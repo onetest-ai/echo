@@ -12,9 +12,9 @@ function callsWeekView(w, size) {
   const h = Math.round(min / 6) / 10
   const time = min < 60 ? [min, `minute${min === 1 ? '' : 's'} recorded`] : [h, `hour${h === 1 ? '' : 's'} recorded`]
   const stat = (v, label) => `<div class="cw-stat"><b>${esc(String(v))}</b><span class="set-sub">${esc(label)}</span></div>`
-  const callsLabel = `call${calls === 1 ? '' : 's'}${memos ? ` · ${memos} memo${memos === 1 ? '' : 's'}` : ''}`
+  const callsLabel = `call${calls === 1 ? '' : 's'}${memos ? `, ${memos === calls ? (memos === 1 ? 'a memo' : 'all memos') : `${memos} of them memo${memos === 1 ? '' : 's'}`}` : ''}`
   const stats = `<div class="cw-stats">${stat(calls, callsLabel)}${stat(time[0], time[1])}${stat(mins, 'with minutes')}</div>`
-  const none = calls ? '' : '<p class="set-sub cw-none">Nothing recorded since Monday.</p>'
+  const none = calls ? '' : '<p class="set-sub cw-none">Nothing recorded this week.</p>'
   let bars = ''
   if (size === 'M') {
     const days = (w.days || []).slice(0, 7), max = Math.max(1, ...days.map((d) => n(d.calls)))

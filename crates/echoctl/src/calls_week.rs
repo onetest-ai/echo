@@ -10,12 +10,13 @@ use serde_json::{json, Value};
 use crate::calls;
 
 /// The local day a call was recorded: its folder's stamp (the local wall clock it started at, as Your day reads it);
-/// a folder without one, its `started_at` in local time.
-fn day_of(dir: &Path, meta: &Value) -> Option<NaiveDate> {
+/// a folder without one, its `started_at` in local time (its meta read only then, into `meta`: an old call is never read).
+fn day_of(dir: &Path, meta: &mut Option<Value>) -> Option<NaiveDate> {
     let name = dir.file_name()?.to_string_lossy();
     if calls::has_stamp(&name) {
         return NaiveDate::parse_from_str(&name[..10], "%Y-%m-%d").ok();
     }
+    let meta = meta.get_or_insert_with(|| calls::read_json(&dir.join("meta.json")));
     meta["started_at"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&Local).date_naive())
 }
 
@@ -33,8 +34,9 @@ pub fn view(today: NaiveDate) -> Value {
     let mut days = [0u64; 7];
     let (mut n, mut memos, mut with_minutes, mut secs) = (0u64, 0u64, 0u64, 0i64);
     for dir in calls::all_calls() {
-        let meta = calls::read_json(&dir.join("meta.json"));
-        let Some(day) = day_of(&dir, &meta).filter(|d| *d >= from && *d <= today) else { continue };
+        let mut meta = None;
+        let Some(day) = day_of(&dir, &mut meta).filter(|d| *d >= from && *d <= today) else { continue };
+        let meta = meta.unwrap_or_else(|| calls::read_json(&dir.join("meta.json")));
         days[(day - from).num_days() as usize] += 1;
         n += 1;
         memos += u64::from(meta["kind"] == "memo");
@@ -45,8 +47,7 @@ pub fn view(today: NaiveDate) -> Value {
     json!({"since": from.to_string(), "today": today.to_string(), "calls": n, "memos": memos, "recorded_min": (secs + 30) / 60, "with_minutes": with_minutes, "days": days})
 }
 
-/// Today's view (`view` for the local date), read again at most every 30 s: Today asks for it on each refresh, and each
-/// call's meta is read for it.
+/// Today's view (`view` for the local date), read again at most every 30 s: Today asks for it on each refresh.
 pub fn today() -> Value {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -96,7 +97,7 @@ mod tests {
         let late = local(2026, 11, 8, 23, 50);
         call("old-dictation", late, 10, false, false);
         let utc = json!({"started_at": late.with_timezone(&chrono::Utc).to_rfc3339()});
-        assert_eq!(day_of(Path::new("old-dictation"), &utc), Some(NaiveDate::from_ymd_opt(2026, 11, 8).unwrap()), "{utc}");
+        assert_eq!(day_of(Path::new("old-dictation"), &mut Some(utc.clone())), Some(NaiveDate::from_ymd_opt(2026, 11, 8).unwrap()), "{utc}");
         // One still recording (no end): counted, no time.
         let rec = crate::paths::calls_dir().join("2026-11-10_150000-initech-planning");
         std::fs::create_dir_all(&rec).unwrap();
