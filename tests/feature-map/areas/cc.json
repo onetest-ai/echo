@@ -88,7 +88,7 @@
   },
   {
    "id": "F-CC-11",
-   "feature": "Inside a run Echo started, `echoctl read echo://call/…` gives Yolo the calls of its task's thread (pinned to the profile it was started on, `ECHOCTL_RUN_PROFILE`) and a minutes run its own call; any other call is refused with why, and only a call that isn't there says \"no call\"",
+   "feature": "Inside a run Echo started, `echoctl read echo://call/…` gives Yolo the calls of its thread (a task's, or an item of Needs you now's; pinned to the profile it was started on, `ECHOCTL_RUN_PROFILE`) and a minutes run its own call; any other call is refused with why, and only a call that isn't there says \"no call\"",
    "priority": "medium",
    "check": "agent",
    "axes": []

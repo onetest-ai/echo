@@ -329,7 +329,12 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
     // routine (the user's own prompt) may read them.
     let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
-    if notes::headless() && !(reads && routine_reads()) {
+    // Yolo reads its own thread: its brief and rules, its people (as they are: no Microsoft 365 refresh).
+    let own_thread_read = match &cmd {
+        ProjectCmd::Show { id } | ProjectCmd::People { id, refresh: false } => guard::run_thread().is_some_and(|t| &t == id),
+        _ => false,
+    };
+    if notes::headless() && !(reads && routine_reads()) && !own_thread_read {
         anyhow::bail!("projects can't be changed or listed from a run Echo started");
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -650,7 +655,11 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
                 format!("Yolo reads its task with `echoctl read echo://task/{project}/{node}`; of the ledger it may only edit that task's state: {may}")
             }
         }
-        None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
+        // Yolo on an item of Needs you now: its thread's work to read, none of it to change.
+        None => match guard::run_thread() {
+            Some(t) => format!("Yolo reads its thread's work (`echoctl project ledger {t} tree`) and changes none of it; no other thread's"),
+            None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
+        },
     }
 }
 
@@ -662,7 +671,10 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Edit { json } => own_task_edit(id, json, &std::env::var(guard::RUN_TASK).unwrap_or_default()),
         _ => false,
     };
-    if notes::headless() && !own_task && !(matches!(cmd, LedgerCmd::Tree) && routine_reads()) {
+    // Yolo reads its own thread's work (the tree, the last sync's state).
+    let own_thread_read = matches!(cmd, LedgerCmd::Tree | LedgerCmd::Status) && guard::run_thread().is_some_and(|t| t == id);
+    let allowed = own_task || own_thread_read || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
+    if notes::headless() && !allowed {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
@@ -758,16 +770,40 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_yolo_read_of_the_ledger_points_to_its_task_not_the_edit_rule() {
-        let (_env, _) = crate::paths::testenv::folders("yolo-ledger-refusal");
+    fn yolo_reads_its_own_threads_data_and_changes_nothing_of_it() {
+        let (_env, _) = crate::paths::testenv::folders("yolo-thread-reads");
+        let mine = crate::projects::create("Pilot", None, None).unwrap();
+        let other = crate::projects::create("Rollout", None, None).unwrap();
         std::env::set_var(crate::notes::HEADLESS, "1");
-        std::env::set_var(super::guard::RUN_TASK, "globex-pilot/T005");
-        let tree = super::ledger_command("globex-pilot", super::LedgerCmd::Tree).unwrap_err().to_string();
-        let edit = r#"{"op":"edit","node":"T005","set":{"title":"x"}}"#.to_string();
-        let edit = super::ledger_command("globex-pilot", super::LedgerCmd::Edit { json: edit }).unwrap_err().to_string();
-        std::env::remove_var(crate::notes::HEADLESS);
+        let tree = |id: &str| super::ledger_command(id, super::LedgerCmd::Tree);
+        let show = |id: &str| super::project_command(super::ProjectCmd::Show { id: id.into() });
+        let people = |id: &str, refresh| super::project_command(super::ProjectCmd::People { id: id.into(), refresh });
+        // Yolo on an item of Needs you now: its thread by RUN_THREAD.
+        std::env::set_var(super::guard::RUN_THREAD, &mine.id);
+        let (t, s, pp) = (tree(&mine.id).is_ok(), show(&mine.id).is_ok(), people(&mine.id, false).is_ok());
+        let (t2, s2) = (tree(&other.id).is_err(), show(&other.id).is_err());
+        let refresh = people(&mine.id, true).is_err();
+        let other_by_item = tree(&other.id).unwrap_err().to_string();
+        let edit = super::ledger_command(&mine.id, super::LedgerCmd::Edit { json: r#"{"op":"create","kind":"task","title":"x"}"#.into() }).is_err();
+        std::env::remove_var(super::guard::RUN_THREAD);
+        // A task's Yolo: its task's thread.
+        std::env::set_var(super::guard::RUN_TASK, format!("{}/T005", mine.id));
+        let by_task = tree(&mine.id).is_ok();
+        let other_by_task = tree(&other.id).unwrap_err().to_string();
+        let title = r#"{"op":"edit","node":"T005","set":{"title":"x"}}"#.to_string();
+        let title = super::ledger_command(&mine.id, super::LedgerCmd::Edit { json: title }).unwrap_err().to_string();
         std::env::remove_var(super::guard::RUN_TASK);
-        assert!(tree.contains("echoctl read echo://task/globex-pilot/T005") && !tree.contains("not its description"), "{tree}");
-        assert!(edit.contains("only its own task's state") && edit.contains("not its description"), "{edit}");
+        // Any other run Echo started: none of it.
+        let none = tree(&mine.id).is_err() && show(&mine.id).is_err();
+        std::env::remove_var(crate::notes::HEADLESS);
+        assert!(t && s && pp, "its own thread: the work, the brief, the people");
+        assert!(t2 && s2, "never another thread");
+        assert!(other_by_item.contains(&format!("project ledger {} tree", mine.id)) && other_by_item.contains("changes none of it"), "{other_by_item}");
+        assert!(refresh, "no Microsoft 365 refresh of its people");
+        assert!(edit, "nothing of the work changes");
+        assert!(by_task, "a task's Yolo reads its task's thread");
+        assert!(other_by_task.contains("echoctl read echo://task/") && !other_by_task.contains("not its description"), "another thread is refused, pointing to its task: {other_by_task}");
+        assert!(title.contains("only its own task's state") && title.contains("not its description"), "{title}");
+        assert!(none, "a run with no thread reads none");
     }
 }

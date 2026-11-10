@@ -91,27 +91,26 @@ fn clock(s: u64) -> String {
 }
 
 /// The call folder a link names (as `calls::resolve_call` finds it). Inside a run Echo started, only a call the run
-/// may read, and a refusal says why (not that the call doesn't exist, #136): Yolo (`guard::RUN_TASK`) a call of its
-/// task's thread; any other run its own call (`guard::own_call`: none without one).
+/// may read, and a refusal says why (not that the call doesn't exist, #136): Yolo (`guard::run_thread`) a call of its
+/// thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
     let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
     if !crate::notes::headless() {
         return Ok(dir);
     }
-    let task = std::env::var(crate::guard::RUN_TASK).unwrap_or_default();
-    match task.split_once('/') {
-        Some((thread, _)) if std::env::var_os(crate::guard::RUN_CALL).is_none() => thread_call(dir, thread, name),
+    match crate::guard::run_thread() {
+        Some(thread) if std::env::var_os(crate::guard::RUN_CALL).is_none() => thread_call(dir, &thread, name),
         _ => crate::guard::own_call(&dir, std::env::var_os(crate::guard::RUN_CALL).as_deref()).map_err(|_| anyhow!("a run Echo started reads only its own call, not {name:?}")),
     }
 }
 
-/// Yolo's run reads a call of its task's thread, and only one pinned to the profile it was started on
+/// Yolo's run reads a call of its thread, and only one pinned to the profile it was started on
 /// (`guard::RUN_PROFILE`, resolved at launch — not the thread's now, which the user may have changed since): a call's
 /// text goes to no other profile. Without that variable, none.
 fn thread_call(dir: PathBuf, thread: &str, name: &str) -> Result<PathBuf> {
     let p = crate::projects::load(thread)?;
     if !crate::projects::of_call(&dir)?.iter().any(|(t, _)| t.id == p.id) {
-        bail!("Yolo reads only the calls of its task's thread ({}), not {name:?}", p.name);
+        bail!("Yolo reads only the calls of its thread ({}), not {name:?}", p.name);
     }
     let run = std::env::var(crate::guard::RUN_PROFILE).ok().filter(|id| !id.is_empty());
     let Some(run) = run else { bail!("this run names no AI profile, so it reads no call") };
@@ -581,7 +580,7 @@ mod tests {
         struct Out;
         impl Drop for Out {
             fn drop(&mut self) {
-                for k in [crate::notes::HEADLESS, crate::guard::RUN_TASK, crate::guard::RUN_PROFILE, crate::guard::RUN_CALL] {
+                for k in [crate::notes::HEADLESS, crate::guard::RUN_TASK, crate::guard::RUN_THREAD, crate::guard::RUN_PROFILE, crate::guard::RUN_CALL] {
                     std::env::remove_var(k);
                 }
             }
@@ -593,7 +592,7 @@ mod tests {
         std::env::set_var(crate::guard::RUN_PROFILE, crate::ai::default_id());
         assert!(read("echo://call/2026-10-24_100000-acme-weekly").unwrap().contains("Acme weekly"));
         let e = read("echo://call/2026-10-26_100000-globex-sync").unwrap_err().to_string();
-        assert!(e.contains("only the calls of its task's thread") && !e.contains("no call"), "{e}");
+        assert!(e.contains("only the calls of its thread") && !e.contains("no call"), "{e}");
         let e = read("echo://call/2026-10-25_100000-acme-legal").unwrap_err().to_string();
         assert!(e.contains("another AI profile"), "a call pinned to another profile: {e}");
         assert!(read("echo://call/2026-10-27_100000-nope").unwrap_err().to_string().contains("no call"), "a call that isn't there");
@@ -607,6 +606,13 @@ mod tests {
         let e = read("echo://call/2026-10-25_100000-acme-legal").unwrap_err().to_string();
         assert!(e.contains("another AI profile"), "re-pinned mid-run: {e}");
         assert!(read("echo://call/2026-10-24_100000-acme-weekly").is_ok(), "re-pinned mid-run");
+        // Yolo on an item of Needs you now: its thread by RUN_THREAD, the same calls, the same refusals.
+        std::env::remove_var(crate::guard::RUN_TASK);
+        std::env::set_var(crate::guard::RUN_THREAD, &pilot);
+        assert!(read("echo://call/2026-10-24_100000-acme-weekly").unwrap().contains("Acme weekly"));
+        assert!(read("echo://call/2026-10-26_100000-globex-sync").unwrap_err().to_string().contains("only the calls of its thread"));
+        std::env::remove_var(crate::guard::RUN_THREAD);
+        std::env::set_var(crate::guard::RUN_TASK, format!("{pilot}/T005"));
         // A Yolo run that names no profile reads no call.
         std::env::remove_var(crate::guard::RUN_PROFILE);
         let e = read("echo://call/2026-10-24_100000-acme-weekly").unwrap_err().to_string();

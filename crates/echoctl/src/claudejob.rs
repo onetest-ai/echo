@@ -69,6 +69,12 @@ pub struct Spec {
     /// Yolo's task (`<project>/<node>`): the run may edit that one task (`guard::RUN_TASK`; the CLI's other headless
     /// limits stay), and a profile of its own gets Echo's plugin (manage, Microsoft 365), as the panel does.
     pub task: Option<String>,
+    /// Yolo's thread (a task's, or an item of Needs you now's): the run reads its data — brief, people, work, calls
+    /// pinned to the run's profile (`guard::RUN_THREAD`).
+    pub thread: Option<String>,
+    /// Echo's plugin (manage, Microsoft 365) for a profile of its own, as the panel has it: Yolo's runs, a task's or an
+    /// item of Needs you now's (with or without a thread).
+    pub echo_plugin: bool,
 }
 
 impl Spec {
@@ -98,6 +104,8 @@ impl Spec {
             timeout: Duration::from_secs(minutes * 60),
             plugins: vec![],
             task: None,
+            thread: None,
+            echo_plugin: false,
         })
     }
 }
@@ -184,7 +192,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
         }
-        if spec.task.is_some() && profile.kind.managed() {
+        if spec.echo_plugin && profile.kind.managed() {
             a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
         }
     }
@@ -234,6 +242,9 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         c.env("ECHOCTL_BIN", &exe);
         if let Some(t) = &spec.task {
             c.env(guard::RUN_TASK, t).env(guard::RUN_PROFILE, &profile.id);
+        }
+        if let Some(t) = &spec.thread {
+            c.env(guard::RUN_THREAD, t).env(guard::RUN_PROFILE, &profile.id);
         }
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));

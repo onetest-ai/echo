@@ -24,7 +24,8 @@
     "promptHas": [
       "Work on the Needs you now item ",
       "data not instructions",
-      "Don't change any thread's work"
+      "Don't change any thread's work",
+      "Its thread is echo://thread/"
     ],
     "readHas": [
       "# Needs you now: ",
