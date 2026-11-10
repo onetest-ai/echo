@@ -182,6 +182,7 @@ async function loadCall(name, retried = false) {
 /** The hash as text: decoded, or as it is when it holds a broken %-sequence (an old or hand-typed link). */
 function hashText() { try { return decodeURIComponent(location.hash) } catch { return location.hash } }
 function route() {
+  S.routed = hashText() // the address the window has routed: one that differs is a click on its way (`callUrl`)
   const h = hashText().slice(1)
   // A menu of the page it leaves doesn't follow to the next one (nor takes the next Escape).
   // Nor does the Send to Claude dialog: left open it covered the next view and took its clicks (#108).
@@ -190,7 +191,7 @@ function route() {
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
   // The page opened at a link goes where the link points, or, for one Echo can't open, nowhere: no call is opened
   // for it at start-up (#168).
-  if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; S.fromLink = true; setTimeout(() => window.echo.openLink(h.slice(5))); return }
+  if (h.startsWith('link=')) { replaceUrl('#'); S.view = 'calls'; S.fromLink = true; setTimeout(() => window.echo.openLink(h.slice(5))); return }
   // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
   const pa = ACTIVITIES.find((a) => a.plugin && (h === a.id || h.startsWith(a.id + '/')))
   if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
@@ -201,7 +202,7 @@ function route() {
   if (sm && sm[2] && sm[1] !== 'plugins') sm[2] = undefined // only Plugins picks one of its own
   // The vocabulary was a Settings section: its old link opens its panel, over the calls.
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
-  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); history.replaceState(null, '', '#settings/plugins') } return }
+  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); replaceUrl('#settings/plugins') } return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
@@ -238,7 +239,7 @@ function route() {
     const gone = S.selected, next = (S.calls || []).find((c) => c.name !== gone)
     commitPendingNotes(); S.selected = next ? next.name : null; S.call = null; S.confirmDelete = false; S.find = ''
     // The hashchange handler loads it (S.call is null), once.
-    if (S.selected) { history.replaceState(null, '', `#call/${S.selected}/minutes`); S.tab = 'minutes' }
+    if (S.selected) { replaceUrl(`#call/${S.selected}/minutes`); S.tab = 'minutes' }
   }
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {

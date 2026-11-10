@@ -246,7 +246,7 @@ window.echo = {
   if (S.view === 'tasks') await loadTasks()
   if (S.view === 'today') await loadToday()
   if (S.view === 'brain') await loadBrain()
-  if (S.view === 'calls' && !S.selected && !S.upSel && !S.fromLink && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
+  if (S.view === 'calls' && !S.selected && !S.upSel && !S.fromLink && S.calls && S.calls.length) S.selected = S.calls[0].name, replaceUrl(`#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()
   render()
