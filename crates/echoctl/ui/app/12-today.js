@@ -92,7 +92,9 @@ function todayView() {
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
   }
   // One column: Your day that held a column becomes the strip (TodayResponsive C).
-  if ((plan.down === 'core:calendar.calendar' || plan.down === 'core:calendar.agenda') && !S.tdEdit) parts[plan.down] = dayStripView(d, now)
+  // (Only when the strip has something to draw: a day of tasks or unanswered meetings keeps its list.)
+  const strip = (plan.down === 'core:calendar.calendar' || plan.down === 'core:calendar.agenda') && !S.tdEdit ? dayStripView(d, now) : ''
+  if (strip) parts[plan.down] = strip
   const part0 = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
   // A widget holding the first column: it the whole height, the rest beside it in the other columns.
   const blocks = plan.hold
@@ -215,7 +217,10 @@ function todayPlan(rows, cols) {
   const holder = live.length === 1 && first.length === 1 && live[0].fill && live[0].span === 1 && rows.length > 1 ? live[0] : null
   if (!holder) return { hold: null, down: null, lines: todayLines(rows, cols) }
   if (cols < 2) return { hold: null, down: holder.id, lines: todayLines([[{ ...holder, fill: false }], ...rows.slice(1)], 1) }
-  return { hold: { id: holder.id }, down: null, lines: todayLines(rows.slice(1), cols - 1) }
+  // Nothing beside it now (all temporal and empty): no column held, the page as rows.
+  const beside = todayLines(rows.slice(1), cols - 1)
+  if (!beside.length) return { hold: null, down: null, lines: todayLines(rows, cols) }
+  return { hold: { id: holder.id }, down: null, lines: beside }
 }
 // end of the today layout block
 

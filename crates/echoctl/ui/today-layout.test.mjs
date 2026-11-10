@@ -86,6 +86,10 @@ test('a fill alone on the first row at span 1 holds the first column; the rest b
   assert.equal(todayPlan([[W('day', 1, true), W('next', 1)]], 3).hold, null)
   assert.equal(todayPlan([[W('needs', 1)], [W('next', 1)]], 3).hold, null)
   assert.equal(todayPlan([[W('day', 1, true)]], 3).hold, null)
+  // Everything beside it empty now (temporal, nothing to show): no column held, Your day across.
+  const p2 = todayPlan([[W('day', 1, true)], [W('next', 1, false, true)], [W('mine', 2, true, true)]], 3)
+  assert.equal(p2.hold, null)
+  assert.equal(ids(p2), 'day:1')
 })
 
 let failed = 0
