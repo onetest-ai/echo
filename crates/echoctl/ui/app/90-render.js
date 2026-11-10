@@ -33,7 +33,7 @@ function viewState() {
   }
   if (S.view === 'tasks') v.filter = `Tasks across threads${S.tk.project ? ` · only ${(projById(S.tk.project) || {}).name || S.tk.project}` : ''}`
   if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
-  if (S.view === 'brain') v.filter = `Brain · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
+  if (S.view === 'brain') v.filter = `Knowledge · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
   if (S.view === 'calendar') {
     v.filter = `Calendar · ${S.cal.mode}`
     const e = S.cal.selected && S.cal.data && (S.cal.data.events || []).find((x) => x.id === S.cal.selected)

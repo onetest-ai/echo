@@ -121,7 +121,7 @@ fn call_inputs() -> Vec<store::Input> {
 /// Bring the Brain up to date with the sources (one sync at a time on this computer).
 pub fn sync() -> Result<store::Report> {
     let lock = paths::config_dir().join("brain.lock");
-    anyhow::ensure!(enabled(), "the Brain is off (Settings → Brain)");
+    anyhow::ensure!(enabled(), "Recall is off (Settings → Knowledge)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
     let emb = embedder();
     let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;

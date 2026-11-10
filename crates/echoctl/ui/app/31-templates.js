@@ -349,7 +349,7 @@ document.addEventListener('keydown', (e) => {
 function meProfileCard(mp) {
   const head = (ctl) => `<div class="set-row"><div><b>Your profile</b><div class="set-sub">Who you are, the people and terms around you, how you work and like notes written. Sections by heading: “People…”, “Terms…”, “How I work…”, “How I like notes…”.</div></div><div class="set-ctl">${ctl}</div></div>`
   // Who reads which part (`calls::me_parts`): the readers of other people's words get the least.
-  const readers = `<div class="set-sub me-readers"><b>Who reads it</b> · minutes, the threads' sync (work and people) and Claude in the window: all of it — your patterns are their defaults, what was said wins · live notes and questions: who you are, people and terms · the Brain's mail and channel reader: people and terms only, for spelling</div>`
+  const readers = `<div class="set-sub me-readers"><b>Who reads it</b> · minutes, the threads' sync (work and people) and Claude in the window: all of it — your patterns are their defaults, what was said wins · live notes and questions: who you are, people and terms · Recall's mail and channel reader: people and terms only, for spelling</div>`
   if (S.meEdit != null) {
     return `<section class="set-sec"><div class="set-card">${head('<button class="btn ghost" data-me-cancel>Cancel</button><button class="btn primary" data-me-save>Save</button>')}${readers}
       <div class="me-edit"><textarea id="me-profile" spellcheck="true" aria-label="Your profile (Markdown)">${esc(S.meEdit)}</textarea><div class="set-sub">Markdown: # for headings, - for lists. ⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`

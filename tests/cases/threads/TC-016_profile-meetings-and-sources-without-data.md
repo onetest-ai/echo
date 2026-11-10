@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-05.spec.mjs]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/profile` | The Profile card is shown |
 | 2 | Read the Meetings row | "No meeting series yet. A meeting that recurs in this thread shows here." |
-| 3 | Read the Sources row | "The Brain is off, so channels, mail and folders aren't read into it — turn it on in Settings → Brain. Meeting chats, and mail already added here, are read into the work either way." |
+| 3 | Read the Sources row | "Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Knowledge. Meeting chats, and mail already added here, are read into the work either way." |
 | 4 | Read the footer of the card | "Saved as you change it · projects/acme-rollout/ · Delete in ⋯" |
 
 ## Expected Final State

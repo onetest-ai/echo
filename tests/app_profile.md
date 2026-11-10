@@ -173,7 +173,6 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
   its content comes from a read of that repository (network or cache), so assert only the tabs, not the plugin list.
 - Known issues seen on the test data (2026-11-06; verify before relying on them):
   - Every page load logs one console error: `favicon.ico` answers 404. It is the only console message in a whole session.
-  - One thing, three names: Settings nav "Knowledge", its page "Recall", a thread's Profile "turn it on in Settings → Brain".
   - Task filter "Who does it" → "Claude can do" or "By hand" shows every pile empty on test data: no task has a mode
     set (`mode: null` in `echoctl project tasks`), so those two filters can only be tested after a task's
     "Claude can" / "By hand" toggle (`data-mode-set`) is pressed.

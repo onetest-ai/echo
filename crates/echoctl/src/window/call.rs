@@ -474,7 +474,7 @@ pub(super) fn act(v: &Value) -> bool {
         "source_folder_pick" => {
             let id = v["id"].as_str().unwrap_or("").to_string();
             std::thread::spawn(move || {
-                if let Some(dir) = crate::app::choose_folder("A folder for this thread — Echo reads its files into the Brain") {
+                if let Some(dir) = crate::app::choose_folder("A folder for this thread — Echo reads its files into Recall") {
                     let dir = dunce::canonicalize(&dir).unwrap_or(dir);
                     let sid = dir.to_string_lossy().to_string();
                     let _ = crate::projects::update(&id, |p| {

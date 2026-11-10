@@ -179,7 +179,7 @@ const also = { name: null, data: null, at: 0 }
 async function loadAlso(name) {
   if (also.name === name && Date.now() - also.at < 60000) return
   also.name = name; also.at = Date.now()
-  try { also.data = await get('api/brain/also/' + encodeURIComponent(name)) } catch { also.data = { error: 'The Brain isn\'t available' } }
+  try { also.data = await get('api/brain/also/' + encodeURIComponent(name)) } catch { also.data = { error: 'Recall isn\'t available' } }
   render()
 }
 function alsoPanel() {
@@ -193,7 +193,7 @@ function alsoPanel() {
     const t = r.link && r.link.includes('?t=') ? Number(r.link.split('?t=')[1]) : null
     return `<div class="al-r"><button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(r.link)}>${kindMark(r)} ${esc(r.doc || r.source)}${r.date ? ` · ${esc(relDay(r.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button><div class="qt">${esc(r.text)}</div></div>`
   }).join('')}</div>`).join('')
-  return `<div class="al">${chips ? `<div class="al-chips">${chips}</div>` : ''}${groups || '<p class="set-sub">Nothing close elsewhere yet — it fills as more calls (and, later, channels, mail and files) come into the Brain.</p>'}</div>`
+  return `<div class="al">${chips ? `<div class="al-chips">${chips}</div>` : ''}${groups || '<p class="set-sub">Nothing close elsewhere yet — it fills as more calls (and, later, channels, mail and files) come into Recall.</p>'}</div>`
 }
 PANEL_VIEWS.push({ id: 'also', label: 'Also discussed', icon: ICON('<circle cx="7" cy="12" r="3"/><circle cx="17" cy="6" r="3"/><circle cx="17" cy="18" r="3"/><path d="M9.6 10.7 14.4 7.4M9.6 13.3l4.8 3.3"/>'), area: 'right', when: () => brainOn() && S.view === 'calls' && !!S.selected, render: alsoPanel })
 // A button that sends one IPC command as it is (`data-cmd-ipc`), then reads the settings again.

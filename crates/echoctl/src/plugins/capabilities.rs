@@ -190,7 +190,7 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
 
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {
     match v["kind"].as_str() {
-        Some("vault") => Ok("Adds a folder you pick (an Obsidian vault) to the Brain: read and indexed on this computer".into()),
+        Some("vault") => Ok("Adds a folder you pick (an Obsidian vault) to Recall: read and indexed on this computer".into()),
         _ => bail!("“brain_source” kind must be one Echo knows (vault)"),
     }
 }
