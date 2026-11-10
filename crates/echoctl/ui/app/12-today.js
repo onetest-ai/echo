@@ -62,6 +62,8 @@ function todayView() {
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView(d.glance, sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView(d.glance, sizeOf['core:tasks.done'] || 'S'), 'core:calls.week': callsWeekView(d.calls_week, sizeOf['core:calls.week'] || 'S') }
+  // Every placed card widget has its place, empty while its card is read (so edit mode can still move or take it off).
+  for (const slug of ownCard) parts[`core:routines.card.${slug}`] = ''
   for (const c of d.cards || []) if (ownCard.has(c.slug)) parts[`core:routines.card.${c.slug}`] = cardHtml(c)
   // Plugins' widgets on the layout, drawn by their kind (13-today-plugins.js).
   for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeOf[id] || 'M')
