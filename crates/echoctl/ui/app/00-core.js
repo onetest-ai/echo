@@ -59,6 +59,7 @@ const S = {
   noteDraft: '', // the note being typed in My notes' box
   noteAt: null, // the call's time when it was started (seconds), while the call records
   noteAtOk: null, // the app's answer for it: does it record the call (`confirmNoteAt`, #358)
+  notesHeld: [], // notes and flags taken, waiting for that answer at Add (`held`)
   noteDraftCall: null, // the call the note in the box is for (the one open at its first key)
   noteKind: 'note', // note | question | decision | todo
   selNote: null, // a comment on words selected in the transcript: {t, quote, x, y, open}
