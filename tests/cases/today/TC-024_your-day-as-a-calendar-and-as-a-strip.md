@@ -22,7 +22,7 @@ tags: [today, widgets, your-day, calendar, strip]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl today remove core:calendar.agenda`, `today add core:calendar.calendar --size M --before core:tasks.mine`, `today add core:calendar.strip --size L --above core:needs.now`; open `{{base_url}}/#today` | On top a section "Your day, the strip": "Your day N meetings", one bar with a block a meeting you go to or maybe (dashed), two at once each half its height, the line now, hour ticks every 2 hours (9 to 18, wider for an early or late meeting); under Needs you now the calendar beside My work |
+| 1 | `target/debug/echoctl today remove core:calendar.agenda`, `today add core:calendar.calendar --size M --before core:tasks.mine`, `today add core:calendar.strip --size L --above core:needs.now`; open `{{base_url}}/#today` | Next meeting on top (now the first row), then a section "Your day, the strip": "Your day N meetings", one bar with a block a meeting you go to or maybe (dashed), two at once each half its height, the line now, hour ticks every 2 hours (9 to 18, wider for an early or late meeting); under Needs you now the calendar beside My work |
 | 2 | Read the calendar | "Your day": the hours down (09 … 18 at least), a block a meeting at its time and length with its subject and time, overlapping ones side by side in lanes; not answered: dashed grey, maybe: dashed violet; past dimmed; the line now; at a first draw it is scrolled to a little before now when it doesn't all fit |
 | 3 | Click a block in the calendar | Its card on the right ("Meeting"), as from Your day's line |
 | 4 | Right-click a block (calendar or strip) | Calendar's menu for that meeting |

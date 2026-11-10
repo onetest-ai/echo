@@ -83,13 +83,16 @@ function todayView() {
   S.todayCols = cols
   todayWatch()
   const plan = todayPlan(rowsIn, cols)
-  const lineHtml = (line) => {
+  const lineHtml = (line, width = cols) => {
     // In edit mode a widget is framed: grip, name, S M L, × (13-today-edit.js); an empty one shows what it is.
     const part = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
-    if (!line.fill && line.items.length === 1) return part(line.items[0].id)
+    // The columns a hug line doesn't use stay empty: a lone S is a third of three columns, not the whole row.
+    // (A fill line takes the whole width: Your day alone on a quiet day isn't a third with two empty.)
+    const used = line.items.reduce((a, i) => a + i.span, 0), spare = line.fill ? 0 : width - used
+    if (!line.fill && line.items.length === 1 && spare <= 0) return part(line.items[0].id)
     // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
     const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
-    return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
+    return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${[...line.items.map((i) => `minmax(0, ${i.span}fr)`), ...(spare > 0 ? [`minmax(0, ${spare}fr)`] : [])].join(' ')}">${cells.join('')}${spare > 0 ? '<div aria-hidden="true"></div>' : ''}</div>`
   }
   // One column: Your day that held a column becomes the strip (TodayResponsive C).
   // (Only when the strip has something to draw: a day of tasks or unanswered meetings keeps its list.)
@@ -98,8 +101,8 @@ function todayView() {
   const part0 = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
   // A widget holding the first column: it the whole height, the rest beside it in the other columns.
   const blocks = plan.hold
-    ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map(lineHtml).join('')}</div></div>`
-    : plan.lines.map(lineHtml).join('')
+    ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map((l) => lineHtml(l, cols - 1)).join('')}</div></div>`
+    : plan.lines.map((l) => lineHtml(l)).join('')
   setTimeout(() => { todayMoreCue(); twRefocus() })
   return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
@@ -258,7 +261,7 @@ function agendaView(d, now) {
     const tcls = r.next ? ' next' : r.choice ? ' choice' : r.kind === 'work' ? ' work' : ''
     const why = [folded ? 'skipped' : r.why ? esc(r.why) : '', ...extra(x, r.past)].filter(Boolean).join(' · ')
     const more = x.event ? `<button class="icon-btn ag-more" data-td-menu="${esc(x.event)}" aria-haspopup="menu" aria-expanded="${!!(S.cal.ctx && S.cal.ctx.id === x.event)}" aria-label="${esc(x.subject || 'A meeting')} — actions" title="Actions">${ICON('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')}</button>` : ''
-    return `${before}<div class="ag-row${r.past ? ' past' : ''}${folded ? ' folded' : ''}" role="listitem"${x.event ? ` data-td-ev="${esc(x.event)}"` : ''} aria-label="${esc(x.subject || 'A call')}"><span class="ag-t mono${tcls}">${esc(hm(r.at))}</span><span class="ag-bar ${esc(r.going)}"></span><div class="ag-b"><div class="ag-s">${r.next ? `<b>${esc(x.subject || 'A meeting')}</b> <span class="chip">next</span>` : esc(x.subject || 'A call')}${appTag(x)}${chipsOf(x)}</div>${why ? `<div class="ag-why mono">${why}</div>` : ''}</div>${more}</div>`
+    return `${before}<div class="ag-row${r.past ? ' past' : ''}${folded ? ' folded' : ''}" role="listitem"${x.event ? ` data-td-ev="${esc(x.event)}"` : ''} aria-label="${esc(x.subject || 'A call')}"><span class="ag-t mono${tcls}">${esc(hm(r.at))}</span><span class="ag-bar ${esc(r.going)}"></span><div class="ag-b"><div class="ag-s">${r.next ? `<b>${esc(x.subject || 'A meeting')}</b> <span class="chip">${r.at <= now ? 'now' : 'next'}</span>` : esc(x.subject || 'A call')}${appTag(x)}${chipsOf(x)}</div>${why ? `<div class="ag-why mono">${why}</div>` : ''}</div>${more}</div>`
   }
   let html = rows.map((r) => line(r)).join('')
   if (!nowDrawn && rows.length) html += nowLine()

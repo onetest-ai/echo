@@ -46,4 +46,4 @@ tags: [today, widgets, layout, cli]
 Today as it comes; `today-layout.json` holds the default.
 
 ## Notes
-- Phase 2 of the Today widgets (#323). Sizes are kept but don't change the page's widths yet: that comes with the layout engine.
+- Phase 2 of the Today widgets (#323). Sizes set the columns a widget takes (TC-021).

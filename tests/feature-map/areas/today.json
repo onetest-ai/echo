@@ -14,7 +14,7 @@
   },
   {
    "id": "F-TODAY-02",
-   "feature": "Your day lists where you'll be: today's meetings (but declined ones) and calls in time order with the line \"now\", a line each — time (violet the next — the line holding the first meeting you go to that isn't over, the one Next meeting shows — amber a choice), a bar (solid: going; dashed: no reply, maybe), its threads and its reason: next, no reply, maybe, \"instead of …\" and \"N skipped\" for an overlap one you accepted wins, \"N others at once\" for two you accepted, your work in a free gap of 45 minutes or more, its minutes (new minutes with what they hold, writing, at HH:MM, failed — try again), prep, import the Teams transcript, recording not available for Zoom/Meet; Show N skipped; ⋯ or right-click opens Calendar's menu for it, a click its card on the right; the greeting counts the meetings you go to; the skipped, shown, in time order; a list cut by its card fades at the bottom while there is more; it opens with the row before now whole at its top (late in the day, the nearest whole row)",
+   "feature": "Your day lists where you'll be: today's meetings (but declined ones) and calls in time order with the line \"now\", a line each — time (violet the next — 'now' when it is under way — the line holding the first meeting you go to that isn't over, the one Next meeting shows — amber a choice), a bar (solid: going; dashed: no reply, maybe), its threads and its reason: next, no reply, maybe, \"instead of …\" and \"N skipped\" for an overlap one you accepted wins, \"N others at once\" for two you accepted, your work in a free gap of 45 minutes or more, its minutes (new minutes with what they hold, writing, at HH:MM, failed — try again), prep, import the Teams transcript, recording not available for Zoom/Meet; Show N skipped; ⋯ or right-click opens Calendar's menu for it, a click its card on the right; the greeting counts the meetings you go to; the skipped, shown, in time order; a list cut by its card fades at the bottom while there is more; it opens with the row before now whole at its top (late in the day, the nearest whole row)",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -84,7 +84,7 @@
   },
   {
    "id": "F-TODAY-12",
-   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space; re-laid when the menu, the right panel or the window changes it; nothing reorders",
+   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space; re-laid when the menu, the right panel or the window changes it; nothing reorders; a hug line keeps its widgets' spans (a lone S is a third of three columns)",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -147,7 +147,7 @@
   },
   {
    "id": "F-TODAY-21",
-   "feature": "Today as it comes (TodayResponsive A / TodayDense): Your day's list holding the first column the whole height (as tall as what's beside it, opened on now, scrolling inside); beside it Next meeting and Needs you now side by side, the day's choices, routine cards, My work; at 2 columns Your day keeps the first and the rest stack in the second; at 1 column Your day becomes the strip on top; a fill widget alone on the layout's first row at size S holds a column in any layout",
+   "feature": "Today as it comes (TodayResponsive A / TodayDense): Your day's list holding the first column (as tall as what's beside it; the list stays in view as Today scrolls, the view's height at most, opened on now, scrolling inside); beside it Next meeting and Needs you now side by side, the day's choices, routine cards, My work; at 2 columns Your day keeps the first and the rest stack in the second; at 1 column Your day becomes the strip on top; a fill widget alone on the layout's first row at size S holds a column in any layout",
    "priority": "high",
    "check": "agent",
    "axes": []

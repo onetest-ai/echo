@@ -46,3 +46,6 @@
 .tw-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tw-dot:disabled { opacity: 0.35; cursor: default; }
 .tw-note { font-size: 11.5px; }
+
+/* A frame keeps its widget's height in a column (Today's own scroll takes the rest), never squeezed to the window. */
+.td > .tw, .td-rest > .tw, .td-grid > .tw { flex-shrink: 0; }

@@ -229,9 +229,10 @@
 .cw-day.on .cw-d { color: var(--text); font-weight: 650; }
 
 /* Today → a widget holding the first column (Your day), the rest beside it (todayPlan). */
-.td-side { display: grid; gap: 16px; flex: 1 1 auto; min-height: 420px; }
-/* The held column is as tall as what's beside it (or the page's rest, at least): its widget fills it and scrolls
-   inside, so Your day opens on now. */
-.td-hold { position: relative; min-height: 420px; }
-.td-hold > .td-sec, .td-hold > .tw { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.td-side { display: grid; gap: 16px; flex: 1 0 auto; min-height: 420px; }
+/* The held column is as tall as what's beside it; its widget stays in view as Today scrolls (sticky), as tall as the
+   view at most, and scrolls inside — so Your day opens on now and is always there beside a long column. */
+.td-hold { min-height: 420px; }
+.td-hold > .td-sec, .td-hold > .tw { position: sticky; top: 0; height: min(100%, calc(100vh - 150px)); min-height: 400px; box-sizing: border-box; display: flex; flex-direction: column; }
+.td-hold > .tw > .tw-in { flex: 1 1 auto; max-height: none; }
 .td-rest { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
