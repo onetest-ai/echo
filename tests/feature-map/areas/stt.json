@@ -81,6 +81,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-STT-10",
+   "feature": "Quitting Echo while it transcribes for other computers ends cleanly (no crash at exit): the server's model is let go first, an utterance being decoded waited for",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

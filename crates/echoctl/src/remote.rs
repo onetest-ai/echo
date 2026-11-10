@@ -29,8 +29,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -50,6 +50,8 @@ const MAX_HEADERS: usize = 16 << 10;
 const MAX_CONNECTIONS: usize = 8;
 /// The model is unloaded after this long without a request (it holds GPU memory).
 const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
+/// At quit, how long an utterance being decoded is waited for before the process exits anyway.
+const LET_GO_WITHIN: Duration = Duration::from_secs(30);
 /// A queued utterance can wait behind others' on the server.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -550,6 +552,32 @@ static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
 /// Wrong keys are answered one at a time, each after a pause.
 static AUTH_FAIL: Mutex<()> = Mutex::new(());
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+/// The app is quitting: no model is loaded again.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// The app is quitting: let go of the server's model, so no whisper context is alive at exit (ggml's Metal device
+/// asserts then, #141). An utterance being decoded holds it and is waited for, at most `LET_GO_WITHIN`.
+pub fn shutdown() {
+    let_go(&LOADED, &QUITTING, LET_GO_WITHIN);
+}
+
+/// Mark `quitting`, then empty `slot` once its holder lets go (within `within`); false if it never did.
+fn let_go<T>(slot: &Mutex<Option<T>>, quitting: &AtomicBool, within: Duration) -> bool {
+    quitting.store(true, Ordering::SeqCst);
+    let until = Instant::now() + within;
+    loop {
+        match slot.try_lock() {
+            Ok(mut g) => *g = None,
+            Err(TryLockError::Poisoned(e)) => *e.into_inner() = None,
+            Err(TryLockError::WouldBlock) if Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            Err(TryLockError::WouldBlock) => return false,
+        }
+        return true;
+    }
+}
 
 /// The app's server thread: follows `transcription-serve.json` (checked every 2 s), listening
 /// while it says on. Never returns.
@@ -743,6 +771,9 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
         None => Config::load().map(|c| whisper_rs::get_lang_id(&crate::call_language::default_language(&c)).unwrap_or(0)).unwrap_or(0),
     };
     let mut g = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+    if QUITTING.load(Ordering::SeqCst) {
+        bail!("the server is stopping"); // its model was let go (`shutdown`)
+    }
     let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
     if g.as_ref().is_some_and(|l| l.model != model) {
         *g = None; // the active model was changed here
@@ -861,5 +892,57 @@ mod tests {
         assert_eq!(audio, [1.0, 0.0]);
         assert!(parse_body(&body[..3]).is_err());
         assert!(parse_body(&body[..body.len() - 1]).is_err());
+    }
+
+    /// A model that drops counts itself.
+    struct Model(Arc<AtomicUsize>);
+    impl Drop for Model {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    use std::sync::Arc;
+
+    #[test]
+    fn quitting_lets_go_of_an_idle_model_at_once() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let (slot, quitting) = (Mutex::new(Some(Model(dropped.clone()))), AtomicBool::new(false));
+        assert!(let_go(&slot, &quitting, Duration::from_secs(5)));
+        assert!(quitting.load(Ordering::SeqCst) && slot.lock().unwrap().is_none());
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn quitting_waits_for_the_utterance_being_decoded_then_lets_go() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let slot = Arc::new(Mutex::new(Some(Model(dropped.clone()))));
+        let (held, s) = (std::sync::mpsc::channel(), slot.clone());
+        let decode = std::thread::spawn(move || {
+            let _g = s.lock().unwrap();
+            held.0.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        });
+        held.1.recv().unwrap();
+        assert!(let_go(&slot, &AtomicBool::new(false), Duration::from_secs(5)));
+        assert!(decode.is_finished(), "let go only after the decode");
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn quitting_never_waits_past_its_bound() {
+        let slot = Arc::new(Mutex::new(Some(())));
+        let (held, s) = (std::sync::mpsc::channel(), slot.clone());
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let decode = std::thread::spawn(move || {
+            let _g = s.lock().unwrap();
+            held.0.send(()).unwrap();
+            let _ = wait.recv();
+        });
+        held.1.recv().unwrap();
+        let t = Instant::now();
+        assert!(!let_go(&slot, &AtomicBool::new(false), Duration::from_millis(200)));
+        assert!(t.elapsed() < Duration::from_secs(2));
+        release.send(()).unwrap();
+        decode.join().unwrap();
     }
 }

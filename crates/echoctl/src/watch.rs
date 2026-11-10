@@ -608,7 +608,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         finish(r, "watch_stopped");
     }
     #[cfg(feature = "transcribe")]
-    crate::live::shutdown(); // no model loaded at exit (#141)
+    crate::transcribe::shutdown(); // no model loaded at exit (#141)
     crate::livenotes::shutdown();
     crate::signin::shutdown();
     crate::notes::shutdown();

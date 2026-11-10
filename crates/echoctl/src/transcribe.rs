@@ -1256,6 +1256,13 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     Ok(())
 }
 
+/// The app is quitting: no whisper model is left loaded at exit (ggml's Metal device asserts then, #141) — neither a
+/// live worker's (`live::shutdown`) nor the transcription server's (`remote::shutdown`).
+pub fn shutdown() {
+    crate::live::shutdown();
+    crate::remote::shutdown();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
