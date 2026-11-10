@@ -1,6 +1,6 @@
 ---
 id: TC-027
-title: The account chip in the top bar shows the default AI profile; with two it picks the default, with one it opens AI & minutes
+title: The account chip in the top bar shows the default AI profile; with two it picks the default, with one it opens Claude
 priority: high
 type: functional
 requirements: [F-AI-09, F-AI-01, F-WS-07]
@@ -11,7 +11,7 @@ tags: [ai, profiles, top-bar]
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
-# TC-027: The account chip in the top bar shows the default AI profile; with two it picks the default, with one it opens AI & minutes
+# TC-027: The account chip in the top bar shows the default AI profile; with two it picks the default, with one it opens Claude
 
 **Module:** Settings | **Priority:** High | **Type:** Functional
 
@@ -33,9 +33,9 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day"; read the top bar's right end | The account chip reads "Claude Code (as configured)" and sits just left of the button "Inbox"; it is a button (named "AI profile: Claude Code (as configured)"), there is no `select[aria-label="AI profile"]` and no caret (`#r-top .acct svg` finds nothing) |
+| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day"; read the top bar's right end | The account chip reads "Claude Code (as configured)" and sits just left of the button "Inbox"; it is a button (named "Claude (Claude Code (as configured))"), there is no `select[aria-label="AI profile"]` and no caret (`#r-top .acct svg` finds nothing) |
 | 2 | Read the chip's tooltip (`title`) | It names "Claude Code (as configured)" and "as Claude Code is set up" |
-| 3 | Click the chip | The URL becomes `#settings/ai` and the heading "AI & minutes" shows |
+| 3 | Click the chip | The Claude session opens in its panel (the bottom panel's tab "Claude" selected), as the status bar's Claude does; the page stays on Today (the profile itself is in Settings → AI & minutes) |
 | 4 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://127.0.0.1:9 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
 | 5 | Reload `{{base_url}}/#today` and wait for "Your day"; read the chip | It reads "Claude Code (as configured)" with a caret; `select[aria-label="AI profile"]` holds two options, "Claude Code (as configured)" (selected) and "Local Llama" |
 | 6 | Read the Record pill (`#r-top .pill`) | The button "Record next call", the select "Language of the call" and the button "Memo"; `#r-top .pill select` finds exactly one select (no profile segment) |

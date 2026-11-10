@@ -130,7 +130,7 @@ scenario(test, 'S-10', 'Inbox and prep on a quiet day', () => {
     await expect(calls.search).toHaveValue('')
   })
 
-  test('5 · A coming meeting opens like a call with a Prep tab and the rest disabled', covers('prep/TC-002', 'F-PREP-02'), async ({ page }) => {
+  test('5 · A coming meeting opens like a call with its one tab, Prep', covers('prep/TC-002', 'F-PREP-02'), async ({ page }) => {
     const m = data.set.s10.meetings[0]
     const u = data.text.upcoming
     const meeting = upcoming()[0]
@@ -146,7 +146,7 @@ scenario(test, 'S-10', 'Inbox and prep on a quiet day', () => {
     for (const name of m.names) await expect(view.person(name)).toBeVisible()
     await expect(view.addThread).toBeVisible()
     await expect(view.tab(u.prepTab)).toHaveAttribute('aria-selected', 'true')
-    for (const tab of u.laterTabs) await expect(view.tab(tab)).toBeDisabled()
+    for (const tab of u.laterTabs) await expect(view.tab(tab)).toHaveCount(0)
     await expect(view.button(u.copyLink)).toHaveCount(0)
   })
 

@@ -4302,9 +4302,7 @@
         "route": "#upcoming/{id}",
         "subject": "Globex sponsor update",
         "tabs": [
-          "Prep",
-          "Transcript",
-          "Minutes"
+          "Prep"
         ],
         "short": "Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late."
       },

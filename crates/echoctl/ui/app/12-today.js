@@ -727,8 +727,8 @@ function todayCloseDialog() {
   </div></div>`
 }
 
-/** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and the Prep tab; Transcript and
- *  Minutes come once it is recorded. */
+/** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and its one tab, Prep (Transcript and
+ *  Minutes are the call's, once it is recorded: then it is a call in the list, no longer coming up). */
 function upcomingDoc() {
   const u = ((S.up && S.up.meetings) || []).find((x) => x.id === S.upSel)
   // A prep written with an error (no summary) is still a prep: its facts and the error show (prepView).
@@ -749,7 +749,7 @@ function upcomingDoc() {
   const head = `${listToggle()}<div class="head-row"><div style="min-width:0"><h2 class="selectable">${esc(title)}</h2>
       <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${line ? line.people : ''}${ev ? eventProjects(ev) : ''}</div>
       <div class="doc-actions">${p ? `<button class="btn ghost" data-copy="${esc(p.link)}" title="Its echo:// link">Copy link</button>` : ''}</div></div>
-    <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Transcript</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Minutes</button></div>`
+    <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button></div>`
   // Being written (from the calendar, any day): read it again until it is there.
   const writing = (u && u.writing) || (S.upPrep && S.upPrep.writing)
   if (writing && !S.upPoll) S.upPoll = setTimeout(() => { S.upPoll = null; loadUpcoming().then(render) }, 2000)

@@ -37,7 +37,7 @@ The dates are the build's: `<today>` its day, `<yesterday>` the day before, `<7 
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync", click "Coming up today" and then its row "Globex sponsor update" | The URL becomes `#upcoming/<prep id>`; the header shows the title, the date with weekday and time, "25 min", "Kim Park", a button "Copy link"; the tabs are "Prep" (selected), "Transcript" and "Minutes" (both disabled) |
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync", click "Coming up today" and then its row "Globex sponsor update" | The URL becomes `#upcoming/<prep id>`; the header shows the title, the date with weekday and time, "25 min", "Kim Park", a button "Copy link"; one tab, "Prep" (selected) |
 | 2 | Read the section "In short" | The sentence from Test Data |
 | 3 | Read the section "Expected from you" | Three items: "Send the access list reminder" with the date <today> (no "late"); "From last time" "Share the dry-run numbers"; "Reply" to "Dana Lee": "Reply to Dana about the checklist" |
 | 4 | Read the section "Last time · <7 days ago>" | The highlight "The Berlin pilot needs SSO first" and "Still to do" "Send the SSO checklist" · "Me" |

@@ -971,7 +971,7 @@
     "live": "live notes: {model}",
     "makeDefault": "Make default",
     "chip": "AI profile",
-    "chipButton": "AI profile: {name}",
+    "chipButton": "Claude ({name})",
     "chipTitle": [
       "Claude Code (as configured)",
       "as Claude Code is set up"

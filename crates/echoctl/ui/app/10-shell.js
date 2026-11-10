@@ -189,12 +189,12 @@ function inboxButton() {
 }
 /** The account Echo works in: the default AI profile. With several, a native select over the
  *  label (as the language picker) makes another the default, as Settings' Make default does;
- *  with one, a click opens AI & minutes. */
+ *  with one, a click opens the Claude session (as the status bar's Claude); its profile is in Settings → AI & minutes. */
 function accountChip() {
   const a = ai(), p = profileOf(a.default)
   if (!p) return ''
   const title = `AI: ${profileLabel(p)} — ${profileWhere(p)}`
-  if (a.profiles.length < 2) return `<button class="acct" data-setsec="ai" title="${esc(title)}" aria-label="AI profile: ${esc(p.name)}"><span>${esc(p.name)}</span></button>`
+  if (a.profiles.length < 2) return `<button class="acct" data-cmd="claude-open" title="${esc(`${title} — open Claude`)}" aria-label="Claude (${esc(p.name)})"><span>${esc(p.name)}</span></button>`
   return `<label class="acct" title="${esc(title)}"><span>${esc(p.name)}</span>${CARET}<select data-ai-default aria-label="AI profile">${profileOptions(p.id)}</select></label>`
 }
 

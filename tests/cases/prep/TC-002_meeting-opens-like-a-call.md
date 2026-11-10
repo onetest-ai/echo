@@ -1,6 +1,6 @@
 ---
 id: TC-002
-title: A coming meeting opens like a call with a Prep tab and the rest disabled
+title: A coming meeting opens like a call with its one tab, Prep
 priority: medium
 type: functional
 requirements: [F-PREP-02]
@@ -11,7 +11,7 @@ tags: [prep, calls]
 auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
-# TC-002: A coming meeting opens like a call with a Prep tab and the rest disabled
+# TC-002: A coming meeting opens like a call with its one tab, Prep
 
 **Module:** Prep | **Priority:** Medium | **Type:** Functional
 
@@ -31,11 +31,11 @@ auto: [tests/auto/specs/S-10.spec.mjs]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calls`, click "Coming up today" and then the row "Globex design review" | The URL is `#upcoming/<id>`; the row is selected |
 | 2 | Read the header | Title "Globex design review", today's weekday and date with the start time, "30 min", the person "Kim Park", and a button "+ Thread" |
-| 3 | Read the tabs | "Prep" is selected; "Transcript" and "Minutes" are disabled |
+| 3 | Read the tabs | One tab, "Prep", selected; no "Transcript" or "Minutes" (they are the call's, once it is recorded) |
 | 4 | Look for "Copy link" | Not shown (it comes with a written prep) |
 
 ## Expected Final State
-The meeting is open on its Prep tab with Transcript and Minutes disabled.
+The meeting is open on its one tab, Prep.
 
 ## Teardown
 - Click "Coming up today" to fold it

@@ -180,7 +180,7 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     expect(listed[0]).toMatchObject({ id: system.id, name: system.name, default: true })
   })
 
-  test('8 · The account chip shows the default AI profile; with two it picks the default, with one it opens AI & minutes', covers('settings/TC-027', 'F-AI-09', 'F-AI-01', 'F-WS-07'), async ({ page }) => {
+  test('8 · The account chip shows the default AI profile; with two it picks the default, with one it opens Claude', covers('settings/TC-027', 'F-AI-09', 'F-AI-01', 'F-WS-07'), async ({ page }) => {
     const { system, local } = data.set.s12.profiles
     const a = data.text.ai
     const sh = data.text.shell
@@ -195,8 +195,8 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await expect(settings.topSelect(a.chip)).toHaveCount(0)
     for (const words of a.chipTitle) await expect(settings.account).toHaveAccessibleDescription(new RegExp(literal(words)))
     await settings.account.click()
-    await expect.poll(() => settings.hash()).toBe(a.route)
-    await expect(settings.heading(a.heading)).toBeVisible()
+    await expect(settings.panelTab(settings.bottomPanel, data.text.tasks.claudePanel)).toHaveAttribute('aria-selected', 'true')
+    await expect.poll(() => settings.hash()).toBe(sh.routes.today)
 
     const added = data.cli('ai', 'add-local', local.id, '--model', local.model, '--url', local.url, '--name', local.name)
     expect(added.code).toBe(0)
