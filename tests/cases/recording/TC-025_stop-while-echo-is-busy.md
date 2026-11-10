@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-18.spec.mjs]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run the prelude, then `target/debug/echoctl config --unscheduled manual --scheduled manual --auto-minutes false`, `target/debug/echoctl ai live off`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `$W 30 app`, `cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"`, `target/debug/echoctl arm --title "REC-025 busy"`, `$W 10 armed` | "waited … for app", then "waited … for armed" |
-| 2 | Run the prelude, then `$C start acme-sync --hold; $W 20 recording $T; target/debug/echoctl arm --title "REC-025 next"` | The recording runs; the second arm exits 0 and prints a line starting "armed" (it waits for the next call: step 4 shows `watcher.armed` true after the Stop) |
+| 2 | Run the prelude, then `$C start acme-sync --hold; $W 20 recording $T; target/debug/echoctl arm --title "REC-025 next"` | The recording runs; the second arm exits 0 and prints "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)" (it waits for the next call: step 4 shows `watcher.armed` true after the Stop) |
 | 3 | Run the prelude, then `kill -STOP $(cat "$D/app.pid"); sleep 8; target/debug/echoctl stop; ls "$ECHOCTL_HOME/.echo/stop.request" "$ECHOCTL_HOME/.echo/armed.json"` (the app is frozen as if a device call hung; its heartbeat is 8 s old) | `stop` prints "stopping", the folder and "Echo is busy for the moment"; never "nothing to stop" or "disarmed". Both files are listed |
 | 4 | Run the prelude, then `kill -CONT $(cat "$D/app.pid"); $W 15 event recording_stopped; $W 10 app; target/debug/echoctl status` (`status` reads a watcher whose heartbeat is fresh again) | "waited … for event recording_stopped"; `watcher.recording` is null, `watcher.armed` true (REC-025 next is still armed) |
 | 5 | Read `meta.json` of `$(ls -d "$ECHOCTL_HOME"/calls/*-$T)` | `stop_reason` is "user" |
@@ -43,5 +43,5 @@ The Stop given while the app was frozen ended the recording as soon as the app r
 - Run the prelude, then `kill -CONT $(cat "$D/app.pid") 2>/dev/null; $C end; target/debug/echoctl stop; target/debug/echoctl app quit`; if it does not stop within 30 s, `kill $(cat "$D/app.pid")`
 
 ## Notes
-- The second arm's words are those of an arm made during a call ("…recording starts within a second"), though it waits for the next call: #350. Step 2 checks only that it is taken.
+- An arm made while Echo records says it is for the next call (#350); one made in a call with nothing recording, that recording starts within a second.
 - `kill -STOP` stands in for the watcher blocked on a device (a device listing or a stream close that hangs while a Bluetooth headset reconnects): the loop and its heartbeat stop alike.

@@ -114,6 +114,9 @@ pub struct WatchState {
     /// The recording is a memo (no call behind it).
     #[serde(default)]
     pub memo: bool,
+    /// The app runs without its tray (`app run --no-tray`): a restart keeps it so (#351).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_tray: bool,
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(name: &str) -> Option<T> {
@@ -600,6 +603,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             armed: armed_now,
             recording: rec.as_ref().map(|r| r.dir.display().to_string()),
             memo: rec.as_ref().is_some_and(|r| r.memo),
+            no_tray: crate::app::NO_TRAY.load(std::sync::atomic::Ordering::SeqCst),
         });
     }
 
@@ -1212,12 +1216,19 @@ pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Op
         let _lock = arm_lock()?;
         write_json("armed.json", &Armed { id: new_arm_id(), armed_at: Utc::now(), title, meeting, languages, ai_profile })?;
     }
-    match running_watcher() {
-        Some(w) if w.in_call == Some(true) => println!("armed — call in progress, recording starts within a second"),
-        Some(_) => println!("armed — recording starts when the call begins (expires in 15 min)"),
-        None => println!("armed, but the echoctl app is not running — start it with `echoctl app start`"),
-    }
+    println!("{}", arm_said(running_watcher().as_ref()));
     Ok(())
+}
+
+/// What `arm` says it will record, by the running app's state: while Echo records a call, the arm is for the next one
+/// (a recording starts only when none is on, #350).
+fn arm_said(w: Option<&WatchState>) -> &'static str {
+    match w {
+        Some(w) if w.recording.is_some() => "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)",
+        Some(w) if w.in_call == Some(true) => "armed — call in progress, recording starts within a second",
+        Some(_) => "armed — recording starts when the call begins (expires in 15 min)",
+        None => "armed, but the echoctl app is not running — start it with `echoctl app start`",
+    }
 }
 
 /// `echoctl memo start`: record the user alone now — no call, no thread to pick (its threads are found
@@ -1329,6 +1340,16 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arm_says_what_it_will_record() {
+        let w = |in_call, recording: Option<&str>| WatchState { pid: 1, heartbeat: Utc::now(), app: TargetApp::Teams, in_call, armed: true, recording: recording.map(String::from), memo: false, no_tray: false };
+        // While Echo records a call, an arm is for the next call: it doesn't start anything now (#350).
+        assert_eq!(arm_said(Some(&w(Some(true), Some("2026-11-10_090000-acme-sync")))), "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)");
+        assert_eq!(arm_said(Some(&w(Some(true), None))), "armed — call in progress, recording starts within a second");
+        assert_eq!(arm_said(Some(&w(Some(false), None))), "armed — recording starts when the call begins (expires in 15 min)");
+        assert_eq!(arm_said(None), "armed, but the echoctl app is not running — start it with `echoctl app start`");
+    }
 
     #[test]
     fn a_plugin_hears_a_call_by_its_name_not_its_path() {
@@ -1493,7 +1514,7 @@ mod tests {
         arm(m.subject.clone(), Some(m), None, None).unwrap();
         let state = |pid: u32, late: i64| {
             let (heartbeat, recording) = (Utc::now() - chrono::Duration::seconds(late), Some("/calls/x".into()));
-            let w = WatchState { pid, heartbeat, app: TargetApp::Teams, in_call: Some(true), armed: true, recording, memo: false };
+            let w = WatchState { pid, heartbeat, app: TargetApp::Teams, in_call: Some(true), armed: true, recording, memo: false, no_tray: false };
             fs::write(file("watch.json"), serde_json::to_vec(&w).unwrap()).unwrap();
         };
         // Blocked on a device for 30 s: the request is left for it, and the next meeting stays armed.
