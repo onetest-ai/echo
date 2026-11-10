@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, languages]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-007: Recording: Default language

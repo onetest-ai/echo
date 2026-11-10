@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, today, close]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-012: Closing a task from Today asks first and keeps the comment

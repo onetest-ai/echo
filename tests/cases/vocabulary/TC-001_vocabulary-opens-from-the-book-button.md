@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary, panel]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-001: The Vocabulary panel opens from the book button beside Calls

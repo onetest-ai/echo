@@ -41,6 +41,7 @@ cases:
   - tests/cases/vocabulary/TC-008_remove-forgets-a-learned-term.md
   - tests/cases/vocabulary/TC-009_learned-filter-appears-past-six-terms.md
   - tests/cases/window/TC-025_a-releases-announcement-shows-once.md
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # S-11: Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary

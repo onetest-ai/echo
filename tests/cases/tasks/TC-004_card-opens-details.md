@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, details]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-004: A task card opens its Details on the right and Tasks stays

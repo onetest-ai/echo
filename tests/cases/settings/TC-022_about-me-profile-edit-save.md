@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, me]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-022: About me: the profile is edited and saved with the keyboard

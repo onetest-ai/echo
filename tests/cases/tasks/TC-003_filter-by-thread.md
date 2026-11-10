@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, filters]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-003: The Thread filter narrows every pile and shows the count of each thread

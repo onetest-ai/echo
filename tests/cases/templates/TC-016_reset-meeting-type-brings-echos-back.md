@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates, meeting-types]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-016: Reset to built-in brings Echo's meeting type back

@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, cards]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-005: A card shows its story, thread and due date, a late one marked, and no date when it has none

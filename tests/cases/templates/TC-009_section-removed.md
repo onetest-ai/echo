@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-009: A section is removed with its trash button

@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-008: A section is added with + Add a section and saved once it has a heading

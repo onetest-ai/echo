@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-011: A pile shows six cards, then "+ N" and "Show fewer"

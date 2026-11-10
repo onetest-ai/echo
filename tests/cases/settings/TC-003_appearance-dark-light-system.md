@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, appearance]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-003: Appearance Dark, Light and System switch the window

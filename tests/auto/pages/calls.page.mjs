@@ -42,4 +42,39 @@ export class CallsPage extends AppPage {
   tab(name) {
     return this.page.getByRole('tab', { name: new RegExp(`^${literal(name)}`) })
   }
+
+  // ── A call's header: its kind, its threads, its buttons; the list's groups ──
+
+  /** A day group of the list ("Today", "Yesterday"). */
+  listGroup(name) {
+    return this.list.getByText(name, { exact: true })
+  }
+
+  /** The kind of meeting: its select, and its chip by the tooltip it has (a guess, or yours). */
+  get kind() {
+    return this.main.getByRole('combobox', { name: 'Kind of meeting' })
+  }
+
+  kindChip(tooltip) {
+    return this.main.getByTitle(tooltip, { exact: true })
+  }
+
+  /** A button of the header ("+ Thread", "What moved", a thread's chip), by its name. */
+  headerButton(name) {
+    return this.main.getByRole('button', { name, exact: true })
+  }
+
+  /** A thread in the "+ Thread" menu (a checkbox item, ticked while the call is in it), or another item of a menu. */
+  threadItem(name) {
+    return this.page.getByRole('menu').getByRole('menuitemcheckbox', { name: new RegExp(`^(✓ )?${literal(name)}$`) })
+  }
+
+  get menuItems() {
+    return this.page.getByRole('menu').getByRole('menuitem')
+  }
+
+  /** The transcript's turns, by their times. */
+  get turns() {
+    return this.main.getByRole('time')
+  }
 }

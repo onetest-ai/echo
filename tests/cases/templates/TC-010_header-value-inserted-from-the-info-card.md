@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-010: The header's info card inserts a {value} into the header

@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, list]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-003: The List shows each person's organisation, calls and what they owe; Add brings a seen person into the thread

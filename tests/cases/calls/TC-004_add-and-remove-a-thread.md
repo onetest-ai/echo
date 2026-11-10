@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, threads]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-004: + Thread puts a call in a thread and a second pick takes it out

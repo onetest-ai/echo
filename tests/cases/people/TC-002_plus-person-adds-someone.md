@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, add]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-002: + Person adds a named person with an address to the thread

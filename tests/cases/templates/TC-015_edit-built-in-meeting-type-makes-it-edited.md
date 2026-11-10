@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates, meeting-types]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-015: Changing a built-in meeting type marks it Edited

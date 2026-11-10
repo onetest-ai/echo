@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, remove]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-007: A client with threads says to move or delete them first, in the window and in the CLI

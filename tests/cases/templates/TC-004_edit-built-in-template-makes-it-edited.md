@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-004: Changing a built-in template saves at once and marks it Edited

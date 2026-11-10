@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, profile]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-004: Client Profile adds and removes another name and a mail domain

@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [minutes, what-moved]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-011: What moved says a thread has not read the call yet and offers Sync now

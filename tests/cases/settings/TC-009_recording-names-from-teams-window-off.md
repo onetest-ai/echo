@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, recording]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-009: Recording: Read the Teams window off is saved to config.json, and the row says what it costs

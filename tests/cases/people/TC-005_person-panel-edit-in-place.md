@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, panel]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-005: A person's panel shows who they are and their place; title, stance and role are edited in place

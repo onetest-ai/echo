@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-002: The minutes list shows each template as Built in with what it is for

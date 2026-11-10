@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, list]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-009: Each row's icon shows whether the call has minutes or only a transcript

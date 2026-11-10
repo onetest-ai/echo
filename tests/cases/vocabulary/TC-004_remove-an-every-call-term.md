@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-004: A term is removed from Every call with its ×

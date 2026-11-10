@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [minutes]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-010: A call's minutes show only the sections they hold

@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, claude]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-010: Send to Claude opens the dialog with the task and a skill; Escape, Cancel and leaving the view close it

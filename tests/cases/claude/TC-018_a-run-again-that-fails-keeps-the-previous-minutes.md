@@ -10,6 +10,7 @@ platform: macos
 data: small
 ai: fake
 tags: [claude, minutes, failure, cli]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-018: A run again that fails keeps the previous minutes

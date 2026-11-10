@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates, meeting-types]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-013: Meeting types lists Echo's six, each with how to tell it

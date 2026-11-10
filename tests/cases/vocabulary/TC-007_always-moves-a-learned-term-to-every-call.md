@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary, learned]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-007: Always moves a learned term to Every call

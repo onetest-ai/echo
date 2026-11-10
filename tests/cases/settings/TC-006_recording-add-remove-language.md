@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, languages]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-006: Recording: a language is added and removed in the calls' languages

@@ -23,7 +23,8 @@ function othersPile(all, key) {
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
-  return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
+  const on = S.pj.node === c.id && S.pj.sel === c.project
+  return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${on ? ' on' : ''}"${on ? ' aria-current="true"' : ''} data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
     <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
@@ -53,7 +54,7 @@ function tasksView() {
     const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
-    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
+    return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
   const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
@@ -71,7 +72,7 @@ function asksPanel() {
     return `${day} · ${n.people <= 1 ? '1:1' : esc(n.subject || 'a meeting')}`
   }
   const why = (c) => c.why === 'late' ? `was due ${esc(fmtDay(c.due))}` : c.why === 'due' ? `due ${esc(fmtDay(c.due))}` : c.why === 'quiet' ? `quiet ${c.quiet} days` : `waiting${c.waiting_for && c.waiting_for.what ? ` · ${esc(c.waiting_for.what)}` : ''}`
-  const rows = asks.map((a) => `<div class="ask"><div class="ask-h"><b>${esc(a.who)}</b><span>${when(a.next)}</span></div>${a.items.map((c) => `<button class="ask-i" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">${esc(c.title)} <span class="${c.why === 'late' ? 'late' : ''}">— ${why(c)}</span></button>`).join('')}</div>`).join('')
+  const rows = asks.map((a) => `<div class="ask" role="group" aria-label="${esc(a.who)}"><div class="ask-h"><b>${esc(a.who)}</b><span>${when(a.next)}</span></div>${a.items.map((c) => `<button class="ask-i" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">${esc(c.title)} <span class="${c.why === 'late' ? 'late' : ''}">— ${why(c)}</span></button>`).join('')}</div>`).join('')
   return `<div class="asks"><div class="asks-h"><b>Asks · by person</b><span>next time you meet</span></div>${rows || '<p class="set-sub">Nothing to chase: nobody owes you anything late, due soon or gone quiet.</p>'}<p class="asks-foot">Computed from what went quiet, what's due and what's owed — never a model's guess.</p></div>`
 }
 PANEL_VIEWS.push({ id: 'asks', label: 'Asks', icon: ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.3M12 14v.01"/>'), area: 'right', when: () => S.view === 'tasks', render: asksPanel })
@@ -167,7 +168,7 @@ function projectCalls(p) {
 }
 
 /** A token (× removes it) and the dashed "+ Add" that opens an inline box in its place. */
-const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="Remove">×</button>` : ''}</span>`
+const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="${remove.value != null ? esc(`Remove ${remove.value}`) : 'Remove'}">×</button>` : ''}</span>`
 function addTok(what, placeholder, extra = '') {
   if (S.pj.adding !== what) return `<button class="tok add" data-pj="adding" data-what="${what}">+ Add</button>`
   return `<span class="tok-in">${extra}<input id="pj-add-${what}" data-add="${what}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" autofocus></span>`
@@ -389,7 +390,7 @@ function clientView(data) {
   const c = (data.clients || []).find((x) => x.id === S.pj.client)
   if (!c) return `<div class="empty"><div><h3>This client is gone</h3><p><a href="#projects">Back to the threads</a></p></div></div>`
   const id = esc(c.id)
-  const row = (label, html) => `<div class="pf-row"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
+  const row = (label, html) => `<div class="pf-row"${label ? ` role="group" aria-label="${esc(label)}"` : ''}><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
   const ps = (data.projects || []).filter((p) => p.client === c.id)
   const name = S.pj.pfEdit === 'cname' ? `<input class="pf-in" id="pj-cname" data-client-field="name" data-id="${id}" value="${esc(c.name)}" aria-label="Name" autofocus>` : `<button class="pf-text" data-pj="pf-edit" data-what="cname">${esc(c.name)}</button>`
   const aliases = (c.aliases || []).map((a) => tok(esc(a), { op: 'client-list-remove', list: 'aliases', value: a })).join('') + addTok('alias', 'Another name — e.g. NW, Northwind Group')
@@ -460,15 +461,15 @@ function clientCalls(cd) {
   const rows = cd.calls.map((c) => {
     const d = c.started_at ? new Date(c.started_at) : null
     const chips = (c.threads || []).map((id) => projById(id)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('')
-    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
+    return `<div class="set-row" role="listitem"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
   }).join('')
-  return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`
+  return `<section class="set-sec"><div class="set-card"${rows ? ' role="list" aria-label="Calls"' : ''}>${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`
 }
 /** The Tasks activity's piles for this client's open threads. */
 function clientTasks(cd) {
   const cols = TASK_PILES.map(([k, label]) => {
     const all = (cd.work.piles || {})[k] || []
-    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
+    return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
   }).join('')
   return `<div class="tk-cols">${cols}</div>${othersPile((cd.work.piles || {}).others || [], 'client-others')}`
 }

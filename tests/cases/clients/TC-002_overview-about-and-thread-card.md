@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, overview]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-002: Overview: About <client> is edited in place; each thread has a card with stories done, piles and calls

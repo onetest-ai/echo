@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, tabs]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-006: The Minutes and Transcript tabs are the only ones, and the chosen tab stays for the next call

@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, profile, threads]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-005: Client Profile → + New thread makes a thread under that client

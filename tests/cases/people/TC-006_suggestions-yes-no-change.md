@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, suggestions]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-006: Suggestions from the people pass are answered Yes, No or Change…; three show and the rest wait
