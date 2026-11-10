@@ -37,4 +37,5 @@ cases:
 
 ## Notes
 - The real-model counterparts stay for releases: S-31 (a live model on hostile words) and S-30.
-- More model-driven cases move here as their scripts are written (#275): the rest of S-19, prep, Yolo, the thread sync, live notes, diagram repair.
+- The prep, Yolo and the thread's sync run on the virtual model in S-33: they need the `standard` data (a thread's meetings, tasks and ledger), and a scenario has one data build.
+- More `small`-data model cases move here as their scripts are written (#275): the rest of S-19, live notes, diagram repair.

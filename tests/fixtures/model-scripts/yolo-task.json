@@ -1,0 +1,15 @@
+{"model": {"context_length": 32768},
+ "rules": [
+ {"when": ["Yolo: the user gave you this task to do on your own", "echo://task/globex-pilot/T005"],
+  "vars": {"cli": "Echo's CLI is `([^`]+)`"},
+  "steps": [
+   {"tool": "Bash", "input": {"command": "{cli} read echo://task/globex-pilot/T005", "description": "Read the task"}},
+   {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot edit '{\"op\":\"edit\",\"node\":\"T005\",\"set\":{\"state\":\"in_progress\"}}'", "description": "Start the task"}},
+   {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot tree", "description": "Read the thread's work"}},
+   {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot edit '{\"op\":\"edit\",\"node\":\"T005\",\"set\":{\"description\":\"Two holds proposed to Kim Park.\"}}'", "description": "Describe the task"}},
+   {"tool": "Bash", "input": {"command": "printf '%s\\n' 'Hi Kim,' '' 'Could you confirm two training slots for the Globex pilot next week?' '' 'Sam' > training-slots-mail.md", "description": "Write the mail"}},
+   {"tool": "Bash", "input": {"command": "{cli} m365 mail send --to kim@globex.example --subject 'Globex pilot training slots' --file training-slots-mail.md --yes", "description": "Send the mail"}},
+   {"tool": "Bash", "input": {"command": "{cli} compose --to kim@globex.example --subject 'Globex pilot training slots' --body-file training-slots-mail.md", "description": "Draft the mail instead"}},
+   {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot edit '{\"op\":\"edit\",\"node\":\"T005\",\"set\":{\"state\":\"done\"}}'", "description": "Close the task"}},
+   {"text": "Drafted the training-slots mail to Kim Park (virtual model); sending it through Microsoft 365 was refused. Left for you: send the draft."}]}
+]}
