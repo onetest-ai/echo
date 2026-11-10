@@ -199,7 +199,7 @@ function accountChip() {
 }
 
 function statusbar() {
-  const a = ai(), p = profileOf(a.default)
+  const a = ai()
   const parts = []
   // The next automatic minutes, a click away (#42).
   const next = (S.calls || []).map((c) => [c, minutesAhead(c)]).filter((x) => x[1]).sort((x, y) => x[1] - y[1])[0]
