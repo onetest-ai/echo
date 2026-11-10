@@ -22,12 +22,14 @@ It uses `echoctl` (ECHOCTL_BIN, else target/debug/echoctl) for everything the CL
 (call folders, the app's state files) in the shapes the Rust code reads. Standard library only.
 """
 import argparse
+import atexit
 import json
 import re
 import os
 import random
 import shutil
 import subprocess
+import time
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -562,11 +564,47 @@ esac
 # Claude account is ever used.
 LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*|{url}) exec {real} "$@";; esac
 """
+# With `--ai virtual`: only the virtual model's own address reaches the real Claude Code — never another server on this
+# computer (a real Ollama), never an account.
+VIRTUAL_PASS = """case "$ANTHROPIC_BASE_URL" in {url}) exec {real} "$@";; esac
+"""
 # small with `--ai local` (the recording and minutes scenarios, which run the Echo app): only a minutes run (the app
 # sets ECHOCTL_RUN_CALL and no ECHOCTL_RUN_MODE) reaches the model; the app's own preps, meeting types, task modes and
 # thread syncs are refused at once, so they never queue in front of the minutes on the one model server.
 MINUTES_ONLY = """case "${ECHOCTL_RUN_MODE}:${ECHOCTL_RUN_CALL:+call}" in :call) PASS;; esac
 """
+
+
+# `--ai virtual`: the virtual model's default script (tests/fixtures/model_server.py). A minutes run (the app's prompt
+# is `/echo:process-call <call folder> …`) goes through process-call's steps with real tools under Echo's guard:
+# the context, the transcript read, notes.md written, the run's own action list written and applied, a two-line
+# report. A case that needs another answer writes <dir>/model/model-script.json before its run.
+VIRTUAL_MINUTES = """# Minutes
+
+## Summary
+- The virtual model wrote these minutes from the transcript it read.
+
+## Decisions
+- Keep the weekly call at thirty minutes.
+
+## Action items
+- [ ] Me — send the follow-up notes
+
+## Open questions
+- None.
+"""
+VIRTUAL_SCRIPT = {"model": {"context_length": 32768}, "rules": [
+    {"when": ["/echo:process-call"],
+     # Claude Code passes the slash command's arguments as <command-args>: the call's folder first.
+     "vars": {"dir": r"<command-args>(\S+)", "actions": r"write the new action list to `([^`]+)`"},
+     "steps": [{"tool": "Bash", "input": {"command": "echoctl context {dir}", "description": "Read the call's context"}},
+               {"tool": "Read", "input": {"file_path": "{dir}/transcript.md"}},
+               {"tool": "Write", "input": {"file_path": "{dir}/notes.md", "content": VIRTUAL_MINUTES}},
+               {"tool": "Write", "input": {"file_path": "{actions}", "content": json.dumps([{"owner": "Me", "task": "Send the follow-up notes",
+                "due": None, "quote": "", "confidence": "high", "status": "todo"}])}},
+               {"tool": "Bash", "input": {"command": "echoctl actions {dir} --apply {actions}", "description": "Apply the action items"}},
+               {"text": "Minutes written to notes.md (virtual model).\nOne action item."}]},
+]}
 
 
 # `open` for the test data: a mail draft (`echoctl compose` opens a mailto: link) is written to <dir>/mail-drafts.log
@@ -585,15 +623,15 @@ def setup_env(d, stale_plugin=True, test_market=True):
     Claude Code's own config folder inside the run. Written to <dir>/env (serve.sh sources it) and used here."""
     b = d.base
     fake = FAKE_CLAUDE
-    if AI == "local":
+    if AI in ("local", "virtual"):
         real = shutil.which("claude")
         if not real:
-            sys.exit("--ai local needs Claude Code (`claude`) on PATH")
+            sys.exit(f"--ai {AI} needs Claude Code (`claude`) on PATH")
         lines = fake.split("\n")
         # Also the one model server named with --ai-url (a faster machine on the network), exactly that address.
         url = sh(AI_URL) if AI_URL else "http://localhost:*"
-        local = LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")
-        if d.set == "small":
+        local = (VIRTUAL_PASS if AI == "virtual" else LOCAL_PASS).format(real=sh(real), url=url).rstrip("\n")
+        if d.set == "small" and AI == "local":
             local = MINUTES_ONLY.replace("PASS", local).rstrip("\n")
         fake = "\n".join(lines[:4] + [local] + lines[4:])
     d.write(f"{b}/bin/claude", fake)
@@ -726,9 +764,9 @@ def build_ai(d, H):
     # Without `--ai local` its address is one nothing listens on (still this computer): no job and no
     # `echoctl doctor` (which loads a local profile's model to check its context) reaches a real model server.
     q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, "--url", AI_URL or (NO_SERVER if AI != "local" else "http://localhost:11434"),
-      "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
+      "--name", local_name())
     # `--ai local`: the local model is the default, so calls and threads without a profile of their own run on it.
-    q("ai", "default", "ollama" if AI == "local" else "work")
+    q("ai", "default", "ollama" if AI in ("local", "virtual") else "work")
     q("ai", "live", "on")
     ai_file = f"{d.config}/ai.json"
     ai = json.load(open(ai_file))
@@ -739,8 +777,8 @@ def build_ai(d, H):
             p["name"] = H.text("Live-notes answers and Yolo / Claude run outcomes; AI profile names and accounts", "Qwen", kind="html", one_line=True, where="config/ai.json profiles[ollama].name")
     d.write_json(ai_file, ai, ascii=False)
     for k, v in {"ai.kind=system": "built in", "ai.kind=local (loopback)": "profile ollama", "ai.kind=claude": "profiles work, other, out",
-                 "ai.default=is default": "profile ollama" if AI == "local" else "profile work",
-                 "ai.default=not": "profile work" if AI == "local" else "profile ollama", "ai.signin=signed in": "profile work (fake claude)",
+                 "ai.default=is default": "profile ollama" if AI in ("local", "virtual") else "profile work",
+                 "ai.default=not": "profile work" if AI in ("local", "virtual") else "profile ollama", "ai.signin=signed in": "profile work (fake claude)",
                  "ai.signin=signed out": "profile out", "ai.signin=other account": "profile other", "ai.count=several": "5 profiles",
                  "ai.file=readable": "config/ai.json", "live.enabled=on": "ai.json live_notes"}.items():
         d.axis(k, v)
@@ -2323,6 +2361,7 @@ def build_standard(d, hostile=False):
 
 NOW = None
 AI = "fake"
+BUILT = False  # the build finished (a virtual model started for it stays up)
 AI_URL = None
 NO_SERVER = "http://127.0.0.1:9"  # the discard port: nothing answers there
 AI_MODEL = None
@@ -2334,16 +2373,44 @@ FAST_AUTO_DELAY_S = 90
 LOCAL_MODEL = "qwen3.8:27b" if sys.platform == "win32" else "qwen3.8:27b-mlx"
 
 
+def local_name():
+    """The local AI profile's name: what serves it."""
+    return "Virtual model" if AI == "virtual" else "Qwen · test server" if AI_URL else "Qwen · this computer"
+
+
+def start_virtual_model(base):
+    """`--ai virtual`: the virtual model for this data, in <base>/model (its script, request log, url and pid), answering
+    from the default script (VIRTUAL_SCRIPT) until a case writes its own. Returns its address."""
+    m = os.path.join(base, "model")
+    os.makedirs(m)
+    with open(os.path.join(m, "model-script.json"), "w") as f:
+        json.dump(VIRTUAL_SCRIPT, f, indent=1)
+    server = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_server.py")
+    p = subprocess.Popen([sys.executable, server, m], stdout=subprocess.DEVNULL, stderr=open(os.path.join(m, "server.log"), "w"),
+                         start_new_session=True)
+    # A build that fails after this (or is interrupted) stops it: nothing is left listening.
+    atexit.register(lambda: BUILT or p.terminate())
+    with open(os.path.join(m, "pid"), "w") as f:
+        f.write(f"{p.pid}\n")
+    for _ in range(50):
+        if os.path.exists(os.path.join(m, "model.url")):
+            return open(os.path.join(m, "model.url")).read().strip()
+        time.sleep(0.1)
+    sys.exit(f"the virtual model didn't start: see {m}/server.log")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build a made-up Echo data folder for functional tests.")
     ap.add_argument("dir")
     ap.add_argument("--set", choices=["small", "standard", "hostile"], default="small")
     ap.add_argument("--now", help="build as if it were this local time (ISO, e.g. 2026-11-06T12:00): for checks that "
                     "don't depend on Today matching the real clock, at hours the real now can't be built")
-    ap.add_argument("--ai", choices=["fake", "local"],
-                    help="fake (every Claude Code run is refused; the default for standard/hostile) or local (runs on the local model "
-                    "profile, the default then, go to the real Claude Code against Ollama; all others are still refused). small: only "
-                    "when given, for the Echo app run on it (its schedulers start Claude Code), else the plain small set")
+    ap.add_argument("--ai", choices=["fake", "local", "virtual"],
+                    help="fake (every Claude Code run is refused; the default for standard/hostile), local (runs on the local model "
+                    "profile, the default then, go to the real Claude Code against Ollama; all others are still refused) or virtual "
+                    "(the same against the virtual model, tests/fixtures/model_server.py, started for this data and answering from "
+                    "<dir>/model/model-script.json; serve.sh down stops it). small: only when given, for the Echo app run on it (its "
+                    "schedulers start Claude Code), else the plain small set")
     ap.add_argument("--ai-url", help="with --ai local: the model server's address when it isn't this computer, e.g. "
                     "http://192.0.2.10:11434 (a faster machine on the network; only that exact address is let through)")
     ap.add_argument("--ai-model", help="with --ai local: the model on that server (default qwen3.8:27b-mlx here, qwen3.8:27b on Windows)")
@@ -2357,6 +2424,8 @@ def main():
         AI_URL, AI_MODEL = model_server(AI_MODEL)
     if (AI_URL or AI_MODEL) and AI != "local":
         sys.exit("--ai-url and --ai-model go with --ai local")
+    if AI == "virtual":
+        AI_MODEL = "virtual"
     if a.now:
         NOW = datetime.fromisoformat(a.now).astimezone()
     base = os.path.abspath(a.dir)
@@ -2377,6 +2446,8 @@ def main():
         sys.exit(f"no {d.bin}: run cargo build first")
     os.makedirs(d.home)
     os.makedirs(d.config)
+    if AI == "virtual":
+        AI_URL = start_virtual_model(base)
     with open(os.path.join(base, "env"), "w") as f:
         f.write(f"export ECHOCTL_HOME={sh(d.home)} ECHOCTL_CONFIG_DIR={sh(d.config)}\n"
                 "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_CHILD_SESSION AI_AGENT\n"
@@ -2397,9 +2468,9 @@ def main():
             cfg = json.load(open(cfg_file))
             cfg["project_sync"] = False
             d.write_json(cfg_file, cfg)
-        if a.ai == "local":
+        if a.ai in ("local", "virtual"):
             d.q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, *(["--url", AI_URL] if AI_URL else []),
-                "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
+                "--name", local_name())
             d.q("ai", "default", "ollama")
     else:
         build_standard(d, hostile=a.set == "hostile")
@@ -2415,6 +2486,8 @@ def main():
             f.write(f"export ECHOCTL_TEST_AUTO_MINUTES_DELAY_S={FAST_AUTO_DELAY_S}\n")
     d.manifest["clock"] = {"auto_minutes_delay_s": FAST_AUTO_DELAY_S if a.clock == "fast" else 900}
     d.write_json(os.path.join(base, "manifest.json"), d.manifest, ascii=False)
+    global BUILT
+    BUILT = True
     print(f"test data ({a.set}) in {base} (. {base}/env)")
 
 

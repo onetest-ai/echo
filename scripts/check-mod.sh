@@ -50,6 +50,8 @@ node crates/echoctl/ui/work-status.test.mjs
 node crates/echoctl/ui/settings-search.test.mjs
 # Settings → Layout's "Echo's own title bar": a Windows-only row, absent (and unsearchable) elsewhere (#76).
 node crates/echoctl/ui/own-title-bar.test.mjs
+# The virtual model for the functional cases (#275): scripts, answers, streaming, log.
+python3 tests/fixtures/model_server_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

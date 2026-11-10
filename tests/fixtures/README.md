@@ -7,7 +7,7 @@ differ only in their times. Standard library Python, and `target/debug/echoctl` 
 points elsewhere).
 
 ```bash
-tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local] [--clock real|fast]   # default small
+tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local|virtual] [--clock real|fast]   # default small
 tests/fixtures/make-data.sh <empty dir>                                    # the same as --set small
 tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile] [--ai …] [--clock fast]
 tests/fixtures/serve.sh down <dir>
@@ -121,6 +121,28 @@ cases that need one say `ai: local` and run one model job each, no more.
 
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo
 app**: the app would start minutes runs (against the fake, so they fail).
+
+### The virtual model (`--ai virtual`)
+
+`--ai virtual` is `--ai local` with a scripted model instead of a real one (#275): `make_data.py` starts
+`model_server.py` for the data in `<dir>/model/`, the local AI profile "Virtual model" points at it and is the
+default, and the fake `claude` passes runs routed there to the real Claude Code. So Claude Code, its tools, Echo's
+guard and the app all run for real; only the model answers from a script. A minutes run takes a second or two, repeats
+exactly, and costs nothing. `serve.sh down` stops the server; with `make_data.py` alone, `kill $(cat <dir>/model/pid)`.
+
+- **The script** is `<dir>/model/model-script.json`, read on every request: rules matched by phrases in the request,
+  one answer per model turn (text, a tool call, or content blocks), values captured from the request by `vars`
+  (`model_server.py`'s docstring). The default (`VIRTUAL_SCRIPT` in `make_data.py`) writes minutes the way process-call
+  does: `echoctl context`, Read the transcript, Write `notes.md` and the run's action list, `echoctl actions --apply`.
+  A case that needs other answers copies one from `tests/fixtures/model-scripts/` (`guard-probe.json`: a model that
+  tries to leave its call) before its run.
+- **The log** is `<dir>/model/model-log.jsonl`, one line per request: the system prompt, the messages (tool results
+  included), the tool names offered, the rule and step that answered. A case checks there what Echo gave the model and
+  what it was told back.
+- **Also Ollama's** `/api/ps` and `/api/generate`, so `echoctl doctor`'s context check sees a model (`"model":
+  {"context_length": …}` in the script).
+
+Cases that run on it say `ai: virtual`. Keep `ai: local` for the few that check the content a real model writes.
 
 ### The test clock (`--clock fast`)
 
