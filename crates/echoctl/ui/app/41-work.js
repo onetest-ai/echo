@@ -340,7 +340,7 @@ function workPanel() {
   // A value is named by its field too ("Handed over by: Dana Lee"): the grid's label beside it isn't its name.
   const FIELD = { state: 'Status', internal_owner: 'Owner', delegated_by: 'Handed over by', decided_by: 'Decided by', due: 'Due', likelihood: 'Likelihood', impact: 'Impact' }
   const val = (field, text, empty, input) => edit === field ? input
-    : `<button class="wp-val${text ? '' : ' empty'}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || empty)}">${text ? esc(text) : `${esc(empty)} · <u>Set</u>`}</button>`
+    : `<button class="wp-val${text ? '' : ' empty'}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || `${empty} · Set`)}">${text ? esc(text) : `${esc(empty)} · <u>Set</u>`}</button>`
   const titles = (ids) => ids.map((i) => `<button class="wp-link" data-pj="node" data-node="${esc(i)}">${esc(i)} ${esc((N[i] || {}).title || '')}</button>`).join('')
   const trackable = n.kind === 'story' || n.kind === 'task' || n.kind === 'question'
   const [word, cls] = workStatus(n)

@@ -7,6 +7,11 @@ export class AppPage {
     this.statusBar = page.getByRole('contentinfo')
   }
 
+  /** A button of the status bar, by the word its name starts with ("Actions", "Claude"). */
+  statusBarButton(word) {
+    return this.statusBar.getByRole('button', { name: new RegExp(`(^|\\s)${word}\\b`) })
+  }
+
   /** The window at a route (`#today`, `#calls`, …): its cookie first, as a browser gets it. */
   async goto(hash = '') {
     await this.page.goto(this.data.base + '/')

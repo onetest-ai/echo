@@ -102,8 +102,9 @@ function needsView(n) {
     const replyBtn = (attrs, label, mark) => `<button class="btn nd-reply" ${attrs} aria-label="${label}" title="${label}">Reply ${mark}</button>`
     const reply = x.source === 'mail' ? replyBtn(`data-needs-read="${esc(x.id)}"`, 'Read and reply', ICON(ND_MAIL))
       : x.app_url || x.chat ? replyBtn(`data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}"`, 'Reply in Teams', TEAMS_LOGO) : ''
-    // A list item named by where it came from ("Mail to you", "Chat with Dana Lee"): its buttons are found in it.
-    return `<div class="nd-row" role="listitem" aria-label="${esc(x.where || '')}"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
+    // A list item named as it reads: where it came from and what it says ("Mail to you — Contract redlines…"), so two
+    // mails are told apart; its buttons are found in it.
+    return `<div class="nd-row" role="listitem" aria-label="${esc(x.where || '')} — ${esc(x.line || '')}"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
       <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
       <div class="nd-a">${reply}${act(`data-needs-todo="${esc(x.id)}"`, "I'll do it", ND_TAKE, ' take')}${act(`data-needs-wont="${esc(x.id)}"`, "Won't do", ND_WONT)}</div></div>`
   }).join('')
@@ -388,7 +389,9 @@ function attendeeLine(att) {
   const count = (k) => att.filter((x) => (ANSWER[x.answer] || ANSWER.none)[0] === k).length
   const tally = [['yes', 'yes'], ['maybe', 'maybe'], ['none', 'no answer'], ['no', 'declined']].map(([k, w]) => count(k) ? `${count(k)} ${w}` : '').filter(Boolean).join(' · ')
   const going = rest.filter((x) => x.answer !== 'declined'), no = rest.filter((x) => x.answer === 'declined')
-  const more = rest.length ? `<span class="at-more" role="button" tabindex="0" aria-haspopup="true">+${rest.length} more<span class="at-pop" role="list" aria-label="${rest.length} more"><span class="at-h">${rest.length} more</span>${going.map(row).join('')}${going.length && no.length ? '<hr role="presentation">' : ''}${no.map(row).join('')}</span></span>` : ''
+  // "+N more": a real button, its list beside it (a button's content isn't read as a list), shown while the pointer or
+  // the focus is on either.
+  const more = rest.length ? `<span class="at-more-w" role="listitem"><button class="at-more" type="button" aria-controls="at-pop">+${rest.length} more</button><span class="at-pop" id="at-pop" role="list" aria-label="${rest.length} more"><span class="at-h" aria-hidden="true">${rest.length} more</span>${going.map(row).join('')}${going.length && no.length ? '<hr role="presentation">' : ''}${no.map(row).join('')}</span></span>` : ''
   return { tally: `<span class="at-tally">${tally}</span>`, people: `<div class="at" role="list" aria-label="Invited">${shown.map(chip).join('')}${more}</div>` }
 }
 

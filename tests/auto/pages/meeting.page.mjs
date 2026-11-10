@@ -1,13 +1,14 @@
 // A meeting still to come (Calls → Coming up today): its header (who is invited, how each answered) and its prep.
 import { AppPage } from './app.page.mjs'
+import { literal } from '../support/data.mjs'
 
 export class MeetingPage extends AppPage {
   constructor(page, data) {
     super(page, data)
-    this.answers = page.getByText(/\d+ yes|\d+ maybe|\d+ no answer|\d+ declined/).first()
+    this.header = page.getByRole('heading', { level: 2 })
     this.invited = page.getByRole('list', { name: 'Invited' })
-    this.more = this.invited.getByRole('button', { name: /more$/ })
-    this.moreList = page.getByRole('list', { name: /more$/ })
+    this.more = this.invited.getByRole('button', { name: /^\+\d+ more$/ })
+    this.moreList = this.invited.getByRole('list', { name: /^\d+ more$/ })
     this.prepFooter = page.getByText(/^Written /)
   }
 
@@ -16,13 +17,22 @@ export class MeetingPage extends AppPage {
     await this.goto(`#upcoming/${prepId}`)
   }
 
-  /** The people shown in the header, each as "Name, Answer" in their order. */
-  async people() {
-    return this.invited.getByRole('listitem').evaluateAll((items) => items.filter((x) => !x.closest('[role=button]')).map((x) => x.getAttribute('aria-label')))
+  /** How many answered what, as the date line says it ("4 yes · 2 maybe · …"). */
+  answers(text) {
+    return this.page.getByText(text, { exact: true })
   }
 
+  /** A person in the header by name: the list item named "Name, Answer". */
   person(name) {
-    return this.invited.getByRole('listitem', { name: new RegExp(`^${name},`) })
+    return this.invited.getByRole('listitem', { name: new RegExp(`^${literal(name)},`) })
+  }
+
+  /** The people shown in the header (not those behind "+N more"), as their names read: "Name, Answer". */
+  async people() {
+    const shown = this.invited.getByRole('listitem', { name: /, / }).filter({ hasNot: this.page.getByRole('list') })
+    const names = []
+    for (const item of await shown.all()) if (await item.isVisible()) names.push(await item.getAttribute('aria-label'))
+    return names
   }
 
   /** Whether a person's name is drawn bold (the most important in the thread). */
@@ -36,13 +46,15 @@ export class MeetingPage extends AppPage {
     return this.person(name).getByRole('tooltip')
   }
 
-  /** The people "+N more" lists, after hovering it. */
+  /** The people "+N more" lists, while the pointer is on it. */
   async morePeople() {
     await this.more.hover()
-    return this.moreList.getByRole('listitem').evaluateAll((items) => items.map((x) => x.getAttribute('aria-label')))
+    const names = []
+    for (const item of await this.moreList.getByRole('listitem').all()) names.push(await item.getAttribute('aria-label'))
+    return names
   }
 
   section(name) {
-    return this.page.getByRole('heading', { name, level: 3 })
+    return this.page.getByRole('heading', { name, level: 3, exact: true })
   }
 }

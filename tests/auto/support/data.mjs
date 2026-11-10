@@ -15,7 +15,9 @@ const SERVE = path.join(ROOT, 'tests/fixtures/serve.sh')
  *  before the first test runs. */
 export function useData(test, { set = 'small', ai, args = [] } = {}) {
   // The set's names, titles and ids (tests/auto/data/<set>.json): the specs never spell them themselves.
-  const data = { dir: '', base: '', env: {}, home: '', set: JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/auto/data', `${set}.json`), 'utf8')) }
+  const read = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/auto/data', `${name}.json`), 'utf8'))
+  // The app's own wording the tests check (data/texts.json), apart from the set's.
+  const data = { dir: '', base: '', env: {}, home: '', set: read(set), text: read('texts') }
   test.beforeAll(async () => {
     // The real path (macOS's temporary folder is a link): Echo names folders by it. serve.sh wants it not to exist yet.
     data.dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'echo-auto-'))
@@ -73,6 +75,9 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
   }
   return data
 }
+
+/** A string as a regular expression's literal part (a name with "(" or "." in it matches as written). */
+export const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** The text of a model message's content (a string or blocks). */
 export const textOf = (c) => (typeof c === 'string' ? c : (c || []).map((b) => b.text || '').join(' '))

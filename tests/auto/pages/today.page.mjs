@@ -24,16 +24,16 @@ export class TodayPage extends AppPage {
     await this.goto('#today')
   }
 
-  /** An item of Needs you now, by where it came from: "Mail to you", "Chat with Dana Lee". */
-  item(where) {
-    return this.needs.getByRole('listitem', { name: where })
+  /** An item of Needs you now, as it reads: where it came from and what it says. */
+  item(where, says) {
+    return this.needs.getByRole('listitem', { name: `${where} — ${says}`, exact: true })
   }
 
-  async illDoIt(where) {
-    await this.item(where).getByRole('button', { name: "I'll do it" }).click()
+  async illDoIt(where, says) {
+    await this.item(where, says).getByRole('button', { name: "I'll do it" }).click()
   }
 
-  async wontDo(where) {
-    await this.item(where).getByRole('button', { name: "Won't do" }).click()
+  async wontDo(where, says) {
+    await this.item(where, says).getByRole('button', { name: "Won't do" }).click()
   }
 }

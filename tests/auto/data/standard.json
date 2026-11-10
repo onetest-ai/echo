@@ -4,7 +4,8 @@
     "chat": "Chat with Dana Lee",
     "mail": "Mail to you",
     "mailTitle": "Contract redlines for the Globex pilot",
-    "mailFrom": "Kim Park"
+    "mailFrom": "Kim Park",
+    "chatLine": "Can you send me the renewal price list for Acme?"
   },
   "task": {
     "title": "Send Kim the signed redlines",

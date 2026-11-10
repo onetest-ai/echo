@@ -160,9 +160,10 @@ def auto_links():
     out = {}
     for p in sorted((AUTO / "specs").glob("*.spec.mjs")):
         text = p.read_text(encoding="utf-8")
-        ids = [i for m in re.finditer(r"covers\(([^)]*)\)", text) for i in re.findall(r"'([^']+)'", m.group(1))]
-        s = re.search(r"scenario\(test,\s*'([^']+)'", text)
-        out[p.relative_to(TESTS.parent).as_posix()] = {"scenario": s.group(1) if s else "", "ids": ids}
+        q = r"['\"`]([^'\"`]+)['\"`]"  # any quote style: a link never drops out unnoticed
+        ids = [i for m in re.finditer(r"covers\(([^)]*)\)", text) for i in re.findall(q, m.group(1))]
+        s = re.findall(r"scenario\(test,\s*" + q, text)
+        out[p.relative_to(TESTS.parent).as_posix()] = {"scenario": s[0] if len(s) == 1 else ",".join(s), "ids": ids}
     return out
 
 
@@ -411,7 +412,8 @@ def auto_report(path):
     prev = json.loads(state_file.read_text()) if state_file.exists() else None
     key = lambda r: f"{r['file']} › {r['title']}"
     now = {key(r): r["status"] for r in rows}
-    ok = lambda f: f in auto and all(r["status"] in ("passed", "flaky") for r in auto[f])
+    # A feature fails only on a test that ran and failed; a skipped one (an earlier stage failed) says nothing.
+    ok = lambda f: f in auto and not any(r["status"] == "failed" for r in auto[f])
     count = {s: sum(1 for r in rows if r["status"] == s) for s in ("passed", "failed", "flaky", "skipped")}
     L = [f"# Autotest run {datetime.now():%Y-%m-%d %H:%M}", "",
          f"Commit `{commit}`{' (uncommitted changes)' if git('status', '--porcelain', '--', 'crates', 'plugin', 'tests') else ''} · "

@@ -1,5 +1,6 @@
 // A thread's Work tab and a work item's details in the right panel.
 import { AppPage } from './app.page.mjs'
+import { literal } from '../support/data.mjs'
 
 export class WorkPage extends AppPage {
   constructor(page, data) {
@@ -19,7 +20,7 @@ export class WorkPage extends AppPage {
 
   /** A field's value in the details, by the field's name ("Owner", "Handed over by", "Due"). */
   value(field) {
-    return this.details.getByRole('button', { name: new RegExp(`^${field}:`) })
+    return this.details.getByRole('button', { name: new RegExp(`^${literal(field)}:`) })
   }
 
   /** Open a field for a change: its box, by the field's name. */

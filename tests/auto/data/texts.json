@@ -1,0 +1,45 @@
+{
+  "_about": "The window's and the CLI's own wording the autotests check, in one place: when the app's words change, change them here.",
+  "statusBar": {
+    "actions": "Actions",
+    "claude": "Claude",
+    "noProfile": "AI:"
+  },
+  "work": {
+    "handedOverBy": "Handed over by",
+    "me": "Me"
+  },
+  "prep": {
+    "inShort": "In short",
+    "whosComing": "Who's coming"
+  },
+  "needs": {
+    "taskDescription": "From {from} ({where}): {title}",
+    "file": ".echo/needs.json"
+  },
+  "minutesRun": {
+    "promptHas": [
+      "write the new action list to",
+      "nobody is watching it"
+    ],
+    "ignoredTools": [
+      "DeferredToolPlaceholder"
+    ],
+    "logRead": "→ Read .*transcript\\.md",
+    "logOk": "Finished: ok",
+    "logRefused": "✗",
+    "logNotAllowed": "Not allowed:",
+    "keptError": "The run didn't finish, so the previous minutes are kept",
+    "keptLog": "The previous minutes are back",
+    "files": {
+      "log": "claude.log",
+      "notes": "notes.md",
+      "actions": "actions.json",
+      "run": "notes-run.json"
+    },
+    "outside": "calls/stolen.md"
+  },
+  "calls": {
+    "minutesTab": "Minutes"
+  }
+}

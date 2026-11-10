@@ -23,7 +23,7 @@ that reason. `ECHO_AUTO_KEEP=1` keeps each spec's data folder (in the system's t
 |---|---|
 | `specs/` | One file a manual scenario: `S-24.spec.mjs` automates S-24. Each test is a stage, numbered as the scenario numbers it (`13 · …`); a test beside the scenario's stages says so (`after · …`). |
 | `pages/` | Page objects, one a view: `AppPage` (opening, the status bar), `TodayPage`, `CallsPage`, `MeetingPage`, `WorkPage`. Every locator lives here, never in a spec. |
-| `data/` | The names, titles, ids and expected values of each data set (`small.json`, `standard.json`): what `tests/fixtures/make_data.py` builds. Specs read them from `data.set`; nothing is spelled in a spec. Change them with the fixture. |
+| `data/` | The names, titles, ids and expected values of each data set (`small.json`, `standard.json`: what `tests/fixtures/make_data.py` builds, read as `data.set`), and the app's own wording the tests check (`texts.json`, read as `data.text`). Nothing is spelled in a spec: change these with the fixture or the app. |
 | `support/` | `data.mjs` (the spec's data: built before its first test, stopped after its last; the CLI; the virtual model's script and log) and `covers.mjs` (the links to the manual side). |
 
 ## Locators

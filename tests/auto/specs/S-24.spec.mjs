@@ -12,7 +12,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     const m = data.set.meetings.globexWeekly
     const meeting = new MeetingPage(page, data)
     await meeting.open(m.prep)
-    await expect(meeting.answers).toHaveText(m.answers)
+    await expect(meeting.answers(m.answers)).toBeVisible()
     expect(await meeting.people()).toEqual(m.people)
     expect(await meeting.isBold(m.key)).toBe(true)
     expect(await meeting.isBold(m.notKey)).toBe(false)
@@ -26,16 +26,16 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
   test("14 · A prep reads in one column, with no Who's coming", covers('prep/TC-009', 'F-PREP-04'), async ({ page }) => {
     const meeting = new MeetingPage(page, data)
     await meeting.open(data.set.meetings.sponsorUpdate.prep)
-    await expect(meeting.section('In short')).toBeVisible()
-    await expect(meeting.section("Who's coming")).toHaveCount(0)
+    await expect(meeting.section(data.text.prep.inShort)).toBeVisible()
+    await expect(meeting.section(data.text.prep.whosComing)).toHaveCount(0)
     await expect(meeting.prepFooter).toBeVisible()
   })
 
   test("36 · Won't do needs a comment; Cancel and Escape keep the item and decide nothing", covers('today/TC-007', 'F-TODAY-04'), async ({ page }) => {
-    const { chat } = data.set.needs
+    const { chat, chatLine } = data.set.needs
     const today = new TodayPage(page, data)
     await today.open()
-    await today.wontDo(chat)
+    await today.wontDo(chat, chatLine)
     await expect(today.wontConfirm).toBeDisabled()
     await today.wontComment.fill('   ')
     await expect(today.wontConfirm).toBeDisabled()
@@ -43,12 +43,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.wontConfirm).toBeEnabled()
     await today.wontCancel.click()
     await expect(today.wontDialog).toBeHidden()
-    await today.wontDo(chat)
+    await today.wontDo(chat, chatLine)
     await page.keyboard.press('Escape')
     await expect(today.wontDialog).toBeHidden()
-    await expect(today.item(chat)).toBeVisible()
+    await expect(today.item(chat, chatLine)).toBeVisible()
     await expect(today.asks).toHaveCount(0)
-    expect(data.json(data.home, '.echo/needs.json').decided || {}).toEqual({})
+    expect(data.json(data.home, data.text.needs.file).decided || {}).toEqual({})
   })
 
   // Not a stage of the manual S-24 (it takes an item its Won't do stages need); here it runs last, after them.
@@ -57,7 +57,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     const today = new TodayPage(page, data)
     await today.installClock()
     await today.open()
-    await today.illDoIt(n.mail)
+    await today.illDoIt(n.mail, n.mailTitle)
     await expect(today.taskTitle).toHaveValue(n.mailTitle)
     await today.taskTitle.fill(t.title)
     await today.taskThread.selectOption({ label: t.thread.name })
@@ -72,9 +72,9 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await today.addToTasks.click()
     await expect(today.taskDialog).toBeHidden()
     await page.reload()
-    await expect(today.item(n.chat)).toBeVisible()
-    await expect(today.item(n.mail)).toHaveCount(0)
-    expect(data.lastEvent(t.thread.id)).toMatchObject({ type: 'create', kind: 'task',
-      fields: { title: t.title, description: `From ${n.mailFrom} (${n.mail}): ${n.mailTitle}` } })
+    await expect(today.item(n.chat, n.chatLine)).toBeVisible()
+    await expect(today.item(n.mail, n.mailTitle)).toHaveCount(0)
+    const description = data.text.needs.taskDescription.replace('{from}', n.mailFrom).replace('{where}', n.mail).replace('{title}', n.mailTitle)
+    expect(data.lastEvent(t.thread.id)).toMatchObject({ type: 'create', kind: 'task', fields: { title: t.title, description } })
   })
 })
