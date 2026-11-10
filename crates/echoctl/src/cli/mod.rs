@@ -11,6 +11,7 @@ pub mod dev;
 pub mod m365;
 pub mod plugin;
 pub mod project;
+pub mod widget;
 
 pub fn print_json(v: &serde_json::Value) {
     println!("{}", serde_json::to_string_pretty(v).unwrap_or_default());

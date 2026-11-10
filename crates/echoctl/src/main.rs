@@ -50,6 +50,7 @@ mod projectsync;
 mod tasks;
 mod taskmodes;
 mod today;
+mod widgets;
 mod teams_transcript;
 mod view;
 mod vocab;
@@ -227,6 +228,11 @@ enum Cmd {
     /// Minutes templates (JSON): each one's words, header and sections, the {values} they may use, and the folder for
     /// your own (a template there named like a built-in changes it)
     Templates,
+    /// Today's widgets: `list` the catalog, `show <id>` a widget's data (JSON, as Today gets it)
+    Widget {
+        #[command(subcommand)]
+        cmd: cli::widget::WidgetCmd,
+    },
     /// Today → Needs you now (JSON): what waits on you from the last day in Teams and mail; --refresh reads them again
     #[command(hide = true)]
     Needs {
@@ -651,6 +657,7 @@ fn main() -> Result<()> {
         Cmd::Org { cmd } => cli::project::org_command(cmd),
         Cmd::Templates => cli::calls::templates(),
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
+        Cmd::Widget { cmd } => cli::widget::widget(cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),

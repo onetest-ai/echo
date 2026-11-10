@@ -62,7 +62,7 @@ pub fn seen(key: &str) -> Result<()> {
 }
 
 /// The cards still to read, rendered by Echo's safe writer (a model wrote them: the AI notice goes with them).
-fn cards() -> Vec<Value> {
+pub(crate) fn cards() -> Vec<Value> {
     load_cards()
         .into_iter()
         .filter(|c| c["seen"] != true)
@@ -154,7 +154,7 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings and calls in time order: a meeting of the calendar with its prep and whether it is set to be
 /// recorded or was (its call); a call of today with no meeting on its own. A meeting of another day (a failed sync keeps
 /// the last agenda, #131) is left out.
-fn day() -> Vec<Value> {
+pub(crate) fn day() -> Vec<Value> {
     let today = Local::now().format("%Y-%m-%d").to_string();
     let calls_today: Vec<(PathBuf, Value, Option<MeetingContext>)> = calls::all_calls()
         .into_iter()
@@ -212,7 +212,7 @@ fn day() -> Vec<Value> {
 
 /// Your work, from Tasks' piles — only what is due by the end of this week or late (the rest stays in Tasks): what you
 /// owe, what is owed to you, what you wait for; late first, then by date.
-fn work(tasks: &Value) -> Value {
+pub(crate) fn work(tasks: &Value) -> Value {
     let today = Local::now().date_naive();
     let week_end = today + chrono::Duration::days(6 - i64::from(chrono::Datelike::weekday(&today).num_days_from_monday()));
     let this_week = |t: &Value| t["late"] == true || t["due"].as_str().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d <= week_end);
@@ -561,15 +561,31 @@ pub fn ask_drop(id: &str) -> Result<()> {
     })
 }
 
-/// `/api/today`: the day, the work and the cards (`tasks`: the Tasks view, made by the window with its calendar).
+/// `/api/today`: the day, the work and the cards (`tasks`: the Tasks view, made by the window with its calendar) —
+/// each from its widget's provider, so Today and `echoctl widget show` say the same.
 pub fn view(tasks: &Value) -> Value {
-    json!({"date": Local::now().to_rfc3339(), "day": day(), "calendar_stale": crate::calendar::unread_today(), "work": work(tasks), "cards": cards(), "asks": load_asks(), "needs": crate::needs::view(),
+    let i = crate::widgets::Inputs { tasks };
+    let w = |id: &str| crate::widgets::data(id, &i).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+    let (day, needs) = (w("core:calendar.agenda"), w("core:needs.now"));
+    json!({"date": Local::now().to_rfc3339(), "day": day["day"], "calendar_stale": day["calendar_stale"], "work": w("core:tasks.mine"), "cards": w("core:routines.cards")["cards"],
+           "asks": load_asks(), "needs": {"items": needs["items"], "checked_at": needs["checked_at"], "errors": needs["errors"], "signed_in": needs["signed_in"]},
            "me": crate::config::Config::load().ok().and_then(|c| c.me).map(|p| p.name)})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn todays_view_keeps_its_shape_now_its_parts_come_from_the_widgets() {
+        let (_env, _) = paths::testenv::folders("today-view-shape");
+        let v = view(&json!({"piles": {}, "asks": [], "projects": []}));
+        let keys: Vec<_> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["asks", "calendar_stale", "cards", "date", "day", "me", "needs", "work"]);
+        let needs: Vec<_> = v["needs"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(needs, ["checked_at", "errors", "items", "signed_in"]);
+        assert!(v["day"].is_array() && v["cards"].is_array() && v["work"]["mine"]["items"].is_array(), "{v}");
+    }
 
     #[test]
     fn a_card_per_source_replaced_by_the_next_and_hidden_by_got_it() {

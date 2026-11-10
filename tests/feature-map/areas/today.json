@@ -67,6 +67,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-10",
+   "feature": "Today's widgets: echoctl widget list gives the catalog (id, part, label, kind, sizes S/M/L, hug or fill, temporal) and widget show a widget's data — the same Today gets (/api/today is made from the widgets' providers; /api/widgets the catalog); a temporal widget's data says empty when it has nothing; an unknown id names widget list",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
