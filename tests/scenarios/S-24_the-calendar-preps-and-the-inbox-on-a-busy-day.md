@@ -55,6 +55,7 @@ cases:
   - tests/cases/today/TC-027_threads-at-a-glance-and-done-this-week.md
   - tests/cases/today/TC-028_recorded-this-week-counts-calls-time-and-minutes-since-monday.md
   - tests/cases/today/TC-029_a-plugins-widgets-on-today.md
+  - tests/cases/today/TC-030_each-routines-card-is-a-widget-of-its-own.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -130,6 +131,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 49 | `today/TC-027_threads-at-a-glance-and-done-this-week.md` | — | — |
 | 50 | `today/TC-028_recorded-this-week-counts-calls-time-and-minutes-since-monday.md` | — | — |
 | 51 | `today/TC-029_a-plugins-widgets-on-today.md` | — | — |
+| 52 | `today/TC-030_each-routines-card-is-a-widget-of-its-own.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.

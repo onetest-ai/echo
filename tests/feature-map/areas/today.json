@@ -137,6 +137,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-20",
+   "feature": "Each source that sends Today a card (a routine's about line, else its title) is a widget of its own, core:routines.card.<name> under Routines (its words and a short hash), sizes M/L, on Today while it has an unread card: put where you want it, its card drawn there with Got it; Routine cards shows the rest",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

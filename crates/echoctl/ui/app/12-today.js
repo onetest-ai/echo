@@ -12,7 +12,11 @@ function todayView() {
   const hr = now.getHours(), first = (d.me || '').trim().split(/\s+/)[0]
   const hello = `${hr < 5 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${first}` : ''}`
   const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span>${todayEditHead()}</header>`
-  const cards = (d.cards || []).map((c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
+  // A routine's card is drawn where its own widget is (`core:routines.card.<slug>`) when that is on Today; Routine
+  // cards shows the rest.
+  const ownCard = new Set((d.layout || []).map((i) => i.widget).filter((w) => w.startsWith('core:routines.card.')).map((w) => w.slice(19)))
+  const cardHtml = (c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`
+  const cards = (d.cards || []).filter((c) => !ownCard.has(c.slug)).map(cardHtml).join('')
   // Your day as "where you'll be" (#315, Workbench `WidgetsCalendar`): a line a place with its reason; the line "now"
   // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card on the right.
   const rows = agendaView(d, now)
@@ -58,6 +62,7 @@ function todayView() {
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView(d.glance, sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView(d.glance, sizeOf['core:tasks.done'] || 'S'), 'core:calls.week': callsWeekView(d.calls_week, sizeOf['core:calls.week'] || 'S') }
+  for (const c of d.cards || []) if (ownCard.has(c.slug)) parts[`core:routines.card.${c.slug}`] = cardHtml(c)
   // Plugins' widgets on the layout, drawn by their kind (13-today-plugins.js).
   for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeOf[id] || 'M')
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)

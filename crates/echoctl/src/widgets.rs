@@ -52,6 +52,21 @@ pub const CORE: &[Widget] = &[
 /// The catalog: Echo's widgets, then each enabled plugin's (`plugin:<plugin>:<widget>`, under the plugin's name).
 pub fn catalog() -> Vec<Widget> {
     let mut all = CORE.to_vec();
+    // Each routine (or other source) that sends Today a card: its card as a widget of its own (`Routine cards` shows
+    // the rest).
+    for (slug, key) in crate::today::card_sources() {
+        all.push(Widget {
+            id: Cow::Owned(format!("{CARD}{slug}")),
+            part: Cow::Borrowed("Routines"),
+            label: Cow::Owned(key),
+            about: Cow::Borrowed("its card, until you read it"),
+            kind: Cow::Borrowed("card1"),
+            sizes: Cow::Borrowed(&["M", "L"]),
+            height: Cow::Borrowed("hug"),
+            temporal: true,
+            refresh: 0,
+        });
+    }
     for (p, m) in crate::plugins::enabled_manifests() {
         for d in m.widgets {
             all.push(Widget {
@@ -71,8 +86,11 @@ pub fn catalog() -> Vec<Widget> {
     all
 }
 
+/// A card source's widget id: this, then its slug (`today::card_slug`).
+pub const CARD: &str = "core:routines.card.";
+
 pub fn find(id: &str) -> Result<Widget> {
-    let hit = if id.starts_with("plugin:") { catalog().into_iter().find(|w| w.id == id) } else { CORE.iter().find(|w| w.id == id).cloned() };
+    let hit = if id.starts_with("plugin:") || id.starts_with(CARD) { catalog().into_iter().find(|w| w.id == id) } else { CORE.iter().find(|w| w.id == id).cloned() };
     hit.ok_or_else(|| anyhow!("no widget {id:?}: `echoctl widget list` names them"))
 }
 
@@ -95,6 +113,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         "work" => crate::today::work(i.tasks),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
+        "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
         "glance" => crate::glance::today(),
         "calls" => crate::calls_week::today(),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
@@ -103,7 +122,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         let empty = match w.kind.as_ref() {
             "next" => v["next"].is_null(),
             "needs" => v["items"].as_array().is_none_or(|a| a.is_empty()),
-            "cards" => v["cards"].as_array().is_none_or(|a| a.is_empty()),
+            "cards" | "card1" => v["cards"].as_array().is_none_or(|a| a.is_empty()),
             "choices" => !has_choices(v["day"].as_array().map(Vec::as_slice).unwrap_or(&[]), chrono::Utc::now()),
             _ => false,
         };

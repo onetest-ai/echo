@@ -69,9 +69,38 @@ pub(crate) fn cards() -> Vec<Value> {
         .map(|c| {
             let html = crate::minutes::markdown_html(c["markdown"].as_str().unwrap_or(""));
             let notice = c["ai"].as_str().map(crate::deliver::ai_notice);
-            json!({"key": c["key"], "title": c["title"], "html": html, "about": c["about"], "at": c["at"], "notice": notice})
+            json!({"key": c["key"], "slug": card_slug(c["key"].as_str().unwrap_or("")), "title": c["title"], "html": html, "about": c["about"], "at": c["at"], "notice": notice})
         })
         .collect()
+}
+
+/// A card source's widget name (`core:routines.card.<slug>`): its words in a–z, 0–9 and dashes, and a short hash of
+/// the whole key, so two sources never share one.
+pub(crate) fn card_slug(key: &str) -> String {
+    let mut words = String::new();
+    for ch in key.to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            words.push(ch);
+        } else if !words.ends_with('-') && !words.is_empty() {
+            words.push('-');
+        }
+    }
+    let words: String = words.trim_end_matches('-').chars().take(40).collect();
+    // FNV-1a: stable across runs and versions.
+    let hash = key.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    format!("{}{}{:06x}", words.trim_end_matches('-'), if words.is_empty() { "" } else { "-" }, hash & 0xff_ffff)
+}
+
+/// Every source that has sent Today a card (read or not), newest first: `(slug, key)` — each a widget of its own.
+pub(crate) fn card_sources() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = vec![];
+    for c in load_cards() {
+        let key = c["key"].as_str().unwrap_or("").to_string();
+        if !key.is_empty() && !out.iter().any(|(_, k)| *k == key) {
+            out.push((card_slug(&key), key));
+        }
+    }
+    out
 }
 
 fn seen_file() -> PathBuf {
@@ -603,6 +632,29 @@ mod tests {
         assert_eq!(cards().len(), 1);
         put_card(&msg("Wednesday", "Third")).unwrap();
         assert_eq!(cards().len(), 2, "the next card from that source shows again");
+    }
+
+    #[test]
+    fn each_card_source_is_a_widget_of_its_own_with_its_card() {
+        let (_env, _) = paths::testenv::folders("today-card-widgets");
+        assert_eq!(card_slug("Routine · Morning brief"), card_slug("Routine · Morning brief"), "stable");
+        assert!(card_slug("Routine · Morning brief").starts_with("routine-morning-brief-"));
+        assert_ne!(card_slug("Brief!"), card_slug("Brief?"), "two keys never share a widget");
+        assert!(!card_slug("Сводка").is_empty() && !card_slug("Сводка").starts_with('-'), "words Echo can't spell still have a name");
+        let msg = |title: &'static str, about: &'static str| crate::deliver::Msg { title, markdown: "x", about: Some(about), ..Default::default() };
+        put_card(&msg("Today", "Routine · Morning brief")).unwrap();
+        put_card(&msg("Weekly", "Routine · Friday review")).unwrap();
+        let brief = format!("{}{}", crate::widgets::CARD, card_slug("Routine · Morning brief"));
+        let w = crate::widgets::find(&brief).unwrap();
+        assert_eq!((w.part.as_ref(), w.label.as_ref(), w.temporal), ("Routines", "Routine · Morning brief", true));
+        let tasks = json!({});
+        let v = crate::widgets::data(&brief, &crate::widgets::Inputs { tasks: &tasks }).unwrap();
+        assert_eq!((v["cards"].as_array().map(Vec::len), v["cards"][0]["title"].as_str(), v["empty"].as_bool()), (Some(1), Some("Today"), Some(false)));
+        // Got it: its widget has nothing to show, but stays in the catalog for the next card.
+        seen("Routine · Morning brief").unwrap();
+        assert_eq!(crate::widgets::data(&brief, &crate::widgets::Inputs { tasks: &tasks }).unwrap()["empty"], true);
+        assert!(crate::widgets::find(&brief).is_ok());
+        crate::today_layout::add(&brief, None, None).unwrap();
     }
 
     #[test]
