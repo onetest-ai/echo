@@ -52,6 +52,11 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
 /// The page's commands of this area (`handle` asks each area in turn).
 pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
+        // Today's edit mode: add, move, size, remove a widget, or reset — the same changes as `echoctl today`.
+        "today_layout" => match today_layout_op(v) {
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
         "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str(), None) {
             Ok(_) => true.into(),
@@ -108,3 +113,26 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         _ => return None,
     })
 }
+
+/// A change to Today's layout from edit mode (`{cmd: "today_layout", op, widget, size?, target?, side?}`).
+fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> {
+    use crate::today_layout::{self as l, Side};
+    let w = v["widget"].as_str().unwrap_or("");
+    let side = match v["side"].as_str() {
+        Some("before") => Some(Side::Before),
+        Some("after") => Some(Side::After),
+        Some("above") => Some(Side::Above),
+        Some("below") => Some(Side::Below),
+        _ => None,
+    };
+    let target = v["target"].as_str().filter(|t| !t.is_empty()).zip(side);
+    match v["op"].as_str().unwrap_or("") {
+        "add" => l::add(w, v["size"].as_str(), target),
+        "move" => l::move_to(w, target),
+        "size" => l::resize(w, v["size"].as_str().unwrap_or("")),
+        "remove" => l::remove(w),
+        "reset" => l::reset(),
+        op => anyhow::bail!("Today's layout: no change {op:?}"),
+    }
+}
+
