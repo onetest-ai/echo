@@ -315,6 +315,16 @@ export class CallsPage extends AppPage {
     return this.main.getByRole('group', { name: this.data.text.callStates.facts, exact: true })
   }
 
+  /** A fact of the call's header, as it reads ("1 min"). */
+  fact(text) {
+    return this.facts.getByText(text, { exact: true })
+  }
+
+  /** The tab's headings (level 3), in order: a box's one heading, and nothing else said beside it. */
+  get paneHeadings() {
+    return this.main.getByRole('heading', { level: 3 })
+  }
+
   async factLines() {
     const snap = await this.facts.ariaSnapshot()
     // A group of one text reads on its own line ("- group "About this call": Memo …").

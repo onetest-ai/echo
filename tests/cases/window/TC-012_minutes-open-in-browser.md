@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [minutes, native]
 external_id: TC-WIN-003
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-012: Open minutes in browser and Show in Finder use the call's files

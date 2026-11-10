@@ -1423,5 +1423,51 @@
       "meeting.json"
     ],
     "emptyBrief": "empty-brief.md"
+  },
+  "s17": {
+    "_about": "S-17 A recorded call end to end: the prepared recordings it reads and copies, and the call it opens in the browser",
+    "model": "large-v3-turbo-q5_0",
+    "capture": {
+      "recording": "acme-sync",
+      "seconds": [
+        36,
+        44
+      ],
+      "exit": "0"
+    },
+    "pinned": {
+      "recording": "mixed-languages-pinned",
+      "title": "TRN-004 pinned",
+      "language": "uk",
+      "languages": [
+        "uk"
+      ]
+    },
+    "next": {
+      "recording": "mixed-languages",
+      "title": "TRN-004 next",
+      "language": "uk"
+    },
+    "workspace": [
+      "en",
+      "uk",
+      "ru"
+    ],
+    "short": {
+      "recording": "very-short",
+      "title": "REC-013 very-short",
+      "files": [
+        "meta.json",
+        "segments.json",
+        "transcript.md"
+      ],
+      "says": "Quick one. Is the call at three still on?",
+      "minutes": 1,
+      "why": "shorter than 3 minutes"
+    },
+    "browser": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync"
+    }
   }
 }
