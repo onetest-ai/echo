@@ -28,6 +28,33 @@ function notesPanel() {
   return notesTimeline(c)
 }
 
+// ── note time: whether a note keeps its call time (no DOM: `note-time.test.mjs`) ─────────────────────────────────
+/** Whether the app's state says it records `call`: its recording's folder has the call's stamp (a retitle keeps it). */
+function recordsCall(state, call) {
+  const r = state && state.recording
+  return !!r && !!call && String(r).split(/[\\/]/).pop().slice(0, 17) === String(call).slice(0, 17)
+}
+/** A note's call time: `at` (taken while the window showed the call recording) only when the app confirmed it records
+ *  the call (true); after hang-up the window's view of it may lag, so `false`, or no answer in time (`undefined`),
+ *  gives none: never a time that isn't confirmed (#358). */
+function noteTime(at, confirmed) {
+  return at != null && confirmed === true ? at : null
+}
+// end of the note time block
+/** Ask the app, its state read again now, whether it records `call`: true or false, or `undefined` with no answer
+ *  within 500 ms. Typing never waits for it. */
+function confirmRecording(call) {
+  const answer = get('api/state').then((s) => { S.state = s; return recordsCall(s, call) }, () => undefined)
+  return Promise.race([answer, new Promise((done) => setTimeout(() => done(undefined), 500))])
+}
+/** The note box's call time is asked about at its first key (the moment it is taken for): `S.noteAtOk` holds the
+ *  answer, `undefined` until it comes. */
+function confirmNoteAt(call) {
+  const ask = { ok: undefined }
+  ask.done = confirmRecording(call).then((ok) => { ask.ok = ok; return ok })
+  S.noteAtOk = ask
+}
+
 /** Where the call is now, in seconds from its start (only while it records). */
 function callNow(c) {
   const t0 = c && c.status === 'recording' && since(c.started_at)
@@ -107,15 +134,18 @@ function saveNoteEdit() {
   render()
 }
 
-/** Add what is typed in the note box (or a flag) at its moment. */
-function addNote(kindOverride) {
+/** Add what is typed in the note box (or a flag) at its moment: its call time only once the app confirmed it records
+ *  the call (a flag asks now; the box asked at its first key, waited for here if it hasn't answered yet). */
+async function addNote(kindOverride) {
   const c = S.call
   if (!c) return
   if (S.closing) return
   if (kindOverride) {
-    const t = callNow(c)
+    const at = callNow(c)
+    const t = noteTime(at, at == null ? false : await confirmRecording(c.name))
     editNotes((text) => NoteDoc.add(text, { kind: kindOverride, t: t == null ? null : Math.floor(t), text: '' }))
   } else {
+    if (S.noteAt != null && S.noteAtOk && S.noteAtOk.ok === undefined) await S.noteAtOk.done
     commitNoteDraft()
     render()
   }
@@ -143,11 +173,12 @@ function commitNoteDraft() {
   const own = S.noteDraftCall || (S.call && S.call.name)
   if (!own || !S.noteDraft.trim()) return null
   const call = ownCall(own)
-  const at = S.noteAt != null ? S.noteAt : S.call && sameCall(S.call.name, call) ? callNow(S.call) : null
+  // Its time: taken at the first key, kept only as the app confirmed (a note added at close with no answer yet: none).
+  const at = noteTime(S.noteAt, S.noteAtOk ? S.noteAtOk.ok : undefined)
   const next = NoteDoc.addTyped(NotesSync.view(call).draft, { text: S.noteDraft, kind: S.noteKind, at })
   if (next == null) return null
   NotesSync.edit(call, next)
-  S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null
+  S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null
   if (!S.closing) saveNotesSoon(call)
   return call
 }
