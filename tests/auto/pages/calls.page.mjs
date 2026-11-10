@@ -73,6 +73,11 @@ export class CallsPage extends AppPage {
     return this.page.getByRole('menu').getByRole('menuitem')
   }
 
+  /** An item of the open menu, by its name ("New thread from this call…"). */
+  menuItem(name) {
+    return this.page.getByRole('menu').getByRole('menuitem', { name, exact: true })
+  }
+
   // ── Coming up today: the list's fold of the meetings still to come, and their rows ──
 
   /** The fold's head ("Coming up today 2 Next 02:04 PM Globex design review"). */
@@ -133,9 +138,28 @@ export class CallsPage extends AppPage {
     return this.list.getByRole('option', { name: new RegExp(`^(?!${literal(this.data.text.upcoming.rowPrefix)} )`) })
   }
 
-  /** A text of the view, as it reads (a fact of the call's header, a line of a tab). */
+  /** A text of the view, as it reads (a fact of the call's header, a line of a tab); one that starts with these words;
+   *  a heading of a tab ("No minutes yet"). */
   says(text) {
     return this.main.getByText(text, { exact: true })
+  }
+
+  saysStarting(words) {
+    return this.main.getByText(new RegExp(`^${literal(words)}`))
+  }
+
+  paneHeading(name) {
+    return this.main.getByRole('heading', { name, level: 3, exact: true })
+  }
+
+  /** The call's tabs, in order. */
+  get callTabs() {
+    return this.main.getByRole('tab')
+  }
+
+  /** A text of the right panel, as it reads (its thread in What moved, My notes' saved state). */
+  panelSays(text) {
+    return this.rightPanel.getByText(text, { exact: true })
   }
 
   /** The minutes' section headings, in order; an item of theirs, by the words it holds; its time chip. */
@@ -212,7 +236,7 @@ export class CallsPage extends AppPage {
 }
 
 /** The lines of an accessibility snapshot's top level: each child's name (or its text), in order. */
-function readLines(snapshot) {
+export function readLines(snapshot) {
   return snapshot.split('\n').slice(1).filter((l) => /^ {2}- /.test(l)).map((l) => {
     const s = l.trim().replace(/^- /, '').replace(/^'(.*)'(:.*)?$/, '$1$2')
     const named = /^\w+ "(.*?)"/.exec(s)

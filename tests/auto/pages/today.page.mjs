@@ -100,6 +100,15 @@ export class TodayPage extends AppPage {
     return this.yourDay.getByRole('group', { name: subject, exact: true })
   }
 
+  /** A button of a row of Your day ("Prepare", "Record when it starts"); a text anywhere in Your day. */
+  dayButton(subject, name) {
+    return this.dayRow(subject).getByRole('button', { name, exact: true })
+  }
+
+  daySays(text) {
+    return this.yourDay.getByText(text)
+  }
+
   get nowLine() {
     return this.yourDay.getByRole('separator', { name: /^Now / })
   }

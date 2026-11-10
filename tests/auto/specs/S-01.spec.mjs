@@ -36,11 +36,13 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
     await expect(calls.search).toHaveAttribute('placeholder', data.text.calls.searchPlaceholder)
     await expect(calls.call(s.acme.title)).toBeVisible()
     // The list from the top: Coming up today, then each day's heading and its calls, newest first.
-    const lines = await calls.lines()
     const expected = s.groups.flatMap(([day, titles]) => [day, ...titles])
-    const read = lines.slice(1).map((l) => expected.find((x) => l === x || new RegExp(` ${literal(x)} `).test(l)))
-    expect(read).toEqual(expected)
-    expect(lines[0]).toMatch(new RegExp(`^${literal(data.text.upcoming.head)} `))
+    const head = new RegExp(`^${literal(data.text.upcoming.head)} `)
+    // Polled: the list is drawn again as the agenda and the calls come in.
+    await expect.poll(async () => {
+      const [first, ...rest] = await calls.lines()
+      return [head.test(first), ...rest.map((l) => expected.find((x) => l === x || new RegExp(` ${literal(x)} `).test(l)))]
+    }).toEqual([true, ...expected])
     const time = await calls.clock(started())
     await expect(calls.call(s.acme.title)).toHaveAccessibleName(new RegExp(`${literal(s.acme.title)} ${literal(time)} ${literal(s.acme.length)} ${literal(s.acme.firstPeople)}`))
     await expect(calls.comingUp).toHaveAccessibleName(new RegExp(` ${literal(s.next)}$`))
@@ -67,7 +69,7 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
     const c = data.text.calls
     const calls = await openAcme(page)
     await expect.poll(() => calls.hash()).toMatch(new RegExp(fill(c.openOn, { tab: c.tabs.minutes })))
-    await expect(calls.main.getByRole('tab')).toHaveText([c.minutesTab, c.transcriptTab])
+    await expect(calls.callTabs).toHaveText([c.minutesTab, c.transcriptTab])
     await expect(calls.heading(s.acme.title)).toBeVisible()
     await expect(calls.says(fill(c.header, { day: await calls.longDay(started()), time: await calls.clock(started()) }))).toBeVisible()
     await expect(calls.says(s.acme.length)).toBeVisible()
@@ -79,7 +81,7 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
     const moved = calls.headerButton(c.whatMoved)
     if ((await moved.getAttribute('aria-pressed')) !== 'true') await moved.click()
     await expect(calls.panelTab(calls.rightPanel, c.whatMoved)).toHaveAttribute('aria-selected', 'true')
-    await expect(calls.rightPanel.getByText(s.acme.thread, { exact: true })).toBeVisible()
+    await expect(calls.panelSays(s.acme.thread)).toBeVisible()
     expect(await calls.minutesFill()).toBe(true)
   })
 
@@ -116,7 +118,7 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
       const calls = await openAcme(page)
       await showNotes(calls)
       await expect(calls.panelTab(calls.rightPanel, c.myNotes)).toHaveAttribute('aria-selected', 'true')
-      await expect(calls.rightPanel.getByText(n.empty, { exact: true })).toBeVisible()
+      await expect(calls.panelSays(n.empty)).toBeVisible()
       await expect(calls.note(s.note)).toHaveCount(0)
       // The save held while the window says so, then let go.
       const release = await calls.holdRequests()
@@ -124,9 +126,9 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
       await calls.newNote.fill(s.note)
       await calls.newNote.press(data.text.shell.keys.enter)
       await expect(calls.note(s.note)).toBeVisible()
-      await expect(calls.rightPanel.getByText(n.saving, { exact: true })).toBeVisible()
+      await expect(calls.panelSays(n.saving)).toBeVisible()
       release()
-      await expect(calls.rightPanel.getByText(n.saved, { exact: true })).toBeVisible()
+      await expect(calls.panelSays(n.saved)).toBeVisible()
       await expect.poll(() => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '')).toContain(s.note)
 
       await page.reload()

@@ -70,6 +70,23 @@ export class CalendarPage extends AppPage {
     return this.card(subject).getByRole('button', { name, exact: true })
   }
 
+  /** The card's heading, a select of it ("Kind of meeting"), a text of it as it reads, or one that starts so. */
+  cardHeading(subject) {
+    return this.card(subject).getByRole('heading', { name: subject, exact: true })
+  }
+
+  cardSelect(subject, name) {
+    return this.card(subject).getByRole('combobox', { name, exact: true })
+  }
+
+  cardSays(subject, text) {
+    return this.card(subject).getByText(text, { exact: true })
+  }
+
+  cardStarting(subject, words) {
+    return this.card(subject).getByText(new RegExp(`^${literal(words)}`))
+  }
+
   /** The colour of a meeting's left edge in the grid (green when recorded, orange when set to record). */
   async edge(subject) {
     return this.event(subject).evaluate((el) => getComputedStyle(el).borderLeftColor)

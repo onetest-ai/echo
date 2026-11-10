@@ -36,7 +36,7 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     await expect(today.section(data.text.shell.yourDay)).toBeVisible()
     expect(await today.dayRows()).toEqual(s.accepted)
     await expect(today.dayRow(s.notAccepted)).toHaveCount(0)
-    await expect(today.yourDay.getByText(s.notAccepted)).toHaveCount(0)
+    await expect(today.daySays(s.notAccepted)).toHaveCount(0)
     await expect(today.textStarting(await today.longDay())).toContainText(fill(data.text.today.meetings, { n: s.accepted.length }))
   })
 
@@ -53,8 +53,8 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     expect(lines.slice(at + 1)).toEqual(s.coming)
     expect(await today.nowColour()).toBe(await today.themeColour(data.text.cal.colours.now))
     for (const subject of s.coming) {
-      await expect(today.dayRow(subject).getByRole('button', { name: t.prepare, exact: true })).toBeVisible()
-      await expect(today.dayRow(subject).getByRole('button', { name: t.record, exact: true })).toBeVisible()
+      await expect(today.dayButton(subject, t.prepare)).toBeVisible()
+      await expect(today.dayButton(subject, t.record)).toBeVisible()
     }
   })
 
@@ -106,14 +106,14 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     await cal.event(k.subject).click()
     const card = cal.card(k.subject)
     await expect(card).toBeVisible()
-    await expect(card.getByRole('heading', { name: k.subject })).toBeVisible()
+    await expect(cal.cardHeading(k.subject)).toBeVisible()
     await expect(cal.cardButton(k.subject, c.close)).toBeVisible()
     await expect(card).toContainText(new RegExp(`${literal(fill(c.when, { start: await cal.clock(m.start), end: await cal.clock(m.end) }))}${c.soon.replace('$', '')}`))
-    await expect(card.getByRole('combobox', { name: c.kind })).toBeVisible()
+    await expect(cal.cardSelect(k.subject, c.kind)).toBeVisible()
     await expect(cal.cardButton(k.subject, c.addThread)).toBeVisible()
-    await expect(card.getByText(c.people, { exact: true })).toBeVisible()
-    await expect(card.getByText(k.organizer, { exact: true })).toBeVisible()
-    await expect(card.getByText(c.organizer, { exact: true })).toBeVisible()
+    await expect(cal.cardSays(k.subject, c.people)).toBeVisible()
+    await expect(cal.cardSays(k.subject, k.organizer)).toBeVisible()
+    await expect(cal.cardSays(k.subject, c.organizer)).toBeVisible()
     expect(await cal.cardPlace(k.subject, t.record, t.prepare)).toEqual({ inside: true, beside: true, level: true, oneLine: true })
 
     const top = await cal.top(k.subject)
@@ -131,10 +131,10 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     const before = fs.existsSync(scheduledFile()) ? fs.readFileSync(scheduledFile(), 'utf8') : null
     try {
       const today = await openToday(page)
-      await expect(today.dayRow(x.subject).getByRole('button', { name: t.prepare, exact: true })).toBeVisible()
-      await today.dayRow(x.subject).getByRole('button', { name: t.record, exact: true }).click()
-      await expect(today.dayRow(x.subject).getByRole('button', { name: t.dontRecord, exact: true })).toBeVisible()
-      await expect(today.dayRow(x.other).getByRole('button', { name: t.record, exact: true })).toBeVisible()
+      await expect(today.dayButton(x.subject, t.prepare)).toBeVisible()
+      await today.dayButton(x.subject, t.record).click()
+      await expect(today.dayButton(x.subject, t.dontRecord)).toBeVisible()
+      await expect(today.dayButton(x.other, t.record)).toBeVisible()
       await expect.poll(scheduled).toEqual([x.subject])
 
       const cal = new CalendarPage(page, data)
@@ -143,7 +143,7 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
       expect(await cal.edge(x.subject)).toBe(await cal.themeColour(c.colours.scheduled))
       await cal.event(x.subject).click()
       await expect(cal.cardButton(x.subject, t.dontRecord)).toBeVisible()
-      await expect(cal.card(x.subject).getByText(new RegExp(`^${literal(c.starts)}`))).toBeVisible()
+      await expect(cal.cardStarting(x.subject, c.starts)).toBeVisible()
       await cal.cardButton(x.subject, t.dontRecord).click()
       await expect(cal.cardButton(x.subject, t.record)).toBeVisible()
       await expect.poll(scheduled).toEqual([])

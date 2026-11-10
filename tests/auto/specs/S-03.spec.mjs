@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { useData, fill, literal } from '../support/data.mjs'
+import { useData, fill } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
 import { CallsPage } from '../pages/calls.page.mjs'
 
@@ -17,9 +17,9 @@ scenario(test, 'S-03', 'Tidy the calls: a call without minutes, delete one, take
     await calls.open()
     await calls.openCall(i.title)
     await expect(calls.tab(c.minutesTab)).toHaveAttribute('aria-selected', 'true')
-    await expect(calls.main.getByRole('heading', { name: c.noMinutes, exact: true })).toBeVisible()
+    await expect(calls.paneHeading(c.noMinutes)).toBeVisible()
     await expect(calls.says(c.ready)).toBeVisible()
-    await expect(calls.main.getByText(new RegExp(`^${literal(c.writesWith)}\\S+`))).toBeVisible()
+    await expect(calls.saysStarting(c.writesWith)).toBeVisible()
     await expect(calls.writeMinutes).toBeVisible()
     await expect(calls.says(fill(c.command, { folder: data.callName(i.folder) }))).toBeVisible()
     await expect(calls.headerButton(c.copy)).toBeVisible()
