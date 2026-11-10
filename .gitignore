@@ -39,3 +39,6 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 __pycache__/
 /tests/tools/testcall/build/
 /tests/fixtures/ai.local.json
+/tests/auto/node_modules/
+/tests/auto/test-results/
+/tests/auto/playwright-report/

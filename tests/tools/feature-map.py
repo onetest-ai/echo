@@ -18,6 +18,11 @@ The map is split so features of different parts of the app can be worked on in p
                                               cases, scenarios and map lines that still quote a label or message
                                               the branch took out of the app (exit 1)
 
+  tests/tools/feature-map.py auto-report RESULTS   after an autotest run (tests/auto, `npm test`): its results against the
+                                              map — what was tested, what failed and which case to re-run, each area's
+                                              coverage (autotests, agent cases, person cases, none), and what changed
+                                              since the last run — to tests/reports/auto-<time>.md
+
 Coverage: a case lists the features it checks in its frontmatter (`requirements: [F-CALLS-01, …]`); a scenario lists
 its cases (`cases:`). A feature is covered by agent cases, person-run cases, or none.
 """
@@ -111,7 +116,28 @@ def problems(doc, cases, scenarios):
         out += [f"{path}: unknown requirement {r}" for r in c["requirements"] if r not in seen]
     for path, s in scenarios.items():
         out += [f"{path}: no such case {c}" for c in s["cases"] if c not in cases]
+    by_id = case_ids(cases)
+    for spec, ids in auto_links().items():
+        out += [f"{spec}: no such case {i}" for i in ids if not i.startswith("F-") and i not in by_id]
+        out += [f"{spec}: unknown feature {i}" for i in ids if i.startswith("F-") and i not in seen]
     return out
+
+
+AUTO = TESTS / "auto"
+
+
+def auto_links():
+    """Each autotest file's links (`covers('area/TC-NNN', 'F-…', …)`): {file: [ids]}."""
+    out = {}
+    for p in sorted(AUTO.glob("*.spec.mjs")):
+        ids = [i for m in re.finditer(r"covers\(([^)]*)\)", p.read_text(encoding="utf-8")) for i in re.findall(r"'([^']+)'", m.group(1))]
+        out[p.relative_to(TESTS.parent).as_posix()] = ids
+    return out
+
+
+def case_ids(cases):
+    """`area/TC-NNN` → the case's path."""
+    return {f"{c['area']}/{c['id']}": path for path, c in cases.items()}
 
 
 def coverage(doc, cases):
@@ -304,6 +330,135 @@ kpis();draw();
 </script></body></html>"""
 
 
+def auto_results(path):
+    """Playwright's JSON results as one row a test: file, title, status (passed, failed, flaky, skipped), seconds,
+    its links and its error's first line."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = []
+
+    def walk(suite, file):
+        file = suite.get("file") or file
+        for spec in suite.get("specs", []):
+            for t in spec.get("tests", []):
+                res = t.get("results") or [{}]
+                last = res[-1]
+                status = {"expected": "passed", "unexpected": "failed", "flaky": "flaky", "skipped": "skipped"}.get(t.get("status"), t.get("status"))
+                err = ((last.get("error") or {}).get("message") or "").strip().splitlines()
+                rows.append({"file": spec.get("file") or file, "title": spec["title"], "status": status,
+                             "seconds": round(sum(r.get("duration", 0) for r in res) / 1000, 1),
+                             "links": [a["description"] for a in t.get("annotations", []) if a.get("type") in ("case", "feature")],
+                             "error": re.sub(r"\x1b\[[0-9;]*m", "", err[0]) if err else ""})
+        for s in suite.get("suites", []):
+            walk(s, file)
+
+    for s in data.get("suites", []):
+        walk(s, None)
+    return rows, data.get("stats", {})
+
+
+def auto_report(path):
+    """The run's report (tests/reports/auto-<time>.md) and its state for the next one (tests/reports/auto-last.json)."""
+    import subprocess
+    from datetime import datetime
+    doc, cases, _ = load()
+    rows, stats = auto_results(path)
+    by_id = case_ids(cases)
+    names = {f["id"]: f for f in doc["features"]}
+    cov = coverage(doc, cases)
+    git = lambda *a: subprocess.run(["git", *a], cwd=TESTS.parent, capture_output=True, text=True).stdout.strip()
+    commit = git("rev-parse", "--short", "HEAD")
+    # A feature is auto-tested when a test names it, or names a case that checks it.
+    auto = {}
+    for r in rows:
+        feats = {i for i in r["links"] if i.startswith("F-")}
+        feats |= {f for i in r["links"] if i in by_id for f in cases[by_id[i]]["requirements"]}
+        for f in feats:
+            auto.setdefault(f, []).append(r)
+    state_file = TESTS / "reports" / "auto-last.json"
+    prev = json.loads(state_file.read_text()) if state_file.exists() else None
+    key = lambda r: f"{r['file']} › {r['title']}"
+    now = {key(r): r["status"] for r in rows}
+    ok = lambda f: f in auto and all(r["status"] in ("passed", "flaky") for r in auto[f])
+    count = {s: sum(1 for r in rows if r["status"] == s) for s in ("passed", "failed", "flaky", "skipped")}
+    L = [f"# Autotest run {datetime.now():%Y-%m-%d %H:%M}", "",
+         f"Commit `{commit}`{' (uncommitted changes)' if git('status', '--porcelain', '--', 'crates', 'plugin', 'tests') else ''} · "
+         f"{len(rows)} tests: {count['passed']} passed, {count['failed']} failed, {count['flaky']} flaky, {count['skipped']} skipped · "
+         f"{round(stats.get('duration', 0) / 1000)} s", ""]
+    failed = [r for r in rows if r["status"] == "failed"]
+    if failed:
+        L += ["## Failed — re-run these cases by hand to tell a bug from a broken test", ""]
+        for r in failed:
+            cs = [by_id[i] for i in r["links"] if i in by_id]
+            L += [f"- **{r['title']}** (`{r['file']}`): {r['error'] or 'failed'}", f"  - cases: {', '.join(f'`{c}`' for c in cs) or '(none linked)'}"]
+        L.append("")
+    flaky = [r for r in rows if r["status"] == "flaky"]
+    if flaky:
+        L += ["## Flaky (passed on a retry) — a bug in the test or the app, never a footnote", ""] + [f"- {r['title']} (`{r['file']}`)" for r in flaky] + [""]
+    L += ["## Coverage by area", "",
+          "Features: tested by an autotest (passing / failing), checked only by agent cases, only by a person, or by nothing.", "",
+          "| Area | Features | Autotests ✓ | Autotests ✗ | Agent cases only | Person only | Nothing |", "|---|---|---|---|---|---|---|"]
+    tot = [0] * 6
+    for a in doc["areas"]:
+        fs = [f for f in doc["features"] if f["area"] == a["prefix"]]
+        n_ok = sum(1 for f in fs if ok(f["id"]))
+        n_bad = sum(1 for f in fs if f["id"] in auto and not ok(f["id"]))
+        rest = [f for f in fs if f["id"] not in auto]
+        n_agent = sum(1 for f in rest if cov[f["id"]]["agent"])
+        n_person = sum(1 for f in rest if not cov[f["id"]]["agent"] and cov[f["id"]]["person"])
+        n_none = len(rest) - n_agent - n_person
+        vals = [len(fs), n_ok, n_bad, n_agent, n_person, n_none]
+        tot = [x + y for x, y in zip(tot, vals)]
+        L.append(f"| {a['name']} | " + " | ".join(str(v) for v in vals) + " |")
+    L.append("| **All** | " + " | ".join(f"**{v}**" for v in tot) + " |")
+    L.append("")
+    L.append(f"Autotests reach {tot[1] + tot[2]} of {tot[0]} features ({round(100 * (tot[1] + tot[2]) / max(tot[0], 1))}%).")
+    L.append("")
+    L += ["## What the autotests checked", "", "| Test | Status | s | Cases | Features |", "|---|---|---|---|---|"]
+    for r in rows:
+        cs = [i for i in r["links"] if not i.startswith("F-")]
+        fs = sorted({i for i in r["links"] if i.startswith("F-")} | {f for i in cs if i in by_id for f in cases[by_id[i]]["requirements"]})
+        L.append(f"| {r['title']} | {r['status']} | {r['seconds']} | {', '.join(cs)} | {', '.join(fs)} |")
+    L.append("")
+    top = [f for f in doc["features"] if f["id"] not in auto and f["priority"] in ("critical", "high")]
+    L += [f"## Left: critical and high features no autotest reaches ({len(top)})", ""]
+    for a in doc["areas"]:
+        fs = [f for f in top if f["area"] == a["prefix"]]
+        if fs:
+            L.append(f"- **{a['name']}**: " + "; ".join(f"{f['id']} {f['feature'][:70]}{'…' if len(f['feature']) > 70 else ''}" for f in fs))
+    L.append("")
+    L += ["## Since the last run", ""]
+    if not prev:
+        L += ["The first run: nothing to compare.", ""]
+    else:
+        before = prev["tests"]
+        added = sorted(set(now) - set(before))
+        gone = sorted(set(before) - set(now))
+        changed = sorted(k for k in set(now) & set(before) if now[k] != before[k])
+        got = sorted(f for f in auto if f not in prev["features"])
+        lost = sorted(f for f in prev["features"] if f not in auto)
+        L.append(f"Last run: {prev['at']} at `{prev['commit']}`.")
+        L.append("")
+        L += [f"- Tests added: {len(added)}"] + [f"  - {k}" for k in added]
+        L += [f"- Tests removed: {len(gone)}"] + [f"  - {k}" for k in gone]
+        L += [f"- Status changed: {len(changed)}"] + [f"  - {k}: {before[k]} → {now[k]}" for k in changed]
+        L += [f"- Features newly reached: {len(got)}" + (f" ({', '.join(got)})" if got else ""),
+              f"- Features no longer reached: {len(lost)}" + (f" ({', '.join(lost)})" if lost else "")]
+        # The cases and the map's features changed in git since that run: their tests may need updating too.
+        touched = [p for p in git("diff", "--name-only", prev["commit"], "--", "tests/cases", "tests/feature-map").splitlines() if p]
+        linked = sorted({p for p in touched if p in cases and any(p == by_id.get(i) for r in rows for i in r["links"])})
+        L += [f"- Cases and map files changed since then: {len(touched)}; of them cases an autotest automates (check the test still matches): {len(linked)}"]
+        L += [f"  - `{p}`" for p in linked]
+        L.append("")
+    out = TESTS / "reports" / f"auto-{datetime.now():%Y-%m-%d_%H%M%S}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(L) + "\n", encoding="utf-8")
+    state_file.write_text(json.dumps({"at": f"{datetime.now():%Y-%m-%d %H:%M}", "commit": commit, "tests": now, "features": sorted(auto)}, indent=1))
+    print(f"{len(rows)} tests: {count['passed']} passed, {count['failed']} failed, {count['flaky']} flaky, {count['skipped']} skipped; "
+          f"autotests reach {tot[1] + tot[2]} of {tot[0]} features")
+    print(f"report: {out.relative_to(TESTS.parent)}")
+    return 1 if failed else 0
+
+
 APP_CODE = ("crates/", "plugin/")
 
 
@@ -385,6 +540,8 @@ def main():
         sys.exit(1 if ps else 0)
     if cmd == "changes":
         sys.exit(changes(sys.argv[2] if len(sys.argv) > 2 else "main"))
+    if cmd == "auto-report":
+        sys.exit(auto_report(sys.argv[2] if len(sys.argv) > 2 else AUTO / "test-results" / "results.json"))
     if cmd == "render":
         out = Path(sys.argv[2]) if len(sys.argv) > 2 else TESTS / "reports" / "feature-map.html"
         covered, n = render(doc, cases, scenarios, out)
