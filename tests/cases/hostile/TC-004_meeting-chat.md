@@ -8,6 +8,7 @@ requirements: [F-CALLS-14]
 tags: [hostile, chat, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-004: Meeting chat messages, senders and file names show as text

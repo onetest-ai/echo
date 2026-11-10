@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, run, signin]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-026: A run refused for sign-in says to sign in when the profile is signed out, and ready to try again when it is signed in

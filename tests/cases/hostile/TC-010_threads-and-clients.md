@@ -8,6 +8,7 @@ requirements: [F-THR-01, F-THR-08, F-THR-10, F-THR-14, F-THR-17, F-CLIENT-02, F-
 tags: [hostile, threads, clients, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-010: Thread and client names, briefs, About, notes, rules, sources and aliases show as text

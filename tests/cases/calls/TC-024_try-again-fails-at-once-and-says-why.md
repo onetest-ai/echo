@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, run, fake-claude]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-024: Try again ends in a failure that names the fake Claude Code, with minutes or without

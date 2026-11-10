@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [settings, health, privacy]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-028: General and Health say what is this computer's; Claude Code is the run's, with no home path on the page

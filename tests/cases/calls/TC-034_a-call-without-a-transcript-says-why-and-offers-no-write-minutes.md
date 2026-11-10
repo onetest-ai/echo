@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, status]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-034: A call whose transcription failed, or that has audio only, says why there is no transcript (and, after a failure, how to transcribe it again), not Write minutes
@@ -33,7 +34,7 @@ tags: [calls, minutes, status]
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Umbrella intro call, then the tab "Minutes" | The heading "No transcript, so no minutes"; "Transcribing this call failed: the speech model could not be loaded: out of memory"; "Transcribe it again in a terminal:" with `echoctl transcribe <its folder>` and "Copy"; no "Write minutes" and no "The transcript is ready." |
 | 2 | Click the tab "Transcript" | The text "No transcript for this call."; no turns, no Find box |
 | 3 | Click the row Recording | The Transcript tab (it stays) says "No transcript for this call." |
-| 4 | Click the tab "Minutes" | The heading "No transcript, so no minutes"; "This recording isn't transcribed yet."; no command and no "Write minutes" |
+| 4 | Click the tab "Minutes" | The heading "No transcript, so no minutes"; "This recording isn't transcribed yet. Echo transcribes it on this computer; the minutes can be written after that."; no command and no "Write minutes" |
 
 ## Expected Final State
 Recording's Minutes tab is open, saying it isn't transcribed yet.

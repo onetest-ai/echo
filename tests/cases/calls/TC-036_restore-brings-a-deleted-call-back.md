@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, delete, cli]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-036: echoctl restore brings the trashed call back into the list

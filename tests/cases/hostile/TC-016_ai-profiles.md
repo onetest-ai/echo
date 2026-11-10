@@ -8,6 +8,7 @@ requirements: [F-AI-01, F-AI-02]
 tags: [hostile, ai, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-016: An AI profile named with markup shows as text in Settings, the account chip and the model pickers

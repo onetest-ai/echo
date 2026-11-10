@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [prep, error]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-011: A prep whose threads run on different AI profiles says so and shows no In short

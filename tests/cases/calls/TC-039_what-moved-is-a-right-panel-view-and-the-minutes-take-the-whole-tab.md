@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, what-moved, minutes, panel]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-039: What moved is a right panel view with the count of changes, and the minutes take the whole Minutes tab

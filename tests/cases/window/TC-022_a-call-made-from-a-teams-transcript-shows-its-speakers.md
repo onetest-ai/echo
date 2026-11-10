@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [transcript, teams-import]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-022: A call made from a Teams transcript says so and shows its turns with the transcript's speaker names and "Me" for the user

@@ -8,6 +8,7 @@ requirements: [F-CAL-04, F-CAL-07, F-PREP-01, F-PREP-02, F-PREP-04, F-TODAY-02]
 tags: [hostile, calendar, prep, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-002: Meeting subjects, organizers, people and the prep show as text in the calendar, Coming up today and Today

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, chat]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-017: The Chat tab lists each message with sender, time and attached file names

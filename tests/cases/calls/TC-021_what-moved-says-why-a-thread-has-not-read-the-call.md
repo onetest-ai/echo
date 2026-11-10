@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, what-moved]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-021: What moved says why a thread has not read the call yet and offers Sync now

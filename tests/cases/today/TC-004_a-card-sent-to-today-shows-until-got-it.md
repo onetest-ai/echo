@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, cards, deliver]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-004: A card sent to Today (a routine's message, echoctl deliver send today) shows until Got it, and comes back when its source sends again

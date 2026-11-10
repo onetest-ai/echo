@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [notes, files, data-loss]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-019: An unreadable my-notes.md says so with Show folder; one changed outside Echo while a note is typed is kept beside as my-notes.<HHMMSS>.md and the panel says where

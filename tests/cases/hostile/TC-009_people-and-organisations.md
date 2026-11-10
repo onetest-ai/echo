@@ -8,6 +8,7 @@ requirements: [F-PPL-01, F-PPL-04, F-PPL-05, F-CLIENT-08]
 tags: [hostile, people, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-009: People and organisations show as text on the map, org chart, list and person panel
@@ -57,7 +58,7 @@ platform: any
 | 9 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 10 | Click `button[aria-pressed][data-pp="view"][data-v="map"]`, then `button[aria-pressed][data-pp="view"][data-v="org"]` | Both views draw without an error text (they draw the thread's members; HOSTILE-41 is "Seen in calls", not a member, so it isn't in them — its name is checked in the list, step 3) |
 | 11 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
-| 12 | Navigate to `{{base_url}}/#project/thread-hostile-21-img-src-x-onerror-alert-1-script-alert-1-s/people`, `button[aria-pressed][data-pp="view"][data-v="list"]` | The thread's list has a person "Person HOSTILE-29 <img src=x onerror=alert(1)>…" with the role text starting HOSTILE-30 (right-to-left) |
+| 12 | Navigate to `{{base_url}}/#project/thread-hostile-21-img-src-x-onerror-alert-1-script-alert-1-s/people`, `button[aria-pressed][data-pp="view"][data-v="list"]` | The thread's list has a person "Person HOSTILE-29 <img src=x onerror=alert>…" (Echo shows people's names without their "(…)" and "[…]" parts, as it drops "(Partner)" or "[EXT]": so the markup reads `alert>` here) with the role text starting HOSTILE-30 (right-to-left) |
 | 13 | Run `browser_evaluate` with `() => { const r = [...document.querySelectorAll('main *')].find((e) => e.children.length === 0 && e.textContent.includes('HOSTILE-30')); return { found: !!r, dir: r ? getComputedStyle(r.closest('main')).direction : null } }` | `found` is `true` and `dir` is `ltr` |
 | 14 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 15 | Navigate to `{{base_url}}/#client/umbrella/people` | The client's People tab lists people of the threads, including names that come from calls (HOSTILE-62, 66, 70, 85, 91, 94, 97, 108, 110, 111) and "HOSTILE-109 WWWW…" and "HOSTILE-88 WWWW…"; each as text |

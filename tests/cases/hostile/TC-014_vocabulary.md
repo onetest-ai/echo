@@ -8,6 +8,7 @@ requirements: [F-VOC-01, F-VOC-02, F-VOC-03]
 tags: [hostile, vocabulary, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-014: Vocabulary terms and the meetings and people of learned terms show as text

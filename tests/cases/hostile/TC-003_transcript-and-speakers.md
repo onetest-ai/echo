@@ -8,6 +8,7 @@ requirements: [F-TR-01, F-TR-02, F-TR-03]
 tags: [hostile, transcript, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-003: Transcript turns and speaker names show as text and keep their rows

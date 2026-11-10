@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-029: Not yet › 15 minutes more moves the time by 15 minutes and says you said not yet

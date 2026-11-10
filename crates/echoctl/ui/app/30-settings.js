@@ -62,13 +62,13 @@ function claudeRows(cc) {
   const get = actBtn('open_settings_url', 'Get Claude Code', 'https://claude.com/claude-code')
   if (!cc.path) return [setRow(`${bad} Claude Code`, 'Not installed. Echo needs it to write minutes and for Claude in the window. Install it, sign in once in a terminal (<code>claude</code>), then Check again.', get)]
   if (cc.error) return [setRow(`${bad} Claude Code`, `Found at <code>${esc(cc.path)}</code>, but it doesn't start: ${esc(cc.error)}. Reinstall it, then Check again.`, get)]
-  const rows = [setRow(`${ok} Claude Code`, `${esc(cc.version)} · <code>${esc(cc.path)}</code>`, '')]
+  const rows = [setRow(`${ok} Claude Code`, `${esc(cc.version)} · <code>${esc(cc.path)}</code>`, '', '', 'Claude Code')]
   const t = cc.terminal || {}
   if (t.ok === true) rows.push(setRow(`${ok} In a terminal`, `<code>claude</code> runs there${t.found && t.found !== cc.path ? ` (<code>${esc(t.found)}</code>)` : ''}.`, ''))
   else if (t.ok === false) rows.push(setRow(`${warn} In a terminal`, `A terminal can't find <code>claude</code>: <code>${esc(t.dir || '')}</code> isn't on your PATH. Echo still runs it; you can't type <code>claude</code> yet.${t.rc === null && !/Windows/.test(navigator.userAgent) ? ` Add that folder to your shell's PATH yourself (${esc(String(t.shell || '').split('/').pop())}).` : ''}`, t.rc === null && !/Windows/.test(navigator.userAgent) ? '' : actBtn('claude_path', 'Add to PATH')))
   else rows.push(setRow(`<span class="set-sub">?</span> In a terminal`, `Couldn't check: ${esc(t.why || 'no answer')}.`, ''))
   const where = (cc.installs || []).map((i) => i.scope === 'user' ? 'every session' : esc(String(i.project || '').split(/[\\/]/).pop() || i.scope)).join(', ')
-  rows.push(cc.plugin ? setRow(`${ok} Echo plugin`, `Claude Code lists it (${where}).`, '')
+  rows.push(cc.plugin ? setRow(`${ok} Echo plugin`, `Claude Code lists it (${where}).`, '', '', 'Echo plugin')
     : setRow(`${bad} Echo plugin`, `Claude Code doesn't list Echo's plugin where Echo's sessions run${where ? ` (only: ${where})` : ''}: no /echo:process-call, record or doctor there.`, actBtn('connect_claude', 'Connect')))
   return rows
 }

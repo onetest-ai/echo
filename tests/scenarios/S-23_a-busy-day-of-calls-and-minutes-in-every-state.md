@@ -33,6 +33,7 @@ cases:
   - tests/cases/calls/TC-024_try-again-fails-at-once-and-says-why.md
   - tests/cases/calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md
   - tests/cases/calls/TC-036_restore-brings-a-deleted-call-back.md
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # S-23: A busy day of calls and minutes in every state

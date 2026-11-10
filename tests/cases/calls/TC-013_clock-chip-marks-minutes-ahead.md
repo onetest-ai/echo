@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, list, minutes]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-013: Only a call with automatic minutes ahead carries the clock chip in the list

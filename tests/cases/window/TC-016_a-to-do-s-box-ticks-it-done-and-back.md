@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [notes]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-016: A to-do's box in My notes ticks it done and back, and my-notes.md follows

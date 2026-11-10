@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [notes, data-loss]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-018: A note typed in My notes but not added is added to its own call when another call opens or Write minutes is pressed

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto, profile]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-032: A transcribed call Echo leaves alone offers Write minutes, the model, the profile picker and the command

@@ -224,7 +224,7 @@ function callChanges(c) {
     const p = projById(g.project) || { id: g.project, name: g.project }
     const rows = movedRows(g)
       .sort((a, b) => (b.node.mine && !TASK_DONE.has(b.node.state) ? 1 : 0) - (a.node.mine && !TASK_DONE.has(a.node.state) ? 1 : 0))
-    const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
+    const head = `<div class="cc-th" role="group" aria-label="${esc(p.name)}">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
     if (!g.read) {
       // Not read yet: being read now, due at a time (15 min after the call, then the next look), or
       // nothing to read (no transcript).
@@ -243,7 +243,7 @@ function callChanges(c) {
         : x.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>'
         : x.op !== 'create' && x.verdict == null && x.applied === false ? '<span class="wk-v">to check</span>' : ''
       const ts = x.ts ? hms(x.ts) : null
-      return `<div class="cc-row"><span class="cc-what ${esc(cls)}">${esc(what)}</span>
+      return `<div class="cc-row" role="group" aria-label="${esc(`${what} ${x.node.id} ${x.node.title}`)}"><span class="cc-what ${esc(cls)}">${esc(what)}</span>
         <div class="cc-main"><button class="cc-node" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.node.id)}"><span class="wk-id">${esc(x.node.id)}</span>${x.node.mine && !TASK_DONE.has(x.node.state) ? ` ${modeIcon(x.node.mode)}` : ''} ${esc(x.node.title)}</button>
         ${x.op === 'link' ? `<div class="cc-dep">for <button class="cc-node inline" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.depends_on)}"><span class="wk-id">${esc(x.depends_on)}</span> ${esc(x.depends_on_title || '')}</button></div>`
           : x.op === 'waiting' && x.what ? `<div class="cc-dep">on ${esc(x.who || 'someone')} — ${esc(x.what)}</div>` : ''}

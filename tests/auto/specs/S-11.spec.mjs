@@ -54,7 +54,9 @@ const sectionLine = (s) => fill(data.text.settings.templates.sectionLine, { s })
 /** The calls with the Vocabulary panel open from the book beside the list. */
 async function vocabulary(page) {
   const voc = new VocabularyPage(page, data)
-  await voc.open()
+  // A fresh load at Calls (it opens the newest call): a hash change after the load on Today opens none.
+  await voc.load(data.text.shell.routes.calls)
+  await voc.book.click()
   await expect(voc.tab).toHaveAttribute('aria-selected', 'true')
   return voc
 }
@@ -559,7 +561,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
   test("29 · The book beside Calls opens the empty Vocabulary panel; it closes", covers('vocabulary/TC-001', 'F-VOC-01'), async ({ page }) => {
     const v = data.text.vocabulary
     const voc = await vocabulary(page)
-    expect(voc.hash()).toMatch(new RegExp(fill(data.text.calls.openOn, { tab: data.text.calls.tabs.minutes })))
+    await expect.poll(() => voc.hash()).toMatch(new RegExp(fill(data.text.calls.openOn, { tab: data.text.calls.tabs.minutes })))
     const p = voc.panel
     await expect(p.getByText(v.line, { exact: true })).toBeVisible()
     await expect(p.getByRole('heading', { name: v.every, exact: true })).toBeVisible()

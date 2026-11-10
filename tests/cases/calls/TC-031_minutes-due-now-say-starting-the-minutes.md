@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-031: A call whose automatic minutes are due now says Echo is starting them and offers no button

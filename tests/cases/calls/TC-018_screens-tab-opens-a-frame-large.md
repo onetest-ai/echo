@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, screens]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-018: The Screens tab shows each frame with its time, and a click opens it large

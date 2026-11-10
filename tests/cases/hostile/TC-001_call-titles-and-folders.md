@@ -8,6 +8,7 @@ requirements: [F-CALLS-01, F-CALLS-03, F-CALLS-05, F-THR-11, F-CLIENT-03, F-WS-0
 tags: [hostile, calls, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-001: Call titles and folder names show as text in the list, header, palette and thread and client call lists

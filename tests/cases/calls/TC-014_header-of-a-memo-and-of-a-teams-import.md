@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, header, kind]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-014: A memo's header says Memo with no kind chip; an imported call's says from Teams transcript

@@ -8,6 +8,7 @@ requirements: [F-PLUG-01, F-PLUG-02, F-PLUG-05, F-PLUG-07]
 tags: [hostile, plugins, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-012: Plugin names, summaries, categories and settings show as text in Settings → Plugins

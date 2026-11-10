@@ -8,6 +8,7 @@ requirements: [F-NOTES-01, F-NOTES-05, F-NOTES-08]
 tags: [hostile, notes, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-007: My notes, the raw my-notes.md and the notes under the minutes lines show as text

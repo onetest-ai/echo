@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, run]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-025: A run that wrote nothing says it failed or was skipped, with the reason and the right button
