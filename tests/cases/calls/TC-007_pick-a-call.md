@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, empty]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-007: Calls with no call chosen says Pick a call

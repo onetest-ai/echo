@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, menu]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-001: Call actions lists the minutes items for a call that has minutes

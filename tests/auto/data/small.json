@@ -552,5 +552,102 @@
     "close": {
       "note": "Sent the checklist by email"
     }
+  },
+  "housekeeping": {
+    "groups": [
+      "Today",
+      "Yesterday"
+    ],
+    "icons": [
+      [
+        "Acme weekly sync",
+        "Minutes"
+      ],
+      [
+        "Initech planning",
+        "Transcript"
+      ],
+      [
+        "Globex pilot kickoff",
+        "Minutes"
+      ]
+    ],
+    "kickoff": {
+      "title": "Globex pilot kickoff",
+      "thread": "Globex pilot",
+      "sections": [
+        [
+          "Summary",
+          "Globex wants a pilot plan in two weeks",
+          "00:05"
+        ],
+        [
+          "Action items",
+          "Me — draft the Globex pilot plan",
+          "00:13"
+        ]
+      ],
+      "absent": [
+        "Decisions",
+        "Open questions"
+      ]
+    },
+    "acme": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "thread": {
+        "id": "acme-rollout",
+        "name": "Acme rollout"
+      },
+      "turns": 5,
+      "kind": "Client",
+      "kindSet": "Partner",
+      "menu": [
+        "Show folder",
+        "Open minutes in browser",
+        "Show minutes in Finder",
+        "Write minutes again",
+        "Default",
+        "Discussion",
+        "Edit templates…",
+        "Ask Claude about this call",
+        "Delete…"
+      ],
+      "firstLine": "# Acme weekly sync"
+    },
+    "initech": {
+      "title": "Initech planning",
+      "folder": "initech-planning",
+      "turns": 2,
+      "kind": "1:1",
+      "menu": [
+        "Show folder",
+        "Ask Claude about this call",
+        "Delete…"
+      ]
+    },
+    "threads": [
+      "Acme rollout",
+      "Globex pilot"
+    ],
+    "pin": {
+      "thread": "globex-pilot",
+      "name": "Globex pilot",
+      "why": "pinned"
+    },
+    "kinds": [
+      "Client",
+      "Partner",
+      "1:1",
+      "Internal",
+      "Industry & Analyst",
+      "Other"
+    ],
+    "missing": "2026-01-01_000000-no-such-call",
+    "failingRun": {
+      "wrote": "# Half-written minutes",
+      "says": "test fake: stopped after writing",
+      "script": "#!/bin/sh\n# A minutes run: writes over notes.md, then fails. Anything else: the data's fake.\nif [ -n \"$ECHOCTL_RUN_CALL\" ] && [ -z \"$ECHOCTL_RUN_MODE\" ]; then printf '# Half-written minutes\\n' > \"$ECHOCTL_RUN_CALL/notes.md\"; echo \"test fake: stopped after writing\" >&2; exit 1; fi\nexec \"$(dirname \"$0\")/claude.fake\" \"$@\"\n"
+    }
   }
 }

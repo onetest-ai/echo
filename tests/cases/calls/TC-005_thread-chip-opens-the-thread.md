@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, threads]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-005: A thread chip opens its thread and says why the call is in it

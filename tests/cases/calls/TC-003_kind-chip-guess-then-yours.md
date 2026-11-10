@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, type]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-003: The kind-of-meeting chip shows a guess dashed, and a choice becomes the user's

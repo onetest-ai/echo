@@ -16,6 +16,7 @@ cases:
   - tests/cases/calls/TC-006_tab-stays-from-call-to-call.md
   - tests/cases/calls/TC-008_call-that-cannot-be-opened.md
   - tests/cases/claude/TC-018_a-run-again-that-fails-keeps-the-previous-minutes.md
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # S-09: A call's housekeeping: list, minutes, kind, thread, tabs and the actions menu

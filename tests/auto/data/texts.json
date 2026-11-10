@@ -175,7 +175,36 @@
   },
   "calls": {
     "minutesTab": "Minutes",
-    "transcriptTab": "Transcript"
+    "transcriptTab": "Transcript",
+    "pick": "Pick a call",
+    "pickLine": "Its minutes, your notes, the transcript, chat and shared screens open here.",
+    "noMinutes": "No minutes yet",
+    "writeAgainWith": "Write again with",
+    "whatMoved": "What moved",
+    "readsSoon": "reads this call within a few minutes",
+    "syncNow": "Sync now",
+    "myNotes": "My notes",
+    "addThread": "+ Thread",
+    "newThreadItem": "New thread from this call…",
+    "tick": "✓ {name}",
+    "guess": "Guessed from who was invited — the minutes settle it",
+    "yours": "You set this",
+    "kindChip": "{kind} ▾",
+    "pinnedBy": "added by hand",
+    "cantOpen": "This call can't be opened",
+    "error": "Error: 404",
+    "watchMs": 8000,
+    "most404": 2,
+    "run": {
+      "kept": "The previous minutes are kept.",
+      "failed": "failed",
+      "back": "The previous minutes are back; what this run wrote is in",
+      "trash": ".echo/trash",
+      "beforeRun": "before-run",
+      "notes": "notes.md",
+      "runFile": "notes-run.json",
+      "log": "claude.log"
+    }
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"

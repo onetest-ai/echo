@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, error]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-008: A call that cannot be read says This call can't be opened

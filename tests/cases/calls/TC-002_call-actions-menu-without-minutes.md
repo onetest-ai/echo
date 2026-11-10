@@ -8,6 +8,7 @@ module: calls
 run: agent
 platform: any
 tags: [calls, menu]
+auto: [tests/auto/specs/S-09.spec.mjs]
 ---
 
 # TC-002: Call actions leaves out the minutes items for a call without minutes
