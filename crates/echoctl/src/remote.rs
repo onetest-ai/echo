@@ -558,7 +558,9 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 /// The app is quitting: let go of the server's model, so no whisper context is alive at exit (ggml's Metal device
 /// asserts then, #141). An utterance being decoded holds it and is waited for, at most `LET_GO_WITHIN`.
 pub fn shutdown() {
-    let_go(&LOADED, &QUITTING, LET_GO_WITHIN);
+    if !let_go(&LOADED, &QUITTING, LET_GO_WITHIN) {
+        eprintln!("transcription server: quitting while an utterance is still being decoded");
+    }
 }
 
 /// Mark `quitting`, then empty `slot` once its holder lets go (within `within`); false if it never did.
@@ -800,6 +802,7 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     /// Each request's (language, hint).
     type Requests = Vec<(String, Option<String>)>;
@@ -901,7 +904,6 @@ mod tests {
             self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
-    use std::sync::Arc;
 
     #[test]
     fn quitting_lets_go_of_an_idle_model_at_once() {
@@ -916,16 +918,19 @@ mod tests {
     fn quitting_waits_for_the_utterance_being_decoded_then_lets_go() {
         let dropped = Arc::new(AtomicUsize::new(0));
         let slot = Arc::new(Mutex::new(Some(Model(dropped.clone()))));
-        let (held, s) = (std::sync::mpsc::channel(), slot.clone());
+        let decoded = Arc::new(AtomicBool::new(false));
+        let (held, s, d) = (std::sync::mpsc::channel(), slot.clone(), decoded.clone());
         let decode = std::thread::spawn(move || {
             let _g = s.lock().unwrap();
             held.0.send(()).unwrap();
             std::thread::sleep(Duration::from_millis(300));
+            d.store(true, Ordering::SeqCst); // still holding the model
         });
         held.1.recv().unwrap();
         assert!(let_go(&slot, &AtomicBool::new(false), Duration::from_secs(5)));
-        assert!(decode.is_finished(), "let go only after the decode");
+        assert!(decoded.load(Ordering::SeqCst), "let go only after the decode");
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        decode.join().unwrap();
     }
 
     #[test]
@@ -944,5 +949,19 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(2));
         release.send(()).unwrap();
         decode.join().unwrap();
+    }
+
+    #[test]
+    fn once_quitting_a_request_loads_no_model() {
+        // The only test that touches the server's statics; a fresh config, should it ever reach the model.
+        let (_env, _) = crate::paths::testenv::folders("remote-quitting");
+        let head = br#"{"languages":["en"]}"#;
+        let mut body = (head.len() as u32).to_le_bytes().to_vec();
+        body.extend(head);
+        body.extend(0i16.to_le_bytes());
+        QUITTING.store(true, Ordering::SeqCst);
+        let e = decode_request(&body).err().expect("refused");
+        assert_eq!(e.to_string(), "the server is stopping");
+        assert!(LOADED.lock().unwrap().is_none());
     }
 }

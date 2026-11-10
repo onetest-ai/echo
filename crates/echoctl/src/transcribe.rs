@@ -1257,10 +1257,11 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
 }
 
 /// The app is quitting: no whisper model is left loaded at exit (ggml's Metal device asserts then, #141) — neither a
-/// live worker's (`live::shutdown`) nor the transcription server's (`remote::shutdown`).
+/// live worker's (`live::shutdown`) nor the transcription server's (`remote::shutdown`), each waited for side by side.
 pub fn shutdown() {
+    let server = std::thread::spawn(crate::remote::shutdown);
     crate::live::shutdown();
-    crate::remote::shutdown();
+    let _ = server.join();
 }
 
 #[cfg(test)]
