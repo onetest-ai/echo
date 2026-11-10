@@ -16,6 +16,7 @@ cases:
   - tests/cases/today/TC-005_actions-on-a-busy-today-act-on-its-items.md
   - tests/cases/today/TC-012_a-failed-calendar-sync-today-says-the-calendar-couldnt-be-read.md
   - tests/cases/settings/TC-028_general-and-health-say-what-is-this-computers.md
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # S-29: Notes, transcripts, settings and Today off the happy path

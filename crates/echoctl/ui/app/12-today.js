@@ -11,7 +11,7 @@ function todayView() {
   const hr = now.getHours(), first = (d.me || '').trim().split(/\s+/)[0]
   const hello = `${hr < 5 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${first}` : ''}`
   const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
-  const cards = (d.cards || []).map((c) => `<section class="td-card"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
+  const cards = (d.cards || []).map((c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
   // Your day: a line a meeting or call, the line "now" between past and to come.
   let nowDrawn = false
   const rows = (d.day || []).map((x) => {

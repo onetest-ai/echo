@@ -2,7 +2,7 @@
 // with the words as its quote. The popover lives outside the regions render() replaces.
 function selPop() {
   let el = $('#sel-pop')
-  if (!el) { el = document.createElement('div'); el.id = 'sel-pop'; document.body.appendChild(el) }
+  if (!el) { el = document.createElement('div'); el.id = 'sel-pop'; el.setAttribute('role', 'group'); el.setAttribute('aria-label', 'A note on what was said'); document.body.appendChild(el) }
   return el
 }
 function hideSelPop() { S.selNote = null; const el = $('#sel-pop'); if (el) el.remove() }

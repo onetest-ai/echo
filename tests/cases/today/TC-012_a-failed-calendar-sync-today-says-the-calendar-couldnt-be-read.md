@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, calendar]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-012: After last night's empty agenda, Your day says the calendar couldn't be read only once today's sync has failed

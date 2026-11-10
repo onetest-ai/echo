@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [notes, edit]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-017: A note edited in place changes its text and kind on Enter, Esc cancels, emptied it stays as it was, × deletes it

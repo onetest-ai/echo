@@ -197,4 +197,19 @@ export class SettingsPage extends AppPage {
     await this.row(name).click()
     await this.editor(name).waitFor()
   }
+
+  /** A group of the page, by its name ("Appearance"). */
+  group(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  /** The page's whole text, as it reads. */
+  async pageText() {
+    return this.main.innerText()
+  }
+
+  /** The page's switches (none while config.json can't be read). */
+  get switches() {
+    return this.main.getByRole('switch')
+  }
 }

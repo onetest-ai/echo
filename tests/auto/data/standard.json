@@ -4979,5 +4979,156 @@
       "at": "_170000",
       "daysBefore": 3
     }
+  },
+  "s29": {
+    "_about": "S-29: notes, transcripts, settings and Today off the happy path",
+    "steering": {
+      "title": "Globex steering",
+      "slug": "globex-steering",
+      "lang": "en",
+      "turns": [
+        [
+          "0:05 Me",
+          "Welcome to the steering meeting."
+        ],
+        [
+          "0:17 Speaker 1",
+          "We approve the pilot scope."
+        ]
+      ],
+      "segments": [
+        {
+          "speaker": "me"
+        },
+        {
+          "speaker": "remote",
+          "name": "Speaker 1"
+        }
+      ]
+    },
+    "noTranscript": [
+      "Recording",
+      "Umbrella intro call"
+    ],
+    "quick": "Quick check-in",
+    "initech": {
+      "title": "Initech planning",
+      "slug": "initech-planning",
+      "first": "0:05 Me"
+    },
+    "acme": {
+      "title": "Acme weekly sync",
+      "slug": "acme-weekly-sync",
+      "rows": 10,
+      "heading": "During the call"
+    },
+    "todos": [
+      [
+        "Remind Omar about the access list",
+        "00:58",
+        false
+      ],
+      [
+        "Send the agenda",
+        "01:10",
+        true
+      ]
+    ],
+    "edit": {
+      "from": "Dana says the checklist went out on Monday",
+      "to": "Dana says the checklist went out on Tuesday",
+      "at": "00:12",
+      "row": "? 00:12 Dana says the checklist went out on Tuesday",
+      "line": "- [00:12] ? Dana says the checklist went out on Tuesday",
+      "gone": "Monday",
+      "cancel": "Pilot starts in Berlin only",
+      "cancelTyped": "Pilot starts in Munich",
+      "cancelRow": "! 00:45 Pilot starts in Berlin only",
+      "cancelLine": "- [00:45] ! Pilot starts in Berlin only",
+      "empty": "a note without a time",
+      "emptyRow": "• a note without a time",
+      "emptyLine": "- a note without a time",
+      "deleted": "Does legal need the old contract too",
+      "left": 9
+    },
+    "comment": {
+      "turn": "0:20 Remote",
+      "at": "00:20",
+      "words": "Sounds good. On our side the main concern is the SSO cutover for the Berlin office and the support hand-over.",
+      "typed": "? Who runs the cutover weekend",
+      "text": "Who runs the cutover weekend",
+      "row": "? 00:20 Who runs the cutover weekend",
+      "line": "- [00:20] ? Who runs the cutover weekend",
+      "quoteLine": "  > \"Sounds good. On our side the main concern is the SSO cutover for the Berlin office and the support hand-over.\""
+    },
+    "rightClick": {
+      "turn": "0:50 Remote",
+      "at": "00:50",
+      "typed": "Send them the answers first",
+      "row": "• 00:50 Send them the answers first",
+      "line": "- [00:50] Send them the answers first"
+    },
+    "minutesLine": {
+      "words": "The questionnaire waits for legal",
+      "at": "00:31",
+      "section": "Summary",
+      "typed": "[] Ask legal for a date",
+      "row": "☐ 00:31 Ask legal for a date “The questionnaire waits for legal”",
+      "line": "- [ ] [00:31] Ask legal for a date",
+      "quoteLine": "  > \"The questionnaire waits for legal\""
+    },
+    "typed": {
+      "first": [
+        "Umbrella discovery",
+        "umbrella-discovery",
+        "Ask Zoe for the budget range"
+      ],
+      "second": [
+        "Duff discovery",
+        "duff-discovery"
+      ],
+      "write": [
+        "Coffee chat",
+        "coffee-chat",
+        "Coffee again next month"
+      ]
+    },
+    "unreadable": {
+      "slug": "acme-weekly-sync",
+      "error": "Is a directory (os error 21)"
+    },
+    "outside": {
+      "title": "Globex standup",
+      "slug": "globex-standup",
+      "row": "• 00:20 Kim asks for the pilot dates",
+      "text": "Kim asks for the pilot dates",
+      "line": "- [00:20] Kim asks for the pilot dates",
+      "typed": "Ask Kim who signs the pilot",
+      "typedLine": "- Ask Kim who signs the pilot",
+      "other": "- Rewritten in another editor\n"
+    },
+    "sections": [
+      "Recording",
+      "AI & minutes",
+      "About me",
+      "Plugins"
+    ],
+    "card": {
+      "title": "Morning brief",
+      "about": "Routine · Weekdays at 08:30",
+      "ai": "sonnet",
+      "first": "## Before the Acme demo\n\n1. **Send the deck** to Dana\n2. Check the SSO checklist\n",
+      "heading": "Before the Acme demo",
+      "items": [
+        "Send the deck to Dana",
+        "Check the SSO checklist"
+      ],
+      "bold": "Send the deck",
+      "second": "## Before the Acme demo\n\n- The deck went out\n",
+      "secondItem": "The deck went out"
+    },
+    "claude": {
+      "version": "2.0.0 (Claude Code, test fake)"
+    }
   }
 }

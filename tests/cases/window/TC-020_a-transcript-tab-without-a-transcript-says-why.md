@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [transcript, empty-state]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-020: A Transcript tab without a transcript says "Transcribing on this computer." while it is transcribed, else "No transcript for this call."

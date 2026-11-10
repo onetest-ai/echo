@@ -409,6 +409,8 @@ export class CallsPage extends AppPage {
   }
 
   async noteTexts() {
+    // With the pointer away: a row under it shows its ✎ and × too.
+    await this.page.mouse.move(0, 0)
     const out = []
     for (const r of await this.noteRows.all()) out.push((await r.innerText()).replace(/\s+/g, ' ').trim())
     return out
@@ -500,5 +502,80 @@ export class CallsPage extends AppPage {
 
   get liveMenuButton() {
     return this.liveRegion().getByRole('button', { name: this.data.text.callStates.liveMenu, exact: true })
+  }
+
+  // ── My notes off the happy path (S-29): a to-do's box, the note editor's buttons, the note on what was said,
+  //    the panel's notices ──
+
+  /** A to-do's box in My notes, by the to-do's words. */
+  noteBox(text) {
+    return this.noteRow(text).getByRole('checkbox')
+  }
+
+  /** A button of the note being edited ("? Question", "Save", "Cancel"). */
+  editorButton(name) {
+    const editor = this.page.getByRole('textbox', { name: this.data.text.callStates.editNote, exact: true })
+    return this.noteRows.filter({ has: editor }).getByRole('button', { name, exact: true })
+  }
+
+  /** A turn's words (what a selection or a right-click starts on); an element of the turn by its tooltip (a note's
+   *  dot). */
+  turnWords(name) {
+    return this.turn(name).getByRole('paragraph')
+  }
+
+  turnTitled(name, title) {
+    return this.turn(name).getByTitle(title, { exact: true })
+  }
+
+  /** The note on what was said (after a selection or a right-click): its button, a text, its box, a menu item. */
+  get pop() {
+    return this.page.getByRole('group', { name: this.data.text.offPath.pop, exact: true })
+  }
+
+  popButton(name) {
+    return this.pop.getByRole('button', { name, exact: true })
+  }
+
+  popSays(text) {
+    return this.pop.getByText(text, { exact: true })
+  }
+
+  get popBox() {
+    return this.pop.getByRole('textbox', { name: this.data.text.offPath.yourNote, exact: true })
+  }
+
+  get popItems() {
+    return this.pop.getByRole('menuitem')
+  }
+
+  /** A text of the right panel that matches a pattern (a notice naming a file); a button of the panel. */
+  panelSaysLike(re) {
+    return this.rightPanel.getByText(re)
+  }
+
+  panelButton(name) {
+    return this.rightPanel.getByRole('button', { name, exact: true })
+  }
+
+  /** The note's buttons, in order (Comment alone after a selection). */
+  get popButtons() {
+    return this.pop.getByRole('button')
+  }
+
+  /** A heading of the view, by its name ("Pick a call"). */
+  headingNamed(name) {
+    return this.main.getByRole('heading', { name, exact: true })
+  }
+
+  /** A line of the minutes (the first item holding these words). */
+  minutesLine(words) {
+    return this.minutesItem(words).first()
+  }
+
+  /** The window reading the open call again (its files changed: the next fetch of its details). Start it before the
+   *  change, await it after. */
+  callReread(folder) {
+    return this.page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(`/api/call/${encodeURIComponent(folder)}`))
   }
 }

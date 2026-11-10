@@ -150,4 +150,41 @@ export class TodayPage extends AppPage {
   async wontDo(sender) {
     await this.action(`${this.data.text.palette.wontDo}: ${sender}`)
   }
+
+  // ── A card sent to Today (S-29), by its title: what it says, its button, its heading and list ──
+
+  card(title) {
+    return this.main.getByRole('region', { name: title, exact: true })
+  }
+
+  cardSays(title, text) {
+    return this.card(title).getByText(text, { exact: true })
+  }
+
+  cardButton(title, name) {
+    return this.card(title).getByRole('button', { name, exact: true })
+  }
+
+  cardHeading(title, name) {
+    return this.card(title).getByRole('heading', { name, exact: true })
+  }
+
+  cardItems(title) {
+    return this.card(title).getByRole('listitem')
+  }
+
+  /** The words a card draws bold. */
+  cardBold(title, text) {
+    return this.card(title).getByRole('strong').filter({ hasText: text })
+  }
+
+  /** A text of Today, as it reads (the calendar's notice). */
+  says(text) {
+    return this.main.getByText(text, { exact: true })
+  }
+
+  /** Your day's buttons of a name ("Open the call", "Record when it starts"). */
+  dayButtons(name) {
+    return this.yourDay.getByRole('button', { name, exact: true })
+  }
 }

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [transcript, notes, minutes]
+auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # TC-021: Selecting words and Comment, or right-clicking a turn or a minutes line and Add note, adds a note at that moment with the words quoted
