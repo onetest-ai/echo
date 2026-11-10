@@ -45,7 +45,7 @@ platform: any
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/` and wait for the text "Your day". Run `browser_run_code_unsafe` with the guard code (see Checks): it records every dialog and page error from now on | It returns `armed` |
 | 2 | Navigate to `{{base_url}}/#calls`, wait for the text "Hostile call HOSTILE-61", click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/<the build date − 1>_090000-` (the hostile call is yesterday at 09:00) and its folder contains `HOSTILE-61`; the header shows a title containing "HOSTILE-61" |
-| 3 | Click the toggle `[aria-label="My notes"]` | It is pressed; the panel opens with a box `[aria-label="New note"]` |
+| 3 | Click the toggle `[data-panel-flip="notes"]` | It is pressed; the panel opens with a box `[aria-label="New note"]` |
 | 4 | Run `browser_evaluate` with `() => document.querySelector('[aria-label="Right panel"]').innerText.match(/HOSTILE-\d+/g)` | Contains HOSTILE-81, HOSTILE-82, HOSTILE-83 and HOSTILE-84 (the heading HOSTILE-80 is in the file's text, step 6) |
 | 5 | Run `browser_evaluate` with `() => ({ rtlDir: getComputedStyle(document.querySelector('[aria-label="Right panel"]')).direction, panel: document.querySelector('[aria-label="Right panel"]').getBoundingClientRect().right, scrollW: document.querySelector('[aria-label="Right panel"]').scrollWidth, clientW: document.querySelector('[aria-label="Right panel"]').clientWidth })` | `rtlDir` is `ltr`; `scrollW` <= `clientW` + 1: the 10 000-character question does not widen the panel |
 | 6 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
@@ -61,7 +61,7 @@ platform: any
 My notes showed the hostile notes in the panel, as raw text and as callouts in the minutes, all as text; the file was not changed. No dialog appeared, check A held on every view, and the console shows only the `favicon.ico` 404.
 
 ## Teardown
-- Make sure My notes is closed (`[aria-label="My notes"]` not pressed); navigate to `{{base_url}}/#today`. The file `my-notes.md` was never edited
+- Make sure My notes is closed (`[data-panel-flip="notes"]` not pressed); navigate to `{{base_url}}/#today`. The file `my-notes.md` was never edited
 
 ## Notes
 - Do not type in the New note box: a note typed is saved to the call.

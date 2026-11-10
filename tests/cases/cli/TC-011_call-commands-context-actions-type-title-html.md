@@ -41,7 +41,7 @@ tags: [cli, calls]
 | 7 | Run `target/debug/echoctl type $C bogus` | Exit code 1; "Error: a meeting type is one of: client, partner, one-on-one, internal, industry, other, steering" |
 | 8 | Reload, click the row Globex pilot kickoff (`[data-call="$C"]`) | The call's header shows the kind chip "Partner ▾" |
 | 9 | Run `target/debug/echoctl title $C "Globex pilot kickoff (signed)"` | Prints the new folder path ending `/calls/${C}-signed`; `ls "$ECHOCTL_HOME/calls" \| grep -- '-globex-pilot-kickoff'` lists only that name |
-| 10 | Reload `{{base_url}}/#calls`, find the row `[role=option][data-call="${C}-signed"]` (yesterday 14:00) | It reads "Globex pilot kickoff (signed)"; opened, its header shows that title, "Partner ▾" and the thread chip "Globex pilot" |
+| 10 | Reload `{{base_url}}/#calls`, find the row `[role=option][data-call="${C}-signed"]` (yesterday's call at 14:00, which the row writes in the browser's locale: "02:00 PM" in en-US) | It reads "Globex pilot kickoff (signed)"; opened, its header shows that title, "Partner ▾" and the thread chip "Globex pilot" |
 | 11 | Run `target/debug/echoctl html ${C}-signed` | Prints the path of `Globex pilot kickoff (signed)-minutes.html` inside that folder; the file exists |
 | 12 | Run `target/debug/echoctl title ${C}-signed "Globex pilot kickoff"` and `target/debug/echoctl type $C client` | The folder is `$C` again; the kind is `client` |
 | 13 | Run `target/debug/echoctl context` (no call: "latest") and read `dir` | `dir` is the newest call: the last name of `ls "$ECHOCTL_HOME/calls" \| grep '^20' \| tail -1` (today's newest recording) |

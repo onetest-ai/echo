@@ -37,7 +37,7 @@ tags: [calendar, card, action]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card has the primary button "Open notes" and no other action for this meeting; below it the series block "Every meeting of this series" with "Record" (pressed: the series rule is always) and "Don't record" (the series rule itself is `calendar/TC-018`) |
+| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card has the primary button "Open notes" and no other action button for this meeting besides its chips (the kind chip, and the thread chip "Acme rollout", a link to its thread); below it the series block "Every meeting of this series" with "Record" (pressed: the series rule is always) and "Don't record" (the series rule itself is `calendar/TC-018`) |
 | 2 | Click the block `[data-ev="ev-globex-steering"]` (Globex steering) | "Open notes" only |
 | 3 | Click the block `[data-ev="ev-m01"]` (Acme design review) | The primary button "Import Teams transcript" and the line (`.why`) "Not recorded. If Teams transcribed it: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow."; no Record button (do not press the import here: `TC-014`) |
 | 4 | Click the block `[data-ev="ev-m02"]` (Globex office hours) | The button "Don't record" and a line (`.why`) starting "Echo starts recording a minute before it begins, transcribed as Ukrainian." (a "Prepare" beside the button adds its own sentence after it); no Record button |

@@ -20,7 +20,7 @@ tags: [tasks, piles, pairwise, blocked]
 
 ## Test Data
 
-| Thread | Id | Title | Line under the title | Due chip | Mode icon |
+| Thread | Id | Title | Line under the title | Due (relative to the build) | Mode icon |
 |---|---|---|---|---|---|
 | Acme rollout | T010 | Book the workshop room | Day-to-day work | 3 days ago (late) | - |
 | Acme rollout | T016 | Map the user groups | Day-to-day work | 3 days ago (late) | You do it by hand |
@@ -37,13 +37,15 @@ tags: [tasks, piles, pairwise, blocked]
 | Acme rollout | T023 | Send the meeting notes (2) | Day-to-day work · blocked | no date | - |
 | Globex pilot | T012 | Send the welcome mail (2) | Day-to-day work | no date | - |
 
+The due chip shows the date itself, as the browser's locale writes it: with a short weekday for today and the next six days ("Tue, Nov 10", "Wed, Nov 11" in en-US), day and short month otherwise ("Nov 7", "Nov 30"); a late one is red (`tk-due late`), "no date" when there is none (`TC-020`). The mode icon's `aria-label` starts with the words of the column: a task done by hand adds how (`You do it by hand: <how>`).
+
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | The headings read "I owe 14", "Owed to me 5", "Waiting for others 5", "Nobody named 11" and the folded button "Others · 24"; the Thread chip reads "All threads ▾" and the header says "across 7 active projects" |
 | 2 | Click the button "+ 8" at the foot of the "I owe" column | The button now reads "Show fewer"; the column holds 14 cards |
-| 3 | For each row of the table find the card `[data-tk="open"][data-project=<thread id>][data-node=<Id>]` in the "I owe" column (thread ids: acme-rollout, acme-renewal, globex-pilot, initech-hiring, umbrella-proposal) and read it | Every card exists in the column and shows the title, the thread name, the line under the title, the due chip and the mode icon of its row; no card of the column is missing from the table |
+| 3 | For each row of the table find the card `[data-tk="open"][data-project=<thread id>][data-node=<Id>]` in the "I owe" column (thread ids: acme-rollout, acme-renewal, globex-pilot, initech-hiring, umbrella-proposal) and read it | Every card exists in the column and shows the title, the thread name, the line under the title, the due chip of its row's date and the mode icon of its row (its `aria-label` starts with the row's words); no card of the column is missing from the table |
 | 4 | Count the cards of the column whose line under the title holds the red word "blocked" | 7 cards (the rows whose line says "blocked"); the other 7 show only the story "Day-to-day work" |
 | 5 | Run `echoctl project tasks` and compare `piles.mine` | 14 entries with the same thread and id pairs; `blocked` is true on exactly the 7 blocked ones and `mine` is true on all 14 |
 

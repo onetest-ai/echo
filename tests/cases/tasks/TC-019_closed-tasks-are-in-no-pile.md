@@ -64,7 +64,7 @@ tags: [tasks, piles, state, pairwise]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe"; click "+ 8" in "I owe", "+ 5" in "Nobody named" and "Others · 24" | Every pile and Others is unfolded; the page holds 59 elements `[data-tk="open"]` in all (14 + 5 + 5 + 11 + 24) |
 | 2 | For each row of the table look for `[data-tk="open"][data-project=<thread id>][data-node=<Id>]` (thread ids are the names in lower case with a hyphen: acme-rollout, acme-renewal, globex-pilot, umbrella-proposal, initech-hiring) | None of the rows has a card in any pile: done, cancelled, merged and deleted tasks are shown nowhere |
-| 3 | Open the "Thread" filter and read the options of the five threads | "Acme renewal · 11", "Acme rollout · 17", "Globex pilot · 10", "Initech hiring · 9", "Umbrella proposal · 10": only open tasks are counted |
+| 3 | Open the "Thread" filter and read the options of the five threads | Among them "Acme renewal · 11", "Acme rollout · 17", "Globex pilot · 10", "Initech hiring · 9", "Umbrella proposal · 10": only open tasks are counted (the list also offers "Umbrella lead · 0" and "Internal tooling · 0", threads with no open task: `TC-024`) |
 | 4 | Look in "Waiting for others" for a card of Kim Park or Lena Vogel | None: Globex pilot T003, T011 and Initech hiring T001 wait on them but are closed, so they leave no card |
 | 5 | Run `echoctl project tasks`, collect the thread and id of every entry of `piles` and look for the rows of the table | None of the rows is in any pile |
 

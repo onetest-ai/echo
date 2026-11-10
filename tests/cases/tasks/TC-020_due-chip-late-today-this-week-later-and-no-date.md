@@ -39,7 +39,7 @@ tags: [tasks, cards, due, late, pairwise]
 | Acme rollout | T005 | Hold the help desk training session | Nobody named | no date | `tk-due none`, text "no date" |
 | Acme rollout | T002 | Get the access list | Others | no date | `tk-due none`, text "no date" |
 
-The date text follows the browser's language, so only the weekday is asserted: it is written (for example "Fri") when the date is today or within the next 7 days, and not written for a date more than a day ago or more than 7 days ahead. Dates in the data: 3 days ago, today, tomorrow, in 20 days.
+The Due column is the date relative to the build; the chip shows the date itself, never "3 days ago" or "tomorrow". Its text follows the browser's locale ("Nov 7", "Tue, Nov 10", "Wed, Nov 11", "Nov 30" in en-US, the Playwright browser's), so only the weekday is asserted: it is written (for example "Fri") when the date is today or within the next 7 days, and not written for a date more than a day ago or more than 7 days ahead. Dates in the data: 3 days ago, today, tomorrow, in 20 days.
 
 ## Steps
 

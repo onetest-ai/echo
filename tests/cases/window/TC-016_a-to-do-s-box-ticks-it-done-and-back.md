@@ -32,7 +32,7 @@ tags: [notes]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls`, click the first row `[role=option][data-call$="-acme-weekly-sync"]` (today's), click "My notes" (`[aria-label="My notes"]`) if the panel isn't open | My notes lists "During the call" and 7 notes of yours (with the call's 3 live items, ✦, among them by time: 10 rows); "Remind Omar about the access list" has a box ☐ named "Mark done" (`aria-checked="false"`), "Send the agenda" a box ☑ named "Mark to do" (`aria-checked="true"`) |
+| 1 | Navigate to `{{base_url}}/#calls`, click the first row `[role=option][data-call$="-acme-weekly-sync"]` (today's), click "My notes" (`[data-panel-flip="notes"]`) if the panel isn't open | My notes lists the heading "During the call" (drawn in capitals: match it ignoring case) and 7 notes of yours (with the call's 3 live items, ✦, among them by time: 10 rows); "Remind Omar about the access list" has a box ☐ named "Mark done" (`aria-checked="false"`), "Send the agenda" a box ☑ named "Mark to do" (`aria-checked="true"`) |
 | 2 | Click the box of "Remind Omar about the access list"; wait 2 s | Its box is ☑ "Mark to do"; "Send the agenda" is unchanged (☑); the state reads "Saved" |
 | 3 | Run `grep -n 'Remind Omar\|Send the agenda' "$ECHOCTL_HOME/calls/$A/my-notes.md"` | `- [x] [00:58] Remind Omar about the access list` and `- [x] [01:10] Send the agenda` |
 | 4 | Click the box of "Remind Omar about the access list" again; wait 2 s | Its box is ☐ "Mark done"; "Send the agenda" stays ☑ |

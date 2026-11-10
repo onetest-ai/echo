@@ -23,7 +23,7 @@ tags: [people, list, side, pairwise]
 | Person | Where | Side in the data | Organisation column |
 |---|---|---|---|
 | Dana Lee | in the thread | org | Acme |
-| Alex Chen | in the thread | yours | your company |
+| Alex Chen | in the thread | yours | your company · Delivery |
 | Lena Vogel | in the thread | yours | your company |
 | Tom Becker | in the thread | yours | your company |
 | Priya Nair | seen in calls | yours | your company |
@@ -38,7 +38,7 @@ tags: [people, list, side, pairwise]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/people`, press "List" | The list is shown |
-| 2 | For each row of the table that says Acme rollout (all but the two Guests) find the row of the person (`tr[data-key]`) and read the column Organisation | It reads the last column of the row: "your company" for a colleague, "Acme" or "Globex" for an outside person known by its mail domain, "outside" for the second Tom Becker (no address at all) |
+| 2 | For each row of the table that says Acme rollout (all but the two Guests) find the row of the person (`tr[data-key]`) and read the column Organisation | It reads the last column of the row: "your company" for a colleague (followed by " · " and the person's group where one is set: "your company · Delivery" for Alex Chen), "Acme" or "Globex" for an outside person known by its mail domain, "outside" for the second Tom Becker (no address at all) |
 | 3 | Navigate to `{{base_url}}/#project/initech-hiring/people`, press "List" | The card says "Nobody in this thread yet."; the block "Seen in calls" lists 5 people |
 | 4 | Read the rows of Guest 2 and Guest 7 | Their Organisation column reads the domain, "fill2.example" and "fill7.example" (a domain no organisation has) |
 | 5 | Click the row of Guest 2 | The right panel shows the person with a link "Name this organisation (fill2.example)"; it is not pressed |

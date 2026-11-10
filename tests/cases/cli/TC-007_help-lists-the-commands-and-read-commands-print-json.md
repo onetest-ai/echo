@@ -23,7 +23,7 @@ tags: [cli, help]
 
 | Command | What it shows |
 |---|---|
-| `echoctl --help` | 53 commands (with `help`) under "Commands:" |
+| `echoctl --help` | every command, one line each with its description, under "Commands:" (`help` last) |
 | `echoctl project --help` | the thread commands, `ledger` among them |
 | `echoctl status`, `echoctl project list` | JSON |
 
@@ -31,7 +31,7 @@ tags: [cli, help]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `target/debug/echoctl --help` | Exit code 0; the first line is "Records the calls you opt in to and transcribes them on this computer (tray app + CLI)"; "Usage: echoctl <COMMAND>"; under "Commands:" 53 lines, among them `project`, `client`, `org`, `series`, `config`, `read`, `m365`, `context`, `actions`, `action`, `title`, `type`, `note`, `html`, `delete`, `restore`, and the last is `help` |
+| 1 | Run `target/debug/echoctl --help` | Exit code 0; the first line is "Records the calls you opt in to and transcribes them on this computer (tray app + CLI)"; "Usage: echoctl <COMMAND>"; under "Commands:" one line per command, each a name and its description, among them `project`, `client`, `org`, `series`, `config`, `read`, `m365`, `context`, `actions`, `action`, `title`, `type`, `note`, `html`, `delete`, `restore`, `language`, and the last is `help` |
 | 2 | Run `target/debug/echoctl project --help` | Exit code 0; "Usage: echoctl project <COMMAND>"; the commands `list`, `show`, `create`, `set`, `rule`, `source`, `include`, `exclude`, `reset`, `term`, `person`, `of`, `people`, `tasks`, `found`, `delete`, `ledger`, `help`, in that order |
 | 3 | Run `target/debug/echoctl project ledger acme-rollout edit --help` | Exit code 0; the line "An edit of yours (JSON: {op: edit\|ac_add\|ac_set\|link\|unlink\|merge\|delete\|accept\|reject\|undo\|create, …})" and "Usage: echoctl project ledger <ID> edit <JSON>" |
 | 4 | Run `target/debug/echoctl help series` | Exit code 0; the same text as `echoctl series --help`: "Usage: echoctl series <COMMAND>" with `list`, `set`, `help` |
@@ -43,4 +43,4 @@ tags: [cli, help]
 Nothing changed: help and read commands only.
 
 ## Notes
-- The count of 53 changes when a command is added or removed: update it with the command's own case.
+- The step names the commands other cases use, not their count (it changes whenever a command is added): a new command that a case uses joins the list with that case.
