@@ -110,7 +110,7 @@
     "refusals": [
       {
         "after": "project ledger acme-rollout tree",
-        "says": "Yolo reads its task with `echoctl read echo://task/globex-pilot/T005`; of the ledger it may only edit that task's state:"
+        "says": "Yolo reads its task with `echoctl read echo://task/globex-pilot/T005` and its thread's work with `echoctl project ledger globex-pilot tree` — no other thread's; of the ledger it may only edit that task's state:"
       },
       {
         "after": "\"description\"",

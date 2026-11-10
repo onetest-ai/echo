@@ -7,6 +7,12 @@ import { covers, scenario } from '../support/covers.mjs'
 import { CallsPage } from '../pages/calls.page.mjs'
 
 const data = useData(test, { set: 'small', ai: 'virtual', args: ['--clock', 'fast'] })
+// The calls are copies of the recordings prepared once a build (`recordings.py prepare`: real capture and transcription,
+// a few minutes — the regression's one speech-to-text check); prepared here when this build has none yet.
+test.beforeAll(async () => {
+  test.setTimeout(15 * 60_000)
+  try { data.run('python3', 'tests/fixtures/recordings.py', 'list') } catch { data.run('python3', 'tests/fixtures/recordings.py', 'prepare', { timeout: 14 * 60_000 }) }
+})
 const state = {} // the two calls' stamps, shared by the stages (as the manual scenario's glue keeps them)
 
 scenario(test, 'S-19', 'Claude Code and the minutes', () => {

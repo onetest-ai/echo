@@ -49,9 +49,11 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     const r = spawnSync(BIN, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: 120_000 })
     return { code: r.status, out: r.stdout, err: r.stderr, json: () => JSON.parse(r.stdout) }
   }
-  /** Any command on the data (a fixture script: `recordings.py copy …`), with the data's environment; its output. */
+  /** Any command on the data (a fixture script: `recordings.py copy …`), with the data's environment; its output. A
+   *  last `{ timeout }` (ms) for a long one. */
   data.run = (cmd, ...args) => {
-    const r = spawnSync(cmd, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: 120_000 })
+    const opts = typeof args.at(-1) === 'object' ? args.pop() : {}
+    const r = spawnSync(cmd, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: opts.timeout || 120_000 })
     if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')}: ${(r.stderr || r.stdout).trim()}`)
     return r.stdout.trim()
   }

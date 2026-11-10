@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, claim]
 ai: virtual
 external_id: TC-CLA-004, TC-CLA-013
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-005: A session can't take a call's minutes while Echo writes them; Write minutes takes them from a session

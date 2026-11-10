@@ -10,6 +10,7 @@ platform: macos
 tags: [notes, minutes, recordings]
 ai: virtual
 external_id: TC-CLA-008
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-009: The user's notes, from during and after the call, shape its minutes

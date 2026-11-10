@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, ai-profile, recordings]
 ai: virtual
 external_id: TC-CLA-011
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-012: Each AI profile's minutes model is used, and a wrong one is explained

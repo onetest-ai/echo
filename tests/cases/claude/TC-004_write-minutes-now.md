@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, recordings]
 ai: virtual
 external_id: TC-CLA-009
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-004: Write minutes from the window, and for a call too short for automatic ones

@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, settings, recordings]
 ai: virtual
 external_id: TC-CLA-005
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-006: Minutes run in the chosen folder

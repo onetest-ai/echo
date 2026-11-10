@@ -21,6 +21,7 @@ cases:
   - tests/cases/claude/TC-011_signed-out.md
   - tests/cases/claude/TC-014_record-from-chat.md
   - tests/cases/privacy/TC-007_no-send-without-yes.md
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # S-19: Claude Code and the minutes

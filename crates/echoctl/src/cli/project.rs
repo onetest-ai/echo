@@ -652,7 +652,10 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
                      trying again won't change that, say the rest in your answer"
                 )
             } else {
-                format!("Yolo reads its task with `echoctl read echo://task/{project}/{node}`; of the ledger it may only edit that task's state: {may}")
+                format!(
+                    "Yolo reads its task with `echoctl read echo://task/{project}/{node}` and its thread's work with \
+                     `echoctl project ledger {project} tree` — no other thread's; of the ledger it may only edit that task's state: {may}"
+                )
             }
         }
         // Yolo on an item of Needs you now: its thread's work to read, none of it to change.
