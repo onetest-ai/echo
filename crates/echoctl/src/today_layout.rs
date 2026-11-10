@@ -55,15 +55,20 @@ pub fn default_items() -> Vec<Item> {
     vec![item("core:needs.now", "M", true), item("core:routines.cards", "M", true), item("core:calendar.agenda", "S", true), item("core:tasks.mine", "M", false)]
 }
 
-/// Today's widgets: the saved layout, else the default. A widget the catalog no longer has, or Today can't draw,
-/// is left out (a plugin removed); a size it doesn't take becomes its first one.
+/// Today's widgets: the saved layout, else the default. A widget the catalog doesn't have now (a plugin off) is kept
+/// — the page just doesn't draw it — so a change never loses its place; a size it doesn't take becomes its first.
 pub fn load() -> Vec<Item> {
-    let saved = std::fs::read(file()).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()).and_then(|f| f.items);
-    let mut items: Vec<Item> = saved.unwrap_or_else(default_items).into_iter().filter(|i| DRAWN.contains(&i.widget.as_str()) && widgets::find(&i.widget).is_ok()).collect();
+    normalize(std::fs::read(file()).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()).and_then(|f| f.items))
+}
+
+/// What Today shows of a saved list (None: the default).
+fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
+    let mut items = saved.unwrap_or_else(default_items);
     for i in &mut items {
-        let w = widgets::find(&i.widget).expect("filtered above");
-        if !w.sizes.contains(&i.size.as_str()) {
-            i.size = w.sizes[0].into();
+        if let Ok(w) = widgets::find(&i.widget) {
+            if !w.sizes.contains(&i.size.as_str()) {
+                i.size = w.sizes[0].into();
+            }
         }
     }
     if let Some(first) = items.first_mut() {
@@ -131,9 +136,14 @@ fn size_of(widget: &str, size: Option<&str>) -> Result<String> {
 /// Changes the saved layout (starting from what Today shows) under its lock, and returns Today's widgets after it.
 fn change(f: impl FnOnce(Vec<Item>) -> Result<Vec<Item>>) -> Result<Vec<Item>> {
     std::fs::create_dir_all(paths::config_dir())?;
-    let items = load();
+    // A file that can't be read (a hand edit gone wrong) is kept beside it, and the change starts from the default —
+    // as the page already shows.
+    if std::fs::read(file()).is_ok_and(|b| serde_json::from_slice::<File>(&b).is_err()) {
+        std::fs::rename(file(), file().with_extension("unreadable.json"))?;
+    }
     crate::calls::update_state(&file(), |v: &mut File| {
-        let next = f(items)?;
+        // What it holds now, read under the lock: two changes at once both count.
+        let next = f(normalize(v.items.take()))?;
         let bytes = serde_json::to_vec(&next)?.len();
         if bytes > MAX_BYTES {
             bail!("Today's layout would be {bytes} bytes, over {MAX_BYTES}");
@@ -236,6 +246,12 @@ mod tests {
         std::fs::create_dir_all(paths::config_dir()).unwrap();
         std::fs::write(file(), "{ not json").unwrap();
         assert_eq!(load(), default_items());
+        // A change starts from the default and keeps the unreadable file beside it.
+        assert_eq!(show(&remove("core:routines.cards").unwrap()), "| core:needs.now | core:calendar.agenda core:tasks.mine");
+        assert_eq!(std::fs::read_to_string(file().with_extension("unreadable.json")).unwrap(), "{ not json");
+        // A widget the catalog doesn't have now (a plugin off) keeps its place through a change.
+        std::fs::write(file(), r#"{"items":[{"widget":"plugin:x:y","size":"M","row":true},{"widget":"core:tasks.mine","size":"M"}]}"#).unwrap();
+        assert_eq!(show(&resize("core:tasks.mine", "S").unwrap()), "| plugin:x:y core:tasks.mine");
     }
 
     #[test]

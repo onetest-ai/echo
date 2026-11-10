@@ -82,12 +82,20 @@ function todayView() {
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
   // by side. Sizes take effect with the layout engine (#315).
+  // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work }
-  const blocks = todayRows(d.layout, Object.keys(parts)).map((r) => {
-    const h = r.map((id) => parts[id]).filter(Boolean)
-    return h.length > 1 ? `<div class="td-grid"${h.length > 2 ? ` style="grid-template-columns: repeat(${h.length}, minmax(0, 1fr))"` : ''}>${h.join('')}</div>` : h.join('')
+  const layoutRows = todayRows(d.layout, Object.keys(parts))
+  // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
+  const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
+  const blocks = layoutRows.map((r) => {
+    const h = r.map((id) => [id, parts[id]]).filter(([, x]) => x)
+    const grid = h.length > 1 || r.some((id) => id === 'core:calendar.agenda' || id === 'core:tasks.mine')
+    if (!grid) return h.map(([, x]) => x).join('')
+    // In a shared row a part of two blocks (Needs you now and its drafts) is one cell.
+    const cells = h.map(([id, x]) => (h.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${x}</div>` : x))
+    return `<div class="td-grid"${cells.length > 2 ? ` style="grid-template-columns: repeat(${cells.length}, minmax(0, 1fr))"` : ''}>${cells.join('')}</div>`
   }).join('')
-  return `<div class="td">${head}${blocks}${empty}</div>`
+  return `<div class="td">${head}${asks}${blocks}${empty}</div>`
 }
 
 // ── today rows: Today's widgets in rows, as its layout says (no DOM: `today-rows.test.mjs`) ─────────────────────────
