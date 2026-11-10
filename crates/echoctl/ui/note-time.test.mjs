@@ -7,7 +7,7 @@ const src = appSource()
 const start = src.indexOf('// ── note time: ')
 const end = src.indexOf('// end of the note time block', start)
 assert.ok(start >= 0 && end > start, 'the note time block not found in app.js')
-const { recordsCall, noteTime } = new Function(`${src.slice(start, end)}\nreturn { recordsCall, noteTime }`)()
+const { recordsCall, noteTime, askRecording, within } = new Function(`${src.slice(start, end)}\nreturn { recordsCall, noteTime, askRecording, within }`)()
 
 const CALL = '2026-11-10_090000-acme-sync'
 const tests = []
@@ -32,9 +32,29 @@ test('a note the app says came after the call (or with no answer in time) gets n
   assert.equal(noteTime(null, true), null, 'no time to keep')
 })
 
+// The app is asked by the state the window polls, read again; Add waits for the answer at most 500 ms.
+test("the app's answer: true while it records the call, false after, unsure when the ask fails", async () => {
+  const get = (state) => async () => state
+  assert.equal((await askRecording(get({ recording: `/calls/${CALL}` }), CALL)).ok, true)
+  assert.equal((await askRecording(get({ recording: null }), CALL)).ok, false)
+  assert.equal((await askRecording(async () => { throw new Error('app restarting') }, CALL)).ok, undefined)
+})
+
+test('an answer later than the wait is no answer: unsure, so no call time', async () => {
+  let fire
+  const timer = (f) => { fire = f }
+  const late = new Promise(() => {}) // never in time
+  const waited = within(late, 500, timer)
+  fire()
+  assert.equal(await waited, undefined)
+  assert.equal(noteTime(754.4, await waited), null)
+  // One in time is taken.
+  assert.equal(await within(Promise.resolve(true), 500, () => {}), true)
+})
+
 let failed = 0
 for (const [name, f] of tests) {
-  try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
+  try { await f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
 }
 if (failed) { console.log(`${failed} failed`); process.exit(1) }
 console.log(`note time: ${tests.length} passed`)
