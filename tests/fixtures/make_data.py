@@ -340,10 +340,10 @@ def build_small(d):
 
 
 # ── standard and hostile ──────────────────────────────────────────────────────────────────────
-# Globex weekly's guests from a partner no thread knows (they change none of its threads): name, address, answer.
-WEEKLY_GUESTS = [("Mia Long", "mia@partner.example", "accepted"), ("Joel Brandt", "joel@partner.example", "accepted"),
-                 ("Ines Duarte", "ines@partner.example", "tentativelyAccepted"), ("Paul Weber", "paul@partner.example", "notResponded"),
-                 ("Sara Lind", "sara@partner.example", "accepted"), ("Theo Grant", "theo@partner.example", "none")]
+# Globex weekly's other Globex guests, on no thread's people (its thread stays Globex pilot by the client's people): name, address, answer.
+WEEKLY_GUESTS = [("Mia Long", "mia@globex.example", "accepted"), ("Joel Brandt", "joel@globex.example", "accepted"),
+                 ("Ines Duarte", "ines@globex.example", "tentativelyAccepted"), ("Paul Weber", "paul@globex.example", "notResponded"),
+                 ("Sara Lind", "sara@globex.example", "accepted"), ("Theo Grant", "theo@globex.example", "none")]
 
 
 def person(name, email=None):

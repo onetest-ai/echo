@@ -321,9 +321,18 @@ fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
 /// isn't on the agenda any more.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn attendees(id: &str) -> Option<Value> {
+    // The page asks every few seconds while the meeting is open: the last answer serves for a minute.
+    static LAST: std::sync::Mutex<Option<(String, std::time::Instant, Value)>> = std::sync::Mutex::new(None);
+    if let Some((k, at, v)) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if k == id && at.elapsed() < std::time::Duration::from_secs(60) {
+            return Some(v.clone());
+        }
+    }
     let m = crate::watch::agenda().into_iter().find(|m| m.id.as_deref().is_some_and(|e| id_of(e) == id))?;
     let ids: Vec<String> = projects::of_meeting(&m).iter().filter(|p| !p.stage.closed()).map(|p| p.id.clone()).collect();
-    Some(json!(people(&m, &ids)))
+    let v = json!(people(&m, &ids));
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.to_string(), std::time::Instant::now(), v.clone()));
+    Some(v)
 }
 
 /// What is expected from the user: their open tasks in these threads (late first), what they still owe from last

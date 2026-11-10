@@ -57,9 +57,7 @@ cases:
 | Standard data, built right before the run | `serve.sh up <dir> <port> --set standard` | all |
 | The meetings' times (live until 20 minutes after the build, to come from 37 minutes after it) | the data | 1–15 (read within 15 minutes of the build) |
 | Today's Day view | stage 1, step 1 | 2–8 (each opens its own cards; no stage closes a card the next one replaces) |
-| Coming up today unfolded | stage 11, step 3 | 12 |
-| Globex sponsor update's prep open | stage 12, step 1 | 13 |
-| Umbrella intro call open on Prep | stage 13, step 5 | 14 |
+| Coming up today unfolded | stage 11, step 3 | 12, 13 |
 | The Day view after stage 17's reload | stage 17, step 4 and its teardown | 18, 19 |
 | The Inbox panel open (it stays open across views) | stage 21, step 1 | 22–30 |
 | The Inbox panel after a full load (the people fold closed again) | stage 31, step 1 | 32–35 |

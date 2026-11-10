@@ -341,7 +341,8 @@ function upcomingDoc() {
   const all = (S.pj.data && S.pj.data.projects) || []
   // A call's header, before the call: its day and time, length, people, thread chips (+ Thread, as in the calendar).
   const mins = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0
-  const att = (S.upPrep && S.upPrep.attendees) || (p && p.people && p.people.some((x) => x.answer) ? p.people : null)
+  const live = S.upPrep && S.upPrep.attendees && S.upPrep.attendees.length ? S.upPrep.attendees : null
+  const att = live || (p && p.people && p.people.some((x) => x.answer) ? p.people : null)
   const names = (u && u.names) || (p && p.people ? p.people.map((x) => x.name) : [])
   const line = att ? attendeeLine(att) : null
   const people = line ? line.tally : names.length ? `<span class="people" title="${esc(names.join(', '))}">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
@@ -380,7 +381,7 @@ function attendeeLine(att) {
   // New: no call with the user yet.
   const fresh = (x) => x.new && !x.calls ? ' <span class="at-new">new</span>' : ''
   const card = (x) => `<span class="at-card" role="tooltip"><span><b>${esc(x.name)}</b> <span class="set-sub">· ${esc(word(x))}</span></span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}<span class="set-sub">${x.influence || x.interest ? `Influence ${LEVEL[x.influence || 0]} · interest ${LEVEL[x.interest || 0]} · ` : ''}${calls(x)}</span></span>`
-  const chip = (x) => `<span class="at-p${x.influence === 3 ? ' key' : ''}${x.answer === 'declined' ? ' declined' : ''}" tabindex="0">${mark(x)}${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${fresh(x)}${card(x)}</span>`
+  const chip = (x) => `<span class="at-p${x.influence === 3 ? ' key' : ''}${x.answer === 'declined' ? ' declined' : ''}"${x.link ? '' : ' tabindex="0"'}>${mark(x)}${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${fresh(x)}${card(x)}</span>`
   const row = (x) => `<div class="at-row${x.answer === 'declined' ? ' declined' : ''}">${mark(x)}<span class="at-n">${esc(x.name)}${fresh(x)}</span><span class="set-sub">${x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : 'first call'}</span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}</div>`
   const shown = att.slice(0, SHOWN), rest = att.slice(SHOWN)
   const count = (k) => att.filter((x) => (ANSWER[x.answer] || ANSWER.none)[0] === k).length
