@@ -30,7 +30,7 @@ auto: [tests/auto/specs/S-10.spec.mjs]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calls`, click "Coming up today" and then the row "Globex design review" | The URL is `#upcoming/<id>`; the row is selected |
-| 2 | Read the header | Title "Globex design review", today's weekday and date with the start time, "30 min", the person "Kim Park", and a button "+ Thread" |
+| 2 | Read the header | Title "Globex design review", today's weekday and date with the start time, "30 min", the person "Kim Park", how the invite was answered ("1 no answer"), and a button "+ Thread" |
 | 3 | Read the tabs | One tab, "Prep", selected; no "Transcript" or "Minutes" (they are the call's, once it is recorded) |
 | 4 | Look for "Copy link" | Not shown (it comes with a written prep) |
 

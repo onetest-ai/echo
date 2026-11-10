@@ -38,6 +38,8 @@
 .td-task-t { font-size: 13px; line-height: 1.4; }
 .td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
 .td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
+/* Whose and where on one line, cut with … when narrow (the whole of it on hover). */
+.td-task-w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .td-icos { margin-left: auto; display: flex; gap: 2px; }
 .td-ico { width: 28px; height: 28px; color: var(--text-3); }
 .td-ico svg { width: 18px; height: 18px; }

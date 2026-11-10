@@ -231,15 +231,22 @@ function renderNow() {
   lastPrint = fingerprint()
 }
 
-/** Put the event card next to the event it belongs to: right of it if there is room, else
- *  left; level with it, kept inside the window. */
+/** Put the event card next to the event it belongs to, inside the calendar's grid (never over the activity bar, the
+ *  calendar's own head — Day, Week — or another panel): right of it if there is room, else left; neither (a block
+ *  across the day), over the block's right part; level with it (#338). */
 function placeDetail() {
   const card = $('.detail'), ev = $('.ev[aria-selected="true"]')
   if (!card || !ev) return
+  const pane = (ev.closest('#calgrid') || ev.closest('#r-primary') || document.body).getBoundingClientRect()
   const r = ev.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight, gap = 8, pad = 12
-  const right = r.right + gap + w <= window.innerWidth - pad
-  const left = right ? r.right + gap : Math.max(pad, r.left - gap - w)
-  const top = Math.min(Math.max(pad, r.top), Math.max(pad, window.innerHeight - h - pad))
+  const minX = pane.left + pad, maxX = pane.right - pad - w
+  // A grid narrower than the card: kept inside the window instead.
+  const left = maxX < minX ? Math.max(pad, Math.min(r.right - w, window.innerWidth - pad - w))
+    : r.right + gap <= maxX ? r.right + gap : r.left - gap - w >= minX ? r.left - gap - w : maxX
+  const bottom = Math.min(pane.bottom, window.innerHeight)
+  let top = Math.min(Math.max(pane.top + pad, r.top), Math.max(pane.top + pad, bottom - h - pad))
+  // A grid shorter than the card (a short window): its bottom kept inside the window, as far up as it must.
+  if (top + h > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - h - pad)
   card.style.left = `${left}px`
   card.style.right = 'auto'
   card.style.top = `${top}px`
