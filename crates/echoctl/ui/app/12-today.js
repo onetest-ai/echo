@@ -80,8 +80,30 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs, d.asks)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
+  // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
+  // by side. Sizes take effect with the layout engine (#315).
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work }
+  const blocks = todayRows(d.layout, Object.keys(parts)).map((r) => {
+    const h = r.map((id) => parts[id]).filter(Boolean)
+    return h.length > 1 ? `<div class="td-grid"${h.length > 2 ? ` style="grid-template-columns: repeat(${h.length}, minmax(0, 1fr))"` : ''}>${h.join('')}</div>` : h.join('')
+  }).join('')
+  return `<div class="td">${head}${blocks}${empty}</div>`
 }
+
+// ── today rows: Today's widgets in rows, as its layout says (no DOM: `today-rows.test.mjs`) ─────────────────────────
+/** The layout's widgets the page has a part for, in order, a row each where one starts (`row`): [[id, …], …]. No
+ *  layout (an older app): Today as it comes. */
+function todayRows(layout, drawn) {
+  const items = layout || [{ widget: 'core:needs.now', row: true }, { widget: 'core:routines.cards', row: true }, { widget: 'core:calendar.agenda', row: true }, { widget: 'core:tasks.mine' }]
+  const rows = []
+  for (const it of items) {
+    if (!drawn.includes(it.widget)) continue
+    if (it.row || !rows.length) rows.push([])
+    rows[rows.length - 1].push(it.widget)
+  }
+  return rows
+}
+// end of the today rows block
 
 // Needs you now's actions: Reply with where it goes (Teams' logo, or a mail's envelope), I'll do it (a box ticked),
 // Won't do (a circle struck through). The Teams logo: Simple Icons 11.15.0 (CC0), in Teams' colour.

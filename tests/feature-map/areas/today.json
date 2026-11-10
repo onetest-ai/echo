@@ -74,6 +74,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-11",
+   "feature": "Today's layout on this computer (today-layout.json): which widgets, in what order, rows and sizes; echoctl today shows it, add / move (before, after, above, below) / size / remove / reset change it, refusing an unknown widget, a size it doesn't take, one not drawn on Today yet; the page draws its parts in that order, a row's widgets side by side; the default is Today as it was",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

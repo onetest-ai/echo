@@ -50,6 +50,7 @@ mod projectsync;
 mod tasks;
 mod taskmodes;
 mod today;
+mod today_layout;
 mod widgets;
 mod teams_transcript;
 mod view;
@@ -228,6 +229,11 @@ enum Cmd {
     /// Minutes templates (JSON): each one's words, header and sections, the {values} they may use, and the folder for
     /// your own (a template there named like a built-in changes it)
     Templates,
+    /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it
+    Today {
+        #[command(subcommand)]
+        cmd: Option<cli::widget::TodayCmd>,
+    },
     /// Today's widgets: `list` the catalog, `show <id>` a widget's data (JSON, as Today gets it)
     Widget {
         #[command(subcommand)]
@@ -658,6 +664,7 @@ fn main() -> Result<()> {
         Cmd::Templates => cli::calls::templates(),
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
         Cmd::Widget { cmd } => cli::widget::widget(cmd),
+        Cmd::Today { cmd } => cli::widget::today(cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),
