@@ -19,7 +19,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie). `<dir>` is the data folder (`. <dir>/env` sets `ECHOCTL_HOME`)
 - Microsoft 365 is not signed in: the Needs you now items come from the data's `.echo/needs.json`
-- Needs you now is `section.nd` on Today; a row is `.nd-row`, its I'll do it button `[data-needs-todo="<item id>"]`. The dialog: heading "A task of yours", box `#nd-title`, thread `#nd-thread`, button `[data-needs-todo-ok]`
+- Needs you now is `section.nd` on Today; a row is `.nd-row`, Won't do and I'll do it are reached from ⌘K (`ControlOrMeta+k`), its NEEDS YOU NOW group ("Won't do: <sender> — …", "I'll do it: <sender> — …"); the row's own button is ✦ (Claude). The dialog: heading "A task of yours", box `#nd-title`, thread `#nd-thread`, button `[data-needs-todo-ok]`
 - Runs alone, not as a stage of S-24: it takes "Mail to you", which S-24's Won't do stages need
 
 ## Test Data
@@ -32,7 +32,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today`, wait for "Needs you now", click "I'll do it" on the row "Mail to you" | A dialog "A task of yours": "What to do" holds "Contract redlines for the Globex pilot"; "In which thread" shows "Globex pilot"; "Cancel" and "Add to Tasks" |
+| 1 | Navigate to `{{base_url}}/#today`, wait for "Needs you now", press `ControlOrMeta+k`, type `I'll do it: Kim Park`, press Enter (⌘K's NEEDS YOU NOW item for the row "Mail to you") | A dialog "A task of yours": "What to do" holds "Contract redlines for the Globex pilot"; "In which thread" shows "Globex pilot"; "Cancel" and "Add to Tasks" |
 | 2 | Replace the text in "What to do" with `Send Kim the signed redlines`; choose "Initech hiring" in "In which thread"; keep references to the button and to Today's page (`const b = document.querySelector('[data-needs-todo-ok]'), m = document.querySelector('#r-primary main')`) | — |
 | 3 | Wait until the clock's minute changes (up to 65 s; the line "now" on Your day shows the new minute) | Today was drawn again (`m.isConnected` is false); the dialog is still open with the same button element (`b.isConnected` is true); "What to do" still holds `Send Kim the signed redlines`; the thread is still "Initech hiring" |
 | 4 | Click "Add to Tasks" | The dialog closes; the row "Mail to you" is gone from Needs you now and stays gone after a reload of `{{base_url}}/#today` |

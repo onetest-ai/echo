@@ -53,6 +53,12 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
   data.json = (...p) => JSON.parse(data.read(...p))
   data.exists = (...p) => fs.existsSync(path.join(...p))
+  /** The prompts Yolo runs were given (`<config>/yolo/<run>/prompt.md`), oldest first. */
+  data.yoloPrompts = () => {
+    const dir = path.join(data.env.ECHOCTL_CONFIG_DIR, 'yolo')
+    if (!fs.existsSync(dir)) return []
+    return fs.readdirSync(dir).sort().map((r) => path.join(dir, r, 'prompt.md')).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8'))
+  }
   /** The last event of a thread's work ledger. */
   data.lastEvent = (thread) => JSON.parse(data.read(data.home, 'projects', thread, 'ledger/events.jsonl').trim().split('\n').at(-1))
 

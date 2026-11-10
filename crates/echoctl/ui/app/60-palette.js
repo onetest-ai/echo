@@ -65,6 +65,7 @@ function paletteItems(target) {
       const name = `${x.from || ''} — ${x.line || ''}`
       if (x.source === 'mail') add('Needs you now', `Read and reply: ${name}`, () => press({ needsRead: x.id }), { keywords: 'mail answer' })
       else if (x.app_url || x.chat) add('Needs you now', `Reply in Teams: ${name}`, () => press({ needsOpen: x.app_url || '', chat: x.chat || '' }), { keywords: 'teams answer chat' })
+      add('Needs you now', `Claude: ${name}`, () => press({ needsClaude: x.id }), { keywords: 'ask work on it yolo skill' })
       add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
       add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
     }

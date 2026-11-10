@@ -28,7 +28,7 @@
   },
   {
    "id": "F-TODAY-04",
-   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply (Teams' logo or an envelope), I'll do it (a task in a thread) and Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item) — I'll do it and Won't do as icons, each action named in its label and tooltip",
+   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply (Teams' logo or an envelope) and My work's ✦: its Claude dialog on the item itself (no task made) — Work on it types the item's link (echo://needs/<id>, read with `echoctl read`) into the Claude panel, Yolo hands it over in the background; either way it then leaves the list; I'll do it (a task in a thread) and Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item) from ⌘K; each action named in its label and tooltip",
    "priority": "high",
    "check": "agent",
    "axes": []

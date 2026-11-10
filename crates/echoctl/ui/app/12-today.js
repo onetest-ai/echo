@@ -66,7 +66,7 @@ function todayView() {
     const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
     // Claude: one dialog — work on it in the panel, or Yolo (Claude does it on its own), with a skill.
-    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1"${modeData(t)} ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1"${modeData(t)} ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON(CLAUDE_SPARK)}</button>`
     // The date's icon before the title's words.
     // The card opens the task's details in the right panel, Today staying put (its icons do their own thing).
     return `<div class="td-task${S.pj.inline === 'today' && S.pj.node === t.id && S.pj.sel === t.project ? ' on' : ''}" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}" role="button" tabindex="0" title="Open its details"><span class="td-task-t">${dueChip(t)}<span class="td-task-title">${esc(t.title)}</span></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${kind === 'I owe' ? modeIcon(t.mode) : ''}${work}${close}</span></span></div>`
@@ -80,19 +80,19 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
+  return `<div class="td">${head}${needsView(d.needs, d.asks)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
 }
 
 // Needs you now's actions: Reply with where it goes (Teams' logo, or a mail's envelope), I'll do it (a box ticked),
 // Won't do (a circle struck through). The Teams logo: Simple Icons 11.15.0 (CC0), in Teams' colour.
 const TEAMS_LOGO = '<svg class="nd-logo" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="#6264A7" d="M20.625 8.127q-.55 0-1.025-.205-.475-.205-.832-.563-.358-.357-.563-.832Q18 6.053 18 5.502q0-.54.205-1.02t.563-.837q.357-.358.832-.563.474-.205 1.025-.205.54 0 1.02.205t.837.563q.358.357.563.837.205.48.205 1.02 0 .55-.205 1.025-.205.475-.563.832-.357.358-.837.563-.48.205-1.02.205zm0-3.75q-.469 0-.797.328-.328.328-.328.797 0 .469.328.797.328.328.797.328.469 0 .797-.328.328-.328.328-.797 0-.469-.328-.797-.328-.328-.797-.328zM24 10.002v5.578q0 .774-.293 1.46-.293.685-.803 1.194-.51.51-1.195.803-.686.293-1.459.293-.445 0-.908-.105-.463-.106-.85-.329-.293.95-.855 1.729-.563.78-1.319 1.336-.756.557-1.67.861-.914.305-1.898.305-1.148 0-2.162-.398-1.014-.399-1.805-1.102-.79-.703-1.312-1.664t-.674-2.086h-5.8q-.411 0-.704-.293T0 16.881V6.873q0-.41.293-.703t.703-.293h8.59q-.34-.715-.34-1.5 0-.727.275-1.365.276-.639.75-1.114.475-.474 1.114-.75.638-.275 1.365-.275t1.365.275q.639.276 1.114.75.474.475.75 1.114.275.638.275 1.365t-.275 1.365q-.276.639-.75 1.113-.475.475-1.114.75-.638.276-1.365.276-.188 0-.375-.024-.188-.023-.375-.058v1.078h10.875q.469 0 .797.328.328.328.328.797zM12.75 2.373q-.41 0-.78.158-.368.158-.638.434-.27.275-.428.639-.158.363-.158.773 0 .41.158.78.159.368.428.638.27.27.639.428.369.158.779.158.41 0 .773-.158.364-.159.64-.428.274-.27.433-.639.158-.369.158-.779 0-.41-.158-.773-.159-.364-.434-.64-.275-.275-.639-.433-.363-.158-.773-.158zM6.937 9.814h2.25V7.94H2.814v1.875h2.25v6h1.875zm10.313 7.313v-6.75H12v6.504q0 .41-.293.703t-.703.293H8.309q.152.809.556 1.5.405.691.985 1.19.58.497 1.318.779.738.281 1.582.281.926 0 1.746-.352.82-.351 1.436-.966.615-.616.966-1.43.352-.815.352-1.752zm5.25-1.547v-5.203h-3.75v6.855q.305.305.691.452.387.146.809.146.469 0 .879-.176.41-.175.715-.48.304-.305.48-.715t.176-.879Z"/></svg>'
 const ND_MAIL = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'
-const ND_TAKE = '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'
-const ND_WONT = '<circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/>'
 /** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
  *  (the app) or Read and reply (a mail, here); I'll do it (a task, in a thread) or Won't do. Empty: not drawn. */
-function needsView(n) {
-  const items = (n && n.items) || []
+function needsView(n, asks) {
+  // An item Claude is working on (its Yolo running) stays out of the list until the run ends: handed over, or back.
+  const busy = new Set((asks || []).filter((a) => a.state === 'working' && a.item).map((a) => a.item))
+  const items = ((n && n.items) || []).filter((x) => !busy.has(x.id))
   if (!items.length) return ''
   const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${Math.max(m, 1)} min` : `${Math.round(m / 60)} h` }
   const rows = items.map((x) => {
@@ -106,10 +106,12 @@ function needsView(n) {
     // mails are told apart; its buttons are found in it.
     return `<div class="nd-row" role="listitem" aria-label="${esc(x.where || '')} — ${esc(x.line || '')}"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
       <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
-      <div class="nd-a">${reply}${act(`data-needs-todo="${esc(x.id)}"`, "I'll do it", ND_TAKE, ' take')}${act(`data-needs-wont="${esc(x.id)}"`, "Won't do", ND_WONT)}</div></div>`
+      <div class="nd-a">${reply}${act(`data-needs-claude="${esc(x.id)}"`, 'Claude — work on this, or Yolo', CLAUDE_SPARK)}</div></div>`
   }).join('')
   return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div><div role="list" aria-labelledby="nd-h">${rows}</div></section>`
 }
+/** My work's ✦ (Claude — work on it, or Yolo), on its cards and on Needs you now's items. */
+const CLAUDE_SPARK = '<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>'
 /** The dialogs of Needs you now: I'll do it (a task's title and its thread), Read and reply (the mail, your answer). */
 function needsDialog() {
   const c = S.needsDlg
@@ -189,10 +191,17 @@ document.addEventListener('input', (e) => {
 /** Today → the Claude dialog's Yolo: the task, its skill and the user's words go to Echo (IPC `task_yolo`), which has
  *  Claude Code do it on its own in the background (the thread's profile); Today reads the outcome (`asks`) until it is
  *  there — a run may take minutes. */
+/** An item of Needs you now as Claude reads it (`links::needs_link`): its id percent-encoded. */
+const needsLink = (id) => 'echo://needs/' + [...new TextEncoder().encode(id)].map((b) => /[A-Za-z0-9\-._~:@]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : '%' + b.toString(16).toUpperCase().padStart(2, '0')).join('')
+
 function todayYolo(c, skill, text) {
   const id = `ask-${Date.now()}`
   S.todayAskId = id
-  send({ cmd: 'task_yolo', ask: id, project: c.project, node: c.node, skill, text })
+  // A task's Yolo, or an item of Needs you now's (no task made: `today::yolo_needs`; the item leaves the list).
+  if (c.needs) {
+    send({ cmd: 'needs_yolo', ask: id, id: c.needs, skill, text })
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== c.needs)
+  } else send({ cmd: 'task_yolo', ask: id, project: c.project, node: c.node, skill, text })
   let n = 0
   const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 300) setTimeout(poll, 5000) })
   setTimeout(poll, 1000)
@@ -201,8 +210,9 @@ function todayYolo(c, skill, text) {
 function todayAskBar() {
   const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
   if (!S.todayAskId) return ''
-  if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Yolo: Claude is on it…</span></div>'
-  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+  // A status (read out as it changes), named for what it reports.
+  if (!a || a.state === 'working') return '<div class="td-askbar" role="status" aria-label="Yolo"><span class="set-sub">Yolo: Claude is on it…</span></div>'
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
 /** The Claude dialog for a task, two actions on the same skill and words: Work on it — into the Claude panel's live
@@ -248,7 +258,7 @@ function sendClaudeDialog() {
   const yolo = c.today ? `<button class="btn" data-sc-yolo title="Claude does it on its own, in the background — sending included">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}Yolo</button>` : ''
   const picker = chosen
     ? `<div class="sc-chosen"><b>${esc(tplName(chosen.id))}</b><span title="${esc(chosen.description)}">${esc(chosen.description)}</span><button class="icon-btn" data-sc-skill="" aria-label="No skill — just the task" title="No skill — just the task">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>`
-    : `<input id="sc-q" class="sc-q" placeholder="Just the task — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
+    : `<input id="sc-q" class="sc-q" placeholder="${c.needs ? 'Just the message' : 'Just the task'} — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
        ${c.open ? `<div class="sc-sugg" role="listbox">${found.map((x) => `<button class="sc-opt" role="option" data-sc-skill="${esc(x.id)}" title="${esc(x.description)}"><b>${esc(tplName(x.id))}${x.id === best ? ' <em class="sc-best">fits best</em>' : ''}</b><span>${esc(x.description)}</span></button>`).join('') || '<div class="set-sub" style="padding:6px 10px">No skill has that in its name or description.</div>'}</div>` : ''}`
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
     <div class="sc-head"><h3 id="sc-h"><span class="md-ico claude">${ICON(CLAUDE_MARK)}</span>Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
@@ -259,7 +269,7 @@ function sendClaudeDialog() {
 }
 /** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
  *  has drawn and gone quiet — earlier keys would land in its start-up. */
-function sendToClaude(line, profile) {
+function sendToClaude(line, profile, typed) {
   const key = 'claude:folder'
   // The task's text stays with its thread's AI profile: the panel starts on it, or — running on another — says so.
   const want = profile || ai().default || ''
@@ -286,6 +296,7 @@ function sendToClaude(line, profile) {
     if (asking()) { S.notice = 'Claude is waiting for your answer in the panel — answer it, then send the task again.'; return render() }
     send({ cmd: 'pty_input', id: e.id, data: line.replace(/[\u0000-\u001f\u007f]+/g, ' ') })
     setTimeout(() => send({ cmd: 'pty_input', id: e.id, data: '\r' }), 150)
+    if (typed) typed()
   }
   if (e.id != null && !e.exited && !e.starting) return type()
   // Not running: started (or resumed) — once; then typed when it has drawn something new and gone quiet.

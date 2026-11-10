@@ -244,6 +244,8 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
             let ts: Vec<&str> = p["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect();
             !ts.is_empty() && ts.iter().all(|t| threads.iter().any(|x| x == t))
         }),
+        // The user's own inbox of the day: no session scoped to threads reads it.
+        Link::Needs(_) => false,
     };
     anyhow::ensure!(ok, "not found (or not readable from this session)");
     Ok(json!({"text": crate::links::read(link)?}))

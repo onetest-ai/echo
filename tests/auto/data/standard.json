@@ -5,7 +5,14 @@
     "mail": "Mail to you",
     "mailTitle": "Contract redlines for the Globex pilot",
     "mailFrom": "Kim Park",
-    "chatLine": "Can you send me the renewal price list for Acme?"
+    "chatLine": "Can you send me the renewal price list for Acme?",
+    "chatFrom": "Dana Lee",
+    "chatId": "teams:19:dana-lee@unq.gbl.spaces",
+    "chatThread": {
+      "id": "acme-rollout",
+      "name": "Acme rollout"
+    },
+    "chatReadCommand": "echoctl m365 teams read 19:dana-lee@unq.gbl.spaces"
   },
   "task": {
     "title": "Send Kim the signed redlines",

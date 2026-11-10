@@ -32,10 +32,10 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
   })
 
   test("36 · Won't do needs a comment; Cancel and Escape keep the item and decide nothing", covers('today/TC-007', 'F-TODAY-04'), async ({ page }) => {
-    const { chat, chatLine } = data.set.needs
+    const { chat, chatLine, chatFrom } = data.set.needs
     const today = new TodayPage(page, data)
     await today.open()
-    await today.wontDo(chat, chatLine)
+    await today.wontDo(chatFrom)
     await expect(today.wontConfirm).toBeDisabled()
     await today.wontComment.fill('   ')
     await expect(today.wontConfirm).toBeDisabled()
@@ -43,7 +43,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.wontConfirm).toBeEnabled()
     await today.wontCancel.click()
     await expect(today.wontDialog).toBeHidden()
-    await today.wontDo(chat, chatLine)
+    await today.wontDo(chatFrom)
     await page.keyboard.press('Escape')
     await expect(today.wontDialog).toBeHidden()
     await expect(today.item(chat, chatLine)).toBeVisible()
@@ -57,7 +57,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     const today = new TodayPage(page, data)
     await today.installClock()
     await today.open()
-    await today.illDoIt(n.mail, n.mailTitle)
+    await today.illDoIt(n.mailFrom)
     await expect(today.taskTitle).toHaveValue(n.mailTitle)
     await today.taskTitle.fill(t.title)
     await today.taskThread.selectOption({ label: t.thread.name })
@@ -76,5 +76,34 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.item(n.mail, n.mailTitle)).toHaveCount(0)
     const description = data.text.needs.taskDescription.replace('{from}', n.mailFrom).replace('{where}', n.mail).replace('{title}', n.mailTitle)
     expect(data.lastEvent(t.thread.id)).toMatchObject({ type: 'create', kind: 'task', fields: { title: t.title, description } })
+  })
+
+  // Not a stage of the manual S-24: runs after Won't do (cancelled) and I'll do it (on the mail), on the chat's item.
+  test("after · ✦ opens My work's Claude dialog on an item; Yolo works on it by its link, no task made; a failed run gives it back", covers('today/TC-014', 'F-TODAY-04'), async ({ page }) => {
+    const { needs: n } = data.set
+    const t = data.text.needs
+    const today = new TodayPage(page, data)
+    await today.open()
+    expect(await today.itemButtons(n.chat, n.chatLine)).toEqual(['Reply in Teams', t.claude])
+    const before = data.read(data.home, 'projects', n.chatThread.id, 'ledger/events.jsonl')
+    await today.claude(n.chat, n.chatLine)
+    await expect(today.claudeDialog).toContainText(`${n.chatThread.name} · ${n.chat} — ${n.chatLine}`)
+    await expect(today.claudeSkill).toHaveAttribute('placeholder', new RegExp(`^${t.skillPlaceholder}`))
+    await today.claudeYolo.click()
+    await expect(today.item(n.chat, n.chatLine)).toHaveCount(0) // Claude is on it
+    await expect(today.askBar).toContainText(data.text.fake.claudeFails, { timeout: 15_000 })
+    await expect(today.askBar).toContainText(`${n.chat}: `)
+    await expect(today.askBar).toContainText(t.stillThere)
+    await expect(today.item(n.chat, n.chatLine)).toBeVisible() // the run failed: the item is back
+    expect((data.json(data.home, data.text.needs.file).decided || {})[n.chatId]).toBeUndefined() // not handed over
+    expect(data.read(data.home, 'projects', n.chatThread.id, 'ledger/events.jsonl')).toBe(before)
+    // Claude got the item by its link only, and the link reads it.
+    const prompt = data.yoloPrompts().at(-1)
+    for (const words of t.promptHas) expect(prompt).toContain(words)
+    expect(prompt).not.toContain(n.chatLine)
+    const read = data.cli('read', `echo://needs/${n.chatId}`)
+    expect(read.code).toBe(0)
+    for (const words of t.readHas) expect(read.out).toContain(words)
+    expect(read.out).toContain(n.chatReadCommand)
   })
 })
