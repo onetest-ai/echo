@@ -92,8 +92,11 @@ function todayView() {
   const FILL = ['core:calendar.agenda', 'core:tasks.mine']
   const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const SPAN = { S: 1, M: 2, L: 3 }
-  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !FILL.includes(id) && !parts[id] })))
-  const cols = S.todayCols || todayCols((($('.td') || $('#r-primary') || {}).clientWidth) || 1200)
+  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !parts[id] })))
+  // Measured on every draw (the width may have changed on another page), then watched while Today shows.
+  const tdWidth = todayWidth()
+  const cols = tdWidth ? todayCols(tdWidth, S.todayCols) : S.todayCols || 3
+  S.todayCols = cols
   todayWatch()
   const blocks = todayLines(rowsIn, cols).map((line) => {
     if (!line.fill && line.items.length === 1) return parts[line.items[0].id]
@@ -111,12 +114,19 @@ function todayWatch() {
   const el = $('#r-primary')
   if (todayRO || !el || typeof ResizeObserver === 'undefined') return
   todayRO = new ResizeObserver(() => {
-    const td = S.view === 'today' && $('.td')
-    if (!td) return
-    const n = todayCols(td.clientWidth, S.todayCols)
+    const w = S.view === 'today' && todayWidth()
+    if (!w) return
+    const n = todayCols(w, S.todayCols)
     if (n !== S.todayCols) { S.todayCols = n; render() }
   })
   todayRO.observe(el)
+}
+/** The width Today's widgets share: `.td`'s content box (its padding off), else the centre's less Today's padding. */
+function todayWidth() {
+  const td = $('.td')
+  if (td) { const cs = getComputedStyle(td); return td.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }
+  const p = $('#r-primary')
+  return p ? p.clientWidth - 48 : 0
 }
 
 // ── today layout: Today's columns and lines (no DOM: `today-layout.test.mjs`) ───────────────────────────────────

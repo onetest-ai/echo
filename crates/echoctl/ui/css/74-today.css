@@ -59,10 +59,8 @@
 /* The list scrolls inside its card: the page stays put. */
 .td-tasks { padding-right: 2px; }
 /* Narrow: the cards one above the other, and the page scrolls (each card still at most a screen's worth). */
-@media (max-width: 1000px) {
-  .td-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; }
-  .td-grid > .td-sec { max-height: 80vh; }
-}
+/* A narrow Today needs no rule of its own: the layout engine gives it fewer columns, each fill line keeping its floor
+   (min-height above) — too short, and Today scrolls as a page (#328). */
 
 /* Today → Needs you now: a row an item — a dot (burning: warn), where and the line, who and when, its actions. */
 .nd .td-card-h { margin-bottom: 4px; }
