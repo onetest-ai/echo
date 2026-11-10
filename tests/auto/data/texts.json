@@ -344,5 +344,28 @@
     "cantDraw": "This diagram couldn’t be drawn",
     "bomb": "Syntax error",
     "serveLog": "serve.log"
+  },
+  "minutes": {
+    "due": "Minutes in ",
+    "writeNow": "Write now",
+    "writeMinutes": "Write minutes",
+    "writing": "Writing minutes…",
+    "profile": "Virtual model · virtual",
+    "tooThin": "No minutes written automatically",
+    "tooThinWhy": "The call is too thin for them",
+    "logStarts": "Echo starts Claude Code to write the minutes",
+    "logGuard": "every tool call is checked: this call's folder",
+    "logOk": "Finished: ok",
+    "logWritten": "Minutes written.",
+    "folderLine": "folder:",
+    "modelLine": "model:",
+    "notice": "Written by AI (Echo, Virtual model · virtual",
+    "callActions": "Call actions",
+    "writeAgain": "Write minutes again",
+    "cantUseModel": "Claude Code can't use the model of Virtual model",
+    "claimRefused": "Echo is writing the minutes for this call right now",
+    "claimTaken": "a Claude Code session's claim taken over by Write minutes",
+    "minutesModelBack": "minutes model virtual",
+    "userNotes": "my-notes.md"
   }
 }

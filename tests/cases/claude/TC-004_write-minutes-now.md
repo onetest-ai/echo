@@ -8,7 +8,7 @@ module: claude
 run: agent
 platform: macos
 tags: [minutes, recordings]
-ai: local
+ai: virtual
 external_id: TC-CLA-009
 ---
 
@@ -17,7 +17,7 @@ external_id: TC-CLA-009
 **Module:** Claude Code | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
+- Test data built by `tests/fixtures/make_data.py <dir> --ai virtual` (`ai: virtual`): the small set, hermetic, with the AI profile "Virtual model" (`tests/fixtures/model_server.py`, answering from its default script: `echoctl context`, the transcript read, `notes.md` and the action list written and applied) the default, so a minutes run is a real Claude Code run under Echo's guard with only the model scripted (`tests/fixtures/README.md`, "The virtual model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
 - Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; W=tests/fixtures/wait.py; export D` (the env sets the file-fed call sources and the call app's id: nothing here records)
 - The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): the calls come from there, nothing is recorded or transcribed here
 - The window served on the data with clicks reaching it: `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` after the prelude (no Echo app needed: the served window starts the run itself); the page loaded from `{{base_url}}/` first
@@ -37,8 +37,8 @@ external_id: TC-CLA-009
 | 1 | Run the prelude, then `python3 tests/fixtures/recordings.py copy minutes-call --title "CLA-004 write now"` | It prints the new call's folder: `minutes-call` (213 s) as captured and transcribed once by `prepare`, ending now |
 | 2 | Run the prelude, then `python3 tests/fixtures/recordings.py copy very-short --title "CLA-004 short"` | It prints the short call's folder (9 s, transcribed) |
 | 3 | `{{base_url}}/#calls`, click `[role=option][data-call$="cla-004-write-now"]`, Minutes tab | "Minutes in N min (HH:MM)" (15 on the real clock, 2 with `--clock fast`) and "Write now" (`[data-cmd="write-notes"]`); the status bar's "⏱ Minutes for “CLA-004 write now” in N min" |
-| 4 | Click "Write now" | Within seconds "Writing minutes…" naming the profile and model ("Qwen · … · <model>") and "Show log" |
-| 5 | Wait until the call's `notes-run.json` says "done" (about a minute on the network server; the run may retitle and rename the folder: find it by the `run_id`, or list `calls/`), then read its `claude.log` | The minutes are shown in the tab; `claude.log` starts "Echo starts Claude Code to write the minutes" with call, model, folder, plugin and "guard: every tool call is checked…", lists the commands Claude ran, and ends "Finished: ok · <time> · $<cost>" and "Minutes written. (<time>)" |
+| 4 | Click "Write now" | Within seconds "Writing minutes…" naming the profile and model ("Virtual model · virtual") and "Show log" |
+| 5 | Wait until the call's `notes-run.json` says "done" (a few seconds on the virtual model; the run may retitle and rename the folder: find it by the `run_id`, or list `calls/`), then read its `claude.log` | The minutes are shown in the tab; `claude.log` starts "Echo starts Claude Code to write the minutes" with call, model, folder, plugin and "guard: every tool call is checked…", lists the commands Claude ran, and ends "Finished: ok · <time> · $<cost>" and "Minutes written. (<time>)" |
 | 6 | Open `[role=option][data-call$="cla-004-short"]`, Minutes tab | "No minutes written automatically" and "The call is too thin for them (shorter than 3 minutes). Write them anyway if you want them.", and "Write minutes" |
 | 7 | Click "Write minutes" and wait until its run is "done" | The minutes are written anyway (`notes.md` in its folder) |
 

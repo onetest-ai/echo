@@ -97,6 +97,13 @@ class Http(unittest.TestCase):
         self.assertIn("isn't a regex", json.loads(e.exception.read())["error"]["message"])
         e.exception.close()
 
+    def test_a_model_it_hasnt_is_a_404_as_ollamas(self):
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.post("/v1/messages", {"model": "no-such-model", "messages": [user("x")]})
+        self.assertEqual(e.exception.code, 404)
+        self.assertIn("no-such-model", json.loads(e.exception.read())["error"]["message"])
+        e.exception.close()
+
     def test_ollama_reports_the_scripts_context(self):
         with urllib.request.urlopen(self.url + "/api/ps", timeout=5) as r:
             self.assertEqual(json.load(r)["models"][0]["context_length"], 8192)
