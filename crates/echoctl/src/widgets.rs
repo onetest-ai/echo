@@ -82,7 +82,9 @@ fn day() -> Value {
     json!({ "day": crate::today::day(), "calendar_stale": crate::calendar::unread_today() })
 }
 
-/// The next meeting: the first of the day's meetings not over yet (one under way counts), or none.
+/// The next meeting: the first of the day's meetings, by start, not over yet — one under way counts, so a long one
+/// already started comes before one about to start (overlaps are the day's choices widget's); a meeting with no end
+/// counts until it starts.
 fn next(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> Value {
     let at = |v: &Value, k: &str| v[k].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&chrono::Utc));
     let n = day.iter().find(|x| x["kind"] == "meeting" && at(x, "end").or_else(|| at(x, "start")).is_some_and(|t| t > now));
