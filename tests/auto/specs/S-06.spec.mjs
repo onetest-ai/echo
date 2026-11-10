@@ -546,15 +546,28 @@ scenario(test, 'S-06', 'Shape the work', () => {
     expect(added.map((e) => [e.op, e.node, e.set])).toEqual([['edit', data.set.board.t2.id, { due: t.due }]])
     // 5: one more "you set due" in History, the newest.
     await expect(set).toHaveCount(sets + 1)
-    // A year half typed (0002) is refused: nothing written, the date kept.
+    // A year half typed (0002) is refused: the date kept.
     before = events().length
     const again = await work.editField(w.due)
     await work.typeDate(again, t.halfYear)
     await page.keyboard.press(key('enter'))
     await expect(work.value(w.due)).toHaveText(t.shown)
-    expect(events().length).toBe(before)
-    // Teardown: undone.
-    await set.first().getByRole('button', { name: w.undo, exact: true }).click()
+    // Typed, then left (a click on the item's title): saved once, the same way.
+    const left = await work.editField(w.due)
+    await work.typeDate(left, t.leftKeys)
+    await work.details.getByText(p.item, { exact: true }).first().click()
+    await expect(work.value(w.due)).toHaveText(t.leftShown)
+    // One part of the date cleared (Backspace), then Enter: half typed, the date kept.
+    const cleared = await work.editField(w.due)
+    await work.typeDate(cleared, [key('backspace')])
+    await page.keyboard.press(key('enter'))
+    await expect(work.value(w.due)).toHaveText(t.leftShown)
+    // Teardown: both undone, newest first.
+    for (let k = 0; k < 2; k++) await set.first().getByRole('button', { name: w.undo, exact: true }).click()
     await expect(work.value(w.due)).toHaveText(p.before.due)
+    // Since the year half typed: only the date left with and the two undos — nothing came of the 0002 (read last, so a
+    // late write would show here too).
+    const ops = events().slice(before).map((l) => JSON.parse(l)).map((e) => e.op === 'edit' ? e.set.due : e.op)
+    expect(ops).toEqual([t.leftDue, w.undoOp, w.undoOp])
   })
 })

@@ -114,7 +114,8 @@
       "Hide",
       "Delete column"
     ],
-    "yesterday": "yesterday"
+    "yesterday": "yesterday",
+    "undoOp": "undo"
   },
   "prep": {
     "inShort": "In short",

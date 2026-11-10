@@ -634,13 +634,13 @@ document.addEventListener('change', (e) => {
   }
 })
 /** A work item's date box, done with (Enter, or left): its date saved once, when it changed and is one a work item can
- *  be due on; an empty box clears a date it had. */
+ *  be due on; an emptied box clears a date it had, a half-typed one (a part cleared) changes nothing. */
 function saveDateField(el) {
   const k = el.dataset.ledgerSet, n = S.pj.work && S.pj.work.nodes[S.pj.node]
   if (S.pj.editField !== k || !n) return
   S.pj.editField = null
   const v = el.value, year = Number(v.slice(0, 4))
-  if (v === (n[k] || '') || (v && !(year >= 2000 && year <= 2100))) return render()
+  if (el.validity.badInput || v === (n[k] || '') || (v && !(year >= 2000 && year <= 2100))) return render()
   ledgerEdit({ op: 'edit', node: S.pj.node, set: { [k]: v || null } })
 }
 // A work item's field opened for a change and left as it was (or Esc): back to reading it.
