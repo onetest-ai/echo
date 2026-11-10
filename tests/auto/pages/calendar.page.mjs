@@ -167,10 +167,13 @@ export class CalendarPage extends AppPage {
     const ev = await this.event(subject).boundingBox()
     const a = await this.cardButton(subject, record).boundingBox()
     const b = await this.cardButton(subject, prepare).boundingBox()
-    const { width, height } = this.page.viewportSize()
-    const level = Math.min(Math.max(12, ev.y), Math.max(12, height - card.height - 12))
+    // Inside the calendar's grid (#338), level with its meeting as far as the grid allows.
+    const g = await this.page.locator('#calgrid').boundingBox()
+    const { height } = this.page.viewportSize()
+    const bottom = Math.min(g.y + g.height, height)
+    const level = Math.min(Math.max(g.y + 12, ev.y), Math.max(g.y + 12, bottom - card.height - 12))
     return {
-      inside: card.x >= 0 && card.y >= 0 && card.x + card.width <= width && card.y + card.height <= height,
+      inside: card.x >= g.x && card.y >= g.y && card.x + card.width <= g.x + g.width && card.y + card.height <= bottom,
       beside: card.x >= ev.x + ev.width || card.x + card.width <= ev.x,
       level: Math.abs(card.y - level) <= 1,
       oneLine: Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 2,

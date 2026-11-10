@@ -62,7 +62,7 @@
   },
   {
    "id": "F-CAL-07",
-   "feature": "A meeting's card: its title with × (Close), when and how far off (Today · HH:MM–HH:MM · in N min / now · N min left / recorded / over), its kind and thread chips; one action strip (the main button and its prep side by side as pills, a line saying what happens or what it was recorded as); People (the organizer, then up to three names and +N more of all invited, or \"N invited\" without names; who declined left out), the series rule and Last time under small headings; it stays open across Day / Week",
+   "feature": "A meeting's card: its title with × (Close), when and how far off (Today · HH:MM–HH:MM · in N min / now · N min left / recorded / over), its kind and thread chips; one action strip (the main button and its prep side by side as pills, a line saying what happens or what it was recorded as); People (the organizer, then up to three names and +N more of all invited, or \"N invited\" without names; who declined left out), the series rule and Last time under small headings; it stays open across Day / Week; kept inside the calendar's grid — a block with no room either side gets it over its right part (#338)",
    "priority": "high",
    "check": "agent",
    "axes": [
