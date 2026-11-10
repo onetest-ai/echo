@@ -24,6 +24,8 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
             json_reply(crate::graph::message(&id).map(|m| json!({"subject": m["subject"], "from": m["from"], "at": m["at"], "text": m["text"], "url": m["url"]})).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
+        // The widgets Today can show (the catalog: Echo's, later the plugins').
+        "/api/widgets" => json_reply(json!(crate::widgets::catalog())),
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).

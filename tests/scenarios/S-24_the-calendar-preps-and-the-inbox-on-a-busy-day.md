@@ -44,6 +44,7 @@ cases:
   - tests/cases/today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md
   - tests/cases/today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md
   - tests/cases/calendar/TC-024_right-click-a-meeting-opens-its-menu.md
+  - tests/cases/today/TC-019_echoctl-widget-gives-todays-widgets-and-the-same-data-today-shows.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -108,6 +109,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 38 | `today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md` | — | — |
 | 39 | `today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md` | — | — |
 | 40 | `calendar/TC-024_right-click-a-meeting-opens-its-menu.md` | — | — |
+| 41 | `today/TC-019_echoctl-widget-gives-todays-widgets-and-the-same-data-today-shows.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.
