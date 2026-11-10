@@ -33,10 +33,10 @@ auto: [tests/auto/specs/S-29.spec.mjs]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `S="$ECHOCTL_HOME/.echo"; cp "$S/agenda.json" <dir>/agenda.bak.json && cp "$S/config.json" <dir>/config.bak.json && target/debug/echoctl agenda clear && python3 -c 'import json,os,time;s=os.environ["ECHOCTL_HOME"]+"/.echo/";t=time.time()-36*3600;os.utime(s+"agenda.json",(t,t));c=json.load(open(s+"config.json"));c["calendar_command"]=["python3","-c","raise SystemExit(1)"];json.dump(c,open(s+"config.json","w"),indent=2)'` | "agenda: 0 meeting(s)", exit 0 |
-| 2 | Reload `{{base_url}}/#today` and wait for "Your day" | No notice about the calendar (no sync has been tried today: just after midnight looks the same); Your day lists today's calls (the ones already recorded, each with its link "the call" in its reason line) and no meeting still to come: no "Record when it starts" |
-| 3 | Run `target/debug/echoctl agenda sync` | One JSON line with `"synced":false` and a `reason` starting "calendar command failed" |
-| 4 | Reload `{{base_url}}/#today` and wait for "Your day" | Under "Your day" the notice "The calendar couldn’t be read today: today’s meetings may be missing."; the rows are as in step 2 |
-| 5 | Run `S="$ECHOCTL_HOME/.echo"; cp <dir>/config.bak.json "$S/config.json" && cp <dir>/agenda.bak.json "$S/agenda.json" && rm -f "$S/calendar-failed.json"`, reload `{{base_url}}/#today` | The notice is gone; today's meetings are listed again (Globex design review, Acme demo, …) |
+| 2 | Reload `{{base_url}}/#today` and wait for "Your day" | No notice about the calendar (no sync has been tried today: just after midnight looks the same); Your day lists today's calls (the ones already recorded; each reason line says where its minutes are: "the call", "minutes", "transcribing…" or "minutes at <time>") and no meeting still to come: no "Record when it starts" |
+| 3 | Run `target/debug/echoctl agenda sync` | One JSON line with `"synced":false` and a `reason` "calendar command failed: …" that says why (the command's last words, else "it ended with exit status: 1", on Windows "exit code: 1") — never ending in nothing |
+| 4 | Reload `{{base_url}}/#today` and wait for "Your day" | Under "Your day" the notice "The calendar couldn’t be read today: today’s meetings may be missing." in amber; the rows are as in step 2 |
+| 5 | Run `S="$ECHOCTL_HOME/.echo"; cp <dir>/config.bak.json "$S/config.json" && cp <dir>/agenda.bak.json "$S/agenda.json" && rm -f "$S/calendar-failed.json"`, reload `{{base_url}}/#today` | The notice is gone; today's meetings are listed again, as before step 1 |
 
 ## Expected Final State
 The agenda and config are as built; Your day lists today's meetings with no notice.

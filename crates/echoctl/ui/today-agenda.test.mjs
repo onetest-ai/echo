@@ -79,6 +79,13 @@ test('a choice that is past is no longer one to make', () => {
   assert.equal(show(r), 'Acme yes 1 other at once')
 })
 
+test('the next is the line holding the first meeting you go to that is not over, as Next meeting says', () => {
+  // Two you said yes to at once, the first over: the line shows the second, still on — it is the next.
+  const r = agendaRows([mt('Acme', 9, 0, 10, 0), mt('Hiring', 9, 30, 11, 0), mt('Review', 14, 0, 15, 0)], day(10, 15), [])
+  assert.equal(show(r), 'Hiring yes next 1 other at once | Review yes')
+  assert.equal(r.rows[0].past, false)
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

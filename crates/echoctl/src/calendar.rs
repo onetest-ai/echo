@@ -239,7 +239,9 @@ pub fn sync(quiet: bool) -> Result<()> {
             Err(_) => vec![],
         },
         Ok(o) => {
-            let why = String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").to_string();
+            let why = String::from_utf8_lossy(&o.stderr).lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            // Its last words on stderr, else how it ended: never a reason ending in nothing.
+            let why = if why.is_empty() { format!("it ended with {}", o.status) } else { why };
             failed(format!("calendar command failed: {why}"), quiet);
             return Ok(());
         }

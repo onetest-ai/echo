@@ -81,6 +81,7 @@ function todayView() {
     const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
   }).join('')
+  setTimeout(todayMoreCue)
   return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
 
@@ -115,7 +116,7 @@ function nextMeetingView(n, size, now) {
   const faces = shown.map((x) => `<span class="td-av${x.answer === 'declined' ? ' no' : x.answer === 'accepted' ? ' yes' : ''}" title="${esc(`${x.name}${said(x)}`)}" role="listitem" aria-label="${esc(`${x.name}${said(x)}`)}">${esc(ini(x.name))}</span>`).join('')
   const more = people.length > shown.length ? `<span class="set-sub">+${people.length - shown.length}</span>` : ''
   const fresh = people.filter((x) => x.new).map((x) => `${esc(x.name)}${x.role ? `, ${esc(x.role)},` : ''} is new to this thread.`).slice(0, 2).join(' ')
-  const knowing = [b.summary ? `<li class="td-next-sum">${esc(b.summary)}</li>` : '', ...exp.map((x) => `<li><b>${x.kind === 'reply' ? '' : 'You owe: '}</b>${owe(x)}</li>`)].filter(Boolean).join('')
+  const knowing = [b.summary ? `<li><span class="td-next-sum">${esc(b.summary)}</span></li>` : '', ...exp.map((x) => `<li><b>${x.kind === 'reply' ? '' : 'You owe: '}</b>${owe(x)}</li>`)].filter(Boolean).join('')
   const left = `<div class="td-next-main">${head}<span class="mono set-sub">${[coming ? `${coming} ${coming === 1 ? 'person' : 'people'}` : '', n.scheduled ? 'records when it starts' : ''].filter(Boolean).join(' · ')}</span>${knowing ? `<h3 class="td-next-cap">Walk in knowing</h3><ul class="td-next-list">${knowing}</ul>` : ''}${acts}</div>`
   const right = `<div class="td-next-side">${people.length ? `<h3 class="td-next-cap">Who's coming</h3><div class="td-avs" role="list" aria-label="Who's coming">${faces}${more}</div>${fresh ? `<p class="set-sub">${fresh}</p>` : ''}` : ''}${(b.ask || []).length ? `<h3 class="td-next-cap">Ask them</h3><ul class="td-next-list">${b.ask.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}${n.scheduled ? '<span class="td-next-rec">● Recording starts with the call</span>' : ''}</div>`
   return `<section class="td-card td-next td-next-l" aria-label="Next meeting">${left}${right}</section>`
@@ -231,7 +232,7 @@ function agendaView(d, now) {
   if (skipped.length) {
     nowDrawn = true
     html += S.tdSkipped
-      ? skipped.map((x) => line({ kind: x.kind, item: x, at: new Date(x.start), past: new Date(x.end || x.start) < now, going: x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes' }, true)).join('') + '<button class="link-btn ag-skip" data-td-skipped="0">Hide the skipped</button>'
+      ? [...skipped].sort((a, b) => new Date(a.start) - new Date(b.start)).map((x) => line({ kind: x.kind, item: x, at: new Date(x.start), past: new Date(x.end || x.start) < now, going: x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes' }, true)).join('') + '<button class="link-btn ag-skip" data-td-skipped="0">Hide the skipped</button>'
       : `<button class="link-btn ag-skip" data-td-skipped="1">Show ${skipped.length} skipped</button>`
   }
   return html
@@ -295,6 +296,17 @@ document.addEventListener('keydown', (e) => {
   const id = S.cal.ctx.id
   setTimeout(() => { const b = document.querySelector(`[data-td-menu="${CSS.escape(id)}"]`); if (b) b.focus() })
 })
+
+/** A list cut by its card's height shows a fade at the bottom while there is more below (window-ui R10: one scroll
+ *  per card, and the cut must show). */
+function todayMoreCue() {
+  for (const el of document.querySelectorAll('.td .td-rows, .td .td-tasks')) {
+    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 4
+    if (more !== el.hasAttribute('data-more')) el.toggleAttribute('data-more', more)
+  }
+}
+document.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches('.td-rows, .td-tasks')) todayMoreCue() }, true)
+window.addEventListener('resize', () => { if (S.view === 'today') todayMoreCue() })
 
 // ── day lanes: Your day's meetings side by side, the hours shown (no DOM: `today-calendar.test.mjs`) ──────────────
 /** Each meeting with its lane and its cluster's lane count: overlapping ones side by side, the next free lane reused. */
@@ -402,9 +414,12 @@ function agendaRows(day, now, tasks) {
     if (g) g.push(m); else groups.push([m])
   }
   const rows = [], skipped = []
-  for (const group of groups) {
+  for (const g0 of groups) {
+    // A line whose first meeting is over shows the one of it you go to still on (it, not the past one, is where you are).
+    const on = g0[0].e < now && g0.find((m) => m.g === 'yes' && m.e > now)
+    const group = on ? [on, ...g0.filter((m) => m !== on)] : g0
     const shown = group[0], others = group.slice(1), yes = group.filter((m) => m.g === 'yes')
-    const row = { kind: shown.x.kind, item: shown.x, at: shown.s, end: shown.e, going: shown.g, past: shown.e < now }
+    const row = { kind: shown.x.kind, item: shown.x, at: shown.s, end: shown.e, going: shown.g, past: shown.e < now, members: group.map((m) => m.x) }
     const unsure = shown.g === 'noreply' ? 'no reply' : shown.g === 'maybe' ? 'maybe' : ''
     if (!others.length) row.why = unsure
     else if (yes.length === 1) { row.choice = 'made'; row.why = `instead of ${others[0].x.subject || 'another'} · ${others.length} skipped` }
@@ -430,7 +445,10 @@ function agendaRows(day, now, tasks) {
     if (be > cur) cur = be
   }
   rows.sort((a, b) => a.at - b.at || (a.kind === 'work' ? 1 : -1))
-  const next = rows.find((r) => r.kind === 'meeting' && r.going === 'yes' && r.end > now)
+  // The next: the line holding the first meeting you go to that isn't over — the Next meeting widget's rule
+  // (widgets::next), so the two never disagree; folded into another line, that line is the next.
+  const first = items.find((m) => m.x.kind === 'meeting' && m.g === 'yes' && m.e > now)
+  const next = first && rows.find((r) => r.members && r.members.includes(first.x))
   if (next) next.next = true
   return { rows, skipped }
 }
