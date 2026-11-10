@@ -58,7 +58,10 @@ pub fn upcoming() -> Value {
     // here, and named in `recorded` (its prep id → its call) for a view of it left open to move to the call.
     let recorded = calls_today_by_meeting();
     let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
-    let list: Vec<Value> = crate::watch::agenda()
+    // In time order (the agenda is in the calendar's order, which isn't by start).
+    let mut agenda = crate::watch::agenda();
+    agenda.sort_by_key(|m| time(m.start.as_deref()));
+    let list: Vec<Value> = agenda
         .into_iter()
         .filter(|m| !m.id.as_ref().is_some_and(|i| recorded.iter().any(|(e, _)| e == i)))
         // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
@@ -659,6 +662,12 @@ mod tests {
         let v = upcoming();
         let subjects: Vec<&str> = v["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str()).collect();
         assert_eq!(subjects, ["Still to come"]);
+        // In time order whatever the agenda's order (#346).
+        let later: MeetingContext = serde_json::from_value(json!({"id": "ev-late", "subject": "Later", "start": at(1), "end": at(2), "response": "accepted"})).unwrap();
+        let sooner: MeetingContext = serde_json::from_value(json!({"id": "ev-soon", "subject": "Sooner", "start": at(0), "end": at(2), "response": "accepted"})).unwrap();
+        crate::watch::write_agenda(&[later, m("ev-next", "Still to come"), sooner]).unwrap();
+        let subjects: Vec<String> = upcoming()["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str().map(str::to_owned)).collect();
+        assert_eq!(subjects, ["Still to come", "Sooner", "Later"]);
         assert_eq!(v["recorded"][id_of("ev-rec")], json!(call));
     }
 
