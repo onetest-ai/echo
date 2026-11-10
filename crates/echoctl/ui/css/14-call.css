@@ -124,7 +124,7 @@
    name can't push the tabs and the minutes out of the window. */
 .doc-head .people { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 /* A person's name in a meeting's prep, a field's value in an item's or a person's details: the same wrap. */
-.pr-who, .wp-val { overflow-wrap: anywhere; min-width: 0; }
+.wp-val { overflow-wrap: anywhere; min-width: 0; }
 .turn { display: grid; grid-template-columns: 56px 1fr; gap: 12px; scroll-margin-top: 80px; }
 .turn time { font-family: var(--mono); font-size: 11px; color: var(--text-3); padding-top: 3px; text-align: right; }
 .turn .who { font-size: 12px; font-weight: 650; margin-bottom: 1px; }

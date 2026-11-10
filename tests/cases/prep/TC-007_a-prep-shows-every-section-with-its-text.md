@@ -1,6 +1,6 @@
 ---
 id: TC-007
-title: A written prep shows In short, Expected from you, Last time, Open with these people, New since then, Who's coming and how it was written
+title: A written prep shows In short, Expected from you, Last time, Open with these people, New since then and how it was written
 priority: high
 type: functional
 requirements: [F-PREP-04, F-PREP-02]
@@ -11,7 +11,7 @@ data: standard
 tags: [prep, sections]
 ---
 
-# TC-007: A written prep shows In short, Expected from you, Last time, Open with these people, New since then, Who's coming and how it was written
+# TC-007: A written prep shows In short, Expected from you, Last time, Open with these people, New since then and how it was written
 
 **Module:** Prep | **Priority:** High | **Type:** Functional
 
@@ -43,7 +43,7 @@ The dates are the build's: `<today>` its day, `<yesterday>` the day before, `<7 
 | 4 | Read the section "Last time · <7 days ago>" | The highlight "The Berlin pilot needs SSO first" and "Still to do" "Send the SSO checklist" · "Me" |
 | 5 | Read the section "Open with these people" | "Task" "Get the access list" · "Omar Haddad" · "late" (class `warn`); "Risk" "The access list arrives late"; "Question" "Is Munich in scope?" · <today> |
 | 6 | Read the section "New since then" | Two lines: the mail from Dana Lee "Re: SSO checklist" with "Thanks, security has it.", and the chat from Omar Haddad "Acme rollout chat" with "Access list by Monday."; only titles, senders and snippets |
-| 7 | Read the footer of the side column | "Written <time> · sonnet", the time an hour before the build as the browser's locale writes hours and minutes ("07:32 AM" in en-US, "07:32" in en-GB) and a button "Write it again" (do not press it: it starts Claude Code) |
+| 7 | Read the footer under the sections | "Written <time> · sonnet", the time an hour before the build as the browser's locale writes hours and minutes ("07:32 AM" in en-US, "07:32" in en-GB) and a button "Write it again" (do not press it: it starts Claude Code) |
 
 ## Expected Final State
 The prep of Globex sponsor update is open with all its sections.

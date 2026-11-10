@@ -55,6 +55,13 @@ pub struct MeetingContext {
     /// notResponded, none); none when the source doesn't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
+    /// How each invited person answered (Graph `status.response`, by lowercased address): accepted,
+    /// tentativelyAccepted, declined, notResponded, none.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub answers: std::collections::BTreeMap<String, String>,
+    /// Those who declined: not among `attendees`, shown last in the call's header.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declined: Vec<Person>,
 }
 
 pub const FILE: &str = "meeting.json";

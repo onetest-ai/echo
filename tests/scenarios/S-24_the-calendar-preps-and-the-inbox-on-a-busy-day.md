@@ -16,7 +16,7 @@ cases:
   - tests/cases/calendar/TC-026_arming-a-zoom-or-google-meet-meeting-says-recording-isnt-available-yet.md
   - tests/cases/prep/TC-006_coming-up-today-lists-the-meetings-still-to-come-and-leaves-out-unanswered-ones.md
   - tests/cases/prep/TC-007_a-prep-shows-every-section-with-its-text.md
-  - tests/cases/prep/TC-008_more-than-ten-people-show-ten-new-first-and-and-n-more.md
+  - tests/cases/prep/TC-008_a-meetings-header-shows-how-each-person-answered.md
   - tests/cases/prep/TC-009_sections-follow-what-the-prep-holds.md
   - tests/cases/prep/TC-014_echoctl-prep-lists-and-shows-preps-on-the-standard-day.md
   - tests/cases/calendar/TC-022_week-shows-calls-without-a-meeting-as-blocks-of-their-own.md
@@ -81,8 +81,8 @@ cases:
 | 10 | `calendar/TC-026_arming-a-zoom-or-google-meet-meeting-says-recording-isnt-available-yet.md` | — | In step 1 skip the navigation to the Day view only if it is on screen; Your day is read again in step 5 |
 | 11 | `prep/TC-006_coming-up-today-lists-the-meetings-still-to-come-and-leaves-out-unanswered-ones.md` | — | Skip its teardown: Coming up today stays unfolded for stage 12 |
 | 12 | `prep/TC-007_a-prep-shows-every-section-with-its-text.md` | — | On stage 11's view: in step 1 skip the navigation and the click on "Coming up today" (it is unfolded); click its row "Globex sponsor update" |
-| 13 | `prep/TC-008_more-than-ten-people-show-ten-new-first-and-and-n-more.md` | — | On stage 12's view: skip step 1 (the prep is open). Skip its teardown |
-| 14 | `prep/TC-009_sections-follow-what-the-prep-holds.md` | — | On stage 13's view: in step 1 skip the navigation and the clicks (Umbrella intro call is open on Prep) |
+| 13 | `prep/TC-008_a-meetings-header-shows-how-each-person-answered.md` | — | On stage 12's view: in step 1 skip the navigation and the click on "Coming up today" (it is unfolded). Skip its teardown |
+| 14 | `prep/TC-009_sections-follow-what-the-prep-holds.md` | — | — |
 | 15 | `prep/TC-014_echoctl-prep-lists-and-shows-preps-on-the-standard-day.md` | — | — |
 | 16 | `calendar/TC-022_week-shows-calls-without-a-meeting-as-blocks-of-their-own.md` | — | — |
 | 17 | `calendar/TC-019_series-record-choice-is-kept.md` | — | Run its teardown (stage 40 reads Globex weekly's rule as the data has it, ask); its reload ends on the Day view |

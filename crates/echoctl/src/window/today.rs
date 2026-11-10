@@ -12,7 +12,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         "/api/upcoming" => json_reply(crate::prep::upcoming()),
         p if p.starts_with("/api/prep/") => {
             let id = &p["/api/prep/".len()..];
-            json_reply(crate::prep::load(id).unwrap_or_else(|| json!({ "none": true, "writing": crate::prep::writing(id) })))
+            let mut v = crate::prep::load(id).unwrap_or_else(|| json!({ "none": true, "writing": crate::prep::writing(id) }));
+            // Who is invited now, with their answers (the prep's own list is from when it was written).
+            if let Some(a) = crate::prep::attendees(id) {
+                v["attendees"] = a;
+            }
+            json_reply(v)
         }
         // A mail of Needs you now, to read it here (its new part as text, escaped by the page).
         "/api/needs/mail" => {

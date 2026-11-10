@@ -33,7 +33,7 @@ tags: [prep, fake-claude, known-issue]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync", click "Coming up today" and the row "Initech team lunch" | The page says "No prep yet", "Echo writes it this morning for every meeting of a thread." and the button "Prepare now" |
-| 2 | Click "Prepare now" and wait 10 seconds | The page shows the reason "Claude · work: test data: Claude Code is a fake here" (not the "No prep yet" box) and, under "Who's coming", "Kim Park" |
+| 2 | Click "Prepare now" and wait 10 seconds | The page shows the reason "Claude · work: test data: Claude Code is a fake here" (not the "No prep yet" box); the header lists "Kim Park" |
 | 3 | Run `echoctl prep --show <the row's prep id>` | JSON with `error` "Claude · work: test data: Claude Code is a fake here" and one person, Kim Park |
 | 4 | Read the row's `title` in Coming up today | "Prep ready" |
 
