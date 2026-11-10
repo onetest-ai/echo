@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calendar, series]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-018: A recurring meeting's card shows what Echo does with every meeting of its series: Record, Ask or Don't record, and the language

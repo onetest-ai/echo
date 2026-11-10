@@ -1158,7 +1158,28 @@
     "from": -1,
     "days": 7,
     "inMin": "{when} · in {n} min",
-    "inHours": "{when} · in {n} h"
+    "inHours": "{when} · in {n} h",
+    "everyMeeting": "Every meeting of this series",
+    "language": "Language",
+    "recordWhen": "Record when it starts",
+    "recordButtons": [
+      "Record when it starts",
+      "Join & record",
+      "Record",
+      "Record it"
+    ],
+    "notYet": "Recording isn't available for {app} meetings yet.",
+    "armRefused": "Error: “{subject}” is a {app} meeting: recording isn't available for {app} meetings yet",
+    "importButton": "Import Teams transcript",
+    "notSignedIn": "not signed in to Microsoft 365 — `echoctl calendar login`",
+    "showPrep": "Show prep",
+    "prepareAgain": "Prepare again",
+    "prepare": "Prepare",
+    "prepareLine": "Prepare writes last time, what is open, what is new and who is coming.",
+    "apps": [
+      "Zoom",
+      "Google Meet"
+    ]
   },
   "threads": {
     "routes": {

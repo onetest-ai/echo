@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calendar, today, zoom, google-meet]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-025: A Zoom or Google Meet invite with its link only in the body shows in the calendar and Today, labelled with its app
