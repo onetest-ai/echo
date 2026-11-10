@@ -338,9 +338,12 @@ pub fn view() -> Value {
     json!({"items": items, "checked_at": st["checked_at"], "errors": st["errors"], "signed_in": graph::account().is_some()})
 }
 
-/// An item of Needs you now by its id, as it was read (for `echo://needs/<id>` and Claude's work on it).
+/// An item of Needs you now by its id, as it was read (for `echo://needs/<id>` and Claude's work on it): from the
+/// list, or — once decided and gone from it at the next read — from its decision, which keeps a copy.
 pub fn item(id: &str) -> Option<Value> {
-    load()["items"].as_array().into_iter().flatten().find(|x| x["id"].as_str() == Some(id)).cloned()
+    let st = load();
+    st["items"].as_array().into_iter().flatten().find(|x| x["id"].as_str() == Some(id)).cloned()
+        .or_else(|| Some(st["decided"][id]["item"].clone()).filter(|v| v.is_object()))
 }
 
 /// The user's decision on an item: `todo` (a task of theirs in `thread`, made here), `wont` (gone; Won't do's
@@ -362,7 +365,7 @@ pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, no
         anyhow::bail!("decide: todo, wont or claude");
     }
     let mut d = st["decided"].as_object().cloned().unwrap_or_default();
-    let mut dv = json!({"how": how, "at": Utc::now().to_rfc3339()});
+    let mut dv = json!({"how": how, "at": Utc::now().to_rfc3339(), "item": item});
     if let Some(n) = note.map(str::trim).filter(|n| !n.is_empty()) {
         dv["note"] = json!(n.chars().take(1000).collect::<String>());
     }
@@ -467,6 +470,12 @@ mod tests {
         assert!(decide("hot:x", "claude", None, None, None).unwrap()["made"].is_null());
         assert_eq!((load()["decided"]["hot:x"]["how"].as_str(), view()["items"].as_array().unwrap().len()), (Some("claude"), 0));
         assert!(decide("mail:old", "maybe", None, None, None).is_err(), "todo, wont or claude only");
+        // The next read drops it from the list; its link still reads it, from the decision's copy.
+        let mut st = load();
+        st["items"] = json!([]);
+        save(&st).unwrap();
+        assert_eq!(item("hot:x").unwrap()["line"], "Checkout is down");
+        assert!(item("hot:never").is_none());
     }
 
     #[test]

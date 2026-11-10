@@ -79,7 +79,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
   })
 
   // Not a stage of the manual S-24: runs after Won't do (cancelled) and I'll do it (on the mail), on the chat's item.
-  test("after · ✦ opens My work's Claude dialog on an item; Yolo hands it over by its link, no task made, and it leaves the list", covers('today/TC-014', 'F-TODAY-04'), async ({ page }) => {
+  test("after · ✦ opens My work's Claude dialog on an item; Yolo works on it by its link, no task made; a failed run gives it back", covers('today/TC-014', 'F-TODAY-04'), async ({ page }) => {
     const { needs: n } = data.set
     const t = data.text.needs
     const today = new TodayPage(page, data)
@@ -90,9 +90,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.claudeDialog).toContainText(`${n.chatThread.name} · ${n.chat} — ${n.chatLine}`)
     await expect(today.claudeSkill).toHaveAttribute('placeholder', new RegExp(`^${t.skillPlaceholder}`))
     await today.claudeYolo.click()
-    await expect(today.item(n.chat, n.chatLine)).toHaveCount(0)
+    await expect(today.item(n.chat, n.chatLine)).toHaveCount(0) // Claude is on it
     await expect(today.askBar).toContainText(data.text.fake.claudeFails, { timeout: 15_000 })
-    expect(data.json(data.home, data.text.needs.file).decided[n.chatId].how).toBe(t.handedBy)
+    await expect(today.askBar).toContainText(`${n.chat}: `)
+    await expect(today.askBar).toContainText(t.stillThere)
+    await expect(today.item(n.chat, n.chatLine)).toBeVisible() // the run failed: the item is back
+    expect((data.json(data.home, data.text.needs.file).decided || {})[n.chatId]).toBeUndefined() // not handed over
     expect(data.read(data.home, 'projects', n.chatThread.id, 'ledger/events.jsonl')).toBe(before)
     // Claude got the item by its link only, and the link reads it.
     const prompt = data.yoloPrompts().at(-1)

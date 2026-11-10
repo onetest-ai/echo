@@ -80,7 +80,7 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
+  return `<div class="td">${head}${needsView(d.needs, d.asks)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
 }
 
 // Needs you now's actions: Reply with where it goes (Teams' logo, or a mail's envelope), I'll do it (a box ticked),
@@ -89,8 +89,10 @@ const TEAMS_LOGO = '<svg class="nd-logo" viewBox="0 0 24 24" width="14" height="
 const ND_MAIL = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'
 /** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
  *  (the app) or Read and reply (a mail, here); I'll do it (a task, in a thread) or Won't do. Empty: not drawn. */
-function needsView(n) {
-  const items = (n && n.items) || []
+function needsView(n, asks) {
+  // An item Claude is working on (its Yolo running) stays out of the list until the run ends: handed over, or back.
+  const busy = new Set((asks || []).filter((a) => a.state === 'working' && a.item).map((a) => a.item))
+  const items = ((n && n.items) || []).filter((x) => !busy.has(x.id))
   if (!items.length) return ''
   const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${Math.max(m, 1)} min` : `${Math.round(m / 60)} h` }
   const rows = items.map((x) => {

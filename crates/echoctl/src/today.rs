@@ -337,8 +337,8 @@ fn yolo_needs_prompt(item_id: &str, skill: &str, words: &str) -> String {
 }
 
 /// Yolo on an item of Needs you now, from Claude's dialog (no task made): as a task's Yolo (`yolo_task`), on the item's
-/// thread's AI profile (or the default), with no task of a thread to change. The item is decided (`claude`): it
-/// leaves Needs you now. The outcome lands in `task-asks.json` by `id`.
+/// thread's AI profile (or the default), with no task of a thread to change. The item is decided (`claude`) only when
+/// the run finished: a failed one leaves it in Needs you now. The outcome lands in `task-asks.json` by `id`.
 #[cfg(feature = "js")]
 pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<()> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -361,9 +361,9 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         plugins: vec![],
         task: None,
     };
-    crate::needs::decide(item_id, "claude", None, None, None)?;
-    let id = id.to_string();
-    save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
+    let (id, item_id) = (id.to_string(), item_id.to_string());
+    // The run names its item: Today keeps it out of Needs you now while the run works.
+    save_ask(json!({"id": id, "state": "working", "title": title, "item": item_id, "at": Local::now().to_rfc3339()}));
     std::thread::spawn(move || {
         let mut spec = spec;
         let out = crate::skills::plugin().and_then(|d| {
@@ -371,8 +371,14 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
             crate::claudejob::run(&spec)
         });
         let mut v = match out {
-            Ok((answer, _, _)) => json!({"state": "done", "say": answer.trim().chars().take(400).collect::<String>()}),
-            Err(e) => json!({"state": "failed", "say": format!("{e:#}")}),
+            Ok((answer, _, _)) => {
+                // Handed over: the item leaves Needs you now (a decision kept even if it's gone from the list by now).
+                if let Err(e) = crate::needs::decide(&item_id, "claude", None, None, None) {
+                    eprintln!("yolo {id}: the item stays in Needs you now: {e:#}");
+                }
+                json!({"state": "done", "say": answer.trim().chars().take(400).collect::<String>()})
+            }
+            Err(e) => json!({"state": "failed", "say": format!("{title}: {e:#} — it is still in Needs you now")}),
         };
         v["id"] = json!(id);
         v["title"] = json!(title);
