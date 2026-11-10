@@ -35,4 +35,4 @@ auto: [tests/auto/specs/S-02.spec.mjs]
 | 4 | Over the line of "Globex design review", click its ⋯ (or right-click the line); then the same for "Acme demo" | Calendar's menu for the meeting, with "Prepare" and "Record when it starts" (the lines hold no buttons: their actions are in the menu) |
 
 ## Expected Final State
-The line "now" sits between Initech planning and Globex design review, and both coming meetings are visible under it with Prepare and Record when it starts.
+The line "now" sits between Initech planning and Globex design review; the coming meetings are listed under it, each with Prepare and Record when it starts in its ⋯ menu.

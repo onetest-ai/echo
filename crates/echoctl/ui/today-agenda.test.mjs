@@ -59,6 +59,26 @@ test('a recorded call (no meeting) is a line you were at', () => {
   assert.equal(show(r), 'A call yes | Review yes next')
 })
 
+test('a long meeting you are unsure of does not chain the day: the ones you go to keep their lines', () => {
+  const r = agendaRows([mt('Conference', 9, 0, 17, 0, 'notResponded'), mt('Standup', 9, 30, 9, 45), mt('Review', 14, 0, 15, 0)], day(8, 0), [])
+  assert.equal(show(r), 'Standup yes next made instead of Conference · 1 skipped | Review yes')
+})
+
+test('your work never lands on a meeting you go to, even a folded one', () => {
+  const r = agendaRows([mt('Acme', 14, 30, 15, 30), mt('Vendor', 15, 0, 17, 30)], day(14, 0), [{ title: 'Budget split', id: 'T1', project: 'p' }])
+  assert.equal(r.rows.filter((x) => x.kind === 'work').length, 0, show(r))
+})
+
+test('an overlap with no yes is not a choice: it keeps its reason and counts the others', () => {
+  const r = agendaRows([mt('Ops', 11, 0, 12, 0, 'notResponded'), mt('Lunch talk', 11, 30, 12, 30, 'tentativelyAccepted')], day(9, 0), [])
+  assert.equal(show(r), 'Ops noreply no reply · 1 other at once')
+})
+
+test('a choice that is past is no longer one to make', () => {
+  const r = agendaRows([mt('Acme', 9, 0, 10, 0), mt('Hiring', 9, 0, 9, 30)], day(11, 0), [])
+  assert.equal(show(r), 'Acme yes 1 other at once')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

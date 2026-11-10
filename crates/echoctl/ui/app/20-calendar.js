@@ -300,6 +300,6 @@ for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.ca
 PANEL_VIEWS.push({
   id: 'meeting', label: 'Meeting', area: 'right',
   icon: ICON('<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/>'),
-  when: () => S.view === 'today' && !!S.cal.selected && !!(S.cal.data && (S.cal.data.events || []).some((e) => e.id === S.cal.selected)),
-  render: () => { const e = S.cal.data.events.find((x) => x.id === S.cal.selected); return `<div class="cal td-meeting">${eventDetail(e, new Date())}</div>` },
+  when: () => S.view === 'today' && !!S.tdSel && !!(S.tdCal && (S.tdCal.events || []).some((e) => e.id === S.tdSel)),
+  render: () => { const e = S.tdCal.events.find((x) => x.id === S.tdSel); return `<div class="cal td-meeting">${eventDetail(e, new Date())}</div>` },
 })

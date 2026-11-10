@@ -4,7 +4,7 @@ title: Plan the afternoon: what's left today, the calendar, set a meeting to rec
 run: agent
 data: small
 cases:
-  - tests/cases/today/TC-001_your-day-only-accepted-meetings.md
+  - tests/cases/today/TC-001_your-day-lists-where-youll-be.md
   - tests/cases/today/TC-002_your-day-line-now.md
   - tests/cases/window/TC-009_calendar-day-week.md
   - tests/cases/window/TC-010_calendar-card.md
@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-02.spec.mjs]
 
 | # | Case | Depends on | Before it |
 |---|------|------------|-----------|
-| 1 | `today/TC-001_your-day-only-accepted-meetings.md` | — | — |
+| 1 | `today/TC-001_your-day-lists-where-youll-be.md` | — | — |
 | 2 | `today/TC-002_your-day-line-now.md` | — | On stage 1's view (`#today`): skip step 1 |
 | 3 | `window/TC-009_calendar-day-week.md` | — | — |
 | 4 | `window/TC-010_calendar-card.md` | — | On stage 3's view (Week, today's week after its step 5): skip the navigation of step 1; check its result (today's column has Globex design review) on the snapshot |

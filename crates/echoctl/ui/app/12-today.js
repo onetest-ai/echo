@@ -78,7 +78,7 @@ function todayView() {
     const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${parts[id]}</div>` : parts[id]))
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
   }).join('')
-  return `<div class="td">${head}${asks}${blocks}${empty}${S.cal.ctx && S.cal.data ? eventMenu(S.cal.data, now) : ''}</div>`
+  return `<div class="td">${head}${asks}${blocks}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
@@ -215,29 +215,40 @@ function agendaView(d, now) {
     const before = !nowDrawn && r.at > now ? (nowDrawn = true, nowLine()) : ''
     if (r.kind === 'work') {
       const t = r.task
-      return `${before}<div class="ag-row ag-work" role="listitem" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}" tabindex="0" aria-label="${esc(`Your work: ${t.title}`)}"><span class="ag-t mono">${esc(hm(r.at))}</span><span class="ag-bar work"></span><div class="ag-b"><div class="ag-s">${esc(t.title)}</div><div class="ag-why mono">${esc(r.why)}</div></div></div>`
+      return `${before}<div class="ag-row ag-work" role="listitem" aria-label="${esc(`Your work: ${t.title}`)}"><span class="ag-t mono">${esc(hm(r.at))}</span><span class="ag-bar work"></span><div class="ag-b"><div class="ag-s"><button class="link-btn ag-task" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}">${esc(t.title)}</button></div><div class="ag-why mono">${esc(r.why)}</div></div></div>`
     }
     const x = r.item
     const tcls = r.next ? ' next' : r.choice ? ' choice' : r.kind === 'work' ? ' work' : ''
     const why = [folded ? 'skipped' : r.why ? esc(r.why) : '', ...extra(x, r.past)].filter(Boolean).join(' · ')
-    const more = x.event ? `<button class="icon-btn ag-more" data-td-menu="${esc(x.event)}" aria-haspopup="menu" aria-label="${esc(x.subject || 'A meeting')} — actions" title="Actions">${ICON('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')}</button>` : ''
+    const more = x.event ? `<button class="icon-btn ag-more" data-td-menu="${esc(x.event)}" aria-haspopup="menu" aria-expanded="${!!(S.cal.ctx && S.cal.ctx.id === x.event)}" aria-label="${esc(x.subject || 'A meeting')} — actions" title="Actions">${ICON('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')}</button>` : ''
     return `${before}<div class="ag-row${r.past ? ' past' : ''}${folded ? ' folded' : ''}" role="listitem"${x.event ? ` data-td-ev="${esc(x.event)}"` : ''} aria-label="${esc(x.subject || 'A call')}"><span class="ag-t mono${tcls}">${esc(hm(r.at))}</span><span class="ag-bar ${esc(r.going)}"></span><div class="ag-b"><div class="ag-s">${r.next ? `<b>${esc(x.subject || 'A meeting')}</b> <span class="chip">next</span>` : esc(x.subject || 'A call')}${appTag(x)}${chipsOf(x)}</div>${why ? `<div class="ag-why mono">${why}</div>` : ''}</div>${more}</div>`
   }
   let html = rows.map((r) => line(r)).join('')
   if (!nowDrawn && rows.length) html += nowLine()
   if (skipped.length) {
+    nowDrawn = true
     html += S.tdSkipped
       ? skipped.map((x) => line({ kind: x.kind, item: x, at: new Date(x.start), past: new Date(x.end || x.start) < now, going: x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes' }, true)).join('') + '<button class="link-btn ag-skip" data-td-skipped="0">Hide the skipped</button>'
       : `<button class="link-btn ag-skip" data-td-skipped="1">Show ${skipped.length} skipped</button>`
   }
   return html
 }
-// Your day's meeting: ⋯ or a right-click → Calendar's menu for it; a click on the line → its card on the right. Both
-// from Calendar's own data (its handlers keep it fresh), loaded for this week when it isn't.
+// Your day's meeting: ⋯ or a right-click → Calendar's menu for it; a click on the line → its card on the right. From
+// today's calendar, read for Today on each open (Calendar's own data and week are left as they are).
 async function todayMeeting(id) {
-  const has = () => S.cal.data && (S.cal.data.events || []).some((e) => e.id === id)
-  if (!has()) { S.cal.offset = 0; await loadCalendar(); }
-  return has()
+  try { S.tdCal = await get(`api/calendar?start=${ymd(new Date())}&days=1`) } catch (e) { S.tdCal = null }
+  return !!(S.tdCal && (S.tdCal.events || []).some((e) => e.id === id))
+}
+function todayMenu(id, x, y) {
+  // After every click handler has run (Calendar's "a click closes the menu" among them), so this one stays open.
+  setTimeout(() => { S.cal.ctx = { id, x, y }; render(); const f = document.querySelector('.ev-ctx .menu-item:not([disabled])'); if (f) f.focus() })
+}
+function todayCard(id) {
+  S.tdSel = id
+  const known = panelViews()
+  if (Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) S.overlay = true
+  Layout.show('meeting', known)
+  layoutChanged()
 }
 document.addEventListener('click', async (e) => {
   if (S.view !== 'today' || !e.target.closest) return
@@ -245,27 +256,34 @@ document.addEventListener('click', async (e) => {
   if (sk) { S.tdSkipped = sk.dataset.tdSkipped === '1'; return render() }
   const m = e.target.closest('[data-td-menu]')
   if (m) {
-    // Calendar's own "any click closes the menu" comes after this listener and would close the one just opened.
-    e.stopImmediatePropagation()
     const id = m.dataset.tdMenu, r = m.getBoundingClientRect()
-    if (await todayMeeting(id)) { S.cal.ctx = { id, x: r.left, y: r.bottom + 4 }; render() }
+    if (await todayMeeting(id)) todayMenu(id, r.left, r.bottom + 4)
     return
   }
+  // In the menu or the card: an action ran — read today's calendar again, so both say what it is now.
+  if (e.target.closest('.ev-ctx, .td-meeting')) setTimeout(async () => { if (S.tdSel || S.cal.ctx) { await todayMeeting(S.tdSel || ''); render() } }, 600)
+  if (e.target.closest('.td-meeting [data-calclose]')) { S.tdSel = null; return render() }
   // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card on the right.
   const it = e.target.closest('[data-ev-ctx]')
-  if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) { S.cal.selected = it.dataset.id; Layout.show('meeting', panelViews()); return layoutChanged() }
+  if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) return todayCard(it.dataset.id)
   const row = e.target.closest('.ag-row[data-td-ev]')
   if (row && !e.target.closest('button, a, .pj-chip')) {
     const id = row.dataset.tdEv
-    if (await todayMeeting(id)) { S.cal.selected = id; Layout.show('meeting', panelViews()); layoutChanged() }
+    if (await todayMeeting(id)) todayCard(id)
   }
 })
 document.addEventListener('contextmenu', async (e) => {
   const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev]')
   if (!row) return
   e.preventDefault()
-  const id = row.dataset.tdEv
-  if (await todayMeeting(id)) { S.cal.ctx = { id, x: e.clientX, y: e.clientY }; render() }
+  const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
+  if (await todayMeeting(id)) todayMenu(id, x, y)
+})
+// Escape in the menu: Calendar closes it; the keyboard goes back to the line's ⋯.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || S.view !== 'today' || !S.cal.ctx) return
+  const id = S.cal.ctx.id
+  setTimeout(() => { const b = document.querySelector(`[data-td-menu="${CSS.escape(id)}"]`); if (b) b.focus() })
 })
 
 // ── agenda rows: Your day as "where you'll be" (no DOM: `today-agenda.test.mjs`) ──────────────────────────────────
@@ -278,25 +296,36 @@ function agendaRows(day, now, tasks) {
   const t = (s) => (s ? new Date(s) : null)
   const going = (x) => (x.kind === 'call' ? 'yes' : x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes')
   const items = (day || []).filter((x) => x.start).map((x) => ({ x, s: t(x.start), e: t(x.end) || t(x.start), g: going(x) })).sort((a, b) => a.s - b.s)
+  const meets = (a, b) => a.s < b.e && b.s < a.e
+  // Groups around the places you go: a meeting you go to opens one, and one you go to that overlaps it joins it (a
+  // choice); a meeting you aren't sure of joins the first group it overlaps, else opens its own. No chains: two
+  // meetings that don't overlap each other never share a line.
+  const groups = []
+  for (const m of items.filter((m) => m.g === 'yes')) {
+    const g = groups.find((g) => meets(g[0], m))
+    if (g) g.push(m); else groups.push([m])
+  }
+  for (const m of items.filter((m) => m.g !== 'yes')) {
+    const g = groups.find((g) => g.some((o) => o.g === 'yes' && meets(o, m))) || groups.find((g) => g[0].g !== 'yes' && meets(g[0], m))
+    if (g) g.push(m); else groups.push([m])
+  }
   const rows = [], skipped = []
-  for (let i = 0; i < items.length;) {
-    const group = [items[i]]
-    let end = items[i].e
-    for (i++; i < items.length && items[i].s < end; i++) { group.push(items[i]); if (items[i].e > end) end = items[i].e }
-    const yes = group.filter((m) => m.g === 'yes')
-    const shown = yes[0] || group[0]
-    const others = group.filter((m) => m !== shown)
+  for (const group of groups) {
+    const shown = group[0], others = group.slice(1), yes = group.filter((m) => m.g === 'yes')
     const row = { kind: shown.x.kind, item: shown.x, at: shown.s, end: shown.e, going: shown.g, past: shown.e < now }
-    if (!others.length) row.why = shown.g === 'noreply' ? 'no reply' : shown.g === 'maybe' ? 'maybe' : ''
+    const unsure = shown.g === 'noreply' ? 'no reply' : shown.g === 'maybe' ? 'maybe' : ''
+    if (!others.length) row.why = unsure
     else if (yes.length === 1) { row.choice = 'made'; row.why = `instead of ${others[0].x.subject || 'another'} · ${others.length} skipped` }
-    else { row.choice = 'pending'; row.why = `${others.length} other${others.length === 1 ? '' : 's'} at once` }
+    else if (yes.length > 1) { if (!row.past) row.choice = 'pending'; row.why = `${others.length} other${others.length === 1 ? '' : 's'} at once` }
+    else row.why = `${unsure} · ${others.length} other${others.length === 1 ? '' : 's'} at once`
     others.forEach((m) => skipped.push(m.x))
     rows.push(row)
   }
-  // Your work in the free gaps you go nowhere, from now (to the quarter hour) to the end of the working day.
+  // Your work in the free gaps — none of the meetings you go to, folded or not — from now (to the quarter hour) to the
+  // end of the working day.
   const from = new Date(now); from.setMinutes(Math.ceil(from.getMinutes() / 15) * 15, 0, 0)
   const dayEnd = new Date(now); dayEnd.setHours(AG_DAY_END, 0, 0, 0)
-  const busy = rows.filter((r) => r.going === 'yes' && r.end > from).map((r) => [r.at, r.end])
+  const busy = items.filter((m) => m.g === 'yes' && m.e > from).map((m) => [m.s, m.e]).sort((a, b) => a[0] - b[0])
   const todo = [...(tasks || [])].sort((a, b) => (b.late ? 1 : 0) - (a.late ? 1 : 0)).slice(0, 2)
   let cur = from
   for (const [bs, be] of [...busy, [dayEnd, dayEnd]]) {
