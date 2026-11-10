@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, arm, second-instance]
 external_id: TC-REC-003
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-003: Cancelling an arm leaves nothing armed

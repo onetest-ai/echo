@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, stop, file-fed]
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-025: A Stop while Echo is busy ends the recording once it is free
@@ -30,7 +31,7 @@ tags: [recording, stop, file-fed]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run the prelude, then `target/debug/echoctl config --unscheduled manual --scheduled manual --auto-minutes false`, `target/debug/echoctl ai live off`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `$W 30 app`, `cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"`, `target/debug/echoctl arm --title "REC-025 busy"`, `$W 10 armed` | "waited … for app", then "waited … for armed" |
-| 2 | Run the prelude, then `$C start acme-sync --hold; $W 20 recording $T; target/debug/echoctl arm --title "REC-025 next"` | The recording runs; the second arm prints "armed" |
+| 2 | Run the prelude, then `$C start acme-sync --hold; $W 20 recording $T; target/debug/echoctl arm --title "REC-025 next"` | The recording runs; the second arm prints "armed — call in progress, recording starts within a second" (the words of an arm made during a call; this one waits for the next call: step 4) |
 | 3 | Run the prelude, then `kill -STOP $(cat "$D/app.pid"); sleep 8; target/debug/echoctl stop; ls "$ECHOCTL_HOME/.echo/stop.request" "$ECHOCTL_HOME/.echo/armed.json"` (the app is frozen as if a device call hung; its heartbeat is 8 s old) | `stop` prints "stopping", the folder and "Echo is busy for the moment"; never "nothing to stop" or "disarmed". Both files are listed |
 | 4 | Run the prelude, then `kill -CONT $(cat "$D/app.pid"); $W 15 event recording_stopped; $W 10 app; target/debug/echoctl status` (`status` reads a watcher whose heartbeat is fresh again) | "waited … for event recording_stopped"; `watcher.recording` is null, `watcher.armed` true (REC-025 next is still armed) |
 | 5 | Read `meta.json` of `$(ls -d "$ECHOCTL_HOME"/calls/*-$T)` | `stop_reason` is "user" |

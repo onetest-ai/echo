@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, second-instance, file-fed]
 external_id: TC-REC-006
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-006: A short drop and rejoin stays one recording
@@ -40,7 +41,7 @@ external_id: TC-REC-006
 | 2 | Run the prelude, then `cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"; ls "$ECHOCTL_HOME/calls" > "$D/before.txt"; target/debug/echoctl arm --title "REC-006 rejoin"; $W 10 armed; $C start acme-sync --hold; $W 20 recording rec-006-rejoin; target/debug/echoctl status | python3 -c 'import json,sys;print(json.load(sys.stdin)["watcher"]["recording"])' > "$D/rec.call"; cat "$D/rec.call"` | The recording's folder, ending `-rec-006-rejoin` |
 | 3 | Run the prelude, then `sleep $(python3 -c "import json,subprocess;print(max(0,38-json.loads(subprocess.check_output(['python3','$C','status']))['for_s']))"); $C end; sleep 4; $C start two-remotes --hold; sleep 5; target/debug/echoctl status; cat "$D/rec.call"` (the sleeps are the call's timeline: the first conversation runs out, the drop, the rejoin 4 s later, 5 s into it) | At 5 s into the second call `watcher.in_call` is true and `watcher.recording` is still the folder in `$D/rec.call` |
 | 4 | Run the prelude, then `sleep 31; $C end; $W 30 event recording_stopped; $W 120 event transcribed; diff "$D/before.txt" <(ls "$ECHOCTL_HOME/calls"); tail -n +$(( $(cat "$D/ev.start") + 1 )) "$ECHOCTL_HOME/.echo/events.jsonl" | grep -o '"event":"[a-z_]*"'` (the `sleep 31` lets the second conversation run out) | One new folder only (the recording's); after its `recording_started` the events are, in order, `call_ended`, `call_resumed`, `call_ended`, `recording_stopped`, `transcribed`: one `recording_started`, one `recording_stopped` |
-| 5 | Run the prelude, then `CALL="$(cat "$D/rec.call")"; grep -c -e "Berlin first" -e "training room" "$CALL/transcript.md"; grep -c -e "Omar is joining" -e "pilot plan" "$CALL/transcript.md"; python3 -c "import json,sys;[print(round(s['start']),s['text'][:50]) for s in json.load(open(sys.argv[1]))]" "$CALL/segments.json"` | Both counts 2 or more: both conversations are in the one transcript; the first conversation's last line ("…training room for Thursday") is followed by the second's first ("Hi everyone, Omar is joining…") with no segment between them: the gap is silence in the timeline |
+| 5 | Run the prelude, then `CALL="$(cat "$D/rec.call")"; grep -c -e "Berlin first" -e "training room" "$CALL/transcript.md"; grep -c -e "Omar is joining" -e "pilot plan" "$CALL/transcript.md"; python3 -c "import json,sys;[print(round(s['start']),s['text'][:50]) for s in json.load(open(sys.argv[1]))]" "$CALL/segments.json"` | Both counts 2 or more: both conversations are in the one transcript; the first conversation's last line ("…training room for Thursday") is followed by the second's first ("Hi everyone, Omar is joining us from the security team today.", one segment or split in two) with no other segment between them: the gap is silence in the timeline |
 
 ## Expected Final State
 A call dropped and rejoined within seconds is one recording, one folder and one transcript, with the gap as silence.

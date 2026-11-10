@@ -1531,6 +1531,87 @@
         "omar": "remote",
         "me": "me"
       }
+    },
+    "cancel": {
+      "title": "REC-003 cancelled"
+    },
+    "expire": {
+      "title": "REC-004 expiring",
+      "minutes": 16
+    },
+    "optIn": {
+      "conversation": "acme-sync",
+      "quiet": 6
+    },
+    "midCall": {
+      "conversation": "acme-sync",
+      "title": "REC-002 mid call",
+      "slug": "rec-002-mid-call",
+      "armAt": 13,
+      "endAt": 36,
+      "before": [
+        "single sign-on",
+        "SSO checklist"
+      ],
+      "after": [
+        "Berlin first",
+        "training room"
+      ],
+      "afterLines": 2
+    },
+    "terminal": {
+      "conversation": "acme-sync",
+      "title": "CLI-004 terminal",
+      "slug": "cli-004-terminal",
+      "stopAt": 20,
+      "stoppedBy": 30,
+      "endAt": 38,
+      "said": "checklist",
+      "notSaid": [
+        "Madrid",
+        "training room",
+        "Thursday"
+      ]
+    },
+    "pill": {
+      "conversation": "acme-sync",
+      "title": "REC-005 pill stop",
+      "slug": "rec-005-pill-stop",
+      "stoppedBy": 30,
+      "endAt": 38,
+      "notSaid": [
+        "training room",
+        "Thursday"
+      ]
+    },
+    "rejoin": {
+      "conversation": "acme-sync",
+      "then": "two-remotes",
+      "title": "REC-006 rejoin",
+      "slug": "rec-006-rejoin",
+      "endAt": 38,
+      "drop": 4,
+      "checkAt": 5,
+      "thenEndAt": 36,
+      "first": [
+        "Berlin first",
+        "training room"
+      ],
+      "second": [
+        "Omar is joining",
+        "pilot plan"
+      ],
+      "lines": 2,
+      "lastOfFirst": "training room",
+      "secondFirstTurn": "Hi everyone, Omar is joining us from the security team today.",
+      "joining": "Omar is joining"
+    },
+    "busy": {
+      "conversation": "acme-sync",
+      "title": "REC-025 busy",
+      "next": "REC-025 next",
+      "slug": "rec-025-busy",
+      "frozen": 8
     }
   },
   "s21": {

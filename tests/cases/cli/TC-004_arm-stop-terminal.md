@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [cli, recording, second-instance, file-fed]
 external_id: TC-CLI-002
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-004: Arming and stopping from the terminal drives the recording like the menu

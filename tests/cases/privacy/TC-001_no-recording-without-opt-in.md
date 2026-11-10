@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [privacy, opt-in, second-instance]
 external_id: TC-PRIV-001
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-001: Nothing records without opting in

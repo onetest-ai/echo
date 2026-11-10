@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, second-instance, file-fed]
 external_id: TC-REC-002
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-002: Record a call already in progress
