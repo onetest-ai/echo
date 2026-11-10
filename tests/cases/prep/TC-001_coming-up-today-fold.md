@@ -8,6 +8,7 @@ module: prep
 run: agent
 platform: any
 tags: [prep, calls]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-001: Coming up today counts the meetings still to come and unfolds into rows

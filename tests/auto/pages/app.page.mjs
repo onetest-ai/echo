@@ -117,6 +117,11 @@ export class AppPage {
     return this.page.evaluate((d) => new Date(d + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }), date)
   }
 
+  /** A day as a heading writes it ("Tuesday, November 10"): an ISO time from a file or the CLI, or now. */
+  async longDay(iso) {
+    return this.page.evaluate((t) => (t ? new Date(t) : new Date()).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }), iso)
+  }
+
   /** A date as a prep writes it beside an item ("Nov 10"): a `YYYY-MM-DD` from a file or the CLI. */
   async shortDay(date) {
     return this.page.evaluate((d) => new Date(d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }), date)

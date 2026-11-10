@@ -8,6 +8,7 @@ module: inbox
 run: agent
 platform: any
 tags: [inbox, empty]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-002: An empty Inbox says Nothing needs you; Done says nothing was decided this week

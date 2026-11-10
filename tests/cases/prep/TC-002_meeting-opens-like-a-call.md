@@ -8,6 +8,7 @@ module: prep
 run: agent
 platform: any
 tags: [prep, calls]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-002: A coming meeting opens like a call with a Prep tab and the rest disabled

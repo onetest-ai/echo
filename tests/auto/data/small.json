@@ -887,5 +887,47 @@
       "nomatch": "nomatch",
       "call": "acme-weekly-sync"
     }
+  },
+  "s10": {
+    "clients": {
+      "acme": "Acme",
+      "globex": "Globex",
+      "initech": "Initech"
+    },
+    "listed": "Acme weekly sync",
+    "meetings": [
+      {
+        "subject": "Globex design review",
+        "names": [
+          "Kim Park"
+        ],
+        "minutes": 30
+      },
+      {
+        "subject": "Acme demo",
+        "names": [
+          "Dana Lee"
+        ],
+        "minutes": 30
+      }
+    ],
+    "notListed": "Industry webinar",
+    "search": "Acme",
+    "globexEvent": "ev-globex-review",
+    "threads": [
+      "Acme rollout",
+      "Globex pilot"
+    ],
+    "pin": "Globex pilot",
+    "me": "Sam",
+    "todayCalls": [
+      "acme-weekly-sync",
+      "initech-planning"
+    ],
+    "task": {
+      "thread": "acme-rollout",
+      "done": "{\"op\":\"edit\",\"node\":\"T001\",\"set\":{\"state\":\"done\"}}",
+      "undo": "{\"op\":\"undo\",\"target\":\"{mid}\"}"
+    }
   }
 }

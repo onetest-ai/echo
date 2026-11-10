@@ -754,5 +754,62 @@
     "always2": "always ({n}): {terms}",
     "learnedN": "learned ({n}):",
     "moved": "moved"
+  },
+  "inbox": {
+    "open": "Open",
+    "done": "Done",
+    "blocking": "Blocking",
+    "thisWeek": "this week",
+    "nothing": "Nothing needs you",
+    "nothingLine": "Echo counts it here when something does.",
+    "nothingDecided": "Nothing decided this week yet.",
+    "badge": "^\\d+ open$",
+    "keys": [
+      "clients",
+      "done",
+      "open",
+      "urgent"
+    ]
+  },
+  "upcoming": {
+    "head": "Coming up today",
+    "headName": "Coming up today {n} Next {time} {next}",
+    "rowName": "Coming up {subject} {time} {minutes} min {names}",
+    "rowPrefix": "Coming up",
+    "noPrep": "No prep yet",
+    "noThread": "This meeting is in no thread: Echo prepares it when you ask, from its people's mail and Teams.",
+    "noThreadStart": "This meeting is in no thread",
+    "inThread": "Echo writes it this morning for every meeting of a thread.",
+    "prepareNow": "Prepare now",
+    "addThread": "+ Thread",
+    "newThread": "New thread from this meeting…",
+    "takeOut": "Take it out of {thread}",
+    "copyLink": "Copy link",
+    "prepTab": "Prep",
+    "laterTabs": [
+      "Transcript",
+      "Minutes"
+    ],
+    "minutes": "{n} min",
+    "when": "{day}, {time}",
+    "route": "#upcoming/{id}",
+    "noPrepShow": "Error: no prep \"{id}\"",
+    "hash": "^[0-9a-f]{16}$"
+  },
+  "quietDay": {
+    "heading": "A quiet day",
+    "line": "No meetings today and nothing on you in Tasks.",
+    "greeting": "^Good (night|morning|afternoon|evening), {name}$",
+    "yourDay": "Your day",
+    "myWork": "My work · this week",
+    "agendaCleared": "agenda: 0 meeting(s)",
+    "notGroups": [
+      "Today",
+      "My work"
+    ],
+    "echoFirst": [
+      "Record the next Teams call",
+      "Record a memo"
+    ]
   }
 }

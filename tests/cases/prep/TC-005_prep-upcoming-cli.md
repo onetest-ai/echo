@@ -8,6 +8,7 @@ module: prep
 run: agent
 platform: any
 tags: [prep, cli]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-005: echoctl prep --upcoming lists today's meetings and --show refuses a missing prep

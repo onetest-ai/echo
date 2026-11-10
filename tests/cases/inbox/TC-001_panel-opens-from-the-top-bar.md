@@ -8,6 +8,7 @@ module: inbox
 run: agent
 platform: any
 tags: [inbox, panel]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-001: The Inbox button opens and closes the right panel on its tab, with no badge when nothing waits

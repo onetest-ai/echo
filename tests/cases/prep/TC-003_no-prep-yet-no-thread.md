@@ -8,6 +8,7 @@ module: prep
 run: agent
 platform: any
 tags: [prep, calls]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-003: A meeting in no thread says No prep yet and offers Prepare now
