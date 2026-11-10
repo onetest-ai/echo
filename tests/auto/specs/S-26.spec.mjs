@@ -69,6 +69,9 @@ async function clientCallRow(page, call, title, chip, noMinutes) {
   return data.set.s26.list.logo.includes(chip) ? [title, line, chip, chip] : [title, `${line} ${chip}`]
 }
 
+/** "1 call", "3 calls", as a card writes a count of calls. */
+const callCount = (n) => fill(data.text.threads.callCount[n === 1 ? 'one' : 'many'], { n })
+
 /** A Profile row's tokens as it reads them, each followed by its ×. */
 const tokens = (xs, remove) => xs.flatMap((x) => [x, typeof remove === 'function' ? remove(x) : remove])
 
@@ -117,7 +120,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
       const want = []
       for (const [i, r] of rows.entries()) want.push(await callRow(clients, calls[i], r))
       await expect.poll(() => clients.callRowsRead()).toEqual(want)
-      await expect(clients.callRows.filter({ hasText: t.teamsChat })).toHaveCount(0)
+      await expect(clients.callRowsSaying(t.teamsChat)).toHaveCount(0)
     }
   })
 
@@ -293,7 +296,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await expect(people.bodyRows(people.inThread)).toHaveCount(l.in.length)
     for (const [i, [name, org, role, stance, calls, isNew]] of l.in.entries()) {
       await expect(people.bodyRows(people.inThread).nth(i)).toHaveAccessibleName(new RegExp(`^${name} `))
-      expect([name, await people.cellText(people.inThread, name, 'Organisation'), await people.cellText(people.inThread, name, 'Role'), await people.cellText(people.inThread, name, 'Stance'), await people.cellText(people.inThread, name, 'Calls')])
+      expect([name, await people.cellText(people.inThread, name, pt.col.organisation), await people.cellText(people.inThread, name, pt.col.role), await people.cellText(people.inThread, name, pt.col.stance), await people.cellText(people.inThread, name, pt.col.calls)])
         .toEqual([name, org, role, stance, calls])
       await expect(people.rowNew(people.inThread, name)).toHaveCount(isNew ? 1 : 0)
     }
@@ -302,7 +305,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await expect(people.button(pt.addAll)).toBeVisible()
     await expect(people.bodyRows(people.seen)).toHaveCount(l.seen.length)
     for (const [name, org, calls] of l.seen) {
-      expect([name, await people.cellText(people.seen, name, 'Organisation'), await people.cellText(people.seen, name, 'Calls')]).toEqual([name, org, calls])
+      expect([name, await people.cellText(people.seen, name, pt.col.organisation), await people.cellText(people.seen, name, pt.col.calls)]).toEqual([name, org, calls])
       await expect(people.rowButton(people.seen, name, pt.add)).toBeVisible()
     }
     const listed = cli('project', 'people', l.thread)
@@ -350,7 +353,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await expect(people.addPerson).toHaveCount(0)
     await expect(people.bodyRows(people.inClient)).toHaveCount(c.in.length)
     for (const [name, threads, org] of c.in) {
-      expect([name, await people.cellText(people.inClient, name, 'Threads'), await people.cellText(people.inClient, name, 'Organisation')]).toEqual([name, threads.replaceAll(', ', ''), org])
+      expect([name, await people.cellText(people.inClient, name, pt.col.threads), await people.cellText(people.inClient, name, pt.col.organisation)]).toEqual([name, threads.replaceAll(', ', ''), org])
     }
     await expect(people.bodyRows(people.seen)).toHaveCount(c.seen.length)
     for (const [i, [name, org]] of c.seen.entries()) {
@@ -368,7 +371,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await people.view(pt.list).click()
     await expect(people.says(c.own.nobody)).toBeVisible()
     await expect(people.bodyRows(people.seen)).toHaveCount(c.own.seen.length)
-    for (const [name, org] of c.own.seen) expect([name, await people.cellText(people.seen, name, 'Organisation')]).toEqual([name, org])
+    for (const [name, org] of c.own.seen) expect([name, await people.cellText(people.seen, name, pt.col.organisation)]).toEqual([name, org])
   })
 
   test('14 · A person\'s panel: place in the thread, who set what (you, Microsoft 365, Echo, a question), who they are and the facts', covers('people/TC-014', 'F-PPL-05', 'F-PPL-06'), async ({ page }) => {
@@ -386,12 +389,12 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
       await expect(people.value(pt.panel.role)).toHaveText(d.role)
       await expect(people.detailEnding(d.roleBy)).toBeVisible()
       await expect(people.chosen(people.stance, d.stance)).toHaveCount(1)
-      expect([await people.level('influence'), await people.level('interest')]).toEqual([d.influence, d.interest])
-      await expect(people.value('Workstream')).toHaveText(d.workstream)
-      await expect(people.chosen(people.panelSelect('Governance'), d.governance)).toHaveCount(1)
+      expect([await people.level(pt.panel.influence), await people.level(pt.panel.interest)]).toEqual([d.influence, d.interest])
+      await expect(people.value(pt.panel.workstream)).toHaveText(d.workstream)
+      await expect(people.chosen(people.panelSelect(pt.panel.governance), d.governance)).toHaveCount(1)
       await expect(people.value(pt.panel.title)).toHaveText(d.title)
-      await expect(people.value('Phone')).toHaveText(d.phone)
-      await expect(people.value('Office')).toHaveText(d.office)
+      await expect(people.value(pt.panel.phone)).toHaveText(d.phone)
+      await expect(people.value(pt.panel.office)).toHaveText(d.office)
       await expect(people.detail(d.source)).toHaveCount(3)
       await expect(people.facts).toHaveCount(d.facts[0])
       await people.panelButton(d.all).click()
@@ -404,7 +407,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
       await expect(people.value(pt.panel.role)).toHaveText(o.role)
       await expect(people.detailEnding(o.roleBy)).toBeVisible()
       await expect(people.chosen(people.stance, o.stance)).toHaveCount(1)
-      await expect(people.chosen(people.panelSelect('Governance'), o.governance)).toHaveCount(1)
+      await expect(people.chosen(people.panelSelect(pt.panel.governance), o.governance)).toHaveCount(1)
       await expect(people.panelButton(o.describe)).toBeVisible()
       await expect(people.detail(o.question)).toBeVisible()
       for (const b of o.answers) await expect(people.panelButton(b)).toBeVisible()
@@ -413,10 +416,10 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
       await people.row(people.inThread, r.name).click()
       await expect(people.panelButton(r.name)).toBeVisible()
       await expect(people.detail(r.note)).toBeVisible()
-      await expect(people.value('Workstream')).toHaveText(r.workstream)
-      await expect(people.chosen(people.panelSelect('Works for in this thread'), r.worksFor)).toHaveCount(1)
+      await expect(people.value(pt.panel.workstream)).toHaveText(r.workstream)
+      await expect(people.chosen(people.panelSelect(pt.panel.worksFor), r.worksFor)).toHaveCount(1)
       await expect(people.value(pt.panel.role)).toHaveText(r.role)
-      expect([await people.level('influence'), await people.level('interest')]).toEqual([r.influence, r.interest])
+      expect([await people.level(pt.panel.influence), await people.level(pt.panel.interest)]).toEqual([r.influence, r.interest])
     } finally {
       // Teardown: the panel closed.
       if (await people.closePanel(people.panel).count()) await people.closePanel(people.panel).click()
@@ -431,13 +434,13 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await people.open(s.thread)
     await people.view(pt.list).click()
     for (const [table, rows] of [[people.inThread, s.in], [people.seen, s.seen]]) {
-      for (const [name, org] of rows) expect([name, await people.cellText(table, name, 'Organisation')]).toEqual([name, org])
+      for (const [name, org] of rows) expect([name, await people.cellText(table, name, pt.col.organisation)]).toEqual([name, org])
     }
     const i = s.initech
     await people.open(i.id)
     await expect(people.says(i.nobody)).toBeVisible()
     await expect(people.bodyRows(people.seen)).toHaveCount(i.seen)
-    for (const [name, org] of i.guests) expect([name, await people.cellText(people.seen, name, 'Organisation')]).toEqual([name, org])
+    for (const [name, org] of i.guests) expect([name, await people.cellText(people.seen, name, pt.col.organisation)]).toEqual([name, org])
     await people.row(people.seen, i.guests[0][0]).click()
     await expect(people.nameOrg).toHaveAccessibleName(i.nameOrg)
     await people.closePanel(people.panel).click()
@@ -623,7 +626,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await expect(clients.says(c.client)).toHaveCount(0)
     const k = x.card
     await expect(clients.cardButton(k.name, `${k.name} ${k.stage}`)).toBeVisible()
-    await expect(clients.cardSays(k.name, fill(k.lines[0], { calls: `${x.row[1]} calls`, day: await clients.cardDay(p.last_call) }))).toBeVisible()
+    await expect(clients.cardSays(k.name, fill(k.lines[0], { calls: callCount(x.row[1]), day: await clients.cardDay(p.last_call) }))).toBeVisible()
     for (const line of k.lines.slice(1)) await expect(clients.cardSays(k.name, line)).toBeVisible()
     for (const d of k.decided) await expect(clients.cardButton(k.name, d)).toBeVisible()
     // The risk without a response first, then the one with its response.
@@ -654,7 +657,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
       const logo = data.set.s26.list.logo.includes(k.name)
       await expect(clients.cardButton(k.name, [k.name, logo && k.name, k.stage].filter(Boolean).join(' '))).toBeVisible()
       const p = show(k.id)
-      const calls = `${p.call_count} call${p.call_count === 1 ? '' : 's'}`
+      const calls = callCount(p.call_count)
       await expect(clients.cardSays(k.name, fill(c.cardCalls, { calls, day: await clients.cardDay(p.last_call) }))).toBeVisible()
       if (k.stories) await expect(clients.cardSays(k.name, k.stories)).toBeVisible()
       for (const line of k.tasks) await expect(clients.cardSays(k.name, line)).toBeVisible()
@@ -680,7 +683,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     const clients = new ClientsPage(page, data)
     await clients.openClient(x.id, c.tabIds.calls)
     await expect(clients.tab(c.tabs.calls)).toHaveAccessibleName(fill(data.text.threads.tabCount, { tab: c.tabs.calls, n: x.calls.length }))
-    const all = [...new Map(['acme-rollout', 'acme-renewal', 'acme-hackathon'].flatMap((id) => show(id).calls).map((k) => [k.name, k])).values()]
+    const all = [...new Map(x.threadIds.flatMap((id) => show(id).calls).map((k) => [k.name, k])).values()]
       .sort((a, b) => b.started_at.localeCompare(a.started_at))
     expect(all.map((k) => k.title)).toEqual(x.calls.map(([title]) => title))
     const want = []
@@ -748,7 +751,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
   })
 
   // clients/TC-015's step 4, its Details, run last: the other stages go on while it fails.
-  test("after · A risk on a client's Overview card opens its Details in the right panel (clients/TC-015 step 4)", covers('clients/TC-015', 'F-CLIENT-02'), async ({ page }) => {
+  test("after · A risk on a client's Overview card opens its Details in the right panel (clients/TC-015 step 4, #314)", covers('clients/TC-015', 'F-CLIENT-02'), async ({ page }) => {
     const o = data.set.s26.overview
     const clients = new ClientsPage(page, data)
     await clients.openClient(o.id, data.text.clients.tabIds.overview)

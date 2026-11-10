@@ -819,14 +819,29 @@
       "role": "Role",
       "sameFirst": "Same person as…",
       "orgPlaceholder": "Who is {domain}?",
-      "nameOrg": "Name this organisation ({domain})"
+      "nameOrg": "Name this organisation ({domain})",
+      "influence": "influence",
+      "interest": "interest",
+      "workstream": "Workstream",
+      "governance": "Governance",
+      "worksFor": "Works for in this thread",
+      "phone": "Phone",
+      "office": "Office"
     },
     "owes": "Owes",
     "addAll": "Add all",
     "tabCount": "People{n}",
     "notPlaced": "Not placed yet",
     "quadrantHead": "{name} {sub}",
-    "newTag": "new"
+    "newTag": "new",
+    "col": {
+      "person": "Person",
+      "organisation": "Organisation",
+      "role": "Role",
+      "stance": "Stance",
+      "calls": "Calls",
+      "threads": "Threads"
+    }
   },
   "vocabulary": {
     "panel": "Vocabulary",
@@ -1246,7 +1261,11 @@
       "takenOut": "(\\d+) taken out by hand"
     },
     "headCalls": "{n} calls · since {since}",
-    "addTo": "Add to a thread"
+    "addTo": "Add to a thread",
+    "callCount": {
+      "one": "{n} call",
+      "many": "{n} calls"
+    }
   },
   "runVars": {
     "headless": "ECHOCTL_HEADLESS",
@@ -1264,5 +1283,36 @@
     "task": "echo://task/{thread}/{id}",
     "prep": "echo://prep/{id}",
     "callRoute": "#call/{c}/{tab}"
+  },
+  "ledgerJson": {
+    "merge": "suggest_merge",
+    "move": "suggest_move",
+    "pending": "pending",
+    "accept": "accept",
+    "reject": "reject",
+    "undo": "undo",
+    "merged": "merged",
+    "deleted": "deleted",
+    "open": "open",
+    "done": "done",
+    "todo": "todo",
+    "create": "create",
+    "human": "human",
+    "edit": "edit",
+    "link": "link",
+    "acSet": "ac_set",
+    "delete": "delete",
+    "merge_op": "merge",
+    "badOps": [
+      "undo",
+      "accept",
+      "reject"
+    ],
+    "people": "people",
+    "pinned": "pinned",
+    "badNode": "T999"
+  },
+  "m365": {
+    "token": "graph.json"
   }
 }

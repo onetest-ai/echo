@@ -648,7 +648,7 @@ scenario(test, 'S-25', 'Who owes what on a full board: Tasks, piles, filters, ba
   })
 
   // tasks/TC-015's step 4, its last check, run last: the other stages only read, and they go on while it fails.
-  test('after · On I owe\'s cards the word "blocked" is red (tasks/TC-015 step 4)', covers('tasks/TC-015', 'F-TASK-01', 'F-TASK-02', 'F-TASK-06'), async ({ page }) => {
+  test('after · On I owe\'s cards the word "blocked" is red (tasks/TC-015 step 4, #313)', covers('tasks/TC-015', 'F-TASK-01', 'F-TASK-02', 'F-TASK-06'), async ({ page }) => {
     const t = data.text.tasks
     const tasks = await openTasks(page)
     await tasks.fold(t.iOwe, fill(t.more, { n: data.set.s25.folds[t.iOwe] })).click()

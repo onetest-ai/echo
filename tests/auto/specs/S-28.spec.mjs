@@ -36,6 +36,8 @@ const commands = (help) => {
   const to = lines.findIndex((l, i) => i >= from && !l.trim())
   return lines.slice(from, to).map((l) => l.trim().split(/\s+/)[0])
 }
+/** The CLI's own words in its JSON (states, ops, answers). */
+const J = data.text.ledgerJson
 /** `echoctl project list` on the data as built (the prelude): stages 1 and 2 read it. */
 let built = null
 /** The window at an echo:// link, as the app opens one the system hands it. */
@@ -123,7 +125,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     for (const [i, [title, why]] of l.calls.entries()) {
       const { started_at: at, minutes } = show.calls[i]
       const vars = { day: await clients.dayLabel(at), time: await clients.clock(at), why: t.why[why], minutes: t.noMinutes }
-      want.push([title, fill(minutes ? t.rowLine : t.rowLineMinutes, vars), why === 'pinned' ? t.unpin : t.takeOut])
+      want.push([title, fill(minutes ? t.rowLine : t.rowLineMinutes, vars), why === J.pinned ? t.unpin : t.takeOut])
     }
     await expect.poll(() => clients.callRowsRead()).toEqual(want)
 
@@ -205,7 +207,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     expect(ta[0]).toBe(r.task.head)
     for (const line of r.task.lines) expect(ta).toContain(line)
     const where = ta.slice(ta.indexOf(r.task.where) + 1)
-    expect(where.some((l) => l.includes('create') && l.includes(r.task.quote))).toBe(true)
+    expect(where.some((l) => l.includes(J.create) && l.includes(r.task.quote))).toBe(true)
 
     const pr = read(r.prep.link).out.split('\n')
     expect(pr[0]).toBe(r.prep.head)
@@ -284,20 +286,22 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     expect([j.sent, j.would.to[0].emailAddress.address, j.would.cc[0].emailAddress.address, j.would.subject, j.would.text, j.next]).toEqual([false, m.to, m.cc, m.subject, m.text, m.next])
     const teams = send('teams', 'send', '--to', m.to)
     expect(teams.code).toBe(0)
-    expect(teams.json()).toMatchObject({ sent: false, would: { kind: 'oneOnOne', text: m.text, to: m.to }, next: m.next })
-    expect(teams.json().would).toEqual({ kind: 'oneOnOne', text: m.text, to: m.to })
+    expect(teams.json()).toMatchObject({ sent: false, would: { kind: m.kinds.oneOnOne, text: m.text, to: m.to }, next: m.next })
+    expect(teams.json().would).toEqual({ kind: m.kinds.oneOnOne, text: m.text, to: m.to })
     const post = send('teams', 'post', m.post.team, m.post.channel, '--subject', m.post.subject)
     expect(post.code).toBe(0)
     expect(post.json()).toMatchObject({ sent: false, would: { ...m.post, text: m.text } })
     const self = send('teams', 'send', '--chat', m.self)
     expect(self.code).toBe(0)
     expect(self.json()).toMatchObject({ sent: false })
-    expect(self.json().would).toEqual({ chat: m.self, kind: 'yourself', text: m.text })
+    expect(self.json().would).toEqual({ chat: m.self, kind: m.kinds.self, text: m.text })
     const file = path.join(data.home, m.upload.file)
     const up = data.cli('m365', 'drive', 'upload', file, m.upload.to)
     expect(up.code).toBe(0)
     expect(up.json()).toMatchObject({ sent: false, would: { to: m.upload.shown, file, bytes: fs.statSync(file).size } })
-    // Not signed in on this data: --yes reaches nobody, it is refused.
+    // Not signed in on this data: --yes reaches nobody, it is refused. No Microsoft 365 token in the data's config (the
+    // file a sign-in writes), so a change of the fixture can never make this a real send.
+    expect(fs.existsSync(path.join(data.env.ECHOCTL_CONFIG_DIR, data.text.m365.token))).toBe(false)
     const yes = send('mail', 'send', '--to', m.to, '--cc', m.cc, '--subject', m.subject, '--yes')
     expect([yes.code, err(yes)]).toEqual([1, m.notSigned])
     const bad = send('mail', 'send', '--to', m.bad, '--subject', 'x')
@@ -353,10 +357,11 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     const list = cli('client', 'list')
     expect(list.map((k) => k.id)).toEqual(x.six)
     expect(list.find((k) => k.id === x.internal).internal).toBe(true)
-    expect(list.find((k) => k.id === 'globex').domains).toEqual(x.globexDomains)
+    expect(list.find((k) => k.id === x.globex).domains).toEqual(x.globexDomains)
     const orgs = cli('org', 'list')
     for (const k of orgs.filter((o) => x.six.includes(o.id))) expect(k.account).toBeUndefined()
     expect(orgs.filter((o) => !x.six.includes(o.id)).map((o) => [o.id, o.account])).toEqual(x.orgs.map((id) => [id, false]))
+    let removed
     try {
       expect(cli('client', 'add', x.add.name, '--domains', x.add.domains)).toEqual(x.add.json)
       expect(cli('client', 'set', x.set.id, '--name', x.set.name, '--domains', x.set.domains)).toMatchObject({ id: x.set.id, name: x.set.name, domains: x.set.list })
@@ -375,10 +380,10 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       const keep = data.cli('client', 'remove', x.keep.id)
       expect([keep.code, err(keep)]).toEqual([1, x.keep.err])
     } finally {
-      // 10 (the teardown): what the case added, removed.
-      const removed = [data.cli('org', 'remove', x.org.id), data.cli('client', 'remove', x.set.id)]
-      expect(removed.map((r) => r.out.trim())).toEqual(x.removed)
+      // 10 (the teardown): what the case added, removed; checked below.
+      removed = [data.cli('org', 'remove', x.org.id), data.cli('client', 'remove', x.set.id)]
     }
+    expect(removed.map((r) => r.out.trim())).toEqual(x.removed)
     expect(cli('client', 'list').map((k) => k.id)).toEqual(x.six)
     await clients.goto(t.routes.projects)
     await expect(clients.listHeading(t.threads)).toBeVisible()
@@ -392,11 +397,12 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     const COFFEE = data.callName(x.coffee)
     const stamp = (name) => name.slice(0, 17)
     const clients = new ClientsPage(page, data)
+    let del
     try {
       expect(cli('project', 'create', x.name, '--client', x.client, '--stage', x.stage)).toMatchObject({ id: x.id, client: x.client, stage: x.stage, group: x.group, call_count: 0, rules: [] })
       const ruled = cli('project', 'rule', x.id, '--people')
-      expect(ruled.rules).toEqual([{ kind: 'people' }])
-      expect(ruled.calls.map((k) => [k.title, k.why]).sort()).toEqual(x.titles.map((title) => [title, 'people']).sort())
+      expect(ruled.rules).toEqual([{ kind: J.people }])
+      expect(ruled.calls.map((k) => [k.title, k.why]).sort()).toEqual(x.titles.map((title) => [title, J.people]).sort())
       await clients.openThread(x.id, t.tabs.calls)
       const lines = await clients.listLines()
       const day = await clients.dayLabel(cli('project', 'show', x.id).last_call)
@@ -411,7 +417,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       const ex = cli('project', 'exclude', x.id, DISC)
       expect([ex.exclusions, ex.calls.map((k) => k.title)]).toEqual([[stamp(DISC)], [x.titles[0]]])
       const inc = cli('project', 'include', x.id, COFFEE)
-      expect([inc.pins, inc.calls.map((k) => [k.title, k.why]).sort()]).toEqual([[stamp(COFFEE)], [[x.titles[0], 'people'], [x.coffeeTitle, 'pinned']].sort()])
+      expect([inc.pins, inc.calls.map((k) => [k.title, k.why]).sort()]).toEqual([[stamp(COFFEE)], [[x.titles[0], J.people], [x.coffeeTitle, J.pinned]].sort()])
       await clients.openThread(x.id, t.tabs.calls)
       await expect(clients.heading(x.set.name)).toBeVisible()
       await expect(clients.factEnding(x.set.name, x.set.tag)).toBeVisible()
@@ -422,13 +428,13 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       await expect(clients.callRow(x.titles[1])).toHaveCount(0)
       cli('project', 'reset', x.id, DISC)
       const reset = cli('project', 'reset', x.id, COFFEE)
-      expect([reset.exclusions, reset.pins, reset.calls.map((k) => [k.title, k.why]).sort()]).toEqual([[], [], x.titles.map((title) => [title, 'people']).sort()])
+      expect([reset.exclusions, reset.pins, reset.calls.map((k) => [k.title, k.why]).sort()]).toEqual([[], [], x.titles.map((title) => [title, J.people]).sort()])
       expect(cli('project', 'rule', x.id, '--remove', '1')).toMatchObject({ rules: [], calls: [] })
     } finally {
-      // 10: the thread deleted (also when a check failed before).
-      const del = data.cli('project', 'delete', x.id)
-      expect(del.out.trim()).toBe(x.trashed)
+      // 10: the thread deleted (also when a check failed before); checked below.
+      del = data.cli('project', 'delete', x.id)
     }
+    expect(del.out.trim()).toBe(x.trashed)
     const gone = data.cli('project', 'show', x.id)
     expect([gone.code, err(gone)]).toEqual([1, x.gone])
     await clients.goto(t.routes.projects)
@@ -450,25 +456,25 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     expect(t0.roots).toEqual(x.roots)
     const merge = t0.nodes[x.merge.node].suggestions[0]
     const move = t0.nodes[x.move.node].suggestions[0]
-    expect([merge.op, merge.to, merge.status]).toEqual(['suggest_merge', x.merge.to, 'pending'])
-    expect([move.op, move.to, move.status]).toEqual(['suggest_move', x.move.to, 'pending'])
+    expect([merge.op, merge.to, merge.status]).toEqual([J.merge, x.merge.to, J.pending])
+    expect([move.op, move.to, move.status]).toEqual([J.move, x.move.to, J.pending])
 
     const made = edit(x.create)
     expect(made.code).toBe(0)
-    expect(made.json()).toMatchObject({ type: 'create', id: x.id, by: 'human' })
-    expect(node(x.id)).toMatchObject({ state: 'open', parent: x.create.parent, internal_owner: x.create.internal_owner })
-    const edited = edit({ op: 'edit', node: x.id, set: x.edit })
-    expect(edited.json()).toMatchObject({ type: 'human', op: 'edit', node: x.id })
+    expect(made.json()).toMatchObject({ type: J.create, id: x.id, by: J.human })
+    expect(node(x.id)).toMatchObject({ state: J.open, parent: x.create.parent, internal_owner: x.create.internal_owner })
+    const edited = edit({ op: J.edit, node: x.id, set: x.edit })
+    expect(edited.json()).toMatchObject({ type: J.human, op: J.edit, node: x.id })
     expect(node(x.id)).toMatchObject({ title: x.edit.title, due: x.edit.due })
-    expect(edit({ op: 'ac_set', node: x.story, ac: 1, met: true }).code).toBe(0)
+    expect(edit({ op: J.acSet, node: x.story, ac: 1, met: true }).code).toBe(0)
     const ac = node(x.story).ac
     expect([ac[0].text ?? ac[0].title ?? x.criteria[0], ac[0].met, ac[0].human, ac[1].met]).toEqual([x.criteria[0], true, true, false])
-    expect(edit({ op: 'link', node: x.id, depends_on: x.link }).code).toBe(0)
+    expect(edit({ op: J.link, node: x.id, depends_on: x.link }).code).toBe(0)
     expect([node(x.id).depends_on, node(x.link).blocks]).toEqual([[x.link], [x.id]])
-    expect(edit({ op: 'accept', target: move.mid }).code).toBe(0)
-    expect(edit({ op: 'reject', target: merge.mid }).code).toBe(0)
+    expect(edit({ op: J.accept, target: move.mid }).code).toBe(0)
+    expect(edit({ op: J.reject, target: merge.mid }).code).toBe(0)
     const t1 = tree().nodes
-    expect([t1[x.move.node].parent, t1[x.move.node].suggestions[0].status, t1[x.merge.node].parent, t1[x.merge.node].suggestions[0].status]).toEqual([x.move.to, 'accept', x.oldParent, 'reject'])
+    expect([t1[x.move.node].parent, t1[x.move.node].suggestions[0].status, t1[x.merge.node].parent, t1[x.merge.node].suggestions[0].status]).toEqual([x.move.to, J.accept, x.oldParent, J.reject])
 
     // 7: the Tree.
     const work = new WorkPage(page, data)
@@ -488,13 +494,13 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     expect(order.slice(story, next < 0 ? undefined : next)).toEqual(expect.arrayContaining([x.move.node, x.link, x.id]))
 
     // 8–10: a merge undone, the task deleted.
-    const merged = edit({ op: 'merge', node: x.id, into: x.link })
+    const merged = edit({ op: J.merge_op, node: x.id, into: x.link })
     expect(merged.code).toBe(0)
-    expect(node(x.id)).toMatchObject({ state: 'merged', merged_into: x.link })
-    expect(edit({ op: 'undo', target: merged.json().mid }).code).toBe(0)
-    expect(node(x.id)).toMatchObject({ state: 'open', merged_into: null })
-    expect(edit({ op: 'delete', node: x.id }).code).toBe(0)
-    expect(node(x.id).state).toBe('deleted')
+    expect(node(x.id)).toMatchObject({ state: J.merged, merged_into: x.link })
+    expect(edit({ op: J.undo, target: merged.json().mid }).code).toBe(0)
+    expect(node(x.id)).toMatchObject({ state: J.open, merged_into: null })
+    expect(edit({ op: J.delete, node: x.id }).code).toBe(0)
+    expect(node(x.id).state).toBe(J.deleted)
     await work.open(x.thread)
     await expect(work.treeRow(x.story)).toBeVisible()
     await expect(work.treeRow(x.id)).toHaveCount(0)
@@ -502,10 +508,10 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     // 11–12: bad edits write nothing.
     const events = () => data.read(data.home, 'projects', x.thread, w.ledger).trim().split('\n').length
     const before = events()
-    const badOp = edit({ op: 'frobnicate' })
-    const badNode = edit({ op: 'edit', node: 'T999', set: { title: 'x' } })
+    const badOp = edit({ op: x.badOpName })
+    const badNode = edit({ op: J.edit, node: J.badNode, set: { title: 'x' } })
     expect([[badOp.code, err(badOp)], [badNode.code, err(badNode)]]).toEqual([[1, x.badOp], [1, x.badNode]])
-    for (const op of ['undo', 'accept', 'reject']) {
+    for (const op of J.badOps) {
       const r = edit({ op, target: x.mid })
       expect([op, r.code, err(r)]).toEqual([op, 1, x.noEvent])
     }
@@ -523,10 +529,10 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       expect(ctx.meeting_type.type).toBe(x.type)
       expect(cli('context', path.join(data.home, 'calls', C))).toEqual(ctx)
       expect(cli('actions', C)).toEqual([expect.objectContaining(x.action)])
-      expect(data.cli('action', C, x.action.id, 'done').out.trim()).toBe('done')
-      expect(cli('actions', C)[0].status).toBe('done')
-      expect(data.cli('action', C, x.action.id, 'todo').out.trim()).toBe('todo')
-      expect(cli('actions', C)[0].status).toBe('todo')
+      expect(data.cli('action', C, x.action.id, J.done).out.trim()).toBe(J.done)
+      expect(cli('actions', C)[0].status).toBe(J.done)
+      expect(data.cli('action', C, x.action.id, J.todo).out.trim()).toBe(J.todo)
+      expect(cli('actions', C)[0].status).toBe(J.todo)
       expect(cli('type', C, x.partner.type)).toEqual(x.partner)
       const bogus = data.cli('type', C, 'bogus')
       expect([bogus.code, err(bogus)]).toEqual([1, x.badType])
@@ -551,7 +557,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       // 12 (and 5): its title, its kind and its action item as they were.
       if (fs.existsSync(path.join(data.home, 'calls', S))) data.cli('title', S, x.title)
       data.cli('type', C, x.type)
-      data.cli('action', C, x.action.id, 'todo')
+      data.cli('action', C, x.action.id, J.todo)
     }
     expect(data.callName(x.slug)).toBe(C)
     expect(cli('context', C).meeting_type.type).toBe(x.type)
@@ -571,6 +577,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       return calls.call(x.title)
     }
     await expect(await find()).toBeVisible()
+    let back
     try {
       const del = data.cli('delete', C)
       expect(del.code).toBe(0)
@@ -581,9 +588,10 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
       const again = data.cli('delete', C)
       expect([again.code, err(again)]).toEqual([1, fill(x.notCall, { c: C })])
     } finally {
-      const back = data.cli('restore', C)
-      expect([back.code, back.out.trim().endsWith(`/calls/${C}`)]).toEqual([0, true])
+      // 6: the call restored (also when a check failed before); checked below.
+      back = data.cli('restore', C)
     }
+    expect([back.code, back.out.trim().endsWith(`/calls/${C}`)]).toEqual([0, true])
     await expect(await find()).toBeVisible()
     const twice = data.cli('restore', C)
     expect([twice.code, err(twice)]).toEqual([1, fill(x.notInTrash, { c: C, home: data.home })])

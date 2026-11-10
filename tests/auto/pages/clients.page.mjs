@@ -280,6 +280,11 @@ export class ClientsPage extends AppPage {
     return out
   }
 
+  /** The Calls tab's rows that say these words (a reason, "its Teams chat"). */
+  callRowsSaying(words) {
+    return this.callRows.filter({ hasText: words })
+  }
+
   /** A thread's card on a client's Overview (a group named by the thread), and what it reads, in order. */
   overviewCard(name) {
     return this.main.getByRole('group', { name, exact: true })

@@ -3884,6 +3884,11 @@
       "threads": [
         "Acme rollout · 17",
         "Acme renewal · 11"
+      ],
+      "threadIds": [
+        "acme-rollout",
+        "acme-renewal",
+        "acme-hackathon"
       ]
     },
     "since": {
@@ -4332,7 +4337,11 @@
       },
       "notSigned": "Error: not signed in to Microsoft 365 — `echoctl calendar login`",
       "bad": "not-an-address",
-      "badErr": "Error: not a mail address: not-an-address"
+      "badErr": "Error: not a mail address: not-an-address",
+      "kinds": {
+        "self": "yourself",
+        "oneOnOne": "oneOnOne"
+      }
     },
     "settings": {
       "series": "id:S-GLOBEX-WEEKLY",
@@ -4470,7 +4479,8 @@
       "removed": [
         "pied-piper removed",
         "hooli removed"
-      ]
+      ],
+      "globex": "globex"
     },
     "thread": {
       "name": "Duff pilot",
@@ -4554,7 +4564,8 @@
       "badOp": "Error: bad op \"frobnicate\"",
       "badNode": "Error: unknown node \"T999\"",
       "noEvent": "Error: unknown event 0000000000",
-      "mid": "0000000000"
+      "mid": "0000000000",
+      "badOpName": "frobnicate"
     },
     "call": {
       "slug": "globex-pilot-kickoff",
