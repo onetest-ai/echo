@@ -96,6 +96,13 @@ const PRELUDE: &str = r#"
     markdown: (md) => call('markdown', String(md)),
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
     inbox: { set: (key, item) => call('inbox.set', [key, item]), clear: (key) => call('inbox.clear', key) },
+    /** Today's widgets it declares (`widgets` in its manifest): `provide` answers Echo's ask ({size}) with the data,
+     *  `set` gives it when the plugin learns something, `clear` takes it off Today until the next. */
+    widgets: {
+      provide: (id, fn) => { commands['__widget:' + id] = (a) => fn(a || {}) },
+      set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
+      clear: (id) => call('widgets.clear', String(id)),
+    },
     profiles: () => call('profiles'),
     claude: {
       run: (opts) => later('claude.run', opts),
@@ -657,6 +664,14 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             inbox_set(id, &s(&arg[0]), Some(&arg[1]))?;
             Value::Null
         }
+        "widgets.set" => {
+            widget_store(id, &s(&arg[0]), Some(&arg[1]), None)?;
+            Value::Null
+        }
+        "widgets.clear" => {
+            widget_store(id, &s(arg), None, None)?;
+            Value::Null
+        }
         "inbox.clear" => {
             inbox_set(id, &s(arg), None)?;
             Value::Null
@@ -918,6 +933,92 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     }
 }
 
+// ── the plugins' Today widgets ──
+
+fn widgets_file(id: &str) -> PathBuf {
+    plugins::data_dir(id).join("widgets.json")
+}
+
+/// A widget's last data (`None`: cleared), or why its provider couldn't answer (the data before kept) — one the
+/// plugin declares, at most 64 KB.
+fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str>) -> Result<()> {
+    let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
+    if !declared {
+        bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
+    }
+    if data.is_some_and(|d| d.to_string().len() > 64 * 1024) {
+        bail!("a widget's data is 64 KB at most");
+    }
+    let f = widgets_file(id);
+    let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all: serde_json::Map<String, Value> = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    // `at`: when its data was given (Today's "from HH:MM"); `asked`: when Echo last asked its provider (or found it
+    // had none), for the next ask; `error`: why the last ask failed, its data kept.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mut last = all.get(widget).cloned().unwrap_or_else(|| json!({"data": null}));
+    match (data, error) {
+        (_, Some("")) => {
+            last["asked"] = json!(now);
+        }
+        (_, Some(e)) => {
+            last["error"] = json!(e);
+            last["asked"] = json!(now);
+        }
+        (d, None) => {
+            last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
+        }
+    }
+    all.insert(widget.into(), last);
+    std::fs::create_dir_all(plugins::data_dir(id))?;
+    paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
+    Ok(())
+}
+
+static WIDGETS: Mutex<()> = Mutex::new(());
+/// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
+static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
+/// `{data, at, asked, error?}`.
+pub fn widget_last(plugin: &str, widget: &str) -> Option<Value> {
+    let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
+    all.get(widget).cloned()
+}
+
+/// Ask a widget's provider for its data in the background (5 s, as a command), keeping the answer — or, when it has
+/// no provider (it only `set`s) or fails, its last data with why.
+pub fn widget_ask(plugin: &str, widget: &str) {
+    let key = format!("{plugin}:{widget}");
+    {
+        let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
+        if asking.contains(&key) {
+            return;
+        }
+        asking.push(key.clone());
+    }
+    let (plugin, widget) = (plugin.to_string(), widget.to_string());
+    std::thread::spawn(move || {
+        widget_ask_now(&plugin, &widget);
+        ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
+    });
+}
+
+/// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
+pub fn widget_ask_now(plugin: &str, widget: &str) {
+    match call_within(plugin, &format!("__widget:{widget}"), &json!({}), Duration::from_secs(5)) {
+        // Kept — or, refused (over 64 KB), why, its data before kept.
+        Ok(v) => {
+            if let Err(e) = widget_store(plugin, widget, Some(&v), None) {
+                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")));
+            }
+        }
+        // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
+        // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
+        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""))),
+        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")))),
+    }
+}
+
 // ── the plugins' Inbox items ──
 
 fn inbox_file(id: &str) -> PathBuf {
@@ -957,6 +1058,88 @@ pub fn inbox_items() -> Vec<(String, String, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set() {
+        let (_env, root) = paths::testenv::folders("jshost-widgets");
+        let mk = root.join("market");
+        let d = mk.join("plugins/ci");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "builds", "label": "Builds", "about": "the last builds", "kind": "list", "sizes": ["M", "L"]},
+            {"id": "health", "label": "CI health", "kind": "status"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "ci", "name": "CI", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.widgets.provide('builds', ({ size }) => ({ items: [{ title: 'main #41 passed' }] }))
+              ctx.command('green', () => { ctx.widgets.set('health', { state: 'ok', title: 'All green' }); return 1 })
+              ctx.command('stranger', () => ctx.widgets.set('nope', { state: 'ok' }))
+              ctx.command('off', () => ctx.widgets.clear('health'))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "ci", "source": "./plugins/ci"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("ci", Some(&name)).unwrap().uses;
+        plugins::install("ci", Some(&name), &agreed).unwrap();
+        sync();
+        // In the catalog under the plugin's name, at the sizes it declared.
+        let w = crate::widgets::find("plugin:ci:builds").unwrap();
+        assert_eq!((w.part.as_ref(), w.label.as_ref(), w.kind.as_ref(), w.sizes.to_vec()), ("CI", "Builds", "list", vec!["M", "L"]));
+        // Pushed: set, then clear; a widget it doesn't declare is refused.
+        let green = (0..50).find_map(|_| call("ci", "green", &json!({})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(green, Some(json!(1)));
+        assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "All green");
+        assert!(call("ci", "stranger", &json!({})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
+        call("ci", "off", &json!({})).unwrap();
+        assert!(widget_last("ci", "health").unwrap()["data"].is_null());
+        // Pulled: Echo asks its provider (in the background) and keeps the answer.
+        assert!(widget_last("ci", "builds").is_none());
+        let first = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!(first["empty"], true, "nothing yet: drawn once the provider answers");
+        let got = (0..100).find_map(|_| widget_last("ci", "builds").or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(got.unwrap()["data"]["items"][0]["title"], "main #41 passed");
+        let v = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!((v["kind"].as_str(), v["label"].as_str(), v["empty"].as_bool()), (Some("list"), Some("Builds"), Some(false)));
+        // Today takes it like Echo's own.
+        crate::today_layout::add("plugin:ci:builds", Some("L"), None).unwrap();
+        assert!(crate::today_layout::load().iter().any(|i| i.widget == "plugin:ci:builds" && i.size == "L"));
+        plugins::remove("ci", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_manifests_widgets_are_checked() {
+        let (_env, root) = paths::testenv::folders("jshost-widget-manifest");
+        let d = root.join("p");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) {}").unwrap();
+        let with = |w: Value, main: bool| {
+            let mut m = json!({"id": "p", "name": "P", "version": "0.1.0", "widgets": [w]});
+            if main {
+                m["main"] = json!("main.js");
+            }
+            std::fs::write(d.join("echo-plugin.json"), m.to_string()).unwrap();
+            plugins::read_manifest(&d).map(|_| ()).map_err(|e| e.to_string())
+        };
+        assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), true).is_ok());
+        assert!(with(json!({"id": "a", "label": "A", "kind": "chart"}), true).unwrap_err().contains("kind Echo doesn't draw"));
+        assert!(with(json!({"id": "A b", "label": "A", "kind": "stat"}), true).unwrap_err().contains("plain, unique id"));
+        assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
+        assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "refresh": 5}), true).unwrap_err().contains("60 s"));
+        assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), false).unwrap_err().contains("host half"));
+    }
 
     #[test]
     fn a_host_half_gets_echos_services_and_answers_commands() {

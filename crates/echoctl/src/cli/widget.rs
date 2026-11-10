@@ -20,6 +20,11 @@ pub fn widget(cmd: WidgetCmd) -> Result<()> {
         WidgetCmd::List => print_json(&serde_json::json!(widgets::catalog())),
         WidgetCmd::Show { id } => {
             widgets::find(&id)?;
+            // A plugin's widget: its provider asked now, waited for (its author sees the answer it gives).
+            #[cfg(feature = "js")]
+            if let Some((plugin, widget)) = id.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                crate::jshost::widget_ask_now(plugin, widget);
+            }
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             let tasks = tasks::across(&watch::agenda(), chrono::Local::now().date_naive(), &now)?;
             print_json(&widgets::data(&id, &widgets::Inputs { tasks: &tasks })?);

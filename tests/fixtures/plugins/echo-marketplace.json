@@ -1,0 +1,6 @@
+{
+  "name": "test-plugins",
+  "plugins": [
+    { "id": "widget-demo", "source": "./plugins/widget-demo" }
+  ]
+}

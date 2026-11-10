@@ -74,6 +74,42 @@ pub struct Manifest {
     /// The client half: a JavaScript module loaded into the Echo window, `export function apply(ctx)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
+    /// Widgets it offers for Today (`plugin:<id>:<widget>` in the catalog), their data from its host half
+    /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub widgets: Vec<WidgetDef>,
+}
+
+/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `list`, `status`, `card`) at the sizes it takes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WidgetDef {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub about: String,
+    pub kind: String,
+    #[serde(default = "widget_sizes")]
+    pub sizes: Vec<String>,
+    #[serde(default = "widget_height")]
+    pub height: String,
+    /// How often Echo asks its provider again while Today shows it, in seconds (60 at least; 60 when not said).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<u64>,
+}
+
+fn widget_sizes() -> Vec<String> {
+    vec!["M".into()]
+}
+fn widget_height() -> String {
+    "hug".into()
+}
+
+/// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
+pub const WIDGET_KINDS: [&str; 5] = ["stat", "stats", "list", "status", "card"];
+
+/// Each enabled plugin's manifest (one it can't read is left out).
+pub fn enabled_manifests() -> Vec<(String, Manifest)> {
+    enabled().into_iter().filter_map(|p| read_manifest(&plugin_dir(&p)).ok().map(|m| (p.id.clone(), m))).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +174,34 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    let mut ids = std::collections::HashSet::new();
+    if m.widgets.len() > 12 {
+        bail!("it declares more than 12 widgets");
+    }
+    for w in &m.widgets {
+        if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
+            bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
+        }
+        if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
+            bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
+        }
+        if !WIDGET_KINDS.contains(&w.kind.as_str()) {
+            bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
+        }
+        let mut seen = std::collections::HashSet::new();
+        if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
+            bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+        }
+        if !["hug", "fill"].contains(&w.height.as_str()) {
+            bail!("widget “{}” is hug or fill high", w.id);
+        }
+        if w.refresh.is_some_and(|r| r < 60) {
+            bail!("widget “{}” is asked again every 60 s at most often", w.id);
+        }
+        if m.main.is_none() {
+            bail!("widget “{}” needs a host half (main) to give its data", w.id);
+        }
+    }
     for f in [&m.main, &m.client].into_iter().flatten() {
         let p = inside_plugin(dir, f)?;
         if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
@@ -184,6 +248,12 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
+    match m.widgets.len() {
+        0 => {}
+        1 => lines.push("Adds a widget you can put on Today".into()),
+        n => lines.push(format!("Adds {n} widgets you can put on Today")),
     }
     Ok(lines)
 }
@@ -1289,7 +1359,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
