@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -102,6 +103,17 @@ class Http(unittest.TestCase):
             self.post("/v1/messages", {"model": "no-such-model", "messages": [user("x")]})
         self.assertEqual(e.exception.code, 404)
         self.assertIn("no-such-model", json.loads(e.exception.read())["error"]["message"])
+        e.exception.close()
+
+    def test_an_error_answer_is_the_apis_error_after_its_delay(self):
+        with open(os.path.join(self.dir, "model-script.json"), "w") as f:
+            json.dump({"rules": [{"when": ["x"], "steps": [{"error": 529, "message": "busy", "delay": 0.3}]}]}, f)
+        t = time.monotonic()
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.post("/v1/messages", {"model": "virtual", "messages": [user("x")]})
+        self.assertGreaterEqual(time.monotonic() - t, 0.3)
+        self.assertEqual(e.exception.code, 529)
+        self.assertEqual(json.loads(e.exception.read())["error"], {"type": "api_error", "message": "busy"})
         e.exception.close()
 
     def test_ollama_reports_the_scripts_context(self):

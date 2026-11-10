@@ -13,7 +13,8 @@ npm test                                       # every scenario, then the covera
 npx playwright test S-24                       # one scenario (no report)
 ```
 
-`cargo build` first: the tests use `target/debug/echoctl`, and `--ai virtual` needs Claude Code on `PATH`. S-19 copies
+`cargo build` first: the tests use `target/debug/echoctl`, and `--ai virtual` needs Claude Code on `PATH`. A spec with a failed test keeps its data folder and prints its path (its runs' `claude.log`, the model's
+`model/model-log.jsonl` and `serve.log`); `ECHO_AUTO_KEEP=1` keeps every one. S-19 copies
 the recordings prepared once a build (`tests/fixtures/recordings.py prepare`); when this build (the last commit that
 changed the app) has none, the spec prepares them first — a few minutes, the one real capture and transcription. The data
 is built between 06:00 and 22:50 only (`make_data.py`'s rule); outside those hours every spec fails at its setup with

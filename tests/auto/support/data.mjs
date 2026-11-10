@@ -37,10 +37,15 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     }
     data.home = data.env.ECHOCTL_HOME
   })
+  // A failed test keeps the data (its runs' claude.log, the model's log) for finding why; the path is printed.
+  test.afterEach(async ({}, info) => {
+    if (info.status !== info.expectedStatus) data.failed = true
+  })
   test.afterAll(async () => {
     if (!data.dir) return
     spawnSync(SERVE, ['down', data.dir], { cwd: ROOT })
-    if (!process.env.ECHO_AUTO_KEEP) fs.rmSync(data.dir, { recursive: true, force: true })
+    if (data.failed) console.log(`test data kept for the failure: ${data.dir}`)
+    else if (!process.env.ECHO_AUTO_KEEP) fs.rmSync(data.dir, { recursive: true, force: true })
   })
 
   /** `echoctl …` (the debug build of this checkout) with exactly the data's environment: `<dir>/env` unsets Claude

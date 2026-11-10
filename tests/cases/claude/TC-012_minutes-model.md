@@ -27,8 +27,8 @@ auto: [tests/auto/specs/S-19.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Read that call's `claude.log` and its Minutes tab | The log's `model:` line and "Claude Code started · model …" name the profile's model, "virtual"; the minutes' note "Written by AI (Echo, Virtual model · virtual · …)" names the same |
-| 2 | `. <dir>/env; target/debug/echoctl ai set ollama --notes-model no-such-model`; in the window, that call → "Call actions" → "Write minutes again"; wait a few seconds | Above the kept minutes: "The last update didn't finish: Claude Code can't use the model of Virtual model · … (… no-such-model). Change it under menu → AI for calls → Minutes model (while it is the profile new calls use), or `echoctl ai set ollama --notes-model <name>`." with "Try again" and "Show log"; the earlier minutes stay |
+| 1 | Read that call's `claude.log` and its Minutes tab | The log's `model:` line and "Claude Code started · model …" name the profile's model, "virtual"; the minutes' note "Written by AI (Echo, Virtual model · virtual)" names the same |
+| 2 | `. <dir>/env; target/debug/echoctl ai set ollama --notes-model no-such-model`; in the window, that call → "Call actions" → "Write minutes again"; wait a few seconds | Above the kept minutes: "The last update didn't finish: Claude Code can't use the model of Virtual model (Virtual model · no-such-model). Change it under menu → AI for calls → Minutes model (while it is the profile new calls use), or `echoctl ai set ollama --notes-model <name>`." with "Try again" and "Show log"; the earlier minutes stay |
 | 3 | `target/debug/echoctl ai set ollama --notes-model ""` | "Virtual model …: minutes model virtual" (back to its default) |
 | 4 | `target/debug/echoctl ai set system --notes-model opus`, then `target/debug/echoctl ai status` | `system` shows `notes_model` "opus"; `ollama` is unchanged |
 | 5 | `target/debug/echoctl ai set system --notes-model default`, then `ai status` | `system`'s `notes_model` is null ("Claude Code's default model"): Claude Code's own setting |

@@ -40,7 +40,7 @@ scenario(test, 'S-19', 'Claude Code and the minutes', () => {
     await expect(page.getByText(t.due)).toBeVisible()
     await calls.writeNow.click()
     await expect(page.getByText(t.writing)).toBeVisible()
-    await expect(page.getByText(t.profile.split(' · ')[1], { exact: false }).first()).toBeVisible()
+    await expect(page.getByText(t.profile, { exact: true })).toBeVisible()
     // Stage 3's step 1, while run A writes: a session (in folder A) can't take the call.
     const claim = data.cli('claim', long, '--for', folderA, '--session', 'test-session-1')
     state.claimA = claim
