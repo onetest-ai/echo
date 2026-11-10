@@ -368,6 +368,20 @@ function emptyMain() {
   return `${listToggle()}<div class="empty"><div>${mark()}<h3>Pick a call</h3><p>Its minutes, your notes, the transcript, chat and shared screens open here.</p></div></div>`
 }
 
+// ── call url: when the open call may write its own address (no DOM: `call-url.test.mjs`) ───────────────────────
+/** The address the open call writes over `hash`, or null: its own (`own`) — a tab the window chose (#148), the newest
+ *  call a fresh load opened, a call renamed under it — only while the address is the one the window last routed
+ *  (`routed`). One that changed since is a click on its way, to another call, tab or view: the view follows on
+ *  hashchange, and a redraw before it still shows this call; writing over it would lose the click (#355). */
+function callUrl(hash, routed, own) {
+  return hash !== own && hash === routed ? own : null
+}
+/** Replace the address without a history entry, as the address the window has now routed. */
+function replaceUrl(h) {
+  history.replaceState(null, '', h)
+  S.routed = hashText()
+}
+// end of the call url block
 /** The call view in regions: `plain` (nothing to show yet), else its header and its pane — on the
  *  Minutes tab with minutes, the pane's bar and its frame apart, so a refresh that changes the bar
  *  never reloads the page in the frame (`render`). */
@@ -391,7 +405,7 @@ function doc() {
   // A tab the window chose itself (above) is written into the URL too, or a click on the tab the URL still names
   // would ask for the URL it already has and change nothing (#148).
   const own = `#call/${c.name}/${S.tab}`
-  if (S.selected === c.name && hashText() !== own) history.replaceState(null, '', own)
+  if (S.selected === c.name) { const to = callUrl(hashText(), S.routed, own); if (to) replaceUrl(to) }
   const people = c.people && c.people.length ? `<span class="people" title="${esc(c.people.join(', '))}">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">
