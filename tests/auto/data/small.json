@@ -1487,7 +1487,60 @@
     "browser": {
       "title": "Acme weekly sync",
       "folder": "acme-weekly-sync"
-    }
+    },
+    "main": {
+      "conversation": "acme-sync",
+      "title": "REC-001 next call",
+      "slug": "rec-001-next-call",
+      "hangUpAt": 37,
+      "stopsIn": [
+        10,
+        15
+      ],
+      "words": [
+        "Berlin first",
+        "training room"
+      ],
+      "lines": 2
+    },
+    "notes": {
+      "typed": "Ask Dana about the Berlin office date",
+      "draft": "half a thought",
+      "terminal": "Tray-style note from the terminal",
+      "after": "Checklist goes out Friday",
+      "within": 5
+    },
+    "open": {
+      "title": "Initech planning",
+      "turns": 2
+    },
+    "autoMinutes": {
+      "recording": "minutes-call",
+      "title": "MIN-A catch-up",
+      "slug": "min-a-catch-up",
+      "early": 45,
+      "slack": 30,
+      "delay": 90
+    },
+    "notesMove": {
+      "recording": "minutes-call",
+      "title": "MIN-B notes move",
+      "slug": "min-b-notes-move",
+      "noteAfter": 35,
+      "note": "Ask Kim for the pilot budget"
+    },
+    "localLive": {
+      "profile": "here",
+      "url": "http://127.0.0.1:9",
+      "model": "m",
+      "name": "m · this computer",
+      "conversation": "minutes-call",
+      "title": "LIVE-019",
+      "slug": "live-019",
+      "early": 5,
+      "past": 100
+    },
+    "language": "en"
   },
   "s18": {
     "_about": "S-18 Recording off the happy path: the captures it records from files and the prepared recordings it copies",

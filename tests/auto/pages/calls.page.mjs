@@ -231,6 +231,16 @@ export class CallsPage extends AppPage {
     return this.rightPanel.getByText(text, { exact: true })
   }
 
+  /** A tab of the call, by its whole name ("Recording Transcript" while the call records). */
+  tabNamed(name) {
+    return this.page.getByRole('tab', { name, exact: true })
+  }
+
+  /** A button of the right panel (My notes' "⚑ Flag"), by its name. */
+  panelButton(name) {
+    return this.rightPanel.getByRole('button', { name, exact: true })
+  }
+
   /** What the window's server says of a call (`/api/call/<folder>`: its automatic minutes' `auto`, …), as the page
    *  asks it (its cookie). */
   async callApi(folder) {

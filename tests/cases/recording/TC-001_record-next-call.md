@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, arm, second-instance]
 external_id: TC-REC-001
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-001: Record the next call: armed, then recorded from connect to hang-up

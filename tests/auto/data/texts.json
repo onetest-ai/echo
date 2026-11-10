@@ -1354,7 +1354,8 @@
       "transcribing": "Transcribing",
       "failed": "Failed",
       "audio": "Audio",
-      "memo": "Memo"
+      "memo": "Memo",
+      "recording": "Recording"
     },
     "chip": "⏱ {n} min",
     "chipPattern": "^⏱ (\\d+) min$",
@@ -1720,6 +1721,19 @@
     "armedFile": "armed.json",
     "stopRequest": "stop.request",
     "stateDir": ".echo",
+    "notePlaceholder": "^Note at \\d+:\\d\\d — Enter to add$",
+    "flag": "⚑ Flag",
+    "noteHint": "The time is taken when you start typing.",
+    "recordingTab": "Recording Transcript",
+    "timedNote": "^- \\[(\\d\\d):(\\d\\d)\\] {text}$",
+    "timedRow": "^• (\\d\\d):(\\d\\d) {text}$",
+    "untimedNote": "- {text}",
+    "untimedRow": "• {text}",
+    "autoRun": "Echo starts Claude Code to write the minutes (automatically)",
+    "runEnded": [
+      "failed",
+      "done"
+    ],
     "checkedBy": "app",
     "statuses": [
       "granted",
@@ -1755,8 +1769,17 @@
       "deliver"
     ],
     "modelLog": "model/model-log.jsonl",
+    "added": "added {name} ({id})",
+    "defaultSet": "new calls use {name}",
+    "liveOn": "live notes during calls: on",
+    "liveOff": "live notes during calls: off",
+    "liveLocal": "local",
+    "liveNotesFile": "live-notes.json",
+    "liveRow": "Live notes during calls",
+    "liveNotWith": "Not with {name}: its model runs on this computer, where it would slow your calls down.",
+    "aiRoute": "#settings/ai",
     "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
-    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
-    "autoRun": "Echo starts Claude Code to write the minutes (automatically)"
+    "homeVar": "ECHOCTL_HOME",
+    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$"
   }
 }

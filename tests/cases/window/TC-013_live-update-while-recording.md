@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [calls, recording, second-instance]
 external_id: TC-WIN-007
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-013: The window updates on its own when a recording ends

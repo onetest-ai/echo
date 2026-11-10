@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [notes, recording, second-instance]
 external_id: TC-WIN-011
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-014: Notes during a recording carry the call's time; terminal notes join them

@@ -80,7 +80,7 @@ scenario(test, 'S-21', 'Living with Echo: quit, one instance, another folder, ap
     test.setTimeout(3 * 60_000)
     const s = set()
     // This stage runs without ECHOCTL_HOME (it would pin the data folder): the folder is the one home.json names.
-    const free = ['ECHOCTL_HOME']
+    const free = [a().homeVar]
     const cli = (...args) => data.cliWithout(free, {}, ...args)
     const home2 = path.join(data.dir, s.newHome)
     const watcher = () => data.status(free).watcher

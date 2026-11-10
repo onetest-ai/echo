@@ -8,6 +8,7 @@ module: claude
 run: agent
 platform: macos
 tags: [live, ai-profiles, performance, file-fed]
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-019: Live notes skip a model on this computer while recording
