@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [transcription, recordings]
 external_id: TC-TRN-001
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # TC-001: The transcript has the words, speakers and order of the call

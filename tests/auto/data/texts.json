@@ -974,5 +974,36 @@
   },
   "notices": {
     "ok": "OK"
+  },
+  "speech": {
+    "recordings": "tests/fixtures/recordings.py",
+    "makeAudio": "tests/fixtures/audio/make_audio.py",
+    "files": [
+      "transcript.md",
+      "segments.json",
+      "expected.json",
+      "meta.json"
+    ],
+    "audio": ".wav",
+    "transcript": "transcript.md",
+    "segments": "segments.json",
+    "expected": "expected.json",
+    "meta": "meta.json",
+    "captureErr": "capture.err",
+    "transcribeOut": "transcribe.out",
+    "speakers": {
+      "me": "Me",
+      "remote": "Remote"
+    },
+    "turnLine": "^\\*\\*(\\S+)\\*\\* \\[(\\d\\d:\\d\\d:\\d\\d)\\]",
+    "modelLine": "**Model:** {model}",
+    "languageLine": "^  language: ",
+    "language": "  language: {lang}",
+    "hint": "vocabulary hint: {terms}",
+    "noSpeech": "debug: no_speech",
+    "built": "{n} turns",
+    "models": "models",
+    "testModels": "ECHOCTL_TEST_MODELS",
+    "debug": "ECHOCTL_DEBUG"
   }
 }

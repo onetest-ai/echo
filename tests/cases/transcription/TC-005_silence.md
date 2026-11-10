@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [transcription, recordings]
 external_id: TC-TRN-006
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # TC-005: Silence produces no made-up text

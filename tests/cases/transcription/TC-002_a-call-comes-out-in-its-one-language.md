@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [transcription, languages, recordings]
 external_id: TC-TRN-003
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # TC-002: A call comes out in its one language

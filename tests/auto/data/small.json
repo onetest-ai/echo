@@ -1043,5 +1043,56 @@
       "search": "acme",
       "noMatch": "zzzz"
     }
+  },
+  "s14": {
+    "model": "large-v3-turbo-q5_0",
+    "maxWer": 0.15,
+    "acme": {
+      "recording": "acme-sync",
+      "title": "TRN-001 acme",
+      "says": [
+        "Berlin first",
+        "SSO checklist"
+      ]
+    },
+    "twoRemotes": {
+      "recording": "two-remotes",
+      "title": "TRN-003 en only",
+      "language": "en"
+    },
+    "oneLanguage": [
+      {
+        "recording": "ukrainian-call",
+        "title": "TRN-002 Ukrainian",
+        "language": "uk"
+      },
+      {
+        "recording": "russian-call",
+        "title": "TRN-002 Russian",
+        "language": "ru"
+      }
+    ],
+    "silence": {
+      "recording": "long-silence",
+      "title": "TRN-005 silence"
+    },
+    "vocabulary": {
+      "conversation": "acme-sync",
+      "turns": 6,
+      "terms": "ServiceNow,Kubernetes,Terraform,Snowflake,SSO,Berlin,Madrid",
+      "hint": "ServiceNow, Kubernetes, Terraform, Snowflake, SSO, Berlin, Madrid",
+      "unsaid": [
+        "ServiceNow",
+        "Kubernetes",
+        "Terraform",
+        "Snowflake"
+      ],
+      "said": [
+        "SSO checklist",
+        "Berlin first"
+      ],
+      "withIt": "_150000-acme-sync-vocabulary",
+      "plain": "_150500-acme-sync-plain"
+    }
   }
 }

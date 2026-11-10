@@ -54,6 +54,11 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     const r = spawnSync(BIN, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: 120_000 })
     return { code: r.status, out: r.stdout, err: r.stderr, json: () => JSON.parse(r.stdout) }
   }
+  /** `echoctl …` as `cli`, with a few variables more (`{ ECHOCTL_DEBUG: '1' }`). */
+  data.cliWith = (extra, ...args) => {
+    const r = spawnSync(BIN, args, { cwd: ROOT, env: { ...data.env, ...extra }, encoding: 'utf8', timeout: 300_000 })
+    return { code: r.status, out: r.stdout, err: r.stderr, json: () => JSON.parse(r.stdout) }
+  }
   /** Any command on the data (a fixture script: `recordings.py copy …`), with the data's environment; its output. A
    *  last `{ timeout }` (ms) for a long one. */
   data.run = (cmd, ...args) => {
