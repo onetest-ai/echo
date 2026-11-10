@@ -55,7 +55,7 @@
   },
   {
    "id": "F-WS-07",
-   "feature": "The status bar shows the next automatic minutes, the default AI profile, Live notes on, Actions and Claude",
+   "feature": "The status bar shows the next automatic minutes, Live notes on, Actions and Claude (the default AI profile is the top bar's account chip)",
    "priority": "low",
    "check": "agent",
    "axes": [

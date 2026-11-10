@@ -113,7 +113,7 @@
   },
   {
    "id": "F-WORK-11",
-   "feature": "Details edits Owner, Handed over by, Due, Decided by, Likelihood and Impact as fit the kind; criteria are ticked in \"Done when · m of n\"",
+   "feature": "Details edits Owner, Handed over by, Due, Decided by, Likelihood and Impact as fit the kind (Owner, Handed over by and Decided by suggest Me and the thread's people as they are typed); criteria are ticked in \"Done when · m of n\"",
    "priority": "high",
    "check": "agent",
    "axes": [
