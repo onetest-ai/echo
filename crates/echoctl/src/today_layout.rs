@@ -38,7 +38,7 @@ pub enum Side {
 }
 
 /// The widgets Today draws now; the others' views come with the layout steps (#315).
-pub const DRAWN: &[&str] = &["core:needs.now", "core:routines.cards", "core:calendar.agenda", "core:tasks.mine", "core:calendar.next", "core:calendar.calendar", "core:calendar.strip"];
+pub const DRAWN: &[&str] = &["core:needs.now", "core:routines.cards", "core:calendar.agenda", "core:tasks.mine", "core:calendar.next", "core:calendar.calendar", "core:calendar.strip", "core:calendar.choices"];
 
 const MAX_BYTES: usize = 16 * 1024;
 

@@ -83,6 +83,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // The day's choices: Accept, Maybe or Decline an invite, sent to its organiser by the user's click.
+        "event_respond" => match crate::m365::event_respond(v["event"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), true) {
+            Ok(r) => notice(&format!("{} — {}", r["meeting"].as_str().unwrap_or("the meeting"), match r["answer"].as_str() { Some("accepted") => "accepted", Some("declined") => "declined", _ => "maybe" })),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Read and reply (a mail of Needs you now): the user's words, sent by their click.
         "needs_reply" => match crate::m365::mail_reply_text(v["message"].as_str().unwrap_or(""), v["all"] == true, v["text"].as_str().unwrap_or(""), None, true) {
             Ok(_) => {
