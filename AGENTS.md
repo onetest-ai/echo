@@ -47,8 +47,8 @@ trivial task, use judgment.
 | Development | .ai-run/guides/development/dev-workflow.md | day-to-day build, run and debug: features, prerequisites, dev app beside Echo, UI review, runtimes, packaging |
 | Development | .ai-run/guides/development/rust-conventions.md | atomic writes, meta.json and state-file locking, call stamps, version bump |
 | Development | .ai-run/guides/development/threads-and-ledger.md | threads, clients and the work ledger: evidence-checked proposals, user edits pinned, Microsoft 365 sends |
-| Echo plugins | .ai-run/guides/plugins/echo-plugins.md | plugin manifest, host half services, grants, client-half ctx and slots, marketplaces |
-| Echo plugins | .ai-run/guides/plugins/plugin-authoring.md | writing, testing, publishing and updating a third-party Echo plugin: manifest, host and client halves, marketplace |
+| Echo plugins | .ai-run/guides/plugins/echo-plugins.md | plugin manifest, host half services, grants, client-half ctx and slots, Today widget kinds, marketplaces |
+| Echo plugins | .ai-run/guides/plugins/plugin-authoring.md | writing, testing, publishing and updating a third-party Echo plugin: manifest, host and client halves, Today widgets, marketplace |
 | Integration | .ai-run/guides/integrations/claude-code-runs.md | starting Claude Code on AI profiles, strict routing, leases, the fake in tests |
 | Security | .ai-run/guides/security/untrusted-text.md | headless-run guard, run allowlists, safe Markdown, path checks |
 | Standards | .ai-run/guides/standards/git-workflow.md | commit, branch, PR and release conventions |
@@ -75,7 +75,7 @@ by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the 
 | Claude Code plugin | change the Claude Code plugin in plugin/ | "edit a skill", "change the launcher", "change the status line" | - | .ai-run/guides/plugins/claude-code-plugin.md |
 | Data | change the Recall store | "add a column", "serve Recall data to a session" | - | .ai-run/guides/data/recall-store.md |
 | Development | write or change files the app keeps | "write a new JSON state file", "change meta.json", "bump the version" | .ai-run/guides/development/rust-conventions.md | .ai-run/guides/development/dev-workflow.md |
-| Echo plugins | build or extend Echo plugins | "add a ctx service", "add a capability", "add a slot", "test a plugin locally" | .ai-run/guides/plugins/echo-plugins.md | .ai-run/guides/plugins/plugin-authoring.md |
+| Echo plugins | build or extend Echo plugins | "add a ctx service", "add a capability", "add a slot", "test a plugin locally", "give a plugin a Today widget", "add a widget kind" | .ai-run/guides/plugins/echo-plugins.md | .ai-run/guides/plugins/plugin-authoring.md |
 | Integration | run Claude Code or change AI profiles | "start a new Claude job", "change routing variables", "test a sign-in" | .ai-run/guides/integrations/claude-code-runs.md | - |
 | Security | change what a run, plugin or page may do with untrusted text or paths | "let process-call use a new command", "render model output as HTML", "accept a path from a plugin" | .ai-run/guides/security/untrusted-text.md | - |
 | Standards | commit, branch or release | "write a commit message", "cut a release" | - | .ai-run/guides/standards/git-workflow.md |

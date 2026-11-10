@@ -5,11 +5,12 @@
 ## Manifest
 
 ### Rules
-- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`. Evidence: `plugins::valid_id`
+- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`, `widgets`. Evidence: `plugins::valid_id`
 - R2. Point `main` and `client` at a `.js`/`.mjs` inside the plugin folder; read any other file it ships with `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - R3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
 - R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts`, `channel.plugin`, `sessions`, `folders.what` read-only, `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
 - R5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
+- R6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, height?, refresh?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `list`, `status` or `card`, `sizes` of `S` `M` `L` each once (default `["M"]`), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 12, and only with a `main` to give their data. Evidence: `plugins::read_manifest`
 
 ## Host half
 
@@ -28,17 +29,20 @@
 - R12. Ask the user for a decision with `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 chars), and `ctx.inbox.clear(key)` once it is settled. Evidence: `attention::inbox_items`
 - R13. Bundle the host half into one file with no `import` of other files; the client half may import its own modules. Evidence: `window::plugins::plugin_file`
 - R14. Keep large data in the store, not in JavaScript memory (64 MB shared by all host halves). Evidence: `jshost::set_memory_limit`
+- R15. Give a widget's data with `ctx.widgets.provide(id, ({size}) => data)` — Echo asks it in the background, answered within 5 s, again after `refresh` — or push it with `ctx.widgets.set(id, data)` and take the widget off Today with `ctx.widgets.clear(id)`; only ids the manifest declares, 64 KB of data at most; work that needs Claude runs as a job whose result you `set`. Evidence: `jshost::widget_ask`
+- R16. Shape a widget's data by its kind — `stat` `{value, label?, tone?, note?}`, `stats` `{items: [{label, value, tone?}]}`, `list` `{items: [{title, sub?, link?}], empty?}`, `status` `{state: ok|warn|bad, title, text?}`, `card` `{title?, text?, link?}`; `tone` `good`, `warn` or `bad`; text is plain (Echo escapes it), a `link` only to `echo://`; check it with `echoctl widget show plugin:<id>:<widget>`. Evidence: `pluginWidgetHtml` (window script)
 
 ### Constraints
 | Do not | Do instead | Evidence |
 |---|---|---|
-| Write `settings.json` or `inbox.json` with `ctx.store.write` | Use `ctx.settings.set` and `ctx.inbox.set` / `clear` | `jshost::inbox_file` |
+| Write `settings.json`, `inbox.json` or `widgets.json` with `ctx.store.write` | Use `ctx.settings.set`, `ctx.inbox.set` / `clear` and `ctx.widgets.set` / `clear` | `jshost::inbox_file`, `jshost::widgets_file` |
 
 ### Read first
 | When you are | Exemplar | Tests |
 |---|---|---|
 | writing a first host half | `jshost::a_host_half_gets_echos_services_and_answers_commands` | exemplar is a test |
 | using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test |
+| adding Today widgets | `jshost::a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set` | exemplar is a test; a plugin with one widget of each kind: `tests/fixtures/plugins` |
 
 ## Client half
 
