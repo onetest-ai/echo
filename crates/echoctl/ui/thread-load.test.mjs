@@ -80,6 +80,15 @@ test('a reload asked well after the last board change takes the board it is give
   }
 })
 
+test('a thread just opened (no detail yet) takes its own board, whatever was changed on the last one', async () => {
+  const S = { pj: { sel: 'acme-rollout', tab: 'brief', work: { nodes: {} }, boardAt: Date.now(), detail: null } }
+  const get = async (url) => url === 'api/project/acme-rollout' ? { id: 'acme-rollout', board: OLD } : {}
+  const noop = async () => {}
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
+  await loadProject()
+  assert.equal(S.pj.detail.board, OLD)
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { await f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
