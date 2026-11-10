@@ -149,6 +149,16 @@ export class TasksPage extends AppPage {
     return readLines(await this.pileArea(pile).ariaSnapshot()).filter((l) => !heading.test(l) && !/^(\+ \d+|Show fewer)$/.test(l))
   }
 
+  /** The count a pile's heading shows; the count of Others (0 when it isn't there). */
+  async pileCount(pile) {
+    return Number((await this.pileArea(pile).getByRole('heading').textContent()).replace(/\D/g, ''))
+  }
+
+  async othersCount() {
+    if (!(await this.others().count())) return 0
+    return Number(/· (\d+)/.exec(await this.others().textContent())[1])
+  }
+
   /** A filter's options, in order. */
   options(name) {
     return this.select(name).getByRole('option')

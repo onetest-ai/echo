@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, client, list, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-013: A client's People tab lists the people of all its threads with a Threads column; the user's company has only colleagues

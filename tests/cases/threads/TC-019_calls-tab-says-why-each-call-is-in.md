@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, calls, membership, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-019: The Calls tab says why each call is in a thread: its series, the client's people, its subject or added by hand

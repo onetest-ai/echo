@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile, rules, membership, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-026: The Profile shows each thread's rules as tokens with the count of calls that match, pinned and taken out

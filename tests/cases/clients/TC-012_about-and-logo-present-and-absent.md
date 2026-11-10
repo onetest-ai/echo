@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, about, logo, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-012: A client's About is Markdown or empty, and its logo shows in the head, the list and on threads that wear it
@@ -23,7 +24,7 @@ tags: [clients, about, logo, pairwise]
 
 | Client | About (Overview) | Logo in the head and the list | Logo row in the Profile |
 |---|---|---|---|
-| Acme | Markdown: heading "About Acme", "A manufacturer of everything, 4,000 people across Europe." (bold word), three bullets (Buyer: Rita Gomez (budget), Delivery: Dana Lee, "See their site" as a link) | an image, `src` ending `/api/client/acme/logo?v=…` | an image, the button "Change logo…" and a link "Remove" |
+| Acme | Markdown: heading "About Acme", "A manufacturer of everything, 4,000 people across Europe." (bold word), three bullets (Buyer: Rita Gomez (budget), Delivery: Dana Lee, "See their site" as a link) | an image, `src` `api/client/acme/logo?v=<n>` (relative to the window's address) | an image, the button "Change logo…" and a link "Remove" |
 | Globex | empty: "Nothing yet — who they are, what you do for them, who matters." | a grey square with the letter "G" | the box "logo", the button "Add a logo…", no "Remove" |
 
 ## Steps
@@ -31,7 +32,7 @@ tags: [clients, about, logo, pairwise]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#client/acme/overview` | The block "About Acme" has the rendered Markdown of the table and a button "Edit"; the link "their site" has `href` `https://acme.example` |
-| 2 | Read the head of the page | The client's logo is an `img` (`src` contains `/api/client/acme/logo`); the tag reads "client" |
+| 2 | Read the head of the page | The client's logo is an `img` (`src` `api/client/acme/logo?v=<n>`, relative); the tag reads "client" |
 | 3 | Run `curl -s -o /dev/null -w "%{http_code} %{content_type}" {{base_url}}/api/client/acme/logo` and the same for globex | Acme: `200 image/png`; Globex: `404` |
 | 4 | Navigate to `{{base_url}}/#client/acme/profile` and read the row "Logo" | The image, "Change logo…" and "Remove"; the line "PNG, JPEG or WebP, up to 512 KB — shown beside its name and on its threads that wear it." |
 | 5 | Navigate to `{{base_url}}/#client/globex/overview` and `#client/globex/profile` | The Overview says "Nothing yet — who they are, what you do for them, who matters."; the head shows the letter "G"; the Profile row "Logo" shows "logo" and "Add a logo…" |

@@ -697,7 +697,8 @@
       "overview": "Overview",
       "calls": "Calls",
       "tasks": "Tasks",
-      "profile": "Profile"
+      "profile": "Profile",
+      "people": "People"
     },
     "rows": {
       "name": "Name",
@@ -718,7 +719,25 @@
     "gone": "This client is gone",
     "backToThreads": "Back to the threads",
     "orgRemoved": "{id} removed",
-    "claudeAbout": "Claude about {name}"
+    "claudeAbout": "Claude about {name}",
+    "addLogo": "Add a logo…",
+    "changeLogo": "Change logo…",
+    "logoBox": "logo",
+    "removeLogo": "Remove",
+    "newThread": "+ New thread",
+    "removeClient": "Remove this client…",
+    "noCalls": "No calls in this client's threads yet.",
+    "cardCalls": "{calls} · last {day}",
+    "callLine": "{day}, {time}",
+    "callLineMinutes": "{day}, {time} · {minutes}",
+    "logoRoute": "/api/client/{id}/logo",
+    "tabIds": {
+      "overview": "overview",
+      "calls": "calls",
+      "tasks": "tasks",
+      "people": "people",
+      "profile": "profile"
+    }
   },
   "people": {
     "views": [
@@ -802,7 +821,12 @@
       "orgPlaceholder": "Who is {domain}?",
       "nameOrg": "Name this organisation ({domain})"
     },
-    "owes": "Owes"
+    "owes": "Owes",
+    "addAll": "Add all",
+    "tabCount": "People{n}",
+    "notPlaced": "Not placed yet",
+    "quadrantHead": "{name} {sub}",
+    "newTag": "new"
   },
   "vocabulary": {
     "panel": "Vocabulary",
@@ -1166,7 +1190,9 @@
     "rulePlaceholder": "a meeting's subject (empty for the client's people)",
     "why": {
       "pinned": "added by hand",
-      "subject": "its subject"
+      "subject": "its subject",
+      "series": "its meeting series",
+      "people": "the client's people"
     },
     "rowLine": "{day}, {time} · {why}",
     "noMinutes": "no minutes yet",
@@ -1203,6 +1229,23 @@
     "addButton": "Add",
     "deleteItem": "Delete…",
     "deleteAsk": "Delete {name}? Its brief, profile and work go to the trash; its calls stay.",
-    "moveToTrash": "Move to trash"
+    "moveToTrash": "Move to trash",
+    "rowLineMinutes": "{day}, {time} · {why} · {minutes}",
+    "tabCount": "{tab}{n}",
+    "partOf": "Part of {thread}? {why}",
+    "suggestAdd": "Add",
+    "notThis": "Not this",
+    "olderNot": "· nothing older is read",
+    "teamsChat": "its Teams chat",
+    "newThread": "New thread",
+    "foundCount": "Found for you {n}",
+    "orgHintFull": "Who this thread is with besides its client: their people are theirs in People, and the people rule counts their domains",
+    "counts": {
+      "match": "^(\\d+) calls? match",
+      "pinned": "(\\d+) pinned",
+      "takenOut": "(\\d+) taken out by hand"
+    },
+    "headCalls": "{n} calls · since {since}",
+    "addTo": "Add to a thread"
   }
 }

@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, profile, aliases, domains, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-011: A client's Profile lists its other names and mail domains: none, one, several, and the user's company

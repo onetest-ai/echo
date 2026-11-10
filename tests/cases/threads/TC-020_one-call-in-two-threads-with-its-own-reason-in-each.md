@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, membership, calls, clients]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-020: A call can be in two threads, with its own reason in each, and each client page shows it under its own thread

@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, map, quadrants, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-009: The map puts each person in a quadrant by influence and interest, and the rest in "Not placed yet"

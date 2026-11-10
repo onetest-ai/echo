@@ -146,6 +146,25 @@ export class AppPage {
     return locator.evaluate((el) => getComputedStyle(el).color)
   }
 
+  /** How opaque an element is drawn ("1", "0.65" for a dimmed one). */
+  async opacityOf(locator) {
+    return Number(await locator.evaluate((el) => getComputedStyle(el).opacity))
+  }
+
+  /** A day as the window's lists write it: "Today", "Yesterday", the weekday for the days before, else its day and
+   *  month ("November 3"), with its year when it isn't this one. An ISO time from a file or the CLI. */
+  async dayLabel(iso) {
+    return this.page.evaluate((t) => {
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      const that = new Date(t); that.setHours(0, 0, 0, 0)
+      const diff = Math.round((today - that) / 86400000)
+      if (diff === 0) return 'Today'
+      if (diff === 1) return 'Yesterday'
+      if (diff < 7) return that.toLocaleDateString([], { weekday: 'long' })
+      return that.toLocaleDateString([], { day: 'numeric', month: 'long', year: today.getFullYear() === that.getFullYear() ? undefined : 'numeric' })
+    }, iso)
+  }
+
   /** How an element's border is drawn ("solid", "dashed"). */
   async borderOf(locator) {
     return locator.evaluate((el) => getComputedStyle(el).borderTopStyle)

@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, stage, membership, closed, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-023: A closed thread keeps the calls that came before it closed and takes none that start after

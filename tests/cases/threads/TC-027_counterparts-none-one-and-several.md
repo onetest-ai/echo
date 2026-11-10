@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile, org]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-027: A thread has no counterpart, one or several, and a counterpart that is not a client has no group in the list

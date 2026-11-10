@@ -2431,5 +2431,1503 @@
       "Umbrella lead · 0",
       "Internal tooling · 0"
     ]
+  },
+  "s26": {
+    "list": {
+      "found": 6,
+      "groups": [
+        "Acme",
+        "Globex",
+        "Umbrella",
+        "Tyrell",
+        "Duff",
+        "Initech · your company",
+        "No client"
+      ],
+      "rows": {
+        "Acme": [
+          [
+            "Acme renewal",
+            2,
+            "Negotiation",
+            "acme-renewal"
+          ],
+          [
+            "Acme rollout",
+            6,
+            "Active",
+            "acme-rollout"
+          ]
+        ],
+        "Globex": [
+          [
+            "Globex pilot",
+            8,
+            "Kickoff",
+            "globex-pilot"
+          ]
+        ],
+        "Umbrella": [
+          [
+            "Umbrella lead",
+            0,
+            "Lead",
+            "umbrella-lead"
+          ],
+          [
+            "Umbrella proposal",
+            5,
+            "Proposal",
+            "umbrella-proposal"
+          ]
+        ],
+        "Tyrell": [],
+        "Duff": [],
+        "Initech · your company": [
+          [
+            "Initech hiring",
+            3,
+            "Wrap-up",
+            "initech-hiring"
+          ]
+        ],
+        "No client": [
+          [
+            "Internal tooling",
+            3,
+            "On hold",
+            "internal-tooling"
+          ]
+        ]
+      },
+      "noFold": [
+        "Tyrell",
+        "Duff"
+      ],
+      "closed": 3,
+      "closedRows": [
+        [
+          "Acme hackathon",
+          1,
+          null,
+          "acme-hackathon"
+        ],
+        [
+          "Legacy migration",
+          1,
+          null,
+          "legacy-migration"
+        ],
+        [
+          "Tyrell bid",
+          1,
+          null,
+          "tyrell-bid"
+        ]
+      ],
+      "logo": [
+        "Globex pilot",
+        "Acme hackathon"
+      ],
+      "fold": {
+        "group": "Acme",
+        "count": 2,
+        "row": "Acme renewal"
+      },
+      "client": {
+        "group": "Tyrell",
+        "id": "tyrell"
+      }
+    },
+    "calls": {
+      "order": [
+        "acme-rollout",
+        "acme-renewal",
+        "globex-pilot",
+        "umbrella-proposal",
+        "initech-hiring",
+        "internal-tooling"
+      ],
+      "rows": {
+        "acme-rollout": [
+          {
+            "title": "Memo",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Acme weekly sync",
+            "why": "its meeting series",
+            "noMinutes": false,
+            "button": "Take out"
+          },
+          {
+            "title": "Acme security review",
+            "why": "added by hand",
+            "noMinutes": true,
+            "button": "Unpin"
+          },
+          {
+            "title": "Acme weekly sync",
+            "why": "its meeting series",
+            "noMinutes": false,
+            "button": "Take out"
+          },
+          {
+            "title": "Globex pilot scoping",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Acme weekly sync",
+            "why": "its meeting series",
+            "noMinutes": false,
+            "button": "Take out"
+          }
+        ],
+        "acme-renewal": [
+          {
+            "title": "Acme renewal negotiation",
+            "why": "its subject",
+            "noMinutes": false,
+            "button": "Take out"
+          },
+          {
+            "title": "Acme renewal pricing",
+            "why": "its subject",
+            "noMinutes": false,
+            "button": "Take out"
+          }
+        ],
+        "globex-pilot": [
+          {
+            "title": "Globex standup",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Memo",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Acme demo",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Globex steering",
+            "why": "the client's people",
+            "noMinutes": false,
+            "button": "Take out"
+          },
+          {
+            "title": "Vendor call with Vandelay",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Globex pilot kickoff",
+            "why": "the client's people",
+            "noMinutes": false,
+            "button": "Take out"
+          },
+          {
+            "title": "Globex support triage",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Globex pilot scoping",
+            "why": "the client's people",
+            "noMinutes": false,
+            "button": "Take out"
+          }
+        ],
+        "umbrella-proposal": [
+          {
+            "title": "Globex retro",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Umbrella contract call",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Umbrella intro call",
+            "why": "added by hand",
+            "noMinutes": true,
+            "button": "Unpin"
+          },
+          {
+            "title": "Umbrella proposal walkthrough",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          },
+          {
+            "title": "Umbrella discovery",
+            "why": "the client's people",
+            "noMinutes": true,
+            "button": "Take out"
+          }
+        ],
+        "initech-hiring": [
+          {
+            "title": "Guest call 7",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Imported review 2",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Initech hiring panel",
+            "why": "its subject",
+            "noMinutes": false,
+            "button": "Take out"
+          }
+        ],
+        "internal-tooling": [
+          {
+            "title": "Guest call 7",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Imported review 2",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          },
+          {
+            "title": "Memo 9",
+            "why": "added by hand",
+            "noMinutes": false,
+            "button": "Unpin"
+          }
+        ]
+      }
+    },
+    "twoThreads": {
+      "call": "globex-pilot-scoping",
+      "memo": "Memo",
+      "title": "Globex pilot scoping",
+      "in": [
+        [
+          "acme-rollout",
+          "Memo",
+          "added by hand",
+          "Unpin"
+        ],
+        [
+          "acme-rollout",
+          "Globex pilot scoping",
+          "added by hand",
+          "Unpin"
+        ],
+        [
+          "globex-pilot",
+          "Memo",
+          "added by hand",
+          "Unpin"
+        ],
+        [
+          "globex-pilot",
+          "Globex pilot scoping",
+          "the client's people",
+          "Take out"
+        ]
+      ],
+      "clients": [
+        {
+          "id": "acme",
+          "calls": 9,
+          "chips": [
+            "Acme rollout"
+          ]
+        },
+        {
+          "id": "globex",
+          "calls": 8,
+          "chips": [
+            "Globex pilot",
+            "Globex pilot"
+          ]
+        }
+      ],
+      "of": [
+        {
+          "id": "acme-rollout",
+          "why": "pinned"
+        },
+        {
+          "id": "globex-pilot",
+          "why": "people"
+        }
+      ],
+      "files": [
+        "meta.json",
+        "meeting.json"
+      ],
+      "notIn": [
+        "\"acme-rollout\"",
+        "\"globex-pilot\""
+      ]
+    },
+    "suggested": {
+      "calls": [
+        {
+          "slug": "acme-renewal-kickoff",
+          "suggested": [
+            "acme-rollout"
+          ],
+          "bar": "Acme rollout"
+        },
+        {
+          "slug": "acme-rollout-kickoff",
+          "suggested": [
+            "acme-renewal",
+            "acme-rollout"
+          ],
+          "bar": "Acme renewal"
+        },
+        {
+          "slug": "internal-tooling-budget",
+          "suggested": [
+            "acme-renewal",
+            "acme-rollout",
+            "globex-pilot",
+            "initech-hiring",
+            "internal-tooling"
+          ],
+          "bar": "Acme renewal"
+        },
+        {
+          "slug": "globex-weekly",
+          "suggested": [
+            "acme-rollout",
+            "initech-hiring"
+          ],
+          "bar": "Acme rollout"
+        }
+      ],
+      "threads": [
+        [
+          "acme-rollout",
+          6
+        ],
+        [
+          "acme-renewal",
+          2
+        ]
+      ],
+      "titles": [
+        "Acme renewal kickoff",
+        "Acme rollout kickoff",
+        "Internal tooling budget",
+        "Globex weekly"
+      ]
+    },
+    "takenOut": {
+      "threads": [
+        [
+          "acme-renewal",
+          "Acme renewal kickoff",
+          "2 calls match · 1 taken out by hand"
+        ],
+        [
+          "legacy-migration",
+          "Coffee chat",
+          "1 call match · 1 pinned, 1 taken out by hand"
+        ],
+        [
+          "globex-pilot",
+          "Partner sync with Vandelay",
+          "8 calls match · 1 pinned, 1 taken out by hand"
+        ],
+        [
+          "acme-hackathon",
+          "Recording",
+          "1 call match · 1 pinned, 1 taken out by hand"
+        ]
+      ],
+      "none": [
+        "acme-rollout",
+        "6 calls match · 3 pinned"
+      ],
+      "footer": "1 call taken out by hand.",
+      "call": "partner-sync-with-vandelay"
+    },
+    "rules": [
+      {
+        "id": "acme-rollout",
+        "tokens": [
+          "series “Acme weekly sync”",
+          "subject “rollout”"
+        ],
+        "line": "6 calls match · 3 pinned"
+      },
+      {
+        "id": "acme-renewal",
+        "tokens": [
+          "subject “renewal”",
+          "series “Acme renewal weekly”"
+        ],
+        "line": "2 calls match · 1 taken out by hand"
+      },
+      {
+        "id": "globex-pilot",
+        "tokens": [
+          "Globex people ≥ half",
+          "from a Teams chat"
+        ],
+        "line": "8 calls match · 1 pinned, 1 taken out by hand"
+      },
+      {
+        "id": "umbrella-proposal",
+        "tokens": [
+          "people from umbrella.example ≥ half",
+          "subject “proposal”",
+          "from a Teams chat"
+        ],
+        "line": "5 calls match · 1 pinned"
+      },
+      {
+        "id": "tyrell-bid",
+        "tokens": [
+          "Tyrell people ≥ half",
+          "series “Tyrell weekly”",
+          "from a Teams chat",
+          "subject “tyrell”"
+        ],
+        "line": "1 call match"
+      },
+      {
+        "id": "legacy-migration",
+        "tokens": [
+          "people from soylent.example ≥ half"
+        ],
+        "line": "1 call match · 1 pinned, 1 taken out by hand"
+      },
+      {
+        "id": "umbrella-lead",
+        "tokens": [],
+        "line": "0 calls match"
+      },
+      {
+        "id": "internal-tooling",
+        "tokens": [],
+        "line": "3 calls match · 3 pinned"
+      },
+      {
+        "id": "initech-hiring",
+        "tokens": [
+          "subject “hiring”",
+          "series “Hiring sync”"
+        ],
+        "line": "3 calls match · 2 pinned"
+      },
+      {
+        "id": "acme-hackathon",
+        "tokens": [],
+        "line": "1 call match · 1 pinned, 1 taken out by hand"
+      }
+    ],
+    "orgs": {
+      "threads": [
+        [
+          "acme-rollout",
+          [
+            [
+              "Vandelay",
+              "vandelay.example"
+            ],
+            [
+              "Northwind Analysts",
+              "northwind.example"
+            ]
+          ]
+        ],
+        [
+          "globex-pilot",
+          [
+            [
+              "Vandelay",
+              "vandelay.example"
+            ]
+          ]
+        ],
+        [
+          "acme-renewal",
+          []
+        ]
+      ],
+      "notGroups": [
+        "Vandelay",
+        "Northwind Analysts"
+      ],
+      "notAccounts": [
+        "vandelay",
+        "northwind-analysts"
+      ]
+    },
+    "found": {
+      "cards": [
+        {
+          "name": "Acme calls",
+          "why": "3 calls mostly with people from acme.example",
+          "org": null,
+          "client": "Acme",
+          "newClient": null,
+          "calls": [
+            "Acme go-live check",
+            "Acme design review",
+            "Acme renewal kickoff"
+          ]
+        },
+        {
+          "name": "Northwind Analysts calls",
+          "why": "3 calls mostly with people from northwind.example",
+          "org": "With Northwind Analysts: its counterpart",
+          "client": "No client",
+          "newClient": null,
+          "calls": [
+            "Globex design review",
+            "Globex data review",
+            "Analyst briefing"
+          ]
+        },
+        {
+          "name": "Umbrella lead notes 1",
+          "why": "a meeting that recurs: 3 calls",
+          "org": null,
+          "client": "No client",
+          "newClient": null,
+          "calls": [
+            "Umbrella lead notes 1",
+            "Umbrella lead notes 8",
+            "Umbrella lead notes 3"
+          ]
+        },
+        {
+          "name": "Initrode calls",
+          "why": "2 calls mostly with people from initrode.example",
+          "org": "With Initrode (initrode.example) — a new organisation, not a client: its counterpart",
+          "client": "No client",
+          "newClient": "New client: Initrode (initrode.example)",
+          "calls": [
+            "Initrode demo",
+            "Initrode intro"
+          ]
+        },
+        {
+          "name": "Duff calls",
+          "why": "2 calls mostly with people from duff.example",
+          "org": null,
+          "client": "Duff",
+          "newClient": null,
+          "calls": [
+            "Duff follow-up",
+            "Duff discovery"
+          ]
+        },
+        {
+          "name": "Design guild",
+          "why": "a meeting that recurs: 2 calls",
+          "org": null,
+          "client": "No client",
+          "newClient": null,
+          "calls": [
+            "Design guild",
+            "Design guild"
+          ]
+        }
+      ],
+      "threads": [
+        "Add to a thread…",
+        "Acme renewal",
+        "Acme rollout",
+        "Globex pilot",
+        "Initech hiring",
+        "Umbrella lead",
+        "Umbrella proposal",
+        "Internal tooling"
+      ],
+      "all": 10
+    },
+    "closedThreads": {
+      "notTaken": [
+        "tyrell-follow-up",
+        "soylent-check-in"
+      ],
+      "tyrell": {
+        "id": "tyrell-bid",
+        "calls": 1,
+        "call": "Tyrell bid review",
+        "why": "people",
+        "group": "closed",
+        "last": "lost"
+      },
+      "rows": [
+        [
+          "tyrell-bid",
+          "Tyrell bid review",
+          "the client's people",
+          "Take out",
+          "Tyrell follow-up"
+        ],
+        [
+          "legacy-migration",
+          "Legacy migration retro",
+          "added by hand",
+          "Unpin",
+          "Soylent check-in"
+        ]
+      ],
+      "client": {
+        "id": "tyrell",
+        "call": "Tyrell bid review",
+        "chip": "Tyrell bid"
+      }
+    },
+    "map": {
+      "threads": [
+        {
+          "id": "acme-rollout",
+          "count": 9,
+          "quadrants": {
+            "Keep satisfied": [
+              "Omar Haddad security",
+              "Lena Vogel your company"
+            ],
+            "Manage closely": [
+              "Dana Lee delivery lead",
+              "Alex Chen architect"
+            ],
+            "Monitor": [
+              "Ola Svensson Acme",
+              "Tom Becker migration lead"
+            ],
+            "Keep informed": [
+              "Rita Gomez Acme"
+            ]
+          },
+          "tray": [
+            "Ivan Petrov Acme new",
+            "Yuki Tanaka Acme new",
+            "Vandelay organisation",
+            "Northwind Analysts organisation"
+          ],
+          "stances": [
+            [
+              "Dana Lee",
+              "champion"
+            ],
+            [
+              "Omar Haddad",
+              "sceptic"
+            ],
+            [
+              "Rita Gomez",
+              "supporter"
+            ],
+            [
+              "Ola Svensson",
+              "blocker"
+            ],
+            [
+              "Ivan Petrov",
+              "neutral"
+            ]
+          ]
+        },
+        {
+          "id": "globex-pilot",
+          "quadrants": {
+            "Keep satisfied": [],
+            "Manage closely": [
+              "Kim Park sponsor new"
+            ],
+            "Monitor": [],
+            "Keep informed": [
+              "Alex Chen Solution architect"
+            ]
+          },
+          "tray": [
+            "Lena Vogel your company",
+            "Vandelay organisation"
+          ],
+          "stances": []
+        }
+      ],
+      "subtitles": {
+        "Keep satisfied": "high influence · low interest",
+        "Manage closely": "high influence · high interest",
+        "Monitor": "low influence · low interest",
+        "Keep informed": "low influence · high interest"
+      },
+      "line": "Drag a person to another quadrant. 4 more were in the calls and aren't in this thread yet — List.",
+      "stances": [
+        "champion",
+        "supporter",
+        "neutral",
+        "sceptic",
+        "blocker"
+      ]
+    },
+    "peopleList": {
+      "thread": "globex-pilot",
+      "columns": [
+        "Person",
+        "Organisation",
+        "Role",
+        "Stance",
+        "Calls",
+        "Talk",
+        "Owes",
+        "Last seen",
+        "Contact"
+      ],
+      "in": [
+        [
+          "Kim Park",
+          "Globex",
+          "sponsor",
+          "supporter",
+          "3/8",
+          true
+        ],
+        [
+          "Alex Chen",
+          "your company · Delivery",
+          "",
+          "",
+          "0/8",
+          false
+        ],
+        [
+          "Lena Vogel",
+          "your company",
+          "",
+          "",
+          "0/8",
+          false
+        ]
+      ],
+      "seen": [
+        [
+          "Ben Okafor",
+          "Globex",
+          "3/8"
+        ],
+        [
+          "Noor Aziz",
+          "Globex",
+          "3/8"
+        ],
+        [
+          "Kai Larsen",
+          "Vandelay",
+          "2/8"
+        ],
+        [
+          "Dana Lee",
+          "Globex",
+          "1/8"
+        ]
+      ],
+      "seenLine": "4 aren't in this thread yet"
+    },
+    "newTag": {
+      "thread": "acme-rollout",
+      "new": [
+        "Ivan Petrov",
+        "Yuki Tanaka"
+      ],
+      "globex": {
+        "id": "globex-pilot",
+        "new": [
+          "Kim Park"
+        ],
+        "not": [
+          "Alex Chen",
+          "Lena Vogel"
+        ]
+      },
+      "cli": [
+        [
+          "Dana Lee",
+          false
+        ],
+        [
+          "Ivan Petrov",
+          true
+        ],
+        [
+          "Yuki Tanaka",
+          true
+        ],
+        [
+          "Ola Svensson",
+          false
+        ]
+      ],
+      "client": {
+        "id": "acme",
+        "new": [
+          "Ivan Petrov",
+          "Alex Chen"
+        ],
+        "not": [
+          "Yuki Tanaka"
+        ]
+      }
+    },
+    "clientPeople": {
+      "id": "acme",
+      "count": 9,
+      "columns": [
+        "Person",
+        "Organisation",
+        "Threads",
+        "Stance",
+        "Calls",
+        "Talk",
+        "Owes",
+        "Last seen",
+        "Contact"
+      ],
+      "in": [
+        [
+          "Dana Lee",
+          "Acme renewal, Acme rollout",
+          "Acme"
+        ],
+        [
+          "Omar Haddad",
+          "Acme renewal, Acme rollout",
+          "Acme"
+        ],
+        [
+          "Rita Gomez",
+          "Acme renewal, Acme rollout",
+          "Acme"
+        ],
+        [
+          "Ivan Petrov",
+          "Acme renewal, Acme rollout",
+          "Acme"
+        ],
+        [
+          "Yuki Tanaka",
+          "Acme hackathon, Acme renewal, Acme rollout",
+          "Acme"
+        ],
+        [
+          "Alex Chen",
+          "Acme renewal, Acme rollout",
+          "your company · Delivery"
+        ],
+        [
+          "Lena Vogel",
+          "Acme rollout",
+          "your company"
+        ],
+        [
+          "Ola Svensson",
+          "Acme rollout",
+          "Acme"
+        ],
+        [
+          "Tom Becker",
+          "Acme rollout",
+          "your company"
+        ]
+      ],
+      "seen": [
+        [
+          "Jo Weber",
+          "Acme"
+        ],
+        [
+          "Priya Nair",
+          "your company"
+        ],
+        [
+          "Finance Desk",
+          "Acme"
+        ],
+        [
+          "Noor Aziz",
+          "Globex"
+        ],
+        [
+          "Tom Becker",
+          "outside"
+        ]
+      ],
+      "map": {
+        "Manage closely": [
+          "Dana Lee",
+          "Alex Chen"
+        ]
+      },
+      "mapLine": "5 more were in the calls and aren't in a thread yet — List.",
+      "own": {
+        "id": "initech",
+        "nobody": "Nobody in this client's threads yet.",
+        "seen": [
+          [
+            "Guest 2",
+            "fill2.example"
+          ],
+          [
+            "Guest 7",
+            "fill7.example"
+          ],
+          [
+            "Lena Vogel",
+            "your company"
+          ],
+          [
+            "Priya Nair",
+            "your company"
+          ],
+          [
+            "Tom Becker",
+            "your company"
+          ]
+        ]
+      }
+    },
+    "panel": {
+      "thread": "acme-rollout",
+      "dana": {
+        "name": "Dana Lee",
+        "sub": "Delivery manager · Acme",
+        "about": "Dana Lee runs delivery on Acme's side and keeps the rollout on schedule.",
+        "aboutNote": "Echo's summary of what was said — click to write your own",
+        "role": "delivery lead",
+        "roleBy": "· yours (Echo leaves it)",
+        "stance": "champion",
+        "influence": "high",
+        "interest": "high",
+        "workstream": "SSO",
+        "governance": "yes",
+        "title": "Delivery manager",
+        "phone": "+49 30 0000 0000",
+        "office": "Berlin",
+        "source": "· Microsoft 365",
+        "facts": [
+          8,
+          10
+        ],
+        "all": "All 10",
+        "fewer": "Fewer"
+      },
+      "omar": {
+        "name": "Omar Haddad",
+        "role": "security",
+        "roleBy": "· from a call",
+        "stance": "sceptic",
+        "governance": "no",
+        "describe": "Describe them…",
+        "question": "Microsoft 365 says title is “Head of IT security” — you set “Security lead”.",
+        "answers": [
+          "Use theirs",
+          "Keep mine"
+        ]
+      },
+      "rita": {
+        "name": "Rita Gomez",
+        "note": "In your words",
+        "workstream": "data migration",
+        "worksFor": "Dana Lee",
+        "role": "Set",
+        "influence": "low",
+        "interest": "high"
+      }
+    },
+    "sides": {
+      "thread": "acme-rollout",
+      "in": [
+        [
+          "Dana Lee",
+          "Acme"
+        ],
+        [
+          "Alex Chen",
+          "your company · Delivery"
+        ],
+        [
+          "Lena Vogel",
+          "your company"
+        ],
+        [
+          "Tom Becker",
+          "your company"
+        ]
+      ],
+      "seen": [
+        [
+          "Priya Nair",
+          "your company"
+        ],
+        [
+          "Jo Weber",
+          "Acme"
+        ],
+        [
+          "Noor Aziz",
+          "Globex"
+        ],
+        [
+          "Tom Becker",
+          "outside"
+        ]
+      ],
+      "initech": {
+        "id": "initech-hiring",
+        "nobody": "Nobody in this thread yet.",
+        "seen": 5,
+        "guests": [
+          [
+            "Guest 2",
+            "fill2.example"
+          ],
+          [
+            "Guest 7",
+            "fill7.example"
+          ]
+        ],
+        "nameOrg": "Name this organisation (fill2.example)",
+        "mapNobody": "Nobody in this thread yet",
+        "mapLine": "5 people were in its calls — add them from List, then drag them where they stand."
+      }
+    },
+    "accounts": {
+      "clients": [
+        "initech",
+        "acme",
+        "globex",
+        "umbrella",
+        "tyrell",
+        "duff"
+      ],
+      "orgs": [
+        "vandelay",
+        "northwind-analysts",
+        "stark-advisory"
+      ],
+      "noDomains": "stark-advisory",
+      "acme": {
+        "id": "acme",
+        "name": "Acme",
+        "line": "3 threads · acme.example"
+      },
+      "gone": [
+        "vandelay",
+        "stark-advisory"
+      ],
+      "counterpart": {
+        "thread": "globex-pilot",
+        "org": "Vandelay"
+      }
+    },
+    "names": {
+      "clients": [
+        [
+          "acme",
+          [
+            "ACME Corp",
+            "Acme GmbH"
+          ],
+          [
+            "acme.example"
+          ],
+          false
+        ],
+        [
+          "globex",
+          [],
+          [
+            "globex.example",
+            "globex-labs.example"
+          ],
+          false
+        ],
+        [
+          "umbrella",
+          [],
+          [
+            "umbrella.example"
+          ],
+          false
+        ],
+        [
+          "tyrell",
+          [],
+          [
+            "tyrell.example"
+          ],
+          false
+        ],
+        [
+          "initech",
+          [],
+          [
+            "initech.example"
+          ],
+          true
+        ]
+      ],
+      "rows": [
+        "Name",
+        "Other names",
+        "Mail domains",
+        "Kind",
+        "Logo",
+        "Threads"
+      ],
+      "outsideLine": "A call is this client's when half of its outside people come from these domains.",
+      "ownLine": "Its people are your colleagues: they never count as a client's people.",
+      "kinds": [
+        "A client, partner or vendor",
+        "Your own company (internal work)"
+      ]
+    },
+    "about": {
+      "acme": {
+        "id": "acme",
+        "heading": "About Acme",
+        "bold": "manufacturer",
+        "paragraph": "A manufacturer of everything, 4,000 people across Europe.",
+        "items": [
+          "Buyer: Rita Gomez (budget)",
+          "Delivery: Dana Lee",
+          "See their site"
+        ],
+        "link": "their site",
+        "href": "https://acme.example",
+        "logo": "/api/client/acme/logo",
+        "png": "image/png",
+        "logoLine": "PNG, JPEG or WebP, up to 512 KB — shown beside its name and on its threads that wear it.",
+        "change": "Change logo…",
+        "remove": "Remove",
+        "src": "api/client/acme/logo?v="
+      },
+      "globex": {
+        "id": "globex",
+        "empty": "Nothing yet — who they are, what you do for them, who matters.",
+        "letter": "G",
+        "logoBox": "logo",
+        "add": "Add a logo…",
+        "logo": "/api/client/globex/logo",
+        "status": 404
+      },
+      "list": {
+        "group": "Acme",
+        "closedRow": "Acme hackathon",
+        "own": "Globex pilot"
+      }
+    },
+    "onlyClosed": {
+      "id": "tyrell",
+      "name": "Tyrell",
+      "line": "1 thread · tyrell.example",
+      "tabs": [
+        "Overview",
+        "Calls1",
+        "Tasks",
+        "People",
+        "Profile"
+      ],
+      "thread": "Tyrell bid",
+      "stage": "Lost",
+      "card": [
+        "1 call · last {day}",
+        "No open tasks"
+      ],
+      "call": "Tyrell bid review",
+      "peopleLines": [
+        "1 people were in its calls — add them from List, then drag them where they stand.",
+        "1 more was in the calls and isn't in a thread yet — List."
+      ],
+      "nobody": "Nobody in this client's threads yet",
+      "threadsRow": [
+        "Tyrell bid Lost 1 call",
+        "+ New thread"
+      ],
+      "stays": "A client with threads stays: move or delete them first.",
+      "threadId": "tyrell-bid"
+    },
+    "noThreads": {
+      "id": "duff",
+      "name": "Duff",
+      "line": "0 threads · duff.example",
+      "about": "About Duff",
+      "empty": "Nothing yet — who they are, what you do for them, who matters.",
+      "noThreads": "No threads for this client yet — add one on Profile.",
+      "noCalls": "No calls in this client's threads yet.",
+      "nobody": "Nobody in this client's threads yet",
+      "join": "People join as its calls come in, or add someone with + Person.",
+      "threadsRow": [
+        "+ New thread"
+      ],
+      "found": {
+        "card": "Duff calls",
+        "why": "2 calls mostly with people from duff.example",
+        "client": "Duff",
+        "calls": [
+          "Duff follow-up",
+          "Duff discovery"
+        ]
+      }
+    },
+    "own": {
+      "id": "initech",
+      "group": "Initech · your company",
+      "after": "Duff",
+      "before": "No client",
+      "row": [
+        "Initech hiring",
+        3,
+        "Wrap-up",
+        "initech-hiring"
+      ],
+      "tag": "your company",
+      "line": "1 thread · initech.example",
+      "card": {
+        "name": "Initech hiring",
+        "stage": "Wrap-up",
+        "lines": [
+          "{calls} · last {day}",
+          "0 of 2 stories done",
+          "2 I owe",
+          "1 owed to me",
+          "1 waiting",
+          "2 nobody named"
+        ],
+        "decided": [
+          "Keep the old tenant read-only"
+        ],
+        "risks": [
+          "Key user on leave likelihood high · impact medium no response yet",
+          "Licences run out likelihood medium · impact high ↳ Answered: the steering group decides; Dana confirms by mail."
+        ]
+      },
+      "kind": "Your own company (internal work)",
+      "threadsRow": [
+        "Initech hiring Wrap-up 3 calls",
+        "+ New thread"
+      ],
+      "seen": 5
+    },
+    "overview": {
+      "id": "acme",
+      "cards": [
+        {
+          "name": "Acme renewal",
+          "id": "acme-renewal",
+          "stage": "Negotiation",
+          "stories": "0 of 2 stories done",
+          "tasks": [
+            "3 I owe",
+            "1 owed to me",
+            "1 waiting",
+            "1 nobody named"
+          ],
+          "late": null,
+          "decided": [
+            "One help desk queue",
+            "Freeze changes in December"
+          ],
+          "risks": [],
+          "questions": [
+            "Which licences do we keep?"
+          ]
+        },
+        {
+          "name": "Acme rollout",
+          "id": "acme-rollout",
+          "stage": "Active",
+          "stories": "1 of 4 stories done",
+          "tasks": [
+            "3 I owe",
+            "3 nobody named"
+          ],
+          "late": "2 late",
+          "decided": [
+            "Go live on a Tuesday",
+            "The pilot starts with the Berlin office"
+          ],
+          "risks": [
+            "The access list arrives late likelihood high · impact medium no response yet"
+          ],
+          "questions": []
+        },
+        {
+          "name": "Acme hackathon",
+          "id": "acme-hackathon",
+          "stage": "Cancelled",
+          "stories": null,
+          "tasks": [],
+          "late": null,
+          "decided": [],
+          "risks": [],
+          "questions": [],
+          "closed": true
+        }
+      ],
+      "risk": {
+        "title": "The access list arrives late",
+        "button": "The access list arrives late likelihood high · impact medium no response yet",
+        "thread": "acme-rollout",
+        "node": "R001"
+      },
+      "noTasks": "No open tasks",
+      "blocks": [
+        "Decided",
+        "Risks",
+        "Open questions"
+      ]
+    },
+    "clientTabs": {
+      "id": "acme",
+      "calls": [
+        [
+          "Memo",
+          "Acme rollout",
+          false
+        ],
+        [
+          "Acme weekly sync",
+          "Acme rollout",
+          false
+        ],
+        [
+          "Acme security review",
+          "Acme rollout",
+          true
+        ],
+        [
+          "Acme renewal negotiation",
+          "Acme renewal",
+          false
+        ],
+        [
+          "Acme renewal pricing",
+          "Acme renewal",
+          false
+        ],
+        [
+          "Acme weekly sync",
+          "Acme rollout",
+          false
+        ],
+        [
+          "Globex pilot scoping",
+          "Acme rollout",
+          false
+        ],
+        [
+          "Acme weekly sync",
+          "Acme rollout",
+          false
+        ],
+        [
+          "Acme hackathon planning",
+          "Acme hackathon",
+          false
+        ]
+      ],
+      "open": "Globex pilot scoping",
+      "tasks": 13,
+      "piles": [
+        6,
+        1,
+        2,
+        4
+      ],
+      "others": 16,
+      "waiting": [
+        [
+          "Unblock: send the revised timeline (2)",
+          "Acme renewal"
+        ],
+        [
+          "an answer on send the revised timeline",
+          "Acme renewal"
+        ]
+      ],
+      "othersBy": {
+        "Acme rollout": 11,
+        "Acme renewal": 5
+      },
+      "threads": [
+        "Acme rollout · 17",
+        "Acme renewal · 11"
+      ]
+    },
+    "since": {
+      "thread": "acme-rollout",
+      "call": "acme-rollout-kickoff",
+      "title": "Acme rollout kickoff",
+      "suggested": [
+        "acme-renewal",
+        "acme-rollout"
+      ],
+      "calls": 6,
+      "rows": [
+        [
+          "acme-renewal",
+          20
+        ],
+        [
+          "umbrella-proposal",
+          30
+        ],
+        [
+          "acme-hackathon",
+          30
+        ],
+        [
+          "legacy-migration",
+          60
+        ]
+      ],
+      "firstCall": {
+        "id": "globex-pilot",
+        "says": "From its first call"
+      },
+      "olderNot": "· nothing older is read",
+      "moved": "{lastYear}-11-01",
+      "after": {
+        "calls": 7,
+        "why": "its subject",
+        "button": "Take out",
+        "of": "subject",
+        "suggested": [
+          "acme-renewal"
+        ]
+      }
+    }
   }
 }

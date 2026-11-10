@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, empty, threads, found]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-014: A client with no thread shows empty tabs, a New thread token and a Remove button, and its calls are offered in Found for you

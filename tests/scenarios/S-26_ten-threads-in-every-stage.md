@@ -28,6 +28,7 @@ cases:
   - tests/cases/clients/TC-015_overview-cards-of-a-client-with-open-and-closed-threads.md
   - tests/cases/clients/TC-016_calls-and-tasks-tabs-of-a-client-with-three-threads.md
   - tests/cases/threads/TC-021_since-keeps-older-calls-out-of-a-thread.md
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # S-26: Ten threads in every stage: membership, people and clients

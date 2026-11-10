@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, overview, cards, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-015: The Overview of Acme shows a card per thread: stories done, task piles, late, decisions, risks and questions, the closed one last
