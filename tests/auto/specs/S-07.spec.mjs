@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { useData, fill } from '../support/data.mjs'
+import { useData, fill, literal } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
 import { ClientsPage } from '../pages/clients.page.mjs'
 import { PeoplePage } from '../pages/people.page.mjs'
@@ -52,7 +52,7 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     await expect(clients.heading(acme.name)).toBeVisible()
     await expect(clients.says(t.client)).toBeVisible()
     await expect(clients.says(acme.facts)).toBeVisible()
-    await expect(clients.claudeAbout).toHaveAccessibleName(`Claude about ${acme.name}`)
+    await expect(clients.claudeAbout).toHaveAccessibleName(fill(t.claudeAbout, { name: acme.name }))
     await expect(clients.tabs).toHaveText(acme.tabs)
     await expect(clients.tab(t.tabs.overview)).toHaveAttribute('aria-selected', 'true')
     await clients.group(globex.name).click()
@@ -129,13 +129,13 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     await clients.aboutBox.press(key('save'))
     await expect(clients.says(a.about)).toBeVisible()
     await clients.editAbout.click()
-    await clients.aboutBox.press('End')
+    await clients.aboutBox.press(key('end'))
     await clients.aboutBox.pressSequentially(a.typed)
     await clients.aboutBox.press(key('escape'))
     await expect(clients.aboutBox).toHaveCount(0)
     await expect(clients.says(a.about)).toBeVisible()
     await clients.card(a.card).click()
-    await expect.poll(() => clients.hash()).toMatch(new RegExp(`^${fill(t.routes.thread, { id: a.thread.id })}\\w+$`))
+    await expect.poll(() => clients.hash()).toMatch(new RegExp(`^${literal(fill(t.routes.thread, { id: a.thread.id }))}\\w+$`))
 
     // Teardown: About cleared.
     await clients.openClient(a.id, 'overview')
@@ -280,7 +280,7 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     for (const text of [omar.org, omar.calls]) await expect(other).toContainText(text)
     await expect(other.getByRole('button', { name: t.add, exact: true })).toBeVisible()
     // Owes: empty (people-lab has no tasks).
-    await expect(other.getByRole('cell').nth(6)).toHaveText('')
+    await expect(await people.cell(people.seen, omar.name, t.owes)).toHaveText('')
     await row.getByRole('button', { name: t.add, exact: true }).click()
     await expect(people.row(people.inThread, dana.name)).toBeVisible()
     await expect(people.says(fill(t.notInOne, { n: 1 }))).toBeVisible()
@@ -295,13 +295,13 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     await people.open(p.thread.id)
     await people.view(t.map).click()
     for (const q of t.quadrants) await expect(people.quadrant(q)).toBeVisible()
-    await expect(people.tray.getByRole('button', { name: new RegExp(`^${p.dana.name} `) })).toBeVisible()
+    await expect(people.chip(p.dana.name, people.tray)).toBeVisible()
     await people.chip(p.dana.name).dragTo(people.quadrant(p.place.to))
-    await expect(people.quadrant(p.place.to).getByRole('button', { name: new RegExp(`^${p.dana.name} `) })).toBeVisible()
+    await expect(people.chip(p.dana.name, people.quadrant(p.place.to))).toBeVisible()
     await expect(people.tray).toHaveCount(0)
     await expect.poll(() => place(p.dana.name)).toMatchObject({ influence: p.place.influence, interest: p.place.interest })
     await people.chip(p.dana.name).dragTo(people.quadrant(p.place.then))
-    await expect(people.quadrant(p.place.then).getByRole('button', { name: new RegExp(`^${p.dana.name} `) })).toBeVisible()
+    await expect(people.chip(p.dana.name, people.quadrant(p.place.then))).toBeVisible()
     await expect(people.quadrant(p.place.to).getByRole('button')).toHaveCount(0)
   })
 
@@ -309,7 +309,7 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     const p = data.set.people
     const t = data.text.people
     const [evidence] = cli('project', 'ledger', p.thread.id, 'sync').pending
-    const file = path.join(data.dir, 'people-suggestions.json')
+    const file = path.join(data.dir, p.suggestionsFile)
     fs.writeFileSync(file, JSON.stringify(p.suggestions))
     expect(cli('project', 'ledger', p.thread.id, 'people-apply', '--evidence', evidence.id, '--file', file)).toMatchObject({ added: p.added })
     const people = new PeoplePage(page, data)
@@ -368,7 +368,7 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     await role.press(key('enter'))
     await expect(people.value(pn.role)).toHaveText(p.edit.role)
     await expect.poll(() => person(p.dana.name).title).toBe(p.edit.title)
-    expect(place(p.dana.name)).toMatchObject({ stance: p.edit.stance, role: p.edit.role })
+    await expect.poll(() => place(p.dana.name)).toMatchObject({ stance: p.edit.stance, role: p.edit.role })
   })
 
   test('15 · Same person: Dana L merged into Dana Lee, then split again', covers('people/TC-007', 'F-PPL-07'), async ({ page }) => {
@@ -428,7 +428,7 @@ scenario(test, 'S-07', "Clients and people: a client's page and tabs, a new thre
     await expect(people.row(people.inThread, p.lena.name)).toContainText(p.lena.domain)
     await people.row(people.inThread, p.lena.name).click()
     await expect(people.detail(p.lena.line)).toBeVisible()
-    await expect(people.nameOrg).toHaveAccessibleName(`Name this organisation (${p.lena.domain})`)
+    await expect(people.nameOrg).toHaveAccessibleName(fill(t.panel.nameOrg, { domain: p.lena.domain }))
     await people.nameOrg.click()
     await expect(people.orgName).toHaveAttribute('placeholder', fill(t.panel.orgPlaceholder, { domain: p.lena.domain }))
     await people.orgName.fill(p.lena.org)

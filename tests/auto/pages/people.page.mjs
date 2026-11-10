@@ -50,6 +50,13 @@ export class PeoplePage extends AppPage {
     return table.getByRole('row', { name: new RegExp(`^${literal(name)} `) })
   }
 
+  /** A person's cell in a table, by its column's header ("Owes"). */
+  async cell(table, name, column) {
+    const i = (await this.columns(table).allTextContents()).indexOf(column)
+    if (i < 0) throw new Error(`no column ${column}`)
+    return this.row(table, name).getByRole('cell').nth(i)
+  }
+
   /** A column header of a table. */
   columns(table) {
     return table.getByRole('columnheader')
@@ -60,9 +67,9 @@ export class PeoplePage extends AppPage {
     return this.main.getByRole('region', { name, exact: true })
   }
 
-  /** A person's chip on the Map (its name, then what they are: "Dana Lee Acme"). */
-  chip(name) {
-    return this.main.getByRole('button', { name: new RegExp(`^${literal(name)}( |$)`) })
+  /** A person's chip on the Map, or in one of its areas (the tray, a quadrant): its name, then what they are ("Dana Lee Acme"). */
+  chip(name, area = this.main) {
+    return area.getByRole('button', { name: new RegExp(`^${literal(name)}( |$)`) })
   }
 
   /** A suggestion from the calls, by words of its question. */

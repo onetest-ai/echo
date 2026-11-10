@@ -26,7 +26,8 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
   test('1 · Calls with no call open says Pick a call', covers('calls/TC-007', 'F-CALLS-04'), async ({ page }) => {
     const c = data.text.calls
     const calls = await loaded(page)
-    // A hash change, not a fresh load (which opens the newest call): the activity bar's Calls, never visited yet.
+    // A hash change: the activity bar's Calls, never visited yet. (page.goto to #calls loads the page afresh here, and
+    // a fresh load opens the newest call.)
     await calls.activity(data.text.shell.activities[1]).click()
     await expect.poll(() => calls.hash()).toBe(data.text.shell.routes.calls)
     await expect(calls.list).toBeVisible()
@@ -168,7 +169,7 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
     await calls.headerButton(a.thread.name).click()
     await expect.poll(() => calls.hash()).toMatch(new RegExp(`^${literal(fill(data.text.clients.routes.thread, { id: a.thread.id }))}`))
     await expect(calls.heading(a.thread.name)).toBeVisible()
-    await calls.main.getByRole('tab', { name: /^Calls/ }).click()
+    await calls.tab(data.text.clients.tabs.calls).click()
     await expect(calls.main.getByRole('button', { name: a.title, exact: true })).toBeVisible()
   })
 
@@ -181,7 +182,7 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
     await expect(calls.tab(c.minutesTab)).toHaveAttribute('aria-selected', 'true')
     await expect(calls.main.getByRole('tab')).toHaveText([c.minutesTab, c.transcriptTab])
     await calls.tab(c.transcriptTab).click()
-    await expect.poll(() => calls.hash()).toMatch(/\/transcript$/)
+    await expect.poll(() => calls.hash()).toMatch(new RegExp(fill(c.openOn, { tab: c.tabs.transcript })))
     await expect(calls.turns).toHaveCount(a.turns)
     await calls.openCall(i.title)
     await expect(calls.tab(c.transcriptTab)).toHaveAttribute('aria-selected', 'true')
@@ -197,19 +198,23 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
     const c = data.text.calls
     const calls = await loaded(page)
     await expect(calls.text(data.text.shell.yourDay)).toBeVisible()
-    await page.goto(`${data.base}/#call/${h.missing}/minutes`)
+    await page.goto(`${data.base}/${fill(c.route, { name: h.missing, tab: c.tabs.minutes })}`)
     await expect(calls.main.getByRole('heading', { name: c.cantOpen })).toBeVisible()
     await expect(calls.main.getByText(new RegExp(`^${literal(c.error)}`))).toBeVisible()
-    // What the window asks for the missing call over 8 s: one retry at most, not one every tick.
+    // What the window asks for the missing call while it refreshes (every 2 s): one retry at most, not one a tick.
     const missing = []
-    const seen = (r) => { if (r.status() === 404 && r.url().includes(h.missing)) missing.push(r.url()) }
+    let refreshes = 0
+    const seen = (r) => {
+      if (r.status() === 404 && r.url().includes(h.missing)) missing.push(r.url())
+      if (r.url().includes(c.refresh)) refreshes++
+    }
     page.on('response', seen)
-    await page.waitForTimeout(c.watchMs)
+    await expect.poll(() => refreshes, { timeout: 20_000 }).toBeGreaterThanOrEqual(c.refreshes)
     page.off('response', seen)
     expect(missing.length).toBeLessThanOrEqual(c.most404)
     await calls.activity(data.text.shell.activities[1]).click()
     await expect(calls.main.getByRole('heading', { name: c.cantOpen })).toHaveCount(0)
-    await expect.poll(() => calls.hash()).toMatch(/^#call\/[^/]+\/minutes$/)
+    await expect.poll(() => calls.hash()).toMatch(new RegExp(fill(c.openOn, { tab: c.tabs.minutes })))
     expect(calls.hash()).not.toContain(h.missing)
     await calls.openCall(h.acme.title)
     await expect(calls.heading(h.acme.title)).toBeVisible()
@@ -219,11 +224,11 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
   test('12 · A run again that fails keeps the previous minutes; what it wrote goes to the trash', covers('claude/TC-018', 'F-MIN-13'), async () => {
     const { acme: a, failingRun: f } = data.set.housekeeping
     const r = data.text.calls.run
-    const bin = path.join(data.dir, 'bin')
+    const bin = path.join(data.dir, f.bin)
     // A fake that writes over the minutes, then fails, in place of the data's fake.
-    fs.renameSync(path.join(bin, 'claude'), path.join(bin, 'claude.fake'))
-    fs.writeFileSync(path.join(bin, 'claude'), f.script, { mode: 0o755 })
+    fs.renameSync(path.join(bin, f.claude), path.join(bin, f.dataFake))
     try {
+      fs.writeFileSync(path.join(bin, f.claude), f.script, { mode: 0o755 })
       const dir = data.callDir(a.folder)
       const before = data.read(dir, r.notes)
       const cli = data.cli('notes', dir, '--wait')
@@ -243,7 +248,7 @@ scenario(test, 'S-09', "A call's housekeeping: list, minutes, kind, thread, tabs
       expect(log).toContain(path.basename(r.trash))
     } finally {
       // Teardown: the data's fake back.
-      fs.renameSync(path.join(bin, 'claude.fake'), path.join(bin, 'claude'))
+      fs.renameSync(path.join(bin, f.dataFake), path.join(bin, f.claude))
     }
   })
 })

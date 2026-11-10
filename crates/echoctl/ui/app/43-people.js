@@ -73,7 +73,7 @@ function peopleSuggestions(d) {
     return `<div class="pp-sug" role="listitem">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : /^https:\/\//i.test(at.url || '') ? `<a class="link-btn pp-src" href="${esc(at.url)}" data-ext title="Open the mail in Outlook">✉ ${esc(src)}</a>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button>${x.field === 'left' ? '' : `<button class="btn ghost" data-pp="sug-edit" data-sid="${esc(x.sid)}" title="Not quite: put it right">Change…</button>`}</div>`
   }
   const shown = S.pj.ppAllSug || all.slice(3).some((x) => x.sid === S.pj.ppSugEdit) ? all : all.slice(0, 3)
-  return `<div class="pp-sugs" role="list" aria-label="Suggestions">${shown.map(row).join('')}${all.length > 3 ? `<button class="link-btn" data-pp="all-sug">${S.pj.ppAllSug ? 'Show fewer' : `${all.length - 3} more from the calls`}</button>` : ''}</div>`
+  return `<div class="pp-sugs"><div class="pp-sugs" role="list" aria-label="Suggestions">${shown.map(row).join('')}</div>${all.length > 3 ? `<button class="link-btn" data-pp="all-sug">${S.pj.ppAllSug ? 'Show fewer' : `${all.length - 3} more from the calls`}</button>` : ''}</div>`
 }
 function peopleMap(d) {
   const thread = !S.pj.client

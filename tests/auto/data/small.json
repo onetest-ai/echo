@@ -495,7 +495,8 @@
       "line": "lena@contoso.example · contoso.example",
       "org": "Contoso",
       "orgId": "contoso"
-    }
+    },
+    "suggestionsFile": "people-suggestions.json"
   },
   "tasks": {
     "acme": {
@@ -551,6 +552,33 @@
     },
     "close": {
       "note": "Sent the checklist by email"
+    },
+    "counts": {
+      "start": [
+        2,
+        0,
+        0,
+        0
+      ],
+      "handedOver": [
+        1,
+        0,
+        0
+      ]
+    },
+    "emptyPiles": [
+      "owed",
+      "waiting",
+      "nobody"
+    ],
+    "states": {
+      "done": "done",
+      "open": "open",
+      "cancelled": "cancelled"
+    },
+    "stages": {
+      "closed": "done",
+      "active": "active"
     }
   },
   "housekeeping": {
@@ -647,7 +675,10 @@
     "failingRun": {
       "wrote": "# Half-written minutes",
       "says": "test fake: stopped after writing",
-      "script": "#!/bin/sh\n# A minutes run: writes over notes.md, then fails. Anything else: the data's fake.\nif [ -n \"$ECHOCTL_RUN_CALL\" ] && [ -z \"$ECHOCTL_RUN_MODE\" ]; then printf '# Half-written minutes\\n' > \"$ECHOCTL_RUN_CALL/notes.md\"; echo \"test fake: stopped after writing\" >&2; exit 1; fi\nexec \"$(dirname \"$0\")/claude.fake\" \"$@\"\n"
+      "script": "#!/bin/sh\n# A minutes run: writes over notes.md, then fails. Anything else: the data's fake.\nif [ -n \"$ECHOCTL_RUN_CALL\" ] && [ -z \"$ECHOCTL_RUN_MODE\" ]; then printf '# Half-written minutes\\n' > \"$ECHOCTL_RUN_CALL/notes.md\"; echo \"test fake: stopped after writing\" >&2; exit 1; fi\nexec \"$(dirname \"$0\")/claude.fake\" \"$@\"\n",
+      "bin": "bin",
+      "claude": "claude",
+      "dataFake": "claude.fake"
     }
   },
   "setup": {
@@ -813,7 +844,15 @@
           "previous",
           "me",
           "language"
-        ]
+        ],
+        "keys": [
+          "folder",
+          "meeting_types",
+          "skills",
+          "templates",
+          "values"
+        ],
+        "kind": "builtin"
       }
     },
     "vocabulary": {

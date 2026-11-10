@@ -193,7 +193,6 @@
     "pinnedBy": "added by hand",
     "cantOpen": "This call can't be opened",
     "error": "Error: 404",
-    "watchMs": 8000,
     "most404": 2,
     "run": {
       "kept": "The previous minutes are kept.",
@@ -204,7 +203,15 @@
       "notes": "notes.md",
       "runFile": "notes-run.json",
       "log": "claude.log"
-    }
+    },
+    "route": "#call/{name}/{tab}",
+    "openOn": "^#call/[^/]+/{tab}$",
+    "tabs": {
+      "minutes": "minutes",
+      "transcript": "transcript"
+    },
+    "refresh": "api/state",
+    "refreshes": 4
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"
@@ -314,7 +321,8 @@
       "down": "ArrowDown",
       "backspace": "Backspace",
       "save": "ControlOrMeta+s",
-      "tab": "Tab"
+      "tab": "Tab",
+      "end": "End"
     },
     "inbox": "Inbox",
     "vocabulary": "Vocabulary",
@@ -493,8 +501,15 @@
       "howToTell": "How to tell it",
       "sections": "{n} sections",
       "match": "match: [{words}]",
-      "nameLine": "name: {id}"
-    }
+      "nameLine": "name: {id}",
+      "lines": {
+        "section": "## ",
+        "match": "match:",
+        "name": "name:"
+      },
+      "sectionLine": "## {s}"
+    },
+    "route": "#settings"
   },
   "tasks": {
     "whoDoesIt": "Who does it",
@@ -558,7 +573,8 @@
       "who": "Who does it",
       "order": "Order"
     },
-    "howField": "how"
+    "howField": "how",
+    "dialogLine": "{thread} · {title}"
   },
   "diagrams": {
     "system": "You fix one Mermaid diagram",
@@ -632,7 +648,8 @@
     "removeAsk": "Remove {name}?",
     "gone": "This client is gone",
     "backToThreads": "Back to the threads",
-    "orgRemoved": "{id} removed"
+    "orgRemoved": "{id} removed",
+    "claudeAbout": "Claude about {name}"
   },
   "people": {
     "views": [
@@ -713,8 +730,10 @@
       "title": "Title",
       "role": "Role",
       "sameFirst": "Same person as…",
-      "orgPlaceholder": "Who is {domain}?"
-    }
+      "orgPlaceholder": "Who is {domain}?",
+      "nameOrg": "Name this organisation ({domain})"
+    },
+    "owes": "Owes"
   },
   "vocabulary": {
     "panel": "Vocabulary",

@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test'
 import { useData, fill, literal } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
 import { SettingsPage } from '../pages/settings.page.mjs'
+import { VocabularyPage } from '../pages/vocabulary.page.mjs'
 
 const data = useData(test, { set: 'small' })
 
@@ -33,52 +34,37 @@ const cli = (...args) => {
 /** Settings → Templates, a template's editor open on it. */
 async function openTemplate(page, name) {
   const settings = new SettingsPage(page, data)
-  await settings.open(data.text.settings.templates.route)
-  await settings.row(name).click()
-  await settings.editor(name).waitFor()
+  await settings.openTemplate(name)
   return settings
 }
 /** Its Reset to built-in, back to Echo's own (a stage's teardown). */
 async function reset(settings, name) {
   const tp = data.text.settings.templates
-  await settings.editor(name).getByRole('button', { name: tp.reset }).click()
-  await expect(settings.row(name)).toHaveAccessibleName(new RegExp(`^${literal(name)} ${tp.builtIn} `))
-}
-/** The word chips of an editor (their × buttons; a section's is "Remove the section …"). */
-const words = (ed) => {
-  const [word, section] = [fill(data.text.settings.templates.removeWord, { word: '' }), fill(data.text.settings.templates.removeSection, { s: '' })]
-  return ed.getByRole('button', { name: new RegExp(`^${literal(word)}(?!${literal(section.slice(word.length))})`) })
+  await settings.editorButton(name, tp.reset).click()
+  await expect(settings.row(name)).toHaveAccessibleName(new RegExp(`^${literal(name)} ${literal(tp.builtIn)} `))
 }
 /** A row of the list, as it reads: its name, its tag, its use. */
 const rowName = (name, tag, use) => `${name} ${tag} ${use}`
 /** A template's use line: its words and its sections. */
 const use = (ws, n) => `${ws.join(', ')} · ${fill(data.text.settings.templates.sections, { n })}`
+/** A template file's section headings, its match line, its name line. */
+const fileLines = (id, kind) => lines(template(id), data.text.settings.templates.lines[kind])
+const sectionLine = (s) => fill(data.text.settings.templates.sectionLine, { s })
 
 /** The calls with the Vocabulary panel open from the book beside the list. */
 async function vocabulary(page) {
-  const settings = new SettingsPage(page, data)
-  await settings.goto(data.text.shell.routes.calls)
-  await page.getByRole('button', { name: data.text.vocabulary.panel, exact: true }).click()
-  await expect(settings.panelTab(settings.rightPanel, data.text.vocabulary.panel)).toHaveAttribute('aria-selected', 'true')
-  return settings
+  const voc = new VocabularyPage(page, data)
+  await voc.open()
+  await expect(voc.tab).toHaveAttribute('aria-selected', 'true')
+  return voc
 }
-/** Add a term to Every call in the open panel. */
-async function addTerm(settings, term, how = 'enter') {
-  const v = data.text.vocabulary
-  const box = settings.rightPanel.getByRole('textbox', { name: v.add })
-  await box.fill(term)
-  if (how === 'enter') await box.press(key('enter'))
-  else await settings.rightPanel.getByRole('button', { name: v.addButton, exact: true }).click()
-}
-const chip = (settings, term) => settings.rightPanel.getByRole('button', { name: fill(data.text.vocabulary.removeTerm, { term }), exact: true })
-const learnedHead = (settings, n) => settings.rightPanel.getByRole('heading', { name: `${data.text.vocabulary.learned} ${n}`, exact: true })
 const learn = (...terms) => cli('vocab', 'add', '--call', data.callName(data.set.setup.vocabulary.call), ...terms)
 
 scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary', () => {
   test('1 · Every section of Settings opens with its own heading', covers('settings/TC-001', 'F-SET-01'), async ({ page }) => {
     const s = data.text.settings
     const settings = new SettingsPage(page, data)
-    await settings.open('#settings')
+    await settings.open(s.route)
     await expect(settings.heading(s.general.heading)).toBeVisible()
     await expect(settings.sectionButtons).toHaveCount(s.sections.length)
     for (const [i, name] of s.sections.entries()) await expect(settings.sectionButtons.nth(i)).toHaveAccessibleName(new RegExp(`^${literal(name)}`))
@@ -137,6 +123,10 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await shows(a.dark, 'dark')
     await settings.choice(a.group, a.light).click()
     await shows(a.light, 'light')
+    // Light stays light when the system turns dark.
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shows(a.light, 'light')
+    await page.emulateMedia({ colorScheme: 'light' })
     await settings.choice(a.group, a.dark).click()
     await shows(a.dark, 'dark')
     await page.reload()
@@ -144,6 +134,9 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await settings.choice(a.group, a.system).click()
     await shows(a.system, 'light')
     await expect(settings.choice(a.group, a.dark)).toHaveAttribute('aria-pressed', 'false')
+    // System follows the system: dark when it turns dark.
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shows(a.system, 'dark')
   })
 
   test('4 · Recording: Calendar meetings set to Manual, saved and kept', covers('settings/TC-004', 'F-SET-06', 'F-SET-03'), async ({ page }) => {
@@ -304,7 +297,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const settings = new SettingsPage(page, data)
     await settings.open(tp.route)
     await expect(settings.says(tp.list)).toBeVisible()
-    const rows = settings.main.getByRole('button', { name: / (Built in|Edited|Yours) / })
+    const rows = settings.rows()
     await expect(rows).toHaveCount(data.set.setup.templates.rows.length)
     for (const [i, [name, tag, u]] of data.set.setup.templates.rows.entries()) await expect(rows.nth(i)).toHaveAccessibleName(rowName(name, tag, u))
   })
@@ -315,15 +308,15 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const settings = await openTemplate(page, st.name)
     const ed = settings.editor(st.name)
     await expect(ed.getByText(tp.builtIn, { exact: true })).toBeVisible()
-    await expect(ed.getByRole('button', { name: tp.reset })).toHaveCount(0)
+    await expect(settings.editorButton(st.name, tp.reset)).toHaveCount(0)
     await expect(ed.getByText(tp.usedWhen, { exact: true })).toBeVisible()
-    const chips = words(ed)
+    const chips = settings.words(st.name)
     await expect(chips).toHaveCount(st.words.length)
     for (const [i, word] of st.words.entries()) await expect(chips.nth(i)).toHaveAccessibleName(fill(tp.removeWord, { word }))
     await expect(settings.headings(st.name)).toHaveCount(st.sections.length)
     for (const [i, h] of st.sections.entries()) await expect(settings.headings(st.name).nth(i)).toHaveValue(h)
     await expect(ed.getByText(tp.foot, { exact: true })).toBeVisible()
-    await ed.getByRole('button', { name: tp.close, exact: true }).click()
+    await settings.editorButton(st.name, tp.close).click()
     await expect(ed).toHaveCount(0)
     await expect(settings.says(tp.choose)).toBeVisible()
   })
@@ -340,7 +333,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await expect(settings.box(tp.summaryBox)).toHaveValue(st.summary)
     await expect(settings.row(st.name)).toHaveAccessibleName(new RegExp(`^${literal(st.name)} ${tp.edited} `))
     await expect(ed.getByText(tp.edited, { exact: true })).toBeVisible()
-    await expect(ed.getByRole('button', { name: tp.reset })).toBeVisible()
+    await expect(settings.editorButton(st.name, tp.reset)).toBeVisible()
     await expect.poll(() => ls(files().templates)).toEqual([`${st.id}.md`])
     expect(template(st.id).split('\n').filter((l) => l.includes(st.summary))).toHaveLength(1)
     await page.reload()
@@ -357,9 +350,9 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const ed = settings.editor(st.name)
     await expect(ed.getByText(tp.edited, { exact: true })).toBeVisible()
     await expect(settings.box(tp.summaryBox)).toHaveValue(st.summary)
-    await ed.getByRole('button', { name: tp.reset }).click()
+    await settings.editorButton(st.name, tp.reset).click()
     await expect(settings.row(st.name)).toHaveAccessibleName(new RegExp(`^${literal(st.name)} ${tp.builtIn} `))
-    await expect(ed.getByRole('button', { name: tp.reset })).toHaveCount(0)
+    await expect(settings.editorButton(st.name, tp.reset)).toHaveCount(0)
     await expect(settings.box(tp.summaryBox)).not.toHaveValue(st.summary)
     await expect.poll(() => ls(files().templates)).toEqual([])
     expect(trashed(st.id)).toBe(before + 1)
@@ -370,18 +363,18 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const st = data.set.setup.templates.status
     const settings = await openTemplate(page, st.name)
     const ed = settings.editor(st.name)
-    const chips = words(ed)
+    const chips = settings.words(st.name)
     await expect(chips).toHaveCount(st.words.length)
     await settings.box(tp.addWord).fill(st.word)
     await settings.box(tp.addWord).press(key('enter'))
     await expect(chips).toHaveCount(st.words.length + 1)
     await expect(chips.last()).toHaveAccessibleName(fill(tp.removeWord, { word: st.word }))
     await expect(settings.row(st.name)).toHaveAccessibleName(rowName(st.name, tp.edited, use([...st.words, st.word], st.sections.length)))
-    await expect.poll(() => lines(template(st.id), 'match')).toEqual([fill(tp.match, { words: [...st.words, st.word].join(', ') })])
+    await expect.poll(() => fileLines(st.id, 'match')).toEqual([fill(tp.match, { words: [...st.words, st.word].join(', ') })])
     await ed.getByRole('button', { name: fill(tp.removeWord, { word: st.word }) }).click()
     await expect(chips).toHaveCount(st.words.length)
     await expect(settings.row(st.name)).toHaveAccessibleName(rowName(st.name, tp.edited, use(st.words, st.sections.length)))
-    await expect.poll(() => lines(template(st.id), 'match')).toEqual([fill(tp.match, { words: st.words.join(', ') })])
+    await expect.poll(() => fileLines(st.id, 'match')).toEqual([fill(tp.match, { words: st.words.join(', ') })])
     await reset(settings, st.name)
   })
 
@@ -396,7 +389,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await ed.getByRole('button', { name: fill(tp.moveDown, { s: first }) }).click()
     for (const [i, h] of [second, first, ...rest].entries()) await expect(settings.headings(st.name).nth(i)).toHaveValue(h)
     await expect(settings.row(st.name)).toHaveAccessibleName(new RegExp(`^${literal(st.name)} ${tp.edited} `))
-    await expect.poll(() => lines(template(st.id), '## ').slice(0, 2)).toEqual([`## ${second}`, `## ${first}`])
+    await expect.poll(() => fileLines(st.id, 'section').slice(0, 2)).toEqual([sectionLine(second), sectionLine(first)])
     await reset(settings, st.name)
   })
 
@@ -407,7 +400,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const settings = await openTemplate(page, st.name)
     const ed = settings.editor(st.name)
     await expect(settings.headings(st.name)).toHaveCount(n)
-    await ed.getByRole('button', { name: tp.addSection, exact: true }).click()
+    await settings.editorButton(st.name, tp.addSection).click()
     await expect(settings.headings(st.name)).toHaveCount(n + 1)
     const added = settings.headings(st.name).nth(n)
     await expect(added).toHaveValue(tp.newSection)
@@ -415,8 +408,8 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await added.fill(st.newSection)
     await added.press(key('tab'))
     await expect(added).toHaveValue(st.newSection)
-    await expect.poll(() => lines(template(st.id), '## ')).toHaveLength(n + 1)
-    expect(lines(template(st.id), '## ').at(-1)).toBe(`## ${st.newSection}`)
+    await expect.poll(() => fileLines(st.id, 'section')).toHaveLength(n + 1)
+    expect(fileLines(st.id, 'section').at(-1)).toBe(sectionLine(st.newSection))
     await page.reload()
     await settings.row(st.name).click()
     await expect(settings.row(st.name)).toHaveAccessibleName(new RegExp(` · ${literal(fill(tp.sections, { n: n + 1 }))}$`))
@@ -434,7 +427,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await expect(settings.headings(st.name)).toHaveCount(left.length)
     for (const [i, h] of left.entries()) await expect(settings.headings(st.name).nth(i)).toHaveValue(h)
     await expect(settings.row(st.name)).toHaveAccessibleName(new RegExp(` · ${literal(fill(tp.sections, { n: left.length }))}$`))
-    await expect.poll(() => lines(template(st.id), '## ')).toHaveLength(left.length)
+    await expect.poll(() => fileLines(st.id, 'section')).toHaveLength(left.length)
     await reset(settings, st.name)
   })
 
@@ -444,7 +437,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const settings = await openTemplate(page, st.name)
     const ed = settings.editor(st.name)
     await expect(ed.getByText(tp.header, { exact: true })).toBeVisible()
-    await ed.getByRole('button', { name: tp.values }).click()
+    await settings.editorButton(st.name, tp.values).click()
     for (const v of values) await expect(ed.getByRole('button', { name: v, exact: true })).toBeVisible()
     await ed.getByRole('button', { name: st.value, exact: true }).click()
     await expect(settings.box(tp.header)).toHaveValue(new RegExp(`${literal(st.value)}$`))
@@ -466,11 +459,11 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await settings.box(tp.addWord).fill(own.word)
     await settings.box(tp.addWord).press(key('enter'))
     await expect(ed.getByRole('button', { name: fill(tp.removeWord, { word: own.word }) })).toBeVisible()
-    await ed.getByRole('button', { name: tp.create, exact: true }).click()
+    await settings.editorButton(tp.newTemplate, tp.create).click()
     await expect(settings.row(own.name)).toHaveAccessibleName(rowName(own.name, tp.yours, use([own.word], own.sections.length)))
     await expect(settings.tab(tabs.minutes[0])).toHaveText(`${tabs.minutes[0]} ${tabs.minutes[1] + 1}`)
-    await expect(settings.editor(own.name).getByRole('button', { name: tp.delete })).toBeVisible()
-    await expect.poll(() => [...lines(template(own.id), 'name:'), ...lines(template(own.id), 'match:')]).toEqual([fill(tp.nameLine, { id: own.id }), fill(tp.match, { words: own.word })])
+    await expect(settings.editorButton(own.name, tp.delete)).toBeVisible()
+    await expect.poll(() => [...fileLines(own.id, 'name'), ...fileLines(own.id, 'match')]).toEqual([fill(tp.nameLine, { id: own.id }), fill(tp.match, { words: own.word })])
   })
 
   test('23 · Deleting your own template moves it to the trash', covers('templates/TC-012', 'F-TPL-04'), async ({ page }) => {
@@ -479,7 +472,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const before = trashed(own.id)
     const settings = await openTemplate(page, own.name)
     await expect(settings.row(own.name)).toHaveAccessibleName(new RegExp(`^${literal(own.name)} ${tp.yours} `))
-    await settings.editor(own.name).getByRole('button', { name: tp.delete }).click()
+    await settings.editorButton(own.name, tp.delete).click()
     await expect(settings.row(own.name)).toHaveCount(0)
     await expect(settings.tab(tabs.minutes[0])).toHaveText(`${tabs.minutes[0]} ${tabs.minutes[1]}`)
     await expect(settings.says(tp.choose)).toBeVisible()
@@ -493,7 +486,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const settings = new SettingsPage(page, data)
     await settings.open(tp.route)
     await settings.tab(tabs.types[0]).click()
-    const rows = settings.main.getByRole('button', { name: new RegExp(` ${tp.builtIn} `) })
+    const rows = settings.rows(tp.builtIn)
     await expect(rows).toHaveCount(types.length)
     for (const [i, name] of types.entries()) await expect(rows.nth(i)).toHaveAccessibleName(new RegExp(`^${literal(name)} ${tp.builtIn} `))
     await expect(settings.row(client.name)).toHaveAccessibleName(rowName(client.name, tp.builtIn, client.about))
@@ -511,11 +504,11 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     const ed = settings.editor(tp.newTypeEditor)
     await ed.getByRole('textbox', { name: tp.name, exact: true }).fill(nt.name)
     await ed.getByRole('textbox', { name: tp.howToTell, exact: true }).fill(nt.about)
-    await ed.getByRole('button', { name: tp.create, exact: true }).click()
+    await settings.editorButton(tp.newTypeEditor, tp.create).click()
     await expect(settings.row(nt.name)).toHaveAccessibleName(new RegExp(`^${literal(nt.name)} ${tp.yours} `))
     await expect(settings.tab(tabs.types[0])).toHaveText(`${tabs.types[0]} ${tabs.types[1] + 1}`)
     await expect.poll(() => types()).toEqual([expect.objectContaining({ id: nt.id, about: nt.about })])
-    await settings.editor(nt.name).getByRole('button', { name: tp.delete }).click()
+    await settings.editorButton(nt.name, tp.delete).click()
     await expect(settings.row(nt.name)).toHaveCount(0)
     await expect(settings.tab(tabs.types[0])).toHaveText(`${tabs.types[0]} ${tabs.types[1]}`)
     await expect.poll(() => types()).toEqual([])
@@ -530,12 +523,12 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await settings.row(client.name).click()
     const ed = settings.editor(client.name)
     await expect(ed.getByText(tp.builtIn, { exact: true })).toBeVisible()
-    await expect(ed.getByRole('button', { name: tp.reset })).toHaveCount(0)
+    await expect(settings.editorButton(client.name, tp.reset)).toHaveCount(0)
     const box = ed.getByRole('textbox', { name: tp.howToTell, exact: true })
     await box.fill(client.edited)
     await box.press(key('tab'))
     await expect(settings.row(client.name)).toHaveAccessibleName(rowName(client.name, tp.edited, client.edited))
-    await expect(ed.getByRole('button', { name: tp.reset })).toBeVisible()
+    await expect(settings.editorButton(client.name, tp.reset)).toBeVisible()
     await expect.poll(() => data.json(data.home, files().types)).toEqual([expect.objectContaining({ id: client.id, about: client.edited })])
   })
 
@@ -547,7 +540,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await settings.tab(tabs.types[0]).click()
     await expect(settings.row(client.name)).toHaveAccessibleName(rowName(client.name, tp.edited, client.edited))
     await settings.row(client.name).click()
-    await settings.editor(client.name).getByRole('button', { name: tp.reset }).click()
+    await settings.editorButton(client.name, tp.reset).click()
     await expect(settings.row(client.name)).toHaveAccessibleName(rowName(client.name, tp.builtIn, client.about))
     await expect.poll(() => data.json(data.home, files().types)).toEqual([])
   })
@@ -555,40 +548,40 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
   test('28 · echoctl templates lists what the window shows', covers('templates/TC-017', 'F-TPL-07'), async () => {
     const { cli: c } = data.set.setup.templates
     const t = cli('templates').json()
-    expect(Object.keys(t).sort()).toEqual(['folder', 'meeting_types', 'skills', 'templates', 'values'])
+    expect(Object.keys(t).sort()).toEqual(c.keys)
     expect(t.folder.endsWith(`/${files().templates}`)).toBe(true)
-    expect(t.templates.map((x) => [x.id, x.kind])).toEqual(c.templates.map((id) => [id, 'builtin']))
+    expect(t.templates.map((x) => [x.id, x.kind])).toEqual(c.templates.map((id) => [id, c.kind]))
     expect(t.meeting_types.map((x) => x.id)).toEqual(c.types)
-    expect(t.skills).toEqual([expect.objectContaining({ id: c.skill, kind: 'builtin', on: true })])
+    expect(t.skills).toEqual([expect.objectContaining({ id: c.skill, kind: c.kind, on: true })])
     expect(t.values.map((x) => x.name ?? x)).toEqual(c.values)
   })
 
   test("29 · The book beside Calls opens the empty Vocabulary panel; it closes", covers('vocabulary/TC-001', 'F-VOC-01'), async ({ page }) => {
     const v = data.text.vocabulary
-    const settings = await vocabulary(page)
-    expect(settings.hash()).toMatch(/^#call\/[^/]+\/minutes$/)
-    const p = settings.rightPanel
+    const voc = await vocabulary(page)
+    expect(voc.hash()).toMatch(new RegExp(fill(data.text.calls.openOn, { tab: data.text.calls.tabs.minutes })))
+    const p = voc.panel
     await expect(p.getByText(v.line, { exact: true })).toBeVisible()
     await expect(p.getByRole('heading', { name: v.every, exact: true })).toBeVisible()
     await expect(p.getByText(v.none, { exact: true })).toBeVisible()
     await expect(p.getByRole('textbox', { name: v.add })).toBeVisible()
     await expect(p.getByRole('button', { name: v.addButton, exact: true })).toBeVisible()
-    await expect(learnedHead(settings, 0)).toBeVisible()
+    await expect(voc.learnedHead(0)).toBeVisible()
     await expect(p.getByText(v.learnedNone, { exact: true })).toBeVisible()
-    await settings.closePanel(p).click()
-    await expect(settings.closePanel(p)).toHaveCount(0)
+    await voc.closePanel(p).click()
+    await expect(voc.closePanel(p)).toHaveCount(0)
   })
 
   test('30 · Terms added to Every call, saved, listed by the CLI, kept after a reload', covers('vocabulary/TC-003', 'F-VOC-02'), async ({ page }) => {
     const v = data.text.vocabulary
     const [a, b] = data.set.setup.vocabulary.terms
-    const settings = await vocabulary(page)
-    await expect(settings.rightPanel.getByText(v.none, { exact: true })).toBeVisible()
-    await addTerm(settings, a, 'click')
-    await expect(chip(settings, a)).toBeVisible()
-    await expect(settings.rightPanel.getByRole('textbox', { name: v.add })).toHaveValue('')
-    await addTerm(settings, b)
-    await expect(chip(settings, b)).toBeVisible()
+    const voc = await vocabulary(page)
+    await expect(voc.says(v.none)).toBeVisible()
+    await voc.add(a, 'click')
+    await expect(voc.chip(a)).toBeVisible()
+    await expect(voc.addBox).toHaveValue('')
+    await voc.add(b)
+    await expect(voc.chip(b)).toBeVisible()
     await expect.poll(() => config().vocabulary).toEqual([a, b])
     const list = cli('vocab', 'list').out
     expect(list).toContain(fill(v.always2, { n: 2, terms: `${a}, ${b}` }))
@@ -596,84 +589,84 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     expect(list).not.toContain(v.moved)
     expect(config().vocabulary).toEqual([a, b])
     await page.reload()
-    await page.getByRole('button', { name: v.panel, exact: true }).click()
+    await voc.book.click()
     for (const t of [a, b]) {
-      await expect(chip(settings, t)).toBeVisible()
-      await expect(settings.learned(t)).toHaveCount(0)
+      await expect(voc.chip(t)).toBeVisible()
+      await expect(voc.learned(t)).toHaveCount(0)
     }
 
     // Teardown: both removed.
-    for (const t of [a, b]) await chip(settings, t).click()
-    await expect(settings.rightPanel.getByText(v.none, { exact: true })).toBeVisible()
+    for (const t of [a, b]) await voc.chip(t).click()
+    await expect(voc.says(v.none)).toBeVisible()
   })
 
   test('31 · A term removed from Every call', covers('vocabulary/TC-004', 'F-VOC-02'), async ({ page }) => {
     const v = data.text.vocabulary
     const [a] = data.set.setup.vocabulary.terms
-    const settings = await vocabulary(page)
-    await addTerm(settings, a)
-    await expect(chip(settings, a)).toBeVisible()
-    await chip(settings, a).click()
-    await expect(chip(settings, a)).toHaveCount(0)
-    await expect(settings.rightPanel.getByText(v.none, { exact: true })).toBeVisible()
+    const voc = await vocabulary(page)
+    await voc.add(a)
+    await expect(voc.chip(a)).toBeVisible()
+    await voc.chip(a).click()
+    await expect(voc.chip(a)).toHaveCount(0)
+    await expect(voc.says(v.none)).toBeVisible()
     await expect.poll(() => config().vocabulary).toEqual([])
   })
 
   test('32 · The same term twice is one chip', covers('vocabulary/TC-005', 'F-VOC-02'), async ({ page }) => {
     const t = data.set.setup.vocabulary.twice
-    const settings = await vocabulary(page)
-    await addTerm(settings, t)
-    await expect(chip(settings, t)).toHaveCount(1)
+    const voc = await vocabulary(page)
+    await voc.add(t)
+    await expect(voc.chip(t)).toHaveCount(1)
     await expect.poll(() => config().vocabulary).toEqual([t])
-    await addTerm(settings, t)
-    await expect(chip(settings, t)).toHaveCount(1)
+    await voc.add(t)
+    await expect(voc.chip(t)).toHaveCount(1)
     await expect.poll(() => config().vocabulary).toEqual([t])
 
     // Teardown: removed.
-    await chip(settings, t).click()
+    await voc.chip(t).click()
     await expect.poll(() => config().vocabulary).toEqual([])
   })
 
   test('33 · Learned terms show their meetings and people', covers('vocabulary/TC-006', 'F-VOC-03'), async ({ page }) => {
     const v = data.text.vocabulary
-    const voc = data.set.setup.vocabulary
-    expect(learn(...voc.learned).out).toContain(`${fill(v.learnedFrom, { call: data.callName(voc.call) })}${voc.learned.join(', ')}`)
-    const settings = await vocabulary(page)
-    await expect(learnedHead(settings, voc.learned.length)).toBeVisible()
-    const rows = settings.rightPanel.getByRole('group')
-    await expect(rows).toHaveCount(voc.learned.length)
-    for (const [i, term] of voc.learned.entries()) await expect(rows.nth(i)).toHaveAccessibleName(term)
-    const okta = settings.learned(voc.learned[1])
+    const set = data.set.setup.vocabulary
+    expect(learn(...set.learned).out).toContain(`${fill(v.learnedFrom, { call: data.callName(set.call) })}${set.learned.join(', ')}`)
+    const voc = await vocabulary(page)
+    await expect(voc.learnedHead(set.learned.length)).toBeVisible()
+    const rows = voc.learnedRows
+    await expect(rows).toHaveCount(set.learned.length)
+    for (const [i, term] of set.learned.entries()) await expect(rows.nth(i)).toHaveAccessibleName(term)
+    const okta = voc.learned(set.learned[1])
     await expect(okta.getByRole('button')).toHaveText([v.always, v.remove])
-    await expect(okta.getByText(voc.scope, { exact: true })).toBeVisible()
-    await expect(settings.rightPanel.getByText(v.none, { exact: true })).toBeVisible()
+    await expect(okta.getByText(set.scope, { exact: true })).toBeVisible()
+    await expect(voc.says(v.none)).toBeVisible()
   })
 
   test('34 · Always moves a learned term to Every call', covers('vocabulary/TC-007', 'F-VOC-03'), async ({ page }) => {
     const v = data.text.vocabulary
-    const voc = data.set.setup.vocabulary
-    const [berlin, okta] = voc.learned
-    const settings = await vocabulary(page)
-    await settings.learned(okta).getByRole('button', { name: v.always, exact: true }).click()
-    await expect(chip(settings, okta)).toBeVisible()
-    await expect(settings.learned(okta)).toHaveCount(0)
-    await expect(settings.learned(berlin)).toBeVisible()
+    const set = data.set.setup.vocabulary
+    const [berlin, okta] = set.learned
+    const voc = await vocabulary(page)
+    await voc.learnedButton(okta, v.always).click()
+    await expect(voc.chip(okta)).toBeVisible()
+    await expect(voc.learned(okta)).toHaveCount(0)
+    await expect(voc.learned(berlin)).toBeVisible()
     await expect.poll(() => config().vocabulary).toContain(okta)
 
     // Teardown: both terms forgotten.
-    cli('vocab', 'remove', ...voc.learned)
+    cli('vocab', 'remove', ...set.learned)
   })
 
   test('35 · Remove forgets a learned term', covers('vocabulary/TC-008', 'F-VOC-03'), async ({ page }) => {
     const v = data.text.vocabulary
-    const voc = data.set.setup.vocabulary
-    const [berlin, okta] = voc.learned
-    learn(...voc.learned)
-    const settings = await vocabulary(page)
-    await settings.learned(berlin).getByRole('button', { name: v.remove, exact: true }).click()
-    await expect(settings.learned(berlin)).toHaveCount(0)
-    await expect(learnedHead(settings, 1)).toBeVisible()
-    await expect(settings.learned(okta)).toBeVisible()
+    const set = data.set.setup.vocabulary
+    const [berlin, okta] = set.learned
+    learn(...set.learned)
+    const voc = await vocabulary(page)
+    await voc.learnedButton(berlin, v.remove).click()
+    await expect(voc.learned(berlin)).toHaveCount(0)
+    await expect(voc.learnedHead(1)).toBeVisible()
+    await expect(voc.learned(okta)).toBeVisible()
     const list = cli('vocab', 'list').out
     const learned = list.slice(list.indexOf(fill(v.learnedN, { n: 1 })))
     expect(list).toContain(fill(v.learnedN, { n: 1 }))
@@ -686,25 +679,25 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
 
   test('36 · The learned terms get a filter past six', covers('vocabulary/TC-009', 'F-VOC-03'), async ({ page }) => {
     const v = data.text.vocabulary
-    const voc = data.set.setup.vocabulary
-    const six = [...voc.learned, ...voc.more]
-    expect(learn(...six).out).toContain(`${fill(v.learnedFrom, { call: data.callName(voc.call) })}${six.join(', ')}`)
-    const settings = await vocabulary(page)
-    const filter = settings.rightPanel.getByRole('textbox', { name: v.filter })
-    await expect(learnedHead(settings, six.length)).toBeVisible()
+    const set = data.set.setup.vocabulary
+    const six = [...set.learned, ...set.more]
+    expect(learn(...six).out).toContain(`${fill(v.learnedFrom, { call: data.callName(set.call) })}${six.join(', ')}`)
+    const voc = await vocabulary(page)
+    const filter = voc.filter
+    await expect(voc.learnedHead(six.length)).toBeVisible()
     await expect(filter).toHaveCount(0)
-    learn(voc.seventh)
+    learn(set.seventh)
     await page.reload()
-    await page.getByRole('button', { name: v.panel, exact: true }).click()
-    await expect(learnedHead(settings, six.length + 1)).toBeVisible()
+    await voc.book.click()
+    await expect(voc.learnedHead(six.length + 1)).toBeVisible()
     await expect(filter).toBeVisible()
-    await filter.fill(voc.filter)
-    await expect(settings.rightPanel.getByRole('group')).toHaveCount(1)
-    await expect(settings.learned(voc.learned[1])).toBeVisible()
-    await filter.fill(voc.nomatch)
-    await expect(settings.rightPanel.getByText(v.nothing, { exact: true })).toBeVisible()
+    await filter.fill(set.filter)
+    await expect(voc.learnedRows).toHaveCount(1)
+    await expect(voc.learned(set.learned[1])).toBeVisible()
+    await filter.fill(set.nomatch)
+    await expect(voc.says(v.nothing)).toBeVisible()
 
     // Teardown: the seven forgotten.
-    cli('vocab', 'remove', ...six, voc.seventh)
+    cli('vocab', 'remove', ...six, set.seventh)
   })
 })

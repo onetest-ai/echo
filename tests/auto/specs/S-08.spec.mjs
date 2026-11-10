@@ -42,13 +42,13 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     await expect(tasks.chosen(t.filters.thread, t.allThreads)).toHaveCount(1)
     await expect(tasks.chosen(t.whoDoesIt, t.anyone)).toHaveCount(1)
     await expect(tasks.chosen(t.filters.order, t.orders.due)).toHaveCount(1)
-    const counts = [2, 0, 0, 0]
+    const counts = data.set.tasks.counts.start
     for (const [i, name] of t.piles.entries()) {
       await expect(tasks.pile(name, counts[i])).toBeVisible()
       if (i) await expect(tasks.pileArea(name)).toContainText(t.nothing)
     }
-    await expect(tasks.cards(t.iOwe)).toHaveCount(2)
-    for (const title of [acme.title, globex.title]) await expect(tasks.pileArea(t.iOwe).getByRole('button', { name: new RegExp(`^${title} `) })).toBeVisible()
+    await expect(tasks.cards(t.iOwe)).toHaveCount(counts[0])
+    for (const title of [acme.title, globex.title]) await expect(tasks.cards(t.iOwe).filter({ hasText: new RegExp(`^\\s*${literal(title)}`) })).toHaveCount(1)
     await expect(tasks.others(1)).toContainText(t.othersLine)
     await expect(tasks.task(other.title)).toHaveCount(0)
     await tasks.others(1).click()
@@ -58,7 +58,7 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     const p = piles()
     expect(p.mine.map((x) => x.title).sort()).toEqual([acme.title, globex.title].sort())
     expect(p.others.map((x) => x.title)).toEqual([other.title])
-    for (const k of ['owed', 'waiting', 'nobody']) expect(p[k]).toEqual([])
+    for (const k of data.set.tasks.emptyPiles) expect(p[k]).toEqual([])
   })
 
   test('2 · Asks with nothing owed: its empty line and its footer, nobody listed', covers('tasks/TC-002', 'F-TASK-08'), async ({ page }) => {
@@ -169,7 +169,7 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     edit(other.project, { op: 'edit', node: other.id, set: { delegated_by: other.handedBy, due: twoDaysAgo() } })
     const tasks = await openTasks(page)
     await expect(tasks.pile(t.iOwe, 2)).toBeVisible()
-    for (const [name, n] of [[t.piles[1], 1], [t.piles[2], 0], [t.piles[3], 0]]) await expect(tasks.pile(name, n)).toBeVisible()
+    for (const [i, n] of data.set.tasks.counts.handedOver.entries()) await expect(tasks.pile(t.piles[i + 1], n)).toBeVisible()
     await expect(tasks.cards(t.piles[1])).toHaveCount(1)
     const card = tasks.cards(t.piles[1]).first()
     for (const text of [other.title, other.owner, other.thread]) await expect(card).toContainText(text)
@@ -254,7 +254,7 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     const claude = today.claudeDialog
     await work.sendToClaude.click()
     await expect(claude.getByRole('heading', { name: data.text.needs.claudeDialog, level: 3 })).toBeVisible()
-    await expect(claude).toContainText(`${data.set.tasks.acme.thread} · ${s.title}`)
+    await expect(claude).toContainText(fill(t.dialogLine, { thread: data.set.tasks.acme.thread, title: s.title }))
     await expect(today.claudeWorkOnIt).toBeVisible()
     await expect(today.claudeCancel).toBeVisible()
     await expect(today.claudeYolo).toHaveCount(0)
@@ -305,7 +305,7 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     await expect(tasks.fold(t.iOwe, more)).toBeVisible()
 
     // Teardown: the tasks made here and stage 10's T003 cancelled.
-    for (const id of [...made, kept.skillTask].filter(Boolean)) edit(f.project, { op: 'edit', node: id, set: { state: 'cancelled' } })
+    for (const id of [...made, kept.skillTask].filter(Boolean)) edit(f.project, { op: 'edit', node: id, set: { state: data.set.tasks.states.cancelled } })
   })
 
   test("12 · Close a task from Today: Cancel keeps it; Close it with a comment takes it out of Today and Tasks", covers('tasks/TC-012', 'F-TASK-13'), async ({ page }) => {
@@ -328,8 +328,8 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     await expect(today.closeDialog).toHaveCount(0)
     await expect(today.closeFor(acme.title)).toHaveCount(0)
     const node = data.ledger(acme.project, 'tree').nodes[acme.id]
-    expect(node.state).toBe('done')
-    expect(node.history.at(-1)).toMatchObject({ op: 'edit', set: { state: 'done' }, note: close.note })
+    expect(node.state).toBe(data.set.tasks.states.done)
+    expect(node.history.at(-1)).toMatchObject({ op: 'edit', set: { state: data.set.tasks.states.done }, note: close.note })
     kept.closed = node.history.at(-1).mid
     const tasks = await openTasks(page)
     await expect(tasks.pile(t.iOwe, 1)).toBeVisible()
@@ -339,7 +339,7 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
   test('13 · No active threads: Tasks says so and opens Threads', covers('tasks/TC-013', 'F-TASK-09'), async ({ page }) => {
     const t = data.text.tasks
     const threads = [data.set.tasks.acme.project, data.set.tasks.globex.project]
-    for (const id of threads) expect(data.cli('project', 'set', id, '--stage', 'done').code).toBe(0)
+    for (const id of threads) expect(data.cli('project', 'set', id, '--stage', data.set.tasks.stages.closed).code).toBe(0)
     const tasks = new TasksPage(page, data)
     await tasks.open()
     await expect(tasks.says(fill(t.across, { n: 0 }))).toBeVisible()
@@ -348,16 +348,15 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     await expect.poll(() => tasks.hash()).toMatch(new RegExp(`^(${data.text.clients.routes.projects}|${data.text.shell.routes.project}/)`))
 
     // Teardown: both threads active again.
-    for (const id of threads) expect(data.cli('project', 'set', id, '--stage', 'active').code).toBe(0)
+    for (const id of threads) expect(data.cli('project', 'set', id, '--stage', data.set.tasks.stages.active).code).toBe(0)
   })
 
   test('14 · No open tasks: Tasks says so, with no pile', covers('tasks/TC-014', 'F-TASK-09'), async ({ page }) => {
     const t = data.text.tasks
-    const { acme } = data.set.tasks
-    // Every open task marked done, noted with stage 12's closed T001 so the teardown reopens it too.
+    const { acme, states } = data.set.tasks
+    // Every open task marked done (stage 12's T001 is already: its teardown undoes the close).
     const done = Object.values(piles()).flat().map((x) => [x.project, x.id])
-    for (const [project, id] of done) edit(project, { op: 'edit', node: id, set: { state: 'done' } })
-    if (kept.closed) done.push([acme.project, acme.id])
+    for (const [project, id] of done) edit(project, { op: 'edit', node: id, set: { state: states.done } })
     expect(Object.values(piles()).flat()).toEqual([])
     const tasks = new TasksPage(page, data)
     await tasks.open()
@@ -366,7 +365,9 @@ scenario(test, 'S-08', "Who owes what: the piles, the filters, a card, closing a
     for (const text of [t.noTasks, t.noTasksLine]) await expect(tasks.says(text)).toBeVisible()
     await expect(tasks.main.getByRole('heading', { name: new RegExp(`^${t.iOwe} `) })).toHaveCount(0)
 
-    // Teardown: each reopened.
-    for (const [project, id] of done) edit(project, { op: 'edit', node: id, set: { state: 'open' } })
+    // Teardown: each reopened; stage 12's T001 by undoing its close (its case's teardown, with the mid it noted).
+    for (const [project, id] of done) edit(project, { op: 'edit', node: id, set: { state: states.open } })
+    if (kept.closed) edit(acme.project, { op: 'undo', target: kept.closed })
+    expect(data.ledger(acme.project, 'tree').nodes[acme.id].state).toBe(states.open)
   })
 })

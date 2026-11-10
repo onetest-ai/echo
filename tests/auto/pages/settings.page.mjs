@@ -78,9 +78,20 @@ export class SettingsPage extends AppPage {
     return this.main.getByRole('tab', { name: new RegExp(`^${literal(name)}`) })
   }
 
+  /** The tags a row of the templates' lists carries ("Built in", "Edited", "Yours"), as one alternative. */
+  get tags() {
+    const tp = this.data.text.settings.templates
+    return [tp.builtIn, tp.edited, tp.yours].map(literal).join('|')
+  }
+
   /** A row of a list (a template, a meeting type), by its name; it reads "<name> <tag> <use>". */
   row(name) {
-    return this.main.getByRole('button', { name: new RegExp(`^${literal(name)} (Built in|Edited|Yours) `) })
+    return this.main.getByRole('button', { name: new RegExp(`^${literal(name)} (${this.tags}) `) })
+  }
+
+  /** Every row of the list shown, in order; with a tag, only the rows with it. */
+  rows(tag) {
+    return this.main.getByRole('button', { name: new RegExp(` (${tag ? literal(tag) : this.tags}) `) })
   }
 
   /** The editor of a template or type, by its title ("Status sync", "New template"). */
@@ -88,15 +99,27 @@ export class SettingsPage extends AppPage {
     return this.main.getByRole('region', { name: title, exact: true })
   }
 
+  /** A button of an editor, by its name ("Reset to built-in", "Delete", "Create"). */
+  editorButton(title, name) {
+    return this.editor(title).getByRole('button', { name, exact: true })
+  }
+
   /** A section's heading boxes in an editor, in order. */
   headings(title) {
     return this.editor(title).getByRole('textbox', { name: 'Heading', exact: true })
   }
 
-  // ── The vocabulary panel ──
+  /** An editor's word chips, by their × buttons ("Remove daily"; a section's reads "Remove the section …"). */
+  words(title) {
+    const tp = this.data.text.settings.templates
+    const [word, section] = [tp.removeWord.replace('{word}', ''), tp.removeSection.replace('{s}', '')]
+    return this.editor(title).getByRole('button', { name: new RegExp(`^${literal(word)}(?!${literal(section.slice(word.length))})`) })
+  }
 
-  /** A learned term's row in the panel (its Always and Remove, its line). */
-  learned(term) {
-    return this.rightPanel.getByRole('group', { name: term, exact: true })
+  /** Settings → Templates, a template's editor open on it. */
+  async openTemplate(name) {
+    await this.open(this.data.text.settings.templates.route)
+    await this.row(name).click()
+    await this.editor(name).waitFor()
   }
 }
