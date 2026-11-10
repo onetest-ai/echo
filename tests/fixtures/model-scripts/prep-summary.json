@@ -1,0 +1,6 @@
+{"model": {"context_length": 32768},
+ "rules": [
+ {"when": ["You prepare a busy person for a meeting", "Meeting: Acme renewal follow-up"],
+  "steps": [
+   {"text": "```json\n{\"relevant\": [\"c1\", \"c2\", \"c4\"], \"in_short\": \"The virtual model's summary: you owe Rita Gomez the revised timeline, and which licences Acme keeps is still open.\"}\n```"}]}
+]}

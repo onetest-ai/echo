@@ -65,8 +65,9 @@ condition, each view and state reached once, every check that can use them hung 
 | [S-27](scenarios/S-27_others-words-everywhere.md) | 16 | Others' words everywhere: nothing runs, nothing breaks (the `hostile` data set: markup, script, `javascript:` links, long words, right-to-left, emoji, Markdown in every place) |
 | [S-28](scenarios/S-28_echo-from-the-terminal.md) | 11 | Echo from the terminal: help, threads and candidates against the window, `read` and `echo://` links in the window, `m365` without `--yes`, series and settings, clients and organisations, a thread made and changed, the work's edits, one call's commands (`standard` data) |
 | [S-29](scenarios/S-29_notes-transcripts-settings-and-today-off-the-happy-path.md) | 10 | Notes, transcripts, settings and Today off the happy path: a Teams import, empty transcripts, to-dos, edits, comments, notes not lost, unreadable and changed files, a broken config, Today's cards and ⌘K (`standard` data) |
-| [S-30](scenarios/S-30_minutes-and-the-work-on-a-local-model.md) | 8 | Minutes and the work on a local model: no Claude Code or no plugin, a template by title, write again with another, a memo, a prep, Yolo, a thread's sync that keeps your fields, a call's profile (`standard` data, `--ai local`: real Claude Code runs) |
+| [S-30](scenarios/S-30_minutes-and-the-work-on-a-local-model.md) | 5 | Minutes on a local model: no Claude Code or no plugin, a template by title, write again with another, a memo, a call's profile (`standard` data, `--ai local`: real Claude Code runs) |
 | [S-31](scenarios/S-31_a-real-minutes-run-on-others-words.md) | 3 | A real minutes run on others' words: only its call's folder changes, nothing runs in the page, orders in the transcript and settings that allow everything change nothing (`hostile` data, `--ai local`) |
+| [S-33](scenarios/S-33_prep-yolo-and-a-thread-sync-on-the-virtual-model.md) | 3 | Prep, Yolo and a thread's sync on the virtual model: what Echo gives the model, the guard's and the CLI's refusals, a prep with the model's picks, Yolo's outcome, a sync that keeps your fields (`standard` data, `--ai virtual`) |
 
 ## Areas
 
