@@ -92,6 +92,8 @@ async function loadFound() {
   try { S.pj.foundData = await get('api/found') } catch { /* app restarting */ }
 }
 // ── thread load: what opening a thread asks the app for (no DOM: `thread-load.test.mjs`) ─────────
+/** How long after a board change a reload's answer may still predate it (the save is on its way). */
+const BOARD_SETTLE_MS = 2000
 async function loadProject() {
   if (S.pj.found) return loadFound()
   if (S.pj.client) {
@@ -102,7 +104,13 @@ async function loadProject() {
   }
   const id = S.pj.sel
   if (!id) { S.pj.detail = null; return }
-  try { const d = await get('api/project/' + encodeURIComponent(id)); if (S.pj.sel === id) S.pj.detail = d } catch { /* app restarting */ }
+  // A board changed here (saveBoard) since, or just before, this reload was asked may not be in its answer yet: kept as
+  // changed, or the next change would be saved on the old board (#321).
+  const asked = Date.now()
+  try {
+    const d = await get('api/project/' + encodeURIComponent(id))
+    if (S.pj.sel === id) S.pj.detail = S.pj.boardAt > asked - BOARD_SETTLE_MS && S.pj.detail ? { ...d, board: S.pj.detail.board } : d
+  } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
   if (S.pj.tab === 'profile') {
     try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
