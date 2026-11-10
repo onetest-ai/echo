@@ -35,6 +35,10 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 let day: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
                 v["next"] = crate::widgets::next_meeting(&day)["next"].clone();
             }
+            // Threads at a glance and Done this week only when one is on Today (each thread's work is read for them).
+            if layout.iter().any(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done") {
+                v["glance"] = crate::glance::today();
+            }
             v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
             let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();

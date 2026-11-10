@@ -57,7 +57,7 @@ function todayView() {
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now) }
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView(d.glance, sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView(d.glance, sizeOf['core:tasks.done'] || 'S') }
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
