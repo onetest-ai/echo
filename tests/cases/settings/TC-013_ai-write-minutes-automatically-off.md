@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, minutes]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-013: AI & minutes: Write minutes automatically off is saved to config.json

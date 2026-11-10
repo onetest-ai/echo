@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-017: Make default moves "Default for new calls" and the account chip follows
@@ -26,7 +27,7 @@ tags: [ai, profiles]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://localhost:11434 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
+| 1 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://127.0.0.1:9 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
 | 2 | Navigate to `{{base_url}}/#settings/ai` and click "Make default" on the row "Local Llama" | "Local Llama" now has the tag "Default for new calls"; "Claude Code (as configured)" has a "Make default" button |
 | 3 | Read the account chip at the top bar's right end | "Local Llama" |
 | 4 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/ai.json"` | The file has `"default": "local-llama"` |
@@ -36,3 +37,6 @@ Local Llama is the default profile in the page, the account chip and `ai.json`.
 
 ## Teardown
 - `echoctl ai default system` (prints `new calls use Claude Code (as configured)`), then `echoctl ai remove local-llama`.
+
+## Notes
+- The profile's address is `http://127.0.0.1:9`, where nothing listens: `echoctl ai status` sends a local profile's server a request, and the Ollama on this computer (`localhost:11434`) is shared, never a test's.

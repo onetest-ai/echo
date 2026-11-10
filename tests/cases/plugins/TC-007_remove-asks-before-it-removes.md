@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, remove]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-007: Remove… asks whether to keep the plugin's data and Cancel changes nothing

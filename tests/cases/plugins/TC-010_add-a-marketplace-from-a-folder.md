@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, marketplaces]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-010: Add a marketplace from a folder lists it with its plugin count

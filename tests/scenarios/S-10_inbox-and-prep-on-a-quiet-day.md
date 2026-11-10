@@ -13,6 +13,7 @@ cases:
   - tests/cases/prep/TC-003_no-prep-yet-no-thread.md
   - tests/cases/prep/TC-005_prep-upcoming-cli.md
   - tests/cases/today/TC-006_a-day-with-nothing-says-a-quiet-day.md
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # S-10: Inbox and prep on a quiet day

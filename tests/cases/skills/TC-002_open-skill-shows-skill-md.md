@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-002: Opening a skill shows its SKILL.md and how Claude names it

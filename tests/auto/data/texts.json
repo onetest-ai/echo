@@ -212,7 +212,8 @@
       "transcript": "transcript"
     },
     "refresh": "api/state",
-    "refreshes": 4
+    "refreshes": 4,
+    "search": "Search calls"
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"
@@ -754,5 +755,259 @@
     "always2": "always ({n}): {terms}",
     "learnedN": "learned ({n}):",
     "moved": "moved"
+  },
+  "inbox": {
+    "open": "Open",
+    "done": "Done",
+    "blocking": "Blocking",
+    "thisWeek": "this week",
+    "nothing": "Nothing needs you",
+    "nothingLine": "Echo counts it here when something does.",
+    "nothingDecided": "Nothing decided this week yet.",
+    "badge": "^\\d+ open$",
+    "keys": [
+      "clients",
+      "done",
+      "open",
+      "urgent"
+    ]
+  },
+  "upcoming": {
+    "head": "Coming up today",
+    "headName": "Coming up today {n} Next {time} {next}",
+    "rowName": "Coming up {subject} {time} {minutes} min {names}",
+    "rowPrefix": "Coming up",
+    "noPrep": "No prep yet",
+    "noThread": "This meeting is in no thread: Echo prepares it when you ask, from its people's mail and Teams.",
+    "noThreadStart": "This meeting is in no thread",
+    "inThread": "Echo writes it this morning for every meeting of a thread.",
+    "prepareNow": "Prepare now",
+    "addThread": "+ Thread",
+    "newThread": "New thread from this meeting…",
+    "takeOut": "Take it out of {thread}",
+    "copyLink": "Copy link",
+    "prepTab": "Prep",
+    "laterTabs": [
+      "Transcript",
+      "Minutes"
+    ],
+    "minutes": "{n} min",
+    "when": "{day}, {time}",
+    "route": "#upcoming/{id}",
+    "noPrepShow": "Error: no prep \"{id}\"",
+    "hash": "^[0-9a-f]{16}$"
+  },
+  "quietDay": {
+    "heading": "A quiet day",
+    "line": "No meetings today and nothing on you in Tasks.",
+    "greeting": "^Good (night|morning|afternoon|evening), {name}$",
+    "yourDay": "Your day",
+    "myWork": "My work · this week",
+    "agendaCleared": "agenda: 0 meeting(s)",
+    "notGroups": [
+      "Today",
+      "My work"
+    ],
+    "echoFirst": [
+      "Record the next Teams call",
+      "Record a memo"
+    ]
+  },
+  "skills": {
+    "tab": "Skills",
+    "listLine": "What Claude does with a task you send it",
+    "builtIn": "Built in",
+    "customized": "Customized",
+    "yours": "Yours",
+    "problems": "⚠",
+    "switch": "{name} on",
+    "on": "On — Claude can use it",
+    "off": "Off — kept out of Claude",
+    "askClaude": "Ask Claude",
+    "newSkill": "New skill",
+    "skillLine": "SKILL.md · in Claude as /my-skills:{id}",
+    "text": "^---\\s+name: {id}\\s+description: .+\\s+---\\s+# {heading}",
+    "toFix": "To fix before Claude can use it",
+    "customize": "Customize",
+    "openCode": "Open in VS Code",
+    "showFinder": "Show in Finder",
+    "reset": "Reset",
+    "name": "Name",
+    "cancel": "Cancel",
+    "create": "Create and open",
+    "latin": "give the skill a name in latin letters (Claude Code's rule for skill names) — its text can be in any language",
+    "ok": "OK",
+    "choose": "Choose a skill to see what Claude does with it.",
+    "offFile": ".echo/skills-off.json",
+    "folder": ".echo/skills",
+    "trash": ".echo/trash/skills",
+    "skillFile": "SKILL.md",
+    "trashed": "^{id}-\\d+$"
+  },
+  "ai": {
+    "route": "#settings/ai",
+    "heading": "AI & minutes",
+    "profiles": "Profiles",
+    "default": "Default for new calls",
+    "builtIn": "Built in",
+    "local": "Model · this computer",
+    "minutes": "minutes: {model}",
+    "live": "live notes: {model}",
+    "makeDefault": "Make default",
+    "chip": "AI profile",
+    "chipButton": "AI profile: {name}",
+    "chipTitle": [
+      "Claude Code (as configured)",
+      "as Claude Code is set up"
+    ],
+    "language": "Language of the call",
+    "file": "ai.json",
+    "added": "added {name} ({id})",
+    "defaultBack": "new calls use {name}",
+    "removed": "removed {id}",
+    "liveNotes": "Live notes",
+    "liveOn": "Live notes on",
+    "autoMinutes": "Write minutes automatically",
+    "skipRow": "Claude in the window: no permission prompts",
+    "skipFlag": "--dangerously-skip-permissions",
+    "skipSays": [
+      "runs any command and tool without asking",
+      "Takes effect the next time the session starts."
+    ],
+    "skipOn": "On."
+  },
+  "transcription": {
+    "route": "#settings/transcription",
+    "heading": "Transcription",
+    "models": "Speech models",
+    "download": "Download ({mb} MB)",
+    "size": "· {mb} MB",
+    "recommended": "Recommended for this computer",
+    "notInBuild": "Not in this build",
+    "whisper": "Whisper, deprecated",
+    "downloading": "Downloading",
+    "keepAudio": "Keep audio files",
+    "echoCancel": "Echo cancellation"
+  },
+  "calendar": {
+    "route": "#settings/calendar",
+    "heading": "Calendar & chat",
+    "card": "Microsoft 365",
+    "account": "Account",
+    "notConnected": "Not connected: the calendar shows only what your tray knows about today.",
+    "signIn": "Sign in…",
+    "notThere": [
+      "Sync now",
+      "Sign out"
+    ],
+    "registration": "App registration",
+    "registrationSays": "The default (CodeMie). Your IT can register another.",
+    "change": "Change…",
+    "chat": "Meeting chat"
+  },
+  "deliver": {
+    "route": "#settings/deliver",
+    "heading": "Sends to you",
+    "rows": [
+      [
+        "Teams",
+        "Your chat with yourself. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ],
+      [
+        "Mail",
+        "Your own mailbox — or the addresses a plugin was given. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ]
+    ],
+    "test": "Send a test"
+  },
+  "plugins": {
+    "route": "#settings/plugins",
+    "heading": "Plugins",
+    "installed": "Installed",
+    "discover": "Discover",
+    "markets": "Marketplaces",
+    "none": "No plugins yet — Discover lists what your marketplaces offer.",
+    "marketsLine": "Where plugins come from.",
+    "builtIn": "built in",
+    "readAgain": "Read again",
+    "more": "More",
+    "hide": "Hide its plugins from Discover",
+    "show": "Show its plugins in Discover",
+    "remove": "Remove — installed plugins stay, without updates",
+    "hidden": "hidden",
+    "add": "Add a marketplace",
+    "source": "Marketplace",
+    "sourceHint": "owner/repo, a git address, or a folder",
+    "name": "Name",
+    "nameHint": "Name (optional)",
+    "addButton": "Add",
+    "read": "{n} plugin · read today",
+    "search": "Search plugins",
+    "all": "All",
+    "nothing": "Nothing matches.",
+    "install": "Install",
+    "installedMark": "Installed ✓",
+    "sheet": "Install {name} {version}?",
+    "from": "from {market} · commit local-",
+    "warn": "Listed by {market} — Echo hasn’t reviewed it. Install it only if you trust who made it.",
+    "able": "It will be able to",
+    "usesNothing": "Uses nothing of Echo's.",
+    "cancel": "Cancel",
+    "detail": "{version} · from {market} · commit local-",
+    "ownSettings": "Its settings",
+    "canDo": "What it can do",
+    "removeAsk": "Remove…",
+    "removeLine": "Remove {name}? Its settings and data can stay for when you install it again.",
+    "keepData": "Remove, keep data",
+    "withData": "Remove with data",
+    "on": "{name} on",
+    "cliKeys": [
+      "busy",
+      "discover",
+      "errors",
+      "installed",
+      "markets"
+    ],
+    "added": "Added {name}: 1 plugins",
+    "dataFolder": ".echo/plugins",
+    "settingsFile": "settings.json",
+    "opacity": {
+      "off": "0.6",
+      "on": "1"
+    }
+  },
+  "notices": {
+    "ok": "OK"
+  },
+  "speech": {
+    "recordings": "tests/fixtures/recordings.py",
+    "makeAudio": "tests/fixtures/audio/make_audio.py",
+    "files": [
+      "transcript.md",
+      "segments.json",
+      "expected.json",
+      "meta.json"
+    ],
+    "audio": ".wav",
+    "transcript": "transcript.md",
+    "segments": "segments.json",
+    "expected": "expected.json",
+    "meta": "meta.json",
+    "captureErr": "capture.err",
+    "transcribeOut": "transcribe.out",
+    "speakers": {
+      "me": "Me",
+      "remote": "Remote"
+    },
+    "turnLine": "^\\*\\*(\\S+)\\*\\* \\[(\\d\\d:\\d\\d:\\d\\d)\\]",
+    "modelLine": "**Model:** {model}",
+    "languageLine": "^  language: ",
+    "language": "  language: {lang}",
+    "hint": "vocabulary hint: {terms}",
+    "noSpeech": "debug: no_speech",
+    "built": "{n} turns",
+    "models": "models",
+    "testModels": "ECHOCTL_TEST_MODELS",
+    "debug": "ECHOCTL_DEBUG"
   }
 }

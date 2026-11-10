@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, install]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-003: Install opens a sheet with what the plugin may do, and Cancel installs nothing

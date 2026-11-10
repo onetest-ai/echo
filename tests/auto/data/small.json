@@ -887,5 +887,212 @@
       "nomatch": "nomatch",
       "call": "acme-weekly-sync"
     }
+  },
+  "s10": {
+    "clients": {
+      "acme": "Acme",
+      "globex": "Globex",
+      "initech": "Initech"
+    },
+    "listed": "Acme weekly sync",
+    "meetings": [
+      {
+        "subject": "Globex design review",
+        "names": [
+          "Kim Park"
+        ],
+        "minutes": 30
+      },
+      {
+        "subject": "Acme demo",
+        "names": [
+          "Dana Lee"
+        ],
+        "minutes": 30
+      }
+    ],
+    "notListed": "Industry webinar",
+    "search": "Acme",
+    "globexEvent": "ev-globex-review",
+    "threads": [
+      "Acme rollout",
+      "Globex pilot"
+    ],
+    "pin": "Globex pilot",
+    "me": "Sam",
+    "todayCalls": [
+      "acme-weekly-sync",
+      "initech-planning"
+    ],
+    "task": {
+      "thread": "acme-rollout",
+      "done": "{\"op\":\"edit\",\"node\":\"T001\",\"set\":{\"state\":\"done\"}}",
+      "undo": "{\"op\":\"undo\",\"target\":\"{mid}\"}"
+    }
+  },
+  "s12": {
+    "skill": {
+      "id": "follow-up-mail",
+      "name": "Follow up mail",
+      "heading": "Follow-up mail",
+      "count": 1,
+      "description": "Use when a task is to write a follow-up mail after a meeting",
+      "badName": "Звіт"
+    },
+    "profiles": {
+      "system": {
+        "id": "system",
+        "name": "Claude Code (as configured)",
+        "minutes": "sonnet",
+        "live": "haiku"
+      },
+      "local": {
+        "id": "local-llama",
+        "name": "Local Llama",
+        "model": "llama3.2",
+        "url": "http://127.0.0.1:9",
+        "kind": "local"
+      }
+    },
+    "models": {
+      "turbo": [
+        "large-v3-turbo-q5_0",
+        574
+      ],
+      "others": [
+        [
+          "large-v3-turbo-q8_0",
+          874
+        ],
+        [
+          "large-v3-q5_0",
+          1081
+        ],
+        [
+          "small-q8_0",
+          264
+        ]
+      ],
+      "notInBuild": [
+        "nemotron-3.5-0.6b",
+        "parakeet-tdt-0.6b-v3"
+      ]
+    },
+    "market": {
+      "folder": "market",
+      "name": "acme-local",
+      "manifest": {
+        "name": "acme-local",
+        "featured": [
+          "acme-notes"
+        ],
+        "plugins": [
+          {
+            "id": "acme-notes",
+            "source": "./plugins/acme-notes",
+            "categories": [
+              "automation"
+            ]
+          }
+        ]
+      },
+      "builtIn": {
+        "name": "onetest",
+        "source": "onetest-ai/echo-plugins"
+      }
+    },
+    "plugin": {
+      "id": "acme-notes",
+      "name": "Acme notes",
+      "version": "0.1.0",
+      "category": "Automation",
+      "summary": "A made-up plugin for tests",
+      "folder": "plugins/acme-notes",
+      "manifest": {
+        "id": "acme-notes",
+        "name": "Acme notes",
+        "version": "0.1.0",
+        "summary": "A made-up plugin for tests",
+        "settings": [
+          {
+            "key": "greeting",
+            "label": "Greeting",
+            "type": "string",
+            "default": "hello"
+          },
+          {
+            "key": "loud",
+            "label": "Loud",
+            "type": "bool",
+            "default": false
+          }
+        ]
+      },
+      "greeting": {
+        "key": "greeting",
+        "label": "Greeting",
+        "before": "hello",
+        "after": "good morning"
+      },
+      "loud": {
+        "key": "loud",
+        "label": "Loud",
+        "before": false,
+        "after": true
+      },
+      "search": "acme",
+      "noMatch": "zzzz"
+    }
+  },
+  "s14": {
+    "model": "large-v3-turbo-q5_0",
+    "maxWer": 0.15,
+    "acme": {
+      "recording": "acme-sync",
+      "title": "TRN-001 acme",
+      "says": [
+        "Berlin first",
+        "SSO checklist"
+      ]
+    },
+    "twoRemotes": {
+      "recording": "two-remotes",
+      "title": "TRN-003 en only",
+      "language": "en"
+    },
+    "oneLanguage": [
+      {
+        "recording": "ukrainian-call",
+        "title": "TRN-002 Ukrainian",
+        "language": "uk"
+      },
+      {
+        "recording": "russian-call",
+        "title": "TRN-002 Russian",
+        "language": "ru"
+      }
+    ],
+    "silence": {
+      "recording": "long-silence",
+      "title": "TRN-005 silence"
+    },
+    "vocabulary": {
+      "conversation": "acme-sync",
+      "turns": 6,
+      "terms": "ServiceNow,Kubernetes,Terraform,Snowflake,SSO,Berlin,Madrid",
+      "hint": "ServiceNow, Kubernetes, Terraform, Snowflake, SSO, Berlin, Madrid",
+      "unsaid": [
+        "ServiceNow",
+        "Kubernetes",
+        "Terraform",
+        "Snowflake"
+      ],
+      "said": [
+        "SSO checklist",
+        "Berlin first"
+      ],
+      "withIt": "_150000-acme-sync-vocabulary",
+      "plain": "_150500-acme-sync-plain"
+    }
   }
 }

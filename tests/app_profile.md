@@ -159,7 +159,7 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
 - **Settings remembers its section within a page load:** `#settings` (or ⌘,) by a hash change reopens the last
   section shown; only a full load lands on General. Likewise a thread's People view doesn't pick up `people-apply`
   written by the CLI until it is navigated to again.
-- A marketplace's "⋯" is a button named "More"; its menu is `.pl-pop` (no `role=menu`).
+- A marketplace's "⋯" is a button named "More"; its menu is `.pl-pop` with `role=menu`, its items `role=menuitem` ("Hide its plugins from Discover" / "Show its plugins in Discover", "Remove — installed plugins stay, without updates").
 - **Reload after a CLI change.** A hash-only Navigate does not refetch data after an `echoctl` step that changed it: reload the page fully (`location.reload()` or reload `{{base_url}}/`), then navigate.
 - Transcript "Find" highlights (class `hit` on `.turn`) a moment after the text is entered; read the DOM after a short wait.
 - A right panel keeps its last tab: after opening a task it shows Details, and clicking Inbox flips it back.

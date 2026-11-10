@@ -217,8 +217,8 @@ const SETTINGS_BODY = {
       else if (x.downloaded) ctl = (x.active || x.runnable === false ? '' : actBtn('use_model', 'Use', x.name)) + (x.active ? '' : actBtn('remove_model', 'Remove', x.name))
       else if (x.runnable === false) ctl = ''
       else ctl = dl ? '<span class="set-sub">Another download is running</span>' : actBtn('download_model', `Download (${x.size_mb} MB)`, x.name)
-      const bar = dl && dl.name === x.name ? `<div class="bar"><span style="width:${dl.pct}%"></span></div>` : ''
-      return setRow(`${esc(x.name)} ${tags}`, `${esc(x.summary || '')} · ${x.size_mb} MB${bar}`, ctl)
+      const bar = dl && dl.name === x.name ? `<div class="bar" role="progressbar" aria-valuenow="${dl.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(`Downloading ${x.name}`)}"><span style="width:${dl.pct}%"></span></div>` : ''
+      return setRow(`${esc(x.name)} ${tags}`, `${esc(x.summary || '')} · ${x.size_mb} MB${bar}`, ctl, '', x.name)
     })
     const srv = st.server || null
     return `<h2>Transcription</h2><p class="set-lead">On this computer — or on one you connect to yourself. Never a cloud service.${st.engine ? ` Speech engine: ${esc(st.engine)}.` : ''}</p>` +
@@ -243,11 +243,11 @@ const SETTINGS_BODY = {
       const who = p.kind === 'claude' ? (s.account ? `Signed in as ${esc(s.account)}` : out ? '<span class="warn">Not signed in — its calls wait for it</span>' : esc(p.account || '')) : esc(profileWhere(p))
       const isDef = p.id === a.default
       const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
-      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}`, ctl)
+      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}`, ctl, '', p.name)
     })
     const add = '<div class="set-sub" style="padding:10px 14px">Add a profile: <code>echoctl ai add-claude &lt;name&gt;</code> (a Claude account) or <code>echoctl ai add-local &lt;name&gt; --url …</code> (a model on this computer) — or ask Claude in the window.</div>'
     return `<h2>AI &amp; minutes</h2><p class="set-lead">Which model and account writes each call's live notes and minutes. A call keeps the profile it was recorded with.</p>` +
-      `<section class="set-sec"><h3>Profiles</h3><div class="set-card">${rows.join('')}${add}</div></section>` +
+      `<section class="set-sec" aria-label="Profiles"><h3>Profiles</h3><div class="set-card">${rows.join('')}${add}</div></section>` +
       setCard('Minutes', [
         setRow('Write minutes automatically', "15 min after a call ends (or after your last note), with the call's profile.", sw('auto_minutes', st.auto_minutes, 'Write minutes automatically')),
         setRow("Keep threads' work current", "After a thread's calls, Claude reads them into its stories, tasks, decisions, risks and questions — with the thread's AI profile.", sw('project_sync', st.project_sync, "Keep threads' work current")),
@@ -257,14 +257,14 @@ const SETTINGS_BODY = {
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
       ]) +
       setCard('Claude in the window', [
-        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts')),
+        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts'), '', 'Claude in the window: no permission prompts'),
       ])
   },
   calendar(st) {
     return `<h2>Calendar &amp; chat</h2><p class="set-lead">Read-only, through Echo's own Microsoft 365 sign-in.</p>` + setCard('Microsoft 365', [
-      setRow('Account', st.calendar ? `Signed in as ${esc(st.calendar)}` : 'Not connected: the calendar shows only what your tray knows about today.', st.calendar ? actBtn('calendar_sync', 'Sync now') + actBtn('calendar_logout', 'Sign out') : actBtn('calendar_login', 'Sign in…', '', true)),
-      setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat')),
-      setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…')),
+      setRow('Account', st.calendar ? `Signed in as ${esc(st.calendar)}` : 'Not connected: the calendar shows only what your tray knows about today.', st.calendar ? actBtn('calendar_sync', 'Sync now') + actBtn('calendar_logout', 'Sign out') : actBtn('calendar_login', 'Sign in…', '', true), '', 'Account'),
+      setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat'), '', 'Meeting chat'),
+      setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…'), '', 'App registration'),
     ])
   },
   deliver() {

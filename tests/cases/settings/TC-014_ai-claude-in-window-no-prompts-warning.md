@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, claude]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-014: AI & minutes: Claude in the window without permission prompts shows its warning and is off

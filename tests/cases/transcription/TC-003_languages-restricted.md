@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [transcription, languages, recordings]
 external_id: TC-TRN-004
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # TC-003: A call started without a language is in the default one

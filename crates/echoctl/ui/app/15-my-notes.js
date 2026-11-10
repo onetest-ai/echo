@@ -261,7 +261,7 @@ function needsPanel() {
     return '<div class="skeleton"><i></i><i></i></div>'
   }
   const open = nyOpen(), urgent = open.filter((i) => i.urgent), done = d.done || []
-  const chip = (f, label, n) => `<button class="fchip${NY.filter === f ? ' on' : ''}" data-ny-filter="${f}">${label}${n ? ` ${n}` : ''}</button>`
+  const chip = (f, label, n) => `<button class="fchip${NY.filter === f ? ' on' : ''}" data-ny-filter="${f}" aria-pressed="${NY.filter === f}">${label}${n ? ` ${n}` : ''}</button>`
   const head = `<div class="ny-head">${chip('open', 'Open', open.length)}${urgent.length ? chip('blocking', 'Blocking', urgent.length) : ''}${chip('done', 'Done', done.length)}<span class="grow"></span><span class="set-sub">this week</span></div>`
   const row = (i) => {
     const busy = nyBusy(i.key)

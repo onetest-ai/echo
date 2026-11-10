@@ -76,7 +76,7 @@ function skillsList(sks) {
 }
 function skillEditor() {
   if (TPL.skNew) {
-    return `<div class="tp-ed"><div class="tp-eh"><b>New skill</b><span class="grow"></span><button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+    return `<div class="tp-ed" role="region" aria-label="New skill"><div class="tp-eh"><b>New skill</b><span class="grow"></span><button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
       <div class="tp-eb"><div class="tp-f"><label class="tp-l" for="sk-name">Name</label><input id="sk-name" class="set-in" placeholder="Status report" value="${esc(TPL.skNew.name || '')}"></div>
       <p class="set-sub">Echo makes its folder with a SKILL.md to fill in and opens it in your editor. Or ask Claude to write it for you.</p></div>
       <div class="tp-ef"><span class="grow"></span><button class="btn ghost" data-sk-cancel>Cancel</button><button class="btn primary" data-sk-create>Create and open</button></div></div>`
@@ -89,7 +89,7 @@ function skillEditor() {
     : `<button class="btn ghost" data-sk-remove data-del="1">${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}Delete</button>`
   const open = d.folder ? `<button class="btn" data-sk-open="code" title="All your skills, as one folder in VS Code">Open in VS Code</button><button class="btn ghost" data-sk-open="finder">Show in Finder</button>` : ''
   const probs = (d.problems || []).length ? `<div class="sk-probs"><b>To fix before Claude can use it</b><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''
-  return `<div class="tp-ed"><div class="tp-eh"><b>${esc(tplName(d.id))}</b><span class="tp-tag${cls}">${tag}</span><span class="grow"></span>
+  return `<div class="tp-ed" role="region" aria-label="${esc(tplName(d.id))}"><div class="tp-eh"><b>${esc(tplName(d.id))}</b><span class="tp-tag${cls}">${tag}</span><span class="grow"></span>
       <button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
     <div class="tp-eb">${probs}
       <div class="set-sub">SKILL.md${skFiles(d.files) ? ' · ' + esc(skFiles(d.files)) : ''} · in Claude as /my-skills:${esc(d.id)}</div>

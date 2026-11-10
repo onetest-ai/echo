@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, transcription]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-010: Transcription lists the speech models with their download size and starts none

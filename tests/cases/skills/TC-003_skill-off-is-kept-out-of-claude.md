@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-003: A skill switched off is recorded as off and switched on again

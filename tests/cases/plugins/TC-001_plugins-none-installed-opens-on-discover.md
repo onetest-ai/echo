@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-001: With nothing installed Plugins opens on Discover and Installed says so

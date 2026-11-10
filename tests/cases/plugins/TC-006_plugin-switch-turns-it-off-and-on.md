@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, enable]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-006: The plugin's switch turns it off and on

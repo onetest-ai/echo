@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-004: Customize copies a built-in skill to the user's folder

@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, discover]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-002: Discover filters by category chip and search, each card naming its marketplace

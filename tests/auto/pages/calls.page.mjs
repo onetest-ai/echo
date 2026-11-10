@@ -73,6 +73,49 @@ export class CallsPage extends AppPage {
     return this.page.getByRole('menu').getByRole('menuitem')
   }
 
+  // ── Coming up today: the list's fold of the meetings still to come, and their rows ──
+
+  /** The fold's head ("Coming up today 2 Next 02:04 PM Globex design review"). */
+  get comingUp() {
+    return this.list.getByRole('button', { name: new RegExp(`^${literal(this.data.text.upcoming.head)}`) })
+  }
+
+  /** The list's rows (the fold's head, then the calls), in order. */
+  get rows() {
+    return this.list.getByRole('button').or(this.list.getByRole('option'))
+  }
+
+  /** A meeting still to come, by its subject (its row reads "Coming up <subject> <time> …"). */
+  upcoming(subject) {
+    return this.list.getByRole('option', { name: new RegExp(`^${literal(this.data.text.upcoming.rowPrefix)} ${literal(subject)} `) })
+  }
+
+  /** The meetings still to come, listed. */
+  get upcomingRows() {
+    return this.list.getByRole('option', { name: new RegExp(`^${literal(this.data.text.upcoming.rowPrefix)} `) })
+  }
+
+  /** A thread's icon on a row (its tooltip names the thread). */
+  rowIcon(row, thread) {
+    return row.getByTitle(thread, { exact: true })
+  }
+
+  /** Whether a row draws a thread's icon before one of its texts (its time), from the left. */
+  async iconBefore(row, thread, text) {
+    const icon = await this.rowIcon(row, thread).boundingBox()
+    const at = await this.rowText(row, text).boundingBox()
+    return !!icon && !!at && icon.x < at.x
+  }
+
+  /** A text of a row, as it reads (its time). */
+  rowText(row, text) {
+    return row.getByText(text, { exact: true })
+  }
+
+  get search() {
+    return this.page.getByRole('textbox', { name: this.data.text.calls.search, exact: true })
+  }
+
   /** The transcript's turns, by their times. */
   get turns() {
     return this.main.getByRole('time')

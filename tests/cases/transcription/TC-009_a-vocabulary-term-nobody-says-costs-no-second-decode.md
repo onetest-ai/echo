@@ -8,6 +8,7 @@ module: transcription
 run: agent
 platform: macos
 tags: [transcription, vocabulary, recordings]
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # TC-009: A vocabulary term nobody says costs no second decode

@@ -12,6 +12,7 @@ cases:
   - tests/cases/settings/TC-026_transcription-server-section-connect-check-connected-and-shared.md
   - tests/cases/transcription/TC-011_the-model-follows-the-calls-language.md
   - tests/cases/transcription/TC-009_a-vocabulary-term-nobody-says-costs-no-second-decode.md
+auto: [tests/auto/specs/S-14.spec.mjs]
 ---
 
 # S-14: Transcription quality on known conversations: words, speakers, languages, silence

@@ -15,6 +15,54 @@ export class MeetingPage extends AppPage {
     this.writeAgain = page.getByRole('button', { name: 'Write it again' })
   }
 
+  // ── Its header's threads (+ Thread, a thread's chip and ×), its tabs and the Prep pane before a prep ──
+
+  get addThread() {
+    return this.main.getByRole('button', { name: this.data.text.upcoming.addThread, exact: true })
+  }
+
+  /** An item of the + Thread menu, by its name ("Globex pilot", "New thread from this meeting…"). */
+  threadItem(name) {
+    return this.main.getByRole('menu').getByRole('menuitem', { name, exact: true })
+  }
+
+  get threadItems() {
+    return this.main.getByRole('menu').getByRole('menuitem')
+  }
+
+  /** A thread's chip in the header, and its × (named "Take it out of <thread>"). */
+  chip(thread) {
+    return this.main.getByRole('button', { name: thread, exact: true })
+  }
+
+  takeOut(thread) {
+    return this.main.getByRole('button', { name: this.data.text.upcoming.takeOut.replace('{thread}', thread), exact: true })
+  }
+
+  /** A tab of the meeting ("Prep", "Transcript", "Minutes"). */
+  tab(name) {
+    return this.main.getByRole('tab', { name, exact: true })
+  }
+
+  /** A button of the meeting's page ("Prepare now", "Copy link"), by its name. */
+  button(name) {
+    return this.main.getByRole('button', { name, exact: true })
+  }
+
+  /** A text of the meeting's page, as it reads; or one that starts with these words. */
+  says(text) {
+    return this.main.getByText(text, { exact: true })
+  }
+
+  saysStarting(text) {
+    return this.main.getByText(new RegExp(`^${literal(text)}`))
+  }
+
+  /** The Prep pane's heading ("No prep yet"). */
+  paneHeading(name) {
+    return this.main.getByRole('heading', { name, level: 3, exact: true })
+  }
+
   /** The meeting by its prep id (`manifest.json` → preps). */
   async open(prepId) {
     await this.goto(`#upcoming/${prepId}`)

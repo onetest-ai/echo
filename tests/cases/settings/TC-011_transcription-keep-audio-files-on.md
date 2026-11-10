@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, audio]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-011: Transcription: Keep audio files on is saved to config.json

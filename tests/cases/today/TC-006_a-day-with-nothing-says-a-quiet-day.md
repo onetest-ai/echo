@@ -8,6 +8,7 @@ module: today
 run: agent
 platform: any
 tags: [today, empty-state, palette]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-006: A day with no meetings, no calls and nothing on you says "A quiet day", and ⌘K on it offers no Today or My work items

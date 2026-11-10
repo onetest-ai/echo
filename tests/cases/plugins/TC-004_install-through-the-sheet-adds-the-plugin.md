@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, install]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-004: Install through the sheet adds the plugin to Installed

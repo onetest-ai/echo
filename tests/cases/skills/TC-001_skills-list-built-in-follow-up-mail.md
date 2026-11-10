@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-001: Skills lists Echo's built-in skill with its switch and description

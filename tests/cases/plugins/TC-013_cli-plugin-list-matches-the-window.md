@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, cli]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-013: echoctl plugin list gives installed, offered and marketplaces

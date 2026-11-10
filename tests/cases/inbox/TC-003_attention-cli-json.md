@@ -8,6 +8,7 @@ module: inbox
 run: agent
 platform: any
 tags: [inbox, cli]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-003: echoctl attention prints the same empty lists as the Inbox

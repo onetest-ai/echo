@@ -8,6 +8,7 @@ module: prep
 run: agent
 platform: any
 tags: [prep, calls, threads]
+auto: [tests/auto/specs/S-10.spec.mjs]
 ---
 
 # TC-004: Putting a meeting in a thread changes the No prep yet line and shows the thread

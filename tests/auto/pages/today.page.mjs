@@ -43,6 +43,16 @@ export class TodayPage extends AppPage {
     this.skills = this.claudeDialog.getByRole('listbox')
   }
 
+  /** The greeting (level 1), as a pattern ("Good afternoon, Sam" by the hour). */
+  greeting(pattern) {
+    return this.main.getByRole('heading', { level: 1, name: new RegExp(pattern) })
+  }
+
+  /** A heading of Today that starts with these words ("Your day", "My work · this week", "A quiet day"). */
+  section(words) {
+    return this.main.getByRole('heading', { name: new RegExp(`^${literal(words)}`) })
+  }
+
   /** A task of My work's ✦ button, by the task's title. */
   claudeFor(title) {
     return this.page.getByRole('button', { name: `Claude: “${title}”…`, exact: true })

@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, remove]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-008: Remove, keep data removes the plugin and leaves its settings
