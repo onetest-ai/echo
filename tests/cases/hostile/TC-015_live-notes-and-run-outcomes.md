@@ -8,6 +8,7 @@ requirements: [F-LIVE-03, F-MIN-09, F-LIVE-05]
 tags: [hostile, live, minutes, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-015: Live notes, answers and a failed minutes run's message show as text

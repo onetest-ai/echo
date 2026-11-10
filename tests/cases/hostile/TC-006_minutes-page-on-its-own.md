@@ -8,6 +8,7 @@ requirements: [F-MIN-01, F-CALLS-17]
 tags: [hostile, minutes, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-006: The minutes page opened on its own (the "Open minutes in browser" page) shows hostile minutes as text

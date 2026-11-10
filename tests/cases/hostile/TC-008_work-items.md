@@ -8,6 +8,7 @@ requirements: [F-WORK-04, F-WORK-07, F-WORK-09, F-WORK-14, F-TASK-06, F-TASK-07]
 tags: [hostile, work, tasks, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-008: Work items show as text on the tree, the board, Tasks and in Details

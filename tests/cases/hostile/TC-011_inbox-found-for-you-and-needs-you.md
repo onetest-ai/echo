@@ -8,6 +8,7 @@ requirements: [F-INBOX-01, F-INBOX-03, F-INBOX-04, F-INBOX-05, F-THR-18, F-TODAY
 tags: [hostile, inbox, found, today, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-011: Inbox items, Found for you and Needs you now show others' words as text

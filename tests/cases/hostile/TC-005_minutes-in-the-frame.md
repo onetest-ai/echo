@@ -8,6 +8,7 @@ requirements: [F-MIN-01, F-MIN-03, F-NOTES-08]
 tags: [hostile, minutes, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-005: The minutes frame shows hostile minutes as text, with only https links and no script of the data

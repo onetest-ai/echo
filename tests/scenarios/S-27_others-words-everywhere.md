@@ -21,6 +21,7 @@ cases:
   - tests/cases/hostile/TC-015_live-notes-and-run-outcomes.md
   - tests/cases/hostile/TC-016_ai-profiles.md
   - tests/cases/hostile/TC-006_minutes-page-on-its-own.md
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # S-27: Others' words everywhere: nothing runs, nothing breaks

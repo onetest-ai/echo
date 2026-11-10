@@ -8,6 +8,7 @@ requirements: [F-TPL-01, F-TPL-02, F-TPL-03, F-TPL-05, F-SKILL-01, F-SKILL-02]
 tags: [hostile, templates, skills, xss]
 run: agent
 platform: any
+auto: [tests/auto/specs/S-27.spec.mjs]
 ---
 
 # TC-013: Skill, template and meeting type words show as text in Settings → Templates
