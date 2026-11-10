@@ -58,7 +58,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
     let w = find(id)?;
     let mut v = match w.kind {
         "day" => day(),
-        "next" => with_brief(next(&crate::today::day(), chrono::Utc::now())),
+        "next" => next_meeting(&crate::today::day()),
         "work" => crate::today::work(i.tasks),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
@@ -91,9 +91,15 @@ fn next(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> Value {
     json!({ "next": n })
 }
 
+/// The next meeting of a day already made (`today::day()`), with what its prep says.
+///
 /// The next meeting with what its prep says, for Next meeting's M and L: what to walk in knowing (the prep's In short,
 /// what is expected from you), what to ask (its open questions), who is coming (the invite's answers, a minute old at
 /// most). No model call: a prep is written by its own job.
+pub fn next_meeting(day: &[Value]) -> Value {
+    with_brief(next(day, chrono::Utc::now()))
+}
+
 fn with_brief(mut v: Value) -> Value {
     let Some(pid) = v["next"]["prep"]["id"].as_str().map(str::to_owned) else { return v };
     if let Some(p) = crate::prep::load(&pid) {
@@ -108,7 +114,8 @@ fn brief(p: &Value) -> Value {
     let list = |k: &str| p[k].as_array().cloned().unwrap_or_default();
     let expected: Vec<Value> = list("expected").iter().take(3).map(|x| json!({"title": x["title"], "kind": x["kind"], "late": x["late"], "from": x["from"]})).collect();
     let ask: Vec<Value> = list("open").iter().filter(|x| x["kind"] == "question").take(2).map(|x| x["title"].clone()).collect();
-    json!({ "summary": p["summary"], "expected": expected, "ask": ask })
+    // The AI profile that wrote it: Ask Claude about it starts on that one (a call's text stays on its pinned profile).
+    json!({ "summary": p["summary"], "expected": expected, "ask": ask, "profile": p["profile"] })
 }
 
 #[cfg(test)]
