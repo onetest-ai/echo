@@ -81,6 +81,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-12",
+   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space; re-laid when the menu, the right panel or the window changes it; nothing reorders",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

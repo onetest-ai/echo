@@ -87,16 +87,77 @@ function todayView() {
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
   const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
-  const blocks = layoutRows.map((r) => {
-    const h = r.map((id) => [id, parts[id]]).filter(([, x]) => x)
-    const grid = h.length > 1 || r.some((id) => id === 'core:calendar.agenda' || id === 'core:tasks.mine')
-    if (!grid) return h.map(([, x]) => x).join('')
-    // In a shared row a part of two blocks (Needs you now and its drafts) is one cell.
-    const cells = h.map(([id, x]) => (h.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${x}</div>` : x))
-    return `<div class="td-grid"${cells.length > 2 ? ` style="grid-template-columns: repeat(${cells.length}, minmax(0, 1fr))"` : ''}>${cells.join('')}</div>`
+  // Laid out by the engine (#328): Today's columns from its width, each row filling it by its widgets' sizes. Your day
+  // and My work fill the height and always sit in the grid (their inner scroll); an empty temporal part takes no space.
+  const FILL = ['core:calendar.agenda', 'core:tasks.mine']
+  const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
+  const SPAN = { S: 1, M: 2, L: 3 }
+  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !FILL.includes(id) && !parts[id] })))
+  const cols = S.todayCols || todayCols((($('.td') || $('#r-primary') || {}).clientWidth) || 1200)
+  todayWatch()
+  const blocks = todayLines(rowsIn, cols).map((line) => {
+    if (!line.fill && line.items.length === 1) return parts[line.items[0].id]
+    // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
+    const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${parts[id]}</div>` : parts[id]))
+    return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
   }).join('')
   return `<div class="td">${head}${asks}${blocks}${empty}</div>`
 }
+
+// Today's width, watched (#328): when the menu, a panel or the window changes it, the columns follow — nothing
+// reorders, only widths.
+let todayRO = null
+function todayWatch() {
+  const el = $('#r-primary')
+  if (todayRO || !el || typeof ResizeObserver === 'undefined') return
+  todayRO = new ResizeObserver(() => {
+    const td = S.view === 'today' && $('.td')
+    if (!td) return
+    const n = todayCols(td.clientWidth, S.todayCols)
+    if (n !== S.todayCols) { S.todayCols = n; render() }
+  })
+  todayRO.observe(el)
+}
+
+// ── today layout: Today's columns and lines (no DOM: `today-layout.test.mjs`) ───────────────────────────────────
+const TD_GAP = 16
+const TD_FOLD = 340, TD_UNFOLD = 380
+/** Today's columns for its width (1–3): fold under 340 px a column, unfold only at 380 from fewer (`prev`), so a panel
+ *  dragged around one width doesn't make Today jump. */
+function todayCols(width, prev) {
+  const fits = (n, per) => n * per + (n - 1) * TD_GAP <= width
+  let base = 1
+  while (base < 3 && fits(base + 1, TD_FOLD)) base++
+  if (!prev || base <= prev) return base
+  let up = 1
+  while (up < 3 && fits(up + 1, TD_UNFOLD)) up++
+  return Math.max(prev, Math.min(base, up))
+}
+/** The layout's rows ([[{id, span, fill, empty}]]) as lines of `cols` columns: empty widgets and rows take none; a row
+ *  too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one. */
+function todayLines(rows, cols) {
+  const lines = []
+  for (const row of rows) {
+    const items = row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))
+    if (!items.length) continue
+    let total = items.reduce((a, w) => a + w.span, 0)
+    while (total > cols) {
+      const widest = items.reduce((m, w) => (w.span > m.span ? w : m), items[0])
+      if (widest.span === 1) break
+      widest.span--
+      total--
+    }
+    let line = null, used = 0
+    for (const w of items) {
+      if (!line || used + w.span > cols) { line = { items: [], fill: false }; lines.push(line); used = 0 }
+      line.items.push({ id: w.id, span: w.span })
+      line.fill = line.fill || !!w.fill
+      used += w.span
+    }
+  }
+  return lines
+}
+// end of the today layout block
 
 // ── today rows: Today's widgets in rows, as its layout says (no DOM: `today-rows.test.mjs`) ─────────────────────────
 /** The layout's widgets the page has a part for, in order, a row each where one starts (`row`): [[id, …], …]. No
