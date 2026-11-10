@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, panel, sources, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-014: A person's panel shows their place in the thread, where each value comes from, their summary and their facts

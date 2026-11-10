@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, filters, owner]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-029: The Owner filter lists the user once, "Me (Sam Rivera)", and keeps the items of either name

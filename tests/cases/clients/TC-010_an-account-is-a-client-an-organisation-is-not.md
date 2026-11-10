@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, org, account, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-010: An account is a client with a page and a group; an organisation that is not a client has neither

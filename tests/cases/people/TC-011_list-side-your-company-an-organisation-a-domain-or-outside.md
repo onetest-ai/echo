@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, list, side, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-011: The Organisation column of the list says your company, the known organisation, the bare domain or outside

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, links, read]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-013: echoctl read gives the text behind a call (around a moment), thread, client, person, task and prep link, and refuses what isn't one

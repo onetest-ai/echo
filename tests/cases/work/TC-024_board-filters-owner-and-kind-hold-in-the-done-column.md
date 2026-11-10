@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, filters, done]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-024: The owner and kind filters of a board hold in every column, the Done column included

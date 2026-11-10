@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, closed, threads, empty]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-013: A client whose threads are all closed shows them as closed cards, no open tasks, and cannot be removed

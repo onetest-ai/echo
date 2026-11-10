@@ -65,7 +65,7 @@ to update; when a spec changes, its `covers` and `scenario` say which manual cas
 - **Data**: `const data = useData(test, { set: 'standard' })` once a spec; `data.set` holds its names (`data/<set>.json`).
 - **The window**: a page object (`new TodayPage(page, data)`), its methods and locators; fixed checks only — what the
   case's steps check. Judgement (how it looks, others' hostile text, a real model's content) stays with agent runs.
-- **The CLI and files**: `data.cli('notes', dir, '--wait')` (exactly the data's environment), `data.home`,
+- **The CLI and files**: `data.cli('notes', dir, '--wait')` (exactly the data's environment; `data.cliIn(text, …)` gives it a message on stdin), `data.home`,
   `data.callDir('initech-planning')`, `data.json(…)`, `data.lastEvent(thread)`.
 - **Model runs**: `useData(test, { ai: 'virtual' })`; `data.model.use('guard-probe.json', { OTHER_CALL: … })`,
   `data.model.clear()`, `data.model.turns(rule)`, `data.model.toolResults()`.

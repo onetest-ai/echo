@@ -70,6 +70,32 @@ export class CalendarPage extends AppPage {
     return this.card(subject).getByRole('button', { name, exact: true })
   }
 
+  /** Open the card of a meeting of a series (of the meetings of that subject, the one whose card offers the series'
+   *  choice "Record every meeting"). */
+  async openSeries(subject) {
+    await this.event(subject).first().waitFor()
+    for (const ev of await this.event(subject).all()) {
+      await ev.click()
+      await this.cardHeading(subject).waitFor()
+      if (await this.seriesChoice(subject).waitFor({ timeout: 2_000 }).then(() => true, () => false)) return
+    }
+    throw new Error(`no meeting "${subject}" of a series`)
+  }
+
+  /** A series' choice in a card (its group "Record every meeting"), a button of it ("Record", "Ask", "Don't record"). */
+  seriesChoice(subject) {
+    return this.card(subject).getByRole('group', { name: 'Record every meeting', exact: true })
+  }
+
+  seriesButton(subject, name) {
+    return this.seriesChoice(subject).getByRole('button', { name, exact: true })
+  }
+
+  /** A select's chosen option in a card, by its text. */
+  cardChosen(subject, select, text) {
+    return this.cardSelect(subject, select).getByRole('option', { name: text, exact: true, selected: true })
+  }
+
   /** The card's line of when, which starts with these words ("Today · 02:42 PM–03:12 PM · in 58 min"), as it reads. */
   async cardWhen(subject, words) {
     return (await this.cardStarting(subject, words).innerText()).replace(/\s+/g, ' ').trim()

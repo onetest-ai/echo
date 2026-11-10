@@ -4,6 +4,9 @@ import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
 import { readLines } from '../support/aria.mjs'
 
+/** A snapshot's text as it reads, without the quotes YAML puts around a text with a colon in it. */
+const unquote = (l) => (/^".*"$/.test(l) ? JSON.parse(l) : l)
+
 export class ClientsPage extends AppPage {
   constructor(page, data) {
     super(page, data)
@@ -250,6 +253,177 @@ export class ClientsPage extends AppPage {
   /** A button of the view, by its name ("Save", "Move to trash", "Edit"). */
   button(name) {
     return this.main.getByRole('button', { name, exact: true })
+  }
+
+  // ── The full set: a thread row's name, a row's reading, a client's cards, the calls rows, Found for you's cards ──
+
+  /** What a thread's row in the left list reads: its name (twice when it wears a picture, named by it), its calls and
+   *  the day of the last one, its stage (none for a closed thread). */
+  rowName({ name, calls, day, stage, logo }) {
+    const n = `${calls} call${calls === 1 ? '' : 's'}${day ? ` · ${day}` : ''}`
+    return [name, logo && name, n, stage].filter(Boolean).join(' ')
+  }
+
+  /** What a Profile row reads after its label, in order: its texts and buttons (a token, its "Remove", "+ Add", the
+   *  line under them). */
+  async rowReads(label) {
+    const lines = readLines(await this.row(label).ariaSnapshot()).map(unquote)
+    if (lines[0] === label) return lines.slice(1)
+    if (lines[0]?.startsWith(`${label} `)) return [lines[0].slice(label.length + 1), ...lines.slice(1)]
+    return lines
+  }
+
+  /** The Calls tab's rows, each as it reads: its title, its line (day, time, why, minutes) and its button. */
+  async callRowsRead() {
+    const out = []
+    for (const r of await this.callRows.all()) out.push(readLines(await r.ariaSnapshot()).map(unquote))
+    return out
+  }
+
+  /** The Calls tab's rows that say these words (a reason, "its Teams chat"). */
+  callRowsSaying(words) {
+    return this.callRows.filter({ hasText: words })
+  }
+
+  /** A thread's card on a client's Overview (a group named by the thread), and what it reads, in order. */
+  overviewCard(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  async cardReads(name) {
+    return readLines(await this.overviewCard(name).ariaSnapshot()).map(unquote)
+  }
+
+  /** A text of a card that starts with these words ("2 calls · last …"), its "N late". */
+  cardSays(name, text) {
+    return this.overviewCard(name).getByText(text, { exact: true })
+  }
+
+  /** A button of a card (its title, a decision, a risk), by its name. */
+  cardButton(name, button) {
+    return this.overviewCard(name).getByRole('button', { name: button, exact: true })
+  }
+
+  /** The day a card writes its last call on ("last saturday"): the lists' day, in lower case. */
+  async cardDay(iso) {
+    return (await this.dayLabel(iso)).toLowerCase()
+  }
+
+  /** Of these threads, the ones with a card on the Overview, in the cards' order. */
+  async cardOrder(names) {
+    const out = []
+    for (const g of await this.main.getByRole('group').all()) {
+      const n = await g.getAttribute('aria-label')
+      if (names.includes(n)) out.push(n)
+    }
+    return out
+  }
+
+  /** A picture of the view or of the left list, by its name (a logo: its client's or thread's name). */
+  img(name) {
+    return this.main.getByRole('img', { name, exact: true })
+  }
+
+  /** A Profile row's picture (the Logo row's). */
+  rowPicture(label) {
+    return this.row(label).getByRole('img')
+  }
+
+  /** The client's picture in the head of its page (the left list's, of its group, comes first). */
+  headImg(name) {
+    return this.main.getByRole('img', { name, exact: true }).last()
+  }
+
+  /** A client's group in the left list, its picture; a thread row's picture. */
+  groupImg(name) {
+    return this.clientGroup(name).getByRole('img')
+  }
+
+  rowImg(name) {
+    // A row with a picture reads its name twice (the picture is named by it).
+    return this.list.getByRole('button', { name: new RegExp(`^${literal(name)} ${literal(name)} \\d+ calls?\\b`) }).getByRole('img')
+  }
+
+  /** A link of the view, by its name. */
+  link(name) {
+    return this.main.getByRole('link', { name, exact: true })
+  }
+
+  /** A list item of the view (About's bullets), as it reads. */
+  get bullets() {
+    return this.main.getByRole('listitem')
+  }
+
+  /** Found for you: a candidate's card (a group named by its name), its why line, its calls (each "<day> <title>"),
+   *  its selects. */
+  foundCard(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  foundSays(name, text) {
+    return this.foundCard(name).getByText(text, { exact: true })
+  }
+
+  foundCall(name, title) {
+    return this.foundCard(name).getByRole('button', { name: new RegExp(` ${literal(title)}$`) })
+  }
+
+  foundCalls(name) {
+    return this.foundCard(name).getByRole('button').filter({ hasNotText: /^(Accept|Reject)$/ })
+  }
+
+  foundSelect(name, select) {
+    return this.foundCard(name).getByRole('combobox', { name: select, exact: true })
+  }
+
+  foundBox(name) {
+    return this.foundCard(name).getByRole('textbox', { name: 'Thread name' })
+  }
+
+  /** Every Found for you card. */
+  get foundCards() {
+    return this.main.getByRole('group').filter({ has: this.page.getByRole('button', { name: 'Accept', exact: true }) })
+  }
+
+  /** A select's option of a Found for you card, by its name; a button of the card ("Accept", "Reject"). */
+  foundOption(name, select, option) {
+    return this.foundSelect(name, select).getByRole('option', { name: option, exact: true })
+  }
+
+  foundButton(name, button) {
+    return this.foundCard(name).getByRole('button', { name: button, exact: true })
+  }
+
+  /** A token of a Profile row by its tooltip (an organisation's domain). */
+  titled(label, title) {
+    return this.row(label).getByTitle(title, { exact: true })
+  }
+
+  /** A text of a thread's header that starts with these words ("6 calls · since 2026-01-01"). */
+  factStarting(thread, words) {
+    return this.head(thread).getByText(new RegExp(`^${literal(words)}`))
+  }
+
+  /** A thread's row in the left list, by all it reads (`rowName`). */
+  rowNamed(name) {
+    return this.list.getByRole('button', { name, exact: true })
+  }
+
+  /** Found for you's new thread row: its Client select (the page's first; each card has its own below). */
+  get newThreadClient() {
+    return this.main.getByRole('combobox', { name: 'Client', exact: true }).first()
+  }
+
+  /** The names Found for you's cards hold in their boxes, in order. */
+  async foundNames() {
+    const names = []
+    for (const box of await this.main.getByRole('textbox', { name: 'Thread name', exact: true }).all()) names.push(await box.inputValue())
+    return names
+  }
+
+  /** A switch of the view ("Your own company"). */
+  switch(name) {
+    return this.main.getByRole('switch', { name, exact: true })
   }
 
   /** The open menu's items, in order. */

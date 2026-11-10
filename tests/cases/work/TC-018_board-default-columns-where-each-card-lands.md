@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, columns, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-018: On the default board a card lands in the column of its state, a blocked one in Blocked even if it waits

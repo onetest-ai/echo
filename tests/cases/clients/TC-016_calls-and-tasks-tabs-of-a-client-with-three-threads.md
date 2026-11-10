@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, calls, tasks]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-016: The Calls tab of Acme lists the calls of its three threads and the Tasks tab sums their piles

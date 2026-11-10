@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, list, stage, client]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-018: The thread list groups ten threads by client, outside clients first, the user's company next, then no client, and folds the closed ones

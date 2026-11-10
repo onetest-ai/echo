@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, list, seen, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-010: The list shows the people placed in a thread apart from those only seen in its calls, who can be added

@@ -117,7 +117,29 @@
     "yesterday": "yesterday",
     "undoOp": "undo",
     "sendTo": "Send to",
-    "edit": "Edit"
+    "edit": "Edit",
+    "syncedRead": "Synced {time} · {calls} calls to read · {n} to review",
+    "syncFailed": "Sync failed",
+    "notSyncedYet": "Not synced yet",
+    "tags": [
+      "session",
+      "dependency",
+      "question",
+      "decision",
+      "risk"
+    ],
+    "colours": {
+      "done": "--me",
+      "open": "--text-3",
+      "waiting": "--warn",
+      "blocked": "--danger",
+      "in_progress": "--accent-ink",
+      "cancelled": "--text-3",
+      "late": "--danger",
+      "toReview": "--warn"
+    },
+    "statusWord": "● {word}",
+    "callsToRead": "\\d+ calls? to read"
   },
   "prep": {
     "inShort": "In short",
@@ -596,7 +618,32 @@
       "order": "Order"
     },
     "howField": "How",
-    "dialogLine": "{thread} · {title}"
+    "dialogLine": "{thread} · {title}",
+    "modes": {
+      "claude": "Claude can do it",
+      "hand": "You do it by hand: {how}"
+    },
+    "quietMark": "quiet {n} d",
+    "quietTitle": "No word about it in {n} days",
+    "blocked": "blocked",
+    "others": "Others",
+    "askWhy": {
+      "due": "due {due}",
+      "item": "{title} — {why}"
+    },
+    "colours": {
+      "late": "--danger"
+    },
+    "filterChip": "{name} ▾",
+    "cliPiles": {
+      "I owe": "mine",
+      "Owed to me": "owed",
+      "Waiting for others": "waiting",
+      "Nobody named": "nobody",
+      "Others": "others"
+    },
+    "waitBorder": "dashed",
+    "cardBorder": "solid"
   },
   "diagrams": {
     "system": "You fix one Mermaid diagram",
@@ -650,7 +697,8 @@
       "overview": "Overview",
       "calls": "Calls",
       "tasks": "Tasks",
-      "profile": "Profile"
+      "profile": "Profile",
+      "people": "People"
     },
     "rows": {
       "name": "Name",
@@ -671,7 +719,25 @@
     "gone": "This client is gone",
     "backToThreads": "Back to the threads",
     "orgRemoved": "{id} removed",
-    "claudeAbout": "Claude about {name}"
+    "claudeAbout": "Claude about {name}",
+    "addLogo": "Add a logo…",
+    "changeLogo": "Change logo…",
+    "logoBox": "logo",
+    "removeLogo": "Remove",
+    "newThread": "+ New thread",
+    "removeClient": "Remove this client…",
+    "noCalls": "No calls in this client's threads yet.",
+    "cardCalls": "{calls} · last {day}",
+    "callLine": "{day}, {time}",
+    "callLineMinutes": "{day}, {time} · {minutes}",
+    "logoRoute": "/api/client/{id}/logo",
+    "tabIds": {
+      "overview": "overview",
+      "calls": "calls",
+      "tasks": "tasks",
+      "people": "people",
+      "profile": "profile"
+    }
   },
   "people": {
     "views": [
@@ -753,9 +819,29 @@
       "role": "Role",
       "sameFirst": "Same person as…",
       "orgPlaceholder": "Who is {domain}?",
-      "nameOrg": "Name this organisation ({domain})"
+      "nameOrg": "Name this organisation ({domain})",
+      "influence": "influence",
+      "interest": "interest",
+      "workstream": "Workstream",
+      "governance": "Governance",
+      "worksFor": "Works for in this thread",
+      "phone": "Phone",
+      "office": "Office"
     },
-    "owes": "Owes"
+    "owes": "Owes",
+    "addAll": "Add all",
+    "tabCount": "People{n}",
+    "notPlaced": "Not placed yet",
+    "quadrantHead": "{name} {sub}",
+    "newTag": "new",
+    "col": {
+      "person": "Person",
+      "organisation": "Organisation",
+      "role": "Role",
+      "stance": "Stance",
+      "calls": "Calls",
+      "threads": "Threads"
+    }
   },
   "vocabulary": {
     "panel": "Vocabulary",
@@ -1119,7 +1205,9 @@
     "rulePlaceholder": "a meeting's subject (empty for the client's people)",
     "why": {
       "pinned": "added by hand",
-      "subject": "its subject"
+      "subject": "its subject",
+      "series": "its meeting series",
+      "people": "the client's people"
     },
     "rowLine": "{day}, {time} · {why}",
     "noMinutes": "no minutes yet",
@@ -1156,6 +1244,75 @@
     "addButton": "Add",
     "deleteItem": "Delete…",
     "deleteAsk": "Delete {name}? Its brief, profile and work go to the trash; its calls stay.",
-    "moveToTrash": "Move to trash"
+    "moveToTrash": "Move to trash",
+    "rowLineMinutes": "{day}, {time} · {why} · {minutes}",
+    "tabCount": "{tab}{n}",
+    "partOf": "Part of {thread}? {why}",
+    "suggestAdd": "Add",
+    "notThis": "Not this",
+    "olderNot": "· nothing older is read",
+    "teamsChat": "its Teams chat",
+    "newThread": "New thread",
+    "foundCount": "Found for you {n}",
+    "orgHintFull": "Who this thread is with besides its client: their people are theirs in People, and the people rule counts their domains",
+    "counts": {
+      "match": "^(\\d+) calls? match",
+      "pinned": "(\\d+) pinned",
+      "takenOut": "(\\d+) taken out by hand"
+    },
+    "headCalls": "{n} calls · since {since}",
+    "addTo": "Add to a thread",
+    "callCount": {
+      "one": "{n} call",
+      "many": "{n} calls"
+    }
+  },
+  "runVars": {
+    "headless": "ECHOCTL_HEADLESS",
+    "task": "ECHOCTL_RUN_TASK",
+    "profile": "ECHOCTL_RUN_PROFILE",
+    "call": "ECHOCTL_RUN_CALL"
+  },
+  "links": {
+    "route": "#link={link}",
+    "call": "echo://call/{c}",
+    "callAt": "echo://call/{c}?t={t}",
+    "thread": "echo://thread/{id}",
+    "client": "echo://client/{id}",
+    "person": "echo://person/{email}",
+    "task": "echo://task/{thread}/{id}",
+    "prep": "echo://prep/{id}",
+    "callRoute": "#call/{c}/{tab}"
+  },
+  "ledgerJson": {
+    "merge": "suggest_merge",
+    "move": "suggest_move",
+    "pending": "pending",
+    "accept": "accept",
+    "reject": "reject",
+    "undo": "undo",
+    "merged": "merged",
+    "deleted": "deleted",
+    "open": "open",
+    "done": "done",
+    "todo": "todo",
+    "create": "create",
+    "human": "human",
+    "edit": "edit",
+    "link": "link",
+    "acSet": "ac_set",
+    "delete": "delete",
+    "merge_op": "merge",
+    "badOps": [
+      "undo",
+      "accept",
+      "reject"
+    ],
+    "people": "people",
+    "pinned": "pinned",
+    "badNode": "T999"
+  },
+  "m365": {
+    "token": "graph.json"
   }
 }

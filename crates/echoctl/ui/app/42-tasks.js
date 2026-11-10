@@ -18,7 +18,7 @@ function taskWho(c, pile) {
 function othersPile(all, key) {
   if (!all.length) return ''
   const open = S.tk.more[key]
-  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${CHEV(open)} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
+  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${CHEV(open)} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards" role="region" aria-label="Others">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
@@ -132,7 +132,7 @@ function foundView(data) {
     const org = c.org ? `<div class="set-sub">With ${esc(c.org.name)}${c.org.new ? ` (${esc(c.org.domain)}) — a new organisation, not a client` : ''}: its counterpart</div>` : ''
     const clientSel = `<select class="found-client" aria-label="Client"><option value=""${def === '' ? ' selected' : ''}>No client</option>${nc ? `<option value="new"${def === 'new' ? ' selected' : ''}>New client: ${esc(nc.name)} (${esc(nc.domain)})</option>` : ''}${clients.map((x) => `<option value="${esc(x.id)}"${def === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
     const merge = projects.length ? `<select class="found-merge" aria-label="Add to a thread"><option value="">Add to a thread…</option>${projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>` : ''
-    return `<section class="set-card found-card" data-key="${esc(c.key)}">
+    return `<section class="set-card found-card" role="group" aria-label="${esc(c.name)}" data-key="${esc(c.key)}">
       <div class="set-row"><div class="found-top">${projIcon({ id: c.key, name: c.name, color: PJ_COLORS[ProjectArt.hash(c.key) % PJ_COLORS.length] }, 28)}<input class="found-name" value="${esc(c.name)}" aria-label="Thread name"></div>
         <div class="set-ctl"><button class="btn primary" data-pj="found-accept">Accept</button><button class="btn ghost" data-pj="found-reject" title="Not a thread — never suggested again">Reject</button></div></div>
       <div class="set-row"><div><div class="set-sub">${esc(c.why)}</div>${org}</div><div class="set-ctl">${clientSel}${merge}</div></div>
@@ -445,7 +445,7 @@ function clientOverview(cd, c) {
     }
     const recs = (label, xs, cls) => xs && xs.length ? `<div class="cl-recs"><span class="cl-rl ${cls}">${label}</span><div>${xs.slice(0, 3).map((x) => recLine(x, cls)).join('')}${xs.length > 3 ? `<span class="set-sub">+ ${xs.length - 3} more</span>` : ''}</div></div>` : ''
     const prog = s.stories ? `<div class="cl-prog"><span class="bd-prog"><span style="width:${Math.round(100 * s.stories_done / s.stories)}%"></span></span><span class="set-sub">${s.stories_done} of ${s.stories} stor${s.stories === 1 ? 'y' : 'ies'} done</span></div>` : ''
-    return `<div class="cl-card${p.group === 'closed' ? ' closed' : ''}">
+    return `<div class="cl-card${p.group === 'closed' ? ' closed' : ''}" role="group" aria-label="${esc(p.name)}">
       <button class="cl-top" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 22)}<b>${esc(p.name)}</b>${stageTag(p.stage)}</button>
       <div class="set-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'}${p.last_call ? ` · last ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''}</div>
       ${prog}

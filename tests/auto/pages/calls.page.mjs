@@ -65,6 +65,11 @@ export class CallsPage extends AppPage {
     return this.main.getByRole('button', { name, exact: true })
   }
 
+  /** A thread's chip in the header (it reads the thread's name twice when the thread wears a picture, named by it). */
+  threadChip(name) {
+    return this.main.getByRole('button', { name: new RegExp(`^${literal(name)}( ${literal(name)})?$`) })
+  }
+
   /** A thread in the "+ Thread" menu (a checkbox item, ticked while the call is in it), or another item of a menu. */
   threadItem(name) {
     return this.page.getByRole('menu').getByRole('menuitemcheckbox', { name: new RegExp(`^(✓ )?${literal(name)}$`) })

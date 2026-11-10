@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, columns, limit]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-019: A board with custom columns shows the limit exceeded, a hidden Waiting column and a card whose stored column does not fit

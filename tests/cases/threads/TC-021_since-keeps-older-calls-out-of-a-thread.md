@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, since, membership, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-021: A thread's Since date keeps older calls out, whatever its rules say, and an earlier one lets them in

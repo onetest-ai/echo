@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, recency, new]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-012: A person first seen in the last 14 days carries the tag "new", and it depends on the scope viewed

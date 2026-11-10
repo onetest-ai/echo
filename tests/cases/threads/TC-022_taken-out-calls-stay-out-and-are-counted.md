@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, membership, exclusions, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-022: A call taken out by hand stays out of its thread, whatever the rules say, and the tab and the profile count it

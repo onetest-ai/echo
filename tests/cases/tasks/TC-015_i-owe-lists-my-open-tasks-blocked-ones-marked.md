@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles, pairwise, blocked]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-015: I owe holds the user's open tasks, a blocked one stays there marked and says by whom

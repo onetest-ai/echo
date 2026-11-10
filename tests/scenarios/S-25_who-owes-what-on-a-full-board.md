@@ -26,6 +26,7 @@ cases:
   - tests/cases/work/TC-023_merged-and-deleted-items-show-nowhere.md
   - tests/cases/work/TC-022_tree-status-words-tasks-and-stories.md
   - tests/cases/work/TC-029_owner-filter-lists-the-user-once-and-keeps-all-their-items.md
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # S-25: Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns

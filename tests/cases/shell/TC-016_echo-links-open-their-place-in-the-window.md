@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [shell, links]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-016: An echo:// link opens its place in the window: a call at a moment, a thread, a client, a person, a task, a prep; an unknown one says so

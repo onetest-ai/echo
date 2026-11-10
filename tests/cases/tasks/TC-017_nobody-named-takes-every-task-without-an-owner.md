@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles, nobody, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-017: Nobody named takes every open task without an owner, whoever handed it over

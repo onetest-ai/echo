@@ -20,6 +20,8 @@
 .tk-m .grow { flex: 1; }
 .tk-pj .pj-ic { flex: none; }
 .tk-who { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "blocked" (and late) on a card's who line: red, as on a client's Overview card (#313). */
+.tk-who .late { color: var(--danger); font-weight: 600; }
 .tk-quiet { flex: none; color: var(--warn); }
 .tk-due { flex: none; white-space: nowrap; color: var(--text-2); }
 .tk-due.late { color: var(--danger); font-weight: 600; }

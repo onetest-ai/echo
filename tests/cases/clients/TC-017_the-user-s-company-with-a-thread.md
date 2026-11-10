@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, internal, pairwise]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-017: The user's company is "your company" even when it has a thread, which keeps it from being removed

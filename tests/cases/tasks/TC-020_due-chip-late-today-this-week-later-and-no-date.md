@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, cards, due, late, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-020: A due chip is red when late, shows the weekday this week, and reads "no date" when there is none

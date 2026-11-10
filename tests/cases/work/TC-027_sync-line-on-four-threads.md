@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, sync, review]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-027: The sync line says synced with calls to read and items to review, failed, or not synced yet

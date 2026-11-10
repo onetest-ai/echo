@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, found, client, org]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-025: Found for you offers six candidate threads with a client choice: none, an existing client, a new one from the domain

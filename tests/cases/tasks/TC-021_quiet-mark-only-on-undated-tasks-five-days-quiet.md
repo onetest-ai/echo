@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, cards, quiet]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-021: A card says "quiet N d" only when it has no date and nobody said a word about it for five days

@@ -274,6 +274,8 @@ function boardChips() {
   const fields = `<span class="pj-add-wrap"><button class="fchip" data-pj="fields-menu">Fields ▾</button>${S.pj.fieldsMenu ? `<div class="menu bd-menu" role="menu">${CARD_FIELDS.map(([k, l]) => `<label class="menu-item bd-check"><input type="checkbox" data-board-field="${k}" ${b.fields.includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>` : ''}</span>`
   return group + fields
 }
+/** The rows of a work item's details that link it to other work: each a group named by its label. */
+const XLINK_ROWS = ['Waits for', 'Holds up', 'Same as', 'Also in']
 const KIND_FILTERS = [['', 'All kinds'], ['story', 'Stories'], ['task', 'Tasks'], ['decision', 'Decisions'], ['risk', 'Risks'], ['question', 'Questions']]
 function projectWork(p) {
   const w = S.pj.work
@@ -298,8 +300,8 @@ function projectWork(p) {
     return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
   }
   const reviewList = review.length ? `<div class="wk-review">${review.map((r) => r.s
-    ? `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(r.n.title)} — ${r.s.quote ? `“${esc(r.s.quote)}”` : esc(r.s.note || '')}</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button><button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button></div>`
-    : `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">“${esc(r.weak.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button><button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button></div>`).join('')}</div>` : ''
+    ? `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-warn">To review</span><span class="grow">${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(r.n.title)} — ${r.s.quote ? `“${esc(r.s.quote)}”` : esc(r.s.note || '')}</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button><button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button></div>`
+    : `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-warn">To review</span><span class="grow">Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">“${esc(r.weak.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button><button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button></div>`).join('')}</div>` : ''
   if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, board)}`
   const rows = []
   const walk = (id, level) => {
@@ -403,7 +405,7 @@ function workPanel() {
     ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
     ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
     ${description}
-    ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div>${v}</div>`).join('')}</div>` : ''}
+    ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div${XLINK_ROWS.includes(k) ? ` role="group" aria-label="${esc(k)}"` : ''}>${v}</div>`).join('')}</div>` : ''}
     ${criteria}
     ${['task', 'story', 'question'].includes(n.kind) ? xLinkBlock(n) : ''}
     ${(() => { const b = slotItems('task.actions', { kind: n.kind, node: n, project: S.pj.sel }); return b ? `<div class="acts plug-acts">${b}</div>` : '' })()}

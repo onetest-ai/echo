@@ -1,6 +1,7 @@
 // Tasks: its filters and its piles (I owe, Owed to me, …), each a heading with its count and the tasks under it.
 import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
+import { readLines } from '../support/aria.mjs'
 
 export class TasksPage extends AppPage {
   async open() {
@@ -57,7 +58,146 @@ export class TasksPage extends AppPage {
     return this.main.getByText(text, { exact: true })
   }
 
+  // ── A full board: a card by its title and thread, what it reads, its marks ──
+
+  /** A pile's card (or Others' while it is open: its region is named "Others"), by its title as written and its
+   *  thread. */
+  card(pile, title, thread) {
+    return this.pileArea(pile).getByRole('button').filter({ has: this.page.getByText(title, { exact: true }) }).filter({ hasText: thread })
+  }
+
+  /** A card in any pile, by its title as written and its thread. */
+  anyCard(title, thread) {
+    return this.main.getByRole('button').filter({ has: this.page.getByText(title, { exact: true }) }).filter({ hasText: thread })
+  }
+
+  /** What a card reads, in order: its title, the line under it, how it is done (the user's own tasks), its thread
+   *  (twice for a thread with a picture of its own, which is named by it), how long it has been quiet, its due. */
+  reads({ title, line, mode, thread, logo, quiet, due }) {
+    return [title, line, mode, thread, logo && thread, quiet, due].filter(Boolean).join(' ')
+  }
+
+  /** A pile's "+ N" or "Show fewer", whichever it shows. */
+  more(pile) {
+    return this.pileArea(pile).getByRole('button', { name: /^(\+ \d+|Show fewer)$/ })
+  }
+
+  /** A card's due chip (titled "Due" or "Overdue"), or its "no date". */
+  due(card, title) {
+    return card.getByTitle(title, { exact: true })
+  }
+
+  undated(card) {
+    return card.getByText('no date', { exact: true })
+  }
+
+  /** A card's due chip, whichever it is ("Due" or "Overdue"). */
+  dueOf(card) {
+    return card.getByTitle(/^(Due|Overdue)$/)
+  }
+
+  /** A pile's cards of one thread. */
+  cardsOf(pile, thread) {
+    return this.cards(pile).filter({ hasText: thread })
+  }
+
+  /** Every due chip of the view (its title "Due" or "Overdue"), and every "no date". */
+  get dueChips() {
+    return this.main.getByTitle(/^(Due|Overdue)$/)
+  }
+
+  get noDates() {
+    return this.main.getByText('no date', { exact: true })
+  }
+
+  /** The chips of late tasks (titled "Overdue"). */
+  get lateChips() {
+    return this.main.getByTitle('Overdue', { exact: true })
+  }
+
+  /** A card's quiet mark ("quiet 5 d", titled "No word about it in 5 days"); every quiet mark of the view, and the
+   *  cards of a thread that carry one. */
+  quiet(card) {
+    return card.getByTitle(/^No word about it in \d+ days$/)
+  }
+
+  get quietMarks() {
+    return this.main.getByTitle(/^No word about it in \d+ days$/)
+  }
+
+  quietIn(thread) {
+    return this.main.getByRole('button').filter({ has: this.page.getByTitle(/^No word about it in \d+ days$/) }).filter({ hasText: thread })
+  }
+
+  /** The red word "blocked" in the lines of a pile's cards. */
+  blockedWords(pile) {
+    return this.pileArea(pile).getByText('blocked', { exact: true })
+  }
+
+  /** How a card is done, its icon (named "Claude can do it", "You do it by hand: …"); the icons of a pile. */
+  mode(card) {
+    return card.getByLabel(/^(Claude can do it|You do it by hand)/)
+  }
+
+  modes(pile) {
+    return this.pileArea(pile).getByLabel(/^(Claude can do it|You do it by hand)/)
+  }
+
+  /** The names the cards of a pile read, in order. */
+  async names(pile) {
+    const heading = new RegExp(`^${literal(pile)} \\d+$`)
+    return readLines(await this.pileArea(pile).ariaSnapshot()).filter((l) => !heading.test(l) && !/^(\+ \d+|Show fewer)$/.test(l))
+  }
+
+  /** The count a pile's heading shows; the count of Others (0 when it isn't there). */
+  async pileCount(pile) {
+    return Number((await this.pileArea(pile).getByRole('heading').textContent()).replace(/\D/g, ''))
+  }
+
+  async othersCount() {
+    if (!(await this.others().count())) return 0
+    return Number(/· (\d+)/.exec(await this.others().textContent())[1])
+  }
+
+  /** A filter's options, in order. */
+  options(name) {
+    return this.select(name).getByRole('option')
+  }
+
   // ── Asks, in the right panel ──
+
+  /** The people Asks names, in order. */
+  get askers() {
+    return this.rightPanel.getByRole('group')
+  }
+
+  /** The names of the people Asks lists, in order. */
+  async askerNames() {
+    const names = []
+    for (const g of await this.askers.all()) names.push(await g.getAttribute('aria-label'))
+    return names
+  }
+
+  /** When you meet a person next, as their block says it beside their name ("today · Weekly sync", "no meeting this
+   *  week"). */
+  askWhen(name) {
+    return this.asker(name).getByText(/^(today|\w{3}) · .+$|^no meeting this week$/)
+  }
+
+  /** A person's things to ask, in order; the reasons after their dashes ("— due Tue, Nov 10"). */
+  asksOf(name) {
+    return this.asker(name).getByRole('button')
+  }
+
+  reasons(name) {
+    return this.asker(name).getByText(/^— /)
+  }
+
+  /** A text of the right panel, as it reads. */
+  panelSays(text) {
+    return this.rightPanel.getByText(text, { exact: true })
+  }
+
 
   /** A person of Asks: their name, when you meet next, and what to ask them. */
   asker(name) {

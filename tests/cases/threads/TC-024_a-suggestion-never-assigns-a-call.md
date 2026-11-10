@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, suggestions, membership, cli]
+auto: [tests/auto/specs/S-26.spec.mjs]
 ---
 
 # TC-024: A suggested thread is only offered on the call; nothing is added until the user presses Add
