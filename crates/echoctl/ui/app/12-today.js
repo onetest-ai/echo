@@ -57,13 +57,13 @@ function todayView() {
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now) }
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now) }
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
   const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
   // Laid out by the engine (#328): Today's columns from its width, each row filling it by its widgets' sizes. Your day
   // and My work fill the height and always sit in the grid (their inner scroll); an empty temporal part takes no space.
-  const FILL = ['core:calendar.agenda', 'core:tasks.mine']
+  const FILL = ['core:calendar.agenda', 'core:tasks.mine', 'core:calendar.calendar']
   const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const SPAN = { S: 1, M: 2, L: 3 }
   const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !parts[id] })))
@@ -266,18 +266,25 @@ document.addEventListener('click', async (e) => {
   // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card on the right.
   const it = e.target.closest('[data-ev-ctx]')
   if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) return todayCard(it.dataset.id)
-  const row = e.target.closest('.ag-row[data-td-ev]')
-  if (row && !e.target.closest('button, a, .pj-chip')) {
+  const row = e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  if (row && row.dataset.tdEv && !e.target.closest('button, a, .pj-chip')) {
     const id = row.dataset.tdEv
     if (await todayMeeting(id)) todayCard(id)
   }
 })
 document.addEventListener('contextmenu', async (e) => {
-  const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev]')
-  if (!row) return
+  const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  if (!row || !row.dataset.tdEv) return
   e.preventDefault()
   const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
   if (await todayMeeting(id)) todayMenu(id, x, y)
+})
+// A calendar's or strip's block with the keyboard: Enter opens its card.
+document.addEventListener('keydown', async (e) => {
+  const b = S.view === 'today' && e.key === 'Enter' && e.target.matches && e.target.matches('.dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  if (!b || !e.target.dataset.tdEv) return
+  e.preventDefault()
+  if (await todayMeeting(e.target.dataset.tdEv)) todayCard(e.target.dataset.tdEv)
 })
 // Escape in the menu: Calendar closes it; the keyboard goes back to the line's ⋯.
 document.addEventListener('keydown', (e) => {
@@ -285,6 +292,88 @@ document.addEventListener('keydown', (e) => {
   const id = S.cal.ctx.id
   setTimeout(() => { const b = document.querySelector(`[data-td-menu="${CSS.escape(id)}"]`); if (b) b.focus() })
 })
+
+// ── day lanes: Your day's meetings side by side, the hours shown (no DOM: `today-calendar.test.mjs`) ──────────────
+/** Each meeting with its lane and its cluster's lane count: overlapping ones side by side, the next free lane reused. */
+function dayLanes(items) {
+  const t = (s) => new Date(s)
+  const xs = (items || []).filter((x) => x.start).map((item) => ({ item, s: t(item.start), e: t(item.end || item.start) })).sort((a, b) => a.s - b.s || b.e - a.e)
+  const out = []
+  let cluster = [], ends = [], clusterEnd = null
+  const close = () => { const n = ends.length; for (const c of cluster) c.lanes = n; out.push(...cluster); cluster = []; ends = [] }
+  for (const x of xs) {
+    // A meeting starting once all before it have ended opens a new cluster.
+    if (cluster.length && x.s >= clusterEnd) { close(); clusterEnd = null }
+    let lane = ends.findIndex((e) => e <= x.s)
+    if (lane < 0) { lane = ends.length; ends.push(x.e) } else ends[lane] = x.e
+    cluster.push({ item: x.item, s: x.s, e: x.e, lane })
+    if (!clusterEnd || x.e > clusterEnd) clusterEnd = x.e
+  }
+  close()
+  return out
+}
+/** The hours Your day shows: 9 to 18, wider for an earlier or later meeting, in whole hours. */
+function dayWindow(items) {
+  let from = 9, to = 18
+  for (const x of items || []) {
+    if (!x.start) continue
+    const s = new Date(x.start), e = new Date(x.end || x.start)
+    const midnight = new Date(s); midnight.setHours(0, 0, 0, 0)
+    from = Math.min(from, s.getHours())
+    // Minutes from the start's midnight: a meeting past midnight ends the day at 24.
+    to = Math.max(to, Math.ceil((e - midnight) / 3600000))
+  }
+  return [from, Math.min(24, to)]
+}
+/** Where a moment sits in the hours shown, 0–100 (minutes from today's midnight; past midnight: 100). */
+function dayPos(date, from, to, today) {
+  const m = (date - today) / 60000
+  return Math.max(0, Math.min(100, (m - from * 60) / ((to - from) * 60) * 100))
+}
+/** A meeting's end to draw: its own; a call still recording, now; none said, half an hour. */
+function dayEnd(x, now) {
+  return x.end ? new Date(x.end) : x.kind === 'call' && new Date(x.start) <= now ? new Date(now) : new Date(new Date(x.start).getTime() + 30 * 60000)
+}
+// end of the day lanes block
+
+/** Your day as a calendar (`core:calendar.calendar`): the hours down, a block a meeting in its lane, the line now;
+ *  the hours stretch to the widget's height, 40 px an hour at least (then it scrolls). */
+function dayCalendarView(d, now) {
+  const items = (d.day || []).filter((x) => x.start)
+  if (!items.length) return ''
+  const drawn = items.map((x) => ({ ...x, end: dayEnd(x, now).toISOString() }))
+  const [from, to] = dayWindow(drawn), span = (to - from) * 60
+  const today = new Date(now); today.setHours(0, 0, 0, 0)
+  const pos = (date) => dayPos(date, from, to, today)
+  const hours = Array.from({ length: to - from }, (_, i) => `<div class="dc-h" style="top:${(i * 60) / span * 100}%"><span>${String(from + i).padStart(2, '0')}</span></div>`).join('')
+  const blocks = dayLanes(drawn).map(({ item: x, s, e, lane, lanes }) => {
+    const going = x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes'
+    const w = 100 / lanes
+    return `<div class="dc-ev ${going}${e < now ? ' past' : ''}" role="listitem" tabindex="0" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A call')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="top:${pos(s)}%;height:${Math.max(2.2, pos(e) - pos(s))}%;left:calc(${lane * w}% + 2px);width:calc(${w}% - 4px)"><b>${esc(x.subject || 'A call')}</b><span class="mono">${esc(hm(s))}</span></div>`
+  }).join('')
+  const nowAt = now.getHours() >= from && now.getHours() < to ? `<div class="dc-now" style="top:${pos(now)}%" role="separator" aria-label="Now ${esc(hm(now))}"></div>` : ''
+  // Opens on now: once a day, at the first draw, scrolled to a little before now; then the scroll is the user's
+  // (kept through redraws: data-keep-scroll).
+  const day = today.toDateString()
+  if (S.dcPlaced !== day) setTimeout(() => { const sc = $('.dc-scroll'), g = sc && sc.firstElementChild; if (sc && g) { S.dcPlaced = day; sc.scrollTop = Math.max(0, g.scrollHeight * (pos(now) / 100) - sc.clientHeight / 3) } })
+  return `<section class="td-sec dc-sec" aria-label="Your day"><h2>Your day</h2><div class="dc-scroll" data-keep-scroll="today-calendar"><div class="dc-grid" role="list" aria-label="Your day by the hour" style="min-height:${(to - from) * 40}px">${hours}${blocks}${nowAt}</div></div></section>`
+}
+
+/** Your day as a strip (`core:calendar.strip`): the day in one bar, a meeting a block (two at once: half its height
+ *  each), the line now; the narrow window's view of the day. */
+function dayStripView(d, now) {
+  const items = (d.day || []).filter((x) => x.start && x.kind === 'meeting' && x.response !== 'notResponded')
+  if (!items.length) return ''
+  const drawn = items.map((x) => ({ ...x, end: dayEnd(x, now).toISOString() }))
+  const [from, to] = dayWindow(drawn), span = (to - from) * 60
+  const today = new Date(now); today.setHours(0, 0, 0, 0)
+  const pos = (date) => dayPos(date, from, to, today)
+  const blocks = dayLanes(drawn).map(({ item: x, s, e, lane, lanes }) => `<div class="ds-ev${e < now ? ' past' : ''}${x.response === 'tentativelyAccepted' ? ' maybe' : ''}" role="listitem" tabindex="0" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A meeting')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="left:${pos(s)}%;width:${Math.max(0.8, pos(e) - pos(s))}%;top:${(lane / lanes) * 100}%;height:${100 / lanes}%"></div>`).join('')
+  const ticks = Array.from({ length: Math.floor((to - from) / 2) + 1 }, (_, i) => `<span style="left:${(i * 120) / span * 100}%">${String(from + i * 2).padStart(2, '0')}</span>`).join('')
+  const nowAt = now.getHours() >= from && now.getHours() < to ? `<div class="ds-now" style="left:${pos(now)}%" role="separator" aria-label="Now ${esc(hm(now))}"></div>` : ''
+  const going = items.filter((x) => x.response !== 'tentativelyAccepted').length
+  return `<section class="td-sec ds-sec" aria-label="Your day, the strip"><h2>Your day <span class="set-sub">${going} meeting${going === 1 ? '' : 's'}</span></h2><div class="ds-bar" role="list" aria-label="Your day in one bar">${blocks}${nowAt}</div><div class="ds-ticks mono">${ticks}</div></section>`
+}
 
 // ── agenda rows: Your day as "where you'll be" (no DOM: `today-agenda.test.mjs`) ──────────────────────────────────
 const AG_GAP_MIN = 45, AG_DAY_END = 18

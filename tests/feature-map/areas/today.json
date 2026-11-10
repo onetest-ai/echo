@@ -95,6 +95,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-14",
+   "feature": "Your day as a calendar (core:calendar.calendar: the hours down, 9–18 at least, a block a meeting in its lane, overlaps side by side, not answered / maybe dashed, the line now, opens scrolled to now) and as a strip (core:calendar.strip: the day in one bar, two at once half height, hour ticks, the line now), put on Today with echoctl today; their blocks act as Your day's lines: click → the card on the right, right-click → Calendar's menu",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
