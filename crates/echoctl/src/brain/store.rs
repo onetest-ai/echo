@@ -729,7 +729,7 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         }
     } else {
-        note = Some("keywords only: no embedding server is set (Settings → Brain)".into());
+        note = Some("keywords only: no embedding server is set (Settings → Knowledge)".into());
     }
     // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
     // is within that thread.

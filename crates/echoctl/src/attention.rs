@@ -280,7 +280,7 @@ pub fn collect() -> Collected {
     #[cfg(feature = "brain")]
     if brain_on && crate::brain::EXTRAS {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
-            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Brain → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
+            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Knowledge → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
         }
         // A topic in the wrong place (`taxonomy::moves`, no model): up to the practice, or down to a client.
         for m in crate::brain::taxonomy::moves().unwrap_or_default() {

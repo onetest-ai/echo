@@ -275,8 +275,8 @@ pub fn apply_move(key: &str) -> Result<String> {
     Ok(if term {
         let group = current().and_then(|t| t.terms.iter().find(|x| x.layer == SHARED && x.is(name)).map(|x| x.group().to_string())).unwrap_or_default();
         let shown = GROUPS.iter().find(|(k, _)| *k == group).map(|(_, l)| *l).unwrap_or("Other");
-        format!("“{name}” is now in your practice's dictionary · {shown} (Brain → Terms)")
+        format!("“{name}” is now in your practice's dictionary · {shown} (Knowledge → Terms)")
     } else {
-        format!("“{name}” is now one of your practice's topics (Brain → Topics)")
+        format!("“{name}” is now one of your practice's topics (Knowledge → Topics)")
     })
 }

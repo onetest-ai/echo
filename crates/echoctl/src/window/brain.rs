@@ -89,7 +89,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            let r = if !crate::brain::enabled() { Err(anyhow::anyhow!("the Brain is off")) } else { match &p["/api/brain/browse/".len()..] {
+            let r = if !crate::brain::enabled() { Err(anyhow::anyhow!("Recall is off")) } else { match &p["/api/brain/browse/".len()..] {
                 "groups" => browse::source_groups(scope),
                 "sources" => browse::source_list(scope, &browse::ListQuery {
                     client: query_param(q, "of"), kind: query_param(q, "kind"), root: query_param(q, "root"), channel: query_param(q, "channel"),
@@ -218,7 +218,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                         }
                     }));
                     match crate::brain::taxonomy::induce(&layer, &|_| {}) {
-                        Ok(_) => crate::app::notify("Topics rebuilt", "Review them on the Brain's Topics tab, then accept"),
+                        Ok(_) => crate::app::notify("Topics rebuilt", "Review them on Knowledge's Topics tab, then accept"),
                         Err(e) => crate::app::notify("Topics not rebuilt", &format!("{e:#}")),
                     }
                 });
@@ -243,7 +243,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                         }
                     }));
                     match crate::brain::taxonomy::split(&layer, &label, &|_| {}) {
-                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on the Brain's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
+                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on Knowledge's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
                         Err(e) => crate::app::notify(&format!("“{label}” not split"), &format!("{e:#}")),
                     }
                 });

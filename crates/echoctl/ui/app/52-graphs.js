@@ -143,7 +143,7 @@ function brainGraph() {
   const shown = new Set(sets.flatMap((s) => s.nodes.map((n) => n.id))).size
   const chip = (s) => `<button class="fchip on" data-gset-close="${esc(s.key)}" title="Take these sources off the graph">${esc(s.label)} · ${s.nodes.length}${s.total > s.nodes.length ? ` of ${nf(s.total)}` : ''} ×</button>`
   const legend = `<span class="pp-leg"><i class="br-dot" style="background:#8a8a95"></i>Your practice</span>` + layers.map((c, i) => `<button class="pp-leg link-btn" data-gset-client="${esc(c)}" title="Bring ${esc(clientName(c))}'s sources onto the graph"><i class="br-dot" style="background:${CLIENT_COLORS[i % CLIENT_COLORS.length]}"></i>${esc(clientName(c))}</button>`).join('')
-  const box = `<input class="wp-in br-pq" id="br-gq" type="search" placeholder="Find a topic or source — Enter searches the Brain" value="${esc(S.br.gq || '')}" aria-label="Find in the graph">`
+  const box = `<input class="wp-in br-pq" id="br-gq" type="search" placeholder="Find a topic or source — Enter searches Recall" value="${esc(S.br.gq || '')}" aria-label="Find in the graph">`
   const res = S.br.gqRes ? `<span class="set-sub br-gq-res">${esc(S.br.gqRes)}</span>` : ''
   const busy = S.br.gbusy ? `<span class="set-sub">${esc(S.br.gbusy)}</span>` : ''
   return `<div class="br-graph-bar">${box}${res}${busy}<span class="grow"></span><span class="set-sub">${g.nodes.length} topics · ${shown} of ${nf(g.sources_total)} sources shown</span></div>
@@ -279,8 +279,8 @@ document.addEventListener('click', (e) => {
 async function graphSearch(q, ask) {
   S.br.gq = q
   if (!q.trim()) { S.br.gqRes = ''; GraphView.focus('br-graph', null); return }
-  if (!ask) { const hits = GraphView.find('br-graph', q); const n = GraphView.focus('br-graph', hits); S.br.gqRes = n ? `${n} by name · Enter searches the Brain` : 'no name matches · Enter searches the Brain'; return }
-  S.br.gqRes = 'searching the Brain…'; render()
+  if (!ask) { const hits = GraphView.find('br-graph', q); const n = GraphView.focus('br-graph', hits); S.br.gqRes = n ? `${n} by name · Enter searches Recall` : 'no name matches · Enter searches Recall'; return }
+  S.br.gqRes = 'searching Recall…'; render()
   try {
     const sc = brainQuery().replace('?', '&')
     const r = await get(`api/brain/browse/graph-search?q=${encodeURIComponent(q)}${sc}`)

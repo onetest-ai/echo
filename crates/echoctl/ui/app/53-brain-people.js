@@ -185,7 +185,7 @@ const DOC_KIND = { call: 'call', channel: 'channel post', mail: 'mail', file: 'd
 function brainDocPanel() {
   const x = S.br.docData
   if (!x || x.source !== S.br.doc) return '<div class="wp br-panel"><div class="skeleton"><i></i><i></i><i></i></div></div>'
-  if (x.missing || x.error) return `<div class="wp-empty">${esc(x.error || 'This source is gone from the Brain.')}</div>`
+  if (x.missing || x.error) return `<div class="wp-empty">${esc(x.error || 'This source is gone from Recall.')}</div>`
   const openLabel = x.kind === 'call' ? 'Open the call' : x.kind === 'file' ? 'Open the document' : x.kind === 'mail' ? 'Open in Outlook' : 'Open in Teams'
   const open = x.link ? `<button class="btn primary" data-br-doc-open="${esc(x.link)}">${openLabel}</button>` : ''
   const threads = (x.threads || []).map((t) => t.id)

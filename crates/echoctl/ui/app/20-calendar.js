@@ -151,7 +151,7 @@ function eventDetail(e, now) {
   const rec = e.recorded
   const line = rec ? `${rec.imported ? 'A call made of its Teams transcript' : STATUS[rec.status] || esc(rec.status)}${rec.minutes ? `, ${rec.minutes} min` : ''}`
     : e.import && e.import.error ? esc(e.import.error)
-    : kind === 'import' ? `${e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it'}: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.`
+    : kind === 'import' ? `${e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it'}: Echo makes a call of its transcript and chat; minutes, threads and Recall follow.`
     : kind === 'other-app' ? notYet(e)
     : kind === 'scheduled' ? `Echo starts recording a minute before it begins${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.`
     : kind === 'join' ? 'Joins it in Teams and records both sides.'

@@ -124,7 +124,7 @@ If the minutes fail, the Minutes tab says why and **Show log** shows what Claude
 - **Command line:** Settings → General → Command line → **Install…** puts `echoctl` in your terminal (macOS asks
   for your password).
 - **Start at login:** Settings → General (on by default).
-- **Brain:** Settings → Brain → **Use the Brain** (off by default). It indexes your calls, threads' mail, channels
+- **Recall:** Settings → Knowledge → **Use Recall** (off by default). It indexes your calls, threads' mail, channels
   and folders for search and for Claude.
 
 ## Troubleshooting

@@ -60,7 +60,7 @@ function brainView() {
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Knowledge">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
   const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }
@@ -127,7 +127,7 @@ function brainTopics(tx) {
   const todo = [nStale ? `${nStale} need${nStale === 1 ? 's' : ''} a rebuild` : '', nReview ? `${nReview} waiting for your review` : ''].filter(Boolean).join(' · ') || 'nothing to do'
   const builds = `<details class="br-blds"${nStale || nReview || jobs.size ? ' open' : ''}><summary>Topic builds · ${ordered.length} layer${ordered.length === 1 ? '' : 's'} · ${todo}</summary>${ordered.map(build).join('')}</details>`
   const mv = (tx.moves || []).map((m) => `<div class="br-mv"><span class="grow">${m.dir === 'up' ? `↑ <b>${esc(m.label)}</b> belongs to your practice? <span class="set-sub">${esc(m.why)}</span>` : `↓ <b>${esc(m.label)}</b> is only ${esc(m.to_name)}'s? <span class="set-sub">${esc(m.why)}</span>`}</span><button class="btn ghost" data-br-move="${esc(m.key)}" data-do="dismiss">Keep it</button><button class="btn primary" data-br-move="${esc(m.key)}" data-do="apply">${m.dir === 'up' ? 'Move up' : 'Move down'}</button></div>`).join('')
-  const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into the Brain now; their new sections are tagged after it">Sync now</button></div>`
+  const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into Recall now; their new sections are tagged after it">Sync now</button></div>`
   const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
   const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
   const arch = archiveGroup('Closed threads', oldTopics.map((x) => `<div class="br-card">${row(x, true)}</div>`), 'topics only closed threads talked about · still searchable')
@@ -286,7 +286,7 @@ function brainSenders() {
     if (!wait.length && !unver.length && !decided.length) return ''
     return `<div class="pp-card"><table class="pp-tbl"><thead><tr><th>${esc(name(c))} · senders${wait.length ? ` · <span class="error">${wait.length} waiting</span>` : ''}${unver.length ? ` · ${unver.length} not authenticated` : ''}</th><th></th></tr></thead><tbody>${wait.join('')}${unver.join('')}${decided.join('')}</tbody></table></div>`
   }).filter(Boolean)
-  return cards.length ? `<p class="set-sub">Mail and posts are read only from you, colleagues and the senders you trust; the Brain keeps facts read from them, never their text.</p>${cards.join('')}` : ''
+  return cards.length ? `<p class="set-sub">Mail and posts are read only from you, colleagues and the senders you trust; Recall keeps facts read from them, never their text.</p>${cards.join('')}` : ''
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('[data-sender]')
