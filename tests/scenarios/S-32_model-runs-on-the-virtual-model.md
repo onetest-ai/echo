@@ -7,6 +7,7 @@ ai: virtual
 cases:
   - tests/cases/claude/TC-023_a-minutes-run-on-the-virtual-model-gets-the-call-and-only-the-run-tools.md
   - tests/cases/hostile/TC-019_a-model-that-tries-to-leave-the-call-is-refused-by-the-guard.md
+auto: [tests/auto/specs/S-32.spec.mjs]
 ---
 
 # S-32: Model runs on the virtual model

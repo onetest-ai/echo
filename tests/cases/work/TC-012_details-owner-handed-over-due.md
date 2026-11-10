@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-012: Details edits Owner, Handed over by and Due of a task; a person's box suggests the thread's people

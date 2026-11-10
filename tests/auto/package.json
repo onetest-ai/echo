@@ -1,0 +1,12 @@
+{
+  "name": "echo-autotests",
+  "private": true,
+  "description": "Echo's automated tests: the window (headless, on serve.sh's made-up data), the CLI and model runs on the virtual model. Run locally: npm test (tests/auto/README.md).",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test; python3 ../tools/feature-map.py auto-report test-results/results.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

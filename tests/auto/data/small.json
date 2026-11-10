@@ -1,0 +1,64 @@
+{
+  "_about": "What tests/fixtures/make_data.py (the small set) builds, as the autotests read it. Change it with the fixture.",
+  "calls": {
+    "noMinutes": {
+      "title": "Initech planning",
+      "folder": "initech-planning"
+    },
+    "withMinutes": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync"
+    },
+    "other": {
+      "folder": "globex-pilot-kickoff"
+    }
+  },
+  "virtualModel": {
+    "profile": "Claude Code writes them with Virtual model (virtual), on this computer.",
+    "minutesRule": 0,
+    "minutes": "The virtual model wrote these minutes from the transcript it read.",
+    "actionLine": "Me — send the follow-up notes",
+    "action": {
+      "task": "Send the follow-up notes",
+      "owner": "Me",
+      "status": "todo"
+    },
+    "runTools": [
+      "Bash",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Read",
+      "Skill",
+      "Write"
+    ],
+    "turns": 6
+  },
+  "guardProbe": {
+    "script": "guard-probe.json",
+    "refusals": [
+      "only this call's folder can be read",
+      "denied by your permission settings",
+      "isn't one of the commands a minutes run uses",
+      "only the Echo CLI runs here, not cat",
+      "writes only notes.md and its new action list"
+    ],
+    "toolResults": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "work": {
+    "thread": "acme-rollout",
+    "item": "Answer the security questionnaire",
+    "people": [
+      "Dana Lee",
+      "Omar Haddad"
+    ],
+    "otherName": "Sam Rivera"
+  }
+}

@@ -21,6 +21,7 @@ cases:
   - tests/cases/work/TC-003_sync-line.md
   - tests/cases/work/TC-008_to-review-accept-a-merge.md
   - tests/cases/work/TC-009_to-review-reject-a-merge.md
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # S-06: Shape the work: the board, the tree, new items, edit, done, undo, link, merge and a rejected proposal

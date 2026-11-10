@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, needs, ill-do-it]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-013: I'll do it adds the task in the chosen thread, and the dialog keeps what you typed and chose while Today is drawn again
