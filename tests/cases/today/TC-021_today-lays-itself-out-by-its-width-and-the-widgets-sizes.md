@@ -24,7 +24,7 @@ tags: [today, widgets, layout, responsive]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Open `{{base_url}}/#today` | 3 columns: Your day holds the first (`.td-side` columns `1fr 2fr`), its column as tall as what is beside it, the list itself in view as Today scrolls (sticky, the view's height at most), opened on now and scrolling inside; beside it Next meeting and Needs you now side by side, then The day's choices across both, then My work |
-| 2 | Click My work's first card | Its Details open on the right; Today narrows to 2 columns: Your day keeps the first (`1fr 1fr`), everything else in the second, one under another in the same order |
+| 2 | Click My work's first card | Its Details open on the right; Today narrows to 2 columns: Your day keeps the first (`1fr 1fr`), still on now (or where you scrolled it), everything else in the second, one under another in the same order |
 | 3 | Close the right panel (its ×) | Back to step 1's widths, nothing moved |
 | 4 | `target/debug/echoctl today size core:calendar.agenda M`; reload | Your day at 2 columns no longer holds one: the rows as laid out — Your day across 2 columns on its own row, then Next and Needs you now, the choices, My work; `today size core:calendar.agenda S` puts it back |
 | 5 | Resize the browser window to 700 × 1000 | Today one column: Your day as the strip (the day in one bar) on top, then Next meeting, Needs you now, the choices, My work, each across, in that order |
