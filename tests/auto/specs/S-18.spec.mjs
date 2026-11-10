@@ -12,7 +12,8 @@
 //   Settings);
 // - stages 25–27 (recording/TC-025, transcription/TC-010, TC-012): each an app instance of its own;
 // - stage 13 steps 2–3 (recording/TC-018, `echoctl speakers` and two speaker labels): the test's models folder has no
-//   speaker model, so the prepared recording has no detected speakers.
+//   speaker model, so the prepared recording has no detected speakers (and F-STT-04, two voices told apart, isn't
+//   claimed: step 1 checks only that both stay Remote).
 // Stages 4–5 run on their own (each case's "on its own"): a call started for the capture and hung up after it, not the
 // scenario's main call.
 import fs from 'node:fs'
@@ -56,11 +57,22 @@ async function captureIn(conversation, startAt, title, then) {
   } finally {
     if (cap) {
       cap.kill('SIGKILL')
-      await cap.done
+      await cap.ends()
     }
     call('end')
   }
 }
+
+// The scenario's prelude, step 1: the test's speech model linked into the run's config and in use, its language
+// English, so a capture transcribes as it records (stages 4–5); without the test's models, stage 4 records without.
+test.beforeAll(() => {
+  if (!models()) return
+  fs.symlinkSync(models(), path.join(data.env.ECHOCTL_CONFIG_DIR, sp().models))
+  for (const args of [['model', 'use', set().model], ['config', '--languages', set().language]]) {
+    const r = data.cli(...args)
+    if (r.code !== 0) throw new Error(`${args.join(' ')}: ${r.err}`)
+  }
+})
 
 scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, Ctrl-C, a crash, mid-call starts, stops, ask mode, a drop, silence, two voices', () => {
   test('4 · A capture stopped with Ctrl-C ends by itself, closed as "user", its two tracks holding what was said until then', covers('recording/TC-016', 'F-REC-05', 'F-REC-07'), async () => {
@@ -71,7 +83,7 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
       // The call's timeline: Ctrl-C 20 s after the capture started, 2 s into the call.
       await expect.poll(() => inCall().for_s, { timeout: 60_000, intervals: [100] }).toBeGreaterThanOrEqual(s.stopAt)
       cap.kill('SIGINT')
-      ended = await cap.done
+      ended = await cap.ends()
       err = cap.err
       stillOn = inCall().in_call
     })
@@ -103,15 +115,11 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     test.skip(!models(), `${sp().testModels} isn't set: the speech model comes only from the test's own folder, never the installed Echo's`)
     test.setTimeout(4 * 60_000)
     const s = set().crash
-    // The speech model linked into the run's config, its language English (the scenario's prelude).
-    fs.symlinkSync(models(), path.join(data.env.ECHOCTL_CONFIG_DIR, sp().models))
-    expect(data.cli('model', 'use', set().model).code).toBe(0)
-    expect(data.cli('config', '--languages', set().language).code).toBe(0)
     let ended, out
     await captureIn(s.conversation, s.startAt, s.title, async (cap) => {
       await expect.poll(() => inCall().for_s, { timeout: 60_000, intervals: [100] }).toBeGreaterThanOrEqual(s.killAt)
       cap.kill('SIGKILL')
-      ended = await cap.done
+      ended = await cap.ends()
       out = cap.out
     })
     expect(ended).toEqual({ code: null, signal: 'SIGKILL' })
@@ -161,7 +169,7 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     expect(runs).toEqual(s.speakers)
   })
 
-  test("13 · Two voices on the remote track are both Remote, the user's lines Me (step 1)", covers('recording/TC-018', 'F-STT-04'), async () => {
+  test("13 · Two voices on the remote track are both Remote, the user's lines Me (step 1)", covers('recording/TC-018'), async () => {
     test.skip(!!rec.none, rec.none)
     const s = set().voices
     const call = copy(s.recording, s.title)

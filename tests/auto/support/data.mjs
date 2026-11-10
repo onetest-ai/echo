@@ -42,6 +42,11 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     if (info.status !== info.expectedStatus) data.failed = true
   })
   test.afterAll(async () => {
+    // Anything `data.start` began and a failed or timed-out test left running, before its data goes.
+    for (const r of started) {
+      r.kill('SIGKILL')
+      await r.done
+    }
     if (!data.dir) return
     spawnSync(SERVE, ['down', data.dir], { cwd: ROOT })
     if (data.failed) console.log(`test data kept for the failure: ${data.dir}`)
@@ -79,6 +84,7 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
   /** `echoctl …` started in the background with the data's environment, as `cli` (a capture stopped by hand): what it
    *  printed so far (`out`, `err`), a signal sent to it (`kill('SIGINT')`, nothing once it has ended), and `done`, how
    *  it ended (`{ code, signal }`). */
+  const started = []
   data.start = (...args) => {
     const p = spawn(BIN, args, { cwd: ROOT, env: data.env, stdio: ['ignore', 'pipe', 'pipe'] })
     const r = { out: '', err: '', ended: false }
@@ -86,6 +92,18 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     p.stderr.on('data', (b) => { r.err += b })
     r.done = new Promise((resolve) => p.on('close', (code, signal) => { r.ended = true; resolve({ code, signal }) }))
     r.kill = (signal) => { if (!r.ended) p.kill(signal) }
+    /** How it ended, waited for at most `ms`: past that it is killed (SIGKILL) and the wait fails. */
+    r.ends = async (ms = 30_000) => {
+      let timer
+      const late = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms) })
+      const end = await Promise.race([r.done, late])
+      clearTimeout(timer)
+      if (end) return end
+      r.kill('SIGKILL')
+      await r.done
+      throw new Error(`echoctl ${args.join(' ')} didn't end within ${ms / 1000} s: killed`)
+    }
+    started.push(r)
     return r
   }
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
