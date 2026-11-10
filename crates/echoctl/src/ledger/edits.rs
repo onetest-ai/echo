@@ -9,7 +9,11 @@ pub(super) fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()>
     for (k, v) in m {
         match k.as_str() {
             "due" if !v.is_null() => {
-                NaiveDate::parse_from_str(v.as_str().unwrap_or(""), "%Y-%m-%d").map_err(|_| anyhow!("due must be YYYY-MM-DD or null"))?;
+                let d = NaiveDate::parse_from_str(v.as_str().unwrap_or(""), "%Y-%m-%d").map_err(|_| anyhow!("due must be YYYY-MM-DD or null"))?;
+                // A date no work item is due on: what a date box gives while its year is half typed (#303).
+                if !(2000..=2100).contains(&d.year()) {
+                    bail!("due must be a date between 2000 and 2100, not {d}");
+                }
             }
             "due" => {}
             "state" if !HUMAN_STATES.contains(&v.as_str().unwrap_or("")) => bail!("state must be one of {HUMAN_STATES:?}"),

@@ -21,6 +21,7 @@ cases:
   - tests/cases/work/TC-003_sync-line.md
   - tests/cases/work/TC-008_to-review-accept-a-merge.md
   - tests/cases/work/TC-009_to-review-reject-a-merge.md
+  - tests/cases/work/TC-030_a-due-date-typed-in-details-is-saved-once-as-typed.md
 auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
@@ -66,6 +67,7 @@ auto: [tests/auto/specs/S-06.spec.mjs]
 | 15 | `work/TC-003_sync-line.md` | — | — |
 | 16 | `work/TC-008_to-review-accept-a-merge.md` | — | Skip the sync in its preconditions (stage 15 ran it; the evidence id is the one it printed under `pending`); run the apply. On stage 15's view (Acme rollout's Board): skip the navigation of step 1; wait for the "To review" banner |
 | 17 | `work/TC-009_to-review-reject-a-merge.md` | — | Skip the sync in its preconditions (stage 15 ran it); run the apply with the same evidence id. On stage 16's view (Acme rollout's Board): skip the navigation of step 1; wait for the "To review" banner |
+| 18 | `work/TC-030_a-due-date-typed-in-details-is-saved-once-as-typed.md` | — | On stage 17's view (Acme rollout's Board): skip the navigation of step 1, click the card T002 (no due date: stage 4's was undone) |
 
 ## Notes
 - The stages are grouped by what they work on: Acme rollout's Board and its cards (1–8), its records on the Tree (9–11), Globex pilot's Board (12–14), then the proposals (15–17). Each view is reached once per group; a stage that goes on from the one before skips only its navigation (and a click when that Details panel is already open). If that view or state isn't there (an earlier stage failed), run the skipped steps and preconditions as written.

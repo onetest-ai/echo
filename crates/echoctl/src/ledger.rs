@@ -1396,6 +1396,11 @@ mod tests {
         assert_eq!(t["T001"].due.as_deref(), Some("2026-11-06"));
         // Bad edits are refused when written, never stored.
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "soon"}})).is_err());
+        // A date no work item is due on: what a date box gives while its year is half typed (#303).
+        for due in ["0002-12-12", "0202-12-12", "1999-12-31", "2101-01-01"] {
+            let err = human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": due}})).unwrap_err();
+            assert!(err.to_string().contains("between 2000 and 2100"), "{due}: {err}");
+        }
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "finished"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T999", "set": {"title": "x"}})).is_err());
         // An undo, accept or reject of an event that isn't there is refused, and nothing is written (#127).

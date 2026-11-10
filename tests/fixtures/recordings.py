@@ -116,7 +116,8 @@ def prepare(force):
         return
     for need, what in ((BIN, "cargo build"), (os.path.join(MODELS, f"ggml-{MODEL}.bin"), "the speech model")):
         if not os.path.exists(need):
-            die(f"missing {need} ({what})")
+            die(f"missing {need} ({what})" + ("; on a computer whose Echo isn't yours to use, name a folder of your own "
+                "with ECHOCTL_TEST_MODELS" if need != BIN else ""))
     shutil.rmtree(c, ignore_errors=True)
     os.makedirs(c)
     work = os.path.join(c, "work")
