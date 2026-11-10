@@ -91,6 +91,16 @@ export class TodayPage extends AppPage {
     await this.item(where, says).getByRole('button', { name: this.data.text.needs.claude }).click()
   }
 
+  /** A task's card in My work, by its title (its name holds its due chip, its title, its pile and its thread). */
+  taskCard(title) {
+    return this.main.getByRole('button', { name: new RegExp(`^(?!Claude: |Close )(.* )?${literal(title)} `) })
+  }
+
+  /** A task's card clicked on its empty area (its corner), not on its title. */
+  async openTaskCard(title) {
+    await this.taskCard(title).click({ position: { x: 4, y: 4 } })
+  }
+
   /** I'll do it and Won't do, from ⌘K's Needs you now group, by the sender. */
   async illDoIt(sender) {
     await this.action(`${this.data.text.palette.illDoIt}: ${sender}`)

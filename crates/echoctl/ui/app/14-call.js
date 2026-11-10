@@ -117,7 +117,7 @@ function turnsHtml(segs, q, jump, marks = [], key = 'tab') {
     // On the turn its time opens, as a click on it would.
     const mine = marks.filter((m) => jumpTurn(turns, m.t) === i)
     const dots = mine.length ? `<span class="nt-marks">${mine.map((m) => `<span class="nt-dot k-${m.kind}" title="${esc((NOTE_LOOK[m.kind] || NOTE_LOOK.note)[1] + (m.text ? ': ' + m.text : ''))}"></span>`).join('')}</span>` : ''
-    return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
+    return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" role="group" aria-label="${clock(Math.floor(t.start))} ${esc(t.who)}" ${i === jumpIdx ? 'id="jump"' : ''}>
       <time>${dots}${clock(Math.floor(t.start))}</time>
       <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div>${t.parts.map((x) => `<p>${esc(x)}</p>`).join('')}</div></div>`
   })

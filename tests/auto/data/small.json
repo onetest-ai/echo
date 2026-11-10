@@ -1094,5 +1094,85 @@
       "withIt": "_150000-acme-sync-vocabulary",
       "plain": "_150500-acme-sync-plain"
     }
+  },
+  "s01": {
+    "groups": [
+      [
+        "Today",
+        [
+          "Initech planning",
+          "Acme weekly sync"
+        ]
+      ],
+      [
+        "Yesterday",
+        [
+          "Globex pilot kickoff"
+        ]
+      ]
+    ],
+    "next": "Globex design review",
+    "acme": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "length": "30 min",
+      "firstPeople": "Sam Rivera, Dana Lee",
+      "people": "Sam Rivera, Dana Lee, Omar Haddad",
+      "thread": "Acme rollout"
+    },
+    "search": [
+      {
+        "words": "Globex",
+        "listed": [
+          "Globex pilot kickoff"
+        ]
+      },
+      {
+        "words": "Omar",
+        "listed": [
+          "Acme weekly sync"
+        ]
+      }
+    ],
+    "sections": [
+      "Summary",
+      "Decisions",
+      "Action items",
+      "Open questions"
+    ],
+    "actions": [
+      [
+        "Me — send Acme the SSO checklist today",
+        "00:21"
+      ],
+      [
+        "Omar Haddad — answer the security questionnaire by Friday",
+        "00:29"
+      ]
+    ],
+    "chip": {
+      "line": "SSO rollout for Acme is on track; the pilot starts with the Berlin office",
+      "time": "00:37"
+    },
+    "jump": {
+      "turn": "0:37 Me",
+      "says": "Then we agree: pilot starts with the Berlin office."
+    },
+    "turns": [
+      "0:05 Me",
+      "0:13 Remote",
+      "0:21 Me",
+      "0:29 Remote",
+      "0:37 Me"
+    ],
+    "find": {
+      "word": "checklist",
+      "hits": [
+        "0:13 Remote",
+        "0:21 Me"
+      ]
+    },
+    "note": "Ask Dana about the Berlin office date",
+    "status": "● to do"
   }
 }

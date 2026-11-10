@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calls, minutes, transcript]
 external_id: TC-WIN-003
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-004: A time chip in the minutes jumps to that moment of the transcript

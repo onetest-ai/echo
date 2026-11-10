@@ -120,4 +120,102 @@ export class CallsPage extends AppPage {
   get turns() {
     return this.main.getByRole('time')
   }
+
+  // ── The list as it reads, a call's header and minutes, the transcript's turns, My notes, a call's delete ──
+
+  /** What the list reads from the top, in order: its rows' names and its day headings. */
+  async lines() {
+    return readLines(await this.list.ariaSnapshot())
+  }
+
+  /** The calls listed (the meetings still to come left out). */
+  get callRows() {
+    return this.list.getByRole('option', { name: new RegExp(`^(?!${literal(this.data.text.upcoming.rowPrefix)} )`) })
+  }
+
+  /** A text of the view, as it reads (a fact of the call's header, a line of a tab). */
+  says(text) {
+    return this.main.getByText(text, { exact: true })
+  }
+
+  /** The minutes' section headings, in order; an item of theirs, by the words it holds; its time chip. */
+  get sections() {
+    return this.minutes.getByRole('heading', { level: 2 })
+  }
+
+  minutesItem(words) {
+    return this.minutes.getByRole('listitem').filter({ hasText: words })
+  }
+
+  timeChip(words, time) {
+    return this.minutesItem(words).getByText(time, { exact: true })
+  }
+
+  /** A text of the minutes, as it reads (their AI notice). */
+  minutesSay(text) {
+    return this.minutes.getByText(text, { exact: true })
+  }
+
+  /** Whether the minutes fill the tab: their frame as wide as the view, no column beside them. */
+  async minutesFill() {
+    const frame = await this.page.locator('iframe[title="Minutes"]').boundingBox()
+    const view = await this.main.boundingBox()
+    return Math.abs(frame.width - view.width) <= 2
+  }
+
+  /** Find in transcript. */
+  get find() {
+    return this.main.getByRole('textbox', { name: 'Find in transcript', exact: true })
+  }
+
+  /** A turn of the transcript, by its time and speaker ("0:37 Me"); every turn. */
+  turn(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  get turnGroups() {
+    return this.main.getByRole('group', { name: /^\d+:\d\d / })
+  }
+
+  async turnNames() {
+    const names = []
+    for (const t of await this.turnGroups.all()) names.push(await t.getAttribute('aria-label'))
+    return names
+  }
+
+  /** The turns drawn highlighted (a background of their own), by their names. */
+  async highlighted() {
+    const names = []
+    for (const t of await this.turnGroups.all()) {
+      if (await t.evaluate((el) => getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)')) names.push(await t.getAttribute('aria-label'))
+    }
+    return names
+  }
+
+  /** My notes in the right panel: the box for a new note, a note by its text, a text of the panel (its saved state). */
+  get newNote() {
+    return this.rightPanel.getByRole('textbox', { name: 'New note', exact: true })
+  }
+
+  note(text) {
+    return this.rightPanel.getByText(text, { exact: true })
+  }
+
+  /** Hold the window's requests to the app (a save) until the returned function lets them go: what the window says
+   *  while one is under way can be read. Once let go, they pass at once. */
+  async holdRequests() {
+    let release
+    const gate = new Promise((r) => { release = r })
+    await this.page.route('**/ipc', async (route) => { await gate; await route.continue() })
+    return release
+  }
+}
+
+/** The lines of an accessibility snapshot's top level: each child's name (or its text), in order. */
+function readLines(snapshot) {
+  return snapshot.split('\n').slice(1).filter((l) => /^ {2}- /.test(l)).map((l) => {
+    const s = l.trim().replace(/^- /, '').replace(/^'(.*)'(:.*)?$/, '$1$2')
+    const named = /^\w+ "(.*?)"/.exec(s)
+    return named ? named[1] : s.replace(/^text:\s*/, '')
+  })
 }

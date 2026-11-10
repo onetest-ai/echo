@@ -115,7 +115,9 @@
       "Delete column"
     ],
     "yesterday": "yesterday",
-    "undoOp": "undo"
+    "undoOp": "undo",
+    "sendTo": "Send to",
+    "edit": "Edit"
   },
   "prep": {
     "inShort": "In short",
@@ -213,7 +215,17 @@
     },
     "refresh": "api/state",
     "refreshes": 4,
-    "search": "Search calls"
+    "search": "Search calls",
+    "searchPlaceholder": "Search titles and people",
+    "aiNotice": "Written by AI (Echo) from an automatic transcript. Check names, figures and commitments before you share it.",
+    "header": "{day}, {time}",
+    "meta": "meta.json",
+    "notes": {
+      "empty": "Add notes about this call. Select words in the transcript to comment on what was said.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "file": "my-notes.md"
+    }
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"

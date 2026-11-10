@@ -11,6 +11,7 @@ cases:
   - tests/cases/window/TC-005_find-in-transcript.md
   - tests/cases/window/TC-007_my-notes-kept.md
   - tests/cases/today/TC-003_task-card-opens-details.md
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # S-01: Review a client call: find it, read the minutes, check a point, note a follow-up

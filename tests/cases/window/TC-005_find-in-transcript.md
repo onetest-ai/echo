@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [transcript, search]
 external_id: TC-WIN-003
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-005: Find in transcript highlights the turns that match
