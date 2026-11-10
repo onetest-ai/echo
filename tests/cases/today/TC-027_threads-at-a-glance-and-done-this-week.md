@@ -22,12 +22,12 @@ tags: [today, widgets, tasks, threads]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl widget show core:tasks.glance` | JSON: `since` (this week's Monday), `threads` (each open thread with tasks: `done` this week, `todo`, `waiting`, `total`, busiest first), `done` (this week's done tasks, newest first, each with its thread) |
+| 1 | `target/debug/echoctl widget show core:tasks.glance` | JSON: `since` (this week's Monday), `threads` (each open thread with tasks: `done` this week, `todo`, `waiting`, `total`, busiest first: 12 threads, Acme rollout first, the seven Wonka and Cyberdyne threads last with `todo` 1 and `total` 1), `done` (this week's done tasks, newest first, each with its thread) |
 | 2 | `target/debug/echoctl today add core:tasks.glance --size M --above core:needs.now`, `today add core:tasks.done --size M --after core:tasks.glance`; open `{{base_url}}/#today` | On top "Threads at a glance": a line a thread (5 at M), its name, a bar — green done this week, amber to do, red waiting, each as wide as its count — and the total; under them the key ("done this week", "to do", "waiting") on one line; beside it "Done this week": the number as in step 1 and "tasks since Monday", up to 4 of them with their thread |
 | 3 | Hover a bar's segment | It says its count ("2 done this week", "16 to do", "1 waiting") |
 | 4 | Click a thread's name | Its Work (`#project/<id>/work`) |
 | 5 | Back on Today, click a done task | Its details on the right |
-| 6 | `target/debug/echoctl today size core:tasks.glance L`, `today size core:tasks.done S`; reload | At L up to 10 threads ("N more in Threads" when there are more); at S Done this week shows only the number |
+| 6 | `target/debug/echoctl today size core:tasks.glance L`, `today size core:tasks.done S`; reload | At L 10 threads of the 12 in step 1: the five busy ones, then Cyberdyne audit, Cyberdyne data room, Cyberdyne training, Wonka factory tour and Wonka loyalty app, each with the total 1; under them the link "2 more in Threads", which opens Threads (`#projects`); at S Done this week shows only the number |
 | 7 | `target/debug/echoctl today reset`; reload | Neither widget on Today (not in the default) |
 
 ## Notes

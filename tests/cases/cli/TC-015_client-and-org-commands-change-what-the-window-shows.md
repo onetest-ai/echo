@@ -33,17 +33,17 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `target/debug/echoctl client list` | A JSON array of 6: `initech` (`internal` true), `acme`, `globex` (`domains` ["globex.example","globex-labs.example"]), `umbrella`, `tyrell`, `duff` |
-| 2 | Run `target/debug/echoctl org list` | The 6 clients (no `account` key) and `vandelay`, `northwind-analysts`, `stark-advisory`, each with `account: false` |
+| 1 | Run `target/debug/echoctl client list` | A JSON array of 8: `initech` (`internal` true), `acme`, `globex` (`domains` ["globex.example","globex-labs.example"]), `umbrella`, `tyrell`, `duff`, `wonka`, `cyberdyne` |
+| 2 | Run `target/debug/echoctl org list` | The 8 clients (no `account` key) and `vandelay`, `northwind-analysts`, `stark-advisory`, each with `account: false` |
 | 3 | Run `target/debug/echoctl client add Hooli --domains hooli.example` | `{"aliases":[],"domains":["hooli.example"],"id":"hooli","internal":false,"name":"Hooli"}` (pretty-printed) |
 | 4 | Run `target/debug/echoctl client set hooli --name "Hooli XYZ" --domains hooli.example,hooli-xyz.example` | `name` "Hooli XYZ", `domains` ["hooli.example","hooli-xyz.example"], `id` still "hooli" |
-| 5 | Reload, navigate to `{{base_url}}/#client/hooli/overview` | The thread list has a group "HOOLI XYZ" (between DUFF and INITECH · YOUR COMPANY); the page reads "Hooli XYZ", "client", "0 threads · hooli.example, hooli-xyz.example" and "No threads for this client yet — add one on Profile." |
+| 5 | Reload, navigate to `{{base_url}}/#client/hooli/overview` | The thread list has a group "HOOLI XYZ" (between CYBERDYNE and INITECH · YOUR COMPANY); the page reads "Hooli XYZ", "client", "0 threads · hooli.example, hooli-xyz.example" and "No threads for this client yet — add one on Profile." |
 | 6 | Run `target/debug/echoctl org add "Pied Piper" --domains piedpiper.example --thread umbrella-proposal` | `id` "pied-piper", `account` false, `domains` ["piedpiper.example"] |
 | 7 | Reload, navigate to `{{base_url}}/#project/umbrella-proposal/profile` | Under "Organisations" the chip "Pied Piper" with "×" |
 | 8 | Run `target/debug/echoctl org set pied-piper --unlink umbrella-proposal`, reload the Profile | "Pied Piper" is no longer under "Organisations" |
 | 9 | Run `target/debug/echoctl client remove acme` | Exit code 1; "Error: acme still has projects: move or delete them first" |
 | 10 | Run `target/debug/echoctl org remove pied-piper` and `target/debug/echoctl client remove hooli` | "pied-piper removed" and "hooli removed" |
-| 11 | Run `target/debug/echoctl client list` and reload `{{base_url}}/#projects` | The 6 clients of step 1 again; no "HOOLI XYZ" group in the thread list |
+| 11 | Run `target/debug/echoctl client list` and reload `{{base_url}}/#projects` | The 8 clients of step 1 again; no "HOOLI XYZ" group in the thread list |
 
 ## Expected Final State
 The clients and organisations are as the data built them.

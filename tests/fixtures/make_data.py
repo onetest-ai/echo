@@ -98,6 +98,10 @@ def iso(t):
 # The data's future, hours after now: today's meetings reach 3 h ahead (the small set's Acme demo ends then). What would land after 23:20 is squeezed into
 # 23:20–23:50 (same order, closer together) rather than pinned to one time or pushed past midnight; earlier times are
 # exact. Building before about 20:20 nothing moves. The meetings "to come" stay exactly 37 minutes after the build.
+# The small set's meetings to come, one after the other, keep their order and the ones you accepted their length
+# (`at.chain`, #364: its 30-minute Acme demo read "23 min" late in the evening): laid back from 23:59, each ends where
+# the next starts at the latest, and one you haven't answered gives way (shorter). The standard set's meetings to come
+# keep theirs (37 minutes after the build); its Zoom and Meet invites stay squeezed whole, so late they stay apart.
 AHEAD_H = 3.0
 
 
@@ -112,6 +116,20 @@ def day_clock(now):
         if hours > 0 and t > soft and over > timedelta(0):
             t = soft + (t - soft) * ((end - soft) / over)
         return max(day0, t)
+
+    def chain(rows):
+        """Meetings to come one after the other, [(hours, minutes, gives_way)] in order: [(start, end)], each starting
+        at(hours) or earlier, over by the next one's start and by 23:59; the length kept, but a meeting that gives way
+        keeps only its start (at least a minute)."""
+        out, limit = [], now.replace(hour=23, minute=59, second=0, microsecond=0)
+        for hours, minutes, gives_way in reversed(rows):
+            start = at(hours)
+            end = min(start + timedelta(minutes=minutes), limit)
+            start = min(start, end - timedelta(minutes=1)) if gives_way else end - timedelta(minutes=minutes)
+            out.append((start, end))
+            limit = start
+        return out[::-1]
+    at.chain = chain
     return at
 
 
@@ -289,15 +307,17 @@ def build_small(d):
 - [ ] Me — draft the Globex pilot plan [00:13]
 """, actions=[{"id": "glob0001", "owner": "Me", "task": "Draft the Globex pilot plan", "due": None, "quote": "I'll draft the pilot plan and share it next week.", "confidence": "high", "status": "open"}])
 
-    def meeting(event, subject, hours, minutes, people, response="accepted"):  # starts at(hours); a late end is squeezed too
-        return {"id": event, "subject": subject, "start": iso(at(hours)), "end": iso(at(hours + minutes / 60)), "organizer": me,
+    def meeting(event, subject, span, people, response="accepted"):
+        return {"id": event, "subject": subject, "start": iso(span[0]), "end": iso(span[1]), "organizer": me,
                 "attendees": people, "join_url": f"https://teams.example/{event}", "source": "test", "response": response}
+    past = lambda hours, minutes: (at(hours), at(hours) + timedelta(minutes=minutes))
+    review, webinar, demo = at.chain([(1, 30, False), (1.5, 60, True), (2.5, 30, False)])  # the webinar isn't answered
     agenda = [
-        meeting("ev-acme-sync", "Acme weekly sync", -3, 30, [dana, omar]),
-        meeting("ev-initech-plan", "Initech planning", -1.5, 20, [lee]),
-        meeting("ev-globex-review", "Globex design review", 1, 30, [kim]),
-        meeting("ev-webinar", "Industry webinar", 1.5, 60, [kim], response="notResponded"),
-        meeting("ev-acme-demo", "Acme demo", 2.5, 30, [dana]),
+        meeting("ev-acme-sync", "Acme weekly sync", past(-3, 30), [dana, omar]),
+        meeting("ev-initech-plan", "Initech planning", past(-1.5, 20), [lee]),
+        meeting("ev-globex-review", "Globex design review", review, [kim]),
+        meeting("ev-webinar", "Industry webinar", webinar, [kim], response="notResponded"),
+        meeting("ev-acme-demo", "Acme demo", demo, [dana]),
     ]
     agenda_file = os.path.join(home, "agenda.json")
     json.dump(agenda, open(agenda_file, "w"), indent=2)
@@ -487,6 +507,8 @@ P = {
     "ola": person("Ola Svensson", "ola@acme.example"),
     "yuki": person("Yuki Tanaka", "yuki@acme.example"),
 }
+# The organiser of the invite at a free time (build_agenda): a colleague in no thread, call or person list.
+NINA = person("Nina Brooks", "nina@initech.example")
 
 
 def talk(lines, gap=8.0, start=5.0, lang="en"):
@@ -1968,6 +1990,11 @@ def build_agenda(d, H):
     events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": ME,
                    "attendees": [p["alex"]], "join_url": "https://teams.example/ev-pinned", "source": "test", "response": "organizer"})
     patch_profile(d, "acme-rollout", lambda pr: pr.update({"events": pr.get("events", []) + ["ev-pinned"]}))
+    # An invite still to answer at a free time (the day's choices: "Accept — your day is free then"): between the live
+    # meetings (they end 20 minutes after the build) and the ones to come (37 minutes after), at any hour of the build.
+    free = (now + timedelta(minutes=22)).replace(second=0, microsecond=0)
+    events.append({"id": "ev-free-invite", "subject": "Design system walkthrough", "start": iso(free), "end": iso(free + timedelta(minutes=14)), "organizer": NINA,
+                   "attendees": [NINA], "join_url": "https://teams.example/ev-free-invite", "source": "test", "response": "notResponded"})
     if H:
         place = "Meeting subjects, organizers, people and locations (calendar blocks and cards, Coming up today, preps)"
         events.append({"id": "ev-hostile", "subject": H.text(place, "Meeting", kind="html", one_line=True, where="agenda subject"), "start": iso(at(1.2)), "end": iso(at(1.6)),
@@ -2288,6 +2315,33 @@ def build_needs(d):
                            "note": "Won't do's comment picks the fake's canned answer by these phrases; any other comment's run is refused"}
 
 
+# Small open threads with one open task each, so that Today's Threads at a glance has more than ten threads (at L:
+# "N more in Threads"). Two new clients of their own; no rules, calls, people or owners shared with the other threads.
+MORE_THREADS = [  # id, name, client, story, task
+    ("wonka-factory-tour", "Wonka factory tour", "wonka", "Visit day", "Agree the tour route"),
+    ("wonka-packaging", "Wonka packaging", "wonka", "New wrappers", "Collect the wrapper samples"),
+    ("wonka-loyalty-app", "Wonka loyalty app", "wonka", "Loyalty points", "List the reward tiers"),
+    ("wonka-shop-fit", "Wonka shop fit", "wonka", "Shop layout", "Measure the shop floor"),
+    ("cyberdyne-audit", "Cyberdyne audit", "cyberdyne", "Audit scope", "Send the audit questionnaire"),
+    ("cyberdyne-data-room", "Cyberdyne data room", "cyberdyne", "Data room setup", "Name the data room owners"),
+    ("cyberdyne-training", "Cyberdyne training", "cyberdyne", "Training plan", "Draft the course outline"),
+]
+
+
+def build_more_threads(d):
+    d.q("client", "add", "Wonka", "--domains", "wonka.example")
+    d.q("client", "add", "Cyberdyne", "--domains", "cyberdyne.example")
+    d.manifest["clients"] += [{"id": "wonka", "name": "Wonka", "domains": ["wonka.example"], "threads": "open (small)"},
+                              {"id": "cyberdyne", "name": "Cyberdyne", "domains": ["cyberdyne.example"], "threads": "open (small)"}]
+    for tid, name, client, story, task in MORE_THREADS:
+        d.q("project", "create", name, "--client", client, "--stage", "active")
+        sid = edit(d, tid, {"op": "create", "kind": "story", "parent": "E01", "title": story})["id"]
+        nid = edit(d, tid, {"op": "create", "kind": "task", "parent": sid, "title": task})["id"]
+        d.manifest["threads"].append({"id": tid, "name": name, "client": client, "stage": "active"})
+        d.manifest["items"] += [{"thread": tid, "id": sid, "kind": "story", "title": story, "state": "open"},
+                                {"thread": tid, "id": nid, "kind": "task", "title": task, "state": "open", "owner": None}]
+
+
 # ── the standard and hostile sets ─────────────────────────────────────────────────────────────
 def build_standard(d, hostile=False):
     H = Hostile(d) if hostile else None
@@ -2306,6 +2360,8 @@ def build_standard(d, hostile=False):
     build_agenda(d, H)
     build_inbox(d, H)
     finish_calls(d)
+    if not H:  # hostile: the jump to a transcript moment loses its highlight with them (S-27 stage 10), not their place
+        build_more_threads(d)
     if H:
         build_hostile_calls(d, H)
         build_injection_call(d)

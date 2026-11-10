@@ -25,7 +25,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 
 | Thing | Value |
 |---|---|
-| Threads | 10: acme-hackathon, acme-renewal, acme-rollout, globex-pilot, initech-hiring, internal-tooling, legacy-migration, tyrell-bid, umbrella-lead, umbrella-proposal |
+| Threads | 17: acme-hackathon, acme-renewal, acme-rollout, cyberdyne-audit, cyberdyne-data-room, cyberdyne-training, globex-pilot, initech-hiring, internal-tooling, legacy-migration, tyrell-bid, umbrella-lead, umbrella-proposal, wonka-factory-tour, wonka-loyalty-app, wonka-packaging, wonka-shop-fit |
 | Acme rollout's calls | 6: three "pinned" (Memo, Acme security review, Globex pilot scoping), three "series" (Acme weekly sync today, 7 and 14 days before the build) |
 | Initech planning | in no thread; suggested: Acme renewal, Acme rollout, Globex pilot, each "1 of its 1 people are in its calls" |
 | Candidates (found) | 6 |
@@ -34,7 +34,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `target/debug/echoctl project list` | Exit code 0; `projects` holds the 10 thread ids of the Test Data; `acme-rollout` has `name` "Acme rollout", `client` "acme", `stage` "active", `group` "delivery", `call_count` 6; `umbrella-lead` has `call_count` 0 and `stage` "lead"; `stages` lists the 10 stage ids from `lead` to `cancelled` |
+| 1 | Run `target/debug/echoctl project list` | Exit code 0; `projects` holds the 17 thread ids of the Test Data; `acme-rollout` has `name` "Acme rollout", `client` "acme", `stage` "active", `group` "delivery", `call_count` 6; `umbrella-lead` has `call_count` 0 and `stage` "lead"; `stages` lists the 10 stage ids from `lead` to `cancelled` |
 | 2 | Navigate to `{{base_url}}/#projects` and wait for "Found for you" | The thread list shows "Acme rollout" with "6 calls · Today" and "Active", "Umbrella lead" with "0 calls" and "Lead"; "Found for you" carries the count 6 |
 | 3 | Run `target/debug/echoctl project show acme-rollout` and read `calls[].title` / `calls[].why` | 6 calls, newest first: Memo `pinned`, Acme weekly sync `series`, Acme security review `pinned`, Acme weekly sync `series`, Globex pilot scoping `pinned`, Acme weekly sync `series`; `rules` is `[{"kind":"series","subject":"Acme weekly sync"},{"contains":"rollout","kind":"subject"}]` |
 | 4 | Navigate to `{{base_url}}/#project/acme-rollout/calls` | The same 6 calls in the same order; each `pinned` one reads "added by hand" with "Unpin", each `series` one "its meeting series" with "Take out"; the tab label reads "Calls6" |

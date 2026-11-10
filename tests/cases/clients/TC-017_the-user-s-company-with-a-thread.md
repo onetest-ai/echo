@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#projects` and read the group of Initech | It reads "Initech · your company" and sits after Duff and before "No client"; its row is "Initech hiring" with the tag "Wrap-up" and "3 calls" |
+| 1 | Navigate to `{{base_url}}/#projects` and read the group of Initech | It reads "Initech · your company" and sits after Cyberdyne and before "No client"; its row is "Initech hiring" with the tag "Wrap-up" and "3 calls" |
 | 2 | Click the name "Initech · your company" | The route is `#client/initech/overview`; the tag reads "your company" (not "client") and the line "1 thread · initech.example" |
 | 3 | Read the Overview | One card, Initech hiring: "Wrap-up", "3 calls · last …", "0 of 2 stories done", "2 I owe", "1 owed to me", "1 waiting", "2 nobody named"; Decided "Keep the old tenant read-only"; Risks "Key user on leave" (no response yet, likelihood high · impact medium) before "Licences run out" (with its response) |
 | 4 | Click the tab "Profile" | The switch "Your own company" is on with "Your own company (internal work)"; the line under the domains says "Its people are your colleagues: they never count as a client's people."; the row "Threads" holds "Initech hiring" and the line "A client with threads stays: move or delete them first." |

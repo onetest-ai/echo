@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-25.spec.mjs]
 
 # S-25: Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns
 
-**Story:** Sam's week has run for a while: 57 open tasks across seven threads, closed ones left behind, work waiting on other people and on other threads. He opens Tasks and checks where each of his own tasks has landed (I owe, with the blocked ones marked), what he handed over (Owed to me) and what is only other people's work (Others), what waits on others (Waiting for others, a card per person), who has nothing named. He reads the due chips (late in red, the weekday this week), the quiet marks, the order, the Who does it and Thread filters and the Asks by person. Then he goes into the threads' Work tabs: a board with custom columns and its filters, what the sync line says, where each card sits on the default board and what the cards show, which links reach other threads, the column counts of four threads, and last how the Tree words questions, risks, tasks and stories, and that merged and deleted items are shown nowhere; last, that the Owner filter lists him once.
+**Story:** Sam's week has run for a while: 64 open tasks across fourteen threads, closed ones left behind, work waiting on other people and on other threads. He opens Tasks and checks where each of his own tasks has landed (I owe, with the blocked ones marked), what he handed over (Owed to me) and what is only other people's work (Others), what waits on others (Waiting for others, a card per person), who has nothing named. He reads the due chips (late in red, the weekday this week), the quiet marks, the order, the Who does it and Thread filters and the Asks by person. Then he goes into the threads' Work tabs: a board with custom columns and its filters, what the sync line says, where each card sits on the default board and what the cards show, which links reach other threads, the column counts of four threads, and last how the Tree words questions, risks, tasks and stories, and that merged and deleted items are shown nowhere; last, that the Owner filter lists him once.
 
 **Data:** `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`). Fresh data per run; every stage only reads, or changes a view setting.
 
@@ -40,7 +40,7 @@ auto: [tests/auto/specs/S-25.spec.mjs]
 | Asset | Made by | Used by stages |
 |---|---|---|
 | Standard data, built right before the run | `serve.sh up <dir> <port> --set standard` | all |
-| Tasks with every pile unfolded ("+ 8" in I owe, "Others · 24", "+ 5" in Nobody named) | stage 1 step 2, stage 2 step 3, stage 4 step 2 | 3, 5–11 (no stage navigates to `#tasks` again or folds a pile) |
+| Tasks with every pile unfolded ("+ 8" in I owe, "Others · 24", "+ 12" in Nobody named) | stage 1 step 2, stage 2 step 3, stage 4 step 2 | 3, 5–11 (no stage navigates to `#tasks` again or folds a pile) |
 | Acme rollout's board | stage 12, step 1 | 13, 14 |
 | Globex pilot's work tab | stage 14, step 5 | 15, 16, 17 |
 | Acme renewal's work tab (Details on T001) | stage 17, step 4 | 18 |

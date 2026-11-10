@@ -22,8 +22,11 @@ with file-fed calls"); `wait.py` waits for the run's app state, an event or a fi
 `sleep`.
 
 Build between 06:00 and 22:50: today's calls lie hours before now and its meetings up to 3 h after. Meeting times
-that would fall after 23:20 (starts and ends) are squeezed into 23:20–23:50 (`day_clock`: same order, closer
-together; built before about 20:20 nothing moves). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
+that would fall after 23:20 are squeezed into 23:20–23:50 (`day_clock`: same order, closer together; built before
+about 20:20 nothing moves). The small set's meetings to come keep their order and the accepted ones their 30 minutes:
+laid back from 23:59, each over by the next one's start, the unanswered Industry webinar giving way (shorter, down to a
+minute at 22:50; `at.chain`, #364). The standard set's Zoom and Meet invites are squeezed whole, ends too (shorter
+late, never overlapping). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
 after it, so the cases' timings hold; after 22:50 those would end tomorrow, and before 06:00 the calls of the last
 6 hours would be yesterday's, so the generator refuses. For checks that don't need Today to match the real
 clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).
@@ -39,7 +42,7 @@ a microphone or reads a real Teams, and `call.py` makes its calls.
 | Set | What it is for | Size |
 |---|---|---|
 | `small` | The data the existing cases and scenarios are written against: Sam Rivera at Initech, clients Acme and Globex, 3 calls, 2 threads, 7 work items, a 5-meeting agenda (`tests/app_profile.md`, "What the test data holds") | 3 calls · 2 threads · 7 items · 5 people · 5 meetings |
-| `standard` | Every value of every state axis of `tests/feature-map/axes/` that test data can hold (the rest are skipped, with the reason, below), and the axis groups of `combinations.json` covered pairwise | 96 calls (56 main ones, 40 all-hands of last spring so the list pages past 60) · 10 threads · ~133 items · 19 people · 37 meetings |
+| `standard` | Every value of every state axis of `tests/feature-map/axes/` that test data can hold (the rest are skipped, with the reason, below), and the axis groups of `combinations.json` covered pairwise | 96 calls (56 main ones, 40 all-hands of last spring so the list pages past 60) · 17 threads · ~147 items · 19 people · 40 meetings |
 | `hostile` | `standard`, plus others' text in every place of `hostile.json`: HTML and script (`<img onerror>`, `<script>`, `javascript:` links), a 10 000-character word, right-to-left and combining characters, emoji and Cyrillic, Markdown that looks like links or headings. Each piece carries a marker `HOSTILE-NN` | standard + 5 calls, 1 thread, 3 items, 2 meetings; ~120 marked pieces |
 
 Every set's config has `calendar_command: []`, so the calendar is off: a sync never runs the msgraph skill from your
@@ -57,12 +60,14 @@ a busy day.
   Aziz, Ben Okafor at globex-labs.example), Umbrella (Zoe Martin, Raj Mehta), partner Vandelay (Kai Larsen),
   analysts Northwind (Mia Novak).
 - **Clients and organisations**: Initech (yours), Acme (aliases, About, logo), Globex (two domains), Umbrella,
-  Tyrell (closed threads only), Duff (no threads); organisations Vandelay, Northwind Analysts, Stark Advisory (no
+  Tyrell (closed threads only), Duff (no threads), Wonka and Cyberdyne (small threads only); organisations Vandelay, Northwind Analysts, Stark Advisory (no
   domain); Soylent removed after its thread was made.
 - **Threads, one per stage**: acme-rollout (active), acme-renewal (negotiation), globex-pilot (kickoff),
   umbrella-proposal (proposal), umbrella-lead (lead, no calls), initech-hiring (wrap_up, the user's company),
   internal-tooling (on_hold, no client), legacy-migration (done, client removed), tyrell-bid (lost five days ago),
-  acme-hackathon (cancelled).
+  acme-hackathon (cancelled). Besides them, seven small active threads, four for Wonka and three for Cyberdyne, each
+  with a story and one task (no owner, no date, nothing shared with the others): Today's Threads at a glance has 12
+  threads, more than the 10 it shows at L. Not in `hostile`.
 - **Work**: acme-rollout's items come from its calls through the ledger's own path (`ledger sync`, `apply`,
   `verify-apply`): created, verified, weak, wrong, to check, kept yours, a pending merge and move. acme-renewal's
   quote is the same item as one in acme-rollout, whose "done" is heard there. The user's own items cover the node
@@ -75,7 +80,9 @@ a busy day.
 - **Today's agenda**: every response and timing, recorded and imported meetings, Teams transcripts known or not,
   scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error. The
   live meetings all run from 10 minutes before the build to 20 after it, and every meeting to come starts 37 minutes
-  after it: the same layout at any hour from 06:00 to 22:50. Tasks due "this week" are due tomorrow (on a Sunday
+  after it: the same layout at any hour from 06:00 to 22:50. Between them, 22 to about 36 minutes after the build, one
+  invite not answered (Design system walkthrough, Nina Brooks) at a time that is free: The day's choices suggests
+  accepting it. Tasks due "this week" are due tomorrow (on a Sunday
   that is next week for Today's "My work · this week", listed in `skipped`).
 - **Inbox**: sign-in (blocking), failed minutes, people suggestions (more than five), work to review, Found for
   you (an existing client, a new client from a domain, a known organisation, a series), senders to trust and

@@ -39,7 +39,7 @@ tags: [inbox, cli]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `echoctl attention` | Exit code 0; JSON with `open` (25 entries), `done` (2), `urgent` 1 and `clients` mapping `acme` to "Acme", `duff` to "Duff", `globex`, `initech`, `tyrell`, `umbrella` |
+| 1 | Run `echoctl attention` | Exit code 0; JSON with `open` (25 entries), `done` (2), `urgent` 1 and `clients` mapping `acme` to "Acme", `duff` to "Duff", `cyberdyne`, `globex`, `initech`, `tyrell`, `umbrella`, `wonka` |
 | 2 | Count `open` by `kind` | people 10, found 6, sender 2, and one each of signin, minutes, work, transcript, health, plugin-update, plugin |
 | 3 | Read the first entry of `open` | The blocking one: `kind` "signin", `urgent` true, title "Sign in to Claude · out", an action "Sign in…" |
 | 4 | Read `done` | Titles "Dana Lee: supporter → champion" and "New thread? “Old standup”" |

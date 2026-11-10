@@ -319,13 +319,13 @@
       14,
       5,
       5,
-      11
+      18
     ],
     "others": 24,
-    "active": 7,
+    "active": 14,
     "folds": {
       "I owe": 8,
-      "Nobody named": 5
+      "Nobody named": 12
     },
     "logo": [
       "Globex pilot"
@@ -340,7 +340,14 @@
       "Acme renewal": "acme-renewal",
       "Globex pilot": "globex-pilot",
       "Umbrella proposal": "umbrella-proposal",
-      "Initech hiring": "initech-hiring"
+      "Initech hiring": "initech-hiring",
+      "Cyberdyne audit": "cyberdyne-audit",
+      "Cyberdyne data room": "cyberdyne-data-room",
+      "Cyberdyne training": "cyberdyne-training",
+      "Wonka factory tour": "wonka-factory-tour",
+      "Wonka loyalty app": "wonka-loyalty-app",
+      "Wonka packaging": "wonka-packaging",
+      "Wonka shop fit": "wonka-shop-fit"
     },
     "cards": {
       "I owe": [
@@ -603,10 +610,59 @@
           "due": null
         },
         {
+          "thread": "Cyberdyne audit",
+          "id": "T001",
+          "title": "Send the audit questionnaire",
+          "line": "Audit scope",
+          "due": null
+        },
+        {
+          "thread": "Cyberdyne data room",
+          "id": "T001",
+          "title": "Name the data room owners",
+          "line": "Data room setup",
+          "due": null
+        },
+        {
+          "thread": "Cyberdyne training",
+          "id": "T001",
+          "title": "Draft the course outline",
+          "line": "Training plan",
+          "due": null
+        },
+        {
           "thread": "Globex pilot",
           "id": "T014",
           "title": "Review the access matrix (2) (kept)",
           "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Wonka factory tour",
+          "id": "T001",
+          "title": "Agree the tour route",
+          "line": "Visit day",
+          "due": null
+        },
+        {
+          "thread": "Wonka loyalty app",
+          "id": "T001",
+          "title": "List the reward tiers",
+          "line": "Loyalty points",
+          "due": null
+        },
+        {
+          "thread": "Wonka packaging",
+          "id": "T001",
+          "title": "Collect the wrapper samples",
+          "line": "New wrappers",
+          "due": null
+        },
+        {
+          "thread": "Wonka shop fit",
+          "id": "T001",
+          "title": "Measure the shop floor",
+          "line": "Shop layout",
           "due": null
         }
       ],
@@ -739,7 +795,14 @@
       "Acme renewal T006": null,
       "Acme rollout T005": "Me",
       "Acme rollout T021": null,
-      "Globex pilot T014": null
+      "Cyberdyne audit T001": null,
+      "Cyberdyne data room T001": null,
+      "Cyberdyne training T001": null,
+      "Globex pilot T014": null,
+      "Wonka factory tour T001": null,
+      "Wonka loyalty app T001": null,
+      "Wonka packaging T001": null,
+      "Wonka shop fit T001": null
     },
     "closed": [
       {
@@ -1246,10 +1309,10 @@
       "thread": "Globex pilot",
       "title": "Schedule the steering call"
     },
-    "allCards": 59,
+    "allCards": 66,
     "lateChips": 3,
     "dated": 13,
-    "undated": 46,
+    "undated": 53,
     "quietMarks": 9,
     "quietThread": "Umbrella proposal",
     "orders": {
@@ -1357,10 +1420,17 @@
       "All threads",
       "Acme renewal · 11",
       "Acme rollout · 17",
+      "Cyberdyne audit · 1",
+      "Cyberdyne data room · 1",
+      "Cyberdyne training · 1",
       "Globex pilot · 10",
       "Initech hiring · 9",
       "Umbrella lead · 0",
       "Umbrella proposal · 10",
+      "Wonka factory tour · 1",
+      "Wonka loyalty app · 1",
+      "Wonka packaging · 1",
+      "Wonka shop fit · 1",
       "Internal tooling · 0"
     ],
     "emptyThreads": [
@@ -2441,6 +2511,8 @@
         "Umbrella",
         "Tyrell",
         "Duff",
+        "Wonka",
+        "Cyberdyne",
         "Initech · your company",
         "No client"
       ],
@@ -2483,6 +2555,52 @@
         ],
         "Tyrell": [],
         "Duff": [],
+        "Wonka": [
+          [
+            "Wonka factory tour",
+            0,
+            "Active",
+            "wonka-factory-tour"
+          ],
+          [
+            "Wonka loyalty app",
+            0,
+            "Active",
+            "wonka-loyalty-app"
+          ],
+          [
+            "Wonka packaging",
+            0,
+            "Active",
+            "wonka-packaging"
+          ],
+          [
+            "Wonka shop fit",
+            0,
+            "Active",
+            "wonka-shop-fit"
+          ]
+        ],
+        "Cyberdyne": [
+          [
+            "Cyberdyne audit",
+            0,
+            "Active",
+            "cyberdyne-audit"
+          ],
+          [
+            "Cyberdyne data room",
+            0,
+            "Active",
+            "cyberdyne-data-room"
+          ],
+          [
+            "Cyberdyne training",
+            0,
+            "Active",
+            "cyberdyne-training"
+          ]
+        ],
         "Initech · your company": [
           [
             "Initech hiring",
@@ -3064,13 +3182,20 @@
         "Add to a thread…",
         "Acme renewal",
         "Acme rollout",
+        "Cyberdyne audit",
+        "Cyberdyne data room",
+        "Cyberdyne training",
         "Globex pilot",
         "Initech hiring",
         "Umbrella lead",
         "Umbrella proposal",
+        "Wonka factory tour",
+        "Wonka loyalty app",
+        "Wonka packaging",
+        "Wonka shop fit",
         "Internal tooling"
       ],
-      "all": 10
+      "all": 17
     },
     "closedThreads": {
       "notTaken": [
@@ -3529,7 +3654,9 @@
         "globex",
         "umbrella",
         "tyrell",
-        "duff"
+        "duff",
+        "wonka",
+        "cyberdyne"
       ],
       "orgs": [
         "vandelay",
@@ -3704,7 +3831,7 @@
     "own": {
       "id": "initech",
       "group": "Initech · your company",
-      "after": "Duff",
+      "after": "Cyberdyne training 0 calls Active",
       "before": "No client",
       "row": [
         "Initech hiring",
@@ -4017,13 +4144,20 @@
         "acme-hackathon",
         "acme-renewal",
         "acme-rollout",
+        "cyberdyne-audit",
+        "cyberdyne-data-room",
+        "cyberdyne-training",
         "globex-pilot",
         "initech-hiring",
         "internal-tooling",
         "legacy-migration",
         "tyrell-bid",
         "umbrella-lead",
-        "umbrella-proposal"
+        "umbrella-proposal",
+        "wonka-factory-tour",
+        "wonka-loyalty-app",
+        "wonka-packaging",
+        "wonka-shop-fit"
       ],
       "rollout": {
         "id": "acme-rollout",
@@ -4427,7 +4561,9 @@
         "globex",
         "umbrella",
         "tyrell",
-        "duff"
+        "duff",
+        "wonka",
+        "cyberdyne"
       ],
       "internal": "initech",
       "globexDomains": [
@@ -4460,7 +4596,7 @@
           "hooli.example",
           "hooli-xyz.example"
         ],
-        "after": "Duff",
+        "after": "Cyberdyne",
         "before": "Initech · your company",
         "line": "0 threads · hooli.example, hooli-xyz.example"
       },
