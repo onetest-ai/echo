@@ -102,11 +102,12 @@ function needsView(n) {
     const replyBtn = (attrs, label, mark) => `<button class="btn nd-reply" ${attrs} aria-label="${label}" title="${label}">Reply ${mark}</button>`
     const reply = x.source === 'mail' ? replyBtn(`data-needs-read="${esc(x.id)}"`, 'Read and reply', ICON(ND_MAIL))
       : x.app_url || x.chat ? replyBtn(`data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}"`, 'Reply in Teams', TEAMS_LOGO) : ''
-    return `<div class="nd-row"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
+    // A list item named by where it came from ("Mail to you", "Chat with Dana Lee"): its buttons are found in it.
+    return `<div class="nd-row" role="listitem" aria-label="${esc(x.where || '')}"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
       <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
       <div class="nd-a">${reply}${act(`data-needs-todo="${esc(x.id)}"`, "I'll do it", ND_TAKE, ' take')}${act(`data-needs-wont="${esc(x.id)}"`, "Won't do", ND_WONT)}</div></div>`
   }).join('')
-  return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div>${rows}</section>`
+  return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div><div role="list" aria-labelledby="nd-h">${rows}</div></section>`
 }
 /** The dialogs of Needs you now: I'll do it (a task's title and its thread), Read and reply (the mail, your answer). */
 function needsDialog() {
@@ -381,14 +382,14 @@ function attendeeLine(att) {
   // New: no call with the user yet.
   const fresh = (x) => x.new && !x.calls ? ' <span class="at-new">new</span>' : ''
   const card = (x) => `<span class="at-card" role="tooltip"><span><b>${esc(x.name)}</b> <span class="set-sub">· ${esc(word(x))}</span></span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}<span class="set-sub">${x.influence || x.interest ? `Influence ${LEVEL[x.influence || 0]} · interest ${LEVEL[x.interest || 0]} · ` : ''}${calls(x)}</span></span>`
-  const chip = (x) => `<span class="at-p${x.influence === 3 ? ' key' : ''}${x.answer === 'declined' ? ' declined' : ''}"${x.link ? '' : ' tabindex="0"'}>${mark(x)}${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${fresh(x)}${card(x)}</span>`
-  const row = (x) => `<div class="at-row${x.answer === 'declined' ? ' declined' : ''}">${mark(x)}<span class="at-n">${esc(x.name)}${fresh(x)}</span><span class="set-sub">${x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : 'first call'}</span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}</div>`
+  const chip = (x) => `<span class="at-p${x.influence === 3 ? ' key' : ''}${x.answer === 'declined' ? ' declined' : ''}" role="listitem" aria-label="${esc(x.name)}, ${esc(word(x))}"${x.link ? '' : ' tabindex="0"'}>${mark(x)}${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${fresh(x)}${card(x)}</span>`
+  const row = (x) => `<div class="at-row${x.answer === 'declined' ? ' declined' : ''}" role="listitem" aria-label="${esc(x.name)}, ${esc(word(x))}">${mark(x)}<span class="at-n">${esc(x.name)}${fresh(x)}</span><span class="set-sub">${x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : 'first call'}</span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}</div>`
   const shown = att.slice(0, SHOWN), rest = att.slice(SHOWN)
   const count = (k) => att.filter((x) => (ANSWER[x.answer] || ANSWER.none)[0] === k).length
   const tally = [['yes', 'yes'], ['maybe', 'maybe'], ['none', 'no answer'], ['no', 'declined']].map(([k, w]) => count(k) ? `${count(k)} ${w}` : '').filter(Boolean).join(' · ')
   const going = rest.filter((x) => x.answer !== 'declined'), no = rest.filter((x) => x.answer === 'declined')
-  const more = rest.length ? `<span class="at-more" tabindex="0" aria-haspopup="true">+${rest.length} more<span class="at-pop" role="tooltip"><span class="at-h">${rest.length} more</span>${going.map(row).join('')}${going.length && no.length ? '<hr>' : ''}${no.map(row).join('')}</span></span>` : ''
-  return { tally: `<span class="at-tally">${tally}</span>`, people: `<div class="at">${shown.map(chip).join('')}${more}</div>` }
+  const more = rest.length ? `<span class="at-more" role="button" tabindex="0" aria-haspopup="true">+${rest.length} more<span class="at-pop" role="list" aria-label="${rest.length} more"><span class="at-h">${rest.length} more</span>${going.map(row).join('')}${going.length && no.length ? '<hr role="presentation">' : ''}${no.map(row).join('')}</span></span>` : ''
+  return { tally: `<span class="at-tally">${tally}</span>`, people: `<div class="at" role="list" aria-label="Invited">${shown.map(chip).join('')}${more}</div>` }
 }
 
 /** A prep: In short, then Last time, Open with these people, New since then; Who's coming beside. `again`: it can

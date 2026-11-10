@@ -10,6 +10,7 @@ platform: macos
 data: small
 ai: virtual
 tags: [claude, minutes, virtual-model]
+auto: [tests/auto/specs/S-32.spec.mjs]
 ---
 
 # TC-023: A minutes run on the virtual model gets the call's prompt and only the run's tools; its minutes show

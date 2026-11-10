@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, needs, wont-do]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-007: Won't do opens a dialog that needs a comment, why or who it's for; Cancel and Escape keep the item

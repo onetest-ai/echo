@@ -44,6 +44,7 @@ cases:
   - tests/cases/today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md
   - tests/cases/today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md
   - tests/cases/calendar/TC-024_right-click-a-meeting-opens-its-menu.md
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # S-24: The calendar, preps and the Inbox on a busy day

@@ -10,6 +10,7 @@ platform: macos
 data: small
 ai: virtual
 tags: [hostile, guard, minutes, virtual-model]
+auto: [tests/auto/specs/S-32.spec.mjs]
 ---
 
 # TC-019: A model that tries to leave the call is refused by the guard each time; the previous minutes stay

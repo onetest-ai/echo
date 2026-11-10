@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, status-bar]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-014: The status bar shows Actions and Claude, and no AI profile (the top bar's chip shows it)

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [prep, sections]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-009: A prep shows only the sections it holds; an empty Expected says Nothing waits on you

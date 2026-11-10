@@ -1,0 +1,45 @@
+{
+  "_about": "What tests/fixtures/make_data.py --set standard builds, as the autotests read it. Change it with the fixture.",
+  "needs": {
+    "chat": "Chat with Dana Lee",
+    "mail": "Mail to you",
+    "mailTitle": "Contract redlines for the Globex pilot",
+    "mailFrom": "Kim Park"
+  },
+  "task": {
+    "title": "Send Kim the signed redlines",
+    "thread": {
+      "id": "initech-hiring",
+      "name": "Initech hiring"
+    }
+  },
+  "meetings": {
+    "globexWeekly": {
+      "prep": "08bd9e1778b4234b",
+      "answers": "4 yes · 2 maybe · 2 no answer · 1 declined",
+      "people": [
+        "Kim Park, Organiser",
+        "Noor Aziz, Tentative",
+        "Mia Long, Accepted",
+        "Joel Brandt, Accepted",
+        "Ines Duarte, Tentative",
+        "Paul Weber, No answer yet",
+        "Sara Lind, Accepted"
+      ],
+      "key": "Kim Park",
+      "notKey": "Noor Aziz",
+      "newcomer": "Mia Long",
+      "card": [
+        "Kim Park · Organiser",
+        "Influence high · interest high · 3 calls together"
+      ],
+      "more": [
+        "Theo Grant, No answer yet",
+        "Lena Vogel, Declined"
+      ]
+    },
+    "sponsorUpdate": {
+      "prep": "e11de173ab857a8b"
+    }
+  }
+}

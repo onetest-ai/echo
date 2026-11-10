@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [prep, people]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-008: A meeting's header shows how each person answered the invite, the most important in the thread first, who declined last; a hover tells more, "+N more" the rest

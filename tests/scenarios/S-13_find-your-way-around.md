@@ -23,6 +23,7 @@ cases:
   - tests/cases/vocabulary/TC-002_vocabulary-opens-from-the-palette-and-the-old-link.md
   - tests/cases/shell/TC-017_top-bar-holds-record-account-and-inbox-on-one-line.md
   - tests/cases/shell/TC-015_narrow-window-opens-the-sidebar-over-the-page.md
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # S-13: Find your way around: the activity bar, the top bar, panels, layout, the actions palette, the status bar and shortcuts

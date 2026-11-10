@@ -79,12 +79,18 @@ def load():
     for p in sorted((TESTS / "cases").glob("*/TC-*.md")):
         fm = frontmatter(p)
         cases[p.relative_to(TESTS.parent).as_posix()] = {"area": p.parent.name, "id": fm.get("id", ""), "title": fm.get("title", ""),
-                                                   "run": fm.get("run", ""), "requirements": fm.get("requirements", []) or []}
+                                                   "run": fm.get("run", ""), "requirements": fm.get("requirements", []) or [],
+                                                   "auto": as_list(fm.get("auto"))}
     scenarios = {}
     for p in sorted((TESTS / "scenarios").glob("S-*.md")):
         fm = frontmatter(p)
-        scenarios[p.relative_to(TESTS.parent).as_posix()] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or []}
+        scenarios[p.relative_to(TESTS.parent).as_posix()] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or [],
+                                                       "auto": as_list(fm.get("auto"))}
     return doc, cases, scenarios
+
+
+def as_list(v):
+    return v if isinstance(v, list) else [v] if v else []
 
 
 def problems(doc, cases, scenarios):
@@ -116,10 +122,32 @@ def problems(doc, cases, scenarios):
         out += [f"{path}: unknown requirement {r}" for r in c["requirements"] if r not in seen]
     for path, s in scenarios.items():
         out += [f"{path}: no such case {c}" for c in s["cases"] if c not in cases]
+    # Autotests ↔ the manual side, both ways: a spec automates a scenario and names its cases; the scenario and each
+    # case name the spec back (`auto:`).
     by_id = case_ids(cases)
-    for spec, ids in auto_links().items():
-        out += [f"{spec}: no such case {i}" for i in ids if not i.startswith("F-") and i not in by_id]
-        out += [f"{spec}: unknown feature {i}" for i in ids if i.startswith("F-") and i not in seen]
+    scen = {s["id"]: path for path, s in scenarios.items()}
+    links = auto_links()
+    for spec, link in links.items():
+        if link["scenario"] not in scen:
+            out.append(f"{spec}: no such scenario {link['scenario'] or '(none: scenario(test, \'S-NN\', …))'}")
+        elif spec not in scenarios[scen[link['scenario']]]["auto"]:
+            out.append(f"{scen[link['scenario']]}: automated by {spec} — add `auto: {spec}`")
+        for i in link["ids"]:
+            if i.startswith("F-"):
+                if i not in seen:
+                    out.append(f"{spec}: unknown feature {i}")
+            elif i not in by_id:
+                out.append(f"{spec}: no such case {i}")
+            elif spec not in cases[by_id[i]]["auto"]:
+                out.append(f"{by_id[i]}: automated by {spec} — add it to `auto:`")
+    for path, c in list(cases.items()) + list(scenarios.items()):
+        for spec in c["auto"]:
+            if spec not in links:
+                out.append(f"{path}: auto names {spec}, which doesn't exist")
+            elif path in cases and f"{c['area']}/{c['id']}" not in links[spec]["ids"]:
+                out.append(f"{path}: auto names {spec}, which doesn't cover it")
+            elif path in scenarios and links[spec]["scenario"] != c["id"]:
+                out.append(f"{path}: auto names {spec}, which automates {links[spec]['scenario']}")
     return out
 
 
@@ -127,11 +155,14 @@ AUTO = TESTS / "auto"
 
 
 def auto_links():
-    """Each autotest file's links (`covers('area/TC-NNN', 'F-…', …)`): {file: [ids]}."""
+    """Each autotest file: the scenario it automates (`scenario(test, 'S-NN', …)`) and its tests' links
+    (`covers('area/TC-NNN', 'F-…', …)`): {file: {"scenario": id, "ids": [ids]}}."""
     out = {}
-    for p in sorted(AUTO.glob("*.spec.mjs")):
-        ids = [i for m in re.finditer(r"covers\(([^)]*)\)", p.read_text(encoding="utf-8")) for i in re.findall(r"'([^']+)'", m.group(1))]
-        out[p.relative_to(TESTS.parent).as_posix()] = ids
+    for p in sorted((AUTO / "specs").glob("*.spec.mjs")):
+        text = p.read_text(encoding="utf-8")
+        ids = [i for m in re.finditer(r"covers\(([^)]*)\)", text) for i in re.findall(r"'([^']+)'", m.group(1))]
+        s = re.search(r"scenario\(test,\s*'([^']+)'", text)
+        out[p.relative_to(TESTS.parent).as_posix()] = {"scenario": s.group(1) if s else "", "ids": ids}
     return out
 
 
@@ -360,8 +391,10 @@ def auto_report(path):
     """The run's report (tests/reports/auto-<time>.md) and its state for the next one (tests/reports/auto-last.json)."""
     import subprocess
     from datetime import datetime
-    doc, cases, _ = load()
+    doc, cases, scenarios = load()
     rows, stats = auto_results(path)
+    links = auto_links()
+    spec_of = lambda r: next((s for s in links if Path(s).name == Path(r["file"]).name), r["file"])
     by_id = case_ids(cases)
     names = {f["id"]: f for f in doc["features"]}
     cov = coverage(doc, cases)
@@ -419,6 +452,22 @@ def auto_report(path):
         fs = sorted({i for i in r["links"] if i.startswith("F-")} | {f for i in cs if i in by_id for f in cases[by_id[i]]["requirements"]})
         L.append(f"| {r['title']} | {r['status']} | {r['seconds']} | {', '.join(cs)} | {', '.join(fs)} |")
     L.append("")
+    # The map both ways: which manual scenario each spec automates and how much of it; which autotests each case has.
+    L += ["## Map: manual scenarios and cases ↔ autotests", "", "| Scenario | Autotest | Its cases automated | Tests passing |", "|---|---|---|---|"]
+    for spec, link in links.items():
+        sp = next((p for p, s in scenarios.items() if s["id"] == link["scenario"]), None)
+        mine = [r for r in rows if spec_of(r) == spec]
+        automated = {by_id[i] for i in link["ids"] if i in by_id}
+        of = len(scenarios[sp]["cases"]) if sp else 0
+        L.append(f"| {link['scenario']} {scenarios[sp]['title'] if sp else ''} | `{spec}` | {len(automated & set(scenarios[sp]['cases'] if sp else []))} of {of} "
+                 f"(+{len(automated - set(scenarios[sp]['cases'] if sp else []))} beside it) | {sum(1 for r in mine if r['status'] in ('passed', 'flaky'))} of {len(mine)} |")
+    L += ["", "| Case | Autotest | Status |", "|---|---|---|"]
+    for cid, p in sorted(by_id.items()):
+        tests = [r for r in rows if cid in r["links"]]
+        if tests or cases[p]["auto"]:
+            st = ", ".join(sorted({r["status"] for r in tests})) or "not run"
+            L.append(f"| `{p}` | " + "; ".join(f"{Path(spec_of(r)).name} › {r['title']}" for r in tests) + f" | {st} |")
+    L.append("")
     top = [f for f in doc["features"] if f["id"] not in auto and f["priority"] in ("critical", "high")]
     L += [f"## Left: critical and high features no autotest reaches ({len(top)})", ""]
     for a in doc["areas"]:
@@ -444,10 +493,15 @@ def auto_report(path):
         L += [f"- Features newly reached: {len(got)}" + (f" ({', '.join(got)})" if got else ""),
               f"- Features no longer reached: {len(lost)}" + (f" ({', '.join(lost)})" if lost else "")]
         # The cases and the map's features changed in git since that run: their tests may need updating too.
-        touched = [p for p in git("diff", "--name-only", prev["commit"], "--", "tests/cases", "tests/feature-map").splitlines() if p]
-        linked = sorted({p for p in touched if p in cases and any(p == by_id.get(i) for r in rows for i in r["links"])})
-        L += [f"- Cases and map files changed since then: {len(touched)}; of them cases an autotest automates (check the test still matches): {len(linked)}"]
-        L += [f"  - `{p}`" for p in linked]
+        diff = subprocess.run(["git", "diff", "--name-only", prev["commit"], "--", "tests/cases", "tests/feature-map", "tests/scenarios"],
+                              cwd=TESTS.parent, capture_output=True, text=True)
+        if diff.returncode != 0:
+            L += [f"- Cases changed since then: can't tell — the last run's commit `{prev['commit']}` isn't in this repository (rebased or gone)"]
+        else:
+            touched = [p for p in diff.stdout.splitlines() if p]
+            linked = sorted({p for p in touched if (p in cases and cases[p]["auto"]) or (p in scenarios and scenarios[p]["auto"])})
+            L += [f"- Cases, scenarios and map files changed since then: {len(touched)}; of them automated (check their autotests still match): {len(linked)}"]
+            L += [f"  - `{p}` → {', '.join(f'`{s}`' for s in (cases.get(p) or scenarios.get(p))['auto'])}" for p in linked]
         L.append("")
     out = TESTS / "reports" / f"auto-{datetime.now():%Y-%m-%d_%H%M%S}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
