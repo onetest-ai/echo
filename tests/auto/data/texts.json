@@ -1490,7 +1490,7 @@
       "cleared": "agenda: 0 meeting(s)",
       "reason": "calendar command failed",
       "notice": "The calendar couldn’t be read today: today’s meetings may be missing.",
-      "openCall": "Open the call",
+      "openCall": "the call",
       "record": "Record when it starts",
       "command": [
         "python3",
