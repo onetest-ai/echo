@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, found]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-017: Found for you with nothing found: no badge, an explanation, and the New thread row

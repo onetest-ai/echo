@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, calls, rules]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-009: A call a rule put in can be taken out by hand; the rules do not put it back

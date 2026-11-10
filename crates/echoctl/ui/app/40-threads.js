@@ -65,20 +65,20 @@ function projectList(data) {
   const open = ps.filter((p) => p.group !== 'closed'), closed = ps.filter((p) => p.group === 'closed')
   const groups = []
   // Each client an accordion: the chevron folds it (the open thread stays in view), the name opens its page.
-  const fold = (id, xs, name) => {
+  const fold = (id, xs, name, label) => {
     const folded = pjFolded.has(id), shown = folded ? xs.filter((p) => p.id === S.pj.sel) : xs
     // Nothing to fold: a spacer keeps the names in line.
     const chev = !xs.length ? '<span class="pj-chev" aria-hidden="true"></span>' : `<button class="pj-chev" data-pj="fold" data-id="${esc(id)}" aria-expanded="${!folded}" title="${folded ? 'Show' : 'Hide'} its threads" aria-label="${folded ? 'Show' : 'Hide'} its threads">${ICON(folded ? '<path d="M9 6l6 6-6 6"/>' : '<path d="M6 9l6 6 6-6"/>')}</button>`
-    return `<div class="pj-ghead${folded ? ' folded' : ''}">${chev}${name}${folded && xs.length ? `<span class="pj-gn">${xs.length}</span>` : ''}</div>${shown.map(row).join('')}`
+    return `<div class="pj-ghead${folded ? ' folded' : ''}" role="group" aria-label="${esc(label)}">${chev}${name}${folded && xs.length ? `<span class="pj-gn">${xs.length}</span>` : ''}</div>${shown.map(row).join('')}`
   }
   for (const c of [...clients.filter((c) => !c.internal), ...clients.filter((c) => c.internal)]) {
     const xs = open.filter((p) => p.client === c.id)
-    groups.push(fold(c.id, xs, `<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}<span class="pj-cn">${esc(c.internal ? `${c.name} · your company` : c.name)}</span></button>`))
+    groups.push(fold(c.id, xs, `<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}<span class="pj-cn">${esc(c.internal ? `${c.name} · your company` : c.name)}</span></button>`, c.internal ? `${c.name} · your company` : c.name))
   }
   // Folds of clients that are gone are forgotten.
   if (clients.length && !data.error) for (const k of [...pjFolded]) if (k !== '-' && !clients.some((c) => c.id === k)) pjFold(k)
   const none = open.filter((p) => !p.client || !clients.some((c) => c.id === p.client))
-  if (none.length) groups.push(clients.length ? fold('-', none, '<div class="pj-group">No client</div>') : `<div class="pj-group">Threads</div>${none.map(row).join('')}`)
+  if (none.length) groups.push(clients.length ? fold('-', none, '<div class="pj-group">No client</div>', 'No client') : `<div class="pj-group">Threads</div>${none.map(row).join('')}`)
   const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${CHEV(S.pj.showClosed)} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
   const err = data.error ? `<p class="error" style="padding:10px">${esc(data.error)}</p>` : ''
   const fc = data.found_count || 0
@@ -104,7 +104,7 @@ function projectMain(data) {
   const facts = [`${p.call_count} call${p.call_count === 1 ? '' : 's'}`, p.since ? `since ${esc(p.since)}` : '', p.last_call ? `last call ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''].filter(Boolean).join(' · ')
   const menu = `<span class="pj-add-wrap pj-more"><button class="icon-btn" data-pj="menu" aria-haspopup="menu" aria-expanded="${S.pj.menu}" aria-label="Thread actions" title="Thread actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.pj.menu ? `<div class="menu" role="menu">${p.client ? `<button class="menu-item" role="menuitem" data-pj="client" data-id="${esc(p.client)}">Open ${esc(p.client_name || 'the client')}</button>` : ''}<button class="menu-item" role="menuitem" data-claude-about>Claude about this thread</button><button class="menu-item" role="menuitem" data-pj="sync">Sync now</button><div class="menu-sep" role="separator"></div><button class="menu-item danger" role="menuitem" data-pj="delete-ask">Delete…</button></div>` : ''}</span>`
   const confirmDel = S.pj.confirmDelete ? `<div class="notice"><span class="grow">Delete <b>${esc(p.name)}</b>? Its brief, profile and work go to the trash; its calls stay.</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="delete">Move to trash</button></div>` : ''
-  const head = `<header class="pj-head"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2>${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div></div><span class="grow"></span>${menu}</div>${confirmDel}
+  const head = `<header class="pj-head" role="group" aria-labelledby="pj-h"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2 id="pj-h">${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div></div><span class="grow"></span>${menu}</div>${confirmDel}
     <div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button class="tab" role="tab" data-pj="tab" data-tab-id="${id}" aria-selected="${tab === id}">${label}</button>`).join('')}</div></header>`
   const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : projectBrief(p)
   return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' ? ' wide' : ''}">${body}</div>`

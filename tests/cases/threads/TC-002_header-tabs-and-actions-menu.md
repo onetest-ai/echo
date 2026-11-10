@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, header]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-002: A thread's header shows client, stage, counts and tabs; Thread actions lists four items

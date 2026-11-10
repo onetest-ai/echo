@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-016: Profile → Meetings and Sources say what is and is not read when there is nothing to read

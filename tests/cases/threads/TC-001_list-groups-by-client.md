@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, list]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-001: The Threads list groups open threads under their client and folds a client

@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, create, calls]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-004: A call's "+ Thread" → "New thread from this call…" makes a thread named after the call with the call pinned

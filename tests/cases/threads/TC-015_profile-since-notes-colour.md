@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-015: Profile → Since, Notes for Claude and Look are edited in place and saved at once

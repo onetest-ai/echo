@@ -25,6 +25,11 @@ export class AppPage {
     return this.activities.getByRole('button', { name, exact: true })
   }
 
+  /** A count an activity's button shows beside its name (Settings' "1" to fix). */
+  activityCount(name) {
+    return this.activity(name).getByText(/^\d+$/)
+  }
+
   /** An activity's name as drawn beside its icon (hidden while the bar is folded). */
   activityLabel(name) {
     return this.activities.getByText(name, { exact: true })

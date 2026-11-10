@@ -1233,5 +1233,178 @@
       "armed",
       "agenda"
     ]
+  },
+  "s05": {
+    "groups": [
+      "Acme",
+      "Globex",
+      "Initech · your company"
+    ],
+    "under": {
+      "Acme": [
+        "Acme rollout 1 call · Today Active"
+      ],
+      "Globex": [
+        "Globex pilot 1 call · Yesterday Active"
+      ],
+      "Initech · your company": []
+    },
+    "own": "Initech · your company",
+    "fold": {
+      "group": "Acme",
+      "row": "Acme rollout",
+      "count": 1,
+      "client": "acme"
+    },
+    "openOn": {
+      "id": "globex-pilot",
+      "tab": "work"
+    },
+    "hiring": {
+      "name": "Initech hiring",
+      "id": "initech-hiring",
+      "client": "Initech",
+      "clientId": "initech",
+      "row": "Initech hiring 0 calls Active",
+      "facts": "0 calls",
+      "stage": "active"
+    },
+    "clientOptions": [
+      "None",
+      "Initech",
+      "Acme",
+      "Globex"
+    ],
+    "acme": {
+      "id": "acme-rollout",
+      "name": "Acme rollout",
+      "client": "Acme",
+      "stage": "Delivery · Active",
+      "facts": "1 call · last call today",
+      "tabs": [
+        "Brief",
+        "Work3",
+        "Calls1",
+        "People",
+        "Profile"
+      ],
+      "menu": [
+        "Open Acme",
+        "Claude about this thread",
+        "Sync now",
+        "Delete…"
+      ]
+    },
+    "org": {
+      "token": "Globex",
+      "option": "Globex · globex.example",
+      "options": [
+        "Organisation…",
+        "Globex · globex.example",
+        "+ New organisation…"
+      ]
+    },
+    "rule": {
+      "kind": "Subject contains",
+      "kinds": [
+        "Meeting series",
+        "The client's people",
+        "Subject contains",
+        "Teams chat id"
+      ],
+      "words": "planning",
+      "token": "subject “planning”",
+      "json": {
+        "kind": "subject",
+        "contains": "planning"
+      },
+      "before": "1 call match · 1 pinned",
+      "after": "2 calls match · 1 pinned",
+      "takenOut": "1 call match · 1 pinned, 1 taken out by hand",
+      "remove": "1"
+    },
+    "pinned": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "day": "Today"
+    },
+    "matched": {
+      "title": "Initech planning",
+      "folder": "initech-planning"
+    },
+    "whys": {
+      "pinned": "pinned",
+      "subject": "subject"
+    },
+    "fromCall": {
+      "id": "initech-planning",
+      "name": "Initech planning",
+      "token": "series “Initech planning”",
+      "line": "1 call match",
+      "threads": [
+        "Acme rollout",
+        "Globex pilot"
+      ]
+    },
+    "globex": {
+      "id": "globex-pilot",
+      "name": "Globex pilot",
+      "renamed": "Globex pilot phase 2",
+      "group": "Globex",
+      "brief": "Pilot for **Globex** design review.",
+      "briefShown": "Pilot for Globex design review.",
+      "bold": "Globex",
+      "draft": "Draft to throw away",
+      "latest": "Globex pilot kickoff",
+      "since": "2026-11-01",
+      "notes": "Call the pilot \"GP\".",
+      "colour": "#f0a24a",
+      "colourBack": "#5aa9ff",
+      "stageGroups": [
+        "Pursuit",
+        "Delivery",
+        "Closed"
+      ],
+      "stages": [
+        "Lead",
+        "Proposal",
+        "Negotiation",
+        "Kickoff",
+        "Active",
+        "On hold",
+        "Wrap-up",
+        "Done",
+        "Lost",
+        "Cancelled"
+      ],
+      "active": "Active",
+      "wrapUp": "Wrap-up",
+      "done": "Done",
+      "wrapUpTag": "Delivery · Wrap-up",
+      "doneTag": "Done",
+      "closedRow": "Globex pilot 1 call · Yesterday",
+      "stageIds": {
+        "active": "active",
+        "done": "done",
+        "closed": "closed"
+      },
+      "domains": "globex.example",
+      "clientId": "globex"
+    },
+    "northwind": {
+      "name": "Northwind",
+      "id": "northwind",
+      "domain": "northwind.example"
+    },
+    "scratch": {
+      "name": "Scratch thread",
+      "id": "scratch-thread"
+    },
+    "notIn": "acme-rollout",
+    "callFiles": [
+      "meta.json",
+      "meeting.json"
+    ],
+    "emptyBrief": "empty-brief.md"
   }
 }

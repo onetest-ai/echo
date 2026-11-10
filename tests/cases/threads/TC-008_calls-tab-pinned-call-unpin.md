@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, calls]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-008: The Calls tab says why a call belongs; Unpin takes a pinned call out and the CLI can pin it again
