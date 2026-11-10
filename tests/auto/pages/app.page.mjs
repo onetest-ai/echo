@@ -18,6 +18,12 @@ export class AppPage {
     this.activities = page.getByRole('navigation', { name: 'Activities' })
     this.rightPanel = page.getByRole('complementary', { name: 'Right panel' })
     this.bottomPanel = page.getByRole('region', { name: 'Bottom panel' })
+    // The Record pill while a call records (its group "Recording") and its Stop; the question Stop asks, its answers.
+    this.recordingPill = this.topBar.getByRole('group', { name: 'Recording', exact: true })
+    this.pillStop = this.recordingPill.getByRole('button', { name: 'Stop', exact: true })
+    this.stopQuestion = this.topBar.getByText('Stop recording?', { exact: true })
+    this.stopRecording = this.topBar.getByRole('button', { name: 'Stop', exact: true })
+    this.keepRecording = this.topBar.getByRole('button', { name: 'Keep recording', exact: true })
   }
 
   /** A button of the activity bar, by its name. */

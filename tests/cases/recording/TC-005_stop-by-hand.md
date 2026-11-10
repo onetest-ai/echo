@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, stop, second-instance, file-fed]
 external_id: TC-REC-005
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-005: Stopping by hand ends the recording, not the call

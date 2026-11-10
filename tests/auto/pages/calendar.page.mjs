@@ -82,6 +82,18 @@ export class CalendarPage extends AppPage {
     throw new Error(`no meeting "${subject}" of a series`)
   }
 
+  /** Open the card of the meeting of that subject whose card offers this button (of several of one subject: the past
+   *  one not recorded offers "Import Teams transcript"). */
+  async openWith(subject, button) {
+    await this.event(subject).first().waitFor()
+    for (const ev of await this.event(subject).all()) {
+      await ev.click()
+      await this.cardHeading(subject).waitFor()
+      if (await this.cardButton(subject, button).waitFor({ timeout: 2_000 }).then(() => true, () => false)) return
+    }
+    throw new Error(`no meeting "${subject}" whose card offers ${button}`)
+  }
+
   /** A series' choice in a card (its group "Record every meeting"), a button of it ("Record", "Ask", "Don't record"). */
   seriesChoice(subject) {
     return this.card(subject).getByRole('group', { name: 'Record every meeting', exact: true })
@@ -118,9 +130,29 @@ export class CalendarPage extends AppPage {
     return this.card(subject).getByText(new RegExp(`^${literal(words)}`))
   }
 
+  /** The meetings in the grid whose time line names their app (a Zoom or Google Meet invite: "… 02:30 PM Zoom"). */
+  appTagged(apps) {
+    return this.main.getByRole('button', { name: new RegExp(` (${apps.map(literal).join('|')})$`) })
+  }
+
+  /** A meeting's menu (a right-click on it): the items it holds, in order. */
+  async menuOf(subject) {
+    await this.event(subject).first().click({ button: 'right' })
+    const menu = this.page.getByRole('menu')
+    await menu.waitFor()
+    const out = []
+    for (const item of await menu.getByRole('menuitem').all()) out.push((await item.innerText()).trim())
+    return out
+  }
+
   /** The colour of a meeting's left edge in the grid (green when recorded, orange when set to record). */
   async edge(subject) {
     return this.event(subject).evaluate((el) => getComputedStyle(el).borderLeftColor)
+  }
+
+  /** The left edge's colour of the meeting whose card is open (of several of one subject: the one selected). */
+  async openEdge(subject) {
+    return this.event(subject).and(this.page.locator('[aria-selected="true"]')).evaluate((el) => getComputedStyle(el).borderLeftColor)
   }
 
   /** The line now's colour and its dot's, in a day's column. */

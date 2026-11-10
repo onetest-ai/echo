@@ -1158,7 +1158,28 @@
     "from": -1,
     "days": 7,
     "inMin": "{when} · in {n} min",
-    "inHours": "{when} · in {n} h"
+    "inHours": "{when} · in {n} h",
+    "everyMeeting": "Every meeting of this series",
+    "language": "Language",
+    "recordWhen": "Record when it starts",
+    "recordButtons": [
+      "Record when it starts",
+      "Join & record",
+      "Record",
+      "Record it"
+    ],
+    "notYet": "Recording isn't available for {app} meetings yet.",
+    "armRefused": "Error: “{subject}” is a {app} meeting: recording isn't available for {app} meetings yet",
+    "importButton": "Import Teams transcript",
+    "notSignedIn": "not signed in to Microsoft 365 — `echoctl calendar login`",
+    "showPrep": "Show prep",
+    "prepareAgain": "Prepare again",
+    "prepare": "Prepare",
+    "prepareLine": "Prepare writes last time, what is open, what is new and who is coming.",
+    "apps": [
+      "Zoom",
+      "Google Meet"
+    ]
   },
   "threads": {
     "routes": {
@@ -1333,7 +1354,8 @@
       "transcribing": "Transcribing",
       "failed": "Failed",
       "audio": "Audio",
-      "memo": "Memo"
+      "memo": "Memo",
+      "recording": "Recording"
     },
     "chip": "⏱ {n} min",
     "chipPattern": "^⏱ (\\d+) min$",
@@ -1642,7 +1664,8 @@
     "stop": {
       "user": "user",
       "duration": "duration",
-      "recovered": "recovered"
+      "recovered": "recovered",
+      "callEnded": "call_ended"
     },
     "writeFailed": "write_failed",
     "captureExit": "capture.exit",
@@ -1663,5 +1686,101 @@
       "inFinder": "Show minutes in Finder",
       "showFolder": "Show folder"
     }
+  },
+  "app": {
+    "_about": "The Echo app run on the test data (`echoctl app run --no-tray --background`) and the CLI that drives it: arm, stop, quit, a second start, the data folder, `up`",
+    "armed": "armed — recording starts when the call begins (expires in 15 min)",
+    "armedInCall": "armed — call in progress, recording starts within a second",
+    "disarmed": "disarmed (nothing was recording)",
+    "nothingToStop": "nothing to stop",
+    "stopping": "stopping {folder}",
+    "busy": "(Echo is busy for the moment; it stops as soon as it is free)",
+    "stopped": "Echo stopped (was pid {pid})",
+    "started": "Echo started (pid {pid})",
+    "alreadyRunning": "Error: Echo is already running (pid {pid}) — `echoctl app quit` stops it",
+    "dataFolder": "data folder: {path}",
+    "chosen": "chosen",
+    "noted": "noted in {path}",
+    "dialogProcess": "osascript",
+    "notesFile": "my-notes.md",
+    "up": {
+      "doctor": "run the doctor skill",
+      "systemAudio": [
+        "system-audio"
+      ]
+    },
+    "events": {
+      "callStarted": "call_started",
+      "callEnded": "call_ended",
+      "callResumed": "call_resumed",
+      "recordingStarted": "recording_started",
+      "recordingStopped": "recording_stopped",
+      "transcribed": "transcribed",
+      "armExpired": "arm_expired"
+    },
+    "armedFile": "armed.json",
+    "stopRequest": "stop.request",
+    "stateDir": ".echo",
+    "notePlaceholder": "^Note at \\d+:\\d\\d — Enter to add$",
+    "flag": "⚑ Flag",
+    "noteHint": "The time is taken when you start typing.",
+    "recordingTab": "Recording Transcript",
+    "timedNote": "^- \\[(\\d\\d):(\\d\\d)\\] {text}$",
+    "timedRow": "^• (\\d\\d):(\\d\\d) {text}$",
+    "untimedNote": "- {text}",
+    "untimedRow": "• {text}",
+    "autoRun": "Echo starts Claude Code to write the minutes (automatically)",
+    "runEnded": [
+      "failed",
+      "done"
+    ],
+    "checkedBy": "app",
+    "statuses": [
+      "granted",
+      "denied",
+      "not_determined",
+      "unknown"
+    ],
+    "marks": {
+      "granted": "✓",
+      "denied": "✗",
+      "not_determined": "?",
+      "unknown": "?"
+    },
+    "permissions": "Permissions",
+    "health": "#settings/health",
+    "due": {
+      "off": "off",
+      "before": "before",
+      "at": "at"
+    },
+    "runDone": "done",
+    "actionsFile": "actions.json",
+    "runCommand": "^\\d\\d:\\d\\d:\\d\\d  → Bash echoctl (\\S+)",
+    "runCommands": [
+      "context",
+      "type",
+      "actions",
+      "title"
+    ],
+    "neverRun": [
+      "m365",
+      "compose",
+      "deliver"
+    ],
+    "modelLog": "model/model-log.jsonl",
+    "added": "added {name} ({id})",
+    "defaultSet": "new calls use {name}",
+    "liveOn": "live notes during calls: on",
+    "liveOff": "live notes during calls: off",
+    "liveLocal": "local",
+    "liveNotesFile": "live-notes.json",
+    "liveRow": "Live notes during calls",
+    "liveNotWith": "Not with {name}: its model runs on this computer, where it would slow your calls down.",
+    "aiRoute": "#settings/ai",
+    "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
+    "homeVar": "ECHOCTL_HOME",
+    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
+    "armedPrefix": "armed"
   }
 }

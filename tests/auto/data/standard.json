@@ -5131,5 +5131,88 @@
     "claude": {
       "version": "2.0.0 (Claude Code, test fake)"
     }
+  },
+  "s24": {
+    "_about": "S-24 The calendar, preps and the Inbox on a busy day: the series, the Zoom and Google Meet invites, a past meeting's import and the cards' preps",
+    "series": {
+      "acme": {
+        "subject": "Acme weekly sync",
+        "pressed": "Record",
+        "language": "English"
+      },
+      "globex": {
+        "subject": "Globex weekly",
+        "pressed": "Ask",
+        "language": "Default language",
+        "key": "id:S-GLOBEX-WEEKLY"
+      },
+      "single": {
+        "subject": "Acme design review"
+      },
+      "list": {
+        "id:S-ACME-WEEKLY": {
+          "record": "always",
+          "languages": [
+            "en"
+          ]
+        },
+        "id:S-GLOBEX-WEEKLY": {
+          "record": "ask"
+        },
+        "id:S-INITECH-ALLHANDS": {
+          "record": "never"
+        },
+        "subject:umbrella pricing call": {
+          "record": "ask",
+          "languages": [
+            "uk"
+          ]
+        }
+      },
+      "choices": [
+        "Record",
+        "Ask",
+        "Don't record"
+      ],
+      "set": "always",
+      "back": "{\"record\":\"ask\"}"
+    },
+    "otherApps": {
+      "zoom": {
+        "id": "ev-zoom-pricing",
+        "subject": "Umbrella pricing review",
+        "app": "Zoom",
+        "url": "https://zoom.us/j/85550100123?pwd=TestOnly",
+        "organizer": "Zoe Martin"
+      },
+      "meet": {
+        "id": "ev-meet-roadmap",
+        "subject": "Globex roadmap chat",
+        "app": "Google Meet",
+        "url": "https://meet.google.com/tst-wxyz-abc",
+        "organizer": "Kim Park"
+      },
+      "teams": {
+        "subject": "Acme help desk sync"
+      },
+      "menu": [
+        "Prepare",
+        "Add to a thread…",
+        "Copy the Zoom link",
+        "Show details"
+      ]
+    },
+    "import": {
+      "subject": "Acme design review",
+      "slug": "acme-design-review",
+      "calls": 1
+    },
+    "preps": {
+      "readyToCome": "Globex sponsor update",
+      "readyPast": "Umbrella security Q&A",
+      "noneToCome": "Initech team lunch",
+      "nonePast": "Acme design review",
+      "prepId": "^#upcoming/[0-9a-f]+$"
+    }
   }
 }

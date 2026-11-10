@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, arm, second-instance]
 external_id: TC-REC-004
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-004: An arm expires after 15 minutes

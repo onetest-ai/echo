@@ -321,7 +321,26 @@
     ],
     "folderA": "folder-a",
     "delay": 4,
-    "wrongModel": "no-such-model"
+    "wrongModel": "no-such-model",
+    "model": "large-v3-turbo-q5_0",
+    "autoOff": {
+      "recording": "minutes-call",
+      "title": "CLA-015 auto off",
+      "quiet": 120
+    },
+    "missed": {
+      "recording": "minutes-call",
+      "title": "CLA-007 missed",
+      "quiet": 105,
+      "startsWithin": 15,
+      "said": "sso checklist"
+    },
+    "checks": [
+      "microphone",
+      "system-audio",
+      "accessibility",
+      "screen"
+    ]
   },
   "clients": {
     "own": {
@@ -1468,7 +1487,60 @@
     "browser": {
       "title": "Acme weekly sync",
       "folder": "acme-weekly-sync"
-    }
+    },
+    "main": {
+      "conversation": "acme-sync",
+      "title": "REC-001 next call",
+      "slug": "rec-001-next-call",
+      "hangUpAt": 37,
+      "stopsIn": [
+        10,
+        15
+      ],
+      "words": [
+        "Berlin first",
+        "training room"
+      ],
+      "lines": 2
+    },
+    "notes": {
+      "typed": "Ask Dana about the Berlin office date",
+      "draft": "half a thought",
+      "terminal": "Tray-style note from the terminal",
+      "after": "Checklist goes out Friday",
+      "within": 5
+    },
+    "open": {
+      "title": "Initech planning",
+      "turns": 2
+    },
+    "autoMinutes": {
+      "recording": "minutes-call",
+      "title": "MIN-A catch-up",
+      "slug": "min-a-catch-up",
+      "early": 45,
+      "slack": 30,
+      "delay": 90
+    },
+    "notesMove": {
+      "recording": "minutes-call",
+      "title": "MIN-B notes move",
+      "slug": "min-b-notes-move",
+      "noteAfter": 35,
+      "note": "Ask Kim for the pilot budget"
+    },
+    "localLive": {
+      "profile": "here",
+      "url": "http://127.0.0.1:9",
+      "model": "m",
+      "name": "m · this computer",
+      "conversation": "minutes-call",
+      "title": "LIVE-019",
+      "slug": "live-019",
+      "early": 5,
+      "past": 100
+    },
+    "language": "en"
   },
   "s18": {
     "_about": "S-18 Recording off the happy path: the captures it records from files and the prepared recordings it copies",
@@ -1531,6 +1603,98 @@
         "omar": "remote",
         "me": "me"
       }
+    },
+    "cancel": {
+      "title": "REC-003 cancelled"
+    },
+    "expire": {
+      "title": "REC-004 expiring",
+      "minutes": 16
+    },
+    "optIn": {
+      "conversation": "acme-sync",
+      "quiet": 6
+    },
+    "midCall": {
+      "conversation": "acme-sync",
+      "title": "REC-002 mid call",
+      "slug": "rec-002-mid-call",
+      "armAt": 13,
+      "endAt": 36,
+      "before": [
+        "single sign-on",
+        "SSO checklist"
+      ],
+      "after": [
+        "Berlin first",
+        "training room"
+      ],
+      "afterLines": 2
+    },
+    "terminal": {
+      "conversation": "acme-sync",
+      "title": "CLI-004 terminal",
+      "slug": "cli-004-terminal",
+      "stopAt": 20,
+      "stoppedBy": 30,
+      "endAt": 38,
+      "said": "checklist",
+      "notSaid": [
+        "Madrid",
+        "training room",
+        "Thursday"
+      ]
+    },
+    "pill": {
+      "conversation": "acme-sync",
+      "title": "REC-005 pill stop",
+      "slug": "rec-005-pill-stop",
+      "stoppedBy": 30,
+      "endAt": 38,
+      "notSaid": [
+        "training room",
+        "Thursday"
+      ]
+    },
+    "rejoin": {
+      "conversation": "acme-sync",
+      "then": "two-remotes",
+      "title": "REC-006 rejoin",
+      "slug": "rec-006-rejoin",
+      "endAt": 38,
+      "drop": 4,
+      "checkAt": 5,
+      "thenEndAt": 36,
+      "first": [
+        "Berlin first",
+        "training room"
+      ],
+      "second": [
+        "Omar is joining",
+        "pilot plan"
+      ],
+      "lines": 2,
+      "lastOfFirst": "training room",
+      "secondFirstTurn": "Hi everyone, Omar is joining us from the security team today.",
+      "joining": "Omar is joining"
+    },
+    "busy": {
+      "conversation": "acme-sync",
+      "title": "REC-025 busy",
+      "next": "REC-025 next",
+      "slug": "rec-025-busy",
+      "frozen": 8
+    }
+  },
+  "s21": {
+    "_about": "S-21 Living with Echo: the call recorded in another data folder (lifecycle/TC-005)",
+    "model": "large-v3-turbo-q5_0",
+    "language": "en",
+    "newHome": "home2",
+    "call": {
+      "conversation": "very-short",
+      "title": "LIFE-005 new folder",
+      "slug": "life-005-new-folder"
     }
   }
 }

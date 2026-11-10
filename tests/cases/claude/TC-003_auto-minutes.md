@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [minutes, auto, second-instance, recordings, test-clock]
 external_id: TC-CLA-003
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-003: Minutes are started automatically at the delay after a call, not before

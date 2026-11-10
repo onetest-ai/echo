@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [lifecycle, second-instance]
 external_id: TC-LIFE-004
+auto: [tests/auto/specs/S-21.spec.mjs]
 ---
 
 # TC-004: Only one Echo runs at a time

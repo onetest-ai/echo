@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, stop, second-instance, file-fed]
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-015: echoctl stop ends the recording, not the call, and the call isn't recorded again

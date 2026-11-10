@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calendar, today, cli, zoom, google-meet, recording]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-026: Arming a Zoom or Google Meet meeting says recording isn't available for that app yet, in the window and the CLI

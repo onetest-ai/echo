@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [cli, doctor, second-instance]
 external_id: TC-CLI-003
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-005: echoctl doctor reports permissions from the running app, as Health does
@@ -24,9 +25,9 @@ external_id: TC-CLI-003
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `. <dir>/env; target/debug/echoctl doctor --json` | `checked_by` is "app" (the running app answered); four checks: `microphone`, `system-audio`, `accessibility`, `screen`, each with a `status` (granted / denied / unknown), a `how` and a `settings_url`; `ready` true when the two required ones are granted |
-| 2 | `{{base_url}}/#settings/health` | PERMISSIONS lists Microphone, System Audio Recording, Accessibility and Screen Recording with the same states as step 1 (✓ for granted) |
-| 3 | `. <dir>/env; target/debug/echoctl up` | `model` is "large-v3-turbo-q5_0" (the speech model the app uses), `app_pid` the running app's, `ready` true |
+| 1 | `. <dir>/env; target/debug/echoctl doctor --json` | `checked_by` is "app" (the running app answered); four checks: `microphone`, `system-audio`, `accessibility`, `screen`, each with a `status` (granted / denied / not_determined / unknown), a `how` and a `settings_url`; `ready` true when the two required ones are granted |
+| 2 | `{{base_url}}/#settings/health` | PERMISSIONS lists Microphone, System Audio Recording, Accessibility and Screen Recording with the same states as step 1 (✓ for granted, ✗ for denied, ? otherwise) |
+| 3 | `. <dir>/env; target/debug/echoctl up` | `model` is "large-v3-turbo-q5_0" (the speech model the app uses), `app_pid` the running app's, `ready` as step 1's (true when the two required permissions are granted to the app; a file-fed run doesn't need them) |
 
 ## Expected Final State
 doctor answers from the running app, matching Health; `up` names the speech model.

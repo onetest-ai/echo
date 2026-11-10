@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [prep, calendar, card]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-012: A meeting's card offers Show prep (and Prepare again), Prepare, or nothing, by its prep and timing

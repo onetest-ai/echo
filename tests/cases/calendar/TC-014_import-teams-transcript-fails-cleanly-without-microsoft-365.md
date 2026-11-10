@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calendar, card, import]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-014: Import Teams transcript without Microsoft 365 ends in a clear message on the card, and the meeting stays unrecorded

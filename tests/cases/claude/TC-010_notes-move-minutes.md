@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [notes, minutes, auto, second-instance, recordings, test-clock]
 external_id: TC-CLA-015
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-010: A note added after the call moves the minutes' time

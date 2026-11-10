@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calendar, series]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-019: Choosing Record for a series is kept after a reload and is what echoctl series lists
