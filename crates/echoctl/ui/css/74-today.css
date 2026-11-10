@@ -212,3 +212,18 @@
 .pw-status.st-ok i { background: var(--me); } .pw-status.st-warn i { background: var(--warn); } .pw-status.st-bad i { background: var(--danger); }
 .pw-card b { font-size: 13.5px; }
 .pw-card p { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+/* Today → Recorded this week: three numbers; at M a bar a day, Monday to Sunday, today marked. A click opens Calls. */
+.cw-sec { cursor: pointer; }
+.cw-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.cw-stat { display: flex; flex-direction: column; min-width: 0; }
+.cw-stat b { font-size: 26px; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.cw-stat span { font-size: 12px; white-space: nowrap; }
+.cw-none { margin: 6px 0 0; font-size: 12.5px; }
+.cw-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.cw-day { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.cw-bar { display: flex; align-items: flex-end; width: 100%; max-width: 28px; height: 48px; border-bottom: 2px solid var(--line-strong); }
+.cw-bar i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.cw-day.on .cw-bar i { background: var(--accent); }
+.cw-day.on .cw-bar { border-bottom-color: var(--accent); }
+.cw-d { font-size: 11px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.cw-day.on .cw-d { color: var(--text); font-weight: 650; }

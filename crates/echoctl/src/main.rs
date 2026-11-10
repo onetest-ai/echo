@@ -11,6 +11,7 @@ mod audio;
 mod ax;
 mod calendar;
 mod calls;
+mod calls_week;
 #[cfg(feature = "tray")]
 mod announce;
 mod call_language;
