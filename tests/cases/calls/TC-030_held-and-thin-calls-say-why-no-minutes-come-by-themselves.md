@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-030: A call held by Not yet or too thin for automatic minutes says so and still offers Write minutes

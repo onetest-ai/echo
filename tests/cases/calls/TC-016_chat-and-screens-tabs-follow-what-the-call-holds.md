@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, tabs, extras]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-016: A call shows Chat and Screens tabs, with counts, only when it has chat or frames

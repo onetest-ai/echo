@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, delete]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-035: Delete asks first; Keep cancels; Delete takes the call out of the list and into the trash folder

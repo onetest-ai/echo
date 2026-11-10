@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-027: A call whose automatic minutes are ahead shows the time left, a ring, why it moved, Write now and Not yet

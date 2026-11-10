@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [prep, calls, tabs]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-010: A recorded call whose meeting had a prep has a Prep tab before Minutes; other calls have none

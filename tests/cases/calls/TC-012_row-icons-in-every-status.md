@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, list, status]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-012: Each row's icon names the call's state: minutes, transcript, transcribing, failed, audio, memo

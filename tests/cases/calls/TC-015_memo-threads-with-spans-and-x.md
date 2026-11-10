@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, memo, threads]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-015: A memo's thread chips show the time they were found in, and × takes one out

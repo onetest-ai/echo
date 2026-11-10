@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, kind]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-022: The minutes frame shows only the sections the call's minutes hold, for a call, a Teams import and a memo

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, what-moved]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-020: What moved lists what the call changed in its thread, hides what the verifier called wrong, and marks the doubtful

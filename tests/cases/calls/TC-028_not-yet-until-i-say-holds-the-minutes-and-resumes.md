@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, auto]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-028: Not yet › Until I say holds the minutes; Write them automatically again brings the countdown back

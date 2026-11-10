@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, status]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-033: While a call is being transcribed, the call opens on Transcript and Minutes says they come after the call

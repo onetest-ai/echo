@@ -4619,5 +4619,365 @@
       "noProfile": "Error: this run names no AI profile, so it reads no call",
       "badProfile": "no-such-profile"
     }
+  },
+  "s23": {
+    "_about": "S-23: the calls in every state (slugs end their folders' names; titles as the list shows them)",
+    "groups": [
+      "Today",
+      "Yesterday"
+    ],
+    "rows": [
+      [
+        "Acme weekly sync",
+        "minutes",
+        [
+          "30 min"
+        ]
+      ],
+      [
+        "Initech planning",
+        "transcript",
+        [
+          "25 min"
+        ]
+      ],
+      [
+        "Quick check-in",
+        "transcribing",
+        [
+          "15 min"
+        ]
+      ],
+      [
+        "Umbrella intro call",
+        "failed",
+        [
+          "20 min"
+        ]
+      ],
+      [
+        "Recording",
+        "audio",
+        [
+          "12 min"
+        ]
+      ],
+      [
+        "Memo",
+        "memo",
+        [
+          "Memo",
+          "4 min"
+        ]
+      ],
+      [
+        "Globex steering",
+        "minutes",
+        [
+          "Teams transcript",
+          "45 min"
+        ]
+      ],
+      [
+        "Globex weekly",
+        "transcript",
+        [
+          "Teams transcript"
+        ]
+      ]
+    ],
+    "standup": {
+      "title": "Globex standup",
+      "slug": "globex-standup",
+      "notes": "my-notes.md",
+      "due": 15
+    },
+    "noChip": [
+      "Initech planning",
+      "Acme weekly sync",
+      "Quick check-in",
+      "Umbrella contract call"
+    ],
+    "profile": {
+      "name": "Claude · work",
+      "model": "sonnet",
+      "account": "sam@initech.example · initech"
+    },
+    "out": {
+      "name": "Claude · out",
+      "option": "Claude · out — not signed in"
+    },
+    "profiles": [
+      "Claude Code (as configured)",
+      "Claude · work — sam@initech.example · initech",
+      "Claude · other — sam.rivera@globex.example · globex",
+      "Claude · out — not signed in",
+      "Qwen · this computer"
+    ],
+    "profileSelected": "Claude · work — sam@initech.example · initech",
+    "prepError": [
+      "Globex standup",
+      "Acme go-live check"
+    ],
+    "prepFirst": [
+      "Umbrella intro call",
+      "Globex retro",
+      "Globex standup",
+      "Acme go-live check"
+    ],
+    "acme": {
+      "title": "Acme weekly sync",
+      "slug": "acme-weekly-sync",
+      "chat": 3,
+      "screens": 2,
+      "turns": 17,
+      "minutes": 30,
+      "people": "Sam Rivera, Dana Lee, Omar Haddad, Rita Gomez, Ivan Petrov, Yuki Tanaka",
+      "more": 1,
+      "kind": "Client",
+      "sections": [
+        "Summary",
+        "Decisions",
+        "Action items",
+        "Open questions"
+      ]
+    },
+    "kickoff": {
+      "title": "Globex pilot kickoff",
+      "chat": 1,
+      "sections": [
+        "Summary",
+        "Action items"
+      ]
+    },
+    "steering": {
+      "title": "Globex steering",
+      "slug": "globex-steering",
+      "minutes": 45,
+      "kind": "Client",
+      "people": "Sam Rivera, Kim Park, Noor Aziz, Ben Okafor",
+      "sections": [
+        "Summary",
+        "Decisions"
+      ]
+    },
+    "memo": {
+      "title": "Memo",
+      "slug": "memo",
+      "minutes": 4,
+      "sections": [
+        "Summary"
+      ],
+      "chips": [
+        [
+          "Acme rollout",
+          "acme-rollout",
+          "0:00–0:06"
+        ],
+        [
+          "Globex pilot",
+          "globex-pilot",
+          "0:06–0:12"
+        ]
+      ]
+    },
+    "security": {
+      "title": "Acme security review"
+    },
+    "walkthrough": {
+      "title": "Umbrella proposal walkthrough"
+    },
+    "vandelay": {
+      "title": "Vendor call with Vandelay"
+    },
+    "initrode": {
+      "title": "Initrode intro"
+    },
+    "triage": {
+      "title": "Globex support triage"
+    },
+    "thin": [
+      [
+        "Coffee chat",
+        "shorter than 3 minutes"
+      ],
+      [
+        "Globex weekly",
+        "less than 1,500 characters of transcript"
+      ]
+    ],
+    "leftAlone": [
+      "Duff discovery",
+      "Design guild"
+    ],
+    "due": {
+      "title": "Initech planning"
+    },
+    "intro": {
+      "title": "Umbrella intro call",
+      "slug": "umbrella-intro-call",
+      "error": "the speech model could not be loaded: out of memory"
+    },
+    "recording": {
+      "title": "Recording"
+    },
+    "plain": [
+      "Initech planning",
+      "Memo"
+    ],
+    "quick": {
+      "title": "Quick check-in"
+    },
+    "initech": {
+      "title": "Initech planning"
+    },
+    "moved": {
+      "thread": "Acme rollout",
+      "count": 6,
+      "cards": [
+        [
+          "Criterion met S001 SSO for the Berlin pilot",
+          "“The SSO checklist is done, we sent it to security on Monday” — Dana Lee",
+          "0:17",
+          null
+        ],
+        [
+          "Done T001 Send the SSO checklist",
+          "“The SSO checklist is done, we sent it to security on Monday” — Dana Lee",
+          "0:17",
+          null
+        ],
+        [
+          "Held T007 Answer the security questionnaire",
+          "“The security questionnaire is on hold until legal reviews the data processing terms” — Omar Haddad",
+          "0:29",
+          "weak · to review"
+        ],
+        [
+          "Waiting T005 Hold the help desk training session",
+          "“We are still waiting for the access list from Omar before we can configure the groups” — Me",
+          "0:56",
+          "to check"
+        ],
+        [
+          "Answered Q001 Who signs off the pilot on Acme's side?",
+          "“Rita will sign off the pilot for Acme because she owns the budget” — Omar Haddad",
+          "1:09",
+          null
+        ],
+        [
+          "Now waits T003 Prepare the training deck",
+          "“The training deck depends on the access list, so it comes after the groups are set up” — Dana Lee",
+          "1:22",
+          null
+        ]
+      ],
+      "item": [
+        "T001",
+        "Send the SSO checklist"
+      ],
+      "notShown": "Run the data migration dry run",
+      "memoThreads": [
+        [
+          "Acme rollout",
+          "unread"
+        ],
+        [
+          "Globex pilot",
+          "readsSoon"
+        ]
+      ],
+      "kickoffThreads": [
+        [
+          "Globex pilot",
+          "unread"
+        ]
+      ],
+      "kickoffNot": "Acme rollout"
+    },
+    "chat": {
+      "acme": [
+        [
+          "Dana Lee",
+          "before the call",
+          "Agenda attached, see you in a minute",
+          "agenda.docx"
+        ],
+        [
+          "Omar Haddad",
+          "1:35",
+          "Questionnaire link: https://acme.example/q"
+        ],
+        [
+          "Facilitator",
+          "10:10",
+          "Recording notes are on"
+        ]
+      ],
+      "kickoff": [
+        [
+          "Kim Park",
+          "0:12",
+          "Plan template?",
+          "pilot-plan.xlsx"
+        ]
+      ]
+    },
+    "frames": [
+      "1:05",
+      "5:07"
+    ],
+    "live": {
+      "now": "Berlin pilot go-ahead",
+      "status": "Claude · work · The call ended · 6 updates · 76K in · 2K out · $0.21 · Not covered: 10:00–11:00",
+      "heading": "During the call",
+      "rows": [
+        "• 00:12 Dana says the checklist went out on Monday",
+        "? 00:31 Does legal need the old contract too",
+        "! 00:45 Pilot starts in Berlin only",
+        "✦ 00:45 ☐ Rita Gomez Finish the dry run",
+        "☐ 00:58 Remind Omar about the access list",
+        "☑ 01:10 Send the agenda",
+        "⚑ 01:30 Budget owner is Rita “she owns the budget”",
+        "• a note without a time",
+        "✦ 02:31 ? Who replaces Yuki?",
+        "✦ 04:10 ! The pilot goes ahead in Berlin"
+      ],
+      "items": [
+        "Finish the dry run",
+        "Who replaces Yuki?",
+        "The pilot goes ahead in Berlin"
+      ],
+      "owner": "Rita Gomez",
+      "asks": [
+        [
+          "What did Omar say about the questionnaire?",
+          "It is on hold until legal reviews the data processing terms."
+        ],
+        [
+          "What did I miss?",
+          "You missed: Rita owns the budget."
+        ]
+      ],
+      "readOnly": "Who replaces Yuki?",
+      "edit": "Dana says the checklist went out on Monday",
+      "jump": [
+        "02:31",
+        120,
+        151
+      ]
+    },
+    "deleted": {
+      "title": "Guest call 6",
+      "slug": "guest-call-6",
+      "trashed": "acme-draft-call"
+    },
+    "draft": {
+      "title": "Acme draft call",
+      "slug": "acme-draft-call",
+      "q": "draft",
+      "at": "_170000",
+      "daysBefore": 3
+    }
   }
 }

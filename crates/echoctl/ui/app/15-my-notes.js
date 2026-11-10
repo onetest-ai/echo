@@ -47,7 +47,7 @@ function notesTimeline(c) {
       const raw = b.raw.trim()
       if (!raw) return ''
       const h = raw.match(/^#{1,6}\s+(.*)$/)
-      return h ? `<div class="nt-head">${esc(h[1])}</div>` : `<div class="nt-entry k-general"><span class="nt-icon">¶</span><div class="nt-body"><span class="nt-text">${esc(raw)}</span></div></div>`
+      return h ? `<div class="nt-head">${esc(h[1])}</div>` : `<div class="nt-entry k-general" role="listitem"><span class="nt-icon">¶</span><div class="nt-body"><span class="nt-text">${esc(raw)}</span></div></div>`
     }
     const [icon, label] = NOTE_LOOK[b.kind] || NOTE_LOOK.note
     const mark = b.kind === 'todo'
@@ -57,13 +57,13 @@ function notesTimeline(c) {
     const quote = b.quote ? `<blockquote>“${esc(b.quote)}”</blockquote>` : ''
     if (S.noteEdit && S.noteEdit.i === i) {
       const kinds = ['note', 'question', 'decision', 'todo', 'flag'].map((k) => `<button class="nt-kind${S.noteEdit.kind === k ? ' on' : ''}" data-edit-kind="${k}">${k === 'note' ? 'Note' : NOTE_LOOK[k][0] + ' ' + NOTE_LOOK[k][1]}</button>`).join('')
-      return `<div class="nt-entry editing k-${S.noteEdit.kind}">${mark}<div class="nt-body"><div>${at}</div>
+      return `<div class="nt-entry editing k-${S.noteEdit.kind}" role="listitem">${mark}<div class="nt-body"><div>${at}</div>
         <textarea id="note-edit" rows="2" aria-label="Edit this note">${esc(S.noteEdit.text)}</textarea>${quote}
         <div class="nt-kinds">${kinds}</div>
         <div class="nt-edit-acts"><span class="grow">Enter to save · Esc to cancel</span><button class="btn ghost" data-cmd="note-edit-cancel">Cancel</button><button class="btn primary" data-cmd="note-edit-save">Save</button></div></div><span></span></div>`
     }
     const text = b.text ? esc(b.text) : (b.kind === 'flag' ? '<span class="muted">Flagged moment</span>' : '')
-    return `<div class="nt-entry k-${b.kind}${b.done ? ' done' : ''}">${mark}<div class="nt-body"><div>${at}<span class="nt-text" data-note-edit="${i}" title="Click to edit">${text}</span></div>${quote}</div><span class="nt-tools"><button class="nt-x" data-note-edit="${i}" title="Edit" aria-label="Edit this note">✎</button><button class="nt-x" data-note-del="${i}" title="Delete" aria-label="Delete this note">×</button></span></div>`
+    return `<div class="nt-entry k-${b.kind}${b.done ? ' done' : ''}" role="listitem">${mark}<div class="nt-body"><div>${at}<span class="nt-text" data-note-edit="${i}" title="Click to edit">${text}</span></div>${quote}</div><span class="nt-tools"><button class="nt-x" data-note-edit="${i}" title="Edit" aria-label="Edit this note">✎</button><button class="nt-x" data-note-del="${i}" title="Delete" aria-label="Delete this note">×</button></span></div>`
   })
   // The call's live notes (✦) among the user's own, by time: theirs never move (`LiveTimeline.merge`).
   const liveItems = LiveTimeline.items((c.live || {}).notes)
@@ -82,7 +82,7 @@ function notesTimeline(c) {
     <div class="nt-bar"><span class="saved-state" id="notes-state">${esc(notesState(v, pendingNote(c.name)))}</span><button class="icon-btn" data-cmd="notes-raw" title="Edit as text (my-notes.md)" aria-label="Edit as text">${ICON('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>')}</button></div>
     ${kept}${err}
     ${liveBox(c)}
-    <div class="nt-list" id="nt-list">${items}${answers}${empty}</div>
+    <div class="nt-list" id="nt-list" role="list" aria-label="Your notes">${items}${answers}${empty}</div>
     <div class="nt-compose">
       <div class="nt-kinds">${kinds}</div>
       <div class="nt-row"><input id="note-input" class="search" autocomplete="off" maxlength="1000" placeholder="${esc(ph)}" value="${esc(S.noteDraft)}" aria-label="New note"${S.closing ? ' readonly' : ''}>${live ? `<button class="btn nt-flag" data-cmd="note-flag" title="Flag this moment — the minutes look here">⚑ Flag</button>` : ''}</div>
@@ -268,7 +268,7 @@ function needsPanel() {
     const acts = busy ? `<span class="ny-busy" role="status"><i></i>${esc(busy)}</span>` : (i.actions || []).map((a, k) => `<button class="btn${a.primary ? (i.urgent ? ' warn' : ' primary') : ''}" data-ny-act="${esc(i.key)}" data-k="${k}">${esc(a.label)}</button>`).join('')
     const go = i.go ? `<button class="btn ghost" data-ny-go="${esc(i.go)}">${(i.actions || []).length ? 'Open' : 'Open →'}</button>` : ''
     const failed = !busy && ((NY.data || {}).failed || {})[i.key]
-    return `<div class="ny-item${i.urgent ? ' urgent' : ''}${busy ? ' busy' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${failed ? `<span class="ny-why ny-err">${esc(failed)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
+    return `<div role="group" aria-label="${esc(i.title)}" class="ny-item${i.urgent ? ' urgent' : ''}${busy ? ' busy' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${failed ? `<span class="ny-why ny-err">${esc(failed)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
   }
   const groupName = (g) => g === '-' || g === 'echo' ? 'Everything else' : (d.clients || {})[g] || g
   const groups = (items) => {

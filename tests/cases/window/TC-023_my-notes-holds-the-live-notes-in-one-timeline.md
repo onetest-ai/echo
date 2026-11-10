@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [live-notes, my-notes, transcript]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-023: My notes holds the call's live notes — Now pinned on top, ✦ items among the user's notes by time — and the Transcript tab is the transcript alone

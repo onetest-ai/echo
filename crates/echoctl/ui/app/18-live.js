@@ -120,7 +120,7 @@ function liveItemHtml(x) {
   const [icon, label] = NOTE_LOOK[x.kind] || NOTE_LOOK.note
   const at = x.t != null ? `<a class="at" data-at="${x.t}" title="Jump to ${clock(x.t)} in the transcript">${esc(NoteDoc.stamp(x.t))}</a> ` : ''
   const owner = x.owner ? `<span class="owner${x.owner === 'Me' ? ' me' : ''}">${esc(x.owner)}</span> ` : ''
-  return `<div class="nt-entry nt-livei k-${x.kind}" data-live-item><span class="nt-icon nl-mark" title="Live notes (written by the model)">✦</span><div class="nt-body"><div>${at}<span class="nl-kind" title="${label}">${icon}</span> ${owner}<span class="nt-text">${esc(x.text)}</span></div></div><span></span></div>`
+  return `<div class="nt-entry nt-livei k-${x.kind}" data-live-item role="listitem"><span class="nt-icon nl-mark" title="Live notes (written by the model)">✦</span><div class="nt-body"><div>${at}<span class="nl-kind" title="${label}">${icon}</span> ${owner}<span class="nt-text">${esc(x.text)}</span></div></div><span></span></div>`
 }
 
 /** Answers to questions about the call (`live-asks.jsonl`), after the timeline. */

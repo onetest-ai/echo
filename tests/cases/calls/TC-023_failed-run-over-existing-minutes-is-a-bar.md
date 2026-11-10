@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, minutes, run]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-023: A failed run over existing minutes shows a bar above them; a finished run shows none

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [calls, live-notes, transcript]
+auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
 # TC-019: A call that kept live notes shows the transcript alone in its Transcript tab; the live notes are in My notes
