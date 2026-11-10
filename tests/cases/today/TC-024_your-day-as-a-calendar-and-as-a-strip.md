@@ -26,7 +26,7 @@ tags: [today, widgets, your-day, calendar, strip]
 | 2 | Read the calendar | "Your day": the hours down (09 … 18 at least), a block a meeting at its time and length with its subject and time, overlapping ones side by side in lanes; not answered: dashed grey, maybe: dashed violet; past dimmed; the line now; at a first draw it is scrolled to a little before now when it doesn't all fit |
 | 3 | Click a block in the calendar | Its card on the right ("Meeting"), as from Your day's line |
 | 4 | Right-click a block (calendar or strip) | Calendar's menu for that meeting |
-| 5 | `target/debug/echoctl today reset`; reload | Today as it comes: Your day's list beside My work, no strip |
+| 5 | `target/debug/echoctl today reset`; reload | Today as it comes: Your day's list holding the first column, no calendar or strip |
 
 ## Notes
 - The rules are the node test `today-calendar.test.mjs` (`dayLanes`, `dayWindow`). Stepping down by height (calendar → agenda on now) comes with the fill heights' rules.

@@ -21,23 +21,25 @@ tags: [today, widgets, layout, cli]
 
 ## Test Data
 
-| Widget | On the page |
-|---|---|
-| `core:needs.now` | Needs you now |
-| `core:routines.cards` | a routine's card (none in the standard data: draws nothing) |
-| `core:calendar.agenda` | Your day |
-| `core:tasks.mine` | My work · this week |
+| Widget | Size | On the page |
+|---|---|---|
+| `core:calendar.agenda` | S | Your day, holding the first column |
+| `core:calendar.next` | S | Next meeting (while there is one) |
+| `core:needs.now` | M | Needs you now, beside Next |
+| `core:calendar.choices` | M | The day's choices (while there are some) |
+| `core:routines.cards` | M | a routine's card (none in the standard data: draws nothing) |
+| `core:tasks.mine` | M | My work · this week |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl today`; open `{{base_url}}/#today` | The four widgets of Test Data in that order, rows starting at Needs you now, the cards and Your day (`row: true`), My work in Your day's row; the page: Needs you now on top, then Your day and My work side by side — Today as it was before widgets |
-| 2 | `target/debug/echoctl today move core:tasks.mine --above core:needs.now`; reload the page | The command prints My work first on a row of its own; the page: My work · this week on top, full width, then Needs you now, then Your day |
+| 1 | `target/debug/echoctl today`; open `{{base_url}}/#today` | The six widgets of Test Data in that order, rows starting at each but Needs you now (in Next's row); the page: Your day on the left the whole height (`.td-hold`), beside it Next meeting and Needs you now side by side, then The day's choices, then My work |
+| 2 | `target/debug/echoctl today move core:tasks.mine --above core:calendar.agenda`; reload the page | The command prints My work first on a row of its own; the page: My work · this week on top, then the rows (nothing holds a column now: Your day is no longer first) |
 | 3 | `target/debug/echoctl today remove core:needs.now`; reload | Needs you now is gone from the page (its items stay: `echoctl widget show core:needs.now` still lists them) |
 | 4 | `target/debug/echoctl today add core:needs.now --after core:tasks.mine`; reload | Needs you now beside My work, in one row |
 | 5 | `target/debug/echoctl today size core:tasks.mine L` | Refused: "core:tasks.mine takes S, M, not L", exit code 1; `echoctl today` unchanged |
-| 6 | `target/debug/echoctl today add core:calendar.strip` | Refused: "core:calendar.strip isn't on Today's page yet …", exit code 1 |
+| 6 | `target/debug/echoctl today add core:nope` | Refused: no widget "core:nope" (`echoctl widget list` names them), exit code 1 |
 | 7 | `target/debug/echoctl today reset`; reload | As in step 1 |
 
 ## Expected Final State

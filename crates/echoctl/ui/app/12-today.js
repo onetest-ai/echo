@@ -82,14 +82,24 @@ function todayView() {
   const cols = tdWidth ? todayCols(tdWidth, S.todayCols) : S.todayCols || 3
   S.todayCols = cols
   todayWatch()
-  const blocks = todayLines(rowsIn, cols).map((line) => {
+  const plan = todayPlan(rowsIn, cols)
+  const lineHtml = (line) => {
     // In edit mode a widget is framed: grip, name, S M L, × (13-today-edit.js); an empty one shows what it is.
     const part = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
     if (!line.fill && line.items.length === 1) return part(line.items[0].id)
     // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
     const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
-  }).join('')
+  }
+  // One column: Your day that held a column becomes the strip (TodayResponsive C).
+  // (Only when the strip has something to draw: a day of tasks or unanswered meetings keeps its list.)
+  const strip = (plan.down === 'core:calendar.calendar' || plan.down === 'core:calendar.agenda') && !S.tdEdit ? dayStripView(d, now) : ''
+  if (strip) parts[plan.down] = strip
+  const part0 = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
+  // A widget holding the first column: it the whole height, the rest beside it in the other columns.
+  const blocks = plan.hold
+    ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map(lineHtml).join('')}</div></div>`
+    : plan.lines.map(lineHtml).join('')
   setTimeout(() => { todayMoreCue(); twRefocus() })
   return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
@@ -197,6 +207,20 @@ function todayLines(rows, cols) {
     }
   }
   return lines
+}
+/** Today's plan (TodayResponsive A / B / C): a fill widget alone on the layout's first row, at span 1, holds the first
+ *  column the whole height (`hold`) and the rest is laid out beside it in the other columns (`lines`); in one column it
+ *  holds nothing and steps down (`down`: Your day as the strip). Otherwise the rows, as `todayLines`. */
+function todayPlan(rows, cols) {
+  const first = rows[0] || []
+  const live = first.filter((w) => !w.empty)
+  const holder = live.length === 1 && first.length === 1 && live[0].fill && live[0].span === 1 && rows.length > 1 ? live[0] : null
+  if (!holder) return { hold: null, down: null, lines: todayLines(rows, cols) }
+  if (cols < 2) return { hold: null, down: holder.id, lines: todayLines([[{ ...holder, fill: false }], ...rows.slice(1)], 1) }
+  // Nothing beside it now (all temporal and empty): no column held, the page as rows.
+  const beside = todayLines(rows.slice(1), cols - 1)
+  if (!beside.length) return { hold: null, down: null, lines: todayLines(rows, cols) }
+  return { hold: { id: holder.id }, down: null, lines: beside }
 }
 // end of the today layout block
 
@@ -467,7 +491,7 @@ function agendaRows(day, now, tasks) {
 /** The layout's widgets the page has a part for, in order, a row each where one starts (`row`): [[id, …], …]. No
  *  layout (an older app): Today as it comes. */
 function todayRows(layout, drawn) {
-  const items = layout || [{ widget: 'core:needs.now', row: true }, { widget: 'core:routines.cards', row: true }, { widget: 'core:calendar.agenda', row: true }, { widget: 'core:tasks.mine' }]
+  const items = layout || [{ widget: 'core:calendar.agenda', row: true }, { widget: 'core:calendar.next', row: true }, { widget: 'core:needs.now' }, { widget: 'core:calendar.choices', row: true }, { widget: 'core:routines.cards', row: true }, { widget: 'core:tasks.mine', row: true }]
   const rows = []
   for (const it of items) {
     if (!drawn.includes(it.widget)) continue

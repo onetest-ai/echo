@@ -310,8 +310,9 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     await expect(today.cardItems(card.title)).toHaveText(card.items)
     await expect(today.cardBold(card.title, card.bold)).toHaveCount(1)
     await expect(today.cardSays(card.title, k.ai)).toBeVisible()
-    // At the top: above Your day.
-    expect((await today.card(card.title).boundingBox()).y).toBeLessThan((await today.yourDay.boundingBox()).y)
+    // Beside Your day: in the column right of it (Today as it comes, F-TODAY-21).
+    const [c, y] = [await today.card(card.title).boundingBox(), await today.yourDay.boundingBox()]
+    expect(c.x).toBeGreaterThanOrEqual(y.x + y.width)
     await today.cardButton(card.title, k.gotIt).click()
     await expect(today.card(card.title)).toHaveCount(0)
     await page.reload()

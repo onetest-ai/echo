@@ -30,7 +30,7 @@ tags: [today, widgets, edit-mode, drag-and-drop]
 | 6 | Pick "Your day · strip" (S is greyed: it takes M and L); click "Add at M" | The strip is added on a new last row at M |
 | 7 | Type "calen" in the search, a letter at a time | The search keeps the keyboard; Your day's widgets and Next meeting listed (label, about or part matches), the part back on All |
 | 8 | Click Done | No frames, the panel closes; Today keeps the changes after a reload |
-| 9 | Edit Today → "Reset to the default" | Today as it comes: Needs, Routine cards, Your day beside My work |
+| 9 | Edit Today → "Reset to the default" | Today as it comes: Your day holding the first column; beside it Next meeting and Needs you now, the choices, My work |
 | 10 | Edit Today again; Tab to My work's "↑" ("Move My work · this week to a row above") and press Enter | My work moves to a row of its own above the row before it; the focus stays on its move button; each frame ends inside its row (no frame under the next row) |
 | 11 | Tab to a widget's × and press Enter | It is off Today; the focus is on the next widget's × (not the page) |
 | 12 | Resize to 700 × 1000; close Add a widget with its ×; click "Add a widget" in the head | The panel opens again (over the page at this width); Done, then `target/debug/echoctl today reset` |
