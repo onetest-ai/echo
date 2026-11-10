@@ -14,7 +14,7 @@
   },
   {
    "id": "F-TODAY-02",
-   "feature": "Your day lists where you'll be: today's meetings (but declined ones) and calls in time order with the line \"now\", a line each — time (violet the next — the line holding the first meeting you go to that isn't over, the one Next meeting shows — amber a choice), a bar (solid: going; dashed: no reply, maybe), its threads and its reason: next, no reply, maybe, \"instead of …\" and \"N skipped\" for an overlap one you accepted wins, \"N others at once\" for two you accepted, your work in a free gap of 45 minutes or more, its minutes (new minutes with what they hold, writing, at HH:MM, failed — try again), prep, import the Teams transcript, recording not available for Zoom/Meet; Show N skipped; ⋯ or right-click opens Calendar's menu for it, a click its card on the right; the greeting counts the meetings you go to; the skipped, shown, in time order; a list cut by its card fades at the bottom while there is more",
+   "feature": "Your day lists where you'll be: today's meetings (but declined ones) and calls in time order with the line \"now\", a line each — time (violet the next — the line holding the first meeting you go to that isn't over, the one Next meeting shows — amber a choice), a bar (solid: going; dashed: no reply, maybe), its threads and its reason: next, no reply, maybe, \"instead of …\" and \"N skipped\" for an overlap one you accepted wins, \"N others at once\" for two you accepted, your work in a free gap of 45 minutes or more, its minutes (new minutes with what they hold, writing, at HH:MM, failed — try again), prep, import the Teams transcript, recording not available for Zoom/Meet; Show N skipped; ⋯ or right-click opens Calendar's menu for it, a click its card on the right; the greeting counts the meetings you go to; the skipped, shown, in time order; a list cut by its card fades at the bottom while there is more; it opens with the row before now whole at its top (late in the day, the nearest whole row)",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -114,6 +114,13 @@
    "id": "F-TODAY-16",
    "feature": "The day's choices (core:calendar.choices, temporal, put on with echoctl today): meetings you accepted at once (not over) with the one Echo suggests and why (you organise it, in a thread, the longer, the earlier) and Keep buttons — Keep declines the others after a second click naming them; invites still to answer with Echo's suggestion (decline when you go elsewhere then, naming the one it suggests keeping; accept when free) and Accept / Maybe / Decline; an answer goes to the organiser through Echo's Microsoft 365 sign-in only on the click (m365::event_respond, refused in runs), the agenda takes it at once; a failure says why",
    "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-17",
+   "feature": "Threads at a glance (core:tasks.glance, M/L) and Done this week (core:tasks.done, S/M), put on with echoctl today: each open thread's tasks as a traffic-light bar — done this week (green), to do (amber), waiting on someone or blocked (red) — and its total, busiest first (M 5, L 10, the rest in Threads), its name opening its Work; the tasks done since Monday counted, at M the latest four with their thread, each opening its details; echoctl widget show gives the same data",
+   "priority": "medium",
    "check": "agent",
    "axes": []
   }

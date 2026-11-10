@@ -34,6 +34,8 @@ pub const CORE: &[Widget] = &[
     w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
     w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true),
     w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true),
+    w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false),
+    w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false),
     w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false),
     w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true),
     w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true),
@@ -63,6 +65,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         "work" => crate::today::work(i.tasks),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
+        "glance" => crate::glance::today(),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
     if w.temporal {

@@ -164,7 +164,16 @@ function renderNow() {
     // Your day opens on now: the line at the top with what comes next under it (one row of the past above it);
     // drawn again, it stays where it was scrolled.
     const r = $('.td-rows'), now = r && r.querySelector('.td-now')
-    if (r && r !== rows) r.scrollTop = keep != null ? keep : now ? Math.max(0, now.getBoundingClientRect().top - r.getBoundingClientRect().top - 64) : 0
+    // The row before the line starts at the top — whole, never cut (a fixed offset cut it).
+    const past = now && now.previousElementSibling, from = past || now
+    if (r && r !== rows) {
+      const top0 = r.getBoundingClientRect().top - r.scrollTop, at = (el) => el.getBoundingClientRect().top - top0
+      let to = keep != null ? keep : from ? at(from) : 0
+      // Late in the day the list can't scroll that far: the nearest whole row above, the rest faded at the bottom.
+      const max = r.scrollHeight - r.clientHeight
+      if (keep == null && to > max) to = Math.max(0, ...[...r.children].map(at).filter((y) => y <= max))
+      r.scrollTop = Math.max(0, to)
+    }
   } else if (S.view === 'tasks') {
     patch(primary, `<main class="main">${tasksView()}</main>`)
   } else if (S.view === 'projects') {

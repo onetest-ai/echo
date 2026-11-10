@@ -49,6 +49,7 @@ mod prep;
 mod projectsync;
 mod tasks;
 mod taskmodes;
+mod glance;
 mod today;
 mod today_layout;
 mod widgets;
