@@ -15,8 +15,8 @@ The map is split so features of different parts of the app can be worked on in p
   tests/tools/feature-map.py changes [BASE]   what this branch changed in the map against BASE (default main): the
                                               features added, changed and removed — the PR's "Map:" line — and a
                                               warning when app code changed but the map didn't, and the
-                                              cases or scenarios that still quote a text the branch took out
-                                              of the app (a renamed label, a removed message) (exit 1)
+                                              cases, scenarios and map lines that still quote a label or message
+                                              the branch took out of the app (exit 1)
 
 Coverage: a case lists the features it checks in its frontmatter (`requirements: [F-CALLS-01, …]`); a scenario lists
 its cases (`cases:`). A feature is covered by agent cases, person-run cases, or none.
@@ -326,9 +326,9 @@ def gone_texts(diff, still_there):
 
 
 def quoting(texts):
-    """Each case or scenario line that quotes one of `texts`: (file, line number, text)."""
+    """Each line of a case, a scenario, the map's areas or the app profile that quotes one of `texts`: (file, line, text)."""
     hits = []
-    for f in sorted(list((TESTS / "cases").rglob("*.md")) + list((TESTS / "scenarios").glob("*.md")) + [TESTS / "app_profile.md"]):
+    for f in sorted(list((TESTS / "cases").rglob("*.md")) + list((TESTS / "scenarios").glob("*.md")) + list((MAP / "areas").glob("*.json")) + [TESTS / "app_profile.md"]):
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             hits += [(f.relative_to(TESTS.parent), n, t) for t in texts if t in line]
     return hits
@@ -366,13 +366,12 @@ def changes(base):
     for f, n, t in stale:
         print(f"{f}:{n}: still says \"{t}\", which no line of the app holds any more")
     if stale:
-        print("Update those cases and scenarios in this branch, or say in the PR why the app still shows the text (built from parts).")
-        return 1
+        print("Update those lines in this branch, or say in the PR why the app still shows the text (built from parts).")
     if code and not touched_map:
         print(f"warning: {len(code)} app file(s) changed ({', '.join(code[:5])}{' …' if len(code) > 5 else ''}) but tests/feature-map/ didn't.")
         print("Update the features this changes, or say in the PR why the behaviour doesn't change (\"Map: no behaviour change — <why>\").")
         return 1
-    return 0
+    return 1 if stale else 0
 
 
 def main():
