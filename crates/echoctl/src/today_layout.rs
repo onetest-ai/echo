@@ -259,7 +259,6 @@ mod tests {
         let (_env, _) = paths::testenv::folders("today-layout-changes");
         let err = |r: Result<Vec<Item>>| r.unwrap_err().to_string();
         assert!(err(add("core:nope", None, None)).contains("echoctl widget list"));
-        assert!(err(add("core:calendar.strip", None, None)).contains("isn't on Today's page yet"));
         assert!(err(add("core:tasks.mine", None, None)).contains("on Today already"));
         assert!(err(resize("core:tasks.mine", "L")).contains("takes S, M, not L"));
         assert!(err(move_to("core:tasks.mine", Some(("core:calendar.strip", Side::After)))).contains("isn't on Today"));

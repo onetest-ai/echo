@@ -29,6 +29,8 @@ test('the hours shown: 9 to 18 at least, wider for an early or late meeting, who
   assert.deepEqual(dayWindow([mt('A', 10, 0, 11, 0)]), [9, 18])
   assert.deepEqual(dayWindow([mt('A', 7, 30, 8, 0), mt('B', 18, 15, 19, 10)]), [7, 20])
   assert.deepEqual(dayWindow([]), [9, 18])
+  // A meeting past midnight: the day shown to 24.
+  assert.deepEqual(dayWindow([{ start: at(22, 0), end: new Date(2026, 10, 13, 0, 30).toISOString() }]), [9, 24])
 })
 
 let failed = 0

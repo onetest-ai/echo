@@ -279,6 +279,13 @@ document.addEventListener('contextmenu', async (e) => {
   const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
   if (await todayMeeting(id)) todayMenu(id, x, y)
 })
+// A calendar's or strip's block with the keyboard: Enter opens its card.
+document.addEventListener('keydown', async (e) => {
+  const b = S.view === 'today' && e.key === 'Enter' && e.target.matches && e.target.matches('.dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  if (!b || !e.target.dataset.tdEv) return
+  e.preventDefault()
+  if (await todayMeeting(e.target.dataset.tdEv)) todayCard(e.target.dataset.tdEv)
+})
 // Escape in the menu: Calendar closes it; the keyboard goes back to the line's ⋯.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || S.view !== 'today' || !S.cal.ctx) return
@@ -311,10 +318,21 @@ function dayWindow(items) {
   for (const x of items || []) {
     if (!x.start) continue
     const s = new Date(x.start), e = new Date(x.end || x.start)
+    const midnight = new Date(s); midnight.setHours(0, 0, 0, 0)
     from = Math.min(from, s.getHours())
-    to = Math.max(to, e.getHours() + (e.getMinutes() > 0 ? 1 : 0))
+    // Minutes from the start's midnight: a meeting past midnight ends the day at 24.
+    to = Math.max(to, Math.ceil((e - midnight) / 3600000))
   }
   return [from, Math.min(24, to)]
+}
+/** Where a moment sits in the hours shown, 0–100 (minutes from today's midnight; past midnight: 100). */
+function dayPos(date, from, to, today) {
+  const m = (date - today) / 60000
+  return Math.max(0, Math.min(100, (m - from * 60) / ((to - from) * 60) * 100))
+}
+/** A meeting's end to draw: its own; a call still recording, now; none said, half an hour. */
+function dayEnd(x, now) {
+  return x.end ? new Date(x.end) : x.kind === 'call' && new Date(x.start) <= now ? new Date(now) : new Date(new Date(x.start).getTime() + 30 * 60000)
 }
 // end of the day lanes block
 
@@ -323,18 +341,22 @@ function dayWindow(items) {
 function dayCalendarView(d, now) {
   const items = (d.day || []).filter((x) => x.start)
   if (!items.length) return ''
-  const [from, to] = dayWindow(items), span = (to - from) * 60
-  const pos = (date) => Math.max(0, Math.min(100, ((date.getHours() - from) * 60 + date.getMinutes()) / span * 100))
+  const drawn = items.map((x) => ({ ...x, end: dayEnd(x, now).toISOString() }))
+  const [from, to] = dayWindow(drawn), span = (to - from) * 60
+  const today = new Date(now); today.setHours(0, 0, 0, 0)
+  const pos = (date) => dayPos(date, from, to, today)
   const hours = Array.from({ length: to - from }, (_, i) => `<div class="dc-h" style="top:${(i * 60) / span * 100}%"><span>${String(from + i).padStart(2, '0')}</span></div>`).join('')
-  const blocks = dayLanes(items).map(({ item: x, s, e, lane, lanes }) => {
+  const blocks = dayLanes(drawn).map(({ item: x, s, e, lane, lanes }) => {
     const going = x.response === 'notResponded' ? 'noreply' : x.response === 'tentativelyAccepted' ? 'maybe' : 'yes'
     const w = 100 / lanes
-    return `<div class="dc-ev ${going}${e < now ? ' past' : ''}" role="listitem" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A call')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="top:${pos(s)}%;height:${Math.max(2.2, pos(e) - pos(s))}%;left:calc(${lane * w}% + 2px);width:calc(${w}% - 4px)"><b>${esc(x.subject || 'A call')}</b><span class="mono">${esc(hm(s))}</span></div>`
+    return `<div class="dc-ev ${going}${e < now ? ' past' : ''}" role="listitem" tabindex="0" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A call')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="top:${pos(s)}%;height:${Math.max(2.2, pos(e) - pos(s))}%;left:calc(${lane * w}% + 2px);width:calc(${w}% - 4px)"><b>${esc(x.subject || 'A call')}</b><span class="mono">${esc(hm(s))}</span></div>`
   }).join('')
   const nowAt = now.getHours() >= from && now.getHours() < to ? `<div class="dc-now" style="top:${pos(now)}%" role="separator" aria-label="Now ${esc(hm(now))}"></div>` : ''
-  // Opens on now: the first time the grid is drawn it scrolls to a little before the hour now (then it's the user's).
-  setTimeout(() => { const sc = $('.dc-scroll'), g = sc && sc.firstElementChild; if (sc && !sc.dataset.placed && g) { sc.dataset.placed = '1'; sc.scrollTop = Math.max(0, g.scrollHeight * (pos(now) / 100) - sc.clientHeight / 3) } })
-  return `<section class="td-sec dc-sec" aria-label="Your day"><h2>Your day</h2><div class="dc-scroll"><div class="dc-grid" role="list" aria-label="Your day by the hour" style="min-height:${(to - from) * 40}px">${hours}${blocks}${nowAt}</div></div></section>`
+  // Opens on now: once a day, at the first draw, scrolled to a little before now; then the scroll is the user's
+  // (kept through redraws: data-keep-scroll).
+  const day = today.toDateString()
+  if (S.dcPlaced !== day) setTimeout(() => { const sc = $('.dc-scroll'), g = sc && sc.firstElementChild; if (sc && g) { S.dcPlaced = day; sc.scrollTop = Math.max(0, g.scrollHeight * (pos(now) / 100) - sc.clientHeight / 3) } })
+  return `<section class="td-sec dc-sec" aria-label="Your day"><h2>Your day</h2><div class="dc-scroll" data-keep-scroll="today-calendar"><div class="dc-grid" role="list" aria-label="Your day by the hour" style="min-height:${(to - from) * 40}px">${hours}${blocks}${nowAt}</div></div></section>`
 }
 
 /** Your day as a strip (`core:calendar.strip`): the day in one bar, a meeting a block (two at once: half its height
@@ -342,9 +364,11 @@ function dayCalendarView(d, now) {
 function dayStripView(d, now) {
   const items = (d.day || []).filter((x) => x.start && x.kind === 'meeting' && x.response !== 'notResponded')
   if (!items.length) return ''
-  const [from, to] = dayWindow(items), span = (to - from) * 60
-  const pos = (date) => Math.max(0, Math.min(100, ((date.getHours() - from) * 60 + date.getMinutes()) / span * 100))
-  const blocks = dayLanes(items).map(({ item: x, s, e, lane, lanes }) => `<div class="ds-ev${e < now ? ' past' : ''}${x.response === 'tentativelyAccepted' ? ' maybe' : ''}" role="listitem" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A meeting')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="left:${pos(s)}%;width:${Math.max(0.8, pos(e) - pos(s))}%;top:${(lane / lanes) * 100}%;height:${100 / lanes}%"></div>`).join('')
+  const drawn = items.map((x) => ({ ...x, end: dayEnd(x, now).toISOString() }))
+  const [from, to] = dayWindow(drawn), span = (to - from) * 60
+  const today = new Date(now); today.setHours(0, 0, 0, 0)
+  const pos = (date) => dayPos(date, from, to, today)
+  const blocks = dayLanes(drawn).map(({ item: x, s, e, lane, lanes }) => `<div class="ds-ev${e < now ? ' past' : ''}${x.response === 'tentativelyAccepted' ? ' maybe' : ''}" role="listitem" tabindex="0" data-td-ev="${esc(x.event || '')}" aria-label="${esc(x.subject || 'A meeting')}" title="${esc(`${hm(s)} ${x.subject || ''}`)}" style="left:${pos(s)}%;width:${Math.max(0.8, pos(e) - pos(s))}%;top:${(lane / lanes) * 100}%;height:${100 / lanes}%"></div>`).join('')
   const ticks = Array.from({ length: Math.floor((to - from) / 2) + 1 }, (_, i) => `<span style="left:${(i * 120) / span * 100}%">${String(from + i * 2).padStart(2, '0')}</span>`).join('')
   const nowAt = now.getHours() >= from && now.getHours() < to ? `<div class="ds-now" style="left:${pos(now)}%" role="separator" aria-label="Now ${esc(hm(now))}"></div>` : ''
   const going = items.filter((x) => x.response !== 'tentativelyAccepted').length
