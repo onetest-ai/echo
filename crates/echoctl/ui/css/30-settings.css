@@ -25,6 +25,7 @@
 .set-row:last-child { border-bottom: 0; }
 /* A row the search picked out (#103). */
 .set-row.hit { background: var(--accent-soft); }
+.set-row.hit mark { background: none; color: inherit; }
 .set-row b { font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .set-row b svg { width: 16px; height: 16px; color: var(--text-2); }
 .set-sub { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }

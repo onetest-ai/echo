@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary, learned]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-006: Learned from calls lists each term with its meeting, people and calls

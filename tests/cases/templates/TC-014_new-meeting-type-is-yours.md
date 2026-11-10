@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates, meeting-types]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-014: A new meeting type is created, shown as Yours, and deleted again

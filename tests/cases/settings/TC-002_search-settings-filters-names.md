@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, search]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-002: Search settings finds sections by their names and by their settings' own labels

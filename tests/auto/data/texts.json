@@ -313,7 +313,8 @@
       "enter": "Enter",
       "down": "ArrowDown",
       "backspace": "Backspace",
-      "save": "ControlOrMeta+s"
+      "save": "ControlOrMeta+s",
+      "tab": "Tab"
     },
     "inbox": "Inbox",
     "vocabulary": "Vocabulary",
@@ -334,7 +335,27 @@
     },
     "recording": {
       "section": "Recording",
-      "route": "#settings/recording"
+      "route": "#settings/recording",
+      "calendar": "Calendar meetings",
+      "other": "Other Teams calls",
+      "ask": "Ask",
+      "manual": "Manual",
+      "languages": "Languages you record in",
+      "neverGuesses": "Echo never guesses a call's language",
+      "addLanguage": "Add a language",
+      "remove": "Remove {name}",
+      "defaultLanguage": "Default language",
+      "callLanguage": "Language of the call",
+      "mute": "Follow Teams' mute",
+      "teams": "Read the Teams window",
+      "teamsLines": [
+        "Who is speaking, mute sync and the call's name",
+        "about 10–20% of its CPU",
+        "calls are still recorded and transcribed"
+      ],
+      "screens": "snapshots read Teams' window too, apart from the switch above",
+      "muteOff": "(it needs Read the Teams window)",
+      "manualValue": "manual"
     },
     "layout": {
       "heading": "Layout",
@@ -353,6 +374,126 @@
       ],
       "right": "Right",
       "bottom": "Bottom"
+    },
+    "sections": [
+      "General",
+      "Recording",
+      "Transcription",
+      "AI & minutes",
+      "Templates",
+      "Calendar & chat",
+      "Knowledge",
+      "About me",
+      "Sends to you",
+      "Plugins",
+      "Layout",
+      "Health"
+    ],
+    "headings": {
+      "Knowledge": [
+        "Recall",
+        3
+      ]
+    },
+    "savedFoot": "Saved as you change it.",
+    "broken": "This section couldn't be shown",
+    "search": {
+      "box": "Search settings",
+      "nothing": "Nothing matches “{q}”.",
+      "queries": [
+        [
+          "keep audio",
+          [
+            "Transcription"
+          ],
+          "Transcription",
+          [
+            "Keep audio files"
+          ]
+        ],
+        [
+          "calendar",
+          [
+            "Recording",
+            "Calendar & chat"
+          ],
+          "Recording",
+          [
+            "Calendar meetings"
+          ]
+        ]
+      ],
+      "none": "zzz"
+    },
+    "appearance": {
+      "group": "Appearance",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark",
+      "bar": {
+        "light": "rgb(239, 239, 243)",
+        "dark": "rgb(23, 23, 28)"
+      }
+    },
+    "config": {
+      "file": ".echo/config.json",
+      "me": ".echo/me.md",
+      "templates": ".echo/templates",
+      "trash": ".echo/trash/templates",
+      "types": ".echo/meeting-types.json"
+    },
+    "me": {
+      "route": "#settings/me",
+      "name": "Your name",
+      "email": "Your email",
+      "profile": "Your profile",
+      "heading": "About me",
+      "edit": "Edit",
+      "box": "Your profile (Markdown)",
+      "readers": [
+        "minutes",
+        "live notes",
+        "the Brain's mail and channel reader"
+      ]
+    },
+    "templates": {
+      "route": "#settings/templates",
+      "heading": "Templates",
+      "line": "The shapes Claude writes in.",
+      "tablist": "Kind of template",
+      "typesHead": "What a call can be, and how to tell",
+      "newType": "New type",
+      "newSkill": "New skill",
+      "newTemplate": "New template",
+      "list": "Minutes templates",
+      "builtIn": "Built in",
+      "edited": "Edited",
+      "yours": "Yours",
+      "reset": "Reset to built-in",
+      "delete": "Delete",
+      "close": "Close",
+      "choose": "Choose a template to see and change it.",
+      "usedWhen": "Used when the title has",
+      "foot": "Saved as you change it · the next minutes follow it",
+      "heading_": "Heading",
+      "summaryBox": "What to write in Summary",
+      "addWord": "Add a word",
+      "removeWord": "Remove {word}",
+      "moveUp": "Move {s} up",
+      "moveDown": "Move {s} down",
+      "addSection": "Add a section",
+      "newSection": "New section",
+      "removeSection": "Remove the section {s}",
+      "header": "Header — how the minutes start",
+      "values": "Values and how a header is read",
+      "name": "Name",
+      "create": "Create",
+      "cancel": "Cancel",
+      "newTypeEditor": "New meeting type",
+      "howToTell": "How to tell it",
+      "sections": "{n} sections",
+      "match": "match: [{words}]",
+      "nameLine": "name: {id}"
     }
   },
   "tasks": {
@@ -574,5 +715,24 @@
       "sameFirst": "Same person as…",
       "orgPlaceholder": "Who is {domain}?"
     }
+  },
+  "vocabulary": {
+    "panel": "Vocabulary",
+    "line": "Names and terms the transcription should hear right.",
+    "every": "Every call",
+    "none": "None yet.",
+    "add": "Add a term",
+    "addButton": "Add",
+    "learned": "Learned from calls",
+    "learnedNone": "None yet — the minutes add the names they had to fix.",
+    "always": "Always",
+    "remove": "Remove",
+    "removeTerm": "Remove {term}",
+    "filter": "Filter learned terms",
+    "nothing": "Nothing matches.",
+    "learnedFrom": "learned from {call}: ",
+    "always2": "always ({n}): {terms}",
+    "learnedN": "learned ({n}):",
+    "moved": "moved"
   }
 }

@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-003: A term is added to Every call and saved

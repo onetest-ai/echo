@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, sections]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-001: Every Settings section opens with its heading

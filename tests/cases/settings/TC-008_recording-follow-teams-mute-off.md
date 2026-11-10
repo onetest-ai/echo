@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, recording]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-008: Recording: Follow Teams' mute off is saved to config.json

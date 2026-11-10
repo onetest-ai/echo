@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary, learned]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-008: Remove forgets a learned term

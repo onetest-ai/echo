@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-005: The same term typed twice makes one chip

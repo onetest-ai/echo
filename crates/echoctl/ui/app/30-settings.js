@@ -72,10 +72,10 @@ function claudeRows(cc) {
     : setRow(`${bad} Echo plugin`, `Claude Code doesn't list Echo's plugin where Echo's sessions run${where ? ` (only: ${where})` : ''}: no /echo:process-call, record or doctor there.`, actBtn('connect_claude', 'Connect')))
   return rows
 }
-const setRow = (title, sub, control, id = '') => `<div class="set-row${SettingsSearch.hit(title, setHitQ) ? ' hit' : ''}"${id ? ` id="set-${id}"` : ''}><div><b>${title}</b>${sub ? `<div class="set-sub">${sub}</div>` : ''}</div><div class="set-ctl">${control}</div></div>`
+const setRow = (title, sub, control, id = '') => `<div class="set-row${SettingsSearch.hit(title, setHitQ) ? ' hit' : ''}"${id ? ` id="set-${id}"` : ''}><div><b>${SettingsSearch.hit(title, setHitQ) ? `<mark>${title}</mark>` : title}</b>${sub ? `<div class="set-sub">${sub}</div>` : ''}</div><div class="set-ctl">${control}</div></div>`
 const setCard = (head, rows) => `<section class="set-sec">${head ? `<h3>${esc(head)}</h3>` : ''}<div class="set-card">${rows.join('')}</div></section>`
 const sw = (key, on, label) => `<button class="sw${on ? ' on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" data-set="${key}" data-val="${!on}"></button>`
-const seg = (key, cur, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-set="${key}" data-val='${esc(JSON.stringify(v))}' aria-pressed="${cur === v}">${esc(l)}</button>`).join('')}</div>`
+const seg = (key, cur, opts, label = '') => `<div class="seg" role="group"${label ? ` aria-label="${esc(label)}"` : ''}>${opts.map(([v, l]) => `<button data-set="${key}" data-val='${esc(JSON.stringify(v))}' aria-pressed="${cur === v}">${esc(l)}</button>`).join('')}</div>`
 const actBtn = (action, label, arg = '', primary = false) => `<button class="btn${primary ? ' primary' : ''}" data-act="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${esc(label)}</button>`
 const LANG_LIST = ['en', 'uk', 'ru', 'es', 'de', 'fr', 'it', 'pl', 'pt', 'nl', 'cs', 'ro', 'tr', 'he', 'ar', 'hi', 'ja', 'zh', 'ko']
 

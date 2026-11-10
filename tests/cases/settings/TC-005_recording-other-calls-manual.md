@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, recording]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-005: Recording: Other Teams calls set to Manual is saved to config.json

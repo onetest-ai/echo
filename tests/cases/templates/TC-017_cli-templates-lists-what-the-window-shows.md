@@ -8,6 +8,7 @@ module: templates
 run: agent
 platform: any
 tags: [templates, cli]
+auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
 # TC-017: echoctl templates lists the templates, meeting types, skills and values the window shows
