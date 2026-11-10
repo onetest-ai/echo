@@ -14,11 +14,12 @@ npx playwright test S-24                       # one scenario (no report)
 ```
 
 `cargo build` first: the tests use `target/debug/echoctl`, and `--ai virtual` needs Claude Code on `PATH`. A spec with a failed test keeps its data folder and prints its path (its runs' `claude.log`, the model's
-`model/model-log.jsonl` and `serve.log`); `ECHO_AUTO_KEEP=1` keeps every one. S-19 copies
+`model/model-log.jsonl` and `serve.log`); `ECHO_AUTO_KEEP=1` keeps every one. S-14 and S-19 use
 the recordings prepared once a build (`tests/fixtures/recordings.py prepare`); when this build (the last commit that
-changed the app) has none, the spec prepares them first — a few minutes, the one real capture and transcription. It links the speech models of
-this computer's Echo (`~/Library/Application Support/echo/models`, never changed); `ECHOCTL_TEST_MODELS=<folder>`
-names another folder instead (one of your own, where the installed Echo is off limits). The data
+changed the app) has none, whichever of them runs first prepares them (`support/recordings.mjs`) — a few minutes, the
+one real capture and transcription. The speech models come only from the folder `ECHOCTL_TEST_MODELS=<folder>` names
+(linked, never changed), never the installed Echo's: without it nothing is prepared, and the stages that need a
+recording skip, saying so. The data
 is built between 06:00 and 22:50 only (`make_data.py`'s rule); outside those hours every spec fails at its setup with
 that reason. `ECHO_AUTO_KEEP=1` keeps each spec's data folder (in the system's temporary folder).
 
@@ -29,7 +30,7 @@ that reason. `ECHO_AUTO_KEEP=1` keeps each spec's data folder (in the system's t
 | `specs/` | One file a manual scenario: `S-24.spec.mjs` automates S-24. Each test is a stage, numbered as the scenario numbers it (`13 · …`); a test beside the scenario's stages says so (`after · …`). |
 | `pages/` | Page objects, one a view: `AppPage` (opening, the status bar), `TodayPage`, `CallsPage`, `MeetingPage`, `WorkPage`. Every locator lives here, never in a spec. |
 | `data/` | The names, titles, ids and expected values of each data set (`small.json`, `standard.json`: what `tests/fixtures/make_data.py` builds, read as `data.set`), and the app's own wording the tests check (`texts.json`, read as `data.text`). Nothing is spelled in a spec: change these with the fixture or the app. |
-| `support/` | `data.mjs` (the spec's data: built before its first test, stopped after its last; the CLI; the virtual model's script and log) and `covers.mjs` (the links to the manual side). |
+| `support/` | `aria.mjs` (what an accessibility snapshot reads, in order: for page objects), `recordings.mjs` (the recordings prepared once a build, for the specs that use them), `data.mjs` (the spec's data: built before its first test, stopped after its last; the CLI; the virtual model's script and log) and `covers.mjs` (the links to the manual side). |
 
 ## Locators
 

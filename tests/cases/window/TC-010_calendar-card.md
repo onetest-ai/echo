@@ -30,7 +30,7 @@ auto: [tests/auto/specs/S-02.spec.mjs]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calendar/week` | Today's column has Globex design review |
-| 2 | Click "Globex design review" | A card opens beside the meeting, fully inside the window: title with "Close" (×) beside it, "Today · HH:MM–HH:MM · in N min", the chips (kind, "+ Thread"), "Record when it starts" and "Prepare" on one line, and PEOPLE with "Sam Rivera" (organizer) |
+| 2 | Click "Globex design review" | A card opens beside the meeting, fully inside the window: title with "Close" (×) beside it, "Today · HH:MM–HH:MM · in N min" ("in 1 h" right after the data is built), the chips (kind, "+ Thread"), "Record when it starts" and "Prepare" on one line, and PEOPLE with "Sam Rivera" (organizer) |
 | 3 | Scroll the grid a little | The card stays with the meeting and fully inside the window (level with it where there is room; near the window's bottom it is held inside) |
 | 4 | Click "Close" on the card | The card goes |
 

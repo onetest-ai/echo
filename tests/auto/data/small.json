@@ -1321,7 +1321,11 @@
       "before": "1 call match · 1 pinned",
       "after": "2 calls match · 1 pinned",
       "takenOut": "1 call match · 1 pinned, 1 taken out by hand",
-      "remove": "1"
+      "remove": "1",
+      "calls": [
+        "Acme weekly sync",
+        "Initech planning"
+      ]
     },
     "pinned": {
       "title": "Acme weekly sync",
@@ -1340,7 +1344,7 @@
       "id": "initech-planning",
       "name": "Initech planning",
       "token": "series “Initech planning”",
-      "line": "1 call match",
+      "line": "1 call match · 1 pinned",
       "threads": [
         "Acme rollout",
         "Globex pilot"
@@ -1359,24 +1363,24 @@
       "since": "2026-11-01",
       "notes": "Call the pilot \"GP\".",
       "colour": "#f0a24a",
-      "colourBack": "#5aa9ff",
-      "stageGroups": [
-        "Pursuit",
-        "Delivery",
-        "Closed"
-      ],
-      "stages": [
-        "Lead",
-        "Proposal",
-        "Negotiation",
-        "Kickoff",
-        "Active",
-        "On hold",
-        "Wrap-up",
-        "Done",
-        "Lost",
-        "Cancelled"
-      ],
+      "stageGroups": {
+        "Pursuit": [
+          "Lead",
+          "Proposal",
+          "Negotiation"
+        ],
+        "Delivery": [
+          "Kickoff",
+          "Active",
+          "On hold",
+          "Wrap-up"
+        ],
+        "Closed": [
+          "Done",
+          "Lost",
+          "Cancelled"
+        ]
+      },
       "active": "Active",
       "wrapUp": "Wrap-up",
       "done": "Done",

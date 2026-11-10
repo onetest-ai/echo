@@ -114,20 +114,22 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
     const c = data.text.calls
     const n = c.notes
     const file = path.join(data.callDir(s.acme.folder), n.file)
+    const calls = new CallsPage(page, data)
     try {
-      const calls = await openAcme(page)
+      await calls.open()
+      await calls.openCall(s.acme.title)
       await showNotes(calls)
       await expect(calls.panelTab(calls.rightPanel, c.myNotes)).toHaveAttribute('aria-selected', 'true')
       await expect(calls.panelSays(n.empty)).toBeVisible()
       await expect(calls.note(s.note)).toHaveCount(0)
       // The save held while the window says so, then let go.
-      const release = await calls.holdRequests()
+      await calls.holdRequests()
       await calls.newNote.click()
       await calls.newNote.fill(s.note)
       await calls.newNote.press(data.text.shell.keys.enter)
       await expect(calls.note(s.note)).toBeVisible()
       await expect(calls.panelSays(n.saving)).toBeVisible()
-      release()
+      await calls.release()
       await expect(calls.panelSays(n.saved)).toBeVisible()
       await expect.poll(() => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '')).toContain(s.note)
 
@@ -137,7 +139,8 @@ scenario(test, 'S-01', 'Review a client call: find it, read the minutes, check a
       await expect(calls.note(s.note)).toBeVisible()
       expect(fs.readFileSync(file, 'utf8')).toContain(s.note)
     } finally {
-      // Teardown: the call's notes file removed.
+      // Teardown: nothing held any more; the call's notes file removed.
+      await calls.release()
       fs.rmSync(file, { force: true })
     }
     expect(fs.existsSync(file)).toBe(false)

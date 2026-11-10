@@ -9,24 +9,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { useData, fill } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
+import { useRecordings } from '../support/recordings.mjs'
 
 const data = useData(test, { set: 'small' })
 /** The folder of the test's own speech models (ECHOCTL_TEST_MODELS), if set. */
 const models = () => process.env[data.text.speech.testModels]
-const state = {} // why the prepared recordings aren't there, if they aren't
-
-// The recordings of this build (`recordings.py prepare`: real capture from files and transcription, a few minutes),
-// prepared here when this build has none yet — only with the test's own models.
-test.beforeAll(async () => {
-  test.setTimeout(15 * 60_000)
-  const s = data.text.speech
-  try {
-    data.run('python3', s.recordings, 'list')
-  } catch {
-    if (!models()) state.none = `no recordings prepared for this build, and ${s.testModels} isn't set (never the installed Echo's models)`
-    else data.run('python3', s.recordings, 'prepare', { timeout: 14 * 60_000 })
-  }
-})
+// The recordings of this build, prepared when it has none yet — only with the test's own models; `state.none` says why
+// there are none.
+const state = useRecordings(test, data)
 
 /** A copy of a prepared recording in the data's calls, under a title: its folder. */
 const copy = (recording, title) => data.run('python3', data.text.speech.recordings, 'copy', recording, '--title', title).split('\n').at(-1)

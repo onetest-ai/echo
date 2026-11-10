@@ -70,6 +70,11 @@ export class CalendarPage extends AppPage {
     return this.card(subject).getByRole('button', { name, exact: true })
   }
 
+  /** The card's line of when, which starts with these words ("Today · 02:42 PM–03:12 PM · in 58 min"), as it reads. */
+  async cardWhen(subject, words) {
+    return (await this.cardStarting(subject, words).innerText()).replace(/\s+/g, ' ').trim()
+  }
+
   /** The card's heading, a select of it ("Kind of meeting"), a text of it as it reads, or one that starts so. */
   cardHeading(subject) {
     return this.card(subject).getByRole('heading', { name: subject, exact: true })

@@ -2,7 +2,7 @@
 // tabs, Overview, Calls, Tasks and Profile rows) and a thread's header, menu and Profile.
 import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
-import { readLines } from './calls.page.mjs'
+import { readLines } from '../support/aria.mjs'
 
 export class ClientsPage extends AppPage {
   constructor(page, data) {
@@ -208,6 +208,11 @@ export class ClientsPage extends AppPage {
   /** A text of a Profile row that starts with these words (a line that goes on, such as the stage's history). */
   rowStarting(label, words) {
     return this.row(label).getByText(new RegExp(`^${literal(words)}`))
+  }
+
+  /** A stage group of the Stage row ("Pursuit", "Delivery", "Closed"): its buttons, in order. */
+  stageGroup(name) {
+    return this.row('Stage').getByRole('group', { name, exact: true }).getByRole('button')
   }
 
   /** A Profile row's buttons, in order. */

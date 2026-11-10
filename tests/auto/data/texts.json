@@ -1046,14 +1046,13 @@
     "week": "Week",
     "notice": "Showing today's meetings only. Connect Microsoft 365 from the menu-bar octopus (Calendar) to see your week.",
     "when": "Today · {start}–{end}",
-    "soon": " · in (\\d+ min|\\d+ h)$",
     "kind": "Kind of meeting",
     "addThread": "+ Thread",
     "people": "People",
     "organizer": "organizer",
     "close": "Close",
     "willRecord": "Will record",
-    "starts": "Echo starts recording a minute before it begins",
+    "starts": "Echo starts recording a minute before it begins, transcribed as English.",
     "scheduled": ".echo/scheduled.json",
     "colours": {
       "now": "--recording",
@@ -1061,7 +1060,9 @@
       "scheduled": "--recording"
     },
     "from": -1,
-    "days": 7
+    "days": 7,
+    "inMin": "{when} · in {n} min",
+    "inHours": "{when} · in {n} h"
   },
   "threads": {
     "routes": {
@@ -1078,7 +1079,8 @@
       "profile": "profile",
       "callsTab": "Calls",
       "profileTab": "Profile",
-      "briefTab": "Brief"
+      "briefTab": "Brief",
+      "overview": "overview"
     },
     "found": "Found for you",
     "foundLine": "From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.",

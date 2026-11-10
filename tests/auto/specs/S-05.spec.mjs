@@ -59,7 +59,7 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
       await expect(clients.threadRow(s.fold.row)).toBeVisible()
       await expect(clients.fold(s.fold.group)).toHaveAccessibleName(t.hide)
       await clients.group(s.fold.group).click()
-      await expect.poll(() => clients.hash()).toBe(fill(data.text.clients.routes.client, { id: s.fold.client, tab: 'overview' }))
+      await expect.poll(() => clients.hash()).toBe(fill(data.text.clients.routes.client, { id: s.fold.client, tab: t.tabs.overview }))
     } finally {
       // Teardown: Acme unfolded (the fold is kept in this browser only).
       if ((await clients.fold(s.fold.group).getAttribute('aria-label').catch(() => t.hide)) === t.show) await clients.fold(s.fold.group).click()
@@ -71,6 +71,7 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
     const clients = new ClientsPage(page, data)
     await clients.goto(t.routes.projects)
     await expect(clients.foundForYou).toHaveAccessibleName(t.found)
+    await expect(clients.activity(t.threads)).toBeVisible()
     await expect(clients.activityCount(t.threads)).toHaveCount(0)
     await clients.foundForYou.click()
     await expect.poll(() => clients.hash()).toBe(t.routes.found)
@@ -187,7 +188,7 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
       await expect(clients.rowButton(r.calls, t.remove)).toBeVisible()
       await expect(clients.rowSays(r.calls, rule.after)).toBeVisible()
       await clients.tab(t.tabs.callsTab).click()
-      await expect(clients.callRows).toHaveCount(2)
+      await expect(clients.callRows).toHaveCount(rule.calls.length)
       await expect(clients.callRow(pinned.title)).toContainText(t.why.pinned)
       await expect(clients.callRow(matched.title)).toContainText(t.why.subject)
       await clients.tab(t.tabs.profileTab).click()
@@ -236,7 +237,7 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
     try {
       expect(cli('project', 'rule', a.id, '--subject', rule.words).rules).toContainEqual(rule.json)
       await clients.openThread(a.id, t.tabs.calls)
-      await expect(clients.callRows).toHaveCount(2)
+      await expect(clients.callRows).toHaveCount(rule.calls.length)
       await expect(clients.callRow(pinned.title)).toContainText(t.why.pinned)
       await expect(clients.callButton(pinned.title, t.unpin)).toBeVisible()
       await expect(clients.callRow(matched.title)).toContainText(t.why.subject)
@@ -383,6 +384,7 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
     const g = data.set.s05.globex
     const t = data.text.threads
     const r = t.rows
+    const colour = show(g.id).color
     const clients = new ClientsPage(page, data)
     try {
       await clients.openThread(g.id, t.tabs.profile)
@@ -411,10 +413,10 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
       await expect(clients.rowButton(r.ai, t.model)).toBeVisible()
     } finally {
       // Teardown: since, notes and colour back.
-      data.cli('project', 'set', g.id, '--since', '', '--notes', '', '--color', g.colourBack)
+      data.cli('project', 'set', g.id, '--since', '', '--notes', '', '--color', colour)
     }
     const p = show(g.id)
-    expect([p.since || '', p.notes || '', p.color]).toEqual(['', '', g.colourBack])
+    expect([p.since || '', p.notes || '', p.color]).toEqual(['', '', colour])
   })
 
   test('15 · A closed stage moves the thread under Closed · 1; its history is shown; Active brings it back', covers('threads/TC-010', 'F-THR-12'), async ({ page }) => {
@@ -424,8 +426,10 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
     const clients = new ClientsPage(page, data)
     try {
       await clients.openThread(g.id, t.tabs.profile)
-      for (const name of g.stageGroups) await expect(clients.rowSays(r.stage, name)).toBeVisible()
-      await expect(clients.rowButtons(r.stage)).toHaveText(g.stages)
+      for (const [name, stages] of Object.entries(g.stageGroups)) {
+        await expect(clients.rowSays(r.stage, name)).toBeVisible()
+        await expect(clients.stageGroup(name)).toHaveText(stages)
+      }
       await expect(clients.rowButton(r.stage, g.active)).toHaveAttribute('aria-pressed', 'true')
       const since = show(g.id).stages.at(-1).at.slice(0, 10)
       await expect(clients.rowSays(r.stage, fill(t.stageSince, { stage: g.active, day: await clients.shortDay(since) }))).toBeVisible()
@@ -440,7 +444,8 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
       await expect(clients.rowButton(r.stage, g.done)).toHaveAttribute('aria-pressed', 'true')
       await expect(clients.factEnding(g.name, g.doneTag)).toBeVisible()
       await expect(clients.threadRow(g.name)).toHaveCount(0)
-      await expect(clients.closedFold).toHaveAccessibleName(new RegExp(`${literal(fill(t.closed, { n: 1 }))}$`))
+      await expect(clients.closedFold).toHaveAccessibleName(fill(t.closed, { n: 1 }))
+      expect((await clients.listLines()).at(-1)).toBe(fill(t.closed, { n: 1 }))
       await clients.closedFold.click()
       await expect(clients.threadRow(g.name)).toHaveAccessibleName(g.closedRow)
       expect(cli('project', 'list').projects.find((p) => p.id === g.id)).toMatchObject({ stage: g.stageIds.done, group: g.stageIds.closed })

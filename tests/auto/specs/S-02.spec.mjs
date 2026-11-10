@@ -21,6 +21,12 @@ const meeting = (subject) => {
 const scheduledFile = () => path.join(data.home, data.text.cal.scheduled)
 const scheduled = () => (fs.existsSync(scheduledFile()) ? JSON.parse(fs.readFileSync(scheduledFile(), 'utf8')).map((m) => m.subject) : [])
 
+/** A meeting card's line of when at a moment: "<when> · in N min", or "in N h" from an hour on (the window rounds). */
+function whenAt(when, start, at) {
+  const m = Math.round((new Date(start) - at) / 60000)
+  return m < 60 ? fill(data.text.cal.inMin, { when, n: Math.max(1, m) }) : fill(data.text.cal.inHours, { when, n: Math.round(m / 60) })
+}
+
 /** Today, once Your day is drawn. */
 async function openToday(page) {
   const today = new TodayPage(page, data)
@@ -40,7 +46,7 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     await expect(today.textStarting(await today.longDay())).toContainText(fill(data.text.today.meetings, { n: s.accepted.length }))
   })
 
-  test('2 · The line now sits between the last past meeting and the first coming one, in the accent colour; the coming ones offer Prepare and Record when it starts', covers('today/TC-002', 'F-TODAY-02'), async ({ page }) => {
+  test('2 · The line now sits between the last past meeting and the first coming one, in the recording colour (coral); the coming ones offer Prepare and Record when it starts', covers('today/TC-002', 'F-TODAY-02'), async ({ page }) => {
     const s = data.set.s02
     const t = data.text.today
     const today = await openToday(page)
@@ -108,7 +114,10 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     await expect(card).toBeVisible()
     await expect(cal.cardHeading(k.subject)).toBeVisible()
     await expect(cal.cardButton(k.subject, c.close)).toBeVisible()
-    await expect(card).toContainText(new RegExp(`${literal(fill(c.when, { start: await cal.clock(m.start), end: await cal.clock(m.end) }))}${c.soon.replace('$', '')}`))
+    const when = fill(c.when, { start: await cal.clock(m.start), end: await cal.clock(m.end) })
+    const early = whenAt(when, m.start, Date.now())
+    const read = await cal.cardWhen(k.subject, when)
+    expect([early, whenAt(when, m.start, Date.now())]).toContain(read)
     await expect(cal.cardSelect(k.subject, c.kind)).toBeVisible()
     await expect(cal.cardButton(k.subject, c.addThread)).toBeVisible()
     await expect(cal.cardSays(k.subject, c.people)).toBeVisible()
@@ -128,9 +137,9 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     const { schedule: x } = data.set.s02
     const c = data.text.cal
     const t = data.text.today
-    const before = fs.existsSync(scheduledFile()) ? fs.readFileSync(scheduledFile(), 'utf8') : null
+    const today = new TodayPage(page, data)
     try {
-      const today = await openToday(page)
+      await openToday(page)
       await expect(today.dayButton(x.subject, t.prepare)).toBeVisible()
       await today.dayButton(x.subject, t.record).click()
       await expect(today.dayButton(x.subject, t.dontRecord)).toBeVisible()
@@ -143,15 +152,17 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
       expect(await cal.edge(x.subject)).toBe(await cal.themeColour(c.colours.scheduled))
       await cal.event(x.subject).click()
       await expect(cal.cardButton(x.subject, t.dontRecord)).toBeVisible()
+      // The sentence whole, as the line's first (Prepare's sentence follows it on the same line).
       await expect(cal.cardStarting(x.subject, c.starts)).toBeVisible()
       await cal.cardButton(x.subject, t.dontRecord).click()
       await expect(cal.cardButton(x.subject, t.record)).toBeVisible()
       await expect.poll(scheduled).toEqual([])
     } finally {
-      // Teardown: the meeting no longer set to record, even when a check failed.
+      // Teardown: the meeting no longer set to record, even when a check failed: Don't record on Today, as a person does.
       if (scheduled().length) {
-        if (before === null) fs.rmSync(scheduledFile(), { force: true })
-        else fs.writeFileSync(scheduledFile(), before)
+        await openToday(page)
+        await today.dayButton(x.subject, t.dontRecord).click()
+        await expect.poll(scheduled).toEqual([])
       }
     }
     expect(scheduled()).toEqual([])

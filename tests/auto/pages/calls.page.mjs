@@ -1,6 +1,7 @@
 // Calls: the list of calls, a call's tabs, and its Minutes tab (the minutes page in its frame, Write minutes).
 import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
+import { readLines } from '../support/aria.mjs'
 
 export class CallsPage extends AppPage {
   constructor(page, data) {
@@ -225,21 +226,16 @@ export class CallsPage extends AppPage {
     return this.rightPanel.getByText(text, { exact: true })
   }
 
-  /** Hold the window's requests to the app (a save) until the returned function lets them go: what the window says
-   *  while one is under way can be read. Once let go, they pass at once. */
+  /** Hold the window's requests to the app (a save) until `release()`: what the window says while one is under way
+   *  can be read. */
   async holdRequests() {
-    let release
-    const gate = new Promise((r) => { release = r })
+    const gate = new Promise((r) => { this.letGo = r })
     await this.page.route('**/ipc', async (route) => { await gate; await route.continue() })
-    return release
   }
-}
 
-/** The lines of an accessibility snapshot's top level: each child's name (or its text), in order. */
-export function readLines(snapshot) {
-  return snapshot.split('\n').slice(1).filter((l) => /^ {2}- /.test(l)).map((l) => {
-    const s = l.trim().replace(/^- /, '').replace(/^'(.*)'(:.*)?$/, '$1$2')
-    const named = /^\w+ "(.*?)"/.exec(s)
-    return named ? named[1] : s.replace(/^text:\s*/, '')
-  })
+  /** Let the held requests go and stop holding (at once, and again harmlessly). */
+  async release() {
+    if (this.letGo) this.letGo()
+    await this.page.unrouteAll({ behavior: 'wait' })
+  }
 }
