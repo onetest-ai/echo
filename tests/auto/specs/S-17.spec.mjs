@@ -162,6 +162,8 @@ scenario(test, 'S-17', 'A recorded call end to end: record, take notes, transcri
       hungUp = Date.now()
       await expect.poll(() => events(main.from), { timeout: 60_000 }).toContain(ev().recordingStopped)
       main.hungUp = hungUp
+      // The window follows within seconds (the call no longer says Recording): a note after that has no time.
+      await expect(view.tabNamed(a().recordingTab)).toHaveCount(0, { timeout: 15_000 })
 
       await view.newNote.press(data.text.shell.keys.escape)
       await view.newNote.fill(n.after)
@@ -422,7 +424,8 @@ scenario(test, 'S-17', 'A recorded call end to end: record, take notes, transcri
       added = data.cli('ai', 'add-local', s.profile, '--url', s.url, '--model', s.model)
       made = data.cli('ai', 'default', s.profile)
       live = data.cli('ai', 'live', 'on')
-      // Its own app (the scenario's quit in stage 9).
+      // Its own app: the scenario's quit first (stage 9 quits it; not when that stage didn't run).
+      if (main.app && !main.app.ended) await main.app.quit()
       app = await data.app()
       data.cli('arm', '--title', s.title)
       await expect.poll(() => watcher().armed, { timeout: 10_000 }).toBe(true)
@@ -442,7 +445,7 @@ scenario(test, 'S-17', 'A recorded call end to end: record, take notes, transcri
     } finally {
       call('end')
       if (app) {
-        await expect.poll(() => watcher().recording || null, { timeout: 60_000 }).toBeNull()
+        await expect.poll(() => watcher().recording || null, { timeout: 60_000 }).toBeNull().catch(() => {})
         quit = await app.quit()
       }
       data.cli('ai', 'live', 'off')

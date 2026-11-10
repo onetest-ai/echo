@@ -1780,6 +1780,7 @@
     "aiRoute": "#settings/ai",
     "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
     "homeVar": "ECHOCTL_HOME",
-    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$"
+    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
+    "armedPrefix": "armed"
   }
 }

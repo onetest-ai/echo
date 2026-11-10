@@ -48,6 +48,8 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
       await r.done
     }
     if (!data.dir) return
+    // And any Echo app on this data's config that isn't our child (a dev build that restarted itself, `home set`).
+    if (data.env.ECHOCTL_CONFIG_DIR) for (const pid of data.apps()) process.kill(pid, 'SIGKILL')
     spawnSync(SERVE, ['down', data.dir], { cwd: ROOT })
     if (data.failed) console.log(`test data kept for the failure: ${data.dir}`)
     else if (!process.env.ECHO_AUTO_KEEP) fs.rmSync(data.dir, { recursive: true, force: true })

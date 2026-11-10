@@ -210,7 +210,7 @@ scenario(test, 'S-19', 'Claude Code and the minutes', () => {
     await until(copied + s.quiet * 1000)
     expect(data.exists(dir, run().runFile)).toBe(false)
     const from = data.model.requests().length
-    let started, pending, done, last
+    let started, pending, done, last, q
     try {
       app = await data.app()
       started = Date.now()
@@ -220,9 +220,9 @@ scenario(test, 'S-19', 'Claude Code and the minutes', () => {
       done = data.callByStamp(stamp)
       last = data.json(done, run().runFile)
     } finally {
-      const q = await app.quit()
-      expect(q.code, q.err).toBe(0)
+      q = await app.quit()
     }
+    expect(q.code, q.err).toBe(0)
     expect(last.auto).toBe(true)
     expect(Date.parse(last.started_at) - started).toBeLessThanOrEqual(s.startsWithin * 1000)
     expect(pending.code, pending.err).toBe(0)
