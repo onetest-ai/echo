@@ -1107,7 +1107,7 @@
       "ai": "AI"
     },
     "noSeries": "No meeting series yet. A meeting that recurs in this thread shows here.",
-    "brainOff": "The Brain is off, so channels, mail and folders aren't read into it — turn it on in Settings → Brain. Meeting chats, and mail already added here, are read into the work either way.",
+    "brainOff": "Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Knowledge. Meeting chats, and mail already added here, are read into the work either way.",
     "footStart": "Saved as you change it",
     "foot": "Saved as you change it · projects/{id}/ · Delete in ⋯",
     "orgHint": "Who this thread is with besides its client: ",
