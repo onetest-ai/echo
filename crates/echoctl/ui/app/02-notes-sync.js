@@ -35,11 +35,11 @@ const NotesSync = (() => {
     /** What the file holds, from the call's details: the editor takes it unless it has unsaved text,
      *  or the fetch began before a save was answered (it may show the file from before), or a note is
      *  being typed (`typing`: it goes on the notes shown, and a save based on them keeps another editor's
-     *  version beside, #130). */
+     *  version beside, #130) — unless the file only grew at its end (a note from the tray or the CLI, #276). */
     seen(name, text, epoch, typing) {
       const c = of(name)
       if (epoch !== undefined && epoch !== c.epoch) return
-      if (typing && c.synced !== null) return
+      if (typing && c.synced !== null && !(c.draft === c.synced && text.startsWith(c.synced))) return
       // With unsaved text, `synced` stays what it was based on: the next save keeps what was
       // appended to the file since (the app merges by that base).
       if (c.inflight || (c.draft !== null && dirty(c))) return

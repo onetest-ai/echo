@@ -73,6 +73,16 @@ test('the window opening closes the right panel, however it was saved; its size 
   assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, true)
 })
 
+test('the right panel closed over a narrow page stays closed when the window is widened (#278)', () => {
+  Layout.load({ right: { open: false, size: 320, active: 'tasks' } })
+  Layout.show('tasks', VIEWS) // asked for in a narrow window: over the page
+  assert.equal(Layout.effective(800, 700, VIEWS, true).right.overlay, true)
+  Layout.close('right') // its Close (or Escape)
+  assert.equal(Layout.effective(800, 700, VIEWS, false).right.shown, false)
+  assert.equal(Layout.effective(1201, 868, VIEWS).right.shown, false)
+  assert.equal(Layout.toJSON().right.open, false)
+})
+
 test('the activity bar starts folded, opens and is remembered; narrow, it opens only over the page', () => {
   Layout.load(undefined)
   assert.deepEqual(Layout.effective(1180, 760, VIEWS).bar, { open: false, over: false })

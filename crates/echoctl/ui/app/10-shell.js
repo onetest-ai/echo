@@ -250,6 +250,15 @@ function flipBar() {
   layoutChanged()
 }
 
+/** The right panel over a narrow page, closed by the user: closed in the layout too, so a wider window doesn't bring it
+ *  back (#278). Once the window is wide again the panel is docked: only the flag goes. */
+function closeOverlay() {
+  S.overlay = false
+  if (!Layout.effective(window.innerWidth, window.innerHeight, panelViews()).narrow) return render()
+  Layout.close('right')
+  layoutChanged()
+}
+
 function layoutChanged() {
   clearTimeout(layoutTimer)
   layoutTimer = setTimeout(() => send({ cmd: 'save_layout', layout: Layout.toJSON() }), 500)

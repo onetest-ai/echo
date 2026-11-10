@@ -98,6 +98,7 @@ const Layout = (() => {
       return true
     },
     toggle(area) { if (AREAS.includes(area)) L[area].open = !L[area].open },
+    close(area) { if (AREAS.includes(area)) L[area].open = false },
     /** The activity bar: open with its names, or folded to its icons. */
     toggleBar() { L.bar.open = !L.bar.open },
     /** A panel dragged to `size` px (null: back to its default). */
