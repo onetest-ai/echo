@@ -13,7 +13,7 @@
 - R6. The run guard is a `PreToolUse` hook with `onFailure: block` that refuses whatever it can't judge, a panic too; refuse the run when any settings source could switch hooks off. Evidence: `ai::hooks_conflict`
 - R7. A minutes run starts with `--tools` `RUN_TOOLS`, `--strict-mcp-config`, `--permission-mode dontAsk` and never `--add-dir`; Write is governed by the `Edit` rule. Evidence: `notes::args`
 - R8. A run reads saved `tool-results` only of its own session (the hook's `transcript_path` + `session_id`), never another session's. Evidence: `guard::own_results`
-- R9. `echoctl read echo://call/…` in Yolo's run gives only a call of its task's thread pinned to the profile the run started on (`guard::RUN_PROFILE`); without it, no call. Evidence: `links::thread_call`
+- R9. A Yolo run (a task's, or an item of Needs you now's) reads only its own thread, and nothing of it changes but its task's state: `echoctl read echo://call/…` gives a call of that thread pinned to the profile the run started on (`guard::RUN_PROFILE`; without it, no call), and the CLI gives its brief, people and work read-only (`guard::run_thread`); never another thread. Evidence: `links::thread_call`, `guard::run_thread`
 - R10. Rename a run's call folder only at the run's end, and never use a `title_from_run` title to find previous minutes. Evidence: `calls::rename_to_title`, `calls::previous_subject`
 - R11. Initialise mermaid on a minutes page only with `securityLevel: 'strict'`. Evidence: `minutes::MERMAID_INIT`
 - R12. A minutes run changes nothing outside its call except learned vocabulary for its meeting and pruned frames moved to the trash; the app, not the run, clears trash entries older than 30 days. Evidence: `calls::purge_trash`
