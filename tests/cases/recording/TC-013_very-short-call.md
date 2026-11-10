@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, minutes, recordings]
 external_id: TC-REC-013
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-013: A very short call gets a transcript and no automatic minutes

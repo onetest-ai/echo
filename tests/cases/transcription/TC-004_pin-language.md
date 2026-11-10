@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [transcription, languages, recordings]
 external_id: TC-TRN-005
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-004: A language pinned for one call applies to that call only

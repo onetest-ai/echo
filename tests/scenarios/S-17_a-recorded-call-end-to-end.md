@@ -22,6 +22,7 @@ cases:
   - tests/cases/claude/TC-019_live-notes-skip-a-model-on-this-computer-while-recording.md
   - tests/cases/window/TC-024_a-recording-window-draws-only-what-changed.md
   - tests/cases/claude/TC-020_live-notes-are-kept-by-one-claude-session-with-two-tools.md
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # S-17: A recorded call end to end: record, take notes, transcript, automatic minutes, the files

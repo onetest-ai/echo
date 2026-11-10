@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, stop, file-fed]
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-016: Stopping a capture by hand (Ctrl-C) keeps what was said so far
@@ -31,7 +32,7 @@ tags: [recording, stop, file-fed]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run the prelude, then `$C end; $C start acme-sync --hold; sleep 2; target/debug/echoctl capture --title "REC-016 stop" > "$D/capture016.out" 2> "$D/capture016.err" & CAP=$!; sleep 20; kill -INT $CAP; wait $CAP; echo "exit $?"; $C status` (the sleeps are the call's timeline) | After the `kill -INT` the capture ends by itself (exit 0, or 134 after it has saved: app_profile.md); `capture016.err` says it is recording, then has a `mic.wav` line and a `remote.wav` line with seconds between 18 and 26; the call is still on (`in_call` true) |
+| 1 | Run the prelude, then `$C end; $C start acme-sync --hold; sleep 2; target/debug/echoctl capture --title "REC-016 stop" > "$D/capture016.out" 2> "$D/capture016.err" & CAP=$!; sleep 20; kill -INT $CAP; wait $CAP; echo "exit $?"; $C status` (the sleeps are the call's timeline) | After the `kill -INT` the capture ends by itself with exit 0 (it exited 134 after saving until #141 was fixed); `capture016.err` says it is recording, then has a `mic.wav` line and a `remote.wav` line with seconds between 18 and 26; the call is still on (`in_call` true) |
 | 2 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-016-stop)"; cat "$CALL/meta.json"` | `ended_at` is set and `stop_reason` is "user" (not "duration"); both tracks are listed with `frames` above 0 |
 | 3 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-016-stop)"; ls "$CALL"; python3 -c "import wave,array,sys;w=wave.open(sys.argv[1]);a=array.array('h',w.readframes(w.getnframes()));print(round(w.getnframes()/w.getframerate(),1),max(map(abs,a)))" "$CALL/remote.wav"` | `mic.wav` and `remote.wav` are kept for the transcription that would follow; `remote.wav` is 18–26 s long and not silent (its peak above 1000): what was said up to the stop, and nothing after |
 

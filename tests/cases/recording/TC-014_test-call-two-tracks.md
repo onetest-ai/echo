@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, tracks, second-instance, recordings]
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-014: A call is recorded as two tracks, written while it records, aligned and closed at its end, and transcribed from both

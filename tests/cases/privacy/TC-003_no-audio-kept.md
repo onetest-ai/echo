@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [privacy, audio, second-instance, recordings]
 external_id: TC-PRIV-003, TC-TRN-002
+auto: [tests/auto/specs/S-17.spec.mjs]
 ---
 
 # TC-003: No audio is kept once a call is transcribed

@@ -186,6 +186,16 @@ export class AppPage {
     return this.page.getByRole('status', { name: 'Notices', exact: true }).getByRole('button', { name: 'OK', exact: true })
   }
 
+  /** The window's own background (the page behind every view), as the browser writes a computed colour. */
+  async windowColour() {
+    return this.page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+  }
+
+  /** The look the window was told to keep ("light", "dark"), or null while it follows the system. */
+  async themeChosen() {
+    return this.page.evaluate(() => document.documentElement.dataset.theme ?? null)
+  }
+
   /** A colour of the window's theme (`--recording`, `--me`), written as the browser writes a computed colour
    *  ("rgb(217, 119, 87)"). */
   async themeColour(name) {

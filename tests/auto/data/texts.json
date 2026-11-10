@@ -486,6 +486,14 @@
       "bar": {
         "light": "rgb(239, 239, 243)",
         "dark": "rgb(23, 23, 28)"
+      },
+      "window": {
+        "light": "rgb(246, 246, 248)",
+        "dark": "rgb(20, 20, 24)"
+      },
+      "text": {
+        "light": "rgb(24, 24, 29)",
+        "dark": "rgb(236, 236, 241)"
       }
     },
     "config": {
@@ -1617,5 +1625,42 @@
     "callsList": "Calls",
     "paletteDialog": "Actions",
     "paletteBox": "Action"
+  },
+  "recording": {
+    "_about": "Calls recorded from files and the recordings prepared once a build (S-17, S-18): the CLI's words and the files it writes",
+    "call": "tests/fixtures/call.py",
+    "noCall": "no call",
+    "recording": "● recording ",
+    "track": "^  {file} — ([\\d.]+)s, [\\d.]+s padded, (\\d+) restart\\(s\\)$",
+    "restarting": "restarting",
+    "tracks": [
+      "mic.wav",
+      "remote.wav"
+    ],
+    "remote": "remote.wav",
+    "stop": {
+      "user": "user",
+      "duration": "duration",
+      "recovered": "recovered"
+    },
+    "writeFailed": "write_failed",
+    "captureExit": "capture.exit",
+    "captureOut": "capture.out",
+    "during": "during.ls",
+    "after": "after.ls",
+    "configAfter": "config.after.json",
+    "callFolder": "call",
+    "callPath": "/calls/\\d{4}-\\d\\d-\\d\\d_\\d{6}-{slug}$",
+    "audioDeleted": "deleted after transcription",
+    "model": "  model: {model}",
+    "doneIn": "^done in \\d+s$",
+    "openLog": "open.log",
+    "reveal": "-R {path}",
+    "minutesPage": "{title}-minutes.html",
+    "menu": {
+      "inBrowser": "Open minutes in browser",
+      "inFinder": "Show minutes in Finder",
+      "showFolder": "Show folder"
+    }
   }
 }
