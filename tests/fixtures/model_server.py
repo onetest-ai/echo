@@ -15,7 +15,8 @@ The script, <dir>/model-script.json (read on every request, so a case can change
    "rules": [{"when": ["phrase", ...], "steps": [ANSWER, ANSWER, ...]}, ...]}
 A request matches the first rule all of whose phrases are in its system prompt or messages; its step is the number
 of assistant turns already in the request (0 for the first call, 1 after the first tool result, ...), and the last
-step repeats. An ANSWER is {"text": "..."}, {"tool": "Read", "input": {...}} or {"blocks": [content blocks]}; a
+step repeats. An ANSWER is {"text": "..."}, {"tool": "Read", "input": {...}}, {"blocks": [content blocks]} or
+{"error": 529, "message": "..."} (the API's error answer, as a server that is overloaded or refuses gives it); a
 request no rule matches gets the text "virtual model: no script for this request". A rule's "vars" ({"dir":
 "<regex with one group>"}) are searched in the request, and "{dir}" in its answers becomes what they found.
 
@@ -181,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
         except ScriptError as e:
             self.server.log({"at": time.time(), "n": n, "path": path, "error": str(e)})
             return self.send_json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": f"virtual model: {e}"}})
+        if "error" in answer:
+            self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "system": req.get("system"),
+                             "messages": req.get("messages"), "rule": rule, "step": step, "error": answer["error"]})
+            return self.send_json(int(answer["error"]), {"type": "error", "error": {"type": "api_error", "message": answer.get("message", "virtual model: an error")}})
         blocks = blocks_of(answer, n)
         stop = "tool_use" if any(b.get("type") == "tool_use" for b in blocks) else "end_turn"
         self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "stream": bool(req.get("stream")),

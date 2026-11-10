@@ -26,6 +26,11 @@ export class CallsPage extends AppPage {
     if (tab) await this.tab(tab).click()
   }
 
+  /** A call's minutes as their own page (`/minutes/<call>`, what Open in browser shows), not in the window's frame. */
+  async openMinutesPage(folder) {
+    await this.page.goto(`${this.data.base}/minutes/${folder}`)
+  }
+
   tab(name) {
     return this.page.getByRole('tab', { name: new RegExp(`^${literal(name)}`) })
   }

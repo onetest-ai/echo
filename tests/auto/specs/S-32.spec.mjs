@@ -1,5 +1,7 @@
 // S-32 Model runs on the virtual model — the real Claude Code, its tools and Echo's guard; only the model is scripted.
 import { test, expect } from '@playwright/test'
+import fs from 'node:fs'
+import path from 'node:path'
 import { useData, textOf } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
 import { CallsPage } from '../pages/calls.page.mjs'
@@ -58,5 +60,40 @@ scenario(test, 'S-32', 'Model runs on the virtual model', () => {
     expect(data.exists(data.home, run.outside)).toBe(false)
     expect(data.read(dir, run.files.notes)).toBe(before)
     expect(data.model.toolResults()).toEqual(g.toolResults)
+  })
+
+  test("3 · A diagram Mermaid can't parse is repaired on the call's profile with only it and its error; one the model refuses keeps its source", covers('claude/TC-021', 'F-MIN-22'), async ({ page }) => {
+    const { calls: c, diagrams: dg } = data.set
+    const t = data.text.diagrams
+    const calls = new CallsPage(page, data)
+    data.model.use(dg.script)
+    data.model.clear()
+    const dir = data.callDir(c.withDiagram.folder)
+    const notes = () => data.read(dir, data.text.minutesRun.files.notes)
+    const before = notes()
+    fs.appendFileSync(path.join(dir, data.text.minutesRun.files.notes), dg.broken)
+    await calls.open()
+    await calls.openCall(c.withDiagram.title, data.text.calls.minutesTab)
+    await expect.poll(notes, { timeout: 15_000 }).toContain(dg.repaired)
+    expect(notes().startsWith(before)).toBe(true) // the rest of the minutes as it was
+    expect(data.read(data.dir, t.serveLog)).toContain(t.repaired)
+    // Only the diagram and Mermaid's error went to the model.
+    const [ask] = data.model.requests()
+    expect(textOf(ask.system)).toContain(t.system)
+    const said = textOf(ask.messages[0].content)
+    for (const words of t.userHas) expect(said).toContain(words)
+    expect(said).not.toContain(before.trim().split('\n')[0])
+    await expect(calls.minutes.locator('svg').first()).toBeVisible()
+    await expect(calls.minutes.getByText(t.bomb)).toHaveCount(0)
+
+    // A second one the model answers with an error: left as it is, shown as its source with the reason.
+    fs.appendFileSync(path.join(dir, data.text.minutesRun.files.notes), dg.refused)
+    await calls.openCall(c.withDiagram.title, data.text.calls.transcriptTab)
+    await calls.tab(data.text.calls.minutesTab).click()
+    await expect.poll(() => data.read(data.dir, t.serveLog), { timeout: 15_000 }).toContain(t.refused)
+    expect(notes()).toContain(dg.refusedBlock)
+    await calls.openMinutesPage(data.callName(c.withDiagram.folder))
+    await expect(page.getByText(t.cantDraw)).toBeVisible()
+    await expect(page.getByText(t.bomb)).toHaveCount(0)
   })
 })

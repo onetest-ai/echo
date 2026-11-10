@@ -174,7 +174,8 @@
     "outside": "calls/stolen.md"
   },
   "calls": {
-    "minutesTab": "Minutes"
+    "minutesTab": "Minutes",
+    "transcriptTab": "Transcript"
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"
@@ -331,5 +332,17 @@
     "claudeCan": "Claude can do",
     "anyone": "Anyone",
     "iOwe": "I owe"
+  },
+  "diagrams": {
+    "system": "You fix one Mermaid diagram",
+    "userHas": [
+      "Mermaid's error:",
+      "The diagram:"
+    ],
+    "repaired": "diagram 1 repaired",
+    "refused": "diagram 2 not repaired",
+    "cantDraw": "This diagram couldn’t be drawn",
+    "bomb": "Syntax error",
+    "serveLog": "serve.log"
   }
 }

@@ -11,6 +11,10 @@
     },
     "other": {
       "folder": "globex-pilot-kickoff"
+    },
+    "withDiagram": {
+      "title": "Globex pilot kickoff",
+      "folder": "globex-pilot-kickoff"
     }
   },
   "virtualModel": {
@@ -282,5 +286,12 @@
     ],
     "rejectBanner": "Same work as Answer the security questionnaire?"
   },
-  "account": "Claude Code (as configured)"
+  "account": "Claude Code (as configured)",
+  "diagrams": {
+    "script": "diagram-repair.json",
+    "broken": "\n## Plan\n\n```mermaid\nflowchart TD\n  A[Budget (Q3)] --> B[Pilot (Globex)]\n```\n",
+    "repaired": "A[\"Budget (Q3)\"] --> B[\"Pilot (Globex)\"]",
+    "refused": "\n## Risks\n\n```mermaid\nflowchart LR\n  R1[Data (EU)] --> R2[Legal sign-off]\n```\n",
+    "refusedBlock": "R1[Data (EU)] --> R2[Legal sign-off]"
+  }
 }

@@ -7,12 +7,13 @@ ai: virtual
 cases:
   - tests/cases/claude/TC-023_a-minutes-run-on-the-virtual-model-gets-the-call-and-only-the-run-tools.md
   - tests/cases/hostile/TC-019_a-model-that-tries-to-leave-the-call-is-refused-by-the-guard.md
+  - tests/cases/claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md
 auto: [tests/auto/specs/S-32.spec.mjs]
 ---
 
 # S-32: Model runs on the virtual model
 
-**Story:** Sam writes a call's minutes, and a transcript talks a model into trying to leave its call. Claude Code, its tools, Echo's guard and the app run for real; the model is the virtual one (`tests/fixtures/model_server.py`), answering from a script and logging what it was given.
+**Story:** Sam writes a call's minutes, a transcript talks a model into trying to leave its call, and a diagram in the minutes that Mermaid can't parse is repaired. Claude Code, its tools, Echo's guard and the app run for real; the model is the virtual one (`tests/fixtures/model_server.py`), answering from a script and logging what it was given.
 
 **Data:** `small` with the virtual model (`tests/fixtures/serve.sh up <dir> <port> --ai virtual`; `tests/fixtures/README.md`, "The virtual model"). Fresh data, built right before the run. Needs Claude Code on `PATH`; no model server, no Claude account.
 
@@ -25,6 +26,7 @@ auto: [tests/auto/specs/S-32.spec.mjs]
 | Data build (`small --ai virtual`) and its virtual model | the lead (`serve.sh up … --ai virtual`), right before the run | all |
 | The default script (a minutes run) | the build | 1 |
 | The guard-probe script | stage 2's Preconditions (`guard-probe.json` with the other call's folder filled in) | 2 |
+| The diagram-repair script | stage 3's Preconditions (`diagram-repair.json`) | 3 |
 
 ## Stages
 
@@ -32,6 +34,7 @@ auto: [tests/auto/specs/S-32.spec.mjs]
 |---|------|------------|-----------|
 | 1 | `claude/TC-023_a-minutes-run-on-the-virtual-model-gets-the-call-and-only-the-run-tools.md` | — | Load `{{base_url}}/` (the cookie) |
 | 2 | `hostile/TC-019_a-model-that-tries-to-leave-the-call-is-refused-by-the-guard.md` | — (another call) | Write the guard-probe script (its Preconditions); clear `<dir>/model/model-log.jsonl` (`: > …`) so its step 4 reads only this run |
+| 3 | `claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md` | — (another call) | Copy the diagram-repair script and clear the log (its Preconditions) |
 
 ## Teardown
 - `tests/fixtures/serve.sh down <dir>` (it stops the virtual model too)

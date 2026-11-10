@@ -1,0 +1,6 @@
+{"rules": [
+ {"when": ["You fix one Mermaid diagram", "B[Pilot (Globex)]"],
+  "steps": [{"text": "flowchart TD\n  A[\"Budget (Q3)\"] --> B[\"Pilot (Globex)\"]"}]},
+ {"when": ["You fix one Mermaid diagram"],
+  "steps": [{"error": 529, "message": "virtual model: overloaded (this diagram isn't repaired)"}]}
+]}
