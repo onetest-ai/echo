@@ -54,6 +54,15 @@ pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
 /// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
 /// calls even if the thread is re-pinned while it runs.
 pub const RUN_PROFILE: &str = "ECHOCTL_RUN_PROFILE";
+/// Yolo's run: the thread it works in (a task's, or an item of Needs you now's), whose data it may read — its brief,
+/// people, work and calls (`run_thread`); nothing of it changes but its own task's state.
+pub const RUN_THREAD: &str = "ECHOCTL_RUN_THREAD";
+
+/// The thread a run Echo started may read (Yolo's: `RUN_THREAD`, else its task's); none for any other run.
+pub fn run_thread() -> Option<String> {
+    let t = std::env::var(RUN_THREAD).ok().filter(|t| !t.is_empty());
+    t.or_else(|| std::env::var(RUN_TASK).ok().and_then(|t| t.split_once('/').map(|(p, _)| p.to_string())).filter(|t| !t.is_empty()))
+}
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
     "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
