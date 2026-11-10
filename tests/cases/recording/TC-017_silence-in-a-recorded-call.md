@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, file-fed, silence, recordings]
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-017: Twenty seconds of silence in a recorded call give no restart and no text

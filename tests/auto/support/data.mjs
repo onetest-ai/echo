@@ -1,6 +1,6 @@
 // A spec file's made-up data (tests/fixtures/serve.sh): built before its first test, stopped after its last; the CLI
 // on it and, with `--ai virtual`, the virtual model's script and log.
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -76,6 +76,18 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
   data.callByStamp = (stamp) => path.join(data.home, 'calls', fs.readdirSync(path.join(data.home, 'calls')).find((n) => n.startsWith(stamp)))
   data.callName = (suffix) => fs.readdirSync(path.join(data.home, 'calls')).find((n) => n.endsWith(suffix))
   data.callDir = (suffix) => path.join(data.home, 'calls', data.callName(suffix))
+  /** `echoctl …` started in the background with the data's environment, as `cli` (a capture stopped by hand): what it
+   *  printed so far (`out`, `err`), a signal sent to it (`kill('SIGINT')`, nothing once it has ended), and `done`, how
+   *  it ended (`{ code, signal }`). */
+  data.start = (...args) => {
+    const p = spawn(BIN, args, { cwd: ROOT, env: data.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const r = { out: '', err: '', ended: false }
+    p.stdout.on('data', (b) => { r.out += b })
+    p.stderr.on('data', (b) => { r.err += b })
+    r.done = new Promise((resolve) => p.on('close', (code, signal) => { r.ended = true; resolve({ code, signal }) }))
+    r.kill = (signal) => { if (!r.ended) p.kill(signal) }
+    return r
+  }
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
   data.json = (...p) => JSON.parse(data.read(...p))
   data.exists = (...p) => fs.existsSync(path.join(...p))

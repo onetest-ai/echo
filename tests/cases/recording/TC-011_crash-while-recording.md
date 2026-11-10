@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [recording, lifecycle, file-fed]
 external_id: TC-REC-012
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-011: A crash while recording is repaired, and transcribed up to the crash

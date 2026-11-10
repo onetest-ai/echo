@@ -34,6 +34,7 @@ cases:
   - tests/cases/recording/TC-025_stop-while-echo-is-busy.md
   - tests/cases/transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md
   - tests/cases/transcription/TC-012_a-calls-language-changed-during-it.md
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # S-18: Recording off the happy path

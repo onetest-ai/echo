@@ -1469,5 +1469,68 @@
       "title": "Acme weekly sync",
       "folder": "acme-weekly-sync"
     }
+  },
+  "s18": {
+    "_about": "S-18 Recording off the happy path: the captures it records from files and the prepared recordings it copies",
+    "model": "large-v3-turbo-q5_0",
+    "language": "en",
+    "stop": {
+      "conversation": "acme-sync",
+      "title": "REC-016 stop",
+      "slug": "rec-016-stop",
+      "startAt": 2,
+      "stopAt": 22,
+      "seconds": [
+        18,
+        26
+      ],
+      "peak": 1000
+    },
+    "crash": {
+      "conversation": "acme-sync",
+      "title": "REC-011 crash",
+      "slug": "rec-011-crash",
+      "startAt": 2,
+      "killAt": 17,
+      "said": "checklist",
+      "after": [
+        "Madrid",
+        "training room"
+      ],
+      "before": 17.0,
+      "files": [
+        "meta.json",
+        "mic.wav",
+        "remote.wav"
+      ],
+      "transcribed": [
+        "transcript.md",
+        "segments.json"
+      ]
+    },
+    "silence": {
+      "recording": "long-silence",
+      "title": "REC-017 silence",
+      "quiet": [
+        6,
+        25
+      ],
+      "segments": 3,
+      "speakers": [
+        "me",
+        "remote",
+        "me"
+      ],
+      "skew": 1.0
+    },
+    "voices": {
+      "recording": "two-remotes",
+      "title": "REC-018 two voices",
+      "sides": {
+        "dana": "remote",
+        "omar": "remote",
+        "me": "me"
+      }
+    }
   }
 }

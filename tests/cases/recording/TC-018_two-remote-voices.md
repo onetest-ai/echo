@@ -8,6 +8,7 @@ module: recording
 run: agent
 platform: macos
 tags: [recording, file-fed, speakers, recordings]
+auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
 # TC-018: Two voices on the remote track stay Remote and are told apart
