@@ -49,3 +49,4 @@
 
 /* A frame keeps its widget's height in a column (Today's own scroll takes the rest), never squeezed to the window. */
 .td > .tw, .td-rest > .tw, .td-grid > .tw { flex-shrink: 0; }
+.tw-top-acts { display: flex; justify-content: flex-end; margin-bottom: 8px; }
