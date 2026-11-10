@@ -165,6 +165,7 @@ function viewTabs() {
 
 function saveBoard(b) {
   if (S.pj.detail) S.pj.detail.board = b
+  S.pj.boardAt = Date.now() // a reload asked before the save lands keeps it (loadProject)
   send({ cmd: 'project', op: 'board', id: S.pj.sel, board: b })
   render()
 }

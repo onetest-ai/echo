@@ -50,6 +50,36 @@ test('once the tree is there, only the Work tab reads it again (it is costly on 
   assert.ok(asked.includes('api/project/acme-rollout/work'), 'the Work tab reads it again')
 })
 
+// A view change (layout, filters) is saved over IPC; a reload asked before it, or just after it, may answer with the
+// board as it was. Its answer keeps the board as the user changed it, or the next change is saved on the old one (#321).
+async function reload(boardAt, served) {
+  const S = { pj: { sel: 'acme-rollout', tab: 'brief', work: { nodes: {} }, boardAt, detail: { id: 'acme-rollout', board: { views: [{ id: 'board', layout: 'tree' }] } } } }
+  const get = async (url) => url === 'api/project/acme-rollout' ? { id: 'acme-rollout', call_count: 2, board: served } : {}
+  const noop = async () => {}
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
+  await loadProject()
+  return S.pj.detail
+}
+const OLD = { views: [{ id: 'board', layout: 'board' }] }
+
+test('a reload asked around a board change keeps the board as changed, and the rest of its answer (#321)', async () => {
+  for (const ago of [0, 500, 1500]) {
+    const d = await reload(Date.now() - ago, OLD)
+    assert.equal(d.board.views[0].layout, 'tree', `changed ${ago} ms before the reload was asked`)
+    assert.equal(d.call_count, 2, 'the rest is the reload\'s')
+  }
+  // Changed while the reload was in flight: after it was asked.
+  const d = await reload(Date.now() + 50, OLD)
+  assert.equal(d.board.views[0].layout, 'tree')
+})
+
+test('a reload asked well after the last board change takes the board it is given (an outside change shows)', async () => {
+  for (const boardAt of [undefined, Date.now() - 10_000]) {
+    const d = await reload(boardAt, OLD)
+    assert.equal(d.board.views[0].layout, 'board', String(boardAt))
+  }
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { await f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
