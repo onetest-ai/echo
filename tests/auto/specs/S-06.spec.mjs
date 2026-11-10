@@ -562,8 +562,13 @@ scenario(test, 'S-06', 'Shape the work', () => {
     await work.typeDate(cleared, [key('backspace')])
     await page.keyboard.press(key('enter'))
     await expect(work.value(w.due)).toHaveText(t.leftShown)
-    // Teardown: both undone, newest first.
-    for (let k = 0; k < 2; k++) await set.first().getByRole('button', { name: w.undo, exact: true }).click()
+    // Teardown: both undone, newest first — each once History has dropped the one before (an undone edit leaves it),
+    // so the next click can't land on the entry just undone while the panel redraws (#319).
+    const entries = await set.count()
+    for (let k = 1; k <= 2; k++) {
+      await set.first().getByRole('button', { name: w.undo, exact: true }).click()
+      await expect(set).toHaveCount(entries - k)
+    }
     await expect(work.value(w.due)).toHaveText(p.before.due)
     // Since the year half typed: only the date left with and the two undos — nothing came of the 0002 (read last, so a
     // late write would show here too).
