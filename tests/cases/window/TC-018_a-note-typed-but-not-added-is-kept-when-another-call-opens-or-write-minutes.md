@@ -17,10 +17,10 @@ tags: [notes, data-loss]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); file reads run after `. <dir>/env`
-- A call's row in the Calls list is `[data-call$="-<slug>"]` and its folder `$ECHOCTL_HOME/calls/*-<slug>` (the folder name ends in the slug; its date follows the data's build date)
-- My notes is open in the right panel (`[aria-label="My notes"]` pressed); the note box is `#note-input` ("New note", placeholder "Add a note — Enter to add")
+- A call's row in the Calls list is `[role=option][data-call$="-<slug>"]` and its folder `$ECHOCTL_HOME/calls/*-<slug>` (the folder name ends in the slug; its date follows the data's build date)
+- My notes is open in the right panel (`[data-panel-flip="notes"]` pressed); the note box is `#note-input` ("New note", placeholder "Add a note — Enter to add")
 - The data's `claude` is a fake that refuses every run: Write minutes fails at once and reaches no account
-- **In S-29** My notes has been open since `window/TC-016` step 1, and the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click. On its own: open a call, press `[aria-label="My notes"]`, then run step 1
+- **In S-29** My notes has been open since `window/TC-016` step 1, and the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click. On its own: open a call, press `[data-panel-flip="notes"]`, then run step 1
 
 ## Test Data
 

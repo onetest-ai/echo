@@ -42,11 +42,11 @@ tags: [work, tree, status, pairwise]
 | Acme renewal | acme-renewal | T019 | task | session | open | - | to do | open |
 | Acme renewal | acme-renewal | T020 | task | dependency | cancelled | - | cancelled | cancelled |
 | Acme renewal | acme-renewal | S003 | story | - | deleted | - | not shown | - |
-| Acme renewal | acme-renewal | D001 | decision | - | open | - | no status | - |
-| Acme renewal | acme-renewal | D002 | decision | - | done | - | no status | - |
+| Acme renewal | acme-renewal | D001 | decision | decision | open | - | no status | - |
+| Acme renewal | acme-renewal | D002 | decision | decision | done | - | no status | - |
 | Acme rollout | acme-rollout | S004 | story | - | done | - | done | done |
 | Initech hiring | initech-hiring | S002 | story | - | blocked | - | blocked | blocked |
-| Initech hiring | initech-hiring | D002 | decision | - | in_progress | - | no status | - |
+| Initech hiring | initech-hiring | D002 | decision | decision | in_progress | - | no status | - |
 | Initech hiring | initech-hiring | D001 | decision | - | deleted | - | not shown | - |
 
 Workstreams (epics) with nothing under them:

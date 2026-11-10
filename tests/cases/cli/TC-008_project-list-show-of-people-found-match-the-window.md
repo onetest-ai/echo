@@ -25,7 +25,7 @@ tags: [cli, threads, found]
 | Thing | Value |
 |---|---|
 | Threads | 10: acme-hackathon, acme-renewal, acme-rollout, globex-pilot, initech-hiring, internal-tooling, legacy-migration, tyrell-bid, umbrella-lead, umbrella-proposal |
-| Acme rollout's calls | 6: three "pinned" (Memo, Acme security review, Globex pilot scoping), three "series" (Acme weekly sync today, Oct 31, Oct 24) |
+| Acme rollout's calls | 6: three "pinned" (Memo, Acme security review, Globex pilot scoping), three "series" (Acme weekly sync today, 7 and 14 days before the build) |
 | Initech planning | in no thread; suggested: Acme renewal, Acme rollout, Globex pilot, each "1 of its 1 people are in its calls" |
 | Candidates (found) | 6 |
 

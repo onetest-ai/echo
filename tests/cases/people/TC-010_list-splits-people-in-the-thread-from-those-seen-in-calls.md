@@ -25,7 +25,7 @@ tags: [people, list, seen, pairwise]
 | Person | Organisation column | Role | Stance | Calls | Tag |
 |---|---|---|---|---|---|
 | Kim Park | Globex | sponsor | supporter | 3/8 | new |
-| Alex Chen | your company | - | - | 0/8 | - |
+| Alex Chen | your company · Delivery | - | - | 0/8 | - |
 | Lena Vogel | your company | - | - | 0/8 | - |
 
 **Seen in calls (not in the thread)**
@@ -41,7 +41,7 @@ tags: [people, list, seen, pairwise]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#project/globex-pilot/people` and press "List" in the segmented control | A table with the columns Person, Organisation, Role, Stance, Calls, Talk, Owes, Last seen |
+| 1 | Navigate to `{{base_url}}/#project/globex-pilot/people` and press "List" in the segmented control | A table with the columns Person, Organisation, Role, Stance, Calls, Talk, Owes, Last seen, then a last one with the buttons to reach each person, whose header "Contact" is for screen readers only (`th .sr`) |
 | 2 | Read the rows of the first block (the card) | Kim Park, Alex Chen and Lena Vogel, with the Organisation, Role, Stance, Calls and tag of the first table |
 | 3 | Read the block "Seen in calls" | The heading "Seen in calls", the text "4 aren't in this thread yet", the button "Add all" and a row each for Ben Okafor, Noor Aziz, Kai Larsen and Dana Lee, each with an "Add" button (not pressed) and the Organisation of the second table |
 | 4 | Run `echoctl project people globex-pilot` | JSON in which the three first people have `in_thread` true and the four others false |

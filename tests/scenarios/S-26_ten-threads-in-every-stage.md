@@ -82,6 +82,6 @@ cases:
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.
 - The only stage that changes data is the last one (`threads/TC-021` moves Acme rollout's Since date); it is last so the others read the data as built, and its teardown is skipped.
-- The browser remembers the folds and the People view: stage 1 opens "Closed · 3" and stage 21 folds it again; stages 12 to 14 leave the People view on List for the next one, and stage 15 ends on Map, as the scenario found it.
+- The browser remembers the folds and the People view: stage 1 opens "Closed · 3" and stage 21 folds it again; stages 12 to 14 leave the People view on List for the next one, and stage 15 ends on Map, as the scenario found it; stage 21 presses List for its step 5 and Map again in its teardown.
 - Each thread is visited once per stage: `threads/TC-019` and `TC-026` go thread by thread, and the scenario picks the order of the threads so that a stage starts where the one before it ended.
 - Never pressed: Accept or Reject in Found for you, "Remove this client…", "Edit", Unlink, Merge, Add (they change data for good; other cases cover them on their own).

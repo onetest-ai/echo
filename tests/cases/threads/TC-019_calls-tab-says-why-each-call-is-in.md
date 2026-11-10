@@ -77,11 +77,13 @@ tags: [threads, calls, membership, pairwise]
 | Imported review 2 | 2 days ago | added by hand | - | Unpin |
 | Memo 9 | 3 days ago | added by hand | - | Unpin |
 
+Started is relative to the build. A row writes that day as the window's day label (`dayLabel`): "Today", "Yesterday", the weekday's name for 2 to 6 days ago ("Saturday"), and the day and month for older ones ("November 3" in en-US, the Playwright browser's locale), then ", " and the time as the locale writes it.
+
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#project/acme-rollout/calls`; read the count on the tab "Calls", the rows from the top and the button of every row, and look for the reason "its Teams chat" | The tab carries the count of the thread's table (6); the rows are those of the table, newest first; each row's second line has the day and time, " · " and the reason of its row, and " · no minutes yet" where the table says so; "Unpin" on a row "added by hand", "Take out" on every other row; no row says "its Teams chat" |
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/calls`; read the count on the tab "Calls", the rows from the top and the button of every row, and look for the reason "its Teams chat" | The tab carries the count of the thread's table (6); the rows are those of the table, newest first; each row's second line has the day (the day label of its Started) and time, " · " and the reason of its row, and " · no minutes yet" where the table says so; "Unpin" on a row "added by hand", "Take out" on every other row; no row says "its Teams chat" |
 | 2 | Do step 1 for each other thread of the tables, one visit each: `acme-renewal`, `globex-pilot`, `umbrella-proposal`, `initech-hiring`, `internal-tooling` | The same for each thread's table (counts 2, 8, 5, 3, 3); "its Teams chat" is on no row of the six tabs: the chat rules of Globex pilot and Umbrella proposal match no call of the data |
 
 ## Expected Final State

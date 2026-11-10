@@ -30,12 +30,14 @@ tags: [work, board, cards, late]
 | T006 | Schedule the steering call | To do | "?" titled "Nobody named" | due today |
 | Q001 | When does finance decide? | Blocked | none (a question has no avatar) | kind "question" |
 
+The dues are relative to the build; the due chip shows the date itself, as the browser's locale writes it: with a short weekday for today and the next six days ("Tue, Nov 10" in en-US), day and short month otherwise ("Nov 7", "Nov 30").
+
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#project/globex-pilot/work`, click the view "Board" | The five columns are shown |
-| 2 | For each row of the table find the card and read its top line (id and story), its avatar `.bd-av`, its title and its chips `.bd-chip` | The card is in the Column of its row; its top line reads the id and "· Day-to-day work" (the story) for the tasks; the avatar and chips are those of the row; the waiting chip reads "⏳" and the name; the holds-up chip reads "holds up N" |
+| 2 | For each row of the table find the card and read its top line (id and story), its avatar `.bd-av`, its title and its chips `.bd-chip` | The card is in the Column of its row; its top line (`.bd-ctx`) reads the id and "· Day-to-day work" (the story) for the tasks (the avatar sits in the same line, so read `.bd-ctx`, not the line's whole text); the avatar and chips are those of the row; the waiting chip reads "⏳" and the name; the holds-up chip reads "holds up N" |
 | 3 | Read the due chip of T004 and of T006 | T004's has the class `late` and the tooltip "Overdue"; T006's (today) has no `late` class and the tooltip "Due" |
 | 4 | Read the avatar of T009 "Send the welcome mail" | It has the class `owed` and the tooltip "Kim Park (the client owes it)" |
 

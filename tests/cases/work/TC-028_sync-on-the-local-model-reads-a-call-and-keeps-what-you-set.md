@@ -30,14 +30,14 @@ tags: [work, ledger, sync, local-model, claude-code, long]
 |---|---|---|
 | T008 Run the data migration dry run | the user sets `due` 2026-11-20 (step 1) | `due` 2026-11-20, `pinned` holds "due" |
 | T003 Prepare the training deck | the user sets `internal_owner` "Alex Chen" (step 1) | still "Alex Chen", `pinned` holds "internal_owner" — although the call says "I will ask Priya to prepare a short training deck" |
-| Evidence pending | Globex pilot scoping (`2026-10-28_110000`), Acme security review (`2026-11-06_110000`), Memo (`2026-11-07_…`) | the first and last marked done by the user (step 2), so only Acme security review is read |
+| Evidence pending | Globex pilot scoping (`<the build date − 10>_110000`), Acme security review (`<the build date − 1>_110000`), Memo (`<the build date>_…`); the evidence ids follow the build day | the first and last marked done by the user (step 2), so only Acme security review is read |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `$L edit '{"op":"edit","node":"T008","set":{"due":"2026-11-20"}}'` and `$L edit '{"op":"edit","node":"T003","set":{"internal_owner":"Alex Chen"}}'` | Each prints JSON with `type` "human", `by` "human", `op` "edit"; in `$L tree`, T008 `due` "2026-11-20" with "due" in `pinned`, T003 `internal_owner` "Alex Chen" with "internal_owner" in `pinned` |
-| 2 | Run `$L pending`; then `$L done --evidence 2026-10-28_110000` and `$L done --evidence <the Memo's id from pending>`; run `$L pending` again | First: three items (Globex pilot scoping, Acme security review, Memo); each `done` prints `{"done": "<id>"}`; then only `2026-11-06_110000` "Acme security review" is left. Save `$L tree` to `<dir>/tree-before.json` and note the node ids |
+| 2 | Run `$L pending`; then `$L done --evidence <the build date − 10>_110000` (Globex pilot scoping's id from pending) and `$L done --evidence <the Memo's id from pending>`; run `$L pending` again | First: three items (Globex pilot scoping, Acme security review, Memo); each `done` prints `{"done": "<id>"}`; then only `<the build date − 1>_110000` "Acme security review" is left. Save `$L tree` to `<dir>/tree-before.json` and note the node ids |
 | 3 | Navigate to `{{base_url}}/#project/acme-rollout/work`, wait for "Sync now", note the time and click the "Sync now" link (`[data-pj="sync"]` in the work bar) | Within 15 seconds (reload to see it) the bar reads "Reading 1 call…" and "Sync now" is disabled |
 | 4 | Every 2 minutes run `$L status` until `state` is no longer "running" (up to 60 minutes on a slow model); note how long it took | `state` "done", `processed` 1, `left` 0, `run` a run id; `message` holds the extract, verify and people reports |
 | 5 | Run `$L pending` and `ls $ECHOCTL_HOME/projects/acme-rollout/ledger/runs/<run>/` | `[]`; the run folder holds `log.txt` and the run's own JSON files (proposals for `2026-11-06_110000`, `packets.json`, `verdicts.json`, people files) |

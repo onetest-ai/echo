@@ -60,7 +60,7 @@ cases:
 | Coming up today unfolded | stage 11, step 3 | 12 |
 | Globex sponsor update's prep open | stage 12, step 1 | 13 |
 | Umbrella intro call open on Prep | stage 13, step 5 | 14 |
-| The Day view after stage 17's reload | stage 17, step 4 | 18, 19 |
+| The Day view after stage 17's reload | stage 17, step 4 and its teardown | 18, 19 |
 | The Inbox panel open (it stays open across views) | stage 21, step 1 | 22–30 |
 | The Inbox panel after a full load (the people fold closed again) | stage 31, step 1 | 32–35 |
 | Acme design review's card with the import's message | stage 28, step 5 | 29 |
@@ -77,7 +77,7 @@ cases:
 | 6 | `calendar/TC-017_card-of-a-recorded-meeting-names-its-recording.md` | — | In step 1 skip the navigation |
 | 7 | `calendar/TC-023_day-and-week-switch-keeps-the-card-open.md` | — | Skip step 1 (the Day view, no card) |
 | 8 | `prep/TC-012_the-calendar-card-offers-show-prep-prepare-or-nothing.md` | — | On stage 7's view: in step 1 skip the navigation; click `[data-ev="ev-m20"]` |
-| 9 | `calendar/TC-025_a-zoom-or-google-meet-meeting-shows-with-its-app.md` | — | On stage 8's view: close the card; in step 2 skip the navigation |
+| 9 | `calendar/TC-025_a-zoom-or-google-meet-meeting-shows-with-its-app.md` | — | — (stage 8 ends on the prep page, `#upcoming/<id>`, with no card open: step 2's navigation brings the Day view back) |
 | 10 | `calendar/TC-026_arming-a-zoom-or-google-meet-meeting-says-recording-isnt-available-yet.md` | — | In step 1 skip the navigation to the Day view only if it is on screen; Your day is read again in step 5 |
 | 11 | `prep/TC-006_coming-up-today-lists-the-meetings-still-to-come-and-leaves-out-unanswered-ones.md` | — | Skip its teardown: Coming up today stays unfolded for stage 12 |
 | 12 | `prep/TC-007_a-prep-shows-every-section-with-its-text.md` | — | On stage 11's view: in step 1 skip the navigation and the click on "Coming up today" (it is unfolded); click its row "Globex sponsor update" |
@@ -85,9 +85,9 @@ cases:
 | 14 | `prep/TC-009_sections-follow-what-the-prep-holds.md` | — | On stage 13's view: in step 1 skip the navigation and the clicks (Umbrella intro call is open on Prep) |
 | 15 | `prep/TC-014_echoctl-prep-lists-and-shows-preps-on-the-standard-day.md` | — | — |
 | 16 | `calendar/TC-022_week-shows-calls-without-a-meeting-as-blocks-of-their-own.md` | — | — |
-| 17 | `calendar/TC-019_series-record-choice-is-kept.md` | — | Skip its teardown: no later stage reads Globex weekly's record rule (stage 5 did) |
-| 18 | `calendar/TC-020_kind-chip-on-a-card-sets-the-type-for-the-series.md` | — | On stage 17's view: in step 1 skip the navigation; click the block |
-| 19 | `calendar/TC-021_thread-chips-on-a-card-and-plus-thread.md` | — | In step 1 skip the navigation; click the block |
+| 17 | `calendar/TC-019_series-record-choice-is-kept.md` | — | Run its teardown (stage 40 reads Globex weekly's rule as the data has it, ask); its reload ends on the Day view |
+| 18 | `calendar/TC-020_kind-chip-on-a-card-sets-the-type-for-the-series.md` | — | On stage 17's view: in step 1 skip the navigation; click the block. Click every block near its top-left corner (`click({ position: { x: 6, y: 4 } })`): the red line "now" (`.now`, drawn above the blocks) crosses the live ones, `ev-m02` among them, and takes a click at their middle |
+| 19 | `calendar/TC-021_thread-chips-on-a-card-and-plus-thread.md` | — | In step 1 skip the navigation; click the block. Click the blocks near their top-left corner, as in stage 18 |
 | 20 | `inbox/TC-004_badge-counts-open-items-and-warns-when-one-blocks.md` | — | — (the server has run for minutes: the sign-in check has settled) |
 | 21 | `inbox/TC-005_chips-open-blocking-and-done.md` | — | On stage 20's view: in step 1 skip the navigation; click "Inbox". Skip its teardown: the panel stays open |
 | 22 | `inbox/TC-006_items-are-grouped-by-client-with-the-blocking-one-first.md` | — | On stage 21's view: skip step 1 (the Inbox is open on Open). Skip its teardown |
@@ -97,7 +97,7 @@ cases:
 | 26 | `inbox/TC-018_echoctl-attention-agrees-with-the-window-on-the-standard-day.md` | — | In step 5 the panel is already open: read its chips. Skip its teardown |
 | 27 | `inbox/TC-016_open-goes-to-the-place-of-the-item.md` | — | Skip step 1. Skip its teardown: the panel stays open for stage 28 |
 | 28 | `inbox/TC-012_import-teams-transcript-without-microsoft-365-fails-and-says-why.md` | — | On stage 27's view: skip step 1 (the Inbox is open over Settings). Skip its teardown: the card stays open for stage 29 |
-| 29 | `calendar/TC-014_import-teams-transcript-fails-cleanly-without-microsoft-365.md` | — | On stage 28's view: skip step 1 (the card of Acme design review is open; its line may already hold the message, it must still show after the click). Skip its teardown |
+| 29 | `calendar/TC-014_import-teams-transcript-fails-cleanly-without-microsoft-365.md` | — | On stage 28's view: skip step 1 (the card of Acme design review is open; its line may already hold the message, it must still show after the click). Run its teardown (Close): stage 30's step 4 opens the card with a click on the block, and a click on the block of an open card closes it |
 | 30 | `inbox/TC-013_not-this-on-a-teams-transcript-drops-the-item.md` | — | Skip step 1 (the Inbox is open). Skip its teardown |
 | 31 | `inbox/TC-009_answering-no-to-a-people-question-takes-it-out-and-lists-it-as-done.md` | — | Reload `{{base_url}}/#today` (a full load: the fold stage 23 opened stays until a reload, and step 3 reads it); in step 1 click "Inbox" only if the panel is not open on Inbox. Skip its teardown |
 | 32 | `inbox/TC-010_found-for-you-not-this-drops-the-item-and-lists-it-as-done.md` | — | In step 1 skip the navigation and the click (the Inbox is open); note N and D. Skip its teardown |
@@ -115,7 +115,7 @@ cases:
 - Data: `standard`, built right before the run.
 - Stages 1 to 15 read the clock: the meetings "live" at the build end 20 minutes after it and the ones "to come" start 37 minutes after it. Run these stages within 15 minutes of the build; if more than 20 minutes have passed, rebuild the data and start again from stage 1. `--now` does not help: the window places the meetings against the real clock, and `--now` only shifts the data.
 - Stages 1 to 8 stay on the Day view: each opens its own cards, and a card is closed only where a step checks it (stages 6 and 7).
-- Stages 17 to 19 change the calendar's own files (a series rule, a meeting's type, a pinned thread); stage 17 leaves Globex weekly on Record (no later stage reads it), stage 19 takes its own pin out again.
+- Stages 17 to 19 change the calendar's own files (a series rule, a meeting's type, a pinned thread); stage 17 puts Globex weekly's rule back to ask in its teardown (stage 40 reads it), stage 19 takes its own pin out again.
 - Inbox stages 20 to 27 read first (badge, chips, groups, folds, buttons, Done rows, the CLI, Open): none of them takes a decision, so Done still holds the data's two rows. The panel opens once (stage 21) and stays open across views until the end. The decisions come last (28 to 35), one item each.
 - The decision stages read the Inbox's counts at their start and expect one less Open and one more Done (stage 30 has already taken one item when 31 and 32 run). Stage 31 starts with a full load: the "5 more like these" that stage 23 opened stays open until a reload, and stage 31 reads the fold.
 - Stage 28 (Inbox) presses Import without Microsoft 365: it fails with a message, and its Open lands on the meeting's card, where stage 29 (calendar) presses the card's own Import and reads the same message.

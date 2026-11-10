@@ -31,8 +31,8 @@ tags: [work, details, xthread, pairwise]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#project/globex-pilot/work`, click the view "Board" and click the card T005 "Book the training slots" | Details shows the title and a row "Waits for" with the link "Acme rollout · T002 Get the access list", the text "· Omar Haddad" and a button "Unlink" |
-| 2 | Click the link "Acme rollout · T002 Get the access list" | The route is `#project/acme-rollout/work` and Details shows T002 "Get the access list" with a row "Holds up" that has a link "Globex pilot · T005" and the words "in another thread" |
+| 1 | Navigate to `{{base_url}}/#project/globex-pilot/work`, click the view "Board" and click the card T005 "Book the training slots" | Details shows the title and a row "Waits for" with the link "Acme rollout · T002 Get the access list", the text "· Omar Haddad" and a button "Unlink"; among its other rows "Waiting on" "Kim Park — …" (T005 also waits for a person) |
+| 2 | Click the link "Acme rollout · T002 Get the access list" | The route is `#project/acme-rollout/work` and Details shows T002 "Get the access list" with a row "Holds up" that has a link "Globex pilot · T005", the words "in another thread" and a button "Unlink" |
 | 3 | Navigate to `{{base_url}}/#project/acme-rollout/work`, click the view "Board" and click the card T009 "Prepare the renewal quote" (in Done) | Details has a row "Also in" with the link "Acme renewal · T001 Prepare the renewal quote" and a button "Unlink" |
 | 4 | Click that link | The route is `#project/acme-renewal/work` and Details shows T001 with the row "Same as": "Acme rollout · T009 Prepare the renewal quote" and "— done there: its status, owner and due show here" |
 | 5 | Do not press "Unlink" | Nothing changes: `echoctl project ledger acme-renewal tree` still lists the link on T001 |

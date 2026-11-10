@@ -58,11 +58,10 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 9 | `cli/TC-010_ledger-tree-and-edit-change-the-work-as-the-user.md` | — | Step 1 alone (it gives the two `mid`s); then steps 2–6 in one call, each edit followed by `$E tree` piped through `python3 -c` that prints only the nodes the step names; step 8 alone (it gives the merge's `mid`); step 9 alone; step 10's edit, then its reload; steps 11–12 in one call |
 | 10 | `cli/TC-011_call-commands-context-actions-type-title-html.md` | — | Batches: steps 1–7; step 9 alone (before the window reads the new name); steps 11–13 |
 | 11 | `cli/TC-012_delete-restore-and-note-from-the-cli.md` | — | Batches: steps 2–3; steps 5–6; steps 8–9 |
-| 12 | `cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md` | — | Steps 1–5 in one call (read only; the calls it reads, Globex pilot scoping and the older Acme weekly sync, are ones stages 6–11 leave as built) |
+| 12 | `cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md` | — | Steps 1–6 in one call (read only; the calls it reads, Globex pilot scoping and the older Acme weekly sync, are ones stages 6–11 leave as built) |
 
 ## Notes
 - The read stages (1–5) come before the ones that change data; each changing stage restores what it changed, except stage 9 (the work of Acme rollout: a criterion met, a move accepted, a merge rejected, a task made and deleted).
 - `<dir>/project-list.json` is the data as built: stages 1 and 2 read it instead of running `project list` twice. Stages 6–11 change the data after it, so nothing later reads it.
 - Batching changes no check: each step's expected result is still checked on its own part of the output, and a failed step fails the stage as before (record which `== step N` part failed). A batch never spans a window step, so every "reload after a CLI change" still sees the change.
-- Stage 9 step 12 and stage 10 step 13 are expected to FAIL until the suspected bugs they check are fixed (an unchecked `target` in ledger `accept`/`reject`/`undo`; "latest" picking an undated call); no stage depends on them.
 - Every CLI step runs `target/debug/echoctl` after `. <dir>/env`; window steps after a CLI change reload the page first.

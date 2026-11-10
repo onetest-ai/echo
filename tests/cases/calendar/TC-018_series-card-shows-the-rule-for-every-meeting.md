@@ -24,15 +24,15 @@ tags: [calendar, series]
 | Meeting (id) | Series rule | Shown on the card |
 |---|---|---|
 | Acme weekly sync (`ev-acme-sync`) | always, English | Record pressed, language "English ▾" |
-| Globex weekly (`ev-globex-weekly`, to come) | ask, any language | Ask pressed, language "Any language ▾" |
+| Globex weekly (`ev-globex-weekly`, to come) | ask, no language | Ask pressed, language "Default language ▾" |
 | Acme design review (`ev-m01`) | not in a series | no "Every meeting of this series" |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | In the card the heading "Every meeting of this series" with a group "Record every meeting": "Record" has `aria-pressed="true"`, "Ask" and "Don't record" `false`; the language chip reads "English ▾" |
-| 2 | Click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build) | The heading "Every meeting of this series"; "Ask" is pressed, "Record" and "Don't record" not; the chip reads "Any language ▾" |
+| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | In the card the heading "Every meeting of this series" (drawn in capitals by the style: match it ignoring case) with a group "Record every meeting": "Record" has `aria-pressed="true"`, "Ask" and "Don't record" `false`; the language chip reads "English ▾" |
+| 2 | Click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build) | The heading "Every meeting of this series"; "Ask" is pressed, "Record" and "Don't record" not; the chip reads "Default language ▾" |
 | 2a | Click "Ask" (already pressed), wait 1 s, run `echoctl series list` | `id:S-GLOBEX-WEEKLY` is still `record` ask; "Ask" stays pressed |
 | 3 | Click the block `[data-ev="ev-m01"]` (Acme design review) | No "Every meeting of this series" in its card |
 | 4 | Run `echoctl series list` | JSON with the keys `id:S-ACME-WEEKLY` (record always, languages en), `id:S-GLOBEX-WEEKLY` (record ask), `id:S-INITECH-ALLHANDS` (record never) and `subject:umbrella pricing call` (record ask, languages uk) |

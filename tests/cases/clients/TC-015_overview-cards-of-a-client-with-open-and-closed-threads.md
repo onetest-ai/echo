@@ -33,7 +33,7 @@ tags: [clients, overview, cards, pairwise]
 | 1 | Navigate to `{{base_url}}/#client/acme/overview` and wait for the text "About Acme" | The section "Threads" holds three cards: Acme renewal, Acme rollout, then Acme hackathon, whose card is marked closed and comes last |
 | 2 | Read each card against the table | Each shows its stage tag, its calls and last-call day, the progress bar with "N of M stories done" where there are stories, the task counts (only the piles that are not empty, among I owe, owed to me, waiting, nobody named), "N late" in red, and the blocks Decided, Risks and Open questions where they hold something |
 | 3 | Read the Risks block of Acme rollout | The risk reads "no response yet" below it (no response is the weakest state) and the levels "likelihood high · impact medium" |
-| 4 | Click "The access list arrives late" | The route is `#project/acme-rollout/work` and the Details drawer opens on R001 |
+| 4 | Click "The access list arrives late" and wait for the right panel's tab "Details" (`[data-panel-show="work-item"][aria-selected="true"]`) (the panel may show its last tab, Inbox, for a moment) | The route is `#project/acme-rollout/work` and the right panel is on its tab "Details", showing R001 |
 | 5 | Navigate back to `{{base_url}}/#client/acme/overview` and click the name "Acme hackathon" | The thread Acme hackathon opens (the route starts with `#project/acme-hackathon/`) |
 
 ## Expected Final State

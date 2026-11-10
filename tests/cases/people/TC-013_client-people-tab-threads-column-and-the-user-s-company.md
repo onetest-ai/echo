@@ -29,7 +29,7 @@ tags: [people, client, list, pairwise]
 | Rita Gomez | in a thread | Acme renewal, Acme rollout | Acme |
 | Ivan Petrov | in a thread | Acme renewal, Acme rollout | Acme |
 | Yuki Tanaka | in a thread | Acme hackathon, Acme renewal, Acme rollout | Acme |
-| Alex Chen | in a thread | Acme renewal, Acme rollout | your company |
+| Alex Chen | in a thread | Acme renewal, Acme rollout | your company · Delivery |
 | Lena Vogel | in a thread | Acme rollout | your company |
 | Ola Svensson | in a thread | Acme rollout | Acme |
 | Tom Becker | in a thread | Acme rollout | your company |

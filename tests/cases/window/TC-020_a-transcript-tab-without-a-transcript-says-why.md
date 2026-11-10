@@ -17,7 +17,7 @@ tags: [transcript, empty-state]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie)
-- A call's row is `[data-call$="-<slug>"]`; the tabs are `role=tab` "Minutes" / "Transcript"
+- A call's row is `[role=option][data-call$="-<slug>"]` (a transcribing call's progress chip in the top bar, `button.pchip`, carries `data-call` too); the tabs are `role=tab` "Minutes" / "Transcript"
 - **In S-29** the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click. On its own, step 1 navigates
 
 ## Test Data
@@ -32,10 +32,10 @@ tags: [transcript, empty-state]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="-quick-check-in"]`, then the tab "Transcript" | The Transcript tab is selected; the pane reads "Transcribing on this computer. This takes about a quarter of the call length."; no "Find in transcript" box; no live column in the pane (its live notes, none yet, would be in My notes) |
-| 2 | Click the row `[data-call$="-recording"]` (title "Recording"), tab "Transcript" | The pane reads "No transcript for this call."; no "Find in transcript" box |
-| 3 | Click the row `[data-call$="-umbrella-intro-call"]`, tab "Transcript" | "No transcript for this call." |
-| 4 | Click the row `[data-call$="-initech-planning"]`, tab "Transcript" | No empty text: the "Find in transcript" box and the turns (first "0:05" Me) |
+| 1 | Navigate to `{{base_url}}/#calls`, click the row `[role=option][data-call$="-quick-check-in"]`, then the tab "Transcript" | The Transcript tab is selected; the pane reads "Transcribing on this computer. This takes about a quarter of the call length."; no "Find in transcript" box; no live column in the pane (its live notes, none yet, would be in My notes) |
+| 2 | Click the row `[role=option][data-call$="-recording"]` (title "Recording"), tab "Transcript" | The pane reads "No transcript for this call."; no "Find in transcript" box |
+| 3 | Click the row `[role=option][data-call$="-umbrella-intro-call"]`, tab "Transcript" | "No transcript for this call." |
+| 4 | Click the row `[role=option][data-call$="-initech-planning"]`, tab "Transcript" | No empty text: the "Find in transcript" box and the turns (first "0:05" Me) |
 
 ## Expected Final State
 Nothing changed.

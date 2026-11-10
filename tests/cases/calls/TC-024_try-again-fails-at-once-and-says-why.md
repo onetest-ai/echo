@@ -17,7 +17,7 @@ tags: [calls, minutes, run, fake-claude]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
-- A call's row in the Calls list is `[data-call$="-<slug>"]` (the folder name ends in the slug; for Acme weekly sync the first match is today's call)
+- A call's row in the Calls list is `[role=option][data-call$="-<slug>"]` (the folder name ends in the slug; for Acme weekly sync the first match is today's call)
 - The data's `claude` is a fake that refuses every run (`tests/fixtures/README.md`): no Claude Code account is used
 
 ## Test Data

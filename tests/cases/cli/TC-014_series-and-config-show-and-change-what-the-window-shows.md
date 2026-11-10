@@ -24,7 +24,7 @@ tags: [cli, series, settings]
 
 | Field | Before | Set to |
 |---|---|---|
-| Series `id:S-GLOBEX-WEEKLY` (Globex weekly, `ev-globex-weekly`) | record `ask`, any language | record `always`, languages `["uk"]` |
+| Series `id:S-GLOBEX-WEEKLY` (Globex weekly, `ev-globex-weekly`) | record `ask`, no language | record `always`, languages `["uk"]` |
 | `scheduled` (Calendar meetings) | `ask` | `manual` |
 | `keep_audio` (Keep audio files) | `false` | `true` |
 
@@ -33,14 +33,14 @@ tags: [cli, series, settings]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `target/debug/echoctl series list` | JSON keyed by series: `id:S-ACME-WEEKLY` (`record` "always", `languages` ["en"]), `id:S-GLOBEX-WEEKLY` (`record` "ask", no `languages`), `id:S-INITECH-ALLHANDS` (`record` "never"), `subject:umbrella pricing call` (`record` "ask", `languages` ["uk"]) |
-| 2 | Navigate to `{{base_url}}/#calendar/day`, click `[data-ev="ev-globex-weekly"]` | Under "Every meeting of this series": "Don't record" `aria-pressed="true"`, "Record" `false`; the language chip "Any language ▾" |
+| 2 | Navigate to `{{base_url}}/#calendar/day`, click `[data-ev="ev-globex-weekly"]` | Under "Every meeting of this series" (drawn in capitals: match it ignoring case): "Ask" `aria-pressed="true"`, "Record" and "Don't record" `false`; the language chip "Default language ▾" |
 | 3 | Run `target/debug/echoctl series set id:S-GLOBEX-WEEKLY '{"record":"always","languages":["uk"]}'` | `{"rule":{"languages":["uk"],"record":"always","subject":"Globex weekly","updated_at":…}}` |
 | 4 | Run `target/debug/echoctl series list --thread globex-pilot` | `series` has one entry: `key` "id:S-GLOBEX-WEEKLY", `subject` "Globex weekly", `rule.record` "always", `rule.languages` ["uk"] |
 | 5 | Reload, open `#calendar/day`, click `[data-ev="ev-globex-weekly"]` | "Record" pressed, "Don't record" not; the chip reads "Ukrainian ▾" |
 | 6 | Run `target/debug/echoctl config` | JSON of the settings with `scheduled` "ask", `keep_audio` false, `me` `{"name":"Sam Rivera","email":"sam@initech.example"}`, `languages` ["en","uk","ru"] |
 | 7 | Run `target/debug/echoctl config --scheduled manual --keep-audio true` | The printed settings have `scheduled` "manual" and `keep_audio` true |
 | 8 | Reload, navigate to `{{base_url}}/#settings/recording` | In the "Calendar meetings" row "Manual" is pressed and "Ask" is not |
-| 9 | Navigate to `{{base_url}}/#settings/transcription` | The switch "Keep audio files" is on |
+| 9 | Navigate to `{{base_url}}/#settings/transcription` | The switch "Keep audio files" is on (`aria-checked="true"`); read the switch, not its row's hint, which always describes Off ("Off: the recordings are deleted…") |
 | 10 | Run `target/debug/echoctl series set id:S-GLOBEX-WEEKLY '{"record":"ask","languages":null}'` and `target/debug/echoctl config --scheduled ask --keep-audio false` | The rule is `ask` without languages again; `scheduled` "ask", `keep_audio` false |
 
 ## Expected Final State

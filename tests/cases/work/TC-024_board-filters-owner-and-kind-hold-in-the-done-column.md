@@ -31,14 +31,14 @@ tags: [work, board, filters, done]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work`, click the view "Board" | Headers "Backlog" 14 / 3, "In progress" 3 / 10, "In review" 0, "Blocked" 1, "Done" 5 |
 | 2 | Select "Omar Haddad" in `[aria-label="Owner"]` | Backlog 1 / 3 holds T002; "In progress" 1 / 10 holds T007; "In review" 0, "Blocked" 0 and "Done" 0: every column follows the owner filter |
-| 3 | Select "Anyone" in Owner and "Tasks" in `[aria-label="Kind"]` | No question is on the board: "Done" holds T001, T009 and T022 only (3) |
-| 4 | Select "All kinds" in Kind | The headers of the first step are back |
+| 3 | Select "Anyone" in Owner and the value `task` in `[aria-label="Kind"]` (its label carries a count: "Tasks · N") | No question is on the board: "Done" holds T001, T009 and T022 only (3) |
+| 4 | Select the value `""` in Kind (the label "All kinds · N") | The headers of the first step are back |
 
 ## Expected Final State
 No filter is set on the board.
 
 ## Teardown
-- Select "Anyone" in Owner and "All kinds" in Kind
+- Select "Anyone" in Owner and the value `""` ("All kinds · N") in Kind
 
 ## Changes
 - Sets and clears two filters of the view "Board" (a saved view setting).

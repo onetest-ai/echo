@@ -36,7 +36,7 @@ The other 8 cards of I owe have no mode (no icon); a card outside I owe never sh
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", click "+ 8" in "I owe" | The chip "Who does it" reads "Anyone ▾"; 14 cards |
-| 2 | Count the `.md-ico` icons of the column and read their `aria-label` | 6 icons: 3 "Claude can do it" (Claude's mark) and 3 "You do it by hand" (a hand), those of the table; none is faded (class `guess`), because every mode is set by the user |
+| 2 | Count the `.md-ico` icons of the column and read their `aria-label` | 6 icons: 3 "Claude can do it" (Claude's mark) and 3 whose label starts with "You do it by hand" (a hand; it goes on with how, e.g. "You do it by hand: A call on Monday morning"), those of the table; none is faded (class `guess`), because every mode is set by the user |
 | 3 | Select "Claude can do" in `[aria-label="Who does it"]` | The chip reads "Claude can do ▾"; "I owe 3" with Acme renewal T003, Umbrella proposal T005 and T009; "Owed to me 0", "Waiting for others 0", "Nobody named 0"; the button "Others" is gone |
 | 4 | Select "By hand" | "I owe 3" with Acme rollout T016, Globex pilot T001 and Initech hiring T010; the other piles show "Nothing here" |
 | 5 | Select "Claude can do", then select the thread "Umbrella proposal · 10" in `[aria-label="Thread"]` | "I owe 2" with Umbrella proposal T005 and T009: the two filters narrow together |

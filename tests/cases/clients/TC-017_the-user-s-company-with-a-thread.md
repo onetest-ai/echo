@@ -34,13 +34,13 @@ tags: [clients, internal, pairwise]
 | 2 | Click the name "Initech · your company" | The route is `#client/initech/overview`; the tag reads "your company" (not "client") and the line "1 thread · initech.example" |
 | 3 | Read the Overview | One card, Initech hiring: "Wrap-up", "3 calls · last …", "0 of 2 stories done", "2 I owe", "1 owed to me", "1 waiting", "2 nobody named"; Decided "Keep the old tenant read-only"; Risks "Key user on leave" (no response yet, likelihood high · impact medium) before "Licences run out" (with its response) |
 | 4 | Click the tab "Profile" | The switch "Your own company" is on with "Your own company (internal work)"; the line under the domains says "Its people are your colleagues: they never count as a client's people."; the row "Threads" holds "Initech hiring" and the line "A client with threads stays: move or delete them first." |
-| 5 | Click the tab "People" | "Nobody in this client's threads yet" and 5 people in "Seen in calls" (see `people/TC-013`) |
+| 5 | Click the tab "People", then "List" in the segmented control "View" (People opens on the view last chosen, Map by default) | "Nobody in this client's threads yet" and 5 people in "Seen in calls" (see `people/TC-013`) |
 
 ## Expected Final State
 Nothing changed.
 
 ## Teardown
-- None: the case only reads
+- Press "Map" in the segmented control (the case changes no data)
 
 ## Notes
 - Covers org.internal (the user's company) by org.threads (open threads). Extends `TC-008` (no threads).
