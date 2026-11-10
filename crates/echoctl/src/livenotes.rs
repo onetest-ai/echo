@@ -39,6 +39,9 @@ mod agent;
 pub use agent::serve as serve_agent;
 use crate::{calls, paths};
 
+mod model;
+pub(crate) use model::*;
+
 pub const NOTES: &str = "live-notes.json";
 /// What the call's live jobs used, added up (`Usage`).
 pub const USAGE: &str = "live-usage.json";
@@ -468,159 +471,6 @@ fn parse_notes(text: &str, duration: f64) -> Result<Draft> {
     let now = v["now"].as_str().map(|s| clip(s, MAX_ITEM_CHARS)).unwrap_or_default();
     Ok(Draft { now, decisions: points("decisions"), actions, questions: points("questions") })
 }
-
-// ── talking to the model ────────────────────────────────────────────────────────────────────
-
-/// One completion: `system` + `user` → the model's text. `cancelled()` is polled while it runs (a
-/// stopped job is a stopped child process). `whole`: a reply cut off at the token limit is an
-/// error (a summary's JSON would be broken).
-fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    match p.kind {
-        Kind::Local => complete_local(p, system, user, max_tokens, whole, cancelled),
-        Kind::System | Kind::Claude => complete_claude(p, &p.live_model(), system, user, whole, CLAUDE_DEADLINE, cancelled),
-    }
-}
-
-/// A model's JSON answer: the whole text, or what lies between its first `{` and last `}` (a code fence or words
-/// around it allowed). None when there is none — never a panic, whatever order the braces come in.
-pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
-    let t = text.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-    serde_json::from_str(t).ok().or_else(|| {
-        let (a, b) = (t.find('{')?, t.rfind('}')?);
-        (a < b).then(|| serde_json::from_str(&t[a..=b]).ok()).flatten()
-    })
-}
-
-/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
-/// minutes model) — a local profile answers through its own server.
-pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
-    match p.kind {
-        Kind::Local => complete_local(p, system, user, max_tokens, true, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => {
-            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting())
-        }
-    }
-}
-
-/// One request with images (PNG bytes) and a text, on a profile's minutes model: the Brain's page
-/// reader. Claude Code gets the images as content blocks (no tools); a `local` profile its Messages API.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], text: &str, max_tokens: u32) -> Result<String> {
-    use base64::Engine as _;
-    let mut blocks: Vec<Value> = images
-        .iter()
-        .map(|png| json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}))
-        .collect();
-    blocks.push(json!({"type": "text", "text": text}));
-    let blocks = Value::Array(blocks);
-    match p.kind {
-        Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => {
-            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
-        }
-    }
-}
-
-fn curl_quote(s: &str) -> String {
-    // A newline would end the option and start another (curl reads its config line by line).
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
-}
-
-/// The curl config for one request (read from stdin: the token never on a command line). The HTTP
-/// status comes last, on a line of its own.
-fn curl_config(p: &Profile, body: &Value) -> String {
-    let base = p.base_url.as_deref().unwrap_or("").trim_end_matches('/');
-    let token = p.token.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| "ollama".into());
-    let mut c = format!(
-        "url = {}\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\nheader = \"anthropic-version: 2023-06-01\"\nheader = {}\ndata-binary = {}\nmax-time = {}\nconnect-timeout = 5\nwrite-out = \"\\n%{{http_code}}\"\n",
-        curl_quote(&format!("{base}/v1/messages")),
-        curl_quote(&format!("x-api-key: {token}")),
-        curl_quote(&body.to_string()),
-        LOCAL_DEADLINE.as_secs(),
-    );
-    // "This Mac" stays on this Mac, whatever proxy the environment names.
-    if ai::loopback(base) {
-        c.push_str("noproxy = \"*\"\n");
-    }
-    c
-}
-
-/// curl's arguments: `-q` must come first (it stops curl reading `~/.curlrc`); no `-L`.
-const CURL_ARGS: [&str; 4] = ["-q", "-sS", "-K", "-"];
-
-/// The last non-empty line of a child's stderr (a login shell's start-up noise comes first).
-pub(crate) fn last_line(s: &str) -> String {
-    s.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").to_string()
-}
-
-/// `POST <base_url>/v1/messages` with thinking off, through curl. `-q` first: the user's
-/// `.curlrc` isn't read (it could turn on following redirects); no `-L`: redirects aren't followed.
-fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, json!(user), max_tokens, whole, cancelled)
-}
-
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-fn complete_local_blocks(p: &Profile, system: &str, blocks: &Value, max_tokens: u32, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, blocks.clone(), max_tokens, true, cancelled)
-}
-
-fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let body = json!({
-        "model": p.live_model(),
-        "max_tokens": max_tokens,
-        "thinking": {"type": "disabled"},
-        "system": system,
-        "messages": [{"role": "user", "content": content}],
-    });
-    let mut c = Command::new("curl");
-    #[cfg(windows)]
-    {
-        use crate::app::NoWindow;
-        c = c.no_window();
-    }
-    c.args(CURL_ARGS).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    ai::detach(&mut c);
-    let mut child = c.spawn().context("running curl")?;
-    let (out, err, ok, wrote) = ai::wait_output_with(&mut child, Some(curl_config(p, &body).into_bytes()), LOCAL_DEADLINE + Duration::from_secs(5), cancelled)
-        .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
-    if let Err(e) = wrote {
-        bail!("{} didn't get the request: {e} {}", p.name, last_line(&err));
-    }
-    if !ok {
-        let why = last_line(&err);
-        bail!("{} didn't answer{}", p.name, if why.is_empty() { String::new() } else { format!(": {why}") });
-    }
-    let (body, status) = out.rsplit_once('\n').unwrap_or((out.as_str(), ""));
-    let v: Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => bail!("{} answered HTTP {}: {}", p.name, status.trim(), clip(body, 200)),
-    };
-    if let Some(e) = v.get("error") {
-        bail!("{}: {}", p.name, e["message"].as_str().or(e.as_str()).unwrap_or("error"));
-    }
-    if status.trim().parse::<u16>().is_ok_and(|s| s >= 400) {
-        bail!("{} answered HTTP {}: {}", p.name, status.trim(), clip(body, 200));
-    }
-    if whole && v["stop_reason"] == "max_tokens" {
-        bail!("{}'s reply was cut off at the token limit", p.name);
-    }
-    let text: String = v["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect();
-    if text.trim().is_empty() {
-        bail!("{} returned no text", p.name);
-    }
-    Ok(text)
-}
-
-/// A lean Claude Code run: no tools, our system prompt, the text on stdin; the result envelope
-/// is checked before the model's own text is used. `system` runs where the minutes run (the
-/// data folder or `notes_in`: its `.claude/settings.json` is part of "as configured"); the others
-/// in Echo's state folder (they load no project settings anyway).
-fn complete_claude(p: &Profile, model: &str, system: &str, user: &str, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    crate::claude_session::complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
-}
-
 
 // ── the scheduler ───────────────────────────────────────────────────────────────────────────
 
