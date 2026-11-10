@@ -17,7 +17,8 @@ pub(crate) fn done_on(n: &Node) -> Option<NaiveDate> {
         .iter()
         .rev()
         .filter(|h| h["applied"] != false)
-        .find(|h| h["effect"] == "done" || h["set"]["state"] == "done" || h["op"] == "done")
+        // A call's status (done, or held: "the workshop happened") or the user's edit to done.
+        .find(|h| h["effect"] == "done" || h["effect"] == "held" || h["set"]["state"] == "done" || h["op"] == "done")
         .and_then(|h| ["at", "ts", "date"].iter().find_map(|k| h[*k].as_str().filter(|s| s.len() >= 10)))
         .and_then(|s| NaiveDate::parse_from_str(&s[..10], "%Y-%m-%d").ok())
 }
@@ -36,7 +37,9 @@ pub fn view(today: NaiveDate) -> Value {
     for p in projects::list().iter().filter(|p| !p.stage.closed()) {
         let Ok(t) = ledger::fold_linked(&p.id) else { continue };
         let (mut d, mut todo, mut waiting) = (0, 0, 0);
-        for n in t.nodes.values().filter(|n| n.kind == "task" && n.merged_into.is_none()) {
+        // A mirror counts once, in its master's thread (as Tasks shows it), unless that thread is closed.
+        let counted = |n: &&Node| n.kind == "task" && n.merged_into.is_none() && n.mirror_of.as_ref().is_none_or(|m| m["closed_thread"] == true);
+        for n in t.nodes.values().filter(counted) {
             match n.state.as_str() {
                 "done" => {
                     if let Some(day) = done_on(n).filter(|day| *day >= from && *day <= today) {
@@ -59,14 +62,28 @@ pub fn view(today: NaiveDate) -> Value {
     json!({"since": from.to_string(), "threads": threads, "done": done.into_iter().map(|(_, v)| v).collect::<Vec<_>>()})
 }
 
-/// Today's view (`view` for the local date).
+/// Today's view (`view` for the local date), read again at most every 30 s: Today asks for it on each refresh, and each
+/// thread's work is folded for it.
 pub fn today() -> Value {
-    view(Local::now().date_naive())
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static LAST: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, v)) = last.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(30)) {
+        return v.clone();
+    }
+    let v = view(Local::now().date_naive());
+    *last = Some((Instant::now(), v.clone()));
+    v
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn t_node(project: &str, id: &str) -> Node {
+        ledger::fold_linked(project).unwrap().nodes[id].clone()
+    }
 
     #[test]
     fn a_thread_counts_done_this_week_to_do_and_waiting_and_done_lists_this_weeks() {
@@ -84,6 +101,11 @@ mod tests {
         let t = &v["threads"][0];
         assert_eq!((t["done"].as_u64(), t["todo"].as_u64(), t["waiting"].as_u64(), t["total"].as_u64()), (Some(1), Some(1), Some(2), Some(4)), "{v}");
         assert_eq!(v["done"][0]["title"], "Book the room");
+        // Done because a call said it happened (held) counts as done this week too.
+        let mut held = t_node(&id, &c);
+        held.state = "done".into();
+        held.history = vec![json!({"effect": "held", "date": today.to_string(), "applied": true})];
+        assert_eq!(done_on(&held), Some(today));
         // Next week, that one was done last week: not counted, not listed.
         let v = view(today + chrono::Duration::days(7));
         assert_eq!((v["threads"][0]["done"].as_u64(), v["done"].as_array().map(Vec::len)), (Some(0), Some(0)), "{v}");
