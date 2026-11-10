@@ -612,11 +612,18 @@ function showNotesState() {
   if (el && call) el.textContent = notesState(NotesSync.view(call), pendingNote(call))
 }
 /** The Time button: `[m:ss] ` (time into the call; tray → Add a note… stamps `[mm:ss]`) at the caret. */
-function stampNotes() {
-  const ta = $('#my-notes')
+async function stampNotes() {
+  let ta = $('#my-notes')
   if (!ta || !S.call || !S.call.started_at || ta.readOnly || ta.dataset.notesCall !== S.call.name) return
   const call = ta.dataset.notesCall
-  const stamp = `[${clock((Date.now() - new Date(S.call.started_at)) / 1000)}] `
+  // The call's time at the click, inserted only once the app confirms it records the call: after hang-up the window
+  // may still show it recording for a few seconds (#377, as a note's time, #358).
+  const t = (Date.now() - new Date(S.call.started_at)) / 1000
+  const ok = await within(askRecording(get, call).then((r) => r.ok), 500)
+  ta = $('#my-notes')
+  if (!ta || ta.readOnly || ta.dataset.notesCall !== call) return
+  if (noteTime(t, ok) == null) return window.echo.notice('The call has ended: no call time to insert.')
+  const stamp = `[${clock(t)}] `
   const at = ta.selectionStart ?? ta.value.length
   ta.setRangeText(stamp, at, ta.selectionEnd ?? at, 'end')
   ta.focus()
