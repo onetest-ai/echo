@@ -102,6 +102,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-15",
+   "feature": "Edit Today: a pencil in the head frames each widget (grip, name, its sizes, ×; content inert; an empty temporal one says what it is); drag a widget onto another's top or bottom quarter for a new row above / below, its left or right half to sit before / after it, or onto the end for a last row; Add a widget on the right (search, parts, a row a widget with Add or on Today, the picked one previewed at a size it takes, Add at that size or drag it in); Reset to the default; Done; every change is the layout file echoctl today edits",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

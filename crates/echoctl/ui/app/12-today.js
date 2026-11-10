@@ -11,7 +11,7 @@ function todayView() {
   // Hello by the time of day, by the user's first name (About me).
   const hr = now.getHours(), first = (d.me || '').trim().split(/\s+/)[0]
   const hello = `${hr < 5 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${first}` : ''}`
-  const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
+  const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span>${todayEditHead()}</header>`
   const cards = (d.cards || []).map((c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
   // Your day as "where you'll be" (#315, Workbench `WidgetsCalendar`): a line a place with its reason; the line "now"
   // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card on the right.
@@ -58,6 +58,7 @@ function todayView() {
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now) }
+  S.tdParts = parts // Add a widget's previews (13-today-edit.js)
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
   const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
@@ -66,19 +67,21 @@ function todayView() {
   const FILL = ['core:calendar.agenda', 'core:tasks.mine', 'core:calendar.calendar']
   const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const SPAN = { S: 1, M: 2, L: 3 }
-  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !parts[id] })))
+  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !parts[id] && !S.tdEdit })))
   // Measured on every draw (the width may have changed on another page), then watched while Today shows.
   const tdWidth = todayWidth()
   const cols = tdWidth ? todayCols(tdWidth, S.todayCols) : S.todayCols || 3
   S.todayCols = cols
   todayWatch()
   const blocks = todayLines(rowsIn, cols).map((line) => {
-    if (!line.fill && line.items.length === 1) return parts[line.items[0].id]
+    // In edit mode a widget is framed: grip, name, S M L, × (13-today-edit.js); an empty one shows what it is.
+    const part = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
+    if (!line.fill && line.items.length === 1) return part(line.items[0].id)
     // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
-    const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${parts[id]}</div>` : parts[id]))
+    const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${line.items.map((i) => `minmax(0, ${i.span}fr)`).join(' ')}">${cells.join('')}</div>`
   }).join('')
-  return `<div class="td">${head}${asks}${blocks}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
+  return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep

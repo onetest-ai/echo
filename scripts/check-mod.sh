@@ -59,6 +59,8 @@ node crates/echoctl/ui/today-layout.test.mjs
 node crates/echoctl/ui/today-agenda.test.mjs
 # Your day as a calendar and a strip: meetings side by side in lanes, the hours shown (dayLanes, dayWindow).
 node crates/echoctl/ui/today-calendar.test.mjs
+# Today's edit mode: where a dragged widget goes over another (dropSide).
+node crates/echoctl/ui/today-edit.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
