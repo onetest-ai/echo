@@ -513,7 +513,8 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
       quit = await own.quit()
     }
     expect(quit.code, quit.err).toBe(0)
-    // The arm is taken: it waits for the next call, as its words (#350) and the state after the Stop show.
+    // The arm is taken: it waits for the next call, as the state after the Stop shows (its exact words, #350, are
+    // checked here once that fix is stable).
     expect(next.code, next.err).toBe(0)
     expect(next.out.trim().startsWith(a().armedPrefix)).toBe(true)
     expect(stop.out.trim()).toBe(`${fill(a().stopping, { folder: recording })} ${a().busy}`)

@@ -1221,9 +1221,10 @@ pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Op
 }
 
 /// What `arm` says it will record, by the running app's state: while Echo records a call, the arm is for the next one
-/// (a recording starts only when none is on, #350).
+/// (a recording starts only when none is on, #350); while it records a memo, for the call on once the memo stops.
 fn arm_said(w: Option<&WatchState>) -> &'static str {
     match w {
+        Some(w) if w.recording.is_some() && w.memo => "armed — Echo is recording a memo; the call is recorded once the memo stops (expires in 15 min)",
         Some(w) if w.recording.is_some() => "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)",
         Some(w) if w.in_call == Some(true) => "armed — call in progress, recording starts within a second",
         Some(_) => "armed — recording starts when the call begins (expires in 15 min)",
@@ -1344,6 +1345,9 @@ mod tests {
     #[test]
     fn arm_says_what_it_will_record() {
         let w = |in_call, recording: Option<&str>| WatchState { pid: 1, heartbeat: Utc::now(), app: TargetApp::Teams, in_call, armed: true, recording: recording.map(String::from), memo: false, no_tray: false };
+        // During a memo the arm records the call on once the memo stops (a memo never holds the arm back).
+        let memo = WatchState { memo: true, ..w(Some(true), Some("2026-11-10_090000-memo")) };
+        assert_eq!(arm_said(Some(&memo)), "armed — Echo is recording a memo; the call is recorded once the memo stops (expires in 15 min)");
         // While Echo records a call, an arm is for the next call: it doesn't start anything now (#350).
         assert_eq!(arm_said(Some(&w(Some(true), Some("2026-11-10_090000-acme-sync")))), "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)");
         assert_eq!(arm_said(Some(&w(Some(true), None))), "armed — call in progress, recording starts within a second");

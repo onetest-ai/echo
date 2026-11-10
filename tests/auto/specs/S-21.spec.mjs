@@ -3,7 +3,8 @@
 // start refused (stage 1), quit and start again (2), another data folder (3: its own app, started twice) — and the
 // window following the system's light and dark (4). Stage 3 records a call fed from files and transcribes it: the
 // speech model comes only from the test's own folder (ECHOCTL_TEST_MODELS); without it, stage 3 skips.
-// Stage 3's restart keeps --no-tray (#351): no dev tray icon shows on the real menu bar.
+// Stage 3's restart keeps --no-tray (#351): no dev tray icon shows on the real menu bar (asserted here once that fix
+// is stable).
 // Not here: stages 5–12 are a person's (start at login, `app start`, the native window and its Dock icon, updates from
 // GitHub, offline, the network).
 import fs from 'node:fs'

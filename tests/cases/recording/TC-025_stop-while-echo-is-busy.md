@@ -43,5 +43,5 @@ The Stop given while the app was frozen ended the recording as soon as the app r
 - Run the prelude, then `kill -CONT $(cat "$D/app.pid") 2>/dev/null; $C end; target/debug/echoctl stop; target/debug/echoctl app quit`; if it does not stop within 30 s, `kill $(cat "$D/app.pid")`
 
 ## Notes
-- An arm made while Echo records says it is for the next call (#350); one made in a call with nothing recording, that recording starts within a second.
+- An arm made while Echo records a call says it is for the next call (#350); while it records a memo, that the call is recorded once the memo stops; in a call with nothing recording, that recording starts within a second.
 - `kill -STOP` stands in for the watcher blocked on a device (a device listing or a stream close that hangs while a Bluetooth headset reconnects): the loop and its heartbeat stop alike.
