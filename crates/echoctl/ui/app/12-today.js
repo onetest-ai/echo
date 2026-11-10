@@ -338,7 +338,7 @@ document.addEventListener('keydown', (e) => {
 function todayMoreCue() {
   // The view Today scrolls in (its height less its padding): the held Your day is that tall at most.
   const td = document.querySelector('.td')
-  if (td) td.style.setProperty('--td-view', `${Math.max(300, td.clientHeight - 42)}px`)
+  if (td) { S.tdView = Math.max(300, td.clientHeight - 42); td.style.setProperty('--td-view', `${S.tdView}px`) }
   for (const el of document.querySelectorAll('.td .td-rows, .td .td-tasks')) {
     const more = el.scrollHeight - el.scrollTop - el.clientHeight > 4
     if (more !== el.hasAttribute('data-more')) el.toggleAttribute('data-more', more)
