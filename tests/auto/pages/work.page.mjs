@@ -140,6 +140,14 @@ export class WorkPage extends AppPage {
     return this.details.getByRole('button', { name: new RegExp(`^${literal(field)}:`) })
   }
 
+  /** A date typed the way a person does: a click on the box's first part, then each key (a programmatic fill sets the
+   *  whole date at once). */
+  async typeDate(box, keys) {
+    const { height } = await box.boundingBox()
+    await box.click({ position: { x: 8, y: height / 2 } })
+    for (const k of keys) await this.page.keyboard.press(k)
+  }
+
   /** Open a field for a change: its box, by the field's name. */
   async editField(field) {
     await this.value(field).click()

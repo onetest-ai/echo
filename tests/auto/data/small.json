@@ -74,7 +74,17 @@
       "handedOver": "not known · Set",
       "due": "no date · Set"
     },
-    "remove": "--remove"
+    "remove": "--remove",
+    "typed": {
+      "keys": "11112026",
+      "due": "2026-11-11",
+      "shown": "Wed, Nov 11",
+      "halfYear": "1110002",
+      "_why": "day = month: the same keys in a month/day/year box and a day.month.year one (the box's order is the computer's region's)",
+      "leftKeys": "12122026",
+      "leftDue": "2026-12-12",
+      "leftShown": "Sat, Dec 12"
+    }
   },
   "threads": [
     "Acme rollout",

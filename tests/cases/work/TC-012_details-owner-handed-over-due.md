@@ -36,7 +36,7 @@ auto: [tests/auto/specs/S-06.spec.mjs]
 | 2 | Click the Owner value, type `Dana Lee`, press Enter. Wait up to 3 s after an action for the window to redraw before reading. | Owner reads "Dana Lee"; the avatar on the card reads "DL" |
 | 3 | Click "Set" next to Handed over by; read the box's suggestions (`input[data-ledger-set="delegated_by"]`, its `list` → `#wp-names option`) | The box suggests "Me" then the thread's people, in their order: "Me", "Dana Lee", "Omar Haddad" (Owner's box suggests the same) |
 | 4 | Type `Sam Rivera`, press Enter | Handed over by reads "Sam Rivera" (a name not suggested is taken too) |
-| 5 | Click "Set" next to Due, enter the date 2026-12-18 in the field named "Due" | Due reads "Fri, Dec 18"; the card shows a due chip "Dec 18" |
+| 5 | Click "Set" next to Due, enter the date 2026-12-18 in the field named "Due" (picked in its calendar it is saved at once; typed, on Enter or a click elsewhere) | Due reads "Fri, Dec 18"; the card shows a due chip "Dec 18" |
 | 6 | Read History | Three entries "you set internal owner", "you set delegated by", "you set due", each with "undo" |
 
 ## Expected Final State

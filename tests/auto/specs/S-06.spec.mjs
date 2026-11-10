@@ -514,4 +514,60 @@ scenario(test, 'S-06', 'Shape the work', () => {
     await expect(work.card(r.reject[0].title)).toBeVisible()
     await expect(work.card(b.t2.title)).toBeVisible()
   })
+
+  test('18 · A Due date typed in Details is saved once, as typed; Enter on an empty box saves nothing', covers('work/TC-030', 'F-WORK-11'), async ({ page }) => {
+    const p = data.set.work
+    const t = p.typed
+    const w = data.text.work
+    const events = () => data.read(data.home, 'projects', p.thread, 'ledger', 'events.jsonl').trim().split('\n')
+    const work = new WorkPage(page, data)
+    await work.open(p.thread)
+    await work.openItem(p.item)
+    await expect(work.value(w.due)).toHaveText(p.before.due)
+    // History already has stage 1's and stage 4's "you set due": this stage adds one.
+    const set = work.history.filter({ hasText: fill(w.youSet, { field: w.fields.due }) })
+    const sets = await set.count()
+    // 2: Enter on the empty box, then Escape: nothing.
+    let before = events().length
+    await work.editField(w.due)
+    await page.keyboard.press(key('enter'))
+    await page.keyboard.press(key('escape'))
+    await expect(work.value(w.due)).toHaveText(p.before.due)
+    expect(events().length).toBe(before)
+    // 3: typed key by key into the box's first part: nothing written while typing.
+    const box = await work.editField(w.due)
+    await work.typeDate(box, t.keys)
+    await expect(box).toHaveValue(t.due)
+    expect(events().length).toBe(before)
+    // 4: Enter: one edit, the date typed.
+    await page.keyboard.press(key('enter'))
+    await expect(work.value(w.due)).toHaveText(t.shown)
+    const added = events().slice(before).map((l) => JSON.parse(l))
+    expect(added.map((e) => [e.op, e.node, e.set])).toEqual([['edit', data.set.board.t2.id, { due: t.due }]])
+    // 5: one more "you set due" in History, the newest.
+    await expect(set).toHaveCount(sets + 1)
+    // A year half typed (0002) is refused: the date kept.
+    before = events().length
+    const again = await work.editField(w.due)
+    await work.typeDate(again, t.halfYear)
+    await page.keyboard.press(key('enter'))
+    await expect(work.value(w.due)).toHaveText(t.shown)
+    // Typed, then left (a click on the item's title): saved once, the same way.
+    const left = await work.editField(w.due)
+    await work.typeDate(left, t.leftKeys)
+    await work.details.getByText(p.item, { exact: true }).first().click()
+    await expect(work.value(w.due)).toHaveText(t.leftShown)
+    // One part of the date cleared (Backspace), then Enter: half typed, the date kept.
+    const cleared = await work.editField(w.due)
+    await work.typeDate(cleared, [key('backspace')])
+    await page.keyboard.press(key('enter'))
+    await expect(work.value(w.due)).toHaveText(t.leftShown)
+    // Teardown: both undone, newest first.
+    for (let k = 0; k < 2; k++) await set.first().getByRole('button', { name: w.undo, exact: true }).click()
+    await expect(work.value(w.due)).toHaveText(p.before.due)
+    // Since the year half typed: only the date left with and the two undos — nothing came of the 0002 (read last, so a
+    // late write would show here too).
+    const ops = events().slice(before).map((l) => JSON.parse(l)).map((e) => e.op === 'edit' ? e.set.due : e.op)
+    expect(ops).toEqual([t.leftDue, w.undoOp, w.undoOp])
+  })
 })

@@ -436,7 +436,8 @@ document.addEventListener('click', (e) => {
       render(); { const i = document.querySelector('[data-view-name]'); if (i) { i.focus(); i.select() } } return
     }
     case 'view-del': { const bd = boardOf(); const cur = activeViewId(); bd.views = bd.views.filter((v) => v.id !== cur); S.pj.viewMenu = false; saveBoard(bd); return chooseView(bd.views[0].id) }
-    case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) { i.focus(); if (i.showPicker && i.type === 'date') try { i.showPicker() } catch {} } } return
+    // A date box opens without its calendar: an open calendar takes Enter and picks today (#303); its icon opens it.
+    case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) i.focus() } return
     case 'edit-title': S.pj.editField = 'title'; render(); { const i = document.querySelector('.wp-title'); if (i) { i.focus(); i.select() } } return
     case 'sync': send({ cmd: 'project', op: 'sync', id: S.pj.sel }); if (S.pj.work) S.pj.work.sync = { state: 'running', message: 'reading calls' }; return render()
     case 'ledger': return ledgerEdit(JSON.parse(d.body))
@@ -541,6 +542,9 @@ document.addEventListener('change', (e) => {
   if (el.dataset && el.dataset.logoOp && el.files) { sendLogo(el.files[0], el.dataset.logoOp, el.dataset.id); el.value = ''; return }
   if (el.dataset && el.dataset.pjFilter) return setView({ [el.dataset.pjFilter]: el.value })
   if (el.dataset && el.dataset.ledgerSet && S.pj.node) {
+    // A date box fires `change` for each part typed (a year half typed is a date too): typed, it is saved once, on
+    // Enter or when left (#303); a day picked in its calendar, at once.
+    if (el.type === 'date') return el.dataset.typed ? undefined : saveDateField(el)
     const k = el.dataset.ledgerSet, v = el.value.trim()
     S.pj.editField = null
     return ledgerEdit({ op: 'edit', node: S.pj.node, set: { [k]: v === '' && k !== 'title' ? null : v } })
@@ -599,6 +603,10 @@ document.addEventListener('keydown', (e) => {
     return render()
   }
   if (el.dataset && el.dataset.clientField && e.key === 'Enter') { e.preventDefault(); return el.blur() }
+  if (el.dataset && el.dataset.ledgerSet && el.type === 'date') {
+    if (e.key === 'Enter') { e.preventDefault(); return saveDateField(el) }
+    if (e.key !== 'Escape' && e.key !== 'Tab') el.dataset.typed = '1'
+  }
   if (el.dataset && (el.dataset.colName || el.dataset.colLimit) && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); el.blur(); S.pj.colMenu = null; return render() }
   if (el.dataset && el.dataset.viewName !== undefined && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); el.blur(); S.pj.viewMenu = false; return render() }
   if (el.id === 'pj-term' && e.key === 'Enter') { e.preventDefault(); return $('[data-pj="term-add"]').click() }
@@ -625,9 +633,20 @@ document.addEventListener('change', (e) => {
     const v = $('#pj-rule-val'); if (v) v.placeholder = ph[e.target.value] || ''
   }
 })
+/** A work item's date box, done with (Enter, or left): its date saved once, when it changed and is one a work item can
+ *  be due on; an emptied box clears a date it had, a half-typed one (a part cleared) changes nothing. */
+function saveDateField(el) {
+  const k = el.dataset.ledgerSet, n = S.pj.work && S.pj.work.nodes[S.pj.node]
+  if (S.pj.editField !== k || !n) return
+  S.pj.editField = null
+  const v = el.value, year = Number(v.slice(0, 4))
+  if (el.validity.badInput || v === (n[k] || '') || (v && !(year >= 2000 && year <= 2100))) return render()
+  ledgerEdit({ op: 'edit', node: S.pj.node, set: { [k]: v || null } })
+}
 // A work item's field opened for a change and left as it was (or Esc): back to reading it.
 document.addEventListener('focusout', (e) => {
   if (!(e.target.closest && e.target.closest('.wp') && e.target.dataset.ledgerSet)) return
+  if (e.target.type === 'date') return saveDateField(e.target)
   setTimeout(() => { if (S.pj.editField && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.wp') && document.activeElement.dataset.ledgerSet)) { S.pj.editField = null; render() } }, 150)
 })
 document.addEventListener('keydown', (e) => {
