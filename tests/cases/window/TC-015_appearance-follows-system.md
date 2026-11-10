@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [appearance]
 external_id: TC-WIN-010
+auto: [tests/auto/specs/S-21.spec.mjs]
 ---
 
 # TC-015: The window follows the system's light and dark appearance

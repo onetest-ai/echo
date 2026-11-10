@@ -18,6 +18,7 @@ cases:
   - tests/cases/lifecycle/TC-009_up-to-date.md
   - tests/cases/privacy/TC-004_offline-transcription.md
   - tests/cases/privacy/TC-005_network-destinations.md
+auto: [tests/auto/specs/S-21.spec.mjs]
 ---
 
 # S-21: Living with Echo
