@@ -161,10 +161,10 @@ function projectCalls(p) {
     const ctl = c.why === 'pinned'
       ? `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="rules" title="Leave it to the rules">Unpin</button>`
       : `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="exclude" title="Take it out (the rules won't put it back)">Take out</button>`
-    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))} · ` : ''}${esc(WHY[c.why] || c.why)}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl">${ctl}</div></div>`
+    return `<div class="set-row" role="listitem"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))} · ` : ''}${esc(WHY[c.why] || c.why)}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl">${ctl}</div></div>`
   }).join('')
   const out = p.exclusions && p.exclusions.length ? `<p class="set-foot">${p.exclusions.length} call${p.exclusions.length === 1 ? '' : 's'} taken out by hand.</p>` : ''
-  return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls match yet. Add a rule on Profile — a meeting series, the client\'s people, a Teams chat — or open a call and add it from its header.</div></div>'}</div>${out}</section>`
+  return `<section class="set-sec"><div class="set-card"${rows ? ' role="list" aria-label="Calls"' : ''}>${rows || '<div class="set-row"><div class="set-sub">No calls match yet. Add a rule on Profile — a meeting series, the client\'s people, a Teams chat — or open a call and add it from its header.</div></div>'}</div>${out}</section>`
 }
 
 /** A token (× removes it) and the dashed "+ Add" that opens an inline box in its place. */
@@ -265,11 +265,11 @@ document.addEventListener('change', (e) => {
 
 function projectProfile(p, data) {
   const id = esc(p.id)
-  const row = (label, html) => `<div class="pf-row"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
+  const row = (label, html) => `<div class="pf-row" role="group" aria-label="${esc(label)}"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
   // Stage: the three groups side by side; its history as one line.
   const at = (st) => { for (let i = (p.stages || []).length - 1; i >= 0; i--) if (p.stages[i].stage === st) return i; return -1 }
   const passed = new Set((p.stages || []).map((c) => c.stage))
-  const groups = ProjectArt.STAGES.map(([, glabel, xs]) => `<div class="pf-sg"><span>${esc(glabel)}</span><div class="seg">${xs.map(([sid, label]) => `<button data-pj="stage" data-stage="${sid}" aria-pressed="${p.stage === sid}" class="${p.stage !== sid && passed.has(sid) ? 'passed' : ''}">${esc(label)}</button>`).join('')}</div></div>`).join('')
+  const groups = ProjectArt.STAGES.map(([, glabel, xs]) => `<div class="pf-sg" role="group" aria-label="${esc(glabel)}"><span>${esc(glabel)}</span><div class="seg">${xs.map(([sid, label]) => `<button data-pj="stage" data-stage="${sid}" aria-pressed="${p.stage === sid}" class="${p.stage !== sid && passed.has(sid) ? 'passed' : ''}">${esc(label)}</button>`).join('')}</div></div>`).join('')
   const st = p.stages || []
   const hist = st.length ? [`${ProjectArt.stage(p.stage).label} since ${shortDay(st[st.length - 1].at)}`, ...st.slice(0, -1).reverse().slice(0, 3).map((c, i, arr) => { const j = st.length - 2 - i; return `${ProjectArt.stage(c.stage).label} ${shortDay(c.at)} → ${shortDay(st[j + 1].at)}` })].join(' · ') : ''
   const reason = st.length && st[st.length - 1].reason ? ` (${esc(st[st.length - 1].reason)})` : ''
@@ -302,7 +302,7 @@ function projectProfile(p, data) {
   const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
     : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
   // Look and AI: not on the board; the same row style.
-  const colors = PJ_COLORS.map((c) => `<button class="pj-swatch${p.color === c ? ' on' : ''}" style="background:${c}" data-pj="color" data-color="${c}" aria-label="Colour ${c}"></button>`).join('')
+  const colors = PJ_COLORS.map((c) => `<button class="pj-swatch${p.color === c ? ' on' : ''}" style="background:${c}" data-pj="color" data-color="${c}" aria-label="Colour ${c}" aria-pressed="${p.color === c}"></button>`).join('')
   // Its look: a pattern made from it (in its colour), or its own logo — the symbols and the client's logo were dropped
   // (the user, 2026-11-05); a thread that picked one still shows it.
   const look = `<div class="pf-look">${p.has_logo ? '' : `<span title="Made from the thread, in its colour">${projIcon({ ...p, icon: null }, 22)}</span>`}<span class="pj-swatches">${colors}</span><span class="pj-logo-drop" data-drop-op="logo" data-id="${id}" title="Drop an image here">${p.has_logo ? projIcon(p, 22) : '<span class="pj-logo-empty">logo</span>'}</span>${logoPicker('logo', p.id, p.has_logo ? 'Change logo…' : 'Use a logo…')}${p.has_logo ? '<button class="link-btn" data-pj="logo-remove">Remove</button>' : ''}${p.icon && !p.has_logo ? '<button class="link-btn" data-pj="icon" data-icon="">Use the pattern</button>' : ''}</div>`

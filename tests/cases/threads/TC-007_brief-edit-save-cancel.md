@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, brief]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-007: The Brief is edited in place: ⌘S saves it as Markdown, Esc cancels, Latest calls lists the thread's calls

@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile, rules]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-013: Profile → Calls adds and removes a rule; the matching count follows

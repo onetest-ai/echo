@@ -1,6 +1,7 @@
 // Calls: the list of calls, a call's tabs, and its Minutes tab (the minutes page in its frame, Write minutes).
 import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
+import { readLines } from '../support/aria.mjs'
 
 export class CallsPage extends AppPage {
   constructor(page, data) {
@@ -73,6 +74,11 @@ export class CallsPage extends AppPage {
     return this.page.getByRole('menu').getByRole('menuitem')
   }
 
+  /** An item of the open menu, by its name ("New thread from this call…"). */
+  menuItem(name) {
+    return this.page.getByRole('menu').getByRole('menuitem', { name, exact: true })
+  }
+
   // ── Coming up today: the list's fold of the meetings still to come, and their rows ──
 
   /** The fold's head ("Coming up today 2 Next 02:04 PM Globex design review"). */
@@ -119,5 +125,117 @@ export class CallsPage extends AppPage {
   /** The transcript's turns, by their times. */
   get turns() {
     return this.main.getByRole('time')
+  }
+
+  // ── The list as it reads, a call's header and minutes, the transcript's turns, My notes, a call's delete ──
+
+  /** What the list reads from the top, in order: its rows' names and its day headings. */
+  async lines() {
+    return readLines(await this.list.ariaSnapshot())
+  }
+
+  /** The calls listed (the meetings still to come left out). */
+  get callRows() {
+    return this.list.getByRole('option', { name: new RegExp(`^(?!${literal(this.data.text.upcoming.rowPrefix)} )`) })
+  }
+
+  /** A text of the view, as it reads (a fact of the call's header, a line of a tab); one that starts with these words;
+   *  a heading of a tab ("No minutes yet"). */
+  says(text) {
+    return this.main.getByText(text, { exact: true })
+  }
+
+  saysStarting(words) {
+    return this.main.getByText(new RegExp(`^${literal(words)}`))
+  }
+
+  paneHeading(name) {
+    return this.main.getByRole('heading', { name, level: 3, exact: true })
+  }
+
+  /** The call's tabs, in order. */
+  get callTabs() {
+    return this.main.getByRole('tab')
+  }
+
+  /** A text of the right panel, as it reads (its thread in What moved, My notes' saved state). */
+  panelSays(text) {
+    return this.rightPanel.getByText(text, { exact: true })
+  }
+
+  /** The minutes' section headings, in order; an item of theirs, by the words it holds; its time chip. */
+  get sections() {
+    return this.minutes.getByRole('heading', { level: 2 })
+  }
+
+  minutesItem(words) {
+    return this.minutes.getByRole('listitem').filter({ hasText: words })
+  }
+
+  timeChip(words, time) {
+    return this.minutesItem(words).getByText(time, { exact: true })
+  }
+
+  /** A text of the minutes, as it reads (their AI notice). */
+  minutesSay(text) {
+    return this.minutes.getByText(text, { exact: true })
+  }
+
+  /** Whether the minutes fill the tab: their frame as wide as the view, no column beside them. */
+  async minutesFill() {
+    const frame = await this.page.locator('iframe[title="Minutes"]').boundingBox()
+    const view = await this.main.boundingBox()
+    return Math.abs(frame.width - view.width) <= 2
+  }
+
+  /** Find in transcript. */
+  get find() {
+    return this.main.getByRole('textbox', { name: 'Find in transcript', exact: true })
+  }
+
+  /** A turn of the transcript, by its time and speaker ("0:37 Me"); every turn. */
+  turn(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  get turnGroups() {
+    return this.main.getByRole('group', { name: /^\d+:\d\d / })
+  }
+
+  async turnNames() {
+    const names = []
+    for (const t of await this.turnGroups.all()) names.push(await t.getAttribute('aria-label'))
+    return names
+  }
+
+  /** The turns drawn highlighted (a background of their own), by their names. */
+  async highlighted() {
+    const names = []
+    for (const t of await this.turnGroups.all()) {
+      if (await t.evaluate((el) => getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)')) names.push(await t.getAttribute('aria-label'))
+    }
+    return names
+  }
+
+  /** My notes in the right panel: the box for a new note, a note by its text, a text of the panel (its saved state). */
+  get newNote() {
+    return this.rightPanel.getByRole('textbox', { name: 'New note', exact: true })
+  }
+
+  note(text) {
+    return this.rightPanel.getByText(text, { exact: true })
+  }
+
+  /** Hold the window's requests to the app (a save) until `release()`: what the window says while one is under way
+   *  can be read. */
+  async holdRequests() {
+    const gate = new Promise((r) => { this.letGo = r })
+    await this.page.route('**/ipc', async (route) => { await gate; await route.continue() })
+  }
+
+  /** Let the held requests go and stop holding (at once, and again harmlessly). */
+  async release() {
+    if (this.letGo) this.letGo()
+    await this.page.unrouteAll({ behavior: 'wait' })
   }
 }

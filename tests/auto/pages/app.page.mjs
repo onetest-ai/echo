@@ -25,6 +25,11 @@ export class AppPage {
     return this.activities.getByRole('button', { name, exact: true })
   }
 
+  /** A count an activity's button shows beside its name (Settings' "1" to fix). */
+  activityCount(name) {
+    return this.activity(name).getByText(/^\d+$/)
+  }
+
   /** An activity's name as drawn beside its icon (hidden while the bar is folded). */
   activityLabel(name) {
     return this.activities.getByText(name, { exact: true })
@@ -134,5 +139,13 @@ export class AppPage {
 
   async minutePasses() {
     await this.page.clock.fastForward('01:05')
+  }
+
+  /** A colour of the window's theme (`--recording`, `--me`), written as the browser writes a computed colour
+   *  ("rgb(217, 119, 87)"). */
+  async themeColour(name) {
+    const hex = (await this.page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n), name)).trim().replace('#', '')
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    return `rgb(${r}, ${g}, ${b})`
   }
 }

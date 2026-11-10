@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, stage]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-010: A closed stage moves the thread to "Closed · N" and its history is shown

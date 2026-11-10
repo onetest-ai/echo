@@ -1094,5 +1094,321 @@
       "withIt": "_150000-acme-sync-vocabulary",
       "plain": "_150500-acme-sync-plain"
     }
+  },
+  "s01": {
+    "groups": [
+      [
+        "Today",
+        [
+          "Initech planning",
+          "Acme weekly sync"
+        ]
+      ],
+      [
+        "Yesterday",
+        [
+          "Globex pilot kickoff"
+        ]
+      ]
+    ],
+    "next": "Globex design review",
+    "acme": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "length": "30 min",
+      "firstPeople": "Sam Rivera, Dana Lee",
+      "people": "Sam Rivera, Dana Lee, Omar Haddad",
+      "thread": "Acme rollout"
+    },
+    "search": [
+      {
+        "words": "Globex",
+        "listed": [
+          "Globex pilot kickoff"
+        ]
+      },
+      {
+        "words": "Omar",
+        "listed": [
+          "Acme weekly sync"
+        ]
+      }
+    ],
+    "sections": [
+      "Summary",
+      "Decisions",
+      "Action items",
+      "Open questions"
+    ],
+    "actions": [
+      [
+        "Me — send Acme the SSO checklist today",
+        "00:21"
+      ],
+      [
+        "Omar Haddad — answer the security questionnaire by Friday",
+        "00:29"
+      ]
+    ],
+    "chip": {
+      "line": "SSO rollout for Acme is on track; the pilot starts with the Berlin office",
+      "time": "00:37"
+    },
+    "jump": {
+      "turn": "0:37 Me",
+      "says": "Then we agree: pilot starts with the Berlin office."
+    },
+    "turns": [
+      "0:05 Me",
+      "0:13 Remote",
+      "0:21 Me",
+      "0:29 Remote",
+      "0:37 Me"
+    ],
+    "find": {
+      "word": "checklist",
+      "hits": [
+        "0:13 Remote",
+        "0:21 Me"
+      ]
+    },
+    "note": "Ask Dana about the Berlin office date",
+    "status": "● to do"
+  },
+  "s02": {
+    "accepted": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Acme demo"
+    ],
+    "notAccepted": "Industry webinar",
+    "lastPast": "Initech planning",
+    "coming": [
+      "Globex design review",
+      "Acme demo"
+    ],
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "recorded": [
+      "Acme weekly sync",
+      "Initech planning"
+    ],
+    "card": {
+      "subject": "Globex design review",
+      "organizer": "Sam Rivera"
+    },
+    "schedule": {
+      "subject": "Globex design review",
+      "other": "Acme demo"
+    },
+    "scroll": 120
+  },
+  "s04": {
+    "mine": [
+      "Send Acme the SSO checklist",
+      "Draft the Globex pilot plan"
+    ],
+    "others": [
+      "Answer the security questionnaire"
+    ],
+    "dueToday": {
+      "title": "Send Acme the SSO checklist",
+      "project": "acme-rollout"
+    },
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "keys": [
+      "watcher",
+      "armed",
+      "agenda"
+    ]
+  },
+  "s05": {
+    "groups": [
+      "Acme",
+      "Globex",
+      "Initech · your company"
+    ],
+    "under": {
+      "Acme": [
+        "Acme rollout 1 call · Today Active"
+      ],
+      "Globex": [
+        "Globex pilot 1 call · Yesterday Active"
+      ],
+      "Initech · your company": []
+    },
+    "own": "Initech · your company",
+    "fold": {
+      "group": "Acme",
+      "row": "Acme rollout",
+      "count": 1,
+      "client": "acme"
+    },
+    "openOn": {
+      "id": "globex-pilot",
+      "tab": "work"
+    },
+    "hiring": {
+      "name": "Initech hiring",
+      "id": "initech-hiring",
+      "client": "Initech",
+      "clientId": "initech",
+      "row": "Initech hiring 0 calls Active",
+      "facts": "0 calls",
+      "stage": "active"
+    },
+    "clientOptions": [
+      "None",
+      "Initech",
+      "Acme",
+      "Globex"
+    ],
+    "acme": {
+      "id": "acme-rollout",
+      "name": "Acme rollout",
+      "client": "Acme",
+      "stage": "Delivery · Active",
+      "facts": "1 call · last call today",
+      "tabs": [
+        "Brief",
+        "Work3",
+        "Calls1",
+        "People",
+        "Profile"
+      ],
+      "menu": [
+        "Open Acme",
+        "Claude about this thread",
+        "Sync now",
+        "Delete…"
+      ]
+    },
+    "org": {
+      "token": "Globex",
+      "option": "Globex · globex.example",
+      "options": [
+        "Organisation…",
+        "Globex · globex.example",
+        "+ New organisation…"
+      ]
+    },
+    "rule": {
+      "kind": "Subject contains",
+      "kinds": [
+        "Meeting series",
+        "The client's people",
+        "Subject contains",
+        "Teams chat id"
+      ],
+      "words": "planning",
+      "token": "subject “planning”",
+      "json": {
+        "kind": "subject",
+        "contains": "planning"
+      },
+      "before": "1 call match · 1 pinned",
+      "after": "2 calls match · 1 pinned",
+      "takenOut": "1 call match · 1 pinned, 1 taken out by hand",
+      "remove": "1",
+      "calls": [
+        "Acme weekly sync",
+        "Initech planning"
+      ]
+    },
+    "pinned": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "day": "Today"
+    },
+    "matched": {
+      "title": "Initech planning",
+      "folder": "initech-planning"
+    },
+    "whys": {
+      "pinned": "pinned",
+      "subject": "subject"
+    },
+    "fromCall": {
+      "id": "initech-planning",
+      "name": "Initech planning",
+      "token": "series “Initech planning”",
+      "line": "1 call match · 1 pinned",
+      "threads": [
+        "Acme rollout",
+        "Globex pilot"
+      ]
+    },
+    "globex": {
+      "id": "globex-pilot",
+      "name": "Globex pilot",
+      "renamed": "Globex pilot phase 2",
+      "group": "Globex",
+      "brief": "Pilot for **Globex** design review.",
+      "briefShown": "Pilot for Globex design review.",
+      "bold": "Globex",
+      "draft": "Draft to throw away",
+      "latest": "Globex pilot kickoff",
+      "since": "2026-11-01",
+      "notes": "Call the pilot \"GP\".",
+      "colour": "#f0a24a",
+      "stageGroups": {
+        "Pursuit": [
+          "Lead",
+          "Proposal",
+          "Negotiation"
+        ],
+        "Delivery": [
+          "Kickoff",
+          "Active",
+          "On hold",
+          "Wrap-up"
+        ],
+        "Closed": [
+          "Done",
+          "Lost",
+          "Cancelled"
+        ]
+      },
+      "active": "Active",
+      "wrapUp": "Wrap-up",
+      "done": "Done",
+      "wrapUpTag": "Delivery · Wrap-up",
+      "doneTag": "Done",
+      "closedRow": "Globex pilot 1 call · Yesterday",
+      "stageIds": {
+        "active": "active",
+        "done": "done",
+        "closed": "closed"
+      },
+      "domains": "globex.example",
+      "clientId": "globex"
+    },
+    "northwind": {
+      "name": "Northwind",
+      "id": "northwind",
+      "domain": "northwind.example"
+    },
+    "scratch": {
+      "name": "Scratch thread",
+      "id": "scratch-thread"
+    },
+    "notIn": "acme-rollout",
+    "callFiles": [
+      "meta.json",
+      "meeting.json"
+    ],
+    "emptyBrief": "empty-brief.md"
   }
 }

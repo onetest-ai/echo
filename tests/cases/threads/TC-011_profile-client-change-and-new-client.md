@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile, clients]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-011: Profile → Client changes the client, makes a new one inline, or clears it

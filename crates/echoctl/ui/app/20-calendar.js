@@ -106,7 +106,7 @@ function calendarView() {
   const top = (hours) => (hours - h0) * HOUR
   const colHtml = dayList.map((day, di) => {
     const lines = Array.from({ length: h1 - h0 }, (_, i) => `<div class="hourline" style="top:${i * HOUR}px"></div>`).join('')
-    const nowLine = sameDay(day, now) ? `<div class="now" style="top:${top(clockHours(now.getTime(), day))}px"></div>` : ''
+    const nowLine = sameDay(day, now) ? `<div class="now" role="separator" aria-label="Now" style="top:${top(clockHours(now.getTime(), day))}px"></div>` : ''
     const items = blocks[di].map((x) => {
       const y = top(x.y0), h = Math.max(22, top(x.y1) - y - 2)
       const w = 100 / x.lanes, left = x.lane * w
@@ -120,7 +120,7 @@ function calendarView() {
       const tag = [appTag(e), e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''].filter(Boolean).join(' ')
       return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
-    return `<div class="col${sameDay(day, now) ? ' today' : ''}" style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
+    return `<div class="col${sameDay(day, now) ? ' today' : ''}" role="group" aria-label="${esc(`${day.toLocaleDateString([], { weekday: 'short' })} ${day.getDate()}`)}"${sameDay(day, now) ? ' aria-current="date"' : ''} style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
   }).join('')
   const empty = !blocks.some((b) => b.length) && !allday.some((a) => a.length)
     ? `<p style="position:absolute;top:40%;left:0;right:0;text-align:center;color:var(--text-3);pointer-events:none">${days === 1 ? 'Nothing on the calendar this day.' : 'Nothing on the calendar these days.'}</p>` : ''

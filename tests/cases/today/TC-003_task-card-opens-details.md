@@ -8,6 +8,7 @@ module: today
 run: agent
 platform: any
 tags: [today, tasks]
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-003: A task card in My work opens the task's details on the right

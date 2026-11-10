@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, delete]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-005: Thread actions → Delete… asks first; Move to trash removes the thread and leaves its calls

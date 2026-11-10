@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [notes]
 external_id: TC-WIN-011
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-007: A note added in My notes is kept with the call

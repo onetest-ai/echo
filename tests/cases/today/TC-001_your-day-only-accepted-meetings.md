@@ -8,6 +8,7 @@ module: today
 run: agent
 platform: any
 tags: [today, calendar]
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-001: Your day lists only the meetings the user accepted

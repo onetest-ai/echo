@@ -91,6 +91,57 @@ export class TodayPage extends AppPage {
     await this.item(where, says).getByRole('button', { name: this.data.text.needs.claude }).click()
   }
 
+  /** Your day: its rows (a meeting or call each, named by its subject) and the line now between them. */
+  get yourDay() {
+    return this.main.getByRole('region', { name: 'Your day', exact: true })
+  }
+
+  dayRow(subject) {
+    return this.yourDay.getByRole('group', { name: subject, exact: true })
+  }
+
+  /** A button of a row of Your day ("Prepare", "Record when it starts"); a text anywhere in Your day. */
+  dayButton(subject, name) {
+    return this.dayRow(subject).getByRole('button', { name, exact: true })
+  }
+
+  daySays(text) {
+    return this.yourDay.getByText(text)
+  }
+
+  get nowLine() {
+    return this.yourDay.getByRole('separator', { name: /^Now / })
+  }
+
+  /** What Your day lists, in order: each row's subject and the line now ("Now 01:43 PM"). */
+  async dayLines() {
+    const names = []
+    for (const l of await this.yourDay.getByRole('group').or(this.nowLine).all()) names.push(await l.getAttribute('aria-label'))
+    return names
+  }
+
+  /** Your day's rows, by their subjects, in order. */
+  async dayRows() {
+    const names = []
+    for (const l of await this.yourDay.getByRole('group').all()) names.push(await l.getAttribute('aria-label'))
+    return names
+  }
+
+  /** The line now's colour (its time and its rule). */
+  async nowColour() {
+    return this.nowLine.evaluate((el) => getComputedStyle(el).color)
+  }
+
+  /** A task's card in My work, by its title (its name holds its due chip, its title, its pile and its thread). */
+  taskCard(title) {
+    return this.main.getByRole('button', { name: new RegExp(`^(?!Claude: |Close )(.* )?${literal(title)} `) })
+  }
+
+  /** A task's card clicked on its empty area (its corner), not on its title. */
+  async openTaskCard(title) {
+    await this.taskCard(title).click({ position: { x: 4, y: 4 } })
+  }
+
   /** I'll do it and Won't do, from ⌘K's Needs you now group, by the sender. */
   async illDoIt(sender) {
     await this.action(`${this.data.text.palette.illDoIt}: ${sender}`)

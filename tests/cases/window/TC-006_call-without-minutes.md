@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calls, minutes]
 external_id: TC-WIN-005
+auto: [tests/auto/specs/S-03.spec.mjs]
 ---
 
 # TC-006: A transcribed call without minutes offers to write them

@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, profile, organisations]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-012: Profile → Organisations adds a counterpart organisation and × unlinks it

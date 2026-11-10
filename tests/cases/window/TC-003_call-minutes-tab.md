@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calls, minutes]
 external_id: TC-WIN-003
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-003: A call with minutes opens on its Minutes with their sections

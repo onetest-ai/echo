@@ -21,6 +21,7 @@ cases:
   - tests/cases/threads/TC-010_stage-closes-the-thread.md
   - tests/cases/threads/TC-011_profile-client-change-and-new-client.md
   - tests/cases/threads/TC-005_delete-thread-keeps-calls.md
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # S-05: Start and run a thread for a client: create it, brief, rules, calls, rename, stage, close

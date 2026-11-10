@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, create, calls]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-004: A call's "+ Thread" → "New thread from this call…" makes a thread named after the call with the call pinned
@@ -32,7 +33,7 @@ tags: [threads, create, calls]
 | 1 | Navigate to `{{base_url}}/#calls` and click the row "Initech planning" | The call opens; its header shows a button "+ Thread" and no thread chip |
 | 2 | Click "+ Thread" | A menu opens listing "Acme rollout" and "Globex pilot" and the item "New thread from this call…" |
 | 3 | Click "New thread from this call…". Wait up to 3 s after an action for the window to redraw before reading. | The URL ends with `#project/initech-planning/profile`; the heading "Initech planning" |
-| 4 | Read the Calls row of the Profile | A token `series “Initech planning”` and the line "1 call match" |
+| 4 | Read the Calls row of the Profile | A token `series “Initech planning”` and the line "1 call match · 1 pinned" |
 | 5 | Click the tab with `data-tab-id="calls"` | A row "Initech planning" with "added by hand" and a button "Unpin" |
 
 ## Expected Final State

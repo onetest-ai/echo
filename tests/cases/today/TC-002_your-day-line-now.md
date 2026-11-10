@@ -8,6 +8,7 @@ module: today
 run: agent
 platform: any
 tags: [today]
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-002: Your day draws the line "now" between past and coming meetings
@@ -29,7 +30,7 @@ tags: [today]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today` | Your day is visible |
-| 2 | Find the line "now" in Your day (a time in the accent colour with a rule after it) | It shows the current time (HH:MM AM/PM) |
+| 2 | Find the line "now" in Your day (a time in the recording colour (coral) with a rule after it) | It shows the current time (HH:MM AM/PM) |
 | 3 | Check what is directly above and below the line | "Initech planning" is above it, "Globex design review" directly below it |
 | 4 | Check the rows below the line | "Globex design review" and "Acme demo" each show a "Prepare" button and "Record when it starts" |
 

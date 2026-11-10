@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, create]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-003: New thread (+) makes a thread with the chosen client and opens its Profile

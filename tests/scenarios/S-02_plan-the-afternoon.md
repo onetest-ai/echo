@@ -9,6 +9,7 @@ cases:
   - tests/cases/window/TC-009_calendar-day-week.md
   - tests/cases/window/TC-010_calendar-card.md
   - tests/cases/calendar/TC-001_schedule-from-today.md
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # S-02: Plan the afternoon: what's left today, the calendar, set a meeting to record and change your mind

@@ -115,7 +115,9 @@
       "Delete column"
     ],
     "yesterday": "yesterday",
-    "undoOp": "undo"
+    "undoOp": "undo",
+    "sendTo": "Send to",
+    "edit": "Edit"
   },
   "prep": {
     "inShort": "In short",
@@ -213,7 +215,25 @@
     },
     "refresh": "api/state",
     "refreshes": 4,
-    "search": "Search calls"
+    "search": "Search calls",
+    "searchPlaceholder": "Search titles and people",
+    "aiNotice": "Written by AI (Echo) from an automatic transcript. Check names, figures and commitments before you share it.",
+    "header": "{day}, {time}",
+    "meta": "meta.json",
+    "notes": {
+      "empty": "Add notes about this call. Select words in the transcript to comment on what was said.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "file": "my-notes.md"
+    },
+    "ready": "The transcript is ready.",
+    "writesWith": "Claude Code writes them with ",
+    "command": "/echo:process-call {folder}",
+    "copy": "Copy",
+    "deleteItem": "Delete…",
+    "deleteAsk": "Delete \"{title}\"? It goes to the trash in the data folder for 30 days.",
+    "keep": "Keep",
+    "delete": "Delete"
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"
@@ -1009,5 +1029,133 @@
     "models": "models",
     "testModels": "ECHOCTL_TEST_MODELS",
     "debug": "ECHOCTL_DEBUG"
+  },
+  "today": {
+    "meetings": "{n} meetings",
+    "prepare": "Prepare",
+    "record": "Record when it starts",
+    "dontRecord": "Don't record",
+    "now": "Now {time}"
+  },
+  "cal": {
+    "routes": {
+      "day": "day",
+      "week": "week"
+    },
+    "day": "Day",
+    "week": "Week",
+    "notice": "Showing today's meetings only. Connect Microsoft 365 from the menu-bar octopus (Calendar) to see your week.",
+    "when": "Today · {start}–{end}",
+    "kind": "Kind of meeting",
+    "addThread": "+ Thread",
+    "people": "People",
+    "organizer": "organizer",
+    "close": "Close",
+    "willRecord": "Will record",
+    "starts": "Echo starts recording a minute before it begins, transcribed as English.",
+    "scheduled": ".echo/scheduled.json",
+    "colours": {
+      "now": "--recording",
+      "recorded": "--me",
+      "scheduled": "--recording"
+    },
+    "from": -1,
+    "days": 7,
+    "inMin": "{when} · in {n} min",
+    "inHours": "{when} · in {n} h"
+  },
+  "threads": {
+    "routes": {
+      "found": "#found",
+      "tab": "#project/{id}/{tab}",
+      "projects": "#projects",
+      "call": "#call/",
+      "minutesEnd": "-{folder}/minutes"
+    },
+    "tabs": {
+      "brief": "brief",
+      "work": "work",
+      "calls": "calls",
+      "profile": "profile",
+      "callsTab": "Calls",
+      "profileTab": "Profile",
+      "briefTab": "Brief",
+      "overview": "overview"
+    },
+    "found": "Found for you",
+    "foundLine": "From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.",
+    "foundNothing": "Nothing found right now. Echo suggests a thread when two or more calls that are in none share a meeting series, one outside organisation, or a Teams chat.",
+    "foundAnswers": [
+      "Accept",
+      "Reject"
+    ],
+    "newThreadPlaceholder": "New thread — name it, Echo finds its calls",
+    "hide": "Hide its threads",
+    "show": "Show its threads",
+    "threads": "Threads",
+    "rows": {
+      "stage": "Stage",
+      "client": "Client",
+      "orgs": "Organisations",
+      "since": "Since",
+      "history": "History",
+      "calls": "Calls",
+      "meetings": "Meetings",
+      "sources": "Sources",
+      "notes": "Notes for Claude",
+      "look": "Look",
+      "ai": "AI"
+    },
+    "noSeries": "No meeting series yet. A meeting that recurs in this thread shows here.",
+    "brainOff": "The Brain is off, so channels, mail and folders aren't read into it — turn it on in Settings → Brain. Meeting chats, and mail already added here, are read into the work either way.",
+    "footStart": "Saved as you change it",
+    "foot": "Saved as you change it · projects/{id}/ · Delete in ⋯",
+    "orgHint": "Who this thread is with besides its client: ",
+    "addOrg": "+ Organisation",
+    "organisation": "Organisation",
+    "add": "+ Add",
+    "remove": "Remove",
+    "ruleKind": "Kind of rule",
+    "rulePlaceholder": "a meeting's subject (empty for the client's people)",
+    "why": {
+      "pinned": "added by hand",
+      "subject": "its subject"
+    },
+    "rowLine": "{day}, {time} · {why}",
+    "noMinutes": "no minutes yet",
+    "unpin": "Unpin",
+    "takeOut": "Take out",
+    "takenOut": "{n} call taken out by hand.",
+    "noCalls": "No calls match yet. Add a rule on Profile — a meeting series, the client's people, a Teams chat — or open a call and add it from its header.",
+    "whatItIs": "What it is",
+    "edit": "Edit",
+    "briefEmpty": "Nothing yet — say what this thread is for, so the minutes and Claude know.",
+    "latest": "Latest calls",
+    "cancel": "Cancel",
+    "save": "Save",
+    "briefHint": "⌘S / Ctrl+S saves, Esc cancels.",
+    "sinceFirst": "From its first call",
+    "notesEmpty": "What the minutes and Claude should know — what people call things, what to leave out",
+    "aiDefault": "The default · Claude Code (as configured)",
+    "aiProfile": "AI profile",
+    "aiOptions": [
+      "The default (Claude Code (as configured))",
+      "Claude Code (as configured)"
+    ],
+    "model": "model: the profile's minutes model",
+    "colour": "Colour {c}",
+    "stageSince": "{stage} since {day}",
+    "closed": "Closed · {n}",
+    "noClient": "No client — internal work, or not set",
+    "noClientOption": "No client",
+    "noClientGroup": "No client",
+    "newClient": "+ New client…",
+    "domains": "its domains: {d}",
+    "clientName": "Client name",
+    "mailDomains": "Mail domains",
+    "addButton": "Add",
+    "deleteItem": "Delete…",
+    "deleteAsk": "Delete {name}? Its brief, profile and work go to the trash; its calls stay.",
+    "moveToTrash": "Move to trash"
   }
 }

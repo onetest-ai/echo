@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calls, search]
 external_id: TC-WIN-002
+auto: [tests/auto/specs/S-01.spec.mjs]
 ---
 
 # TC-002: Search filters the Calls list by title and by person

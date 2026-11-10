@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, cli]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-006: A thread renamed with `echoctl project set --name` shows its new name in the window

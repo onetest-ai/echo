@@ -8,6 +8,7 @@ module: threads
 run: agent
 platform: any
 tags: [threads, membership, cli]
+auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
 # TC-014: Membership is computed from rules and pins; no thread is written into a call

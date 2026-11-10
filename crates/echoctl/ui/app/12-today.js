@@ -17,7 +17,7 @@ function todayView() {
   const rows = (d.day || []).map((x) => {
     const st = x.start ? new Date(x.start) : null, en = x.end ? new Date(x.end) : null
     const past = en ? en < now : st ? st < now : false
-    const line = !nowDrawn && st && st > now ? (nowDrawn = true, `<div class="td-now"><span>${esc(hm(now))}</span></div>`) : ''
+    const line = !nowDrawn && st && st > now ? (nowDrawn = true, `<div class="td-now" role="separator" aria-label="Now ${esc(hm(now))}"><span>${esc(hm(now))}</span></div>`) : ''
     const chips = (x.threads || []).map((p) => `<span class="pj-chip"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${projIcon(p, 14)}${esc(p.name)}</button></span>`).join('')
     const acts = []
     // Its minutes (from the Meeting Notebook plugin's Today): writing, coming at a time, written, or failed — Try again.
@@ -41,11 +41,11 @@ function todayView() {
     }
     if (x.kind === 'meeting' && !past && !x.call && otherApp(x)) acts.push(`<span class="set-sub">${notYet(x)}</span>`)
     else if (x.kind === 'meeting' && !past && !x.call) acts.push(x.scheduled ? `<button class="btn ghost" data-unschedule="${esc(x.event)}">Don't record</button>` : `<button class="btn ghost" data-schedule="${esc(x.event)}">Record when it starts</button>`)
-    return `${line}<div class="td-row${past ? ' past' : ''}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${appTag(x)}${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
-  }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now"><span>${esc(hm(now))}</span></div>` : '')
+    return `${line}<div class="td-row${past ? ' past' : ''}" role="group" aria-label="${esc(x.subject || 'A call')}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${appTag(x)}${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
+  }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now" role="separator" aria-label="Now ${esc(hm(now))}"><span>${esc(hm(now))}</span></div>` : '')
   // A sync failed today and none has read the calendar today (the server says): today's meetings may be missing.
   const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: today’s meetings may be missing.</span></p>' : ''
-  const day = (d.day || []).length || stale ? `<section class="td-sec"><h2>Your day</h2>${stale}<div class="td-rows">${rows}</div></section>` : ''
+  const day = (d.day || []).length || stale ? `<section class="td-sec" aria-label="Your day"><h2>Your day</h2>${stale}<div class="td-rows">${rows}</div></section>` : ''
   // My work: a card a task due this week or late — what you owe, what is owed to you, what you wait for.
   const all = (S.pj.data && S.pj.data.projects) || []
   const today0 = new Date(); today0.setHours(0, 0, 0, 0)

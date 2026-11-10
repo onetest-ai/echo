@@ -2,6 +2,7 @@
 // tabs, Overview, Calls, Tasks and Profile rows) and a thread's header, menu and Profile.
 import { AppPage } from './app.page.mjs'
 import { literal } from '../support/data.mjs'
+import { readLines } from '../support/aria.mjs'
 
 export class ClientsPage extends AppPage {
   constructor(page, data) {
@@ -99,5 +100,160 @@ export class ClientsPage extends AppPage {
   /** The folded pile of others' tasks ("Others · 1 — …"). */
   others(n) {
     return this.main.getByRole('button', { name: new RegExp(`^Others · ${n} `) })
+  }
+
+  // ── Threads: the left list in order, a client's fold, New thread and Found for you, a thread's Profile rows, its
+  //    Brief and its Calls ──
+
+  /** What the left list reads from the top, in order: its buttons' names, each client group's name. */
+  async listLines() {
+    return readLines(await this.list.ariaSnapshot())
+  }
+
+  /** A client's group in the left list ("Acme", "Initech · your company"): its fold, and its count while folded. */
+  clientGroup(name) {
+    return this.list.getByRole('group', { name, exact: true })
+  }
+
+  fold(name) {
+    return this.clientGroup(name).getByRole('button', { name: /its threads$/ })
+  }
+
+  foldCount(name, n) {
+    return this.clientGroup(name).getByText(String(n), { exact: true })
+  }
+
+  /** A thread's row in the left list, by its name (it reads "<name> <n> call(s) · <last call> <stage>"). */
+  threadRow(name) {
+    return this.list.getByRole('button', { name: new RegExp(`^${literal(name)} \\d+ calls?\\b`) })
+  }
+
+  /** The left list's New thread (+), Found for you (with its count while it has one), and Closed · N. */
+  get addThread() {
+    return this.list.getByRole('button', { name: 'New thread', exact: true })
+  }
+
+  get foundForYou() {
+    return this.list.getByRole('button', { name: /^Found for you\b/ })
+  }
+
+  get closedFold() {
+    return this.list.getByRole('button', { name: /Closed · \d+$/ })
+  }
+
+  /** Found for you's new thread: its Client select and Create. */
+  get threadClient() {
+    return this.main.getByRole('combobox', { name: 'Client', exact: true })
+  }
+
+  get create() {
+    return this.main.getByRole('button', { name: 'Create', exact: true })
+  }
+
+  /** A button of a Profile row, by its name ("+ Add", "Remove", "Active"); a text of the row; a select of the row. */
+  rowButton(label, name) {
+    return this.row(label).getByRole('button', { name, exact: true })
+  }
+
+  rowSays(label, text) {
+    return this.row(label).getByText(text, { exact: true })
+  }
+
+  rowSelect(label, name) {
+    return this.row(label).getByRole('combobox', { name, exact: true })
+  }
+
+  /** A box of the Profile, by its name ("Since", "Notes for Claude", "Client name"). */
+  box(name) {
+    return this.main.getByRole('textbox', { name, exact: true })
+  }
+
+  /** A day as a thread's Since reads it ("Nov 1, 2026"): a `YYYY-MM-DD` from a file or the CLI. */
+  async sinceDay(date) {
+    return this.page.evaluate((d) => new Date(d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }), date)
+  }
+
+  /** The Brief: its box while it is edited, a paragraph of the view (of the Brief, the Profile's foot), its bold
+   *  words, a call of Latest calls by its title. */
+  get briefBox() {
+    return this.main.getByRole('textbox', { name: "The thread's brief (Markdown)", exact: true })
+  }
+
+  paragraph(text) {
+    return this.main.getByRole('paragraph').filter({ hasText: text })
+  }
+
+  get bold() {
+    return this.main.getByRole('strong')
+  }
+
+  latestCall(title) {
+    return this.main.getByRole('button', { name: new RegExp(`^\\S+ ${literal(title)}$`) })
+  }
+
+  /** A thread's header (named by its heading), and a text of it as it reads: its client and stage tags, its facts
+   *  line; or one that ends with these words. */
+  head(thread) {
+    return this.main.getByRole('group', { name: thread, exact: true })
+  }
+
+  fact(thread, text) {
+    return this.head(thread).getByText(text, { exact: true })
+  }
+
+  factEnding(thread, words) {
+    return this.head(thread).getByText(new RegExp(`${literal(words)}$`))
+  }
+
+  /** A text of a Profile row that starts with these words (a line that goes on, such as the stage's history). */
+  rowStarting(label, words) {
+    return this.row(label).getByText(new RegExp(`^${literal(words)}`))
+  }
+
+  /** A stage group of the Stage row ("Pursuit", "Delivery", "Closed"): its buttons, in order. */
+  stageGroup(name) {
+    return this.row('Stage').getByRole('group', { name, exact: true }).getByRole('button')
+  }
+
+  /** A Profile row's buttons, in order. */
+  rowButtons(label) {
+    return this.row(label).getByRole('button')
+  }
+
+  /** A row of the Calls tab, by its call's title, and a button of that row ("Unpin", "Take out", the title). */
+  callRow(title) {
+    return this.callRows.filter({ has: this.page.getByRole('button', { name: title, exact: true }) })
+  }
+
+  callButton(title, name) {
+    return this.callRow(title).getByRole('button', { name, exact: true })
+  }
+
+  /** A heading of the view's own sections (level 3: "Latest calls"); the left list's heading (level 1: "Threads"). */
+  subheading(name) {
+    return this.main.getByRole('heading', { name, level: 3, exact: true })
+  }
+
+  listHeading(name) {
+    return this.list.getByRole('heading', { name, level: 1, exact: true })
+  }
+
+  /** A select's options, in order, and the one chosen, by its name. */
+  options(select) {
+    return select.getByRole('option')
+  }
+
+  chosen(select, name) {
+    return select.getByRole('option', { name, exact: true, selected: true })
+  }
+
+  /** A button of the view, by its name ("Save", "Move to trash", "Edit"). */
+  button(name) {
+    return this.main.getByRole('button', { name, exact: true })
+  }
+
+  /** The open menu's items, in order. */
+  get menuItems() {
+    return this.main.getByRole('menu').getByRole('menuitem')
   }
 }
