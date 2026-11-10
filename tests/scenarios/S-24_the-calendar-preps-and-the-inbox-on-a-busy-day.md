@@ -53,6 +53,7 @@ cases:
   - tests/cases/today/TC-025_edit-today-move-size-remove-and-add-widgets.md
   - tests/cases/today/TC-026_the-days-choices-suggest-and-answer-invites.md
   - tests/cases/today/TC-027_threads-at-a-glance-and-done-this-week.md
+  - tests/cases/today/TC-028_recorded-this-week-counts-calls-time-and-minutes-since-monday.md
   - tests/cases/today/TC-029_a-plugins-widgets-on-today.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
@@ -127,6 +128,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 47 | `today/TC-025_edit-today-move-size-remove-and-add-widgets.md` | — | — |
 | 48 | `today/TC-026_the-days-choices-suggest-and-answer-invites.md` | — | — |
 | 49 | `today/TC-027_threads-at-a-glance-and-done-this-week.md` | — | — |
+| 50 | `today/TC-028_recorded-this-week-counts-calls-time-and-minutes-since-monday.md` | — | — |
 | 51 | `today/TC-029_a-plugins-widgets-on-today.md` | — | — |
 
 ## Notes
