@@ -24,7 +24,7 @@ tags: [today, widgets, routines]
 |---|--------|----------------|
 | 1 | Write two short Markdown files; `target/debug/echoctl deliver send today --title "Morning brief" --file <a.md> --about "Routine · Morning brief"` and the same with "Friday review" / "Routine · Friday review" | Each prints "Sent" |
 | 2 | `target/debug/echoctl widget list` | Two widgets `core:routines.card.routine-morning-brief-<hash>` and `…routine-friday-review-<hash>`, part "Routines", labelled by their source, sizes M and L |
-| 3 | `target/debug/echoctl today add <the morning brief's id> --size M --before core:needs.now`; open `{{base_url}}/#today` | "Morning brief" beside Needs you now, with Got it; "Friday review" in Routine cards below — the brief not there twice |
+| 3 | `target/debug/echoctl today add <the morning brief's id> --size M --before core:needs.now`; open `{{base_url}}/#today` | "Morning brief" in Next meeting's row, beside it (Needs you now wraps to the line under it: the row is full), with Got it; "Friday review" in Routine cards below — the brief not there twice |
 | 4 | Click Got it on Morning brief | It is gone (its widget has nothing to show); Friday review stays |
 | 5 | `deliver send today` the brief again (same `--about`); reload | The new brief shows in its own place again |
 | 6 | `target/debug/echoctl today reset`; reload | Both cards in Routine cards |
