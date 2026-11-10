@@ -4,7 +4,7 @@
 // (`event_respond`, window/today.rs → m365::event_respond), only on your click; "Keep" one of an overlap declines the
 // others after a second click that names them.
 
-// ── day choices: what to decide today (no DOM: `today-choices.test.mjs`; built on agendaRows) ───────────────────────
+// ── day choices: what to decide today (no DOM: `today-choices.test.mjs`) ─────────────────────────────────────────
 /** Today's choices still to make, in time order: `{kind: 'overlap', members, pick, why, at}` for two or more you accepted
  *  at once (not over), `{kind: 'invite', item, suggest: 'accept'|'decline', why, at}` for an invite still to answer. */
 function dayChoices(day, now) {
@@ -12,9 +12,19 @@ function dayChoices(day, now) {
   const yes = (x) => !['notResponded', 'tentativelyAccepted', 'declined'].includes(x.response)
   const len = (x) => t(x.end || x.start) - t(x.start)
   const out = []
-  for (const r of agendaRows(day, now, []).rows) {
-    if (r.choice !== 'pending' || r.past) continue
-    const members = r.members.filter((x) => x.kind === 'meeting' && yes(x)).sort((a, b) => t(a.start) - t(b.start) || len(b) - len(a))
+  // Meetings you accepted, not over, in clusters of ones at once (a chain counts: A with C, C with B) — the same rule
+  // as widgets::has_choices, so the widget shows whenever the CLI says there is a choice.
+  const open = (day || []).filter((x) => x.kind === 'meeting' && x.start && yes(x) && t(x.end || x.start) > now).sort((a, b) => t(a.start) - t(b.start) || len(b) - len(a))
+  const clusters = []
+  let cur = [], curEnd = 0
+  for (const x of open) {
+    if (cur.length && t(x.start) >= curEnd) { clusters.push(cur); cur = [] }
+    if (!cur.length) curEnd = 0
+    cur.push(x)
+    curEnd = Math.max(curEnd, +t(x.end || x.start))
+  }
+  if (cur.length) clusters.push(cur)
+  for (const members of clusters) {
     if (members.length < 2) continue
     // Echo's suggestion: the one you organise, else one in a thread, else the longer, else the earlier.
     const rules = [
@@ -33,7 +43,7 @@ function dayChoices(day, now) {
     }
     out.push({ kind: 'overlap', members, pick, why, at: t(members[0].start) })
   }
-  const going = (day || []).filter((x) => x.start && (x.kind === 'call' || yes(x)) && t(x.end || x.start) > now)
+  const going = (day || []).filter((x) => x.start && (x.kind === 'call' || (x.kind === 'meeting' && yes(x))) && t(x.end || x.start) > now)
   for (const x of day || []) {
     if (x.kind !== 'meeting' || x.response !== 'notResponded' || !x.start || t(x.end || x.start) <= now) continue
     const at = going.filter((g) => t(g.start) < t(x.end || x.start) && t(x.start) < t(g.end || g.start)).sort((a, b) => t(a.start) - t(b.start))
@@ -62,9 +72,11 @@ function dayChoicesView(d, now) {
     }
     const key = c.members.map((x) => x.event).join('|')
     const confirm = S.tdKeep && S.tdKeep.key === key ? c.members.find((x) => x.event === S.tdKeep.event) : null
-    const others = (keep) => c.members.filter((x) => x !== keep)
+    // Keep declines the others — not one you organise (Graph can't decline it: cancel it in Outlook).
+    const others = (keep) => c.members.filter((x) => x !== keep && x.response !== 'organizer')
+    const yours = (keep) => c.members.filter((x) => x !== keep && x.response === 'organizer')
     const acts = confirm
-      ? `<span class="set-sub">Decline ${esc(others(confirm).map((x) => x.subject || 'a meeting').join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.</span><button class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}</button><button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
+      ? `<span class="set-sub">${others(confirm).length ? `Decline ${esc(others(confirm).map((x) => x.subject || 'a meeting').join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.` : 'Nothing to decline.'}${yours(confirm).length ? ` Yours — ${esc(yours(confirm).map((x) => x.subject || 'a meeting').join(', '))} — stays: cancel it in Outlook.` : ''}</span>${others(confirm).length ? '<button' : '<span hidden'} class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}${others(confirm).length ? '</button>' : '</span>'}<button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
       : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(x.subject || 'this one')}</button>`).join('')
     return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map((x) => x.subject).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(x.subject || 'A meeting')}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. Echo suggests <b>${esc(c.pick.subject || 'one')}</b> — ${esc(c.why)}</div><div class="ch-acts">${acts}</div></div></div>`
   }).join('')
@@ -76,8 +88,11 @@ function todayRespond(event, how) {
   S.tdResp = { ...(S.tdResp || {}), [event]: how }
   render()
   send({ cmd: 'event_respond', event, how })
-  // The answer is in the agenda once the reply's refresh comes; the buttons come back after a while either way.
-  setTimeout(() => { if (S.tdResp) { delete S.tdResp[event]; render() } }, 8000)
+  // The buttons stay off until Today is read again after the reply (its refresh): sent, the line has gone; refused, the
+  // notice said why and they come back.
+  const was = S.today
+  const back = () => { if (S.today === was) return setTimeout(back, 500); if (S.tdResp) { delete S.tdResp[event]; render() } }
+  setTimeout(back, 500)
 }
 
 document.addEventListener('click', (e) => {

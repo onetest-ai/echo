@@ -217,9 +217,13 @@ pub fn event_respond(event: &str, how: &str, yes: bool) -> Result<Value> {
             let e = format!("{e:#}");
             if e.contains("403") || e.contains("Forbidden") || e.contains("Authorization") { anyhow::anyhow!("{e} — answer it in Outlook instead") } else { anyhow::anyhow!(e) }
         })?;
-    m.response = Some(said.into());
+    // Today's agenda as it is now (a sync may have written it during the request), with this answer.
     let subject = m.subject.clone();
-    crate::watch::write_agenda(&agenda)?;
+    let mut agenda = crate::watch::agenda();
+    if let Some(m) = agenda.iter_mut().find(|m| m.id.as_deref() == Some(event)) {
+        m.response = Some(said.into());
+        crate::watch::write_agenda(&agenda)?;
+    }
     Ok(json!({"sent": true, "meeting": subject, "answer": said}))
 }
 

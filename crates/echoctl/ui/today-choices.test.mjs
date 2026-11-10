@@ -10,7 +10,7 @@ const block = (from, to) => {
   assert.ok(a >= 0 && b > a, `${from} not found in app.js`)
   return src.slice(a, b)
 }
-const dayChoices = new Function(`${block('// ── agenda rows:', '// end of the agenda rows block')}\n${block('// ── day choices:', '// end of the day choices block')}\nreturn dayChoices`)()
+const dayChoices = new Function(`${block('// ── day choices:', '// end of the day choices block')}\nreturn dayChoices`)()
 
 const day = (h, m = 0) => new Date(2026, 10, 12, h, m)
 const at = (h, m = 0) => day(h, m).toISOString()
@@ -47,6 +47,16 @@ test('in time order, an overlap and an invite each once', () => {
 test('an invite at the time of an overlap names the one Echo suggests keeping; equal ones are "the first of them"', () => {
   const cs = dayChoices([mt('Office hours', 18, 0, 18, 30), mt('Board', 18, 0, 18, 30, 'organizer'), mt('Dry run', 18, 0, 18, 30, 'notResponded'), mt('X', 20, 0, 20, 30), mt('Y', 20, 0, 20, 30)], day(9, 0))
   assert.equal(show(cs), 'Office hours or Board → Board (you organise it) | Dry run? decline (you go to Board then) | X or Y → X (the first of them)')
+})
+
+test('a meeting already over is no member: Keep never declines the past', () => {
+  assert.equal(dayChoices([mt('A', 9, 0, 10, 0), mt('B', 9, 30, 11, 0)], day(10, 15)).length, 0)
+})
+
+test('a chain of overlaps is one choice; a call is where you are, not a choice', () => {
+  assert.equal(show(dayChoices([mt('A', 10, 0, 11, 0), mt('C', 10, 45, 11, 30), mt('B', 11, 15, 12, 0)], day(9, 0))), 'A or C or B → A (the longer)')
+  const call = { kind: 'call', subject: 'A call', start: at(10, 0), end: at(10, 20) }
+  assert.equal(show(dayChoices([call, mt('A', 10, 10, 11, 0), mt('B', 10, 30, 11, 0)], day(9, 0))), 'A or B → A (the longer)')
 })
 
 let failed = 0
