@@ -44,7 +44,7 @@ T002 has the new owner, hand-over and due date.
 ## Teardown
 - Click "undo" on the three entries (newest first)
 - Owner reads "Omar Haddad", Due "no date" again
-- `target/debug/echoctl project person acme-rollout "Dana Lee" --remove` and the same for "Omar Haddad"
+- `target/debug/echoctl project person acme-rollout "Dana Lee" --remove` and `target/debug/echoctl project person acme-rollout "Omar Haddad" --remove`
 
 ## Changes
 - Changes owner, delegated_by and due of T002.
