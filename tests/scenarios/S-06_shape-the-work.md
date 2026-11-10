@@ -51,7 +51,7 @@ cases:
 | 1 | `work/TC-004_board-columns-and-cards.md` | — | — |
 | 2 | `work/TC-001_saved-views-board-tree-new-rename-delete.md` | — | On stage 1's view (Acme rollout's Board): skip the navigation of step 1; check its result on the snapshot |
 | 3 | `work/TC-005_drag-card-sets-state.md` | — | On stage 2's view (Acme rollout's Board): skip the navigation of step 1; check its result on the snapshot |
-| 4 | `work/TC-012_details-owner-handed-over-due.md` | — | On stage 3's view (Acme rollout's Board): skip the navigation of step 1, click the card T002 |
+| 4 | `work/TC-012_details-owner-handed-over-due.md` | — | On stage 3's view (Acme rollout's Board): run the case's two `project person` commands, reload the page, then skip the navigation of step 1 and click the card T002 |
 | 5 | `work/TC-016_waits-for-holds-up-copy-link.md` | — | Its precondition (the CLI link), then on stage 4's view (Acme rollout's Board): skip the navigation of step 1, click the card T002 (the click reads the Details again) |
 | 6 | `work/TC-011_status-change-history-cli.md` | — | On stage 5's view (Acme rollout's Board): skip the navigation of step 1, click the card T001 |
 | 7 | `work/TC-010_details-open-title-description.md` | — | On stage 6's view (T001's Details open on the Board): skip step 1's navigation and click; check its result on the snapshot |
