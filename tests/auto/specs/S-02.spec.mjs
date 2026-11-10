@@ -127,7 +127,7 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
 
     const top = await cal.top(k.subject)
     await cal.scrollGrid(todays, data.set.s02.scroll)
-    await expect.poll(() => cal.top(k.subject)).toBeLessThan(top)
+    await expect.poll(() => cal.top(k.subject)).not.toBe(top)
     await expect.poll(() => cal.cardPlace(k.subject, t.record, t.prepare)).toEqual({ inside: true, beside: true, level: true, oneLine: true })
     await cal.cardButton(k.subject, c.close).click()
     await expect(card).toHaveCount(0)

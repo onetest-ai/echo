@@ -146,11 +146,18 @@ export class CalendarPage extends AppPage {
     return (await this.event(subject).boundingBox()).y
   }
 
-  /** The grid scrolled by the wheel, over a day's column. */
+  /** The grid scrolled by the wheel, over a day's column: down by `dy`, or up when it is already at its end (late in
+   *  the day the grid opens scrolled to the bottom, so a scroll down moves nothing). */
   async scrollGrid(column, dy) {
     const box = await column.boundingBox()
     await this.page.mouse.move(box.x + 4, Math.max(box.y, 0) + 200)
-    await this.page.mouse.wheel(0, dy)
+    const down = await column.evaluate((el) => {
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (p.scrollHeight > p.clientHeight + 1 && getComputedStyle(p).overflowY !== 'visible') return p.scrollTop + p.clientHeight < p.scrollHeight - 1
+      }
+      return true
+    })
+    await this.page.mouse.wheel(0, down ? dy : -dy)
   }
 
   /** Where a meeting's card is: inside the window, beside its meeting (right or left of it, apart), level with it as
