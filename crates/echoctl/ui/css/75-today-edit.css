@@ -1,16 +1,19 @@
 /* Today's edit mode and Add a widget (62-today-edit.js). */
 .td-head .td-edit-btn { margin-left: auto; }
 .td-head .td-edit-acts { margin-left: auto; display: flex; gap: 8px; }
-.tw { position: relative; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); padding: 0 0 8px; min-width: 0; cursor: grab; }
+.tw { position: relative; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); padding: 0 0 8px; min-width: 0; cursor: grab; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
 .tw.tmp { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 .tw.dragging { opacity: 0.4; }
-.tw-h { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.tw-h { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .tw-h b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tw-grip { color: var(--text-3); }
 .tw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .tw-seg button { border: 0; background: transparent; color: var(--text-2); font: 11px var(--mono); padding: 2px 7px; cursor: pointer; }
 .tw-seg button.on { background: var(--accent); color: #fff; }
-.tw-in { pointer-events: none; max-height: 320px; overflow: hidden; padding: 0 8px; opacity: 0.85; }
+.tw-mv { display: inline-flex; gap: 1px; }
+.tw-mv button { border: 0; background: transparent; color: var(--text-3); width: 20px; height: 20px; border-radius: 5px; cursor: pointer; font-size: 12px; line-height: 20px; padding: 0; }
+.tw-mv button:hover, .tw-mv button:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.tw-in { pointer-events: none; flex: 1 1 auto; min-height: 0; max-height: 320px; overflow: hidden; padding: 0 8px; opacity: 0.85; }
 .tw-in > .td-sec, .tw-in > .td-card { border: 0; box-shadow: none; }
 .tw-empty { padding: 14px 6px; font-size: 12px; }
 .tw[data-drop]::after { content: ''; position: absolute; background: var(--accent); border-radius: 2px; z-index: 2; }

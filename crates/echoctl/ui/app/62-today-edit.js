@@ -9,7 +9,7 @@ const TW_SIZES = { S: 1, M: 2, L: 3 }
 /** The head's buttons: Edit; in edit mode Reset to the default and Done. */
 function todayEditHead() {
   return S.tdEdit
-    ? '<span class="td-edit-acts"><button class="btn ghost" data-tw-reset="1">Reset to the default</button><button class="btn primary" data-tw-done="1">Done</button></span>'
+    ? '<span class="td-edit-acts"><button class="btn" data-tw-panel="1">Add a widget</button><button class="btn ghost" data-tw-reset="1">Reset to the default</button><button class="btn primary" data-tw-done="1">Done</button></span>'
     : `<button class="icon-btn td-edit-btn" data-tw-edit="1" aria-label="Edit Today" title="Edit Today — move, size, add widgets">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
 }
 
@@ -17,8 +17,12 @@ function todayEditHead() {
 function todayEditCell(id, html, size) {
   const w = (S.tdCatalog || []).find((x) => x.id === id) || { id, label: id, sizes: ['S', 'M', 'L'] }
   const sizes = (w.sizes || []).map((z) => `<button type="button" class="${z === size ? 'on' : ''}" data-tw-size="${esc(z)}" data-tw-id="${esc(id)}" aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${esc(z)}">${esc(z)}</button>`).join('')
+  const rows = twRows(), r = rows.findIndex((row) => row.includes(id)), i = r < 0 ? -1 : rows[r].indexOf(id)
+  const can = { up: r > 0, down: r >= 0 && r < rows.length - 1, left: i > 0, right: i >= 0 && i < (rows[r] || []).length - 1 }
+  const MV = { left: ['←', 'before the one beside it'], up: ['↑', 'to a row above'], down: ['↓', 'to a row below'], right: ['→', 'after the one beside it'] }
+  const moves = Object.entries(MV).filter(([k]) => can[k]).map(([k, [a, say]]) => `<button type="button" data-tw-move="${k}" data-tw-id="${esc(id)}" aria-label="Move ${esc(w.label)} ${say}" title="Move ${say}">${a}</button>`).join('')
   const body = html || `<div class="tw-empty set-sub">${esc(w.about || '')}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b><span class="tw-seg" role="group" aria-label="Size">${sizes}</span><button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div><div class="tw-in" inert>${body}</div></section>`
+  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span><button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div><div class="tw-in" inert>${body}</div></section>`
 }
 
 /** The zone after the last widget: a widget dropped there goes last, on a row of its own. */
@@ -44,6 +48,47 @@ function todayLayoutDo(body) {
 function twPickSize(w) {
   const sizes = (w && w.sizes) || []
   return sizes.includes(S.tdPickSize) ? S.tdPickSize : sizes.includes('M') ? 'M' : sizes[0]
+}
+
+/** Add a widget, shown again (closed while editing, or under the page at a narrow width: over it, as the right panel
+ *  opens there). */
+function todayEditPanel() {
+  const known = panelViews()
+  if (Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) S.overlay = true
+  Layout.show('add-widget', known)
+  layoutChanged()
+}
+
+/** The layout's rows: widget ids, a row each. */
+function twRows() {
+  const rows = []
+  for (const i of (S.today && S.today.layout) || []) { if (i.row || !rows.length) rows.push([]); rows[rows.length - 1].push(i.widget) }
+  return rows
+}
+
+/** A move by keyboard (#345): up — a row of its own above the row before; down — below the row after; left / right —
+ *  before the one before it / after the one after it in its row. The moved widget's button keeps the focus. */
+function todayEditMove(id, dir) {
+  const rows = twRows(), r = rows.findIndex((row) => row.includes(id))
+  if (r < 0) return
+  const i = rows[r].indexOf(id)
+  const to = dir === 'up' ? r > 0 && [rows[r - 1][0], 'above']
+    : dir === 'down' ? r < rows.length - 1 && [rows[r + 1][0], 'below']
+    : dir === 'left' ? i > 0 && [rows[r][i - 1], 'before']
+    : i < rows[r].length - 1 && [rows[r][i + 1], 'after']
+  if (!to) return
+  S.tdFocus = { id, sel: `[data-tw-move="${dir}"]`, was: JSON.stringify(S.today.layout) }
+  todayLayoutDo({ op: 'move', widget: id, target: to[0], side: to[1] })
+}
+
+/** After a redraw in edit mode: the focus back where the keyboard was (a moved widget's button, a neighbour after ×). */
+function twRefocus() {
+  const f = S.tdFocus
+  // Only once Today is drawn from the changed layout (the change's reply refreshes it).
+  if (!f || !S.tdEdit || JSON.stringify((S.today || {}).layout) === f.was) return
+  const frame = document.querySelector(`.tw[data-tw="${CSS.escape(f.id)}"]`)
+  const el = frame && (frame.querySelector(f.sel) || frame.querySelector('button:not([disabled])'))
+  if (el) { el.focus(); S.tdFocus = null }
 }
 
 async function todayEditOpen() {
@@ -102,14 +147,20 @@ PANEL_VIEWS.push({
 
 document.addEventListener('click', (e) => {
   if (S.view !== 'today' || !e.target.closest) return
-  const t = e.target.closest('[data-tw-edit],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
+  const t = e.target.closest('[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
   if (!t) return
   const d = t.dataset
   if (d.twEdit) return todayEditOpen()
+  if (d.twPanel) return todayEditPanel()
+  if (d.twMove) return todayEditMove(d.twId, d.twMove)
   if (d.twDone) return todayEditDone()
   if (d.twReset) return todayLayoutDo({ op: 'reset' })
   if (d.twSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twSize })
-  if (d.twRemove) return todayLayoutDo({ op: 'remove', widget: d.twRemove })
+  if (d.twRemove) {
+    const all = twRows().flat(), i = all.indexOf(d.twRemove), next = all[i + 1] || all[i - 1]
+    if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(S.today.layout) }
+    return todayLayoutDo({ op: 'remove', widget: d.twRemove })
+  }
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
   if (d.twPickSize) { S.tdPickSize = d.twPickSize; return render() }
   if (d.twPart) { S.tdPart = d.twPart; return render() }

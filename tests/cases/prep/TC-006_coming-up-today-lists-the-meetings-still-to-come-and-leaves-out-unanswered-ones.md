@@ -32,7 +32,7 @@ tags: [prep, calls, response]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" | The first row of the list is "Coming up today" (`.up-fold`) with the number 13 (`.up-n`) |
 | 2 | Read that row's right side | "Now" and "Globex office hours" (the first meeting already started and not over) |
-| 3 | Click the row "Coming up today" | `aria-expanded` is true; 13 rows with `data-up` appear above the calls |
+| 3 | Click the row "Coming up today" | `aria-expanded` is true; 13 rows with `data-up` appear above the calls, in time order (as `echoctl prep --upcoming`) |
 | 4 | Count the rows by title | "Vendor demo" 2, "Initech architecture board" 2, "Globex office hours" 1, "Initech team lunch" 1, "Globex sponsor update" 1, "Acme help desk sync" 1, "Acme renewal follow-up" 1, "Globex weekly" 1, "Steering prep" 1, "Umbrella pricing review" 1, "Globex roadmap chat" 1 (total 13) |
 | 5 | Look for "Acme budget check", "Partner planning", "Initech town hall" and "Acme training dry run" | None of them is listed |
 | 6 | Read the row "Initech architecture board" that starts latest (the one to come) | Its meta spans hold the time, "25 min" and "Alex Chen, Priya Nair +1"; no thread icon |
