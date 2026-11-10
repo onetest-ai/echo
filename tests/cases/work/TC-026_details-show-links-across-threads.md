@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, xthread, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-026: Details name the item of another thread that a task waits for, holds up, shares or mirrors

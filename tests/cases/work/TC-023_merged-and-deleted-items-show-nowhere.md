@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, tree, state, filters]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-023: Merged and deleted items are not on the tree, the board or in the kind counts

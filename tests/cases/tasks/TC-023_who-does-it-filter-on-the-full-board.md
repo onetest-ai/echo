@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, filters, mode, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-023: Who does it keeps only the user's tasks Claude can do, or the ones by hand, and narrows with the Thread filter

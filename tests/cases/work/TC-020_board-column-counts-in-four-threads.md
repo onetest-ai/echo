@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, columns, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-020: Four threads on the default five columns show the column counts of their tasks and questions

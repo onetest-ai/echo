@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles, waiting, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-016: Waiting for others holds the work my tasks wait for and a card for each person they wait on

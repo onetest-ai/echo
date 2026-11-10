@@ -178,6 +178,122 @@ export class WorkPage extends AppPage {
     return this.details.getByRole('checkbox', { name: text })
   }
 
+  // ── A full board: cards by id, what a card reads, the column heads in order, the tree's status words ──
+
+  /** A card of the board, by its id (drawn at its top). */
+  cardById(id) {
+    return this.main.getByRole('listitem').filter({ has: this.page.getByText(id, { exact: true }) })
+  }
+
+  /** A card in a column, by its id; a column's cards. */
+  cardIn(column, id) {
+    return this.column(column).getByRole('listitem').filter({ has: this.page.getByText(id, { exact: true }) })
+  }
+
+  cardsIn(column) {
+    return this.column(column).getByRole('listitem')
+  }
+
+  /** What a card reads, as one line: its id and story, its owner's initials, its title, its chips. */
+  async reads(id) {
+    const first = (await this.cardById(id).ariaSnapshot()).split('\n')[0]
+    return first.replace(/^- /, '').replace(/^'(.*)'$/, '$1').replace(/^listitem: /, '').replace(/^"(.*)"$/, '$1')
+  }
+
+  /** A card's top line ("T005 · Day-to-day work"), its avatar (titled by its owner's name), a chip of it as it reads
+   *  ("⏳ Kim Park", "holds up 1", "question"), its due chip (titled "Due" or "Overdue"). */
+  top(id, text) {
+    return this.cardById(id).getByText(text, { exact: true })
+  }
+
+  avatar(id, title) {
+    return this.cardById(id).getByTitle(title, { exact: true })
+  }
+
+  chip(id, text) {
+    return this.cardById(id).getByText(text, { exact: true })
+  }
+
+  dueChip(id, title) {
+    return this.cardById(id).getByTitle(title, { exact: true })
+  }
+
+  /** The column heads' names, in order. */
+  async columnNames() {
+    const names = []
+    for (const h of await this.columnHeads.all()) names.push(await h.getAttribute('aria-label'))
+    return names
+  }
+
+  /** "To review": its items, in order (each its question and its two buttons), and an item's buttons. */
+  get toReview() {
+    return this.main.getByRole('group', { name: 'To review', exact: true })
+  }
+
+  reviewButtons(i) {
+    return this.toReview.nth(i).getByRole('button')
+  }
+
+  /** The sync line's failure, by what its tooltip says. */
+  syncFailed(why) {
+    return this.main.getByTitle(why, { exact: true })
+  }
+
+  /** A part of the sync line, as it reads ("3 to review", in amber). */
+  syncPart(text) {
+    return this.main.getByText(text, { exact: true })
+  }
+
+  /** A tree row's status ("● to do"), its tags ("session", "holds up 1"); a workstream's header. */
+  treeStatus(id) {
+    return this.treeRow(id).getByText(/^● /)
+  }
+
+  treeTag(id, text) {
+    return this.treeRow(id).getByText(text, { exact: true })
+  }
+
+  /** Every tree row. */
+  get treeRows() {
+    return this.main.getByRole('button', { name: /^[A-Z]\d{3} / })
+  }
+
+  /** A row of the details that links the item to other work ("Waits for", "Holds up", "Same as", "Also in"). */
+  linkRow(name) {
+    return this.details.getByRole('group', { name, exact: true })
+  }
+
+  /** A button of a link row ("Acme rollout · T002 Get the access list", "Unlink"); of the one that says these words
+   *  when there are two rows of a name ("Holds up" in the thread and in another). */
+  linkIn(row, name, says) {
+    const r = says ? this.linkRow(row).filter({ hasText: says }) : this.linkRow(row)
+    return r.getByRole('button', { name, exact: true })
+  }
+
+  /** Every card of the board; every task row of the tree. */
+  get allCards() {
+    return this.main.getByRole('listitem')
+  }
+
+  get treeTasks() {
+    return this.main.getByRole('button', { name: /^T\d{3} / })
+  }
+
+  /** A select's option, by its name. */
+  option(select, name) {
+    return this.select(select).getByRole('option', { name, exact: true })
+  }
+
+  /** A select's options, in order. */
+  options(name) {
+    return this.select(name).getByRole('option')
+  }
+
+  /** A select's chip, as it reads ("Me (Sam Rivera) ▾"). */
+  chipReads(text) {
+    return this.main.getByText(new RegExp(`^${literal(text)} ▾`))
+  }
+
   /** A result of the search for an item in another thread, by its name ("Acme rollout · T001 Send Acme the SSO checklist"). */
   result(name) {
     return this.details.getByRole('group', { name, exact: true })

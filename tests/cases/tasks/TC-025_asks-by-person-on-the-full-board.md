@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, asks, waiting, quiet, due]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-025: Asks lists what is due soon, quiet or waited for, by person, at most two per story

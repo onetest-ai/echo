@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, tree, status, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-022: The tree words a task or story by state, type and wait: waiting, held, blocked, to do, and shows no status on a decision

@@ -141,6 +141,16 @@ export class AppPage {
     await this.page.clock.fastForward('01:05')
   }
 
+  /** The colour an element is drawn in (its text), as the browser writes a computed colour ("rgb(196, 49, 75)"). */
+  async colourOf(locator) {
+    return locator.evaluate((el) => getComputedStyle(el).color)
+  }
+
+  /** How an element's border is drawn ("solid", "dashed"). */
+  async borderOf(locator) {
+    return locator.evaluate((el) => getComputedStyle(el).borderTopStyle)
+  }
+
   /** A colour of the window's theme (`--recording`, `--me`), written as the browser writes a computed colour
    *  ("rgb(217, 119, 87)"). */
   async themeColour(name) {

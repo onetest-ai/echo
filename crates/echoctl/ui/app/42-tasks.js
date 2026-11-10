@@ -18,7 +18,7 @@ function taskWho(c, pile) {
 function othersPile(all, key) {
   if (!all.length) return ''
   const open = S.tk.more[key]
-  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${CHEV(open)} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
+  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${CHEV(open)} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards" role="region" aria-label="Others">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }

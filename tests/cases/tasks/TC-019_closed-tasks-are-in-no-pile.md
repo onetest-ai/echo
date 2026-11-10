@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles, state, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-019: A done, cancelled, merged or deleted task is in no pile and in no count

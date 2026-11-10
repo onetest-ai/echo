@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, tree, status, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-021: The tree words a question answered or open and a risk handled or with no response, by its text and state

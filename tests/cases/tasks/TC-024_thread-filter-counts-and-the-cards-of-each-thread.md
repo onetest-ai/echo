@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, filters, thread]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-024: The Thread filter counts each open thread's tasks, offers no closed thread and narrows every pile

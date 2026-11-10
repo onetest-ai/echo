@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, cards, late]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-025: A board card shows its owner avatar, a late due in red, who it waits on and what it holds up

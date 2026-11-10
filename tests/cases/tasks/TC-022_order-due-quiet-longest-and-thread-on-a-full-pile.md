@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, order, quiet, due]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-022: Order puts late first then nearest date then the quietest, or the quietest, or by thread, on 14 cards

@@ -117,7 +117,29 @@
     "yesterday": "yesterday",
     "undoOp": "undo",
     "sendTo": "Send to",
-    "edit": "Edit"
+    "edit": "Edit",
+    "syncedRead": "Synced {time} · {calls} calls to read · {n} to review",
+    "syncFailed": "Sync failed",
+    "notSyncedYet": "Not synced yet",
+    "tags": [
+      "session",
+      "dependency",
+      "question",
+      "decision",
+      "risk"
+    ],
+    "colours": {
+      "done": "--me",
+      "open": "--text-3",
+      "waiting": "--warn",
+      "blocked": "--danger",
+      "in_progress": "--accent-ink",
+      "cancelled": "--text-3",
+      "late": "--danger",
+      "toReview": "--warn"
+    },
+    "statusWord": "● {word}",
+    "callsToRead": "\\d+ calls? to read"
   },
   "prep": {
     "inShort": "In short",
@@ -596,7 +618,32 @@
       "order": "Order"
     },
     "howField": "How",
-    "dialogLine": "{thread} · {title}"
+    "dialogLine": "{thread} · {title}",
+    "modes": {
+      "claude": "Claude can do it",
+      "hand": "You do it by hand: {how}"
+    },
+    "quietMark": "quiet {n} d",
+    "quietTitle": "No word about it in {n} days",
+    "blocked": "blocked",
+    "others": "Others",
+    "askWhy": {
+      "due": "due {due}",
+      "item": "{title} — {why}"
+    },
+    "colours": {
+      "late": "--danger"
+    },
+    "filterChip": "{name} ▾",
+    "cliPiles": {
+      "I owe": "mine",
+      "Owed to me": "owed",
+      "Waiting for others": "waiting",
+      "Nobody named": "nobody",
+      "Others": "others"
+    },
+    "waitBorder": "dashed",
+    "cardBorder": "solid"
   },
   "diagrams": {
     "system": "You fix one Mermaid diagram",

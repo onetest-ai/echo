@@ -313,5 +313,2123 @@
       "task": "T"
     },
     "state": "done"
+  },
+  "s25": {
+    "counts": [
+      14,
+      5,
+      5,
+      11
+    ],
+    "others": 24,
+    "active": 7,
+    "folds": {
+      "I owe": 8,
+      "Nobody named": 5
+    },
+    "logo": [
+      "Globex pilot"
+    ],
+    "how": "A call on Monday morning",
+    "me": [
+      "Sam Rivera",
+      "Me"
+    ],
+    "threadIds": {
+      "Acme rollout": "acme-rollout",
+      "Acme renewal": "acme-renewal",
+      "Globex pilot": "globex-pilot",
+      "Umbrella proposal": "umbrella-proposal",
+      "Initech hiring": "initech-hiring"
+    },
+    "cards": {
+      "I owe": [
+        {
+          "thread": "Acme rollout",
+          "id": "T010",
+          "title": "Book the workshop room",
+          "line": "Day-to-day work",
+          "due": "late"
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T016",
+          "title": "Map the user groups",
+          "line": "Day-to-day work",
+          "due": "late",
+          "mode": "hand"
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T003",
+          "title": "Send the revised timeline",
+          "line": "Day-to-day work · blocked by Rita Gomez",
+          "due": "today",
+          "mode": "claude"
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T001",
+          "title": "Collect the user list",
+          "line": "Day-to-day work · blocked by T002",
+          "due": "tomorrow",
+          "mode": "hand"
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T009",
+          "title": "Close the open tickets",
+          "line": "Day-to-day work",
+          "due": "later",
+          "mode": "claude"
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T005",
+          "title": "Prepare the demo script",
+          "line": "Day-to-day work · blocked",
+          "due": null,
+          "mode": "claude",
+          "quiet": 5
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T012",
+          "title": "Draft the status report (2)",
+          "line": "Day-to-day work · blocked by Zoe Martin",
+          "due": null,
+          "quiet": 5
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T013",
+          "title": "Prepare the demo script (2)",
+          "line": "Day-to-day work",
+          "due": null,
+          "quiet": 5
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T010",
+          "title": "Prepare the handover pack",
+          "line": "Day-to-day work",
+          "due": null,
+          "mode": "hand"
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T012",
+          "title": "Agree the support hours (2)",
+          "line": "Day-to-day work · blocked by T013",
+          "due": null
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T017",
+          "title": "Send the revised timeline (2)",
+          "line": "Day-to-day work · blocked by T018",
+          "due": null
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T019",
+          "title": "Share the architecture diagram (2)",
+          "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T023",
+          "title": "Send the meeting notes (2)",
+          "line": "Day-to-day work · blocked",
+          "due": null
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T012",
+          "title": "Send the welcome mail (2)",
+          "line": "Day-to-day work",
+          "due": null
+        }
+      ],
+      "Owed to me": [
+        {
+          "thread": "Acme renewal",
+          "id": "T011",
+          "title": "Test the password reset",
+          "line": "Alex Chen · blocked",
+          "due": "today"
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T005",
+          "title": "Book the training slots",
+          "line": "Alex Chen · blocked",
+          "due": "tomorrow"
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T010",
+          "title": "Check the licence count",
+          "line": "Zoe Martin · client · blocked",
+          "due": "later"
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T009",
+          "title": "Send the welcome mail",
+          "line": "Kim Park · client",
+          "due": "later"
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T008",
+          "title": "Write the FAQ page",
+          "line": "Alex Chen · blocked",
+          "due": null
+        }
+      ],
+      "Waiting for others": [
+        {
+          "thread": "Initech hiring",
+          "id": "T013",
+          "title": "Unblock: agree the support hours (2)",
+          "line": "Alex Chen · stops T012",
+          "due": null
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T002",
+          "title": "Unblock: collect the user list",
+          "line": "Alex Chen · stops T001",
+          "due": null
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T018",
+          "title": "Unblock: send the revised timeline (2)",
+          "line": "Alex Chen · stops T017",
+          "due": null
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T012",
+          "title": "an answer on draft the status report (2)",
+          "line": "Zoe Martin · stops T012",
+          "due": null,
+          "quiet": 5,
+          "wait": true
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T003",
+          "title": "an answer on send the revised timeline",
+          "line": "Rita Gomez · stops T003",
+          "due": null,
+          "wait": true
+        }
+      ],
+      "Nobody named": [
+        {
+          "thread": "Globex pilot",
+          "id": "T004",
+          "title": "Check the firewall rules",
+          "line": "Day-to-day work",
+          "due": "late"
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T006",
+          "title": "Schedule the steering call",
+          "line": "Day-to-day work",
+          "due": "today"
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T011",
+          "title": "Confirm the go-live date",
+          "line": "Day-to-day work",
+          "due": "tomorrow"
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T004",
+          "title": "Draft the status report (kept)",
+          "line": "Day-to-day work",
+          "due": null,
+          "quiet": 5
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T008",
+          "title": "Archive the old tenant (kept)",
+          "line": "Day-to-day work",
+          "due": null,
+          "quiet": 5
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T006",
+          "title": "Agree the support hours (kept)",
+          "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T015",
+          "title": "Update the contact list (2) (kept)",
+          "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T006",
+          "title": "Share the architecture diagram (kept)",
+          "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T005",
+          "title": "Hold the help desk training session",
+          "line": "SSO for the Berlin pilot",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T021",
+          "title": "Agree the acceptance criteria (kept)",
+          "line": "Day-to-day work",
+          "due": null
+        },
+        {
+          "thread": "Globex pilot",
+          "id": "T014",
+          "title": "Review the access matrix (2) (kept)",
+          "line": "Day-to-day work",
+          "due": null
+        }
+      ],
+      "Others": [
+        {
+          "thread": "Acme rollout",
+          "id": "T014",
+          "title": "Send the meeting notes",
+          "line": "Dana Lee · client",
+          "due": "later"
+        },
+        {
+          "thread": "Umbrella proposal",
+          "id": "T002",
+          "title": "Unblock: review the test plan",
+          "line": "Alex Chen",
+          "due": null,
+          "quiet": 5
+        },
+        {
+          "thread": "Initech hiring",
+          "id": "T003",
+          "title": "After: set up the test tenant",
+          "line": "Alex Chen",
+          "due": null
+        },
+        {
+          "thread": "Acme renewal",
+          "id": "T005",
+          "title": "After: share the architecture diagram",
+          "line": "Alex Chen · blocked",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T002",
+          "title": "Get the access list",
+          "line": "Omar Haddad · client",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T003",
+          "title": "Prepare the training deck",
+          "line": "Rita Gomez · client · blocked",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T004",
+          "title": "Write the help desk guide",
+          "line": "Rita Gomez · client",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T006",
+          "title": "Plan the rollback rehearsal",
+          "line": "Tom Becker",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T007",
+          "title": "Answer the security questionnaire",
+          "line": "Omar Haddad · client",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T008",
+          "title": "Run the data migration dry run",
+          "line": "Rita Gomez · client",
+          "due": null
+        },
+        {
+          "thread": "Acme rollout",
+          "id": "T012",
+          "title": "After: confirm the go-live date",
+          "line": "Alex Chen · blocked",
+          "due": null
+        }
+      ]
+    },
+    "unblock": [
+      {
+        "thread": "Umbrella proposal",
+        "id": "T002",
+        "title": "Unblock: review the test plan"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T005",
+        "title": "Unblock: agree the support hours"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T009",
+        "title": "Unblock: write the faq page"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T008",
+        "title": "Unblock: write the cut-over runbook"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T010",
+        "title": "Unblock: fix the sso redirect"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T007",
+        "title": "Unblock: schedule the steering call"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T010",
+        "title": "Unblock: reporting dashboard"
+      }
+    ],
+    "nobodyBy": {
+      "Globex pilot T004": "Priya Nair",
+      "Globex pilot T006": "Priya Nair",
+      "Acme rollout T011": "Me",
+      "Umbrella proposal T004": null,
+      "Umbrella proposal T008": null,
+      "Initech hiring T006": null,
+      "Initech hiring T015": null,
+      "Acme renewal T006": null,
+      "Acme rollout T005": "Me",
+      "Acme rollout T021": null,
+      "Globex pilot T014": null
+    },
+    "closed": [
+      {
+        "thread": "Acme rollout",
+        "id": "T001",
+        "title": "Send the SSO checklist"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T009",
+        "title": "Prepare the renewal quote"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T013",
+        "title": "Order the licences"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T017",
+        "title": "Publish the release notes"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T019",
+        "title": "Clean up the test accounts"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T020",
+        "title": "Agree the acceptance criteria"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T022",
+        "title": "Confirm the go-live date (2)"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T025",
+        "title": "Agree the acceptance criteria (2)"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T001",
+        "title": "Prepare the renewal quote"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T002",
+        "title": "Legal review of the contract terms"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T004",
+        "title": "Share the architecture diagram"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T007",
+        "title": "Write the cut-over runbook"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T009",
+        "title": "Fix the SSO redirect"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T013",
+        "title": "Review the invoice"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T015",
+        "title": "Confirm the rollback window"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T016",
+        "title": "Rehearse the demo"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T020",
+        "title": "Rehearse the demo (2)"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T003",
+        "title": "Chase the signed SOW"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T008",
+        "title": "Collect feedback from Berlin"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T011",
+        "title": "Chase the signed SOW (2)"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T013",
+        "title": "Review the access matrix (2)"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T001",
+        "title": "Review the test plan"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T003",
+        "title": "Draft the status report"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T006",
+        "title": "Ask for the budget code"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T007",
+        "title": "Archive the old tenant"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T015",
+        "title": "Check the licence count (2)"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T016",
+        "title": "Sign off the data mapping (2)"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T001",
+        "title": "Update the risk log"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T002",
+        "title": "Set up the test tenant"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T004",
+        "title": "Agree the support hours"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T007",
+        "title": "Plan the hypercare week"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T011",
+        "title": "Update the contact list"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T014",
+        "title": "Update the contact list (2)"
+      }
+    ],
+    "chips": [
+      {
+        "thread": "Acme rollout",
+        "id": "T010",
+        "title": "Book the workshop room",
+        "pile": "I owe",
+        "due": "late"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T016",
+        "title": "Map the user groups",
+        "pile": "I owe",
+        "due": "late"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T004",
+        "title": "Check the firewall rules",
+        "pile": "Nobody named",
+        "due": "late"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T003",
+        "title": "Send the revised timeline",
+        "pile": "I owe",
+        "due": "today"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T011",
+        "title": "Test the password reset",
+        "pile": "Owed to me",
+        "due": "today"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T006",
+        "title": "Schedule the steering call",
+        "pile": "Nobody named",
+        "due": "today"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T001",
+        "title": "Collect the user list",
+        "pile": "I owe",
+        "due": "tomorrow"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T005",
+        "title": "Book the training slots",
+        "pile": "Owed to me",
+        "due": "tomorrow"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T011",
+        "title": "Confirm the go-live date",
+        "pile": "Nobody named",
+        "due": "tomorrow"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T009",
+        "title": "Close the open tickets",
+        "pile": "I owe",
+        "due": "later"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T010",
+        "title": "Check the licence count",
+        "pile": "Owed to me",
+        "due": "later"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T009",
+        "title": "Send the welcome mail",
+        "pile": "Owed to me",
+        "due": "later"
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T014",
+        "title": "Send the meeting notes",
+        "pile": "Others",
+        "due": "later"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T019",
+        "title": "Share the architecture diagram (2)",
+        "pile": "I owe",
+        "due": null
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T005",
+        "title": "Hold the help desk training session",
+        "pile": "Nobody named",
+        "due": null
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T002",
+        "title": "Get the access list",
+        "pile": "Others",
+        "due": null
+      }
+    ],
+    "quiet": [
+      {
+        "thread": "Umbrella proposal",
+        "id": "T005",
+        "title": "Prepare the demo script",
+        "pile": "I owe",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T012",
+        "title": "Draft the status report (2)",
+        "pile": "I owe",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T013",
+        "title": "Prepare the demo script (2)",
+        "pile": "I owe",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T004",
+        "title": "Draft the status report (kept)",
+        "pile": "Nobody named",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T008",
+        "title": "Archive the old tenant (kept)",
+        "pile": "Nobody named",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T002",
+        "title": "Unblock: review the test plan",
+        "pile": "Others",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T011",
+        "title": "After: help desk readiness",
+        "pile": "Others",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T014",
+        "title": "After: prepare the demo script (2)",
+        "pile": "Others",
+        "quiet": 5
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T009",
+        "title": "Close the open tickets",
+        "pile": "I owe",
+        "quiet": null
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T010",
+        "title": "Check the licence count",
+        "pile": "Owed to me",
+        "quiet": null
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T010",
+        "title": "Prepare the handover pack",
+        "pile": "I owe",
+        "quiet": null
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T012",
+        "title": "Agree the support hours (2)",
+        "pile": "I owe",
+        "quiet": null
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T017",
+        "title": "Send the revised timeline (2)",
+        "pile": "I owe",
+        "quiet": null
+      },
+      {
+        "thread": "Acme rollout",
+        "id": "T023",
+        "title": "Send the meeting notes (2)",
+        "pile": "I owe",
+        "quiet": null
+      }
+    ],
+    "modes": [
+      {
+        "thread": "Acme rollout",
+        "id": "T016",
+        "title": "Map the user groups"
+      },
+      {
+        "thread": "Acme renewal",
+        "id": "T003",
+        "title": "Send the revised timeline"
+      },
+      {
+        "thread": "Globex pilot",
+        "id": "T001",
+        "title": "Collect the user list"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T009",
+        "title": "Close the open tickets"
+      },
+      {
+        "thread": "Umbrella proposal",
+        "id": "T005",
+        "title": "Prepare the demo script"
+      },
+      {
+        "thread": "Initech hiring",
+        "id": "T010",
+        "title": "Prepare the handover pack"
+      }
+    ],
+    "asks": [
+      {
+        "who": "Alex Chen",
+        "thread": "Acme renewal",
+        "id": "T011",
+        "text": "Test the password reset",
+        "due": true
+      },
+      {
+        "who": "Alex Chen",
+        "thread": "Globex pilot",
+        "id": "T005",
+        "text": "Book the training slots",
+        "due": true
+      },
+      {
+        "who": "Alex Chen",
+        "thread": "Initech hiring",
+        "id": "T013",
+        "text": "Unblock: agree the support hours (2)",
+        "why": "waiting",
+        "due": false
+      },
+      {
+        "who": "Alex Chen",
+        "thread": "Acme renewal",
+        "id": "T018",
+        "text": "Unblock: send the revised timeline (2)",
+        "why": "waiting",
+        "due": false
+      },
+      {
+        "who": "Alex Chen",
+        "thread": "Globex pilot",
+        "id": "T002",
+        "text": "Unblock: collect the user list",
+        "why": "waiting",
+        "due": false
+      },
+      {
+        "who": "Zoe Martin",
+        "thread": "Umbrella proposal",
+        "id": "T010",
+        "text": "Check the licence count",
+        "why": "quiet 5 days",
+        "due": false
+      },
+      {
+        "who": "Zoe Martin",
+        "thread": "Umbrella proposal",
+        "id": "T012",
+        "text": "an answer on draft the status report (2)",
+        "why": "waiting · an answer on draft the status report (2)",
+        "due": false
+      }
+    ],
+    "blocked": 7,
+    "othersPerThread": {
+      "Acme rollout": 11,
+      "Acme renewal": 5,
+      "Initech hiring": 3,
+      "Umbrella proposal": 3,
+      "Globex pilot": 2
+    },
+    "notOwed": {
+      "thread": "Acme rollout",
+      "title": "Get the access list"
+    },
+    "notWaiting": [
+      "Kim Park",
+      "Lena Vogel"
+    ],
+    "waitWho": [
+      {
+        "who": "Zoe Martin",
+        "thread": "umbrella-proposal",
+        "id": "T012"
+      },
+      {
+        "who": "Rita Gomez",
+        "thread": "acme-renewal",
+        "id": "T003"
+      }
+    ],
+    "lateNobody": {
+      "thread": "Globex pilot",
+      "title": "Check the firewall rules"
+    },
+    "todayNobody": {
+      "thread": "Globex pilot",
+      "title": "Schedule the steering call"
+    },
+    "allCards": 59,
+    "lateChips": 3,
+    "dated": 13,
+    "undated": 46,
+    "quietMarks": 9,
+    "quietThread": "Umbrella proposal",
+    "orders": {
+      "due": [
+        [
+          "Acme rollout T010",
+          "Acme rollout T016"
+        ],
+        [
+          "Acme renewal T003"
+        ],
+        [
+          "Globex pilot T001"
+        ],
+        [
+          "Umbrella proposal T009"
+        ],
+        [
+          "Umbrella proposal T005",
+          "Umbrella proposal T012",
+          "Umbrella proposal T013"
+        ],
+        [
+          "Initech hiring T010",
+          "Initech hiring T012"
+        ],
+        [
+          "Acme renewal T017",
+          "Acme renewal T019"
+        ],
+        [
+          "Acme rollout T023",
+          "Globex pilot T012"
+        ]
+      ],
+      "quiet": [
+        [
+          "Umbrella proposal T005",
+          "Umbrella proposal T009",
+          "Umbrella proposal T012",
+          "Umbrella proposal T013"
+        ],
+        [
+          "Initech hiring T010",
+          "Initech hiring T012"
+        ],
+        [
+          "Acme renewal T003",
+          "Acme renewal T017",
+          "Acme renewal T019"
+        ],
+        [
+          "Acme rollout T010",
+          "Acme rollout T016",
+          "Acme rollout T023",
+          "Globex pilot T001",
+          "Globex pilot T012"
+        ]
+      ],
+      "thread": [
+        [
+          "Acme renewal T003",
+          "Acme renewal T017",
+          "Acme renewal T019"
+        ],
+        [
+          "Acme rollout T010",
+          "Acme rollout T016",
+          "Acme rollout T023"
+        ],
+        [
+          "Globex pilot T001",
+          "Globex pilot T012"
+        ],
+        [
+          "Initech hiring T010",
+          "Initech hiring T012"
+        ],
+        [
+          "Umbrella proposal T005",
+          "Umbrella proposal T009",
+          "Umbrella proposal T012",
+          "Umbrella proposal T013"
+        ]
+      ]
+    },
+    "claudeCan": [
+      "Acme renewal T003",
+      "Umbrella proposal T005",
+      "Umbrella proposal T009"
+    ],
+    "byHand": [
+      "Acme rollout T016",
+      "Globex pilot T001",
+      "Initech hiring T010"
+    ],
+    "both": {
+      "thread": "Umbrella proposal · 10",
+      "cards": [
+        "Umbrella proposal T005",
+        "Umbrella proposal T009"
+      ]
+    },
+    "threadOptions": [
+      "All threads",
+      "Acme renewal · 11",
+      "Acme rollout · 17",
+      "Globex pilot · 10",
+      "Initech hiring · 9",
+      "Umbrella lead · 0",
+      "Umbrella proposal · 10",
+      "Internal tooling · 0"
+    ],
+    "emptyThreads": [
+      "Umbrella lead · 0",
+      "Internal tooling · 0"
+    ],
+    "askers": [
+      "Alex Chen",
+      "Zoe Martin"
+    ],
+    "askNarrow": {
+      "thread": "Acme renewal · 11",
+      "who": "Alex Chen",
+      "asks": [
+        "Test the password reset",
+        "Unblock: send the revised timeline (2)"
+      ],
+      "gone": "Zoe Martin"
+    },
+    "askEmpty": "Umbrella lead · 0",
+    "askOpen": {
+      "who": "Zoe Martin",
+      "title": "Check the licence count",
+      "path": "General › Day-to-day work"
+    },
+    "work": {
+      "custom": {
+        "thread": "acme-rollout",
+        "heads": [
+          [
+            "Backlog",
+            "14 / 3"
+          ],
+          [
+            "In progress",
+            "3 / 10"
+          ],
+          [
+            "In review",
+            "0"
+          ],
+          [
+            "Blocked",
+            "1"
+          ],
+          [
+            "Done",
+            "5"
+          ]
+        ],
+        "over": "Backlog",
+        "hidden": 1,
+        "notShown": "Waiting",
+        "cards": [
+          [
+            "Q003",
+            "Backlog"
+          ],
+          [
+            "T002",
+            "Backlog"
+          ],
+          [
+            "T008",
+            "Backlog"
+          ],
+          [
+            "T007",
+            "In progress"
+          ],
+          [
+            "T011",
+            "In progress"
+          ],
+          [
+            "T016",
+            "In progress"
+          ],
+          [
+            "T023",
+            "Blocked"
+          ],
+          [
+            "Q001",
+            "Done"
+          ],
+          [
+            "Q002",
+            "Done"
+          ],
+          [
+            "T001",
+            "Done"
+          ],
+          [
+            "T009",
+            "Done"
+          ],
+          [
+            "T022",
+            "Done"
+          ]
+        ],
+        "stored": {
+          "id": "T008",
+          "column": "In review",
+          "shown": "Backlog"
+        }
+      },
+      "filters": {
+        "owner": "Omar Haddad",
+        "ownerHeads": [
+          [
+            "Backlog",
+            "1 / 3"
+          ],
+          [
+            "In progress",
+            "1 / 10"
+          ],
+          [
+            "In review",
+            "0"
+          ],
+          [
+            "Blocked",
+            "0"
+          ],
+          [
+            "Done",
+            "0"
+          ]
+        ],
+        "ownerCards": [
+          [
+            "T002",
+            "Backlog"
+          ],
+          [
+            "T007",
+            "In progress"
+          ]
+        ],
+        "kind": "task",
+        "all": "",
+        "done": "Done",
+        "doneTasks": [
+          "T001",
+          "T009",
+          "T022"
+        ],
+        "questions": [
+          "Q001",
+          "Q002"
+        ]
+      },
+      "sync": {
+        "synced": {
+          "thread": "acme-rollout",
+          "calls": 3,
+          "review": 3
+        },
+        "review": [
+          {
+            "says": "Same work as Prepare the training deck?",
+            "buttons": [
+              "Yes",
+              "No"
+            ]
+          },
+          {
+            "says": "Belongs under Data migration?",
+            "buttons": [
+              "Yes",
+              "No"
+            ]
+          },
+          {
+            "says": "Is Answer the security questionnaire done?",
+            "buttons": [
+              "Done",
+              "Look"
+            ]
+          }
+        ],
+        "never": [
+          "acme-renewal",
+          "umbrella-proposal"
+        ],
+        "failed": {
+          "thread": "globex-pilot",
+          "why": "Claude Code exited with an error (exit 1)"
+        }
+      },
+      "globex": {
+        "thread": "globex-pilot",
+        "heads": [
+          [
+            "To do",
+            "6"
+          ],
+          [
+            "In progress",
+            "1"
+          ],
+          [
+            "Waiting",
+            "1"
+          ],
+          [
+            "Blocked",
+            "3"
+          ],
+          [
+            "Done",
+            "1"
+          ]
+        ],
+        "cards": [
+          [
+            "T002",
+            "To do"
+          ],
+          [
+            "T006",
+            "To do"
+          ],
+          [
+            "T007",
+            "To do"
+          ],
+          [
+            "T010",
+            "To do"
+          ],
+          [
+            "T012",
+            "To do"
+          ],
+          [
+            "T014",
+            "To do"
+          ],
+          [
+            "T009",
+            "In progress"
+          ],
+          [
+            "T005",
+            "Waiting"
+          ],
+          [
+            "T001",
+            "Blocked"
+          ],
+          [
+            "T004",
+            "Blocked"
+          ],
+          [
+            "Q001",
+            "Blocked"
+          ],
+          [
+            "T008",
+            "Done"
+          ]
+        ],
+        "question": "Q001",
+        "absent": [
+          "T003",
+          "T011",
+          "T013",
+          "D001",
+          "R001"
+        ],
+        "blockedWaiting": [
+          "T004",
+          "Blocked"
+        ],
+        "waiting": [
+          "T005",
+          "Waiting"
+        ],
+        "doneWaiting": {
+          "id": "T008",
+          "column": "Done",
+          "chip": "⏳ Kim Park"
+        }
+      },
+      "chips": {
+        "thread": "globex-pilot",
+        "cards": [
+          {
+            "id": "T005",
+            "column": "Waiting",
+            "avatar": [
+              "AC",
+              "Alex Chen"
+            ],
+            "reads": "T005 · Day-to-day work AC Book the training slots {due} ⏳ Kim Park",
+            "top": "T005 · Day-to-day work"
+          },
+          {
+            "id": "T004",
+            "column": "Blocked",
+            "avatar": [
+              "?",
+              "Nobody named"
+            ],
+            "reads": "T004 · Day-to-day work ? Check the firewall rules {due} ⏳ Kim Park",
+            "top": "T004 · Day-to-day work",
+            "late": true
+          },
+          {
+            "id": "T002",
+            "column": "To do",
+            "avatar": [
+              "AC",
+              "Alex Chen"
+            ],
+            "reads": "T002 · Day-to-day work AC Unblock: collect the user list holds up 1",
+            "top": "T002 · Day-to-day work"
+          },
+          {
+            "id": "T001",
+            "column": "Blocked",
+            "avatar": [
+              "SR",
+              "Sam Rivera"
+            ],
+            "reads": "T001 · Day-to-day work SR Collect the user list {due}",
+            "top": "T001 · Day-to-day work"
+          },
+          {
+            "id": "T009",
+            "column": "In progress",
+            "avatar": [
+              "KP",
+              "Kim Park (the client owes it)"
+            ],
+            "reads": "T009 · Day-to-day work KP Send the welcome mail {due} holds up 1",
+            "top": "T009 · Day-to-day work",
+            "owed": true
+          },
+          {
+            "id": "T006",
+            "column": "To do",
+            "avatar": [
+              "?",
+              "Nobody named"
+            ],
+            "reads": "T006 · Day-to-day work ? Schedule the steering call {due}",
+            "top": "T006 · Day-to-day work"
+          },
+          {
+            "id": "Q001",
+            "column": "Blocked",
+            "avatar": null,
+            "reads": "Q001 · Day-to-day work When does finance decide? question",
+            "top": "Q001 · Day-to-day work"
+          }
+        ],
+        "week": [
+          "T005",
+          "T001",
+          "T006"
+        ],
+        "today": "T006"
+      },
+      "links": {
+        "waits": {
+          "thread": "globex-pilot",
+          "title": "Book the training slots",
+          "row": "Waits for",
+          "link": "Acme rollout · T002 Get the access list",
+          "owner": "· Omar Haddad",
+          "waitingOn": "Waiting on",
+          "waitingOnText": "Kim Park — an answer on book the training slots"
+        },
+        "holds": {
+          "thread": "acme-rollout",
+          "title": "Get the access list",
+          "row": "Holds up",
+          "link": "Globex pilot · T005",
+          "says": "in another thread"
+        },
+        "also": {
+          "thread": "acme-rollout",
+          "title": "Prepare the renewal quote",
+          "column": "Done",
+          "id": "T009",
+          "row": "Also in",
+          "link": "Acme renewal · T001 Prepare the renewal quote"
+        },
+        "same": {
+          "thread": "acme-renewal",
+          "id": "T001",
+          "title": "Prepare the renewal quote",
+          "row": "Same as",
+          "link": "Acme rollout · T009 Prepare the renewal quote",
+          "says": "— done there: its status, owner and due show here",
+          "master": {
+            "thread": "acme-rollout",
+            "node": "T009"
+          }
+        }
+      },
+      "counts": {
+        "order": [
+          "acme-renewal",
+          "globex-pilot",
+          "initech-hiring",
+          "umbrella-proposal"
+        ],
+        "heads": {
+          "acme-renewal": [
+            [
+              "To do",
+              "8"
+            ],
+            [
+              "In progress",
+              "1"
+            ],
+            [
+              "Waiting",
+              "1"
+            ],
+            [
+              "Blocked",
+              "2"
+            ],
+            [
+              "Done",
+              "3"
+            ]
+          ],
+          "globex-pilot": [
+            [
+              "To do",
+              "6"
+            ],
+            [
+              "In progress",
+              "1"
+            ],
+            [
+              "Waiting",
+              "1"
+            ],
+            [
+              "Blocked",
+              "3"
+            ],
+            [
+              "Done",
+              "1"
+            ]
+          ],
+          "initech-hiring": [
+            [
+              "To do",
+              "7"
+            ],
+            [
+              "In progress",
+              "2"
+            ],
+            [
+              "Waiting",
+              "0"
+            ],
+            [
+              "Blocked",
+              "0"
+            ],
+            [
+              "Done",
+              "3"
+            ]
+          ],
+          "umbrella-proposal": [
+            [
+              "To do",
+              "6"
+            ],
+            [
+              "In progress",
+              "1"
+            ],
+            [
+              "Waiting",
+              "1"
+            ],
+            [
+              "Blocked",
+              "2"
+            ],
+            [
+              "Done",
+              "2"
+            ]
+          ]
+        },
+        "cards": {
+          "acme-renewal": {
+            "Waiting": [
+              "T003"
+            ],
+            "Blocked": [
+              "T011",
+              "T017"
+            ],
+            "Done": [
+              "T001",
+              "T002",
+              "T016"
+            ],
+            "In progress": [
+              "Q001"
+            ]
+          },
+          "umbrella-proposal": {
+            "Waiting": [
+              "T012"
+            ],
+            "Blocked": [
+              "T005",
+              "T010"
+            ],
+            "Done": [
+              "T001",
+              "T015"
+            ],
+            "In progress": [
+              "T013"
+            ]
+          },
+          "initech-hiring": {
+            "Waiting": [],
+            "Blocked": [],
+            "Done": [
+              "T002",
+              "T007",
+              "T011"
+            ],
+            "In progress": [
+              "T008",
+              "T012"
+            ]
+          }
+        },
+        "absent": {
+          "acme-renewal": [
+            "T004",
+            "T007",
+            "T009",
+            "T013",
+            "T015",
+            "T020"
+          ],
+          "initech-hiring": [
+            "T001",
+            "T004",
+            "T014"
+          ],
+          "umbrella-proposal": [
+            "T003",
+            "T006",
+            "T007",
+            "T016"
+          ]
+        },
+        "todo": {
+          "thread": "initech-hiring",
+          "id": "T010",
+          "column": "To do"
+        }
+      },
+      "records": {
+        "order": [
+          "umbrella-proposal",
+          "globex-pilot",
+          "initech-hiring",
+          "acme-renewal",
+          "acme-rollout"
+        ],
+        "rows": {
+          "acme-rollout": [
+            [
+              "Q001",
+              "answered",
+              "done"
+            ],
+            [
+              "Q002",
+              "answered",
+              "done"
+            ],
+            [
+              "Q003",
+              "answered",
+              "done"
+            ],
+            [
+              "R001",
+              "no response",
+              "waiting"
+            ]
+          ],
+          "globex-pilot": [
+            [
+              "Q001",
+              "open",
+              "open"
+            ],
+            [
+              "R001",
+              "handled",
+              "done"
+            ]
+          ],
+          "initech-hiring": [
+            [
+              "R001",
+              "handled",
+              "done"
+            ],
+            [
+              "R002",
+              "no response",
+              "waiting"
+            ],
+            [
+              "R003",
+              "cancelled",
+              "cancelled"
+            ]
+          ],
+          "umbrella-proposal": [
+            [
+              "Q001",
+              "cancelled",
+              "cancelled"
+            ],
+            [
+              "R001",
+              "done",
+              "done"
+            ]
+          ],
+          "acme-renewal": [
+            [
+              "Q001",
+              "open",
+              "open"
+            ]
+          ]
+        },
+        "decisions": {
+          "thread": "acme-rollout",
+          "ids": [
+            "D001",
+            "D002"
+          ]
+        }
+      },
+      "items": {
+        "order": [
+          "acme-rollout",
+          "acme-renewal",
+          "globex-pilot",
+          "initech-hiring",
+          "umbrella-proposal"
+        ],
+        "rows": {
+          "umbrella-proposal": [
+            {
+              "id": "T001",
+              "tag": null,
+              "word": "done",
+              "shown": true,
+              "class": "done"
+            },
+            {
+              "id": "T009",
+              "tag": null,
+              "word": "to do",
+              "shown": true,
+              "class": "open"
+            },
+            {
+              "id": "T013",
+              "tag": "session",
+              "word": "in progress",
+              "shown": true,
+              "class": "in_progress"
+            },
+            {
+              "id": "T010",
+              "tag": null,
+              "word": "blocked",
+              "shown": true,
+              "class": "blocked"
+            },
+            {
+              "id": "T012",
+              "tag": "dependency",
+              "word": "waiting",
+              "shown": true,
+              "class": "waiting"
+            },
+            {
+              "id": "T015",
+              "tag": "session",
+              "word": "held",
+              "shown": true,
+              "class": "done"
+            },
+            {
+              "id": "T006",
+              "tag": null,
+              "word": "cancelled",
+              "shown": true,
+              "class": "cancelled"
+            },
+            {
+              "id": "S002",
+              "tag": null,
+              "word": "waiting",
+              "shown": true,
+              "class": "waiting"
+            },
+            {
+              "id": "S003",
+              "tag": null,
+              "word": null,
+              "shown": false,
+              "class": null
+            }
+          ],
+          "globex-pilot": [
+            {
+              "id": "T004",
+              "tag": null,
+              "word": "blocked",
+              "shown": true,
+              "class": "blocked"
+            },
+            {
+              "id": "T005",
+              "tag": null,
+              "word": "waiting",
+              "shown": true,
+              "class": "waiting"
+            },
+            {
+              "id": "T008",
+              "tag": null,
+              "word": "done",
+              "shown": true,
+              "class": "done"
+            },
+            {
+              "id": "S002",
+              "tag": null,
+              "word": "cancelled",
+              "shown": true,
+              "class": "cancelled"
+            },
+            {
+              "id": "S003",
+              "tag": null,
+              "word": "to do",
+              "shown": true,
+              "class": "open"
+            }
+          ],
+          "acme-renewal": [
+            {
+              "id": "T003",
+              "tag": null,
+              "word": "waiting",
+              "shown": true,
+              "class": "waiting"
+            },
+            {
+              "id": "T017",
+              "tag": "session",
+              "word": "blocked",
+              "shown": true,
+              "class": "blocked"
+            },
+            {
+              "id": "T001",
+              "tag": null,
+              "word": "done",
+              "shown": true,
+              "class": "done"
+            },
+            {
+              "id": "T019",
+              "tag": "session",
+              "word": "to do",
+              "shown": true,
+              "class": "open"
+            },
+            {
+              "id": "T020",
+              "tag": "dependency",
+              "word": "cancelled",
+              "shown": true,
+              "class": "cancelled"
+            },
+            {
+              "id": "S003",
+              "tag": null,
+              "word": null,
+              "shown": false,
+              "class": null
+            },
+            {
+              "id": "D001",
+              "tag": "decision",
+              "word": null,
+              "shown": true,
+              "class": null
+            },
+            {
+              "id": "D002",
+              "tag": "decision",
+              "word": null,
+              "shown": true,
+              "class": null
+            }
+          ],
+          "acme-rollout": [
+            {
+              "id": "S004",
+              "tag": null,
+              "word": "done",
+              "shown": true,
+              "class": "done"
+            }
+          ],
+          "initech-hiring": [
+            {
+              "id": "S002",
+              "tag": null,
+              "word": "blocked",
+              "shown": true,
+              "class": "blocked"
+            },
+            {
+              "id": "D002",
+              "tag": "decision",
+              "word": null,
+              "shown": true,
+              "class": null
+            },
+            {
+              "id": "D001",
+              "tag": null,
+              "word": null,
+              "shown": false,
+              "class": null
+            }
+          ]
+        },
+        "emptyStreams": {
+          "acme-renewal": [
+            "Phase two",
+            "Reporting"
+          ],
+          "globex-pilot": [
+            "Hypercare",
+            "Onboarding"
+          ],
+          "umbrella-proposal": [
+            "Integrations"
+          ],
+          "acme-rollout": [
+            "Security hardening"
+          ]
+        },
+        "stream": "General",
+        "blockedWaiting": {
+          "thread": "globex-pilot",
+          "id": "T004"
+        },
+        "holdsUp": {
+          "thread": "umbrella-proposal",
+          "id": "T010",
+          "n": 1
+        }
+      },
+      "nowhere": {
+        "thread": "acme-rollout",
+        "kinds": [
+          "All kinds · 32",
+          "Stories · 4",
+          "Tasks · 22",
+          "Decisions · 2",
+          "Risks · 1",
+          "Questions · 3"
+        ],
+        "ids": [
+          "T020",
+          "T013",
+          "T025",
+          "R002"
+        ],
+        "owners": [
+          "Anyone",
+          "Nobody named",
+          "Me (Sam Rivera)",
+          "Alex Chen",
+          "Dana Lee",
+          "Omar Haddad",
+          "Rita Gomez",
+          "Tom Becker"
+        ]
+      },
+      "mine": {
+        "thread": "acme-rollout",
+        "me": "Me (Sam Rivera)",
+        "notOptions": [
+          "Me",
+          "Sam Rivera"
+        ],
+        "open": [
+          "T010",
+          "T016",
+          "T023"
+        ],
+        "done": [
+          "T001",
+          "T009",
+          "T022"
+        ],
+        "avatars": [
+          "SR",
+          "M"
+        ],
+        "tree": [
+          "T001",
+          "T009",
+          "T010",
+          "T016",
+          "T019",
+          "T022",
+          "T023"
+        ],
+        "owners": [
+          "Sam Rivera",
+          "Me"
+        ],
+        "doneColumn": "Done",
+        "owner": {
+          "T001": "Me",
+          "T009": "Sam Rivera",
+          "T010": "Sam Rivera",
+          "T016": "Sam Rivera",
+          "T019": "Sam Rivera",
+          "T022": "Sam Rivera",
+          "T023": "Sam Rivera"
+        },
+        "initials": {
+          "Me": "M",
+          "Sam Rivera": "SR"
+        },
+        "stories": [
+          "S001",
+          "S003"
+        ]
+      }
+    },
+    "threadFilter": [
+      {
+        "option": "Acme renewal · 11",
+        "counts": [
+          3,
+          1,
+          2,
+          1
+        ],
+        "others": 5,
+        "name": "Acme renewal",
+        "cards": 12
+      },
+      {
+        "option": "Acme rollout · 17",
+        "counts": [
+          3,
+          0,
+          0,
+          3
+        ],
+        "others": 11,
+        "name": "Acme rollout",
+        "cards": 17
+      },
+      {
+        "option": "Globex pilot · 10",
+        "counts": [
+          2,
+          2,
+          1,
+          3
+        ],
+        "others": 2,
+        "name": "Globex pilot",
+        "cards": 10
+      },
+      {
+        "option": "Initech hiring · 9",
+        "counts": [
+          2,
+          1,
+          1,
+          2
+        ],
+        "others": 3,
+        "name": "Initech hiring",
+        "cards": 9
+      },
+      {
+        "option": "Umbrella lead · 0",
+        "counts": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "others": 0,
+        "name": "Umbrella lead",
+        "cards": 0
+      },
+      {
+        "option": "Umbrella proposal · 10",
+        "counts": [
+          4,
+          1,
+          1,
+          2
+        ],
+        "others": 3,
+        "name": "Umbrella proposal",
+        "cards": 11
+      },
+      {
+        "option": "Internal tooling · 0",
+        "counts": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "others": 0,
+        "name": "Internal tooling",
+        "cards": 0
+      }
+    ],
+    "filterSteps": [
+      "Acme renewal · 11",
+      "Globex pilot · 10",
+      "Umbrella lead · 0",
+      "Internal tooling · 0"
+    ]
   }
 }

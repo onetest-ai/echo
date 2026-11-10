@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles, owed, others, pairwise]
+auto: [tests/auto/specs/S-25.spec.mjs]
 ---
 
 # TC-018: Another person's task is Owed to me only when the user handed it over, else it is in Others
