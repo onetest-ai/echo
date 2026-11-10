@@ -509,6 +509,8 @@ document.addEventListener('click', (e) => {
     case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
     case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
+    // The account chip: open the Claude session, never fold it (the status bar's Claude toggles).
+    case 'claude-open': return claudePanel('claude-folder')
     case 'bar-flip': return flipBar()
     case 'win-min': return send({ cmd: 'window_min' })
     case 'win-max': return send({ cmd: 'window_zoom' })

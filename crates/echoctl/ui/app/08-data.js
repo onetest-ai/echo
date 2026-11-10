@@ -54,6 +54,9 @@ async function loadCalls(reset) {
 /** Today's meetings still to come (Calls → Coming up today), and the open one's prep. */
 async function loadUpcoming() {
   try { S.up = await get('api/upcoming') } catch { /* app restarting */ }
+  // The open meeting started recording: it is a call now — its Prep tab, as its echo://prep link opens.
+  const call = S.upSel && S.up && S.up.recorded && S.up.recorded[S.upSel]
+  if (call && S.view === 'calls') { location.hash = `call/${call}/prep`; return }
   if (S.upSel) { try { const id = S.upSel, p = await get('api/prep/' + id); if (S.upSel === id) S.upPrep = p } catch { /* app restarting */ } }
 }
 async function loadMoreCalls() {

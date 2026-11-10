@@ -194,7 +194,7 @@ function accountChip() {
   const a = ai(), p = profileOf(a.default)
   if (!p) return ''
   const title = `AI: ${profileLabel(p)} — ${profileWhere(p)}`
-  if (a.profiles.length < 2) return `<button class="acct" data-cmd="claude-panel" title="${esc(`${title} — open Claude`)}" aria-label="Claude (${esc(p.name)})"><span>${esc(p.name)}</span></button>`
+  if (a.profiles.length < 2) return `<button class="acct" data-cmd="claude-open" title="${esc(`${title} — open Claude`)}" aria-label="Claude (${esc(p.name)})"><span>${esc(p.name)}</span></button>`
   return `<label class="acct" title="${esc(title)}"><span>${esc(p.name)}</span>${CARET}<select data-ai-default aria-label="AI profile">${profileOptions(p.id)}</select></label>`
 }
 

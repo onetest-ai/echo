@@ -54,17 +54,13 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings still to come or going on, each with its threads and its prep's state — "Coming up today".
 pub fn upcoming() -> Value {
     let now = Utc::now();
-    let scheduled = kept_anyway();
-    // A meeting already a call today (being recorded, or recorded) is in the calls list, not still to come.
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let recorded: Vec<String> = calls::all_calls()
-        .into_iter()
-        .filter(|d| calls::stamp_of(d).starts_with(&today))
-        .filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id))
-        .collect();
+    // A meeting already a call today (being recorded, or recorded) is in the calls list, not still to come: left out
+    // here, and named in `recorded` (its prep id → its call) for a view of it left open to move to the call.
+    let recorded = calls_today_by_meeting();
+    let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
-        .filter(|m| !m.id.as_ref().is_some_and(|i| recorded.contains(i)))
+        .filter(|m| !m.id.as_ref().is_some_and(|i| recorded.iter().any(|(e, _)| e == i)))
         // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
         // tentative isn't their day yet.
         .filter(|m| (m.accepted() || m.id.as_ref().is_some_and(|i| scheduled.contains(i))) && time(m.end.as_deref()).is_none_or(|e| e > now))
@@ -91,7 +87,21 @@ pub fn upcoming() -> Value {
             }))
         })
         .collect();
-    json!({ "meetings": list })
+    let recorded: serde_json::Map<String, Value> = recorded.into_iter().map(|(e, call)| (id_of(&e), json!(call))).collect();
+    json!({ "meetings": list, "recorded": recorded })
+}
+
+/// Today's calls that are a meeting of the calendar: (its event id, the call's folder name).
+fn calls_today_by_meeting() -> Vec<(String, String)> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    calls::all_calls()
+        .into_iter()
+        .filter(|d| calls::stamp_of(d).starts_with(&today))
+        .filter_map(|d| {
+            let id = MeetingContext::load(&d).ok().flatten()?.id.filter(|i| !i.is_empty())?;
+            Some((id, d.file_name()?.to_string_lossy().into_owned()))
+        })
+        .collect()
 }
 
 /// "Last time": the previous meeting of this subject with minutes — its date, highlights and open actions.
@@ -624,15 +634,6 @@ pub fn start_scheduler() {
     });
 }
 
-/// Meetings Coming up today keeps though not accepted: set to record, or recorded today (their event ids); Today's
-/// day checks the same from what it has at hand.
-fn kept_anyway() -> Vec<String> {
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let mut ids: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
-    ids.extend(crate::calls::all_calls().into_iter().filter(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
-    ids
-}
-
 /// The agenda meeting of a prep id.
 pub fn meeting(id: &str) -> Option<MeetingContext> {
     crate::watch::agenda().into_iter().find(|m| m.id.as_deref().is_some_and(|e| id_of(e) == id))
@@ -641,6 +642,25 @@ pub fn meeting(id: &str) -> Option<MeetingContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meeting_already_a_call_today_leaves_coming_up_and_names_its_call() {
+        let (_env, _) = crate::paths::testenv::folders("prep-upcoming-recorded");
+        let at = |h: i64| (Utc::now() + chrono::Duration::hours(h)).to_rfc3339();
+        let m = |id: &str, subject: &str| -> MeetingContext {
+            serde_json::from_value(json!({"id": id, "subject": subject, "start": at(-1), "end": at(1), "response": "accepted"})).unwrap()
+        };
+        crate::watch::write_agenda(&[m("ev-rec", "Being recorded"), m("ev-next", "Still to come")]).unwrap();
+        let call = format!("{}-being-recorded", Local::now().format("%Y-%m-%d_%H%M%S"));
+        let dir = crate::paths::calls_dir().join(&call);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), "{}").unwrap();
+        fs::write(dir.join("meeting.json"), serde_json::to_string(&m("ev-rec", "Being recorded")).unwrap()).unwrap();
+        let v = upcoming();
+        let subjects: Vec<&str> = v["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str()).collect();
+        assert_eq!(subjects, ["Still to come"]);
+        assert_eq!(v["recorded"][id_of("ev-rec")], json!(call));
+    }
 
     #[test]
     fn the_people_say_how_they_answered_and_who_declined_comes_last() {
