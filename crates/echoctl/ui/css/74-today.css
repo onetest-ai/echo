@@ -2,13 +2,14 @@
 /* One scroll per card, as Templates: the head and Needs you now stay, Your day and My work scroll inside; the page
    itself scrolls only when the window is too short for the cards' least height. */
 .td { padding: 18px 24px 24px; display: flex; flex-direction: column; gap: 16px; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
-.td-head { display: flex; align-items: baseline; gap: 12px; }
-.td-head h1 { margin: 0; font-size: 20px; font-weight: 650; }
+.td-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.td-head h1 { margin: 0; font-size: 20px; font-weight: 650; white-space: nowrap; }
 .td-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
-.td-card-h { display: flex; align-items: center; gap: 10px; }
+.td-card-h { display: flex; align-items: center; gap: 2px 10px; flex-wrap: wrap; }
+.td-card-h > b { white-space: nowrap; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .td-md { font-size: 13px; line-height: 1.55; }
 .td-md > :first-child { margin-top: 0; } .td-md > :last-child { margin-bottom: 0; }
-.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: start; flex: 1 1 auto; min-height: 280px; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: stretch; flex: 1 1 auto; min-height: 280px; }
 .td-sec { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; }
 .td-grid > .td-sec { display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
 /* A line of hug widgets only (Today's layout): as tall as they are, not the fill's height. */

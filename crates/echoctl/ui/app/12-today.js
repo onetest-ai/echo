@@ -340,7 +340,8 @@ function todayMoreCue() {
   const td = document.querySelector('.td')
   if (td) { S.tdView = Math.max(300, td.clientHeight - 42); td.style.setProperty('--td-view', `${S.tdView}px`) }
   for (const el of document.querySelectorAll('.td .td-rows, .td .td-tasks')) {
-    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 4
+    // More than a line's worth below (a last button half under the fade isn't "more").
+    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 24
     if (more !== el.hasAttribute('data-more')) el.toggleAttribute('data-more', more)
   }
 }
