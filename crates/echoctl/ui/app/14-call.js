@@ -58,7 +58,7 @@ function callMenu(c) {
 /** Messages for a moment float over the window (`toasts`, drawn once in #r-over): nothing in the
  *  page moves when one comes or goes. */
 function toasts() {
-  const n = S.notice ? `<div class="toast"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
+  const n = S.notice ? `<div class="toast"><span class="grow">${esc(S.notice).replace(/`([^`]+)`/g, '<code>$1</code>')}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
   const c = S.closeError ? `<div class="toast error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
   return n + c
 }

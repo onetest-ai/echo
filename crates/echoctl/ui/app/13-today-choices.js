@@ -71,14 +71,19 @@ function dayChoicesView(d, now) {
       return `<div class="ch-row" role="listitem" data-td-ev="${esc(x.event || '')}" aria-label="${esc(`Invite: ${x.subject || 'A meeting'}`)}"><span class="ag-t mono">${esc(hm(c.at))}</span><div class="ch-b"><div><b>${esc(x.subject || 'A meeting')}</b> <span class="set-sub">not answered</span></div><div class="set-sub">Echo suggests: <b>${c.suggest === 'accept' ? 'Accept' : 'Decline'}</b> — ${esc(c.why)}</div><div class="ch-acts">${btn(x, 'accept', 'Accept', c.suggest === 'accept')}${btn(x, 'tentative', 'Maybe')}${btn(x, 'decline', 'Decline', c.suggest === 'decline')}</div></div></div>`
     }
     const key = c.members.map((x) => x.event).join('|')
+    // Two of the same name at once: told apart by their order ("Vendor demo (2)").
+    const name = (x) => {
+      const same = c.members.filter((m) => m.subject === x.subject)
+      return (x.subject || 'A meeting') + (same.length > 1 ? ` (${same.indexOf(x) + 1})` : '')
+    }
     const confirm = S.tdKeep && S.tdKeep.key === key ? c.members.find((x) => x.event === S.tdKeep.event) : null
     // Keep declines the others — not one you organise (Graph can't decline it: cancel it in Outlook).
     const others = (keep) => c.members.filter((x) => x !== keep && x.response !== 'organizer')
     const yours = (keep) => c.members.filter((x) => x !== keep && x.response === 'organizer')
     const acts = confirm
-      ? `<span class="set-sub">${others(confirm).length ? `Decline ${esc(others(confirm).map((x) => x.subject || 'a meeting').join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.` : 'Nothing to decline.'}${yours(confirm).length ? ` Yours — ${esc(yours(confirm).map((x) => x.subject || 'a meeting').join(', '))} — stays: cancel it in Outlook.` : ''}</span>${others(confirm).length ? '<button' : '<span hidden'} class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}${others(confirm).length ? '</button>' : '</span>'}<button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
-      : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(x.subject || 'this one')}</button>`).join('')
-    return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map((x) => x.subject).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(x.subject || 'A meeting')}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. Echo suggests <b>${esc(c.pick.subject || 'one')}</b> — ${esc(c.why)}</div><div class="ch-acts">${acts}</div></div></div>`
+      ? `<span class="set-sub">${others(confirm).length ? `Decline ${esc(others(confirm).map(name).join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.` : 'Nothing to decline.'}${yours(confirm).length ? ` Yours — ${esc(yours(confirm).map(name).join(', '))} — stays: cancel it in Outlook.` : ''}</span>${others(confirm).length ? '<button' : '<span hidden'} class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}${others(confirm).length ? '</button>' : '</span>'}<button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
+      : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(name(x))}</button>`).join('')
+    return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map((x) => x.subject).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(name(x))}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. Echo suggests <b>${esc(name(c.pick))}</b> — ${esc(c.why)}</div><div class="ch-acts">${acts}</div></div></div>`
   }).join('')
   return `<section class="td-sec ch-sec" aria-label="The day's choices"><h2>The day's choices <span class="set-sub">${cs.length}</span></h2><div class="ch-list" role="list">${lines}</div></section>`
 }
@@ -100,8 +105,16 @@ document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-td-respond]')
   if (r) { e.stopPropagation(); return todayRespond(r.dataset.event, r.dataset.tdRespond) }
   const k = e.target.closest('[data-td-keep]')
-  if (k) { e.stopPropagation(); S.tdKeep = { key: k.dataset.key, event: k.dataset.tdKeep }; return render() }
-  if (e.target.closest('[data-td-keep-no]')) { e.stopPropagation(); S.tdKeep = null; return render() }
+  // The keyboard stays in the line: on "Decline them" (or Cancel) after Keep, back on that Keep after Cancel.
+  const refocus = (sel) => setTimeout(() => { const el = document.querySelector(sel); if (el) el.focus() })
+  if (k) { e.stopPropagation(); S.tdKeep = { key: k.dataset.key, event: k.dataset.tdKeep }; render(); return refocus('button[data-td-keep-yes], [data-td-keep-no]') }
+  if (e.target.closest('[data-td-keep-no]')) {
+    e.stopPropagation()
+    const was = S.tdKeep
+    S.tdKeep = null
+    render()
+    return was && refocus(`[data-td-keep="${CSS.escape(was.event)}"][data-key="${CSS.escape(was.key)}"]`)
+  }
   const y = e.target.closest('[data-td-keep-yes]')
   if (y) {
     e.stopPropagation()
