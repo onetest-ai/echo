@@ -29,6 +29,9 @@ pub use programs::*;
 
 /// Set before stopping to have the app start again (after the data folder changed).
 pub static RESTART: AtomicBool = AtomicBool::new(false);
+/// The app runs without its tray (`app run --no-tray`, a dev or test run): its restart starts it the same way, as does
+/// `home set`'s, which reads it from the app it quits (`WatchState::no_tray`, #351).
+pub static NO_TRAY: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const BUNDLE_ID: &str = "ai.onetest.echo";
@@ -71,6 +74,7 @@ pub fn installed_app() -> Option<PathBuf> {
 
 /// `echoctl app run`: the app itself. Never returns until the user quits it.
 pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
+    NO_TRAY.store(!tray, Ordering::SeqCst);
     // One app per user: an exclusive lock held for the process's life (the heartbeat alone
     // leaves a window where a login launch and `app start` both get in).
     if !single_instance()? {
@@ -371,7 +375,7 @@ pub fn spawn_app(restart: bool) -> Result<()> {
     }
     let exe = std::env::current_exe()?;
     let mut cmd = Command::new(exe);
-    cmd.args(["app", "run", "--background"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(run_args(NO_TRAY.load(Ordering::SeqCst))).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     if restart {
         cmd.env(WAIT_FOR_LOCK, "1");
     }
@@ -392,6 +396,15 @@ pub fn spawn_app(restart: bool) -> Result<()> {
     }
     cmd.spawn()?;
     Ok(())
+}
+
+/// The arguments a started app runs with: in the background, and without its tray when the app it follows had none.
+fn run_args(no_tray: bool) -> Vec<&'static str> {
+    let mut a = vec!["app", "run", "--background"];
+    if no_tray {
+        a.push("--no-tray");
+    }
+    a
 }
 
 /// Show a folder in Finder / Explorer.
@@ -1266,7 +1279,17 @@ pub mod notifications {
 
 #[cfg(test)]
 mod tests {
-    use super::translocated;
+    use super::{run_args, translocated};
+
+    #[test]
+    fn a_started_app_runs_without_its_tray_when_the_one_it_follows_had_none() {
+        assert_eq!(run_args(false), ["app", "run", "--background"]);
+        // A dev or test run (`app run --no-tray`): its restart and `home set`'s start it the same way (#351).
+        assert_eq!(run_args(true), ["app", "run", "--background", "--no-tray"]);
+        // An older app's state, without the field, had its tray.
+        let w: crate::watch::WatchState = serde_json::from_str(r#"{"pid":1,"heartbeat":"2026-11-10T10:00:00Z","app":"teams","in_call":false,"armed":false,"recording":null}"#).unwrap();
+        assert!(!w.no_tray);
+    }
 
     #[test]
     fn a_translocated_app_is_recognised_and_a_real_one_is_not() {

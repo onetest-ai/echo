@@ -3,8 +3,8 @@
 // start refused (stage 1), quit and start again (2), another data folder (3: its own app, started twice) — and the
 // window following the system's light and dark (4). Stage 3 records a call fed from files and transcribes it: the
 // speech model comes only from the test's own folder (ECHOCTL_TEST_MODELS); without it, stage 3 skips.
-// Until #351 is fixed, stage 3's restart (a dev build restarting itself drops --no-tray) shows a dev tray icon on the
-// real menu bar for a few seconds.
+// Stage 3's restart keeps --no-tray (#351): no dev tray icon shows on the real menu bar (asserted here once that fix
+// is stable).
 // Not here: stages 5–12 are a person's (start at login, `app start`, the native window and its Dock icon, updates from
 // GitHub, offline, the network).
 import fs from 'node:fs'
@@ -99,8 +99,8 @@ scenario(test, 'S-21', 'Living with Echo: quit, one instance, another folder, ap
       fs.writeFileSync(path.join(data.dir, data.text.recording.openLog), '')
       set2 = await data.cliAwait(free, 'home', 'set', home2)
       await first.ends(15_000)
-      // The debug build restarted itself on the new folder (never `open` of an installed Echo, #142); until #351 it
-      // shows a tray icon on the real menu bar meanwhile.
+      // The debug build restarted itself on the new folder (never `open` of an installed Echo, #142), without its tray as
+      // before (#351).
       await expect.poll(() => (watcher() || {}).pid, { timeout: 30_000 }).toBeTruthy()
       restarted = watcher().pid
       expect(restarted).not.toBe(first.pid)

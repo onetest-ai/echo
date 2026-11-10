@@ -232,8 +232,11 @@ pub fn home(cmd: Option<HomeCmd>) -> Result<()> {
         },
     };
     // The running app keeps its files in the old folder: restart it on the new one.
-    let was_running = watch::running_watcher().is_some();
+    let running = watch::running_watcher();
+    let was_running = running.is_some();
     if was_running {
+        // The app it starts again runs as this one did (without its tray, a dev or test run: #351).
+        app::NO_TRAY.store(running.is_some_and(|w| w.no_tray), std::sync::atomic::Ordering::SeqCst);
         app::quit()?;
     }
     let d = paths::set_home(&dir)?;
