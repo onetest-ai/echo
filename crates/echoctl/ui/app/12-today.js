@@ -414,7 +414,10 @@ function agendaRows(day, now, tasks) {
     if (g) g.push(m); else groups.push([m])
   }
   const rows = [], skipped = []
-  for (const group of groups) {
+  for (const g0 of groups) {
+    // A line whose first meeting is over shows the one of it you go to still on (it, not the past one, is where you are).
+    const on = g0[0].e < now && g0.find((m) => m.g === 'yes' && m.e > now)
+    const group = on ? [on, ...g0.filter((m) => m !== on)] : g0
     const shown = group[0], others = group.slice(1), yes = group.filter((m) => m.g === 'yes')
     const row = { kind: shown.x.kind, item: shown.x, at: shown.s, end: shown.e, going: shown.g, past: shown.e < now, members: group.map((m) => m.x) }
     const unsure = shown.g === 'noreply' ? 'no reply' : shown.g === 'maybe' ? 'maybe' : ''
