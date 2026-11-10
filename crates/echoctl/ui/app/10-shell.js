@@ -199,12 +199,11 @@ function accountChip() {
 }
 
 function statusbar() {
-  const a = ai(), p = profileOf(a.default)
+  const a = ai()
   const parts = []
   // The next automatic minutes, a click away (#42).
   const next = (S.calls || []).map((c) => [c, minutesAhead(c)]).filter((x) => x[1]).sort((x, y) => x[1] - y[1])[0]
   const soon = next ? `<button class="sb-btn sb-minutes" data-minutes-of="${esc(next[0].name)}" title="Minutes at ${esc(hm(next[1]))}">⏱ Minutes for “${esc(next[0].title)}” in ${minutesLeft(next[1])} min</button>` : ''
-  if (p) parts.push(`<span title="${esc(profileWhere(p))}">AI: ${esc(p.name)}</span>`)
   if (a.live_notes) parts.push('<span>Live notes on</span>')
   // The terminal panel: a toggle here, where VS Code keeps it.
   parts.push(`<button class="sb-btn" data-pal-open title="Actions (${MAC ? '⌘K' : 'Ctrl+K'})">Actions ${MAC ? '⌘K' : 'Ctrl+K'}</button>`)

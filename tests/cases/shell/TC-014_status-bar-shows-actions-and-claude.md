@@ -1,6 +1,6 @@
 ---
 id: TC-014
-title: The status bar shows the default AI profile, Actions and Claude
+title: The status bar shows Actions and Claude, and no AI profile (the top bar's chip shows it)
 priority: low
 type: functional
 requirements: [F-WS-07]
@@ -10,7 +10,7 @@ platform: any
 tags: [shell, status-bar]
 ---
 
-# TC-014: The status bar shows the default AI profile, Actions and Claude
+# TC-014: The status bar shows Actions and Claude, and no AI profile (the top bar's chip shows it)
 
 **Module:** Window shell | **Priority:** Low | **Type:** Functional
 
@@ -24,12 +24,11 @@ tags: [shell, status-bar]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today` and wait for the text "Your day" | A status bar runs along the foot of the window |
-| 2 | Read the status bar | "AI: Claude Code (as configured)", a button "Actions ⌘K" ("Actions Ctrl+K" off macOS) and a button "Claude" |
+| 2 | Read the status bar | A button "Actions ⌘K" ("Actions Ctrl+K" off macOS) and a button "Claude"; no "AI:" (the default profile is the top bar's account chip) |
 | 3 | Look for "Live notes on" and for "Minutes for" | Neither shows (live notes are off; no minutes are due soon) |
-| 4 | Hover the text "AI: Claude Code (as configured)" | Its tooltip reads "as Claude Code is set up" |
 
 ## Expected Final State
-The status bar shows the profile and its two buttons.
+The status bar shows its two buttons.
 
 ## Notes
-- "Claude" is never pressed: it starts a terminal session. The status bar changing with the default profile and with live notes is checked in settings/ cases.
+- "Claude" is never pressed: it starts a terminal session. The status bar changing with live notes, and the account chip with the default profile, are checked in settings/ cases.

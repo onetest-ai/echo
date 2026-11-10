@@ -18,7 +18,7 @@ cases:
   - tests/cases/shell/TC-005_settings-shortcut-and-return-to-where-you-were.md
   - tests/cases/shell/TC-007_palette-on-today-lists-the-days-actions.md
   - tests/cases/shell/TC-009_status-bar-actions-button-opens-the-palette.md
-  - tests/cases/shell/TC-014_status-bar-shows-the-profile-and-the-entries.md
+  - tests/cases/shell/TC-014_status-bar-shows-actions-and-claude.md
   - tests/cases/shell/TC-008_palette-typing-ranks-and-enter-goes-to-settings.md
   - tests/cases/vocabulary/TC-002_vocabulary-opens-from-the-palette-and-the-old-link.md
   - tests/cases/shell/TC-017_top-bar-holds-record-account-and-inbox-on-one-line.md
@@ -59,7 +59,7 @@ cases:
 | 12 | `shell/TC-005_settings-shortcut-and-return-to-where-you-were.md` | 11 | On stage 11's view (Acme weekly sync open, picked by a click): reload the page once (a full load of the same `#call/…` URL keeps the call open; without it Settings would reopen on the Layout section stages 8–9 left, not General); skip step 1, check its expected result (the hash) on one snapshot; go on with step 2 |
 | 13 | `shell/TC-007_palette-on-today-lists-the-days-actions.md` | — | — |
 | 14 | `shell/TC-009_status-bar-actions-button-opens-the-palette.md` | — | On stage 13's view (`#today`, the palette closed): in step 1 skip the navigation, click "Actions" in the status bar |
-| 15 | `shell/TC-014_status-bar-shows-the-profile-and-the-entries.md` | — | On stage 14's view (`#today`): skip step 1's navigation, check its expected result on one snapshot |
+| 15 | `shell/TC-014_status-bar-shows-actions-and-claude.md` | — | On stage 14's view (`#today`): skip step 1's navigation, check its expected result on one snapshot |
 | 16 | `shell/TC-008_palette-typing-ranks-and-enter-goes-to-settings.md` | — | On stage 15's view (`#today`): in step 1 skip the navigation, press `ControlOrMeta+k` and type `plugins` |
 | 17 | `vocabulary/TC-002_vocabulary-opens-from-the-palette-and-the-old-link.md` | — | — |
 | 18 | `shell/TC-017_top-bar-holds-record-account-and-inbox-on-one-line.md` | — | Click "Close the panel" (stage 17 left the Vocabulary panel open). Skip its teardown: stage 19 sets its own size |

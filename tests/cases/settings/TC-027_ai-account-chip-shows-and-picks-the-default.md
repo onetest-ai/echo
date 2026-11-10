@@ -38,13 +38,13 @@ tags: [ai, profiles, top-bar]
 | 4 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://localhost:11434 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
 | 5 | Reload `{{base_url}}/#today` and wait for "Your day"; read the chip | It reads "Claude Code (as configured)" with a caret; `select[aria-label="AI profile"]` holds two options, "Claude Code (as configured)" (selected) and "Local Llama" |
 | 6 | Read the Record pill (`#r-top .pill`) | The button "Record next call", the select "Language of the call" and the button "Memo"; `#r-top .pill select` finds exactly one select (no profile segment) |
-| 7 | Select "Local Llama" in "AI profile" (`browser_select_option`) | The chip reads "Local Llama"; the status bar starts with "AI: Local Llama" |
+| 7 | Select "Local Llama" in "AI profile" (`browser_select_option`) | The chip reads "Local Llama" |
 | 8 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/ai.json"` | The file has `"default": "local-llama"` |
-| 9 | Reload `{{base_url}}/#today` and wait for "Your day" | The chip still reads "Local Llama" (its select has "Local Llama" selected); the status bar starts with "AI: Local Llama" |
+| 9 | Reload `{{base_url}}/#today` and wait for "Your day" | The chip still reads "Local Llama" (its select has "Local Llama" selected) |
 | 10 | Navigate to `{{base_url}}/#settings/ai`; read the card "Profiles" | "Local Llama" has the tag "Default for new calls"; "Claude Code (as configured)" has a button "Make default" |
 
 ## Expected Final State
-Local Llama is the default in the chip, the status bar, Settings → AI & minutes and `ai.json`, after a reload too.
+Local Llama is the default in the chip, Settings → AI & minutes and `ai.json`, after a reload too.
 
 ## Teardown
 - `echoctl ai default system` (prints `new calls use Claude Code (as configured)`), then `echoctl ai remove local-llama` (prints `removed local-llama`).
