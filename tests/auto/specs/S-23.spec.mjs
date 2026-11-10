@@ -16,7 +16,7 @@ const data = useData(test, { set: 'standard', ai: 'fake' })
 
 /** The newest call folder whose name ends in a slug (today's Acme weekly sync, not the older ones). */
 const folderOf = (slug) => fs.readdirSync(path.join(data.home, 'calls')).filter((n) => n.endsWith(`-${slug}`)).sort().at(-1)
-const metaOf = (slug) => data.json(data.home, 'calls', folderOf(slug), data.text.calls.meta)
+const metaOf = (slug) => data.json(data.home, cs().callsFolder, folderOf(slug), data.text.calls.meta)
 /** The trash folder's entries ending in a slug. */
 const trashed = (slug) => {
   const dir = path.join(data.home, data.text.calls.run.trash)
@@ -79,7 +79,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     const n = Number(new RegExp(cs().chipPattern).exec(await chip.textContent())[1])
     expect(n).toBeGreaterThanOrEqual(1)
     expect(n).toBeLessThanOrEqual(set().standup.due)
-    const due = new Date(fs.statSync(path.join(data.home, 'calls', folderOf(set().standup.slug), set().standup.notes)).mtimeMs + set().standup.due * 60_000)
+    const due = new Date(fs.statSync(path.join(data.home, cs().callsFolder, folderOf(set().standup.slug), set().standup.notes)).mtimeMs + set().standup.due * 60_000)
     await expect(chip).toHaveAttribute('title', fill(cs().chipTitle, { time: await view.clock(due.toISOString()) }))
     for (const t of set().noChip) await expect(view.titled(title, view.newest(t))).toHaveCount(0)
     await expect(view.titled(title)).toHaveCount(1)
@@ -89,7 +89,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     const st = set().standup
     const view = await calls(page)
     await view.openNewest(st.title, cs().tabs.minutes)
-    const edited = new Date(fs.statSync(path.join(data.home, 'calls', folderOf(st.slug), st.notes)).mtimeMs)
+    const edited = new Date(fs.statSync(path.join(data.home, cs().callsFolder, folderOf(st.slug), st.notes)).mtimeMs)
     const { n, time } = await countdown(view)
     expect(n).toBeGreaterThanOrEqual(1)
     expect(n).toBeLessThanOrEqual(st.due)
@@ -114,7 +114,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     const view = await calls(page)
     await view.openNewest(st.title, cs().tabs.minutes)
     const before = await countdown(view)
-    const t0 = new Date(fs.statSync(path.join(data.home, 'calls', folderOf(st.slug), st.notes)).mtimeMs + st.due * 60_000)
+    const t0 = new Date(fs.statSync(path.join(data.home, cs().callsFolder, folderOf(st.slug), st.notes)).mtimeMs + st.due * 60_000)
     expect(before.time).toBe(await view.clock(t0.toISOString()))
     await view.headerButton(cs().notYet).click()
     await view.menuItemNamed(cs().notYetItems[0]).click()
@@ -131,7 +131,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     const st = set().standup
     const view = await calls(page)
     await view.openNewest(st.title, cs().tabs.minutes)
-    const edited = new Date(fs.statSync(path.join(data.home, 'calls', folderOf(st.slug), st.notes)).mtimeMs)
+    const edited = new Date(fs.statSync(path.join(data.home, cs().callsFolder, folderOf(st.slug), st.notes)).mtimeMs)
     const t0 = new Date(edited.getTime() + st.due * 60_000)
     // About 15 minutes more than in stage 3: stage 4's 15 minutes more.
     expect((await countdown(view)).time).toBe(await view.clock(new Date(t0.getTime() + 15 * 60_000).toISOString()))
@@ -220,14 +220,14 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     await expect(view.says(modelLine(s.profile))).toBeVisible()
     await expect(view.select(cs().modelSelect)).toBeVisible()
     await expect(view.headerButton(cs().tryAgain)).toBeVisible()
-    await sessionLine(view, 'acme-security-review')
+    await sessionLine(view, s.security.slug)
     await view.openNewest(s.walkthrough.title)
     await expect(view.paneHeading(cs().skipped)).toBeVisible()
     await expect(view.says(cs().tooShort)).toBeVisible()
     await expect(view.headerButton(cs().writeMinutes)).toBeVisible()
     await expect(view.headerButton(cs().tryAgain)).toHaveCount(0)
     await expect(view.select(cs().modelSelect)).toBeVisible()
-    await sessionLine(view, 'umbrella-proposal-walkthrough')
+    await sessionLine(view, s.walkthrough.slug)
   })
 
   test('11 · A run refused for sign-in says to sign in when the profile is signed out, and ready to try again when it is signed in', covers('calls/TC-026', 'F-MIN-09'), async ({ page }) => {
@@ -278,7 +278,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     await expect(view.chosen(cs().modelSelect, s.profileSelected)).toHaveCount(1)
     const write = view.headerButton(cs().writeMinutes)
     await expect(write).toBeVisible()
-    await sessionLine(view, 'duff-discovery')
+    await sessionLine(view, s.leftAloneSlug)
     // The long Model picker never squeezes the button (#117: it was 26 px and read "mi").
     const fit = await view.buttonBeside(write, view.select(cs().modelSelect))
     expect(fit.width).toBeGreaterThanOrEqual(80)
@@ -330,12 +330,12 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     // One line: Memo, its day and time, its length; no kind of meeting, no people.
     expect(await view.factLines()).toEqual([`${cs().memo} ${await when(view, memo.slug)} ${fill(cs().duration, { n: memo.minutes })}`])
     await view.openNewest(steering.title)
-    const chip = `${steering.kind} ▾`
+    const chip = fill(data.text.calls.kindChip, { kind: steering.kind })
     expect(await view.factLines()).toEqual([`${await when(view, steering.slug)} ${fill(cs().duration, { n: steering.minutes })} ${chip}`, cs().kindSelect, `${cs().fromTeams} ${steering.people}`])
     await expect(view.kindChip(cs().invite)).toHaveText(new RegExp(`^${literal(chip)}`))
     await expect(view.factTitled(cs().fromTeamsHint)).toHaveText(cs().fromTeams)
     await view.openNewest(acme.title)
-    expect(await view.factLines()).toEqual([`${await when(view, acme.slug)} ${fill(cs().duration, { n: acme.minutes })} ${acme.kind} ▾`, cs().kindSelect, fill(cs().more, { names: acme.people, n: acme.more })])
+    expect(await view.factLines()).toEqual([`${await when(view, acme.slug)} ${fill(cs().duration, { n: acme.minutes })} ${fill(data.text.calls.kindChip, { kind: acme.kind })}`, cs().kindSelect, fill(cs().more, { names: acme.people, n: acme.more })])
   })
 
   test('17 · A call shows Chat and Screens tabs, with counts, only when it has chat or frames', covers('calls/TC-016', 'F-CALLS-07', 'F-CALLS-14', 'F-CALLS-15'), async ({ page }) => {

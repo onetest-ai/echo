@@ -47,7 +47,7 @@ function notesTimeline(c) {
       const raw = b.raw.trim()
       if (!raw) return ''
       const h = raw.match(/^#{1,6}\s+(.*)$/)
-      return h ? `<div class="nt-head">${esc(h[1])}</div>` : `<div class="nt-entry k-general" role="listitem"><span class="nt-icon">¶</span><div class="nt-body"><span class="nt-text">${esc(raw)}</span></div></div>`
+      return h ? `<div class="nt-head" role="presentation">${esc(h[1])}</div>` : `<div class="nt-entry k-general" role="listitem"><span class="nt-icon">¶</span><div class="nt-body"><span class="nt-text">${esc(raw)}</span></div></div>`
     }
     const [icon, label] = NOTE_LOOK[b.kind] || NOTE_LOOK.note
     const mark = b.kind === 'todo'
@@ -71,7 +71,7 @@ function notesTimeline(c) {
     ? LiveTimeline.merge(blocks.map((b, i) => ({ i, t: b.note && b.t != null ? b.t : null })), liveItems).map((e) => e.live ? liveItemHtml(e.live) : rows[e.mine.i]).join('')
     : rows.join('')
   const answers = hasLive(c) ? liveAnswersHtml(c) : ''
-  const empty = liveItems.length || answers || blocks.some((b) => b.note || b.raw.trim()) ? '' : `<p class="panel-empty">${c.status === 'recording' ? 'Notes you add here are tied to the moment of the call. Start with ? for a question, ! for a decision, [] for a to-do.' : 'Add notes about this call. Select words in the transcript to comment on what was said.'}</p>`
+  const empty = liveItems.length || answers || blocks.some((b) => b.note || b.raw.trim()) ? '' : `<p class="panel-empty" role="presentation">${c.status === 'recording' ? 'Notes you add here are tied to the moment of the call. Start with ? for a question, ! for a decision, [] for a to-do.' : 'Add notes about this call. Select words in the transcript to comment on what was said.'}</p>`
   const live = c.status === 'recording'
   const kinds = ['note', 'question', 'decision', 'todo'].map((k) => `<button class="nt-kind${S.noteKind === k ? ' on' : ''}" data-note-kind="${k}">${k === 'note' ? 'Note' : `${NOTE_LOOK[k][0]} ${NOTE_LOOK[k][1]}`}</button>`).join('')
   const at = S.noteAt != null ? S.noteAt : callNow(c)

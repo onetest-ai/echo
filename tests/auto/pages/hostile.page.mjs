@@ -13,18 +13,20 @@ export class HostilePage extends AppPage {
   constructor(page, data) {
     super(page, data)
     this.h = data.set
-    this.seen = { dialogs: [], pageErrors: [], console: [], outside: [] }
+    this.seen = { dialogs: [], pageErrors: [], console: [], outside: [], popups: [] }
     const origin = new URL(data.base).origin
     page.on('dialog', async (d) => { this.seen.dialogs.push(`${d.type()}: ${d.message()}`); await d.dismiss().catch(() => {}) })
     page.on('pageerror', (e) => this.seen.pageErrors.push(String(e)))
     page.on('console', (m) => { if (m.type() === 'error' && !ALLOWED(m)) this.seen.console.push(`${m.text()} ${m.location().url || ''}`.trim()) })
-    page.on('request', (r) => { const u = r.url(); if (!/^(data|blob|about):/.test(u) && new URL(u).origin !== origin) this.seen.outside.push(u) })
+    // Requests of every page and frame of this browser context (a popup's too), and any popup at all.
+    page.context().on('request', (r) => { const u = r.url(); if (!/^(data|blob|about):/.test(u) && new URL(u).origin !== origin) this.seen.outside.push(u) })
+    page.on('popup', (p) => this.seen.popups.push(p.url()))
   }
 
   /** What the guard recorded since the last read (check D, the console and the requests), emptied. */
   quiet() {
     const r = this.seen
-    this.seen = { dialogs: [], pageErrors: [], console: [], outside: [] }
+    this.seen = { dialogs: [], pageErrors: [], console: [], outside: [], popups: [] }
     return r
   }
 
@@ -66,13 +68,18 @@ export class HostilePage extends AppPage {
   /** Check A of the cases: no inline handler, no inline script, no javascript: or vbscript: address, no broken image
    *  made from the data, and the page no wider than the window. */
   async markup() {
-    return this.page.evaluate(() => ({
-      handlers: document.querySelectorAll('[onerror],[onload],[onclick],[onmouseover],[onfocus],[onmouseenter]').length,
-      inlineScripts: document.querySelectorAll('script:not([src])').length,
-      badUrls: [...document.querySelectorAll('[href],[src],[action],[formaction]')].filter((e) => /^\s*(javascript|vbscript):/i.test(e.getAttribute('href') || e.getAttribute('src') || e.getAttribute('action') || e.getAttribute('formaction') || '')).length,
-      brokenImgs: document.querySelectorAll('img[src="x"]').length,
-      fits: document.documentElement.scrollWidth <= window.innerWidth,
-    }))
+    return this.page.evaluate(() => {
+      const all = [...document.querySelectorAll('*')]
+      return {
+        // Any attribute named on…, on any element: an inline handler.
+        handlers: all.filter((e) => [...e.attributes].some((a) => /^on/i.test(a.name))).length,
+        inlineScripts: document.querySelectorAll('script:not([src])').length,
+        badUrls: [...document.querySelectorAll('[href],[src],[action],[formaction]')].filter((e) => /^\s*(javascript|vbscript):/i.test(e.getAttribute('href') || e.getAttribute('src') || e.getAttribute('action') || e.getAttribute('formaction') || '')).length,
+        // An image from the data (src=x) or from anywhere but the web or the page's own data.
+        brokenImgs: document.querySelectorAll('img[src="x"]').length + [...document.images].filter((i) => i.getAttribute('src') && !/^(https?|data):$/.test(new URL(i.src, location.href).protocol)).length,
+        fits: document.documentElement.scrollWidth <= window.innerWidth,
+      }
+    })
   }
 
   /** Links of a part of the page to an address that starts so (none to the data's evil.example in Your day). */
@@ -124,7 +131,7 @@ export class HostilePage extends AppPage {
 
   /** A row of the Calls list, a button, a tab, an option, a heading: by a text its name holds. */
   row(text) {
-    return this.page.getByRole('listbox', { name: 'Calls' }).getByRole('option', { name: text }).first()
+    return this.page.getByRole('listbox', { name: this.data.text.hostile.callsList }).getByRole('option', { name: text }).first()
   }
 
   button(name, where) {
@@ -158,7 +165,7 @@ export class HostilePage extends AppPage {
 
   /** The actions palette (⌘K). */
   get palette() {
-    return this.page.getByRole('dialog', { name: 'Actions' })
+    return this.page.getByRole('dialog', { name: this.data.text.hostile.paletteDialog })
   }
 
   /** A region of the page, by its name (a thread's brief, a client's About). */
@@ -200,17 +207,13 @@ export class HostilePage extends AppPage {
     return this.main.getByRole('group', { name: group, exact: true }).getByRole('button', { name, exact: true })
   }
 
-  /** A row of a table (a person), a list item (a card, a chat message) or an option, holding a text. */
+  /** A row of a table (a person) or a list item (a card, a chat message), holding a text. */
   rowHolding(text, where) {
     return (where || this.main).getByRole('row').filter({ hasText: text }).first()
   }
 
   itemHolding(text, where) {
     return (where || this.main).getByRole('listitem').filter({ hasText: text }).first()
-  }
-
-  optionHolding(text, where) {
-    return (where || this.page).getByRole('option', { name: text }).first()
   }
 
   /** The buttons of a part of the page that match a pattern ("+ 9" folds). */
@@ -259,7 +262,7 @@ export class HostilePage extends AppPage {
 
   /** The palette's box. */
   get paletteBox() {
-    return this.palette.getByRole('textbox', { name: 'Action' })
+    return this.palette.getByRole('textbox', { name: this.data.text.hostile.paletteBox })
   }
 
   /** A person's name as Echo shows names (its "(…)" and "[…]" parts dropped, a "Last, First" turned round): the
@@ -285,11 +288,11 @@ export class HostilePage extends AppPage {
 
   /** A row of the Calls list holding a text (a 10 000-character title has no name: found by its text). */
   rowWithText(text) {
-    return this.page.getByRole('listbox', { name: 'Calls' }).getByRole('option').filter({ hasText: text }).first()
+    return this.page.getByRole('listbox', { name: this.data.text.hostile.callsList }).getByRole('option').filter({ hasText: text }).first()
   }
 
   get callsList() {
-    return this.page.getByRole('listbox', { name: 'Calls' })
+    return this.page.getByRole('listbox', { name: this.data.text.hostile.callsList })
   }
 
   get callRows() {
@@ -362,5 +365,19 @@ export class HostilePage extends AppPage {
   /** A piece's marker ("HOSTILE-48"). */
   mark(id) {
     return `${this.h.marker}${id}`
+  }
+
+  /** Tasks' cards drawn past the right edge of their pile (a region), by their first words. */
+  async cardsOutsidePiles() {
+    const out = []
+    for (const pile of await this.main.getByRole('region').all()) {
+      const p = await pile.boundingBox()
+      if (!p) continue
+      for (const card of await pile.getByRole('button').all()) {
+        const b = await card.boundingBox()
+        if (b && b.x + b.width > p.x + p.width + 1) out.push((await card.textContent()).slice(0, 40))
+      }
+    }
+    return out
   }
 }

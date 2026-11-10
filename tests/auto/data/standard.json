@@ -4782,10 +4782,12 @@
       ]
     },
     "security": {
-      "title": "Acme security review"
+      "title": "Acme security review",
+      "slug": "acme-security-review"
     },
     "walkthrough": {
-      "title": "Umbrella proposal walkthrough"
+      "title": "Umbrella proposal walkthrough",
+      "slug": "umbrella-proposal-walkthrough"
     },
     "vandelay": {
       "title": "Vendor call with Vandelay"
@@ -4978,7 +4980,8 @@
       "q": "draft",
       "at": "_170000",
       "daysBefore": 3
-    }
+    },
+    "leftAloneSlug": "duff-discovery"
   },
   "s29": {
     "_about": "S-29: notes, transcripts, settings and Today off the happy path",

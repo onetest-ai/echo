@@ -1436,7 +1436,8 @@
     "minutesFailed": "Minutes failed: {title}",
     "writeAgain": "Write again",
     "nothingMatches": "Nothing matches \"{q}\".",
-    "callActions": "Call actions"
+    "callActions": "Call actions",
+    "callsFolder": "calls"
   },
   "offPath": {
     "_about": "Notes, transcripts, settings and Today off the happy path (S-29): the app's words",
@@ -1509,7 +1510,9 @@
     "noticeOk": "OK",
     "mark": "✓",
     "badMark": "✗",
-    "healthRoute": "#settings/health"
+    "healthRoute": "#settings/health",
+    "noteRow": "• {text}",
+    "quoted": "{row} “{q}”"
   },
   "hostile": {
     "_about": "The views S-27 opens on the hostile set and the controls it presses (none that runs, sends or changes)",
@@ -1609,6 +1612,9 @@
     "loadedImgs": "img[src^=\"http\"]",
     "noteMade": "li li img, li li script, .mynote img, .mynote script, .mynote a",
     "imgs": "img",
-    "bigHeadings": "h1"
+    "bigHeadings": "h1",
+    "callsList": "Calls",
+    "paletteDialog": "Actions",
+    "paletteBox": "Action"
   }
 }

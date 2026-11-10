@@ -126,7 +126,7 @@ function liveItemHtml(x) {
 /** Answers to questions about the call (`live-asks.jsonl`), after the timeline. */
 function liveAnswersHtml(c) {
   const a = liveAnswers(c)
-  return a ? `<div class="nt-head">Asked about this call</div><div class="nl-answers">${a}</div>` : ''
+  return a ? `<div class="nt-head" role="presentation">Asked about this call</div><div class="nl-answers" role="presentation">${a}</div>` : ''
 }
 
 /** The Transcript tab of a call that records with live notes: the live transcript at full width, kept at

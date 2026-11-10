@@ -107,6 +107,13 @@ export class AppPage {
     await this.page.goto(this.data.base + '/' + hash)
   }
 
+  /** The window loaded afresh at a route (its cookie first, then a reload there): what a fresh load opens on it (Calls:
+   *  the newest call), not what a hash change after an earlier load gives. */
+  async load(hash) {
+    await this.goto(hash)
+    await this.page.reload()
+  }
+
   /** The view's own content (the primary area's main element). */
   get main() {
     return this.page.getByRole('main').first()

@@ -22,10 +22,10 @@ const op = () => data.text.offPath
 const cs = () => data.text.callStates
 const set = () => data.set.s29
 /** The call folders whose names end in a slug, oldest first. */
-const foldersOf = (slug) => fs.readdirSync(path.join(data.home, 'calls')).filter((n) => n.endsWith(`-${slug}`)).sort()
+const foldersOf = (slug) => fs.readdirSync(path.join(data.home, cs().callsFolder)).filter((n) => n.endsWith(`-${slug}`)).sort()
 const folderOf = (slug) => foldersOf(slug).at(-1)
 /** A call's my-notes.md (empty while there is none), as its lines. */
-const notesFile = (slug) => (data.exists(data.home, 'calls', folderOf(slug), data.text.calls.notes.file) ? data.read(data.home, 'calls', folderOf(slug), data.text.calls.notes.file) : '')
+const notesFile = (slug) => (data.exists(data.home, cs().callsFolder, folderOf(slug), data.text.calls.notes.file) ? data.read(data.home, cs().callsFolder, folderOf(slug), data.text.calls.notes.file) : '')
 const lines = (slug) => notesFile(slug).split('\n')
 
 /** The Calls list on screen; with a call open on a tab and My notes beside it. */
@@ -50,9 +50,9 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     const t = cs().tabs
     const view = await calls(page)
     await view.openNewest(s.title)
-    const at = data.json(data.home, 'calls', folderOf(s.slug), data.text.calls.meta).started_at
+    const at = data.json(data.home, cs().callsFolder, folderOf(s.slug), data.text.calls.meta).started_at
     const people = data.set.s23.steering.people
-    expect(await view.factLines()).toEqual([`${await view.longDay(at)}, ${await view.clock(at)} ${fill(cs().duration, { n: data.set.s23.steering.minutes })} ${data.set.s23.steering.kind} ▾`, cs().kindSelect, `${cs().fromTeams} ${people}`])
+    expect(await view.factLines()).toEqual([`${await view.longDay(at)}, ${await view.clock(at)} ${fill(cs().duration, { n: data.set.s23.steering.minutes })} ${fill(data.text.calls.kindChip, { kind: data.set.s23.steering.kind })}`, cs().kindSelect, `${cs().fromTeams} ${people}`])
     await expect(view.factTitled(cs().fromTeamsHint)).toHaveText(cs().fromTeams)
     await expect(view.threadChip(data.set.s23.memo.chips[1][0])).toBeVisible()
     await view.tab(t.transcript).click()
@@ -62,7 +62,7 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
       await expect(view.turnWords(name)).toHaveText(words)
       await expect(view.within(view.turn(name), s.lang)).toBeVisible()
     }
-    const segs = data.json(data.home, 'calls', folderOf(s.slug), op().segments)
+    const segs = data.json(data.home, cs().callsFolder, folderOf(s.slug), op().segments)
     expect(segs.map((x) => (x.speaker === 'me' ? { speaker: x.speaker } : { speaker: x.speaker, name: x.name }))).toEqual(s.segments)
     expect(segs.map((x) => x.text)).toEqual(s.turns.map((x) => x[1]))
     await expect(view.callTabs).toHaveText([t.minutes, t.transcript])
@@ -169,7 +169,7 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     await expect(view.popSays(fill(op().goesTo, { t: c.at }))).toBeVisible()
     await view.popBox.fill(c.typed)
     await view.popButton(op().addNote).click()
-    await expect.poll(() => view.noteTexts()).toContain(`${c.row} “${c.words}”`)
+    await expect.poll(() => view.noteTexts()).toContain(fill(op().quoted, { row: c.row, q: c.words }))
     await expect(view.turnTitled(c.turn, fill(op().dot, { text: c.text }))).toHaveCount(1)
     await expect.poll(() => lines(initech.slug)).toEqual(expect.arrayContaining([c.line, c.quoteLine]))
     await view.turnWords(r.turn).click({ button: 'right' })
@@ -203,12 +203,12 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     await expect(view.newNote).toHaveValue('')
     await expect.poll(() => notesFile(uSlug)).toBe(`- ${uText}\n`)
     await view.openNewest(uTitle)
-    expect(await view.noteTexts()).toEqual([`• ${uText}`])
+    expect(await view.noteTexts()).toEqual([fill(op().noteRow, { text: uText })])
     await expect(view.panelSays(op().saved)).toBeVisible()
     await view.openNewest(cTitle, cs().tabs.minutes)
     await view.newNote.fill(cText)
     await view.headerButton(cs().writeMinutes).click()
-    await expect.poll(() => view.noteTexts()).toEqual([`• ${cText}`])
+    await expect.poll(() => view.noteTexts()).toEqual([fill(op().noteRow, { text: cText })])
     await expect(view.newNote).toHaveValue('')
     await expect(view.paneHeading(cs().couldnt)).toBeVisible({ timeout: 15_000 })
     await expect(view.says(data.text.fake.claudeFails)).toBeVisible()
@@ -228,7 +228,7 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     await expect(view.panelSays(op().saved)).toBeVisible()
     await view.newNote.fill(o.typed)
     await expect(view.panelSays(op().notSaved)).toBeVisible()
-    const dir = path.join(data.home, 'calls', folderOf(o.slug))
+    const dir = path.join(data.home, cs().callsFolder, folderOf(o.slug))
     // The window reads the call again once its file changed; while a note is typed nothing is drawn over.
     const reread = view.callReread(folderOf(o.slug))
     fs.writeFileSync(path.join(dir, data.text.calls.notes.file), o.other)
@@ -239,13 +239,13 @@ scenario(test, 'S-29', 'Notes, transcripts, settings and Today off the happy pat
     const kept = view.panelSaysLike(new RegExp(op().kept))
     await expect(kept).toBeVisible()
     const copy = new RegExp(op().kept).exec(await kept.textContent())[1]
-    expect(await view.noteTexts()).toEqual([o.row, `• ${o.typed}`])
+    expect(await view.noteTexts()).toEqual([o.row, fill(op().noteRow, { text: o.typed })])
     await expect(view.panelSays(op().saved)).toBeVisible()
     expect(notesFile(o.slug).split('\n')).toEqual(expect.arrayContaining([o.line, o.typedLine]))
     expect(data.read(dir, copy)).toBe(o.other)
     await view.panelButton(op().noticeOk).click()
     await expect(kept).toHaveCount(0)
-    expect(await view.noteTexts()).toEqual([o.row, `• ${o.typed}`])
+    expect(await view.noteTexts()).toEqual([o.row, fill(op().noteRow, { text: o.typed })])
   })
 
   test('8 · An unreadable config.json says so in every Settings section instead of its settings; the rest of the window works', covers('settings/TC-025', 'F-SET-18'), async ({ page }) => {
