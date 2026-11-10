@@ -22,6 +22,7 @@ It uses `echoctl` (ECHOCTL_BIN, else target/debug/echoctl) for everything the CL
 (call folders, the app's state files) in the shapes the Rust code reads. Standard library only.
 """
 import argparse
+import atexit
 import json
 import re
 import os
@@ -563,6 +564,10 @@ esac
 # Claude account is ever used.
 LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*|{url}) exec {real} "$@";; esac
 """
+# With `--ai virtual`: only the virtual model's own address reaches the real Claude Code — never another server on this
+# computer (a real Ollama), never an account.
+VIRTUAL_PASS = """case "$ANTHROPIC_BASE_URL" in {url}) exec {real} "$@";; esac
+"""
 # small with `--ai local` (the recording and minutes scenarios, which run the Echo app): only a minutes run (the app
 # sets ECHOCTL_RUN_CALL and no ECHOCTL_RUN_MODE) reaches the model; the app's own preps, meeting types, task modes and
 # thread syncs are refused at once, so they never queue in front of the minutes on the one model server.
@@ -625,7 +630,7 @@ def setup_env(d, stale_plugin=True, test_market=True):
         lines = fake.split("\n")
         # Also the one model server named with --ai-url (a faster machine on the network), exactly that address.
         url = sh(AI_URL) if AI_URL else "http://localhost:*"
-        local = LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")
+        local = (VIRTUAL_PASS if AI == "virtual" else LOCAL_PASS).format(real=sh(real), url=url).rstrip("\n")
         if d.set == "small" and AI == "local":
             local = MINUTES_ONLY.replace("PASS", local).rstrip("\n")
         fake = "\n".join(lines[:4] + [local] + lines[4:])
@@ -2356,6 +2361,7 @@ def build_standard(d, hostile=False):
 
 NOW = None
 AI = "fake"
+BUILT = False  # the build finished (a virtual model started for it stays up)
 AI_URL = None
 NO_SERVER = "http://127.0.0.1:9"  # the discard port: nothing answers there
 AI_MODEL = None
@@ -2382,6 +2388,8 @@ def start_virtual_model(base):
     server = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_server.py")
     p = subprocess.Popen([sys.executable, server, m], stdout=subprocess.DEVNULL, stderr=open(os.path.join(m, "server.log"), "w"),
                          start_new_session=True)
+    # A build that fails after this (or is interrupted) stops it: nothing is left listening.
+    atexit.register(lambda: BUILT or p.terminate())
     with open(os.path.join(m, "pid"), "w") as f:
         f.write(f"{p.pid}\n")
     for _ in range(50):
@@ -2478,6 +2486,8 @@ def main():
             f.write(f"export ECHOCTL_TEST_AUTO_MINUTES_DELAY_S={FAST_AUTO_DELAY_S}\n")
     d.manifest["clock"] = {"auto_minutes_delay_s": FAST_AUTO_DELAY_S if a.clock == "fast" else 900}
     d.write_json(os.path.join(base, "manifest.json"), d.manifest, ascii=False)
+    global BUILT
+    BUILT = True
     print(f"test data ({a.set}) in {base} (. {base}/env)")
 
 

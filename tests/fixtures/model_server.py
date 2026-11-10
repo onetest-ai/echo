@@ -33,6 +33,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 NO_SCRIPT = {"text": "virtual model: no script for this request"}
 
 
+class ScriptError(Exception):
+    """The script can't answer this request (a bad rule): the request gets a 400 at once, never a dropped
+    connection Claude Code would retry."""
+
+
 def text_of(content):
     """Every text in a message's content (a string or blocks), tool inputs and tool results included."""
     if isinstance(content, str):
@@ -60,12 +65,16 @@ def answer_for(req, script):
     step = sum(1 for m in msgs if m.get("role") == "assistant")
     for i, rule in enumerate(script.get("rules", [])):
         when = rule.get("when", [])
-        if all(w in hay for w in ([when] if isinstance(when, str) else when)):
+        when = [when] if isinstance(when, str) else when
+        if when and all(w in hay for w in when):
             steps = rule.get("steps") or [NO_SCRIPT]
             found = {}
             for name, rx in (rule.get("vars") or {}).items():
-                m = re.search(rx, hay)
-                found[name] = m.group(1) if m else ""
+                try:
+                    m = re.search(rx, hay)
+                except re.error as e:
+                    raise ScriptError(f"rule {i}: vars.{name} isn't a regex: {e}") from e
+                found[name] = m.group(1) if m and m.groups() else ""
             return i, step, fill(steps[min(step, len(steps) - 1)], found)
     return None, step, NO_SCRIPT
 
@@ -85,7 +94,8 @@ def fill(v, found):
 
 def blocks_of(answer, n):
     if "blocks" in answer:
-        return answer["blocks"]
+        # Streamed as text and tool_use only: other kinds (thinking, …) aren't played back.
+        return [b for b in answer["blocks"] if b.get("type") in ("text", "tool_use")]
     if "tool" in answer:
         pre = [{"type": "text", "text": answer["say"]}] if answer.get("say") else []
         return pre + [{"type": "tool_use", "id": f"toolu_virtual_{n:04d}", "name": answer["tool"], "input": answer.get("input", {})}]
@@ -166,7 +176,11 @@ class Handler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.n += 1
             n = self.server.n
-        rule, step, answer = answer_for(req, self.server.script())
+        try:
+            rule, step, answer = answer_for(req, self.server.script())
+        except ScriptError as e:
+            self.server.log({"at": time.time(), "n": n, "path": path, "error": str(e)})
+            return self.send_json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": f"virtual model: {e}"}})
         blocks = blocks_of(answer, n)
         stop = "tool_use" if any(b.get("type") == "tool_use" for b in blocks) else "end_turn"
         self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "stream": bool(req.get("stream")),
