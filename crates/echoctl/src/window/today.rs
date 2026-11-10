@@ -39,6 +39,16 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             if layout.iter().any(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done") {
                 v["glance"] = crate::glance::today();
             }
+            // Plugins' widgets on Today: their last data, by id (each asked again in the background when stale).
+            let tasks = json!({});
+            let plugins: serde_json::Map<String, Value> = layout
+                .iter()
+                .filter(|i| i.widget.starts_with("plugin:"))
+                .filter_map(|i| crate::widgets::data(&i.widget, &crate::widgets::Inputs { tasks: &tasks }).ok().map(|d| (i.widget.clone(), d)))
+                .collect();
+            if !plugins.is_empty() {
+                v["plugins"] = json!(plugins);
+            }
             v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
             let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();

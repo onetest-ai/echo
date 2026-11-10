@@ -123,6 +123,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-19",
+   "feature": "A plugin's widgets on Today: declared in echo-plugin.json `widgets` (id, label, about, kind stat|stats|list|status|card, sizes, height, refresh at least 60 s; checked at install; the sheet says 'Adds N widgets you can put on Today'), in the catalog as plugin:<id>:<widget> under the plugin's name, put on with echoctl today or Add a widget; data from the host half's ctx.widgets.provide (asked by Echo in the background, 5 s, again after refresh) or set / clear (cleared: off Today), the last answer drawn at once (a failed ask keeps it, dated); Echo draws each kind, the plugin's text escaped, links only to echo://, data it can't draw says why",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

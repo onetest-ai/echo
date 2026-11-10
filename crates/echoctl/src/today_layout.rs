@@ -123,7 +123,8 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
 /// A widget's size, checked: one it takes (the default: M if it takes it, else its first).
 fn size_of(widget: &str, size: Option<&str>) -> Result<String> {
     let w = widgets::find(widget)?;
-    if !DRAWN.contains(&widget) {
+    // A plugin's widget is drawn by its kind (12-today.js, pluginWidgetView).
+    if !DRAWN.contains(&widget) && !widget.starts_with("plugin:") {
         bail!("{widget} isn't on Today's page yet: its view comes with the next widget steps (#315)");
     }
     let s = size.map(str::to_uppercase).unwrap_or_else(|| if w.sizes.contains(&"M") { "M".into() } else { w.sizes[0].into() });

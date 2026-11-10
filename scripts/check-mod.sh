@@ -63,6 +63,8 @@ node crates/echoctl/ui/today-calendar.test.mjs
 node crates/echoctl/ui/today-edit.test.mjs
 # The day's choices: overlaps you accepted, what Echo suggests, invites to answer (dayChoices).
 node crates/echoctl/ui/today-choices.test.mjs
+# A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).
+node crates/echoctl/ui/today-plugin-widgets.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"

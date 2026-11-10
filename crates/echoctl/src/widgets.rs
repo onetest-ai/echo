@@ -2,6 +2,8 @@
 //! Today's page and `echoctl widget show` read the same data; plugins will add theirs to the catalog (#315).
 //! A provider never calls a model: what needs one is a job whose result a provider reads.
 
+use std::borrow::Cow;
+
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -9,22 +11,23 @@ use serde_json::{json, Value};
 /// A widget the catalog offers: where it comes from, what it shows, the sizes it takes (S, M, L: 1, 2, 3 columns),
 /// how tall it is (`hug` its content, `fill` its column) and whether it is temporal (on Today only while its data
 /// isn't `empty`).
-#[derive(Serialize, Clone, Copy, Debug)]
+/// A plugin's widget (`plugin:<plugin>:<widget>`) is owned text from its manifest; Echo's own are constants.
+#[derive(Serialize, Clone, Debug)]
 pub struct Widget {
-    pub id: &'static str,
-    pub part: &'static str,
-    pub label: &'static str,
-    pub about: &'static str,
-    pub kind: &'static str,
-    pub sizes: &'static [&'static str],
-    pub height: &'static str,
+    pub id: Cow<'static, str>,
+    pub part: Cow<'static, str>,
+    pub label: Cow<'static, str>,
+    pub about: Cow<'static, str>,
+    pub kind: Cow<'static, str>,
+    pub sizes: Cow<'static, [&'static str]>,
+    pub height: Cow<'static, str>,
     pub temporal: bool,
 }
 
 // One line a widget in the catalog below: its fields in the struct's order.
 #[allow(clippy::too_many_arguments)]
 const fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static str, kind: &'static str, sizes: &'static [&'static str], height: &'static str, temporal: bool) -> Widget {
-    Widget { id, part, label, about, kind, sizes, height, temporal }
+    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal }
 }
 
 /// Echo's own widgets, for what Today shows now. The rest of the agreed set comes with their phases.
@@ -41,13 +44,30 @@ pub const CORE: &[Widget] = &[
     w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true),
 ];
 
-/// The catalog: Echo's widgets (and, later, the installed plugins').
+/// The catalog: Echo's widgets, then each enabled plugin's (`plugin:<plugin>:<widget>`, under the plugin's name).
 pub fn catalog() -> Vec<Widget> {
-    CORE.to_vec()
+    let mut all = CORE.to_vec();
+    for (p, m) in crate::plugins::enabled_manifests() {
+        for d in m.widgets {
+            all.push(Widget {
+                id: Cow::Owned(format!("plugin:{}:{}", p, d.id)),
+                part: Cow::Owned(m.name.clone()),
+                label: Cow::Owned(d.label),
+                about: Cow::Owned(d.about),
+                kind: Cow::Owned(d.kind),
+                sizes: Cow::Owned(d.sizes.iter().filter_map(|s| ["S", "M", "L"].into_iter().find(|x| x == s)).collect()),
+                height: Cow::Owned(d.height),
+                // A plugin's widget is on Today while its plugin has given it something to show.
+                temporal: true,
+            });
+        }
+    }
+    all
 }
 
 pub fn find(id: &str) -> Result<Widget> {
-    CORE.iter().find(|w| w.id == id).copied().ok_or_else(|| anyhow!("no widget {id:?}: `echoctl widget list` names them"))
+    let hit = if id.starts_with("plugin:") { catalog().into_iter().find(|w| w.id == id) } else { CORE.iter().find(|w| w.id == id).cloned() };
+    hit.ok_or_else(|| anyhow!("no widget {id:?}: `echoctl widget list` names them"))
 }
 
 /// What a provider reads beyond its own part: the Tasks view, made by the caller (the window from its calendar, the
@@ -59,7 +79,11 @@ pub struct Inputs<'a> {
 /// A widget's data. A temporal widget's says `empty` when it has nothing (Today takes no space for it).
 pub fn data(id: &str, i: &Inputs) -> Result<Value> {
     let w = find(id)?;
-    let mut v = match w.kind {
+    if let Some(rest) = id.strip_prefix("plugin:") {
+        let (plugin, widget) = rest.split_once(':').unwrap_or((rest, ""));
+        return Ok(plugin_data(plugin, widget, &w));
+    }
+    let mut v = match w.kind.as_ref() {
         "day" | "choices" => day(),
         "next" => next_meeting(&crate::today::day()),
         "work" => crate::today::work(i.tasks),
@@ -69,7 +93,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
     if w.temporal {
-        let empty = match w.kind {
+        let empty = match w.kind.as_ref() {
             "next" => v["next"].is_null(),
             "needs" => v["items"].as_array().is_none_or(|a| a.is_empty()),
             "cards" => v["cards"].as_array().is_none_or(|a| a.is_empty()),
@@ -79,6 +103,26 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         v["empty"] = json!(empty);
     }
     Ok(v)
+}
+
+/// A plugin's widget: the last data its plugin gave (`ctx.widgets.set`, or its provider's answer), with when; asking
+/// its provider again, in the background, once that is older than the widget's `refresh` (60 s at least). Never waits
+/// for the plugin: Today draws the last answer at once.
+#[cfg(not(feature = "js"))]
+fn plugin_data(_plugin: &str, _widget: &str, w: &Widget) -> Value {
+    json!({"kind": w.kind, "label": w.label, "data": null, "empty": true})
+}
+
+#[cfg(feature = "js")]
+fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
+    let last = crate::jshost::widget_last(plugin, widget);
+    let every = crate::plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).and_then(|(_, m)| m.widgets.into_iter().find(|d| d.id == widget)).and_then(|d| d.refresh).unwrap_or(60).max(60);
+    let stale = last.as_ref().and_then(|l| l["at"].as_str()).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
+    if stale {
+        crate::jshost::widget_ask(plugin, widget);
+    }
+    let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
+    json!({"kind": w.kind, "label": w.label, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
@@ -145,12 +189,12 @@ mod tests {
 
     #[test]
     fn the_catalog_has_one_widget_per_id_each_with_sizes_it_can_take() {
-        let ids: std::collections::BTreeSet<_> = CORE.iter().map(|w| w.id).collect();
+        let ids: std::collections::BTreeSet<_> = CORE.iter().map(|w| w.id.as_ref()).collect();
         assert_eq!(ids.len(), CORE.len(), "ids are unique");
         for w in CORE {
             assert!(w.id.starts_with("core:") && !w.label.is_empty() && !w.about.is_empty(), "{w:?}");
             assert!(!w.sizes.is_empty() && w.sizes.iter().all(|s| ["S", "M", "L"].contains(s)), "{w:?}");
-            assert!(["hug", "fill"].contains(&w.height), "{w:?}");
+            assert!(["hug", "fill"].contains(&w.height.as_ref()), "{w:?}");
         }
         assert!(find("core:nope").unwrap_err().to_string().contains("echoctl widget list"));
     }
@@ -204,7 +248,7 @@ mod tests {
         let (_env, _) = crate::paths::testenv::folders("widgets-data");
         let tasks = json!({"piles": {}, "asks": [], "projects": []});
         for w in CORE {
-            let v = data(w.id, &Inputs { tasks: &tasks }).unwrap_or_else(|e| panic!("{}: {e:#}", w.id));
+            let v = data(&w.id, &Inputs { tasks: &tasks }).unwrap_or_else(|e| panic!("{}: {e:#}", w.id));
             assert_eq!(v["empty"].as_bool(), w.temporal.then_some(true), "{}: {v}", w.id);
         }
         assert!(data("core:tasks.mine", &Inputs { tasks: &tasks }).unwrap()["mine"]["items"].is_array());
