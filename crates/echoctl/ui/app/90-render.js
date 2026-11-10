@@ -622,7 +622,7 @@ async function stampNotes() {
   const ok = await within(askRecording(get, call).then((r) => r.ok), 500)
   ta = $('#my-notes')
   if (!ta || ta.readOnly || ta.dataset.notesCall !== call) return
-  if (noteTime(t, ok) == null) return window.echo.notice('The call has ended: no call time to insert.')
+  if (noteTime(t, ok) == null) return window.echo.notice(ok === false ? 'The call has ended: no call time to insert.' : "Couldn't confirm the call is recording: no call time inserted.")
   const stamp = `[${clock(t)}] `
   const at = ta.selectionStart ?? ta.value.length
   ta.setRangeText(stamp, at, ta.selectionEnd ?? at, 'end')
