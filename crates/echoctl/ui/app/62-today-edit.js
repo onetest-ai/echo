@@ -59,11 +59,9 @@ function todayEditPanel() {
   layoutChanged()
 }
 
-/** The layout's rows: widget ids, a row each. */
+/** The layout's rows as the page draws them: widget ids, a row each (widgets not drawn left out). */
 function twRows() {
-  const rows = []
-  for (const i of (S.today && S.today.layout) || []) { if (i.row || !rows.length) rows.push([]); rows[rows.length - 1].push(i.widget) }
-  return rows
+  return todayRows((S.today && S.today.layout) || [], Object.keys(S.tdParts || {}))
 }
 
 /** A move by keyboard (#345): up — a row of its own above the row before; down — below the row after; left / right —
@@ -73,19 +71,22 @@ function todayEditMove(id, dir) {
   if (r < 0) return
   const i = rows[r].indexOf(id)
   const to = dir === 'up' ? r > 0 && [rows[r - 1][0], 'above']
-    : dir === 'down' ? r < rows.length - 1 && [rows[r + 1][0], 'below']
+    : dir === 'down' ? r < rows.length - 1 && [rows[r + 1][rows[r + 1].length - 1], 'below']
     : dir === 'left' ? i > 0 && [rows[r][i - 1], 'before']
     : i < rows[r].length - 1 && [rows[r][i + 1], 'after']
   if (!to) return
-  S.tdFocus = { id, sel: `[data-tw-move="${dir}"]`, was: JSON.stringify(S.today.layout) }
+  S.tdFocus = { id, sel: `[data-tw-move="${dir}"]`, was: JSON.stringify(S.today.layout), at: Date.now() }
   todayLayoutDo({ op: 'move', widget: id, target: to[0], side: to[1] })
 }
 
 /** After a redraw in edit mode: the focus back where the keyboard was (a moved widget's button, a neighbour after ×). */
 function twRefocus() {
   const f = S.tdFocus
+  if (!f) return
+  // A change refused (its notice said why) never redraws: the focus wish lapses rather than land on a later change.
+  if (!S.tdEdit || Date.now() - f.at > 5000) { S.tdFocus = null; return }
   // Only once Today is drawn from the changed layout (the change's reply refreshes it).
-  if (!f || !S.tdEdit || JSON.stringify((S.today || {}).layout) === f.was) return
+  if (JSON.stringify((S.today || {}).layout) === f.was) return
   const frame = document.querySelector(`.tw[data-tw="${CSS.escape(f.id)}"]`)
   const el = frame && (frame.querySelector(f.sel) || frame.querySelector('button:not([disabled])'))
   if (el) { el.focus(); S.tdFocus = null }
@@ -107,6 +108,7 @@ async function todayEditOpen() {
 /** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
 function todayEditDone() {
   S.tdEdit = false
+  S.tdFocus = null
   const was = S.tdEditWas || { open: true, overlay: S.overlay }
   const known = panelViews()
   if (was.active && known.some((v) => v.id === was.active)) Layout.show(was.active, known)
@@ -158,7 +160,7 @@ document.addEventListener('click', (e) => {
   if (d.twSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twSize })
   if (d.twRemove) {
     const all = twRows().flat(), i = all.indexOf(d.twRemove), next = all[i + 1] || all[i - 1]
-    if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(S.today.layout) }
+    if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(S.today.layout), at: Date.now() }
     return todayLayoutDo({ op: 'remove', widget: d.twRemove })
   }
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
