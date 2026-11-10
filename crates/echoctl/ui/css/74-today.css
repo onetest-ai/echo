@@ -109,3 +109,30 @@
 .td-av.no { opacity: 0.45; text-decoration: line-through; }
 .td-next-rec { margin-top: auto; font-size: 12px; color: var(--danger); }
 @media (max-width: 700px) { .td-next-l { grid-template-columns: minmax(0, 1fr); } .td-next-side { border-left: 0; border-top: 1px solid var(--line); } }
+
+/* Today → Your day as "where you'll be": a line a place — time, a bar for how sure, the place and its reason, ⋯. */
+.ag-row { display: grid; grid-template-columns: 64px 4px minmax(0, 1fr) auto; gap: 0 10px; align-items: start; padding: 7px 4px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 6px; }
+.ag-row:first-child { border-top: 0; }
+.ag-row:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.ag-row.past { opacity: 0.55; }
+.ag-row.folded { opacity: 0.5; }
+.ag-t { padding-top: 1px; color: var(--text-3); white-space: nowrap; }
+.ag-t.next { color: var(--accent); font-weight: 650; }
+.ag-t.choice { color: var(--warn); }
+.ag-bar { align-self: stretch; border-radius: 2px; min-height: 18px; box-sizing: border-box; }
+.ag-bar.yes { background: var(--me); }
+.ag-bar.noreply { border: 1px dashed var(--text-3); }
+.ag-bar.maybe { border: 1px dashed var(--accent); }
+.ag-bar.work { border: 1px dashed color-mix(in srgb, var(--me) 70%, transparent); }
+.ag-work .ag-s { color: color-mix(in srgb, var(--me) 75%, var(--text)); }
+.ag-b { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ag-s { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.ag-why { font-size: 11.5px; color: var(--text-3); }
+.ag-why .link-btn { font: inherit; padding: 0; }
+.ag-why .ag-new { color: var(--accent); font-weight: 650; }
+.ag-more { opacity: 0; }
+.ag-row:hover .ag-more, .ag-more:focus-visible, .ag-more[aria-expanded="true"] { opacity: 1; }
+.ag-skip { margin-top: 8px; font-size: 12px; }
+.td-meeting { display: block; height: auto; }
+/* Your day's meeting card in the right panel: Calendar's card, laid in the panel rather than floating beside a block. */
+.td-meeting .detail { position: static; inset: auto; width: auto; max-width: none; max-height: none; box-shadow: none; border: 0; border-radius: 0; margin: 0; }

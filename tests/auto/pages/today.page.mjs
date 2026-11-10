@@ -96,13 +96,28 @@ export class TodayPage extends AppPage {
     return this.main.getByRole('region', { name: 'Your day', exact: true })
   }
 
+  /** A line of Your day ("where you'll be"), by its meeting's subject. */
   dayRow(subject) {
-    return this.yourDay.getByRole('group', { name: subject, exact: true })
+    return this.yourDay.getByRole('listitem', { name: subject, exact: true })
   }
 
-  /** A button of a row of Your day ("Prepare", "Record when it starts"); a text anywhere in Your day. */
+  /** A link of a line of Your day (its minutes, its prep); a text anywhere in Your day. */
   dayButton(subject, name) {
     return this.dayRow(subject).getByRole('button', { name, exact: true })
+  }
+
+  /** A line's menu (⋯, as a person does: over the line): Calendar's menu for its meeting. */
+  async dayMenu(subject) {
+    await this.dayRow(subject).hover()
+    await this.dayRow(subject).getByRole('button', { name: `${subject} — actions`, exact: true }).click()
+    const menu = this.page.getByRole('menu')
+    await menu.waitFor()
+    return menu
+  }
+
+  /** An item of a line's menu, run: "Prepare", "Record when it starts", "Don't record", …. */
+  async dayMenuItem(subject, name) {
+    await (await this.dayMenu(subject)).getByRole('menuitem', { name, exact: true }).click()
   }
 
   daySays(text) {
@@ -116,15 +131,15 @@ export class TodayPage extends AppPage {
   /** What Your day lists, in order: each row's subject and the line now ("Now 01:43 PM"). */
   async dayLines() {
     const names = []
-    for (const l of await this.yourDay.getByRole('group').or(this.nowLine).all()) names.push(await l.getAttribute('aria-label'))
-    return names
+    for (const l of await this.yourDay.getByRole('listitem').or(this.nowLine).all()) names.push(await l.getAttribute('aria-label'))
+    return names.filter((n) => !n.startsWith('Your work: '))
   }
 
   /** Your day's rows, by their subjects, in order. */
   async dayRows() {
     const names = []
-    for (const l of await this.yourDay.getByRole('group').all()) names.push(await l.getAttribute('aria-label'))
-    return names
+    for (const l of await this.yourDay.getByRole('listitem').all()) names.push(await l.getAttribute('aria-label'))
+    return names.filter((n) => !n.startsWith('Your work: '))
   }
 
   /** The line now's colour (its time and its rule). */

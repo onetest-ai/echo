@@ -36,17 +36,16 @@ async function openToday(page) {
 }
 
 scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, set a meeting to record and change your mind', () => {
-  test('1 · Your day lists only the meetings the user accepted, in time order; the greeting counts them', covers('today/TC-001', 'F-TODAY-02', 'F-TODAY-01'), async ({ page }) => {
+  test("1 · Your day lists where you'll be in time order — one not answered says so; the greeting counts the ones you go to", covers('today/TC-001', 'F-TODAY-02', 'F-TODAY-01'), async ({ page }) => {
     const s = data.set.s02
     const today = await openToday(page)
     await expect(today.section(data.text.shell.yourDay)).toBeVisible()
-    expect(await today.dayRows()).toEqual(s.accepted)
-    await expect(today.dayRow(s.notAccepted)).toHaveCount(0)
-    await expect(today.daySays(s.notAccepted)).toHaveCount(0)
+    expect(await today.dayRows()).toEqual(s.dayList)
+    await expect(today.dayRow(s.notAccepted)).toContainText(s.noReplySays)
     await expect(today.textStarting(await today.longDay())).toContainText(fill(data.text.today.meetings, { n: s.accepted.length }))
   })
 
-  test('2 · The line now sits between the last past meeting and the first coming one, in the recording colour (coral); the coming ones offer Prepare and Record when it starts', covers('today/TC-002', 'F-TODAY-02'), async ({ page }) => {
+  test("2 · The line now sits between the last past meeting and the first coming one, in the recording colour (coral); a coming one's menu offers Prepare and Record when it starts", covers('today/TC-002', 'F-TODAY-02'), async ({ page }) => {
     const s = data.set.s02
     const t = data.text.today
     const today = await openToday(page)
@@ -58,9 +57,13 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     expect(lines[at - 1]).toBe(s.lastPast)
     expect(lines.slice(at + 1)).toEqual(s.coming)
     expect(await today.nowColour()).toBe(await today.themeColour(data.text.cal.colours.now))
-    for (const subject of s.coming) {
-      await expect(today.dayButton(subject, t.prepare)).toBeVisible()
-      await expect(today.dayButton(subject, t.record)).toBeVisible()
+    for (const subject of s.comingGoing) {
+      const menu = await today.dayMenu(subject)
+      await expect(menu.getByRole('menuitem', { name: t.prepare, exact: true })).toBeVisible()
+      await expect(menu.getByRole('menuitem', { name: t.record, exact: true })).toBeVisible()
+      await page.keyboard.press(data.text.shell.keys.escape)
+      await today.section(data.text.shell.yourDay).click({ position: { x: 4, y: 4 } })
+      await expect(page.getByRole('menu')).toHaveCount(0)
     }
   })
 
@@ -140,11 +143,12 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
     const today = new TodayPage(page, data)
     try {
       await openToday(page)
-      await expect(today.dayButton(x.subject, t.prepare)).toBeVisible()
-      await today.dayButton(x.subject, t.record).click()
-      await expect(today.dayButton(x.subject, t.dontRecord)).toBeVisible()
-      await expect(today.dayButton(x.other, t.record)).toBeVisible()
+      await today.dayMenuItem(x.subject, t.record)
       await expect.poll(scheduled).toEqual([x.subject])
+      await expect((await today.dayMenu(x.subject)).getByRole('menuitem', { name: t.dontRecord, exact: true })).toBeVisible()
+      await today.section(data.text.shell.yourDay).click({ position: { x: 4, y: 4 } })
+      await expect((await today.dayMenu(x.other)).getByRole('menuitem', { name: t.record, exact: true })).toBeVisible()
+      await today.section(data.text.shell.yourDay).click({ position: { x: 4, y: 4 } })
 
       const cal = new CalendarPage(page, data)
       await cal.open(c.routes.day)
@@ -161,7 +165,7 @@ scenario(test, 'S-02', 'Plan the afternoon: what\'s left today, the calendar, se
       // Teardown: the meeting no longer set to record, even when a check failed: Don't record on Today, as a person does.
       if (scheduled().length) {
         await openToday(page)
-        await today.dayButton(x.subject, t.dontRecord).click()
+        await today.dayMenuItem(x.subject, t.dontRecord)
         await expect.poll(scheduled).toEqual([])
       }
     }

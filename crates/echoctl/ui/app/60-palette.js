@@ -69,7 +69,8 @@ function paletteItems(target) {
       add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
       add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
     }
-    for (const x of d.day || []) {
+    // The meetings you go to (Your day also lists the ones not answered and the maybes).
+    for (const x of (d.day || []).filter((x) => x.response !== 'notResponded' && x.response !== 'tentativelyAccepted')) {
       const end = x.end ? new Date(x.end) : x.start ? new Date(x.start) : null
       if (!x.prep || x.prep.writing || (end && end < now)) continue
       const name = x.subject || x.title || 'meeting'

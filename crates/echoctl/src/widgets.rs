@@ -87,7 +87,9 @@ fn day() -> Value {
 /// counts until it starts.
 fn next(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> Value {
     let at = |v: &Value, k: &str| v[k].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&chrono::Utc));
-    let n = day.iter().find(|x| x["kind"] == "meeting" && at(x, "end").or_else(|| at(x, "start")).is_some_and(|t| t > now));
+    // One the user goes to: not one they haven't answered, nor a maybe.
+    let going = |x: &Value| !matches!(x["response"].as_str(), Some("notResponded" | "tentativelyAccepted"));
+    let n = day.iter().find(|x| x["kind"] == "meeting" && going(x) && at(x, "end").or_else(|| at(x, "start")).is_some_and(|t| t > now));
     json!({ "next": n })
 }
 
@@ -146,6 +148,9 @@ mod tests {
         assert_eq!(next(&day, t(10, 30))["next"]["subject"], "Globex review");
         assert_eq!(next(&day, t(11, 30))["next"]["subject"], "Globex review", "one under way counts");
         assert!(next(&day, t(12, 30))["next"].is_null());
+        // One not answered, or a maybe, isn't where you'll be next.
+        let unsure = vec![json!({"kind": "meeting", "subject": "Ops", "start": at(11), "end": at(12), "response": "notResponded"}), json!({"kind": "meeting", "subject": "Lunch", "start": at(12), "end": at(13), "response": "tentativelyAccepted"}), json!({"kind": "meeting", "subject": "Demo", "start": at(13), "end": at(14), "response": "accepted"})];
+        assert_eq!(next(&unsure, t(10, 0))["next"]["subject"], "Demo");
     }
 
     #[test]
