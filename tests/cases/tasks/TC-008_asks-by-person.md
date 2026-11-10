@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, asks]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-008: Asks lists, by person, what they owe late

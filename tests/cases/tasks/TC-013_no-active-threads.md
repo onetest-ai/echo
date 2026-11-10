@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, empty]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-013: With no active thread Tasks offers Open Threads

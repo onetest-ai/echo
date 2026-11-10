@@ -32,6 +32,15 @@ export class TodayPage extends AppPage {
     this.askBar = page.getByRole('status', { name: t.needs.yolo })
     this.yoloWorking = this.askBar.getByText(t.needs.working)
     this.dismiss = this.askBar.getByRole('button', { name: t.needs.dismiss })
+
+    // Close this task? (a task of My work's Close button)
+    this.closeDialog = page.getByRole('dialog', { name: 'Close this task?' })
+    this.closeNote = this.closeDialog.getByLabel(/^A comment, if you like/)
+    this.closeIt = this.closeDialog.getByRole('button', { name: 'Close it', exact: true })
+    this.closeCancel = this.closeDialog.getByRole('button', { name: 'Cancel', exact: true })
+    // The Claude dialog's chosen skill: its cross, and the list it opens.
+    this.noSkill = this.claudeDialog.getByRole('button', { name: 'No skill — just the task' })
+    this.skills = this.claudeDialog.getByRole('listbox')
   }
 
   /** A task of My work's ✦ button, by the task's title. */

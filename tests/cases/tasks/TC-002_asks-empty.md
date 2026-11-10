@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, asks]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-002: Asks says nobody owes anything when nothing is late, due soon or quiet

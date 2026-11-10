@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-001: Tasks sorts the open tasks into piles with counts and folds the others

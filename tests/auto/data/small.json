@@ -496,5 +496,61 @@
       "org": "Contoso",
       "orgId": "contoso"
     }
+  },
+  "tasks": {
+    "acme": {
+      "project": "acme-rollout",
+      "id": "T001",
+      "title": "Send Acme the SSO checklist",
+      "story": "SSO for the Berlin pilot",
+      "thread": "Acme rollout",
+      "option": "Acme rollout · 2",
+      "path": "Acme rollout › SSO for the Berlin pilot",
+      "owner": "Sam Rivera"
+    },
+    "globex": {
+      "project": "globex-pilot",
+      "id": "T001",
+      "title": "Draft the Globex pilot plan",
+      "story": "Pilot plan",
+      "thread": "Globex pilot",
+      "option": "Globex pilot · 1",
+      "path": "Globex pilot › Pilot plan",
+      "owner": "Sam Rivera",
+      "due": "no date",
+      "status": "● to do"
+    },
+    "other": {
+      "project": "acme-rollout",
+      "id": "T002",
+      "title": "Answer the security questionnaire",
+      "owner": "Omar Haddad",
+      "thread": "Acme rollout",
+      "handedBy": "Me"
+    },
+    "threads": [
+      "All threads",
+      "Acme rollout · 2",
+      "Globex pilot · 1"
+    ],
+    "active": 2,
+    "skillTask": {
+      "project": "acme-rollout",
+      "parent": "S001",
+      "title": "Write the follow-up mail to Acme",
+      "owner": "Sam Rivera",
+      "skill": "Use when a task is to write a follow-up mail"
+    },
+    "fold": {
+      "project": "acme-rollout",
+      "parent": "S001",
+      "title": "Fold test {n}",
+      "owner": "Sam Rivera",
+      "total": 7,
+      "shown": 6
+    },
+    "close": {
+      "note": "Sent the checklist by email"
+    }
   }
 }

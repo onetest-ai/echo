@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, filters, mode]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-009: Who does it filters the piles after a task is set to By hand

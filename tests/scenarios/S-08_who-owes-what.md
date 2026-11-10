@@ -18,6 +18,7 @@ cases:
   - tests/cases/tasks/TC-012_close-from-today.md
   - tests/cases/tasks/TC-013_no-active-threads.md
   - tests/cases/tasks/TC-014_no-open-tasks.md
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # S-08: Who owes what: the piles, the filters, a card, closing a task, Claude's dialog, Asks

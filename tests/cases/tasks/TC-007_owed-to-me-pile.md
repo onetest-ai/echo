@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, piles]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-007: A task handed over by Sam goes to Owed to me and leaves Others

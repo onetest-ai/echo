@@ -8,6 +8,7 @@ module: tasks
 run: agent
 platform: any
 tags: [tasks, order]
+auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
 # TC-006: Order sorts by due date with late first, by quiet time, or by thread

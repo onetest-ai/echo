@@ -23,7 +23,8 @@ function othersPile(all, key) {
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
-  return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
+  const on = S.pj.node === c.id && S.pj.sel === c.project
+  return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${on ? ' on' : ''}"${on ? ' aria-current="true"' : ''} data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
     <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
@@ -53,7 +54,7 @@ function tasksView() {
     const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
-    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
+    return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
   const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
@@ -71,7 +72,7 @@ function asksPanel() {
     return `${day} · ${n.people <= 1 ? '1:1' : esc(n.subject || 'a meeting')}`
   }
   const why = (c) => c.why === 'late' ? `was due ${esc(fmtDay(c.due))}` : c.why === 'due' ? `due ${esc(fmtDay(c.due))}` : c.why === 'quiet' ? `quiet ${c.quiet} days` : `waiting${c.waiting_for && c.waiting_for.what ? ` · ${esc(c.waiting_for.what)}` : ''}`
-  const rows = asks.map((a) => `<div class="ask"><div class="ask-h"><b>${esc(a.who)}</b><span>${when(a.next)}</span></div>${a.items.map((c) => `<button class="ask-i" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">${esc(c.title)} <span class="${c.why === 'late' ? 'late' : ''}">— ${why(c)}</span></button>`).join('')}</div>`).join('')
+  const rows = asks.map((a) => `<div class="ask" role="group" aria-label="${esc(a.who)}"><div class="ask-h"><b>${esc(a.who)}</b><span>${when(a.next)}</span></div>${a.items.map((c) => `<button class="ask-i" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">${esc(c.title)} <span class="${c.why === 'late' ? 'late' : ''}">— ${why(c)}</span></button>`).join('')}</div>`).join('')
   return `<div class="asks"><div class="asks-h"><b>Asks · by person</b><span>next time you meet</span></div>${rows || '<p class="set-sub">Nothing to chase: nobody owes you anything late, due soon or gone quiet.</p>'}<p class="asks-foot">Computed from what went quiet, what's due and what's owed — never a model's guess.</p></div>`
 }
 PANEL_VIEWS.push({ id: 'asks', label: 'Asks', icon: ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.3M12 14v.01"/>'), area: 'right', when: () => S.view === 'tasks', render: asksPanel })
@@ -468,7 +469,7 @@ function clientCalls(cd) {
 function clientTasks(cd) {
   const cols = TASK_PILES.map(([k, label]) => {
     const all = (cd.work.piles || {})[k] || []
-    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
+    return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
   }).join('')
   return `<div class="tk-cols">${cols}</div>${othersPile((cd.work.piles || {}).others || [], 'client-others')}`
 }
