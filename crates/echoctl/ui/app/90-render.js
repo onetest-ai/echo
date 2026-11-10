@@ -159,8 +159,12 @@ function renderNow() {
     drawGraph()
     drawPeople()
   } else if (S.view === 'today') {
-    const rows = $('.td-rows'), keep = rows ? rows.scrollTop : null
+    // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep.
+    const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
     patch(primary, `<main class="main">${todayView()}</main>`)
+    // Today's view height, on the element (not in the HTML, which would then change with the window and be redrawn).
+    const td = $('.td')
+    if (td && S.tdView) td.style.setProperty('--td-view', `${S.tdView}px`)
     // Your day opens on now: the line at the top with what comes next under it (one row of the past above it);
     // drawn again, it stays where it was scrolled.
     const r = $('.td-rows'), now = r && r.querySelector('.td-now')

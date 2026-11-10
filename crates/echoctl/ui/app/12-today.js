@@ -104,7 +104,7 @@ function todayView() {
     ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map((l) => lineHtml(l, cols - 1)).join('')}</div></div>`
     : plan.lines.map((l) => lineHtml(l)).join('')
   setTimeout(() => { todayMoreCue(); twRefocus() })
-  return `<div class="td${S.tdEdit ? ' td-editing' : ''}"${S.tdView ? ` style="--td-view: ${S.tdView}px"` : ''}>${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
+  return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
