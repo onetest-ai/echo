@@ -22,6 +22,7 @@ export class CallsPage extends AppPage {
 
   async openCall(title, tab) {
     await this.call(title).click()
+    await this.list.getByRole('option', { name: new RegExp(literal(title)), selected: true }).waitFor()
     if (tab) await this.tab(tab).click()
   }
 

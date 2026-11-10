@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, criteria]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-013: A story's criteria are ticked in "Done when · m of n"; a risk's likelihood and impact are set

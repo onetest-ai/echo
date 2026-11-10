@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, review, suggestions]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-009: To review: No turns a suggestion down and both items stay

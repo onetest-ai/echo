@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, tree]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-007: The tree shows workstream, stories with criteria, tasks, and questions, decisions and risks with their statuses

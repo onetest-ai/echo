@@ -10,6 +10,7 @@ platform: macos
 data: standard
 ai: virtual
 tags: [prep, cli, virtual-model]
+auto: [tests/auto/specs/S-33.spec.mjs]
 ---
 
 # TC-015: echoctl prep --write on the virtual model sends the facts in one request and writes the prep with the model's In short and picks

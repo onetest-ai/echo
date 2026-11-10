@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, cross-thread]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-017: "Link to an item in another thread" finds an open item and links it as the same work; Unlink undoes it

@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, top-bar, layout]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-017: The top bar holds the sidebar switch, the Record pill, the account chip and the Inbox on one line, overlapping nowhere down to the narrowest window

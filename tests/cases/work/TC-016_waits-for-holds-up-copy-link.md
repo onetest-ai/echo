@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, links]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-016: Waits for / Holds up link to the other item; Copy link carries echo://task/<thread>/<id>

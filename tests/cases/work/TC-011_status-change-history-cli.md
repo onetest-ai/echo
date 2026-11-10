@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, state]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-011: Details → Status changes the state; History says "you set state · undo" and the CLI agrees

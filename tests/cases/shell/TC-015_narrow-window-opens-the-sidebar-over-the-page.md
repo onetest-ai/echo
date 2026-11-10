@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, responsive]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-015: Under 900 px the sidebar opens over the page and Escape closes it

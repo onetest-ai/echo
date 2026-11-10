@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, activity-bar]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-001: The activity bar lists Today, Calls, Calendar, Threads, Tasks and Settings

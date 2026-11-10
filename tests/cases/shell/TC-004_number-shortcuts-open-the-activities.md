@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, keyboard]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-004: ⌘1 to ⌘5 open Today, Calls, Calendar, Threads and Tasks

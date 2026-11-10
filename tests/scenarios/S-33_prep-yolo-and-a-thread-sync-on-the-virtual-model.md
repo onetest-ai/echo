@@ -8,6 +8,7 @@ cases:
   - tests/cases/prep/TC-015_prep-write-on-the-virtual-model-writes-its-summary.md
   - tests/cases/tasks/TC-026_yolo-on-the-virtual-model-does-the-task-and-says-so-above-it.md
   - tests/cases/work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md
+auto: [tests/auto/specs/S-33.spec.mjs]
 ---
 
 # S-33: Prep, Yolo and a thread's sync on the virtual model

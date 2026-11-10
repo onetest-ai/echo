@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, columns]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-006: A column's menu renames it, sets a limit, hides or deletes it; + Column adds one; "N hidden" shows it again

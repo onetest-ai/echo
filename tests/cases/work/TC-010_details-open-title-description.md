@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-010: A card opens the Details drawer; the title and the description are edited in place

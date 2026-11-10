@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, palette]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-006: ⌘K on an open call lists that call's actions first

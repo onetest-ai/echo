@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, panels]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-012: The right panel is closed at every window open and the Inbox button does not restore its last tab

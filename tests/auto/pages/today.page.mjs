@@ -1,5 +1,7 @@
-// Today: Needs you now (its items; ✦ and My work's Claude dialog; I'll do it and Won't do from ⌘K) and Asks.
+// Today: Needs you now (its items; ✦ and My work's Claude dialog; I'll do it and Won't do from ⌘K), Asks, and My work ·
+// this week (a task's ✦, Yolo and its outcome above the list).
 import { AppPage } from './app.page.mjs'
+import { literal } from '../support/data.mjs'
 
 export class TodayPage extends AppPage {
   constructor(page, data) {
@@ -25,8 +27,26 @@ export class TodayPage extends AppPage {
     this.claudeSkill = this.claudeDialog.getByLabel('Skill')
     this.claudeWorkOnIt = this.claudeDialog.getByRole('button', { name: t.needs.workOnIt })
     this.claudeYolo = this.claudeDialog.getByRole('button', { name: t.needs.yolo })
-    // The last Yolo's outcome, above My work.
-    this.askBar = page.getByRole('status', { name: 'Yolo' })
+    this.claudeCancel = this.claudeDialog.getByRole('button', { name: t.needs.cancel })
+    // The last Yolo's outcome, above My work: Claude is on it, then what it says, with Dismiss.
+    this.askBar = page.getByRole('status', { name: t.needs.yolo })
+    this.yoloWorking = this.askBar.getByText(t.needs.working)
+    this.dismiss = this.askBar.getByRole('button', { name: t.needs.dismiss })
+  }
+
+  /** A task of My work's ✦ button, by the task's title. */
+  claudeFor(title) {
+    return this.page.getByRole('button', { name: `Claude: “${title}”…`, exact: true })
+  }
+
+  /** A task of My work's Close button: there while the task is listed. */
+  closeFor(title) {
+    return this.page.getByRole('button', { name: `Close “${title}”…`, exact: true })
+  }
+
+  /** A skill the Claude dialog offers, by its name. */
+  skill(name) {
+    return this.claudeDialog.getByRole('option', { name: new RegExp(`^${literal(name)}\\b`) })
   }
 
   /** Today, once Needs you now is drawn (its items loaded: ⌘K lists them only then). */

@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, details, mode]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-014: Details → Who does it switches Claude can / By hand and the CLI shows the mode

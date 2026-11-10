@@ -133,11 +133,12 @@ function paletteDraw() {
   PAL.items = Palette.grouped(Palette.rank(PAL.query.trim() ? all : all.filter((x) => x.group !== 'Calls'), PAL.query))
   if (PAL.sel >= PAL.items.length) PAL.sel = Math.max(0, PAL.items.length - 1)
   let group = null
+  // Each group's items in a group named by its head.
   $('#pal-list').innerHTML = PAL.items.map((it, i) => {
-    const head = it.group !== group ? `<div class="pal-group">${esc(it.group)}</div>` : ''
+    const head = it.group !== group ? `${group === null ? '' : '</div>'}<div role="group" aria-label="${esc(it.group)}"><div class="pal-group">${esc(it.group)}</div>` : ''
     group = it.group
     return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
-  }).join('') || '<div class="pal-empty">Nothing matches.</div>'
+  }).join('') + (group === null ? '' : '</div>') || '<div class="pal-empty">Nothing matches.</div>'
   const on = $('#pal-list .pal-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
 }
 function paletteRun(i) {
