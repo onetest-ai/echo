@@ -14,7 +14,9 @@ The map is split so features of different parts of the app can be worked on in p
                                               tests/reports/feature-map.html)
   tests/tools/feature-map.py changes [BASE]   what this branch changed in the map against BASE (default main): the
                                               features added, changed and removed — the PR's "Map:" line — and a
-                                              warning when app code changed but the map didn't (exit 1)
+                                              warning when app code changed but the map didn't, and the
+                                              cases or scenarios that still quote a text the branch took out
+                                              of the app (a renamed label, a removed message) (exit 1)
 
 Coverage: a case lists the features it checks in its frontmatter (`requirements: [F-CALLS-01, …]`); a scenario lists
 its cases (`cases:`). A feature is covered by agent cases, person-run cases, or none.
@@ -305,6 +307,33 @@ kpis();draw();
 APP_CODE = ("crates/", "plugin/")
 
 
+QUOTED = re.compile(r"""'([^'\\\n]{4,80})'|"([^"\\\n]{4,80})"|`([^`$\\\n]{4,80})`|>([^<>{}$\n]{4,80})<""")
+
+
+def gone_texts(diff, still_there):
+    """Texts the window, CLI or plugin showed that this diff took out: a quoted phrase (two words or more) on a removed
+    line that no line of the app holds any more (`still_there(text)` false)."""
+    added = "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
+    out = set()
+    for line in diff.splitlines():
+        if not line.startswith("-") or line.startswith("---"):
+            continue
+        for m in QUOTED.finditer(line[1:]):
+            t = next(g for g in m.groups() if g is not None).strip()
+            if re.fullmatch(r"[A-Z][a-z']*( [A-Za-z'’,.…-]+)+", t) and t not in added and not still_there(t):
+                out.add(t)
+    return sorted(out)
+
+
+def quoting(texts):
+    """Each case or scenario line that quotes one of `texts`: (file, line number, text)."""
+    hits = []
+    for f in sorted(list((TESTS / "cases").rglob("*.md")) + list((TESTS / "scenarios").glob("*.md")) + [TESTS / "app_profile.md"]):
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            hits += [(f.relative_to(TESTS.parent), n, t) for t in texts if t in line]
+    return hits
+
+
 def changes(base):
     """The map's features on BASE vs the working tree, and whether app code changed without the map."""
     import subprocess
@@ -332,6 +361,13 @@ def changes(base):
     parts = [f"added {ids(added)}" if added else "", f"changed {ids(changed)}" if changed else "", f"removed {ids(removed)}" if removed else ""]
     line = "; ".join(p for p in parts if p) or "no change"
     print(f"Map: {line}")
+    still = lambda t: subprocess.run(["git", "grep", "-qF", t, "--", *APP_CODE], cwd=root).returncode == 0
+    stale = quoting(gone_texts(git("diff", "-U0", merge_base, "--", *APP_CODE), still))
+    for f, n, t in stale:
+        print(f"{f}:{n}: still says \"{t}\", which no line of the app holds any more")
+    if stale:
+        print("Update those cases and scenarios in this branch, or say in the PR why the app still shows the text (built from parts).")
+        return 1
     if code and not touched_map:
         print(f"warning: {len(code)} app file(s) changed ({', '.join(code[:5])}{' …' if len(code) > 5 else ''}) but tests/feature-map/ didn't.")
         print("Update the features this changes, or say in the PR why the behaviour doesn't change (\"Map: no behaviour change — <why>\").")
