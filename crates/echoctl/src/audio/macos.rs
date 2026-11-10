@@ -162,8 +162,8 @@ static LAST: Shared<Vec<AudioProcess>> = Shared::new();
 /// How old an answer may be. Call detection, the tap and the mic each ask several times a second; each request is
 /// work in coreaudiod, on the audio path the call app uses too (measured: ~0.55% of coreaudiod's CPU per check a second).
 const FRESH: Duration = Duration::from_millis(750);
-/// How long a caller waits for a new answer before it takes the last one: coreaudiod can stall inside a request, and
-/// the watcher's loop (call detection) must not stall with it.
+/// How long a query is waited for, counted from its start, before callers take the last answer: coreaudiod can stall
+/// inside a request, and the watcher's loop (call detection) must not stall with it.
 const ANSWER_WITHIN: Duration = Duration::from_millis(500);
 
 /// The app's audio processes: one answer every `FRESH` at most, for all callers. A check lists the process objects
@@ -180,19 +180,21 @@ struct Shared<T> {
 
 struct Asked<T> {
     last: Option<(Instant, TargetApp, T)>,
-    asking: bool,
+    /// The query running, since when.
+    asking: Option<Instant>,
     error: Option<String>,
 }
 
 impl<T> Shared<T> {
     const fn new() -> Self {
-        Shared { state: std::sync::Mutex::new(Asked { last: None, asking: false, error: None }), answered: std::sync::Condvar::new() }
+        Shared { state: std::sync::Mutex::new(Asked { last: None, asking: None, error: None }), answered: std::sync::Condvar::new() }
     }
 }
 
 /// `slot`'s answer for `app` while it is younger than `FRESH`, else a new one from `query`, kept for the next caller.
-/// `query` runs on a thread of its own, one at a time: a caller waits for it at most `within`, then takes the last
-/// answer about `app` (none yet: an error), and a query that hangs delays no one, nor is asked again until it returns.
+/// `query` runs on a thread of its own, one at a time: callers wait for it until `within` after its start, then take
+/// the last answer about `app` (none yet: an error); a query that hangs past that delays no caller, nor is asked
+/// again until it returns.
 fn shared<T: Clone + Send + 'static>(
     slot: &'static Shared<T>,
     app: TargetApp,
@@ -207,23 +209,28 @@ fn shared<T: Clone + Send + 'static>(
             return Ok(v.clone());
         }
     }
-    if !s.asking {
-        s.asking = true;
-        std::thread::spawn(move || {
+    if s.asking.is_none() {
+        s.asking = Some(Instant::now());
+        let asked = std::thread::Builder::new().name("audio-processes".into()).spawn(move || {
             let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| query(app)))
                 .unwrap_or_else(|_| Err(anyhow!("the process query panicked")));
             let mut s = lock();
-            s.asking = false;
+            s.asking = None;
             match answer {
                 Ok(v) => (s.last, s.error) = (Some((now, app, v)), None),
                 Err(e) => s.error = Some(format!("{e:#}")),
             }
             slot.answered.notify_all();
         });
+        if let Err(e) = asked {
+            s.asking = None;
+            return Err(anyhow!("can't ask Core Audio: {e}"));
+        }
     }
-    let (s, _) = slot.answered.wait_timeout_while(s, within, |s| s.asking).unwrap_or_else(|e| e.into_inner());
+    let left = within.saturating_sub(s.asking.map_or(Duration::ZERO, |at| at.elapsed()));
+    let (s, _) = slot.answered.wait_timeout_while(s, left, |s| s.asking.is_some()).unwrap_or_else(|e| e.into_inner());
     match (&s.error, &s.last) {
-        (Some(e), _) if !s.asking => Err(anyhow!("{e}")),
+        (Some(e), _) if s.asking.is_none() => Err(anyhow!("{e}")),
         (_, Some((_, a, v))) if *a == app => Ok(v.clone()),
         _ => Err(anyhow!("Core Audio didn't answer in time")),
     }
@@ -620,9 +627,11 @@ mod tests {
         let started = Instant::now();
         // The watcher's own query hangs: it gets the last answer once its wait is up.
         assert_eq!(shared(&LAST, TargetApp::Teams, t0 + FRESH, Duration::from_millis(100), hangs).unwrap(), 1);
-        // Another caller meanwhile (the remote track's supervisor): the same, and no second query.
+        // Another caller meanwhile (the remote track's supervisor): the last answer at once, and no second query.
+        let later = Instant::now();
         assert_eq!(shared(&LAST, TargetApp::Teams, t0 + FRESH * 2, Duration::from_millis(100), count(3)).unwrap(), 1);
-        assert!(started.elapsed() < Duration::from_secs(2), "no caller waited on the hung query");
+        assert!(later.elapsed() < Duration::from_millis(50), "a query hung past its wait delays no one");
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(ASKED.load(Ordering::SeqCst), 2, "the second caller didn't ask again");
         // Once it returns, its answer is the one shared while fresh.
         release.send(()).unwrap();
