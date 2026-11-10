@@ -473,7 +473,8 @@ document.addEventListener('click', (e) => {
     }
     case 'found-reject': { const card = b.closest('.found-card'); send({ cmd: 'project', op: 'found_reject', key: card.dataset.key }); card.remove(); return }
     case 'goto': return go(`project/${d.id}/brief`)
-    case 'goto-node': { S.pj.node = d.node; S.pj.wantNode = d.node; S.pj.inline = null; go(`project/${d.id}/work`); Layout.show('work-item', panelViews()); return layoutChanged() }
+    // Work's tab first: the item's Details panel exists only on Work, and the route changes on a later hashchange (#314).
+    case 'goto-node': { S.pj.node = d.node; S.pj.wantNode = d.node; S.pj.inline = null; S.pj.tab = 'work'; go(`project/${d.id}/work`); Layout.show('work-item', panelViews()); return layoutChanged() }
     case 'tab': return go(`project/${S.pj.sel}/${d.tabId}`)
     case 'toggle-closed': S.pj.showClosed = !S.pj.showClosed; return render()
     case 'fold': {
