@@ -240,9 +240,13 @@ function placeDetail() {
   const pane = (ev.closest('#calgrid') || ev.closest('#r-primary') || document.body).getBoundingClientRect()
   const r = ev.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight, gap = 8, pad = 12
   const minX = pane.left + pad, maxX = pane.right - pad - w
-  const left = r.right + gap <= maxX ? r.right + gap : r.left - gap - w >= minX ? r.left - gap - w : Math.max(minX, maxX)
+  // A grid narrower than the card: kept inside the window instead.
+  const left = maxX < minX ? Math.max(pad, Math.min(r.right - w, window.innerWidth - pad - w))
+    : r.right + gap <= maxX ? r.right + gap : r.left - gap - w >= minX ? r.left - gap - w : maxX
   const bottom = Math.min(pane.bottom, window.innerHeight)
-  const top = Math.min(Math.max(pane.top + pad, r.top), Math.max(pane.top + pad, bottom - h - pad))
+  let top = Math.min(Math.max(pane.top + pad, r.top), Math.max(pane.top + pad, bottom - h - pad))
+  // A grid shorter than the card (a short window): its bottom kept inside the window, as far up as it must.
+  if (top + h > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - h - pad)
   card.style.left = `${left}px`
   card.style.right = 'auto'
   card.style.top = `${top}px`
