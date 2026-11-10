@@ -6,7 +6,7 @@
 set -euo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-usage="usage: serve.sh up <dir> <port> [--set small|standard|hostile] [--now TIME] | down <dir>"
+usage="usage: serve.sh up <dir> <port> [--set small|standard|hostile] [--ai fake|local|virtual] [--now TIME] | down <dir>"
 cmd="${1:?$usage}"
 dir="${2:?$usage}"
 
@@ -33,6 +33,8 @@ case "$cmd" in
     ;;
   down)
     [ -f "$dir/pid" ] && kill "$(cat "$dir/pid")" 2> /dev/null || true
+    # `--ai virtual`: the virtual model started with the data.
+    [ -f "$dir/model/pid" ] && kill "$(cat "$dir/model/pid")" 2> /dev/null || true
     echo "stopped $dir"
     ;;
   *) echo "$usage" >&2; exit 1 ;;

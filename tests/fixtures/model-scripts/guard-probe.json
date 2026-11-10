@@ -1,0 +1,12 @@
+{"rules": [
+ {"when": ["/echo:process-call"],
+  "vars": {"dir": "<command-args>(\\S+)", "calls": "<command-args>(\\S+)/[^/\\s]+\\s"},
+  "steps": [
+   {"tool": "Read", "input": {"file_path": "{calls}/OTHER_CALL/transcript.md"}},
+   {"tool": "Edit", "input": {"file_path": "{dir}/my-notes.md", "old_string": "a", "new_string": "b"}},
+   {"tool": "Bash", "input": {"command": "echoctl quit", "description": "Quit Echo"}},
+   {"tool": "Bash", "input": {"command": "cat /etc/hosts", "description": "Read a system file"}},
+   {"tool": "Write", "input": {"file_path": "{calls}/stolen.md", "content": "copied"}},
+   {"tool": "Write", "input": {"file_path": "{dir}/notes.md", "content": "# Minutes\n\n## Summary\n- Written after five refused tries.\n"}},
+   {"text": "Minutes written; some steps were refused."}]}
+]}
