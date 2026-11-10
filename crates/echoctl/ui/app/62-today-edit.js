@@ -35,19 +35,39 @@ function dropSide(r, x, y) {
 }
 // end of the drop side block
 
-/** A change to Today's layout, then Today read again. */
+/** A change to Today's layout; its reply refreshes Today (window.echo.refresh) once it is written. */
 function todayLayoutDo(body) {
   send({ cmd: 'today_layout', ...body })
-  setTimeout(() => loadToday().then(render), 250)
+}
+
+/** The size the panel offers a widget: the one picked if it takes it, else M, else its first. */
+function twPickSize(w) {
+  const sizes = (w && w.sizes) || []
+  return sizes.includes(S.tdPickSize) ? S.tdPickSize : sizes.includes('M') ? 'M' : sizes[0]
 }
 
 async function todayEditOpen() {
   S.tdEdit = true
+  // As the right panel was, for Done to put it back.
+  const was = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay).right
+  S.tdEditWas = { open: !!(was && was.shown), active: was && was.active, overlay: S.overlay }
   if (!S.tdCatalog) { try { S.tdCatalog = await get('api/widgets') } catch (e) { S.tdCatalog = [] } }
   if (!S.tdPick) S.tdPick = (S.tdCatalog[0] || {}).id
   const known = panelViews()
   if (Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) S.overlay = true
   Layout.show('add-widget', known)
+  layoutChanged()
+}
+
+/** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
+function todayEditDone() {
+  S.tdEdit = false
+  const was = S.tdEditWas || { open: true, overlay: S.overlay }
+  const known = panelViews()
+  if (was.active && known.some((v) => v.id === was.active)) Layout.show(was.active, known)
+  if (!was.open) Layout.close('right')
+  S.overlay = was.overlay
+  S.tdEditWas = null
   layoutChanged()
 }
 
@@ -62,13 +82,13 @@ function addWidgetPanel() {
   const w = all.find((x) => x.id === S.tdPick)
   let pick = ''
   if (w) {
-    const size = (w.sizes || []).includes(S.tdPickSize) ? S.tdPickSize : (w.sizes || []).includes('M') ? 'M' : (w.sizes || [])[0]
+    const size = twPickSize(w)
     const px = { S: 170, M: 280, L: 380 }[size] || 280
     const html = (S.tdParts || {})[w.id]
     const pv = html ? `<div class="tw-pv-in" inert style="width:${px * 2}px">${html}</div>` : `<div class="set-sub tw-pv-none">${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</div>`
     const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}">${z}</button>`).join('')
     const note = `${size} · ${TW_SIZES[size]} column${TW_SIZES[size] === 1 ? '' : 's'}${w.height === 'fill' ? ' · fills its column' : ''}`
-    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${size}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
+    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
   }
   return `<div class="tw-panel"><div class="tw-top"><input class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div><div class="tw-list" role="list" aria-label="Widgets">${rows}</div>${pick}</div>`
 }
@@ -86,7 +106,7 @@ document.addEventListener('click', (e) => {
   if (!t) return
   const d = t.dataset
   if (d.twEdit) return todayEditOpen()
-  if (d.twDone) { S.tdEdit = false; return layoutChanged() }
+  if (d.twDone) return todayEditDone()
   if (d.twReset) return todayLayoutDo({ op: 'reset' })
   if (d.twSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twSize })
   if (d.twRemove) return todayLayoutDo({ op: 'remove', widget: d.twRemove })
@@ -109,7 +129,8 @@ document.addEventListener('dragstart', (e) => {
   if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
   const page = e.target.closest('.tw[data-tw]'), cat = e.target.closest('[data-tw-drag]')
   if (!page && !cat) return
-  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: S.tdPick === cat.dataset.twDrag ? S.tdPickSize : undefined }
+  const w = cat && (S.tdCatalog || []).find((x) => x.id === cat.dataset.twDrag)
+  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: S.tdPick === cat.dataset.twDrag ? twPickSize(w) : undefined }
   try { e.dataTransfer.setData('text/plain', twDrag.id); e.dataTransfer.effectAllowed = 'move' } catch (x) { /* some webviews refuse */ }
   if (page) page.classList.add('dragging')
 })
@@ -134,6 +155,8 @@ document.addEventListener('drop', (e) => {
   const side = w ? dropSide(w.getBoundingClientRect(), e.clientX, e.clientY) : undefined
   todayLayoutDo({ op: drag.from === 'page' ? 'move' : 'add', widget: drag.id, size: drag.size, target: w ? w.dataset.tw : undefined, side })
 })
+// A drop anywhere ends the drag, even where no widget takes it (a redraw may have removed the dragged one).
+document.addEventListener('drop', () => { if (twDrag) { twDrag = null; twClear() } })
 document.addEventListener('dragend', () => {
   if (!twDrag) return
   twDrag = null
