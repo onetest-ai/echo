@@ -16,7 +16,7 @@ cases:
   - tests/cases/calendar/TC-026_arming-a-zoom-or-google-meet-meeting-says-recording-isnt-available-yet.md
   - tests/cases/prep/TC-006_coming-up-today-lists-the-meetings-still-to-come-and-leaves-out-unanswered-ones.md
   - tests/cases/prep/TC-007_a-prep-shows-every-section-with-its-text.md
-  - tests/cases/prep/TC-008_more-than-ten-people-show-ten-new-first-and-and-n-more.md
+  - tests/cases/prep/TC-008_a-meetings-header-shows-how-each-person-answered.md
   - tests/cases/prep/TC-009_sections-follow-what-the-prep-holds.md
   - tests/cases/prep/TC-014_echoctl-prep-lists-and-shows-preps-on-the-standard-day.md
   - tests/cases/calendar/TC-022_week-shows-calls-without-a-meeting-as-blocks-of-their-own.md
@@ -57,9 +57,7 @@ cases:
 | Standard data, built right before the run | `serve.sh up <dir> <port> --set standard` | all |
 | The meetings' times (live until 20 minutes after the build, to come from 37 minutes after it) | the data | 1–15 (read within 15 minutes of the build) |
 | Today's Day view | stage 1, step 1 | 2–8 (each opens its own cards; no stage closes a card the next one replaces) |
-| Coming up today unfolded | stage 11, step 3 | 12 |
-| Globex sponsor update's prep open | stage 12, step 1 | 13 |
-| Umbrella intro call open on Prep | stage 13, step 5 | 14 |
+| Coming up today unfolded | stage 11, step 3 | 12, 13 |
 | The Day view after stage 17's reload | stage 17, step 4 and its teardown | 18, 19 |
 | The Inbox panel open (it stays open across views) | stage 21, step 1 | 22–30 |
 | The Inbox panel after a full load (the people fold closed again) | stage 31, step 1 | 32–35 |
@@ -81,8 +79,8 @@ cases:
 | 10 | `calendar/TC-026_arming-a-zoom-or-google-meet-meeting-says-recording-isnt-available-yet.md` | — | In step 1 skip the navigation to the Day view only if it is on screen; Your day is read again in step 5 |
 | 11 | `prep/TC-006_coming-up-today-lists-the-meetings-still-to-come-and-leaves-out-unanswered-ones.md` | — | Skip its teardown: Coming up today stays unfolded for stage 12 |
 | 12 | `prep/TC-007_a-prep-shows-every-section-with-its-text.md` | — | On stage 11's view: in step 1 skip the navigation and the click on "Coming up today" (it is unfolded); click its row "Globex sponsor update" |
-| 13 | `prep/TC-008_more-than-ten-people-show-ten-new-first-and-and-n-more.md` | — | On stage 12's view: skip step 1 (the prep is open). Skip its teardown |
-| 14 | `prep/TC-009_sections-follow-what-the-prep-holds.md` | — | On stage 13's view: in step 1 skip the navigation and the clicks (Umbrella intro call is open on Prep) |
+| 13 | `prep/TC-008_a-meetings-header-shows-how-each-person-answered.md` | — | On stage 12's view: in step 1 skip the navigation and the click on "Coming up today" (it is unfolded). Skip its teardown |
+| 14 | `prep/TC-009_sections-follow-what-the-prep-holds.md` | — | — |
 | 15 | `prep/TC-014_echoctl-prep-lists-and-shows-preps-on-the-standard-day.md` | — | — |
 | 16 | `calendar/TC-022_week-shows-calls-without-a-meeting-as-blocks-of-their-own.md` | — | — |
 | 17 | `calendar/TC-019_series-record-choice-is-kept.md` | — | Run its teardown (stage 40 reads Globex weekly's rule as the data has it, ask); its reload ends on the Day view |

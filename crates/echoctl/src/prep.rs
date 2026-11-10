@@ -279,8 +279,17 @@ fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
         me.as_ref().is_some_and(|m| m.email.as_deref().is_some_and(|e| p.email.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(e))) || m.name.eq_ignore_ascii_case(&p.name))
     };
     let mut out = vec![];
+    // How they answered the invite: the organiser is coming; an invite that doesn't say, no answer.
+    let answer = |p: &crate::meeting::Person, declined: bool| {
+        let organizer = m.organizer.as_ref().is_some_and(|o| o.email.is_some() && o.email == p.email || o.name == p.name);
+        let said = p.email.as_deref().and_then(|e| m.answers.get(&e.to_lowercase())).map(String::as_str);
+        if declined { "declined" } else if organizer { "organizer" } else {
+            match said { Some("accepted") => "accepted", Some("tentativelyAccepted") => "tentative", _ => "none" }
+        }
+    };
     // The user isn't one of the people coming: the prep is theirs.
-    for p in m.organizer.iter().chain(&m.attendees).filter(|p| !is_me(p)) {
+    let invited = m.organizer.iter().chain(&m.attendees).map(|p| (p, false)).chain(m.declined.iter().map(|p| (p, true)));
+    for (p, declined) in invited.filter(|(p, _)| !is_me(p)) {
         let email = p.email.as_deref().unwrap_or("").to_lowercase();
         let k = known.iter().find(|k| !email.is_empty() && (k["email"].as_str() == Some(email.as_str()) || k["key"].as_str() == Some(email.as_str())));
         let place = k.and_then(|k| k["places"].as_array()?.iter().find(|pl| thread_ids.iter().any(|t| pl["thread"].as_str() == Some(t.as_str()))).cloned());
@@ -293,13 +302,37 @@ fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
             // New to the threads; a meeting in no thread knows nobody, so it says nothing.
             "new": !thread_ids.is_empty() && k.is_none_or(|k| k["new"].as_bool().unwrap_or(false)),
             "link": k.and_then(|k| k["key"].as_str()).map(|key| format!("echo://person/{key}")),
+            "answer": answer(p, declined),
+            // Their weight in the meeting's thread (the People map's 1–3), 0 when not set.
+            "influence": place.as_ref().and_then(|pl| pl["influence"].as_u64()).unwrap_or(0),
+            "interest": place.as_ref().and_then(|pl| pl["interest"].as_u64()).unwrap_or(0),
         }));
     }
     // One line a person (an invite can name someone twice, on two addresses).
     let mut seen = std::collections::HashSet::new();
     out.retain(|x| seen.insert(x["name"].as_str().unwrap_or("").to_lowercase()));
-    out.sort_by(|a, b| b["calls"].as_u64().cmp(&a["calls"].as_u64()));
+    // Those coming first, by their weight in the thread, then by calls together; who declined last.
+    let n = |x: &Value, f: &str| x[f].as_u64().unwrap_or(0);
+    out.sort_by_key(|x| (x["answer"] == "declined", std::cmp::Reverse((n(x, "influence"), n(x, "interest"), n(x, "calls")))));
     out
+}
+
+/// A meeting of the agenda's people as its header shows them (`people`), by the prep's id; none when the meeting
+/// isn't on the agenda any more.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn attendees(id: &str) -> Option<Value> {
+    // The page asks every few seconds while the meeting is open: the last answer serves for a minute.
+    static LAST: std::sync::Mutex<Option<(String, std::time::Instant, Value)>> = std::sync::Mutex::new(None);
+    if let Some((k, at, v)) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if k == id && at.elapsed() < std::time::Duration::from_secs(60) {
+            return Some(v.clone());
+        }
+    }
+    let m = crate::watch::agenda().into_iter().find(|m| m.id.as_deref().is_some_and(|e| id_of(e) == id))?;
+    let ids: Vec<String> = projects::of_meeting(&m).iter().filter(|p| !p.stage.closed()).map(|p| p.id.clone()).collect();
+    let v = json!(people(&m, &ids));
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.to_string(), std::time::Instant::now(), v.clone()));
+    Some(v)
 }
 
 /// What is expected from the user: their open tasks in these threads (late first), what they still owe from last
@@ -600,6 +633,27 @@ pub fn meeting(id: &str) -> Option<MeetingContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_people_say_how_they_answered_and_who_declined_comes_last() {
+        let _env = crate::paths::testenv::folders("prep-answers");
+        let p = |n: &str, e: &str| crate::meeting::Person { name: n.into(), email: Some(e.into()) };
+        let m = MeetingContext {
+            organizer: Some(p("Dana Kowal", "dana@northwind.example")),
+            attendees: vec![p("Kim Park", "kim@globex.example"), p("Noor Ali", "noor@globex.example"), p("Lena Fox", "lena@globex.example")],
+            declined: vec![p("Raj Mehta", "raj@umbrella.example")],
+            answers: [("kim@globex.example", "accepted"), ("noor@globex.example", "tentativelyAccepted"), ("raj@umbrella.example", "declined")]
+                .into_iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+            ..Default::default()
+        };
+        let out = people(&m, &[]);
+        let said: Vec<(&str, &str)> = out.iter().map(|x| (x["name"].as_str().unwrap(), x["answer"].as_str().unwrap())).collect();
+        assert_eq!(said.last(), Some(&("Raj Mehta", "declined")), "who declined: last");
+        for (name, answer) in [("Dana Kowal", "organizer"), ("Kim Park", "accepted"), ("Noor Ali", "tentative"), ("Lena Fox", "none")] {
+            assert!(said.contains(&(name, answer)), "{name}: {answer} in {said:?}");
+        }
+        assert!(out.iter().all(|x| x["influence"] == 0 && x["interest"] == 0), "no thread: no weight");
+    }
 
     #[test]
     fn expected_from_you_is_your_tasks_last_times_actions_and_mail_to_you_once_each() {

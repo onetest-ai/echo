@@ -341,11 +341,14 @@ function upcomingDoc() {
   const all = (S.pj.data && S.pj.data.projects) || []
   // A call's header, before the call: its day and time, length, people, thread chips (+ Thread, as in the calendar).
   const mins = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0
+  const live = S.upPrep && S.upPrep.attendees && S.upPrep.attendees.length ? S.upPrep.attendees : null
+  const att = live || (p && p.people && p.people.some((x) => x.answer) ? p.people : null)
   const names = (u && u.names) || (p && p.people ? p.people.map((x) => x.name) : [])
-  const people = names.length ? `<span class="people" title="${esc(names.join(', '))}">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
+  const line = att ? attendeeLine(att) : null
+  const people = line ? line.tally : names.length ? `<span class="people" title="${esc(names.join(', '))}">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
   const ev = u ? { id: u.event, subject: u.subject, projects: u.projects || [] } : null
   const head = `${listToggle()}<div class="head-row"><div style="min-width:0"><h2 class="selectable">${esc(title)}</h2>
-      <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${ev ? eventProjects(ev) : ''}</div>
+      <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${line ? line.people : ''}${ev ? eventProjects(ev) : ''}</div>
       <div class="doc-actions">${p ? `<button class="btn ghost" data-copy="${esc(p.link)}" title="Its echo:// link">Copy link</button>` : ''}</div></div>
     <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Transcript</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Minutes</button></div>`
   // Being written (from the calendar, any day): read it again until it is there.
@@ -357,6 +360,35 @@ function upcomingDoc() {
     return { head, pane: `<div class="empty"><div><h3>${busy ? 'Writing the prep…' : 'No prep yet'}</h3><p>${busy ? 'From last time, what is open in its threads, what is new and who is coming.' : u && u.threads.length ? 'Echo writes it this morning for every meeting of a thread.' : 'This meeting is in no thread: Echo prepares it when you ask, from its people\'s mail and Teams.'}</p>${busy ? '' : `<button class="btn primary" data-prep-write="${esc(S.upSel)}">Prepare now</button>`}</div></div>` }
   }
   return { head, pane: prepView(p, !!u) }
+}
+
+const ANSWER = {
+  accepted: ['yes', 'Accepted', '<path d="M2.5 6.5l2.3 2.3 4.7-5"/>'],
+  organizer: ['yes', 'Organiser', '<path d="M2.5 6.5l2.3 2.3 4.7-5"/>'],
+  tentative: ['maybe', 'Tentative', '<path d="M4.2 4.4a1.9 1.9 0 1 1 2.6 1.8c-.6.3-.8.6-.8 1.2"/><circle cx="6" cy="9.4" r=".6" fill="currentColor"/>'],
+  none: ['none', 'No answer yet', '<circle cx="6" cy="6" r="3.6" stroke-dasharray="2 1.6"/>'],
+  declined: ['no', 'Declined', '<path d="M3 3l6 6M9 3L3 9"/>'],
+}
+const LEVEL = ['not set', 'low', 'mid', 'high']
+/** A meeting's people in its header (`prep::people`): how each answered the invite, the most important in the
+ *  thread first (high influence in bold), who declined last, struck; a name's hover tells their place, "+N more"'s
+ *  the rest. Names and roles are others' words: escaped. */
+function attendeeLine(att) {
+  const SHOWN = 7
+  const mark = (x) => { const [cls, word, d] = ANSWER[x.answer] || ANSWER.none; return `<i class="at-s ${cls}" aria-label="${word}"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8">${d}</svg></i>` }
+  const word = (x) => (ANSWER[x.answer] || ANSWER.none)[1]
+  const calls = (x) => x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'} together` : 'first call with you'
+  // New: no call with the user yet.
+  const fresh = (x) => x.new && !x.calls ? ' <span class="at-new">new</span>' : ''
+  const card = (x) => `<span class="at-card" role="tooltip"><span><b>${esc(x.name)}</b> <span class="set-sub">· ${esc(word(x))}</span></span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}<span class="set-sub">${x.influence || x.interest ? `Influence ${LEVEL[x.influence || 0]} · interest ${LEVEL[x.interest || 0]} · ` : ''}${calls(x)}</span></span>`
+  const chip = (x) => `<span class="at-p${x.influence === 3 ? ' key' : ''}${x.answer === 'declined' ? ' declined' : ''}"${x.link ? '' : ' tabindex="0"'}>${mark(x)}${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${fresh(x)}${card(x)}</span>`
+  const row = (x) => `<div class="at-row${x.answer === 'declined' ? ' declined' : ''}">${mark(x)}<span class="at-n">${esc(x.name)}${fresh(x)}</span><span class="set-sub">${x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : 'first call'}</span>${x.role ? `<span class="at-r">${esc(x.role)}</span>` : ''}</div>`
+  const shown = att.slice(0, SHOWN), rest = att.slice(SHOWN)
+  const count = (k) => att.filter((x) => (ANSWER[x.answer] || ANSWER.none)[0] === k).length
+  const tally = [['yes', 'yes'], ['maybe', 'maybe'], ['none', 'no answer'], ['no', 'declined']].map(([k, w]) => count(k) ? `${count(k)} ${w}` : '').filter(Boolean).join(' · ')
+  const going = rest.filter((x) => x.answer !== 'declined'), no = rest.filter((x) => x.answer === 'declined')
+  const more = rest.length ? `<span class="at-more" tabindex="0" aria-haspopup="true">+${rest.length} more<span class="at-pop" role="tooltip"><span class="at-h">${rest.length} more</span>${going.map(row).join('')}${going.length && no.length ? '<hr>' : ''}${no.map(row).join('')}</span></span>` : ''
+  return { tally: `<span class="at-tally">${tally}</span>`, people: `<div class="at">${shown.map(chip).join('')}${more}</div>` }
 }
 
 /** A prep: In short, then Last time, Open with these people, New since then; Who's coming beside. `again`: it can
@@ -377,13 +409,10 @@ function prepView(p, again) {
   const expected = p.expected ? sec('Expected from you', exp ? `<ul>${exp}</ul>` : '<p class="set-sub" style="margin:0">Nothing waits on you.</p>') : ''
   const open = (p.open || []).length ? sec('Open with these people', `<ul>${p.open.map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : o.due ? ` · ${esc(day(o.due))}` : ''}</li>`).join('')}</ul>`) : ''
   const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}${n.snippet ? ` <span class="set-sub">“${esc(n.snippet)}”</span>` : ''}</li>`).join('')}</ul>`) : ''
-  // The new faces first, then by calls together; ten at most.
-  const ppl = [...(p.people || [])].sort((a, b) => (b.new - a.new) || (b.calls - a.calls)), more = ppl.length - 10
-  const who = ppl.slice(0, 10).map((x) => `<div class="pr-who"><span>${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${x.role ? ` <span class="set-sub">· ${esc(x.role)}</span>` : ''}</span>${x.new ? '<span class="chip warn-chip">new</span>' : (x.calls ? `<span class="set-sub pr-n">${x.calls} call${x.calls === 1 ? '' : 's'}</span>` : '')}</div>`).join('') + (more > 0 ? `<div class="set-sub">and ${more} more</div>` : '')
   const short = p.summary ? sec('In short', `<p class="pr-short">${esc(p.summary)}</p>`) : p.error ? `<p class="set-sub">${esc(p.error)}</p>` : ''
   const foot = `<div class="pr-foot"><span class="set-sub">Written ${esc(p.written_at ? hm(new Date(p.written_at)) : '')}${p.model ? ` · ${esc(p.model)}` : ''}</span>${again ? `<button class="btn ghost" data-prep-write="${esc(p.id)}">Write it again</button>` : ''}</div>`
   const empty = !short && !last && !open && !fresh ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
-  return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${empty}</article><aside class="pr-side">${who ? sec("Who's coming", who) : ''}${foot}</aside></div>`
+  return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${empty}${foot}</article></div>`
 }
 
 /** The ⋯ menu's Write again with…: each minutes template but the one used now (the call's from then on), and the

@@ -340,6 +340,12 @@ def build_small(d):
 
 
 # ── standard and hostile ──────────────────────────────────────────────────────────────────────
+# Globex weekly's other Globex guests, on no thread's people (its thread stays Globex pilot by the client's people): name, address, answer.
+WEEKLY_GUESTS = [("Mia Long", "mia@globex.example", "accepted"), ("Joel Brandt", "joel@globex.example", "accepted"),
+                 ("Ines Duarte", "ines@globex.example", "tentativelyAccepted"), ("Paul Weber", "paul@globex.example", "notResponded"),
+                 ("Sara Lind", "sara@globex.example", "accepted"), ("Theo Grant", "theo@globex.example", "none")]
+
+
 def person(name, email=None):
     return {"name": name, "email": email} if email else {"name": name}
 
@@ -1916,7 +1922,11 @@ def build_agenda(d, H):
     events.append({"id": "ev-renewal-call", "subject": "Acme renewal follow-up", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["rita"],
                    "attendees": [p["rita"]], "join_url": "https://teams.example/ev-renewal-call", "source": "test", "response": "accepted"})
     events.append({"id": "ev-globex-weekly", "subject": "Globex weekly", "series_id": "S-GLOBEX-WEEKLY", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["kim"],
-                   "attendees": [p["kim"], p["noor"]], "join_url": "https://teams.example/l/meetup-join/19%3aglobex-pilot%40thread.v2/0", "source": "test", "response": "accepted"})
+                   "attendees": [p["kim"], p["noor"]] + [person(n, e) for n, e, _ in WEEKLY_GUESTS], "join_url": "https://teams.example/l/meetup-join/19%3aglobex-pilot%40thread.v2/0",
+                   "source": "test", "response": "accepted",
+                   # How they answered (the call's header): Noor tentative, the guests as listed; Lena Vogel declined (kept apart).
+                   "answers": {"noor@globex.example": "tentativelyAccepted", "lena@initech.example": "declined"} | {e: a for _, e, a in WEEKLY_GUESTS},
+                   "declined": [p["lena"]]})
     events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": ME,
                    "attendees": [p["alex"]], "join_url": "https://teams.example/ev-pinned", "source": "test", "response": "organizer"})
     patch_profile(d, "acme-rollout", lambda pr: pr.update({"events": pr.get("events", []) + ["ev-pinned"]}))

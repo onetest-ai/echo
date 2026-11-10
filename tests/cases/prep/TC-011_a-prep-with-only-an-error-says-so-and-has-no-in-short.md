@@ -31,7 +31,7 @@ tags: [prep, error]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Globex standup, then the tab "Prep" | The prep shows the grey text "its threads run on different AI profiles: no summary, the facts only" |
-| 2 | Look for the headings of the prep | No "In short", no "Expected from you", no "Who's coming"; the footer says "Written HH:MM" without a model name; no "Write it again" |
+| 2 | Look for the headings of the prep | No "In short", no "Expected from you"; the footer says "Written HH:MM" without a model name; no "Write it again" |
 | 3 | Click the row Acme go-live check | The same text and footer |
 
 ## Expected Final State

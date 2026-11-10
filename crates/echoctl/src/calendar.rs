@@ -154,18 +154,15 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
     let subject = ev.get("subject").and_then(Value::as_str).unwrap_or("").to_string();
     let start = graph_time(ev.get("start")?)?;
     let end = ev.get("end").and_then(graph_time);
-    // People only: meeting rooms/equipment ("resource") and those who declined don't count.
-    let attendees = ev
-        .get("attendees")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter(|x| x.get("type").and_then(Value::as_str) != Some("resource"))
-                .filter(|x| x.pointer("/status/response").and_then(Value::as_str) != Some("declined"))
-                .filter_map(person)
-                .collect()
-        })
-        .unwrap_or_default();
+    // People only: meeting rooms/equipment ("resource") don't count, and those who declined are kept apart.
+    let invited: Vec<&Value> = ev.get("attendees").and_then(Value::as_array).into_iter().flatten()
+        .filter(|x| x.get("type").and_then(Value::as_str) != Some("resource"))
+        .collect();
+    let said = |x: &Value| x.pointer("/status/response").and_then(Value::as_str).map(str::to_owned);
+    let (declined, attendees): (Vec<&Value>, Vec<&Value>) = invited.iter().partition(|x| said(x).as_deref() == Some("declined"));
+    let answers = invited.iter()
+        .filter_map(|x| Some((x.pointer("/emailAddress/address")?.as_str()?.to_lowercase(), said(x)?)))
+        .collect();
     Some(MeetingContext {
         id: ev.get("id").and_then(Value::as_str).map(str::to_owned),
         subject: Some(subject),
@@ -173,7 +170,9 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         start: Some(start.to_rfc3339()),
         end: end.map(|e| e.to_rfc3339()),
         organizer: ev.get("organizer").and_then(person),
-        attendees,
+        attendees: attendees.into_iter().filter_map(person).collect(),
+        declined: declined.into_iter().filter_map(person).collect(),
+        answers,
         join_url: join_link(ev),
         response: ev.pointer("/responseStatus/response").and_then(Value::as_str).map(str::to_owned),
         vocabulary: vec![],
@@ -481,6 +480,21 @@ mod tests {
         let v = view_event(&ev).unwrap();
         assert_eq!(v["names"], json!(["Kim Park", "noor@globex.example"]), "rooms and who declined left out");
         assert_eq!(v["people"], 2, "and the count with them");
+    }
+
+    #[test]
+    fn a_meeting_keeps_how_each_person_answered_and_who_declined_apart() {
+        let ev = json!({"id": "e1", "subject": "Design review", "start": {"dateTime": "2026-11-08T15:00:00.0000000", "timeZone": "UTC"},
+            "attendees": [{"type": "required", "status": {"response": "accepted"}, "emailAddress": {"name": "Kim Park", "address": "Kim@globex.example"}},
+                          {"type": "optional", "status": {"response": "tentativelyAccepted"}, "emailAddress": {"address": "noor@globex.example"}},
+                          {"type": "required", "status": {"response": "declined"}, "emailAddress": {"name": "Raj Mehta", "address": "raj@umbrella.example"}},
+                          {"type": "resource", "status": {"response": "accepted"}, "emailAddress": {"name": "Room 4", "address": "room4@globex.example"}}]});
+        let m = to_meeting(&ev).unwrap();
+        assert_eq!(m.attendees.iter().map(|p| p.email.as_deref().unwrap()).collect::<Vec<_>>(), ["Kim@globex.example", "noor@globex.example"], "coming: no room, no one who declined");
+        assert_eq!(m.declined.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Raj Mehta"]);
+        assert_eq!(m.answers.get("kim@globex.example").map(String::as_str), Some("accepted"), "by the lowercased address");
+        assert_eq!(m.answers.get("noor@globex.example").map(String::as_str), Some("tentativelyAccepted"));
+        assert!(!m.answers.contains_key("room4@globex.example"));
     }
 
     #[test]

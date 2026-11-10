@@ -17,7 +17,7 @@
   },
   {
    "id": "F-PREP-02",
-   "feature": "A coming meeting opens like a call: date, length, people, thread chips (+ Thread), Copy link, a Prep tab; Transcript and Minutes are disabled until it is recorded",
+   "feature": "A coming meeting opens like a call: date, length, how many answered yes, maybe, not yet or declined, its people (each with their answer to the invite; the most important in its threads first by influence, interest and calls together; who declined last, struck; a hover tells their role and weight, \"+N more\" lists the rest), thread chips (+ Thread), Copy link, a Prep tab; Transcript and Minutes are disabled until it is recorded",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -36,7 +36,7 @@
   },
   {
    "id": "F-PREP-04",
-   "feature": "A prep shows In short, Expected from you (or \"Nothing waits on you\"), Last time (highlights, Still to do), Open with these people, New since then (titles and senders only), Who's coming (ten, new first), when and with which model it was written, Write it again",
+   "feature": "A prep shows In short, Expected from you (or \"Nothing waits on you\"), Last time (highlights, Still to do), Open with these people, New since then (titles and senders only), when and with which model it was written, Write it again",
    "priority": "high",
    "check": "agent",
    "axes": [
