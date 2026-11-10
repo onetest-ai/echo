@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, m365, privacy, sending]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-016: echoctl m365 sends nothing without --yes: mail, a Teams message, a channel post and an upload answer what would be sent

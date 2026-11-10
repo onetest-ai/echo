@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, clients, organisations]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-015: client and org commands list, add, change and remove clients and organisations as the window shows them

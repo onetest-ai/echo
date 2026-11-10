@@ -3929,5 +3929,684 @@
         ]
       }
     }
+  },
+  "s28": {
+    "help": {
+      "first": "Records the calls you opt in to and transcribes them on this computer (tray app + CLI)",
+      "usage": "Usage: echoctl <COMMAND>",
+      "has": [
+        "project",
+        "client",
+        "org",
+        "series",
+        "config",
+        "read",
+        "m365",
+        "context",
+        "actions",
+        "action",
+        "title",
+        "type",
+        "note",
+        "html",
+        "delete",
+        "restore",
+        "language"
+      ],
+      "last": "help",
+      "project": [
+        "list",
+        "show",
+        "create",
+        "set",
+        "rule",
+        "source",
+        "include",
+        "exclude",
+        "reset",
+        "term",
+        "person",
+        "of",
+        "people",
+        "tasks",
+        "found",
+        "delete",
+        "ledger",
+        "help"
+      ],
+      "projectUsage": "Usage: echoctl project <COMMAND>",
+      "edit": [
+        "An edit of yours (JSON: {op: edit|ac_add|ac_set|link|unlink|merge|delete|accept|reject|undo|create, …})",
+        "Usage: echoctl project ledger <ID> edit <JSON>"
+      ],
+      "series": {
+        "usage": "Usage: echoctl series <COMMAND>",
+        "commands": [
+          "list",
+          "set",
+          "help"
+        ]
+      },
+      "version": "^echoctl (\\d+\\.\\d+\\.\\d+)$",
+      "echo": "Echo {v}",
+      "status": [
+        "agenda",
+        "armed",
+        "watcher"
+      ],
+      "list": [
+        "clients",
+        "orgs",
+        "projects",
+        "stages"
+      ],
+      "bad": "frobnicate",
+      "badErr": [
+        "error: unrecognized subcommand 'frobnicate'",
+        "For more information, try '--help'."
+      ],
+      "badCode": 2
+    },
+    "lists": {
+      "ids": [
+        "acme-hackathon",
+        "acme-renewal",
+        "acme-rollout",
+        "globex-pilot",
+        "initech-hiring",
+        "internal-tooling",
+        "legacy-migration",
+        "tyrell-bid",
+        "umbrella-lead",
+        "umbrella-proposal"
+      ],
+      "rollout": {
+        "id": "acme-rollout",
+        "name": "Acme rollout",
+        "client": "acme",
+        "stage": "active",
+        "group": "delivery",
+        "call_count": 6,
+        "row": [
+          "Acme rollout",
+          6,
+          "Active"
+        ]
+      },
+      "lead": {
+        "id": "umbrella-lead",
+        "call_count": 0,
+        "stage": "lead",
+        "row": [
+          "Umbrella lead",
+          0,
+          "Lead"
+        ]
+      },
+      "stages": [
+        "lead",
+        "proposal",
+        "negotiation",
+        "kickoff",
+        "active",
+        "on_hold",
+        "wrap_up",
+        "done",
+        "lost",
+        "cancelled"
+      ],
+      "found": 6,
+      "calls": [
+        [
+          "Memo",
+          "pinned"
+        ],
+        [
+          "Acme weekly sync",
+          "series"
+        ],
+        [
+          "Acme security review",
+          "pinned"
+        ],
+        [
+          "Acme weekly sync",
+          "series"
+        ],
+        [
+          "Globex pilot scoping",
+          "pinned"
+        ],
+        [
+          "Acme weekly sync",
+          "series"
+        ]
+      ],
+      "rules": [
+        {
+          "kind": "series",
+          "subject": "Acme weekly sync"
+        },
+        {
+          "contains": "rollout",
+          "kind": "subject"
+        }
+      ],
+      "ofA": {
+        "projects": [
+          {
+            "id": "acme-rollout",
+            "name": "Acme rollout",
+            "why": "series"
+          }
+        ],
+        "suggested": [
+          {
+            "id": "acme-renewal",
+            "why": "6 of its 6 people are in its calls"
+          }
+        ]
+      },
+      "ofI": {
+        "suggested": [
+          "acme-renewal",
+          "acme-rollout",
+          "globex-pilot"
+        ],
+        "why": "1 of its 1 people are in its calls"
+      },
+      "planning": {
+        "slug": "initech-planning",
+        "title": "Initech planning",
+        "bar": "Acme renewal"
+      },
+      "people": {
+        "calls": 6,
+        "all": 13,
+        "in": [
+          "Dana Lee",
+          "Omar Haddad",
+          "Rita Gomez",
+          "Ivan Petrov",
+          "Yuki Tanaka",
+          "Alex Chen",
+          "Lena Vogel",
+          "Ola Svensson",
+          "Tom Becker"
+        ]
+      },
+      "candidates": {
+        "keys": [
+          "domain:acme.example",
+          "domain:northwind.example",
+          "series:umbrella lead notes",
+          "domain:initrode.example",
+          "domain:duff.example",
+          "series:design guild"
+        ],
+        "initrode": {
+          "key": "domain:initrode.example",
+          "new_client": {
+            "domain": "initrode.example",
+            "name": "Initrode"
+          },
+          "why": "2 calls mostly with people from initrode.example"
+        },
+        "names": [
+          "Acme calls",
+          "Northwind Analysts calls",
+          "Umbrella lead notes 1",
+          "Initrode calls",
+          "Duff calls",
+          "Design guild"
+        ],
+        "firstWhy": "3 calls mostly with people from acme.example"
+      }
+    },
+    "read": {
+      "weekly": "acme-weekly-sync",
+      "at": 40,
+      "callHead": "# Call: Acme weekly sync — {day} {time}",
+      "around": "## Said around 00:40 (±90 s)",
+      "turns": [
+        "[00:05] Me:",
+        "[00:17] Dana Lee:",
+        "[00:29] Omar Haddad:",
+        "[00:43] Dana Lee:"
+      ],
+      "lastTurn": "[02:03] Omar Haddad:",
+      "minutes": "## Minutes",
+      "minutesHead": "# Acme weekly sync",
+      "sections": [
+        "Summary",
+        "Decisions",
+        "Action items",
+        "Open questions"
+      ],
+      "thread": {
+        "link": "echo://thread/acme-rollout",
+        "head": "# Thread Acme rollout — client Acme (echo://client/acme), stage Active",
+        "brief": [
+          "## What it is",
+          "Rolling out **single sign-on** and the data migration for Acme, Berlin first."
+        ],
+        "people": [
+          "## People",
+          "- [Dana Lee](echo://person/dana@acme.example) (Acme): delivery lead"
+        ],
+        "calls": "## Calls",
+        "callLinks": 6
+      },
+      "client": {
+        "link": "echo://client/acme",
+        "head": "# Acme — client, acme.example",
+        "threads": "## Threads",
+        "lines": [
+          "- [Acme hackathon](echo://thread/acme-hackathon) — Cancelled",
+          "- [Acme renewal](echo://thread/acme-renewal) — Negotiation",
+          "- [Acme rollout](echo://thread/acme-rollout) — Active"
+        ],
+        "about": "## About"
+      },
+      "person": {
+        "link": "echo://person/dana@acme.example",
+        "head": "# Dana Lee",
+        "sub": "Delivery manager · Acme · dana@acme.example",
+        "threads": [
+          "## Threads",
+          "- Acme rollout: delivery lead"
+        ],
+        "said": "## What was said about them"
+      },
+      "task": {
+        "link": "echo://task/acme-rollout/T001",
+        "head": "# Send the SSO checklist — task (done)",
+        "lines": [
+          "Thread: echo://thread/acme-rollout",
+          "Owner: Me"
+        ],
+        "where": "## Where it was said",
+        "quote": "I will send the SSO checklist to Dana by Friday"
+      },
+      "prep": {
+        "link": "echo://prep/e11de173ab857a8b",
+        "head": "# Prep",
+        "short": "In short: Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late.",
+        "meeting": "Meeting: Globex sponsor update ("
+      },
+      "missing": {
+        "link": "echo://thread/no-such-thread",
+        "err": "Error: no thread \"no-such-thread\""
+      },
+      "foreign": [
+        [
+          "https://acme.example",
+          "Error: not an echo:// link Echo knows: https://acme.example"
+        ],
+        [
+          "echo://call/../../etc",
+          "Error: not an echo:// link Echo knows: echo://call/../../etc"
+        ]
+      ]
+    },
+    "links": {
+      "turn": {
+        "at": 43,
+        "name": "0:43 Dana Lee",
+        "title": "Acme weekly sync"
+      },
+      "tabs": {
+        "transcript": "transcript",
+        "brief": "brief",
+        "people": "people",
+        "work": "work",
+        "prep": "prep"
+      },
+      "thread": {
+        "id": "acme-rollout",
+        "name": "Acme rollout",
+        "brief": "Rolling out single sign-on and the data migration for Acme, Berlin first."
+      },
+      "client": {
+        "id": "acme",
+        "about": "A manufacturer of everything, 4,000 people across Europe.",
+        "cards": [
+          "Acme renewal",
+          "Acme rollout",
+          "Acme hackathon"
+        ]
+      },
+      "person": {
+        "thread": "acme-renewal",
+        "name": "Dana Lee",
+        "tab": "Person",
+        "lines": [
+          "Delivery manager · Acme",
+          "dana@acme.example · Acme"
+        ]
+      },
+      "task": {
+        "thread": "acme-rollout",
+        "id": "T001",
+        "kind": "task",
+        "title": "Send the SSO checklist",
+        "status": "● done"
+      },
+      "upcoming": {
+        "id": "e11de173ab857a8b",
+        "route": "#upcoming/{id}",
+        "subject": "Globex sponsor update",
+        "tabs": [
+          "Prep",
+          "Transcript",
+          "Minutes"
+        ],
+        "short": "Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late."
+      },
+      "recorded": {
+        "id": "1acb47358ad30580",
+        "slug": "umbrella-intro-call",
+        "subject": "Umbrella intro call"
+      },
+      "missing": {
+        "link": "echo://thread/no-such-thread",
+        "notice": "Echo can't open that link: no thread \"no-such-thread\""
+      }
+    },
+    "m365": {
+      "text": "Hello Dana,\n\nThe **checklist** is attached.\n",
+      "to": "dana@acme.example",
+      "cc": "omar@acme.example",
+      "subject": "SSO checklist",
+      "next": "Nothing was sent. Show the user exactly this; run the same command with --yes only after they agree.",
+      "post": {
+        "team": "team1",
+        "channel": "chan1",
+        "subject": "Hi"
+      },
+      "self": "48:notes",
+      "upload": {
+        "file": ".echo/me.md",
+        "to": "Documents/about-me.md",
+        "shown": "OneDrive/Documents/about-me.md"
+      },
+      "notSigned": "Error: not signed in to Microsoft 365 — `echoctl calendar login`",
+      "bad": "not-an-address",
+      "badErr": "Error: not a mail address: not-an-address"
+    },
+    "settings": {
+      "series": "id:S-GLOBEX-WEEKLY",
+      "subject": "Globex weekly",
+      "thread": "globex-pilot",
+      "list": {
+        "id:S-ACME-WEEKLY": {
+          "record": "always",
+          "languages": [
+            "en"
+          ]
+        },
+        "id:S-GLOBEX-WEEKLY": {
+          "record": "ask"
+        },
+        "id:S-INITECH-ALLHANDS": {
+          "record": "never"
+        },
+        "subject:umbrella pricing call": {
+          "record": "ask",
+          "languages": [
+            "uk"
+          ]
+        }
+      },
+      "set": {
+        "record": "always",
+        "languages": [
+          "uk"
+        ]
+      },
+      "back": {
+        "record": "ask",
+        "languages": null
+      },
+      "before": {
+        "pressed": "Ask",
+        "not": [
+          "Record",
+          "Don't record"
+        ],
+        "language": "Default language"
+      },
+      "after": {
+        "pressed": "Record",
+        "not": [
+          "Don't record"
+        ],
+        "language": "Ukrainian"
+      },
+      "caption": "Every meeting of this series",
+      "config": {
+        "scheduled": "ask",
+        "keep_audio": false,
+        "me": {
+          "name": "Sam Rivera",
+          "email": "sam@initech.example"
+        },
+        "languages": [
+          "en",
+          "uk",
+          "ru"
+        ]
+      },
+      "changed": {
+        "scheduled": "manual",
+        "keep_audio": true
+      },
+      "recording": {
+        "route": "#settings/recording",
+        "group": "Calendar meetings",
+        "on": "Manual",
+        "off": "Ask"
+      },
+      "transcription": {
+        "route": "#settings/transcription",
+        "switch": "Keep audio files"
+      },
+      "language": "Language"
+    },
+    "clients": {
+      "six": [
+        "initech",
+        "acme",
+        "globex",
+        "umbrella",
+        "tyrell",
+        "duff"
+      ],
+      "internal": "initech",
+      "globexDomains": [
+        "globex.example",
+        "globex-labs.example"
+      ],
+      "orgs": [
+        "vandelay",
+        "northwind-analysts",
+        "stark-advisory"
+      ],
+      "add": {
+        "name": "Hooli",
+        "domains": "hooli.example",
+        "json": {
+          "aliases": [],
+          "domains": [
+            "hooli.example"
+          ],
+          "id": "hooli",
+          "internal": false,
+          "name": "Hooli"
+        }
+      },
+      "set": {
+        "id": "hooli",
+        "name": "Hooli XYZ",
+        "domains": "hooli.example,hooli-xyz.example",
+        "list": [
+          "hooli.example",
+          "hooli-xyz.example"
+        ],
+        "after": "Duff",
+        "before": "Initech · your company",
+        "line": "0 threads · hooli.example, hooli-xyz.example"
+      },
+      "org": {
+        "name": "Pied Piper",
+        "id": "pied-piper",
+        "domains": "piedpiper.example",
+        "thread": "umbrella-proposal"
+      },
+      "keep": {
+        "id": "acme",
+        "err": "Error: acme still has projects: move or delete them first"
+      },
+      "removed": [
+        "pied-piper removed",
+        "hooli removed"
+      ]
+    },
+    "thread": {
+      "name": "Duff pilot",
+      "id": "duff-pilot",
+      "client": "duff",
+      "stage": "lead",
+      "group": "pursuit",
+      "calls": [
+        "duff-follow-up",
+        "duff-discovery"
+      ],
+      "titles": [
+        "Duff follow-up",
+        "Duff discovery"
+      ],
+      "coffee": "coffee-chat",
+      "coffeeTitle": "Coffee chat",
+      "groupName": "Duff",
+      "row": [
+        "Duff pilot",
+        2,
+        "Lead"
+      ],
+      "set": {
+        "stage": "proposal",
+        "reason": "they asked for a quote",
+        "name": "Duff pilot bid",
+        "tag": "Proposal"
+      },
+      "trashed": "duff-pilot moved to the trash",
+      "gone": "Error: no project \"duff-pilot\""
+    },
+    "ledger": {
+      "thread": "acme-rollout",
+      "roots": [
+        "E01",
+        "E02"
+      ],
+      "keys": [
+        "evidence",
+        "nodes",
+        "notes",
+        "pending",
+        "processed",
+        "roots"
+      ],
+      "merge": {
+        "node": "T004",
+        "to": "T003"
+      },
+      "move": {
+        "node": "T006",
+        "to": "S002"
+      },
+      "create": {
+        "op": "create",
+        "kind": "task",
+        "parent": "S002",
+        "title": "Book the dry-run window",
+        "internal_owner": "Me"
+      },
+      "id": "T026",
+      "edit": {
+        "title": "Book the dry-run window with Rita",
+        "due": "2026-11-20"
+      },
+      "story": "S002",
+      "criteria": [
+        "Data moved to the new tenant",
+        "Old tenant switched off"
+      ],
+      "link": "T008",
+      "oldParent": "S001",
+      "tree": {
+        "story": "Data migration",
+        "criteria": "criteria 1 / 2",
+        "pinned": "pinned: parent",
+        "meta": "Me · Nov 20",
+        "from": "SSO for the Berlin pilot"
+      },
+      "badOp": "Error: bad op \"frobnicate\"",
+      "badNode": "Error: unknown node \"T999\"",
+      "noEvent": "Error: unknown event 0000000000",
+      "mid": "0000000000"
+    },
+    "call": {
+      "slug": "globex-pilot-kickoff",
+      "title": "Globex pilot kickoff",
+      "minutes": 45.0,
+      "language": "en",
+      "external": [
+        "Kim Park <kim@globex.example>",
+        "Ben Okafor <ben@globex-labs.example>"
+      ],
+      "type": "client",
+      "action": {
+        "id": "glob0001",
+        "task": "Draft the Globex pilot plan",
+        "owner": "Me",
+        "status": "open"
+      },
+      "partner": {
+        "by": "you",
+        "label": "Partner",
+        "type": "partner"
+      },
+      "badType": "Error: a meeting type is one of: client, partner, one-on-one, internal, industry, other, steering",
+      "signed": "Globex pilot kickoff (signed)",
+      "suffix": "-signed",
+      "thread": "Globex pilot",
+      "html": "-minutes.html"
+    },
+    "trash": {
+      "slug": "tyrell-follow-up",
+      "title": "Tyrell follow-up",
+      "search": "Tyrell",
+      "draft": "acme-draft-call",
+      "note": "Check the Tyrell budget",
+      "noWatcher": "Error: no watcher running",
+      "notCall": "Error: {c} is not a call folder (expected meta.json inside)",
+      "notInTrash": "Error: {c} is not in {home}/.echo/trash",
+      "notes": "my-notes"
+    },
+    "runs": {
+      "scoping": "globex-pilot-scoping",
+      "weekly": "acme-weekly-sync",
+      "task": "globex-pilot/T005",
+      "head": "# Call: Globex pilot scoping — {day} 11:00",
+      "weeklyHead": "# Call: Acme weekly sync — ",
+      "yoloNot": "Error: Yolo reads only the calls of its thread (Globex pilot), not \"{c}\"",
+      "ownOnly": "Error: a run Echo started reads only its own call, not \"{c}\"",
+      "noCall": "Error: no call \"2026-01-01_000000-no-such-call\"",
+      "missing": "2026-01-01_000000-no-such-call",
+      "otherProfile": "Error: \"{c}\" is pinned to another AI profile than this run's: its text isn't sent here",
+      "noProfile": "Error: this run names no AI profile, so it reads no call",
+      "badProfile": "no-such-profile"
+    }
   }
 }

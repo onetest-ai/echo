@@ -1247,5 +1247,22 @@
     },
     "headCalls": "{n} calls · since {since}",
     "addTo": "Add to a thread"
+  },
+  "runVars": {
+    "headless": "ECHOCTL_HEADLESS",
+    "task": "ECHOCTL_RUN_TASK",
+    "profile": "ECHOCTL_RUN_PROFILE",
+    "call": "ECHOCTL_RUN_CALL"
+  },
+  "links": {
+    "route": "#link={link}",
+    "call": "echo://call/{c}",
+    "callAt": "echo://call/{c}?t={t}",
+    "thread": "echo://thread/{id}",
+    "client": "echo://client/{id}",
+    "person": "echo://person/{email}",
+    "task": "echo://task/{thread}/{id}",
+    "prep": "echo://prep/{id}",
+    "callRoute": "#call/{c}/{tab}"
   }
 }

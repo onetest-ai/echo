@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, series, settings]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-014: series list / set and config show and change what the window shows: a series' rule on its meeting's card, the settings in Settings

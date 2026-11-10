@@ -399,9 +399,21 @@ export class ClientsPage extends AppPage {
     return this.head(thread).getByText(new RegExp(`^${literal(words)}`))
   }
 
+  /** A thread's row in the left list, by all it reads (`rowName`). */
+  rowNamed(name) {
+    return this.list.getByRole('button', { name, exact: true })
+  }
+
   /** Found for you's new thread row: its Client select (the page's first; each card has its own below). */
   get newThreadClient() {
     return this.main.getByRole('combobox', { name: 'Client', exact: true }).first()
+  }
+
+  /** The names Found for you's cards hold in their boxes, in order. */
+  async foundNames() {
+    const names = []
+    for (const box of await this.main.getByRole('textbox', { name: 'Thread name', exact: true }).all()) names.push(await box.inputValue())
+    return names
   }
 
   /** A switch of the view ("Your own company"). */

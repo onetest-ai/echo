@@ -170,6 +170,15 @@ export class AppPage {
     return locator.evaluate((el) => getComputedStyle(el).borderTopStyle)
   }
 
+  /** A notice the window shows (its region "Notices"), by what it says; its OK. */
+  noticeSays(text) {
+    return this.page.getByRole('status', { name: 'Notices', exact: true }).getByText(text, { exact: true })
+  }
+
+  noticeOk() {
+    return this.page.getByRole('status', { name: 'Notices', exact: true }).getByRole('button', { name: 'OK', exact: true })
+  }
+
   /** A colour of the window's theme (`--recording`, `--me`), written as the browser writes a computed colour
    *  ("rgb(217, 119, 87)"). */
   async themeColour(name) {

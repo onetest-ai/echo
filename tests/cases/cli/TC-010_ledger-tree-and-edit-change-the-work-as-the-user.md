@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, work, ledger]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-010: project ledger tree reads the work; edit creates, edits, ticks a criterion, links, accepts, rejects, merges, undoes and deletes as the user

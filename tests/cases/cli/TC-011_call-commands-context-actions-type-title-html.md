@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, calls]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-011: context, actions, action, type, title and html work on one call by its folder name or path, and the window shows the kind and the title

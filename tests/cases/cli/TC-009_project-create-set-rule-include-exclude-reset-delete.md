@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, threads, rules]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-009: project create, rule, set, exclude, include, reset and delete change a thread as the window does

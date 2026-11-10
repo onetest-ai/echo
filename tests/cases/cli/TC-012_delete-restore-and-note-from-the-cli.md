@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, calls, trash]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-012: delete moves a call to the trash and restore brings it back, as the window shows; note without a recording says no watcher runs

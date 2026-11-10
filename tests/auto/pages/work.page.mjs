@@ -258,6 +258,13 @@ export class WorkPage extends AppPage {
     return this.main.getByRole('button', { name: /^[A-Z]\d{3} / })
   }
 
+  /** The ids of the tree's rows, top to bottom. */
+  async treeOrder() {
+    const ids = []
+    for (const r of await this.treeRows.all()) ids.push((await r.textContent()).match(/^[A-Z]\d{3}/)[0])
+    return ids
+  }
+
   /** A row of the details that links the item to other work ("Waits for", "Holds up", "Same as", "Also in"). */
   linkRow(name) {
     return this.details.getByRole('group', { name, exact: true })

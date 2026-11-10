@@ -16,6 +16,7 @@ cases:
   - tests/cases/cli/TC-011_call-commands-context-actions-type-title-html.md
   - tests/cases/cli/TC-012_delete-restore-and-note-from-the-cli.md
   - tests/cases/cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # S-28: Echo from the terminal: help, threads, links, sends, series and settings, clients, thread changes, the work and one call

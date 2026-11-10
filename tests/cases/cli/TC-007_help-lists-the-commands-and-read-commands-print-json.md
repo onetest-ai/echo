@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, help]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-007: echoctl --help lists the commands, each subcommand's --help lists its own, and the read commands print JSON

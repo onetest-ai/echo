@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, threads, found]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-008: project list, show, of, people and found give the threads, their calls with why, a call's threads and suggestions, people and candidates as the window shows them

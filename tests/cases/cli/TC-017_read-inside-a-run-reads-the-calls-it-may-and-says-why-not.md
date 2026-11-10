@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [cli, links, read, runs, yolo, guard]
+auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
 # TC-017: Inside a run Echo started, echoctl read gives Yolo the calls of its task's thread, a minutes run its own call, and a refusal says why instead of "no call"
@@ -33,7 +34,7 @@ tags: [cli, links, read, runs, yolo, guard]
 |---|---|---|
 | 1 | Run `target/debug/echoctl read "echo://call/$G" \| head -1` (the user) | "# Call: Globex pilot scoping — <its date> 11:00" |
 | 2 | Run `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_TASK=globex-pilot/T005 ECHOCTL_RUN_PROFILE=$P target/debug/echoctl read "echo://call/$G" \| head -1` (Yolo, a call of its thread) | Exit code 0; the same first line |
-| 3 | Run `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_TASK=globex-pilot/T005 ECHOCTL_RUN_PROFILE=$P target/debug/echoctl read "echo://call/$A"` (Yolo, a call of another thread) | Exit code 1; `Error: Yolo reads only the calls of its task's thread (Globex pilot), not "<$A>"` |
+| 3 | Run `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_TASK=globex-pilot/T005 ECHOCTL_RUN_PROFILE=$P target/debug/echoctl read "echo://call/$A"` (Yolo, a call of another thread) | Exit code 1; `Error: Yolo reads only the calls of its thread (Globex pilot), not "<$A>"` |
 | 4 | Run `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_CALL="$ECHOCTL_HOME/calls/$A" target/debug/echoctl read "echo://call/$A" \| head -1` and the same with `"echo://call/$G"` (a minutes run of `$A`) | Its own call: exit 0, "# Call: Acme weekly sync — …"; the other: exit 1, `Error: a run Echo started reads only its own call, not "<$G>"` |
 | 5 | Run `ECHOCTL_HEADLESS=1 target/debug/echoctl read "echo://call/$G"` (a run with no call and no task) and `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_TASK=globex-pilot/T005 ECHOCTL_RUN_PROFILE=$P target/debug/echoctl read echo://call/2026-01-01_000000-no-such-call` | Exit 1 each: `Error: a run Echo started reads only its own call, not "<$G>"`; then `Error: no call "2026-01-01_000000-no-such-call"` (only a call that isn't there says "no call") |
 | 6 | Run `ECHOCTL_HEADLESS=1 ECHOCTL_RUN_TASK=globex-pilot/T005 ECHOCTL_RUN_PROFILE=no-such-profile target/debug/echoctl read "echo://call/$G"` (Yolo started on another profile than the call's — as when the thread was re-pinned since) and the same without `ECHOCTL_RUN_PROFILE` | Exit 1 each: `Error: "<$G>" is pinned to another AI profile than this run's: its text isn't sent here`; then `Error: this run names no AI profile, so it reads no call` |
