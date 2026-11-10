@@ -80,7 +80,7 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
+  return `<div class="td">${head}${needsView(d.needs)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
 }
 
 // Needs you now's actions: Reply with where it goes (Teams' logo, or a mail's envelope), I'll do it (a box ticked),
@@ -124,12 +124,11 @@ function needsDialog() {
   }
   if (c.kind === 'wont') {
     // Won't do: a comment is required — why, or who it's for; Claude reads it (a reply only when it asks for one).
-    const note = c.note || ''
     return `<div class="td-modal" data-needs-off="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
       <h3 id="nd-dlg">Won't do</h3><p><b>${esc(item.where || '')}</b> — ${esc(item.line || '')}</p>
-      <label for="nd-note" class="set-sub">Why, or who it's for — needed</label><textarea id="nd-note" rows="3" placeholder="That's presales' deal — or: tell her to ask Omar">${esc(note)}</textarea>
+      <label for="nd-note" class="set-sub">Why, or who it's for — needed</label><textarea id="nd-note" rows="3" placeholder="That's presales' deal — or: tell her to ask Omar"></textarea>
       <p class="set-sub">Claude notes who it's for. It drafts a reply only when you ask for one here, and sends nothing: you do, from Today.</p>
-      <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-wont-ok="${esc(c.id)}"${note.trim() ? '' : ' disabled title="Write why, or who it\'s for"'}>Won't do</button></div></div></div>`
+      <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-wont-ok="${esc(c.id)}" disabled title="Write why, or who it's for">Won't do</button></div></div></div>`
   }
   const m = c.mail
   const body = !m ? '<p class="set-sub">Reading the mail…</p>' : m.error ? `<p class="warn">${esc(m.error)}</p>` : `<p><b>${esc(m.subject || '')}</b><br><span class="set-sub">${esc((m.from && (m.from.name || m.from.email)) || '')}</span></p><div class="nd-mail">${esc(m.text || '')}</div>`
@@ -178,6 +177,11 @@ document.addEventListener('input', (e) => {
     if (b) { b.disabled = !e.target.value.trim(); b.title = b.disabled ? "Write why, or who it's for" : '' }
   }
   if (e.target.id === 'wd-text' && S.wontEdit) S.wontEdit.text = e.target.value
+  // I'll do it, Read and reply and Close: what the user typed and chose stays when the dialog is drawn again.
+  if (e.target.id === 'nd-title' && S.needsDlg && S.needsDlg.kind === 'todo') S.needsDlg.title = e.target.value
+  if (e.target.id === 'nd-reply' && S.needsDlg && S.needsDlg.kind === 'mail') S.needsDlg.reply = e.target.value
+  if (e.target.id === 'nd-thread' && S.needsDlg && S.needsDlg.kind === 'todo') S.needsDlg.thread = e.target.value
+  if (e.target.id === 'td-close-note' && S.todayClose) S.todayClose.note = e.target.value
 })
 
 /** Today → the Claude dialog's Yolo: the task, its skill and the user's words go to Echo (IPC `task_yolo`), which has
@@ -293,6 +297,25 @@ function sendToClaude(line, profile) {
 }
 /** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
  *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
+/** Today's dialogs, drawn in their own region (`#r-dlg`): Today is drawn again each minute (the now line), which would
+ *  replace a dialog under the pointer (a click lost) and its typed words. */
+function todayDialogs() {
+  return S.view === 'today' ? todayCloseDialog() + needsDialog() : ''
+}
+/** A dialog drawn again (its item changed, the threads came) gets back what the user typed and chose. */
+function todayDialogsKeep() {
+  const put = (id, v) => { const el = $('#' + id); if (el && v != null && el.value !== v) el.value = v }
+  const c = S.needsDlg
+  if (c && c.kind === 'todo') { put('nd-title', c.title); put('nd-thread', c.thread) }
+  if (c && c.kind === 'mail') put('nd-reply', c.reply)
+  if (c && c.kind === 'wont') {
+    put('nd-note', c.note)
+    const b = $('[data-needs-wont-ok]'), empty = !(c.note || '').trim()
+    if (b && b.disabled !== empty) { b.disabled = empty; b.title = empty ? "Write why, or who it's for" : '' }
+  }
+  if (S.todayClose) put('td-close-note', S.todayClose.note)
+}
+
 function todayCloseDialog() {
   const c = S.todayClose
   if (!c) return ''
