@@ -231,6 +231,12 @@ export class CallsPage extends AppPage {
     return this.rightPanel.getByText(text, { exact: true })
   }
 
+  /** What the window's server says of a call (`/api/call/<folder>`: its automatic minutes' `auto`, …), as the page
+   *  asks it (its cookie). */
+  async callApi(folder) {
+    return (await this.page.request.get(`${this.data.base}/api/call/${folder}`)).json()
+  }
+
   /** Hold the window's requests to the app (a save) until `release()`: what the window says while one is under way
    *  can be read. */
   async holdRequests() {

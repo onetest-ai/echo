@@ -321,7 +321,26 @@
     ],
     "folderA": "folder-a",
     "delay": 4,
-    "wrongModel": "no-such-model"
+    "wrongModel": "no-such-model",
+    "model": "large-v3-turbo-q5_0",
+    "autoOff": {
+      "recording": "minutes-call",
+      "title": "CLA-015 auto off",
+      "quiet": 120
+    },
+    "missed": {
+      "recording": "minutes-call",
+      "title": "CLA-007 missed",
+      "quiet": 105,
+      "startsWithin": 15,
+      "said": "sso checklist"
+    },
+    "checks": [
+      "microphone",
+      "system-audio",
+      "accessibility",
+      "screen"
+    ]
   },
   "clients": {
     "own": {

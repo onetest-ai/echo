@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, auto, second-instance, recordings]
 ai: virtual
 external_id: TC-CLA-006
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-007: Calls missed while Echo was quit get their minutes on the next start, written from the call alone and sent nowhere
@@ -39,7 +40,7 @@ external_id: TC-CLA-006
 | 4 | Start the dev app (`$W 30 app`), then `$W 60 file "$ECHOCTL_HOME/calls/$(cat "$D/cla-007.stamp")*/notes-run.json"` and read it | Within a minute of the start: `"auto": true`, `started_at` within seconds of the start; `claude.log` starts "Echo starts Claude Code to write the minutes (automatically)" |
 | 5 | Run the prelude, then `target/debug/echoctl pending --for "$ECHOCTL_HOME"` | `[]`: a session is never given the call (the app writes it) |
 | 6 | `$W 300 sh "grep -qs '\"state\": *\"done\"' $ECHOCTL_HOME/calls/$(cat "$D/cla-007.stamp")*/notes-run.json"`; `ls` the call's folder (the run may rename it); read `notes.md`, `actions.json`, and the model's log (`grep -c -i 'SSO checklist' "$D/model/model-log.jsonl"`) | `notes.md` and `actions.json` are there: the virtual model's minutes ("The virtual model wrote these minutes…") and its one action item, "Me — send the follow-up notes", applied; the model's log holds the call's transcript (the run read it: the count is not 0, the checklist is said in the call). (Owners and dates a real model draws from the call: the release check of S-30.) |
-| 7 | Read the call's `claude.log` (the window's "Show log") | Its first line: "Echo starts Claude Code to write the minutes (automatically)", with the model, the folder and "guard: every tool call is checked…"; the commands it ran are `echoctl context`, `type`, `actions` (and `title`) on this call, the reads and writes in its folder only; no `m365`, `compose`, `deliver` or other send; it ends "Minutes written." |
+| 7 | Read the call's `claude.log` (the window's "Show log") | Its first line: "Echo starts Claude Code to write the minutes (automatically)", with the model, the folder and "guard: every tool call is checked…"; the commands it ran are `echoctl context`, `type`, `actions` (and `title`) on this call, the reads and writes in its folder only; no `m365`, `compose`, `deliver` or other send; it ends "Minutes written. (Ns)" (each line after its time) |
 
 ## Expected Final State
 A missed call is caught up by Echo at its next start, not by a session; the automatic run writes the minutes from the call alone and sends nothing.

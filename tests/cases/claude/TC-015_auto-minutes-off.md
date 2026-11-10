@@ -10,6 +10,7 @@ platform: macos
 tags: [minutes, auto, second-instance, recordings]
 ai: virtual
 external_id: TC-CLA-016
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-015: Automatic minutes off: nothing is written until asked

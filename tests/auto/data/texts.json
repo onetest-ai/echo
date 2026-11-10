@@ -1719,6 +1719,44 @@
     },
     "armedFile": "armed.json",
     "stopRequest": "stop.request",
-    "stateDir": ".echo"
+    "stateDir": ".echo",
+    "checkedBy": "app",
+    "statuses": [
+      "granted",
+      "denied",
+      "not_determined",
+      "unknown"
+    ],
+    "marks": {
+      "granted": "✓",
+      "denied": "✗",
+      "not_determined": "?",
+      "unknown": "?"
+    },
+    "permissions": "Permissions",
+    "health": "#settings/health",
+    "due": {
+      "off": "off",
+      "before": "before",
+      "at": "at"
+    },
+    "runDone": "done",
+    "actionsFile": "actions.json",
+    "runCommand": "^\\d\\d:\\d\\d:\\d\\d  → Bash echoctl (\\S+)",
+    "runCommands": [
+      "context",
+      "type",
+      "actions",
+      "title"
+    ],
+    "neverRun": [
+      "m365",
+      "compose",
+      "deliver"
+    ],
+    "modelLog": "model/model-log.jsonl",
+    "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
+    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
+    "autoRun": "Echo starts Claude Code to write the minutes (automatically)"
   }
 }
