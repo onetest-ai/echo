@@ -359,7 +359,10 @@ document.addEventListener('click', (e) => {
   if (t.dataset.panelShow) { Layout.show(t.dataset.panelShow, panelViews()); return layoutChanged() }
   if (t.dataset.panelMove) { Layout.move(t.dataset.panelMove, t.dataset.to, panelViews()); return layoutChanged() }
   if (t.dataset.panelToggle) {
-    if (S.overlay && t.dataset.panelToggle === 'right') return closeOverlay()
+    if (S.overlay && t.dataset.panelToggle === 'right') {
+      if (Layout.effective(window.innerWidth, window.innerHeight, panelViews()).narrow) return closeOverlay()
+      S.overlay = false // widened since: the docked panel's Close closes it below
+    }
     Layout.toggle(t.dataset.panelToggle); return layoutChanged()
   }
   if (t.dataset.go) { S.barOver = false; return goActivity(t.dataset.go) }
