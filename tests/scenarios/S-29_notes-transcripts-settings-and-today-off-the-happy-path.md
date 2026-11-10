@@ -29,7 +29,7 @@ cases:
 | Asset | Made by | Used by stages |
 |---|---|---|
 | Data build (`standard`) | the lead (`serve.sh up … --set standard`), right before the run and before 21:00 | all |
-| The call folders' names (dated by the build) | Prelude, step P2 (one `ls`) | 1, 3–7 (the shell steps and the folder names in TC-018's and TC-019's Test Data) |
+| The call folders' names (dated by the build) | Prelude, step P2 (one `ls`) | 1, 3–7 (the shell steps; TC-018 names its calls by slug, TC-019 finds its folder with `ls`) |
 | The Calls list on screen | stage 1 (step 1) | 1–3, 5, 6 (each clicks its row without navigating again) |
 | My notes open in the right panel, on today's Acme weekly sync | stage 3 (step 1) | 3–7 (the panel stays open as calls change; stage 4 reopens it after its reload, step 6) |
 | Today on screen, the card dismissed | stage 9 (step 7) | 10 |
@@ -41,7 +41,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | # | Action | Expected Result |
 |---|---|---|
 | P1 | Load `{{base_url}}/` (the cookie) in the open browser | The window loads |
-| P2 | `. <dir>/env; ls "$ECHOCTL_HOME/calls" \| grep -E -- '-(globex-steering\|acme-weekly-sync\|globex-standup\|umbrella-discovery\|duff-discovery\|coffee-chat\|initech-planning)$'` | One folder each, three for `acme-weekly-sync` (two older, today's last). Note them: their dates follow the build day, so a case's Test Data that names a dated folder (TC-018, TC-019) means the folder of the same slug here — the older Acme weekly sync whose `my-notes.md` is a folder (`ls -ld …/my-notes.md` → `d`) for TC-019 |
+| P2 | `. <dir>/env; ls "$ECHOCTL_HOME/calls" \| grep -E -- '-(globex-steering\|acme-weekly-sync\|globex-standup\|umbrella-discovery\|duff-discovery\|coffee-chat\|initech-planning)$'` | One folder each, three for `acme-weekly-sync` (two older, today's last). Note them: their dates follow the build day, so a case's Test Data that names a dated folder (TC-018, TC-019) means the folder of the same slug here — the oldest Acme weekly sync, whose `my-notes.md` is a folder (`ls -ld …/my-notes.md` → `d`), for TC-019 |
 
 ## Stages
 
@@ -58,7 +58,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 9 | `today/TC-004_a-card-sent-to-today-shows-until-got-it.md` | — | Steps 1–2 in one shell call (each command preceded by `echo "== step N"`, followed by `echo "exit $?"`; each step checked on its own part). Skip nothing else: Today stays on screen for stage 10 |
 | 10 | `today/TC-005_actions-on-a-busy-today-act-on-its-items.md` | — | On stage 9's view (Your day, no card): in step 1 skip the navigation, check "Your day" on one snapshot, press `ControlOrMeta+k` |
 | 11 | `today/TC-012_a-failed-calendar-sync-today-says-the-calendar-couldnt-be-read.md` | — | After stage 10 (it changes the agenda; its step 5 puts it back). Steps 1 and 5's shell parts in one shell call each |
-| 12 | `settings/TC-028_general-and-health-say-what-is-this-computers.md` | — | — (stage 10's Cancel already closed the palette) |
+| 12 | `settings/TC-028_general-and-health-say-what-is-this-computers.md` | — | — |
 
 ## Notes
 - Stages 3–7 change the notes of their calls (each on its own calls; stage 5 adds a note to today's Acme weekly sync after stage 4 edited it, and expects only its own line). Stage 8 breaks `config.json` and restores it: its teardown must run.
