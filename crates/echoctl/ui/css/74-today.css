@@ -12,7 +12,7 @@
 .td-sec { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; }
 .td-grid > .td-sec { display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
 /* A line of hug widgets only (Today's layout): as tall as they are, not the fill's height. */
-.td-grid.td-hug { flex: none; min-height: 0; }
+.td-grid.td-hug { flex: none; min-height: 0; align-items: stretch; }
 /* Needs you now and its drafts as one cell of a shared row (Today's layout). */
 .td-grid > .td-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
 .td-rows, .td-tasks { min-height: 0; overflow-y: auto; }
