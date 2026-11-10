@@ -51,6 +51,8 @@ node crates/echoctl/ui/settings-search.test.mjs
 # Settings → Layout's "Echo's own title bar": a Windows-only row, absent (and unsearchable) elsewhere (#76).
 node crates/echoctl/ui/own-title-bar.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
+# Today's widgets in rows, in its layout's order (todayRows, #323).
+node crates/echoctl/ui/today-rows.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"

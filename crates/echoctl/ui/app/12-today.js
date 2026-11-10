@@ -80,8 +80,38 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs, d.asks)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
+  // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
+  // by side. Sizes take effect with the layout engine (#315).
+  // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work }
+  const layoutRows = todayRows(d.layout, Object.keys(parts))
+  // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
+  const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
+  const blocks = layoutRows.map((r) => {
+    const h = r.map((id) => [id, parts[id]]).filter(([, x]) => x)
+    const grid = h.length > 1 || r.some((id) => id === 'core:calendar.agenda' || id === 'core:tasks.mine')
+    if (!grid) return h.map(([, x]) => x).join('')
+    // In a shared row a part of two blocks (Needs you now and its drafts) is one cell.
+    const cells = h.map(([id, x]) => (h.length > 1 && id === 'core:needs.now' ? `<div class="td-col">${x}</div>` : x))
+    return `<div class="td-grid"${cells.length > 2 ? ` style="grid-template-columns: repeat(${cells.length}, minmax(0, 1fr))"` : ''}>${cells.join('')}</div>`
+  }).join('')
+  return `<div class="td">${head}${asks}${blocks}${empty}</div>`
 }
+
+// ── today rows: Today's widgets in rows, as its layout says (no DOM: `today-rows.test.mjs`) ─────────────────────────
+/** The layout's widgets the page has a part for, in order, a row each where one starts (`row`): [[id, …], …]. No
+ *  layout (an older app): Today as it comes. */
+function todayRows(layout, drawn) {
+  const items = layout || [{ widget: 'core:needs.now', row: true }, { widget: 'core:routines.cards', row: true }, { widget: 'core:calendar.agenda', row: true }, { widget: 'core:tasks.mine' }]
+  const rows = []
+  for (const it of items) {
+    if (!drawn.includes(it.widget)) continue
+    if (it.row || !rows.length) rows.push([])
+    rows[rows.length - 1].push(it.widget)
+  }
+  return rows
+}
+// end of the today rows block
 
 // Needs you now's actions: Reply with where it goes (Teams' logo, or a mail's envelope), I'll do it (a box ticked),
 // Won't do (a circle struck through). The Teams logo: Simple Icons 11.15.0 (CC0), in Teams' colour.
