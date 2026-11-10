@@ -336,6 +336,9 @@ document.addEventListener('keydown', (e) => {
 /** A list cut by its card's height shows a fade at the bottom while there is more below (window-ui R10: one scroll
  *  per card, and the cut must show). */
 function todayMoreCue() {
+  // The view Today scrolls in (its height less its padding): the held Your day is that tall at most.
+  const td = document.querySelector('.td')
+  if (td) td.style.setProperty('--td-view', `${Math.max(300, td.clientHeight - 42)}px`)
   for (const el of document.querySelectorAll('.td .td-rows, .td .td-tasks')) {
     const more = el.scrollHeight - el.scrollTop - el.clientHeight > 4
     if (more !== el.hasAttribute('data-more')) el.toggleAttribute('data-more', more)
