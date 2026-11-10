@@ -32,8 +32,8 @@ tags: [today, needs, ill-do-it]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#today`, wait for "Needs you now", click "I'll do it" on the row "Mail to you" | A dialog "A task of yours": "What to do" holds "Contract redlines for the Globex pilot"; "In which thread" shows "Globex pilot"; "Cancel" and "Add to Tasks" |
-| 2 | Replace the text in "What to do" with `Send Kim the signed redlines`; choose "Initech hiring" in "In which thread"; keep a reference to the button (`const b = document.querySelector('[data-needs-todo-ok]')`) | — |
-| 3 | Wait until the clock's minute changes (up to 65 s; the line "now" on Your day shows the new minute) | The dialog is still open with the same button element (`b.isConnected` is true); "What to do" still holds `Send Kim the signed redlines`; the thread is still "Initech hiring" |
+| 2 | Replace the text in "What to do" with `Send Kim the signed redlines`; choose "Initech hiring" in "In which thread"; keep references to the button and to Today's page (`const b = document.querySelector('[data-needs-todo-ok]'), m = document.querySelector('#r-primary main')`) | — |
+| 3 | Wait until the clock's minute changes (up to 65 s; the line "now" on Your day shows the new minute) | Today was drawn again (`m.isConnected` is false); the dialog is still open with the same button element (`b.isConnected` is true); "What to do" still holds `Send Kim the signed redlines`; the thread is still "Initech hiring" |
 | 4 | Click "Add to Tasks" | The dialog closes; the row "Mail to you" is gone from Needs you now and stays gone after a reload of `{{base_url}}/#today` |
 | 5 | Run `. <dir>/env && tail -1 "$ECHOCTL_HOME/projects/initech-hiring/ledger/events.jsonl"` | A `create` of a `task` titled "Send Kim the signed redlines", due today, its description "From Kim Park (Mail to you): Contract redlines for the Globex pilot", under the story "From Teams and mail" (epic "Follow-ups") |
 | 6 | Navigate to `{{base_url}}/#tasks`, find "Send Kim the signed redlines" | The task is listed in the thread Initech hiring |
