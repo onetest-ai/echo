@@ -33,7 +33,7 @@ cases:
 |---|------|------------|-----------|
 | 1 | `prep/TC-015_prep-write-on-the-virtual-model-writes-its-summary.md` | — | Load `{{base_url}}/` (the cookie). Write the prep script and clear the log (its Preconditions). Steps 4–5 in one shell call |
 | 2 | `tasks/TC-026_yolo-on-the-virtual-model-does-the-task-and-says-so-above-it.md` | — (another thread, another job) | Write the Yolo script; clear `<dir>/model/model-log.jsonl` (`: > …`) so its step 7 reads only this run. Step 1's commands in one shell call |
-| 3 | `work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md` | — (another thread) | Write the sync script; clear `<dir>/model/model-log.jsonl` so its step 9 reads only this sync. Steps 1–2 in one shell call |
+| 3 | `work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md` | — (another thread) | Write the sync script; clear `<dir>/model/model-log.jsonl` so its step 9 reads only this sync. Step 1 and step 2's first `pending` in one shell call; step 2's two `done` (the ids from that `pending`), its second `pending` and the saved tree in a second |
 
 ## Teardown
 - `tests/fixtures/serve.sh down <dir>` (it stops the virtual model too)

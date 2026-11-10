@@ -16,7 +16,7 @@ cases:
 
 **Story:** Sam has no Claude account on this computer: his AI profile is a model server of his own (Ollama, on this Mac or one on the network). First he sees what Echo says on a computer without Claude Code or without Echo's plugin. Then Claude Code writes real minutes on the local model: a standup's follow the Status sync template because of its title, a negotiation's are written again with Discussion and keep it, a memo's come in the memo template, one part per thread. Last he checks that a call keeps the profile it was given when he changes the default.
 
-**Data:** `standard` with the local model (`tests/fixtures/serve.sh up <dir> <port> --set standard --ai local`; `tests/fixtures/README.md`, "Real Claude Code runs on a local model"). Fresh data per run, built right before it, between 06:00 and 20:00 local. Needs Claude Code on `PATH` and the data's model server answering. Serve it with `serve.sh` only, never the Echo app. Ports: the scenario's, and its port + 1 and + 2 for stage 1.
+**Data:** `standard` with the local model (`tests/fixtures/serve.sh up <dir> <port> --set standard --ai local`; `tests/fixtures/README.md`, "Real Claude Code runs on a local model"). Fresh data per run, built right before it, as `make_data.py` allows (06:00–22:50 local). Needs Claude Code on `PATH` and the data's model server answering. Serve it with `serve.sh` only, never the Echo app. Ports: the scenario's, and its port + 1 and + 2 for stage 1.
 
 **Length:** about 4 minutes of model time on the network test server (stage 2 ≈ 2 min, 3 ≈ 1 min, 4 ≈ 1 min); longer on a Mac running the model itself. One model run per stage from 2 to 4 (three in all), each on its own prompt or condition, none repeated; a stage whose run fails for an infrastructure reason (Ollama down, model missing) is BLOCKED, not retried.
 
@@ -24,7 +24,7 @@ cases:
 
 | Asset | Made by | Used by stages |
 |---|---|---|
-| Data build (`standard --ai local`) | the lead (`serve.sh up … --set standard --ai local`), right before the run, between 06:00 and 20:00 | all |
+| Data build (`standard --ai local`) | the lead (`serve.sh up … --set standard --ai local`), right before the run (06:00–22:50) | all |
 | `<profile>`, `<model>` and `<where>` (the default AI profile in `echoctl ai status`) | Prelude, step P2 | 2–5 |
 | The call folders (`<standup>`, Initrode demo, Analyst briefing, `<call>` = Acme renewal negotiation, the memo's `<stamp>`, Umbrella proposal walkthrough) | Prelude, step P2 | 2–5 |
 | Two extra window servers (no Claude Code; no plugin) | stage 1 (steps 1, 3) | 1 (stopped in its teardown) |
