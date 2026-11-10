@@ -1565,13 +1565,14 @@ mod tests {
     }
 
     #[test]
-    fn a_local_profiles_one_shot_jobs_go_to_its_minutes_model_and_live_notes_to_its_live_model() {
-        // #294: a prep (and every complete_text job) records the minutes model, so that is the one asked.
+    fn a_local_profiles_one_shot_jobs_run_on_the_model_they_record() {
+        // #294: a prep records text_model; that is the one asked — on a local profile its live model, already loaded.
         let p = Profile { live_model: Some("small".into()), notes_model: Some("big".into()), ..local("") };
         let ok = http("200 OK", "", r#"{"content":[{"type":"text","text":"ok"}]}"#);
         let (url, seen) = serve_seen(ok.clone());
         complete_text(&Profile { base_url: Some(url), ..p.clone() }, "sys", "hi", 10).unwrap();
-        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"big""#));
+        assert_eq!(text_model(&p), "small");
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
         let (url, seen) = serve_seen(ok);
         complete(&Profile { base_url: Some(url), ..p }, "sys", "hi", 10, true, &|| false).unwrap();
         assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
