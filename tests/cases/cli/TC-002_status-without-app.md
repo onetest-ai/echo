@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [cli, status]
 external_id: TC-CLI-004
+auto: [tests/auto/specs/S-04.spec.mjs]
 ---
 
 # TC-002: echoctl status reports no watcher and today's agenda when the app isn't running

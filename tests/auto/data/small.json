@@ -1208,5 +1208,30 @@
       "other": "Acme demo"
     },
     "scroll": 120
+  },
+  "s04": {
+    "mine": [
+      "Send Acme the SSO checklist",
+      "Draft the Globex pilot plan"
+    ],
+    "others": [
+      "Answer the security questionnaire"
+    ],
+    "dueToday": {
+      "title": "Send Acme the SSO checklist",
+      "project": "acme-rollout"
+    },
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "keys": [
+      "watcher",
+      "armed",
+      "agenda"
+    ]
   }
 }

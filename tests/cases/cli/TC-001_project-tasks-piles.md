@@ -8,6 +8,7 @@ module: cli
 run: agent
 platform: any
 tags: [cli, tasks]
+auto: [tests/auto/specs/S-04.spec.mjs]
 ---
 
 # TC-001: echoctl project tasks sorts open tasks into the user's and others' piles

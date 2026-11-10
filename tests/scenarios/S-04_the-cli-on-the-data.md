@@ -6,6 +6,7 @@ data: small
 cases:
   - tests/cases/cli/TC-001_project-tasks-piles.md
   - tests/cases/cli/TC-002_status-without-app.md
+auto: [tests/auto/specs/S-04.spec.mjs]
 ---
 
 # S-04: The CLI on the same data: tasks by who has to move, the app's state
