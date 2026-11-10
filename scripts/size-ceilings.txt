@@ -1,6 +1,5 @@
 # Files over 1,500 lines when the limit came in (2026-11-08, #126): each may shrink, never grow (scripts/size-check.sh).
 # Lower a ceiling when its file shrinks; drop the line once the file is under 1,500.
-crates/echoctl/src/ai.rs 1831
 crates/echoctl/src/notes.rs 1637
 crates/echoctl/src/livenotes.rs 1596
 crates/echoctl/src/app.rs 1531
