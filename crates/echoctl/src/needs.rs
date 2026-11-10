@@ -338,8 +338,14 @@ pub fn view() -> Value {
     json!({"items": items, "checked_at": st["checked_at"], "errors": st["errors"], "signed_in": graph::account().is_some()})
 }
 
-/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here) or `wont` (gone; Won't do's
-/// comment kept as its `note`). Gives the task made and the item as it was.
+/// An item of Needs you now by its id, as it was read (for `echo://needs/<id>` and Claude's work on it).
+pub fn item(id: &str) -> Option<Value> {
+    load()["items"].as_array().into_iter().flatten().find(|x| x["id"].as_str() == Some(id)).cloned()
+}
+
+/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here), `wont` (gone; Won't do's
+/// comment kept as its `note`) or `claude` (handed to Claude, from the dialog: Work on it or Yolo). Gives the task
+/// made and the item as it was.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, note: Option<&str>) -> Result<Value> {
     let mut st = load();
@@ -352,8 +358,8 @@ pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, no
         let note = format!("From {}{}: {}", item["from"].as_str().unwrap_or("someone"), item["where"].as_str().map(|w| format!(" ({w})")).unwrap_or_default(), item["line"].as_str().unwrap_or(""));
         let story = follow_ups(&thread)?;
         made = crate::ledger::human_event(&thread, &json!({"op": "create", "kind": "task", "parent": story, "title": title.chars().take(200).collect::<String>(), "internal_owner": me, "description": note.chars().take(1200).collect::<String>(), "due": Utc::now().format("%Y-%m-%d").to_string()}))?;
-    } else if how != "wont" {
-        anyhow::bail!("decide: todo or wont");
+    } else if how != "wont" && how != "claude" {
+        anyhow::bail!("decide: todo, wont or claude");
     }
     let mut d = st["decided"].as_object().cloned().unwrap_or_default();
     let mut dv = json!({"how": how, "at": Utc::now().to_rfc3339()});
@@ -456,6 +462,11 @@ mod tests {
         assert_eq!(d["item"]["line"], "Pilot user list", "the item as it was, for Won't do's run");
         assert_eq!(view()["items"].as_array().unwrap().len(), 1);
         assert_eq!(load()["decided"]["mail:c1"]["note"], "for presales: their deal", "Won't do's comment is kept");
+        // Handed to Claude (its dialog): decided, no task made, gone from the view too.
+        assert_eq!(item("hot:x").unwrap()["line"], "Checkout is down");
+        assert!(decide("hot:x", "claude", None, None, None).unwrap()["made"].is_null());
+        assert_eq!((load()["decided"]["hot:x"]["how"].as_str(), view()["items"].as_array().unwrap().len()), (Some("claude"), 0));
+        assert!(decide("mail:old", "maybe", None, None, None).is_err(), "todo, wont or claude only");
     }
 
     #[test]

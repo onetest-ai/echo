@@ -18,7 +18,7 @@ tags: [today, needs, wont-do, claude, m365]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie). `<dir>` is the data folder (`. <dir>/env` sets `ECHOCTL_HOME`)
 - Microsoft 365 is not signed in: the Needs you now items come from the data's `.echo/needs.json`. Claude Code is the data's fake: a Won't do run answers from `<dir>/fake-answers.tsv` by a phrase of the comment (`manifest.json` `needs`), any other run is refused
-- Needs you now is `section.nd` on Today; a row is `.nd-row`, its Won't do button `[data-needs-wont="<item id>"]`. The dialog: heading "Won't do", box `#nd-note`, button `[data-needs-wont-ok]`. Asks is `section.wd`, a line `.wd-row`, a draft `.wd-draft`
+- Needs you now is `section.nd` on Today; a row is `.nd-row`, Won't do and I'll do it are reached from ⌘K (`ControlOrMeta+k`), its NEEDS YOU NOW group ("Won't do: <sender> — …", "I'll do it: <sender> — …"); the row's own button is ✦ (Claude). The dialog: heading "Won't do", box `#nd-note`, button `[data-needs-wont-ok]`. Asks is `section.wd`, a line `.wd-row`, a draft `.wd-draft`
 
 ## Test Data
 
@@ -34,7 +34,7 @@ The fake's answer for the comment `tell her to ask Priya`: for "Priya Nair", why
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today`, click "Won't do" on the row "Chat with Dana Lee", type `tell her to ask Priya`, click the dialog's "Won't do" | The row leaves Needs you now; Asks shows a line "Won't do" for "Chat with Dana Lee" |
+| 1 | Navigate to `{{base_url}}/#today`, press `ControlOrMeta+k`, type `Won't do: Dana Lee`, press Enter (⌘K's NEEDS YOU NOW item for the row "Chat with Dana Lee"), type `tell her to ask Priya`, click the dialog's "Won't do" | The row leaves Needs you now; Asks shows a line "Won't do" for "Chat with Dana Lee" |
 | 2 | Wait up to 30 s for the line to change | "Won't do · for Priya Nair: Priya owns the Acme renewal pricing"; "A draft in Teams — nothing is sent until you press Send"; the draft "Hi Dana, Priya Nair owns the renewal pricing now: please ask her for the price list."; buttons "Send", "Edit", "Drop" |
 | 3 | Run `. <dir>/env && python3 -c "import json,os; a=[x for x in json.load(open(os.environ['ECHOCTL_HOME']+'/.echo/task-asks.json')) if x.get('kind')=='wont']; print(a[0]['state'], a[0]['draft']['channel'], a[0]['to']['chat'])"` | Prints `done teams 19:dana-lee@unq.gbl.spaces`: a draft, not sent, for the item's own chat |
 | 4 | Click "Edit" | The draft becomes a box (`#wd-text`) holding its text; "Edit" is gone; "Send" and "Drop" stay |

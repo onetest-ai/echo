@@ -1,3 +1,5 @@
+import { literal } from '../support/data.mjs'
+
 // The Echo window as a whole: opening it on the data, and what every view shares (the status bar).
 export class AppPage {
   /** @param {import('@playwright/test').Page} page  @param data the spec file's data (support/data.mjs) */
@@ -10,6 +12,13 @@ export class AppPage {
   /** A button of the status bar, by the word its name starts with ("Actions", "Claude"). */
   statusBarButton(word) {
     return this.statusBar.getByRole('button', { name: new RegExp(`(^|\\s)${word}\\b`) })
+  }
+
+  /** Do an action from ⌘K: open the palette, type what the action says, choose the action whose name starts so. */
+  async action(words) {
+    await this.page.keyboard.press('ControlOrMeta+k')
+    await this.page.getByLabel('Action', { exact: true }).fill(words)
+    await this.page.getByRole('option', { name: new RegExp(`^${literal(words)}`) }).first().click()
   }
 
   /** The window at a route (`#today`, `#calls`, …): its cookie first, as a browser gets it. */

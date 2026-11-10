@@ -47,6 +47,12 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // Claude's dialog on an item (✦): Yolo in the background (the outcome above My work), the item decided.
+        #[cfg(feature = "js")]
+        "needs_yolo" => match crate::today::yolo_needs(v["ask"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or(""), v["skill"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Won't do, with the user's comment (required): decided, then Claude notes who it's for in the background.
         #[cfg(feature = "js")]
         "needs_wont" => match crate::today::wont_do(v["ask"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or(""), v["note"].as_str().unwrap_or("")) {
