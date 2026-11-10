@@ -1174,5 +1174,39 @@
     },
     "note": "Ask Dana about the Berlin office date",
     "status": "● to do"
+  },
+  "s02": {
+    "accepted": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Acme demo"
+    ],
+    "notAccepted": "Industry webinar",
+    "lastPast": "Initech planning",
+    "coming": [
+      "Globex design review",
+      "Acme demo"
+    ],
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "recorded": [
+      "Acme weekly sync",
+      "Initech planning"
+    ],
+    "card": {
+      "subject": "Globex design review",
+      "organizer": "Sam Rivera"
+    },
+    "schedule": {
+      "subject": "Globex design review",
+      "other": "Acme demo"
+    },
+    "scroll": 120
   }
 }

@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calendar]
 external_id: TC-WIN-009
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-010: A meeting's card opens beside it and closes

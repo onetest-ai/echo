@@ -1021,5 +1021,38 @@
     "models": "models",
     "testModels": "ECHOCTL_TEST_MODELS",
     "debug": "ECHOCTL_DEBUG"
+  },
+  "today": {
+    "meetings": "{n} meetings",
+    "prepare": "Prepare",
+    "record": "Record when it starts",
+    "dontRecord": "Don't record",
+    "now": "Now {time}"
+  },
+  "cal": {
+    "routes": {
+      "day": "day",
+      "week": "week"
+    },
+    "day": "Day",
+    "week": "Week",
+    "notice": "Showing today's meetings only. Connect Microsoft 365 from the menu-bar octopus (Calendar) to see your week.",
+    "when": "Today · {start}–{end}",
+    "soon": " · in (\\d+ min|\\d+ h)$",
+    "kind": "Kind of meeting",
+    "addThread": "+ Thread",
+    "people": "People",
+    "organizer": "organizer",
+    "close": "Close",
+    "willRecord": "Will record",
+    "starts": "Echo starts recording a minute before it begins",
+    "scheduled": ".echo/scheduled.json",
+    "colours": {
+      "now": "--recording",
+      "recorded": "--me",
+      "scheduled": "--recording"
+    },
+    "from": -1,
+    "days": 7
   }
 }

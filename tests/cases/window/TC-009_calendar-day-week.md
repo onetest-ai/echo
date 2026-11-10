@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calendar]
 external_id: TC-WIN-008
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-009: Calendar Day and Week show today's meetings and the line now

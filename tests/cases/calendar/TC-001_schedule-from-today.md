@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calendar, today, schedule]
 external_id: TC-CAL-004
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-001: Record when it starts schedules a coming meeting, and Don't record undoes it

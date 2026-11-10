@@ -8,6 +8,7 @@ module: today
 run: agent
 platform: any
 tags: [today]
+auto: [tests/auto/specs/S-02.spec.mjs]
 ---
 
 # TC-002: Your day draws the line "now" between past and coming meetings
