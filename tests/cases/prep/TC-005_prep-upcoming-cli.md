@@ -17,7 +17,7 @@ auto: [tests/auto/specs/S-10.spec.mjs]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
-- The data puts the meetings to come 1 h, 1.5 h and 2.5 h ahead; built after about 20:20 the later ones start sooner, in the same order and over by 23:59, the accepted ones still 30 min (the unanswered Industry webinar then shorter; tests/fixtures/README.md). Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- The data puts the meetings to come 1 h, 1.5 h and 2.5 h ahead; built after about 20:20 the later ones start sooner, in the same order and over by 23:59, the accepted ones still 30 min (the unanswered Industry webinar then shorter); built after about 21:50 all three start sooner, and at 22:50 Globex design review starts 8 minutes after the build (tests/fixtures/README.md, #364). Every `echoctl` command runs after `. <dir>/env` (the run's env file)
 
 ## Test Data
 

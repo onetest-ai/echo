@@ -1997,7 +1997,14 @@ def build_agenda(d, H):
                    "attendees": [NINA], "join_url": "https://teams.example/ev-free-invite", "source": "test", "response": "notResponded"})
     if H:
         place = "Meeting subjects, organizers, people and locations (calendar blocks and cards, Coming up today, preps)"
-        events.append({"id": "ev-hostile", "subject": H.text(place, "Meeting", kind="html", one_line=True, where="agenda subject"), "start": iso(at(1.2)), "end": iso(at(1.6)),
+        # A meeting you go to, never at once with another (Your day would fold it, #371): 72–96 minutes after the build,
+        # after the meetings to come and before the Zoom invite; built late (after about 21:35), when the Zoom invite
+        # is squeezed earlier, it is laid back into the free time 21–36 minutes after the build (the free invite then
+        # folds under it).
+        h_start, h_end = now + timedelta(minutes=72), now + timedelta(minutes=96)
+        if h_end > at(1.75):
+            h_start, h_end = (now + timedelta(minutes=21)).replace(second=0, microsecond=0) + timedelta(minutes=1), soon
+        events.append({"id": "ev-hostile", "subject": H.text(place, "Meeting", kind="html", one_line=True, where="agenda subject"), "start": iso(h_start), "end": iso(h_end),
                        "organizer": {"name": H.text(place, "", kind="rtl", one_line=True, where="agenda organizer"), "email": "org@umbrella.example"},
                        "attendees": [{"name": H.text(place, "", kind="emoji", one_line=True, where="agenda attendees"), "email": "a@umbrella.example"},
                                      {"name": H.text(place, "", kind="long", where="agenda attendees"), "email": "b@umbrella.example"}],
@@ -2360,7 +2367,7 @@ def build_standard(d, hostile=False):
     build_agenda(d, H)
     build_inbox(d, H)
     finish_calls(d)
-    if not H:  # hostile: the jump to a transcript moment loses its highlight with them (S-27 stage 10), not their place
+    if not H:  # hostile: the jump to a transcript moment loses its highlight with them (S-27 stage 10, #370)
         build_more_threads(d)
     if H:
         build_hostile_calls(d, H)

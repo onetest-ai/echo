@@ -17,7 +17,7 @@ tags: [today, widgets, calendar, invites, m365]
 
 ## Preconditions
 - Standard data set built right before the run (a busy evening: several meetings accepted at once, invites not answered): `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first; CLI steps after `. <dir>/env`; the browser 1440 × 1000
-- Steps 1–3 within about 30 minutes of the build: the invite "Design system walkthrough" lies in the free time between the meetings under way (they end 20 minutes after the build) and the ones to come (37 minutes after), from 22 to about 36 minutes after the build, at any hour of the build; once it is over it is no choice any more
+- Run steps 1–3 within 15 minutes of the build: the meetings under way end 20 minutes after it, and a line of meetings at once is no choice once they are over. The invite "Design system walkthrough" lies in the free time between the meetings under way (they end 20 minutes after the build) and the ones to come (37 minutes after), from 22 to about 36 minutes after the build, at any hour of the build; once it is over it is no choice any more
 - The test data isn't signed in to Microsoft 365: an answer can't be sent, which is what step 6 checks. The send itself is checked on a real account (person-run, as S-20)
 
 ## Steps

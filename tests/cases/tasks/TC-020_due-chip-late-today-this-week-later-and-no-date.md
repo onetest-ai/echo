@@ -49,7 +49,7 @@ The Due column is the date relative to the build; the chip shows the date itself
 | 1 | Navigate to `{{base_url}}/#tasks`, wait for the text "I owe", click "+ 8" in "I owe", "+ 12" in "Nobody named" and "Others · 24" | All piles are unfolded |
 | 2 | For each row of the table find the card and read its due chip `.tk-due` (class, `title` attribute, text) | The chip matches the Chip column of its row |
 | 3 | Count the chips with the class `late` on the whole page | Exactly 3: Acme rollout T010, Acme rollout T016, Globex pilot T004; the chips for today and tomorrow are not red |
-| 4 | Count the cards whose chip is not `none` | 13 cards have a date (3 late, 3 today, 3 tomorrow, 4 in 20 days); the other 46 read "no date" |
+| 4 | Count the cards whose chip is not `none` | 13 cards have a date (3 late, 3 today, 3 tomorrow, 4 in 20 days); the other 53 read "no date" |
 
 ## Expected Final State
 Every card of the table shows the chip of its row; 3 red chips on the page.
