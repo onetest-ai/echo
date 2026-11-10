@@ -44,7 +44,7 @@
   },
   {
    "id": "F-REC-05",
-   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again; a capture device that hangs (listing, opening or closing it) never holds up Stop (the recording ends within seconds); a Stop while Echo is busy for a moment is kept and ends the recording once it is free, never disarming the next meeting",
+   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again; a capture device that hangs (listing, opening or closing it) or Core Audio's list of the app's audio processes that hangs never holds up Stop (the call is told from the last answer meanwhile) (the recording ends within seconds); a Stop while Echo is busy for a moment is kept and ends the recording once it is free, never disarming the next meeting",
    "priority": "high",
    "check": "agent",
    "axes": [

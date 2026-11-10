@@ -45,3 +45,4 @@ The Stop given while the devices hung ended the recording at once; the app answe
 
 ## Notes
 - `recording/TC-025` is the other half: the whole app frozen (`kill -STOP`), where the Stop waits until it is free.
+- A hang in Core Audio's list of the app's audio processes (call detection, the tap and the mic ask it) can't be made from a case: its Rust tests (`audio::macos`, `shared`) hold a query that hangs and check that no caller waits on it.
