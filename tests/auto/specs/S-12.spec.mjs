@@ -84,15 +84,16 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     expect([null, []]).toContainEqual(off())
     const skills = new SkillsPage(page, data)
     await skills.openSkills()
-    await expect(skills.skillName(sk.name)).not.toHaveCSS('color', k.dimmed)
+    const on = await skills.nameColour(sk.name)
     try {
       await skills.switchTip(sk.name, k.on).click()
       await expect(skills.switchTip(sk.name, k.off)).toBeVisible()
       await expect(skills.switchBox(sk.name)).not.toBeChecked()
-      await expect(skills.skillName(sk.name)).toHaveCSS('color', k.dimmed)
+      await expect.poll(() => skills.nameColour(sk.name)).not.toBe(on)
       await expect.poll(off).toEqual([sk.id])
       await skills.switchTip(sk.name, k.off).click()
       await expect(skills.switchTip(sk.name, k.on)).toBeVisible()
+      await expect(skills.skillName(sk.name)).toHaveCSS('color', on)
       await expect.poll(off).toEqual([])
     } finally {
       // The skill on again, whatever failed above.
@@ -325,8 +326,8 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     for (const [name, mb] of [models.turbo, ...models.others]) {
       const row = settings.settingRow(name)
       await expect(settings.rowButton(row, fill(t.download, { mb }))).toBeVisible()
-      await expect(settings.rowHas(row, new RegExp(`${fill(t.size, { mb })}$`))).toBeVisible()
-      await expect(settings.rowHas(row, new RegExp(`^${t.whisper}`))).toBeVisible()
+      await expect(settings.rowHas(row, new RegExp(`${literal(fill(t.size, { mb }))}$`))).toBeVisible()
+      await expect(settings.rowHas(row, new RegExp(`^${literal(t.whisper)}`))).toBeVisible()
     }
     await expect(settings.says(t.recommended)).toHaveCount(1)
     for (const name of models.notInBuild) {
@@ -574,15 +575,19 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     const name = fill(t.on, { name: p.name })
     const row = plugins.switchOf(plugins.installedRow(p.name), name)
     const detail = plugins.switchOf(plugins.detail(p.name), name)
+    const lines = plugins.rowLines(p.name, p.version, p.summary)
     await expect(row).toHaveAttribute('aria-checked', 'true')
     await expect(detail).toHaveAttribute('aria-checked', 'true')
+    await expect(lines).toHaveCSS('opacity', t.opacity.on)
     await detail.click()
     await expect(detail).toHaveAttribute('aria-checked', 'false')
     await expect(row).toHaveAttribute('aria-checked', 'false')
+    await expect(lines).toHaveCSS('opacity', t.opacity.off)
     await expect.poll(enabled).toBe(false)
     await detail.click()
     await expect(detail).toHaveAttribute('aria-checked', 'true')
     await expect(row).toHaveAttribute('aria-checked', 'true')
+    await expect(lines).toHaveCSS('opacity', t.opacity.on)
     await expect.poll(enabled).toBe(true)
   })
 

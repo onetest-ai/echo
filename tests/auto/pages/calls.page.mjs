@@ -100,13 +100,20 @@ export class CallsPage extends AppPage {
     return row.getByTitle(thread, { exact: true })
   }
 
+  /** Whether a row draws a thread's icon before one of its texts (its time), from the left. */
+  async iconBefore(row, thread, text) {
+    const icon = await this.rowIcon(row, thread).boundingBox()
+    const at = await this.rowText(row, text).boundingBox()
+    return !!icon && !!at && icon.x < at.x
+  }
+
   /** A text of a row, as it reads (its time). */
   rowText(row, text) {
     return row.getByText(text, { exact: true })
   }
 
   get search() {
-    return this.page.getByRole('textbox', { name: 'Search calls' })
+    return this.page.getByRole('textbox', { name: this.data.text.calls.search, exact: true })
   }
 
   /** The transcript's turns, by their times. */

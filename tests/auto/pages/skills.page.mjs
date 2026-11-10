@@ -60,6 +60,11 @@ export class SkillsPage extends SettingsPage {
     return this.skill(name).getByText(name, { exact: true })
   }
 
+  /** The colour the row draws the skill's name in (dimmed while it is off). */
+  async nameColour(name) {
+    return this.skillName(name).evaluate((el) => getComputedStyle(el).color)
+  }
+
   /** A button of the editor (or of the list above it), by its name. */
   editorButton(title, name) {
     return this.editor(title).getByRole('button', { name, exact: true })

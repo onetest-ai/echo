@@ -36,7 +36,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 1 | Navigate to `{{base_url}}/#today` and wait for "Your day"; read the top bar's right end | The account chip reads "Claude Code (as configured)" and sits just left of the button "Inbox"; it is a button (named "AI profile: Claude Code (as configured)"), there is no `select[aria-label="AI profile"]` and no caret (`#r-top .acct svg` finds nothing) |
 | 2 | Read the chip's tooltip (`title`) | It names "Claude Code (as configured)" and "as Claude Code is set up" |
 | 3 | Click the chip | The URL becomes `#settings/ai` and the heading "AI & minutes" shows |
-| 4 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://localhost:11434 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
+| 4 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://127.0.0.1:9 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
 | 5 | Reload `{{base_url}}/#today` and wait for "Your day"; read the chip | It reads "Claude Code (as configured)" with a caret; `select[aria-label="AI profile"]` holds two options, "Claude Code (as configured)" (selected) and "Local Llama" |
 | 6 | Read the Record pill (`#r-top .pill`) | The button "Record next call", the select "Language of the call" and the button "Memo"; `#r-top .pill select` finds exactly one select (no profile segment) |
 | 7 | Select "Local Llama" in "AI profile" (`browser_select_option`) | The chip reads "Local Llama" |
@@ -51,5 +51,6 @@ Local Llama is the default in the chip, Settings → AI & minutes and `ai.json`,
 - `echoctl ai default system` (prints `new calls use Claude Code (as configured)`), then `echoctl ai remove local-llama` (prints `removed local-llama`).
 
 ## Notes
+- The profile's address is `http://127.0.0.1:9`, where nothing listens: `echoctl ai status` sends a local profile's server a request, and the Ollama on this computer (`localhost:11434`) is shared, never a test's.
 - No model server is needed: the profile is only added and made the default, never used.
 - A Claude profile that isn't signed in is made the default as Settings' "Make default" does it: nothing starts by itself; the sign-in note under the Record pill offers "Sign in…" (not checked here: it needs a signed-out Claude profile).

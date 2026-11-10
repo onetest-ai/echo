@@ -63,6 +63,11 @@ export class PluginsPage extends SettingsPage {
     return this.main.getByRole('group', { name, exact: true }).filter({ has: this.page.getByRole('switch') })
   }
 
+  /** An installed row's lines (its name and version, its summary), as drawn: dimmed while the plugin is off. */
+  rowLines(name, version, summary) {
+    return this.installedRow(name).getByText(new RegExp(`^${literal(name)} ${literal(version)}\\s*${literal(summary)}$`))
+  }
+
   detail(name) {
     return this.main.getByRole('region', { name, exact: true })
   }

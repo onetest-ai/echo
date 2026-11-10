@@ -172,8 +172,7 @@ scenario(test, 'S-10', 'Inbox and prep on a quiet day', () => {
       const row = calls.upcoming(m.subject)
       const icon = calls.rowIcon(row, s10.pin)
       await expect(icon).toBeVisible()
-      const time = calls.rowText(row, await calls.clock(start))
-      expect((await icon.boundingBox()).x).toBeLessThan((await time.boundingBox()).x)
+      expect(await calls.iconBefore(row, s10.pin, await calls.clock(start))).toBe(true)
       await view.takeOut(s10.pin).click()
       await expect(view.chip(s10.pin)).toHaveCount(0)
       await expect(view.saysStarting(u.noThreadStart)).toBeVisible()
@@ -230,6 +229,7 @@ scenario(test, 'S-10', 'Inbox and prep on a quiet day', () => {
     expect(cleared.code).toBe(0)
     expect(cleared.out.trim()).toBe(q.agendaCleared)
     const deleted = []
+    const restored = []
     let mid
     try {
       for (const suffix of s10.todayCalls) {
@@ -258,9 +258,10 @@ scenario(test, 'S-10', 'Inbox and prep on a quiet day', () => {
       await page.keyboard.press(data.text.shell.keys.escape)
       await expect(palette.dialog).toBeHidden()
     } finally {
-      // The calls and the task back (the agenda stays empty: this stage runs last).
-      for (const name of deleted) expect(data.cli('restore', name).code).toBe(0)
-      if (mid) expect(data.cli('project', 'ledger', s10.task.thread, 'edit', fill(s10.task.undo, { mid })).code).toBe(0)
+      // The calls and the task back (the agenda stays empty: this stage runs last); checked after.
+      for (const name of deleted) restored.push(data.cli('restore', name).code)
+      if (mid) restored.push(data.cli('project', 'ledger', s10.task.thread, 'edit', fill(s10.task.undo, { mid })).code)
     }
+    expect(restored).toEqual(Array(deleted.length + (mid ? 1 : 0)).fill(0))
   })
 })

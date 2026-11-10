@@ -217,7 +217,7 @@ const SETTINGS_BODY = {
       else if (x.downloaded) ctl = (x.active || x.runnable === false ? '' : actBtn('use_model', 'Use', x.name)) + (x.active ? '' : actBtn('remove_model', 'Remove', x.name))
       else if (x.runnable === false) ctl = ''
       else ctl = dl ? '<span class="set-sub">Another download is running</span>' : actBtn('download_model', `Download (${x.size_mb} MB)`, x.name)
-      const bar = dl && dl.name === x.name ? `<div class="bar"><span style="width:${dl.pct}%"></span></div>` : ''
+      const bar = dl && dl.name === x.name ? `<div class="bar" role="progressbar" aria-valuenow="${dl.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(`Downloading ${x.name}`)}"><span style="width:${dl.pct}%"></span></div>` : ''
       return setRow(`${esc(x.name)} ${tags}`, `${esc(x.summary || '')} · ${x.size_mb} MB${bar}`, ctl, '', x.name)
     })
     const srv = st.server || null

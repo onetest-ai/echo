@@ -212,7 +212,8 @@
       "transcript": "transcript"
     },
     "refresh": "api/state",
-    "refreshes": 4
+    "refreshes": 4,
+    "search": "Search calls"
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"
@@ -841,8 +842,7 @@
     "folder": ".echo/skills",
     "trash": ".echo/trash/skills",
     "skillFile": "SKILL.md",
-    "trashed": "^{id}-\\d+$",
-    "dimmed": "rgb(138, 138, 149)"
+    "trashed": "^{id}-\\d+$"
   },
   "ai": {
     "route": "#settings/ai",
@@ -970,7 +970,11 @@
     ],
     "added": "Added {name}: 1 plugins",
     "dataFolder": ".echo/plugins",
-    "settingsFile": "settings.json"
+    "settingsFile": "settings.json",
+    "opacity": {
+      "off": "0.6",
+      "on": "1"
+    }
   },
   "notices": {
     "ok": "OK"
