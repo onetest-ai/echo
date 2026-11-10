@@ -196,6 +196,8 @@ window.addEventListener('resize', () => { if (S.view === 'projects') drawOrgLink
 function personPanel() {
   const d = peopleData(), k = S.pj.person
   if (!d || !k) return '<div class="wp-empty">Pick someone on the People tab.</div>'
+  // Its thread just deleted (or not read yet): nobody to show.
+  if (!d.people || !d.orgs) return '<div class="wp-empty">Not in this view any more.</div>'
   if (k.startsWith('org:')) return orgPanel(d, k.slice(4))
   const x = d.people.find((y) => y.key === k)
   if (!x) return '<div class="wp-empty">Not in this view any more.</div>'

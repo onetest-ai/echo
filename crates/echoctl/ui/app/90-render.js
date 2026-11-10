@@ -66,7 +66,14 @@ function reportView(now) {
 document.addEventListener('selectionchange', () => reportView())
 setInterval(() => { if (document.visibilityState === 'visible') reportView(true) }, 60000)
 
+/** Draws the page. A render asked for while one runs (a field it removes fires blur or change, whose handler renders)
+ *  waits for it to end: two at once would replace a region the other is replacing. */
 function render() {
+  if (render.busy) { setTimeout(render); return }
+  render.busy = true
+  try { renderNow() } finally { render.busy = false }
+}
+function renderNow() {
   if (plTyping()) { S.renderOnBlur = true; return }
   reportView()
   // Send to Claude's dialog: over whichever view the task was in (Today, a thread's Work, Tasks).
@@ -352,7 +359,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.panelShow) { Layout.show(t.dataset.panelShow, panelViews()); return layoutChanged() }
   if (t.dataset.panelMove) { Layout.move(t.dataset.panelMove, t.dataset.to, panelViews()); return layoutChanged() }
   if (t.dataset.panelToggle) {
-    if (S.overlay && t.dataset.panelToggle === 'right') { S.overlay = false; return render() } // a narrow window's overlay closes; the saved layout stays
+    if (S.overlay && t.dataset.panelToggle === 'right') return closeOverlay()
     Layout.toggle(t.dataset.panelToggle); return layoutChanged()
   }
   if (t.dataset.go) { S.barOver = false; return goActivity(t.dataset.go) }

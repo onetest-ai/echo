@@ -212,7 +212,7 @@ document.addEventListener('keydown', (e) => {
   // The thread menus — Thread actions (#166), "+ Thread" on a call or a calendar card, and the work board's Fields,
   // a column's ⋯, the view's (#152): Escape closes them as it closes the call's.
   if (e.key === 'Escape' && (S.pj.menu || S.pj.picker || S.pj.evPicker || S.pj.fieldsMenu || S.pj.colMenu || S.pj.viewMenu)) { S.pj.menu = false; S.pj.picker = false; S.pj.evPicker = null; S.pj.fieldsMenu = false; S.pj.colMenu = null; S.pj.viewMenu = false; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; if (S.overlay) return closeOverlay(); return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   if ((MAC ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '\\') { e.preventDefault(); return flipBar() }

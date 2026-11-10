@@ -250,6 +250,14 @@ function flipBar() {
   layoutChanged()
 }
 
+/** The right panel over a narrow page, closed by the user: closed in the layout too, so a wider window doesn't bring it
+ *  back (#278). */
+function closeOverlay() {
+  S.overlay = false
+  Layout.close('right')
+  layoutChanged()
+}
+
 function layoutChanged() {
   clearTimeout(layoutTimer)
   layoutTimer = setTimeout(() => send({ cmd: 'save_layout', layout: Layout.toJSON() }), 500)

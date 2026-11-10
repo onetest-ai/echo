@@ -177,6 +177,18 @@ test('an outside change while a note is being typed waits: the note goes on the 
   assert.equal(N.view(CALL).draft, '- Rewritten again\n')
 })
 
+test('a note appended from the tray or the CLI while a note is being typed shows at once (#276)', () => {
+  const { N, sent } = make()
+  N.seen(CALL, '- [00:10] First\n')
+  N.seen(CALL, '- [00:10] First\n- [00:15] From the terminal\n', N.epoch(CALL), true)
+  assert.equal(N.view(CALL).draft, '- [00:10] First\n- [00:15] From the terminal\n')
+  assert.equal(N.view(CALL).dirty, false)
+  // Enter adds the typed note after it, on the file as it is now: nothing kept beside.
+  N.edit(CALL, '- [00:10] First\n- [00:15] From the terminal\n- [00:20] half a thought\n')
+  N.save(CALL)
+  assert.equal(sent[0].base, '- [00:10] First\n- [00:15] From the terminal\n')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { await f(); console.log(`ok   ${name}`) } catch (e) { failed++; console.log(`FAIL ${name}\n     ${e.message}`) }
