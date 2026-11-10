@@ -44,7 +44,7 @@
 .doc li::marker { color: var(--text-3); }
 .doc a { color: var(--accent-ink); text-decoration: none; }
 .doc a:hover { text-decoration: underline; }
-.doc .at {
+.doc :is(a, span).at {
   font-family: var(--mono); font-size: 11px; color: var(--accent-ink);
   background: var(--accent-soft); padding: 0 5px; border-radius: 4px; margin-left: 2px;
   cursor: pointer; text-decoration: none;

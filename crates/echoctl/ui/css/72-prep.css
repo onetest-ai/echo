@@ -13,7 +13,7 @@
 /* A meeting's people in its header (attendeeLine): an answer mark each, a card on hover, "+N more" with the rest. */
 .at { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: -6px 0 12px; font-size: 12.5px; color: var(--text-2); position: relative; }
 .at-tally { color: var(--text-3); }
-.at-p { position: relative; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; border-radius: 4px; padding: 1px 3px; margin: -1px -3px; outline: none; }
+.at-p { position: relative; display: inline-flex; align-items: center; gap: 5px; border-radius: 4px; padding: 1px 3px; margin: -1px -3px; outline: none; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 .at-p a { color: inherit; text-decoration: none; }
 .at-p:hover, .at-p:focus-within { background: var(--accent-soft); color: var(--text); }
 .at-p.key { color: var(--text); font-weight: 600; }
