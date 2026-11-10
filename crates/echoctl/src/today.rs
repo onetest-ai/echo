@@ -300,6 +300,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         plugins: vec![],
         task: Some(format!("{project}/{node}")),
         thread: Some(project.to_string()),
+        echo_plugin: true,
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
@@ -374,6 +375,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         plugins: vec![],
         task: None,
         thread: item["thread"].as_str().filter(|t| !t.is_empty()).map(str::to_owned),
+        echo_plugin: true,
     };
     let (id, item_id) = (id.to_string(), item_id.to_string());
     // The run names its item: Today keeps it out of Needs you now while the run works.
@@ -499,6 +501,7 @@ pub fn wont_do(id: &str, item_id: &str, comment: &str) -> Result<()> {
         plugins: vec![],
         task: None,
         thread: None,
+        echo_plugin: false,
     };
     // Where a draft would go: the item's own chat or mail, kept here, never taken from the answer.
     let to = json!({"chat": item["chat"], "message": item["message"]});

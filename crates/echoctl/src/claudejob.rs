@@ -70,8 +70,11 @@ pub struct Spec {
     /// limits stay), and a profile of its own gets Echo's plugin (manage, Microsoft 365), as the panel does.
     pub task: Option<String>,
     /// Yolo's thread (a task's, or an item of Needs you now's): the run reads its data — brief, people, work, calls
-    /// pinned to the run's profile (`guard::RUN_THREAD`) — and gets Echo's plugin as with a task.
+    /// pinned to the run's profile (`guard::RUN_THREAD`).
     pub thread: Option<String>,
+    /// Echo's plugin (manage, Microsoft 365) for a profile of its own, as the panel has it: Yolo's runs, a task's or an
+    /// item of Needs you now's (with or without a thread).
+    pub echo_plugin: bool,
 }
 
 impl Spec {
@@ -102,6 +105,7 @@ impl Spec {
             plugins: vec![],
             task: None,
             thread: None,
+            echo_plugin: false,
         })
     }
 }
@@ -188,7 +192,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
         }
-        if (spec.task.is_some() || spec.thread.is_some()) && profile.kind.managed() {
+        if spec.echo_plugin && profile.kind.managed() {
             a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
         }
     }

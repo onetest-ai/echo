@@ -655,7 +655,11 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
                 format!("Yolo reads its task with `echoctl read echo://task/{project}/{node}`; of the ledger it may only edit that task's state: {may}")
             }
         }
-        None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
+        // Yolo on an item of Needs you now: its thread's work to read, none of it to change.
+        None => match guard::run_thread() {
+            Some(t) => format!("Yolo reads its thread's work (`echoctl project ledger {t} tree`) and changes none of it; no other thread's"),
+            None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
+        },
     }
 }
 
@@ -779,6 +783,7 @@ mod tests {
         let (t, s, pp) = (tree(&mine.id).is_ok(), show(&mine.id).is_ok(), people(&mine.id, false).is_ok());
         let (t2, s2) = (tree(&other.id).is_err(), show(&other.id).is_err());
         let refresh = people(&mine.id, true).is_err();
+        let other_by_item = tree(&other.id).unwrap_err().to_string();
         let edit = super::ledger_command(&mine.id, super::LedgerCmd::Edit { json: r#"{"op":"create","kind":"task","title":"x"}"#.into() }).is_err();
         std::env::remove_var(super::guard::RUN_THREAD);
         // A task's Yolo: its task's thread.
@@ -793,10 +798,11 @@ mod tests {
         std::env::remove_var(crate::notes::HEADLESS);
         assert!(t && s && pp, "its own thread: the work, the brief, the people");
         assert!(t2 && s2, "never another thread");
+        assert!(other_by_item.contains(&format!("project ledger {} tree", mine.id)) && other_by_item.contains("changes none of it"), "{other_by_item}");
         assert!(refresh, "no Microsoft 365 refresh of its people");
         assert!(edit, "nothing of the work changes");
         assert!(by_task, "a task's Yolo reads its task's thread");
-        assert!(other_by_task.contains("echoctl read echo://task/"), "another thread is refused, pointing to its task: {other_by_task}");
+        assert!(other_by_task.contains("echoctl read echo://task/") && !other_by_task.contains("not its description"), "another thread is refused, pointing to its task: {other_by_task}");
         assert!(title.contains("only its own task's state") && title.contains("not its description"), "{title}");
         assert!(none, "a run with no thread reads none");
     }
