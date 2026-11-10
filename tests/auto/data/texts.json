@@ -225,7 +225,15 @@
       "saving": "Saving…",
       "saved": "Saved",
       "file": "my-notes.md"
-    }
+    },
+    "ready": "The transcript is ready.",
+    "writesWith": "Claude Code writes them with ",
+    "command": "/echo:process-call {folder}",
+    "copy": "Copy",
+    "deleteItem": "Delete…",
+    "deleteAsk": "Delete \"{title}\"? It goes to the trash in the data folder for 30 days.",
+    "keep": "Keep",
+    "delete": "Delete"
   },
   "fake": {
     "claudeFails": "test data: Claude Code is a fake here"

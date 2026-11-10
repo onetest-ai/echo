@@ -9,6 +9,7 @@ run: agent
 platform: any
 tags: [calls, delete]
 external_id: TC-WIN-006
+auto: [tests/auto/specs/S-03.spec.mjs]
 ---
 
 # TC-008: Deleting a call asks first, then moves it to the trash
