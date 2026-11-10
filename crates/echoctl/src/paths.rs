@@ -169,12 +169,14 @@ pub mod testenv {
         }
     }
 
-    /// `f()` comes true within a second — for a lock just released: while another test thread starts
+    /// `f()` comes true soon (polled every 20 ms) — for a lock just released: while another test thread starts
     /// a process, its child holds a copy of the descriptor until it execs (macOS).
     pub fn eventually(what: &str, f: impl Fn() -> bool) {
         let t = std::time::Instant::now();
         while !f() {
-            assert!(t.elapsed() < std::time::Duration::from_secs(1), "{what}");
+            // A bound for a failure only: it returns as soon as `f` holds. A fake Claude Code is a process of its own,
+            // which takes more than a second to answer while the Mac is busy (#283).
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "{what}");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }

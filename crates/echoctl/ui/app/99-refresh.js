@@ -164,6 +164,8 @@ window.echo = {
    *  editor read-only, every unsaved note saved, then `close_ready` says for handshake `n` whether
    *  it worked. */
   prepareClose(n, close) {
+    // The layout's pending save goes first (IPC keeps order: it is written before close_ready), #300.
+    flushLayout()
     // A note typed in the box or edited in place without Enter is saved too, in its own call.
     const committed = commitPendingNotes()
     S.closing = true

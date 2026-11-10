@@ -1565,6 +1565,19 @@ mod tests {
     }
 
     #[test]
+    fn a_local_profiles_one_shot_jobs_go_to_its_minutes_model_and_live_notes_to_its_live_model() {
+        // #294: a prep (and every complete_text job) records the minutes model, so that is the one asked.
+        let p = Profile { live_model: Some("small".into()), notes_model: Some("big".into()), ..local("") };
+        let ok = http("200 OK", "", r#"{"content":[{"type":"text","text":"ok"}]}"#);
+        let (url, seen) = serve_seen(ok.clone());
+        complete_text(&Profile { base_url: Some(url), ..p.clone() }, "sys", "hi", 10).unwrap();
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"big""#));
+        let (url, seen) = serve_seen(ok);
+        complete(&Profile { base_url: Some(url), ..p }, "sys", "hi", 10, true, &|| false).unwrap();
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
+    }
+
+    #[test]
     fn a_local_model_answers_through_curl() {
         let url = serve(Some(http("200 OK", "", r#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"hello"}]}"#)));
         assert_eq!(complete_local(&local(&url), "sys", "hi", 10, true, &|| false).unwrap(), "hello");

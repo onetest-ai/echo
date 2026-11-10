@@ -24,11 +24,11 @@ pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
     })
 }
 
-/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
-/// minutes model) — a local profile answers through its own server.
+/// One prompt, one answer, no tools (a prep, the Brain's jobs, a diagram's repair): on the profile's minutes model —
+/// a local profile answers through its own server.
 pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
     match p.kind {
-        Kind::Local => complete_local(p, system, user, max_tokens, true, &|| crate::notes::quitting()),
+        Kind::Local => complete_local_body(p, &minutes_model(p), system, json!(user), max_tokens, true, &|| crate::notes::quitting()),
         Kind::System | Kind::Claude => {
             let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
             complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting())
@@ -48,7 +48,7 @@ pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], tex
     blocks.push(json!({"type": "text", "text": text}));
     let blocks = Value::Array(blocks);
     match p.kind {
-        Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
+        Kind::Local => complete_local_body(p, &minutes_model(p), system, blocks, max_tokens, true, &|| crate::notes::quitting()),
         Kind::System | Kind::Claude => {
             let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
             crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
@@ -90,18 +90,20 @@ pub(crate) fn last_line(s: &str) -> String {
 
 /// `POST <base_url>/v1/messages` with thinking off, through curl. `-q` first: the user's
 /// `.curlrc` isn't read (it could turn on following redirects); no `-L`: redirects aren't followed.
+/// Live notes on a local profile: its live model.
 pub(super) fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, json!(user), max_tokens, whole, cancelled)
+    complete_local_body(p, &p.live_model(), system, json!(user), max_tokens, whole, cancelled)
 }
 
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub(super) fn complete_local_blocks(p: &Profile, system: &str, blocks: &Value, max_tokens: u32, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, blocks.clone(), max_tokens, true, cancelled)
+/// The one-shot jobs' model on a local profile (a prep, the Brain's, a diagram's): its minutes model — the one they
+/// record (#294).
+fn minutes_model(p: &Profile) -> String {
+    p.notes_model().unwrap_or_else(|| p.live_model())
 }
 
-pub(super) fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
+pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let body = json!({
-        "model": p.live_model(),
+        "model": model,
         "max_tokens": max_tokens,
         "thinking": {"type": "disabled"},
         "system": system,
