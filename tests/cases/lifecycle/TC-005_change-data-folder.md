@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [lifecycle, data-folder, second-instance]
 external_id: TC-LIFE-005
+auto: [tests/auto/specs/S-21.spec.mjs]
 ---
 
 # TC-005: Changing the data folder restarts on it and leaves the old one alone

@@ -9,6 +9,7 @@ run: agent
 platform: macos
 tags: [lifecycle, second-instance]
 external_id: TC-LIFE-003
+auto: [tests/auto/specs/S-21.spec.mjs]
 ---
 
 # TC-003: Quit leaves no process and restarts normally
@@ -27,7 +28,7 @@ external_id: TC-LIFE-003
 |---|--------|----------------|
 | 1 | `P=$(cat "$D/app.pid"); target/debug/echoctl app quit; python3 tests/fixtures/wait.py 10 sh "! ps -p $P > /dev/null"; ps -p $P` | "Echo stopped (was pid $P)"; `ps` finds no such process |
 | 2 | `for p in $(pgrep -f "echoctl app run"); do ps eww -o command= -p $p \| grep -q "ECHOCTL_CONFIG_DIR=$ECHOCTL_CONFIG_DIR" && echo "left: $p"; done; target/debug/echoctl status` | Nothing "left" on this run's config (the user's own Echo is not counted); `watcher` is null |
-| 3 | Start the app again (as above), `python3 tests/fixtures/wait.py 30 app`, then `target/debug/echoctl status`; `pgrep -P "$(cat "$D/app.pid")" osascript`; `target/debug/echoctl up` | `watcher.pid` is the new app; no `osascript` child (no first-run dialog); `up` has `home_chosen` true and `app_pid` the new app; `ready` true and `next` "nothing — Echo is running" when the process running the steps has System Audio Recording, else `failing` is `["system-audio"]` only and `next` "run the doctor skill" (a file-fed run needs no permission: that check is the live one's) |
+| 3 | Start the app again (as above), `python3 tests/fixtures/wait.py 30 app`, then `target/debug/echoctl status`; `pgrep -P "$(cat "$D/app.pid")" osascript`; `target/debug/echoctl up` | `watcher.pid` is the new app; no `osascript` child (no first-run dialog); `up` has `home_chosen` true and `app_pid` the new app; `model` null and `next` "run the doctor skill" (the test data chooses no speech model, and `up` asks for that first); `ready` true with `failing` `[]` when the process running the steps has System Audio Recording, else `ready` false with `failing` `["system-audio"]` only (a file-fed run needs no permission: that check is the live one's) |
 | 4 | `target/debug/echoctl app quit` | "Echo stopped" |
 
 ## Expected Final State

@@ -1532,5 +1532,16 @@
         "me": "me"
       }
     }
+  },
+  "s21": {
+    "_about": "S-21 Living with Echo: the call recorded in another data folder (lifecycle/TC-005)",
+    "model": "large-v3-turbo-q5_0",
+    "language": "en",
+    "newHome": "home2",
+    "call": {
+      "conversation": "very-short",
+      "title": "LIFE-005 new folder",
+      "slug": "life-005-new-folder"
+    }
   }
 }

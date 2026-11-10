@@ -85,9 +85,16 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
    *  printed so far (`out`, `err`), a signal sent to it (`kill('SIGINT')`, nothing once it has ended), and `done`, how
    *  it ended (`{ code, signal }`). */
   const started = []
-  data.start = (...args) => {
-    const p = spawn(BIN, args, { cwd: ROOT, env: data.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    const r = { out: '', err: '', ended: false }
+  data.start = (...args) => startIn(data.env, args)
+  /** The data's environment with some variables left out (`['ECHOCTL_HOME']`) and others added. */
+  const envWithout = (unset = [], extra = {}) => {
+    const env = { ...data.env, ...extra }
+    for (const k of unset) delete env[k]
+    return env
+  }
+  const startIn = (env, args) => {
+    const p = spawn(BIN, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const r = { out: '', err: '', ended: false, pid: p.pid }
     p.stdout.on('data', (b) => { r.out += b })
     p.stderr.on('data', (b) => { r.err += b })
     r.done = new Promise((resolve) => p.on('close', (code, signal) => { r.ended = true; resolve({ code, signal }) }))
@@ -106,6 +113,58 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     started.push(r)
     return r
   }
+  /** `echoctl …` as `cli`, with some of the data's variables left out (`['ECHOCTL_HOME']`: the folder `home.json`
+   *  names, as an app started without it reads it) and others added. */
+  data.cliWithout = (unset, extra, ...args) => {
+    const r = spawnSync(BIN, args, { cwd: ROOT, env: envWithout(unset, extra), encoding: 'utf8', timeout: 120_000 })
+    return { code: r.status, out: r.stdout, err: r.stderr, json: () => JSON.parse(r.stdout) }
+  }
+  /** `echoctl …` as `cliWithout`, awaited without blocking this process: a command that waits for a process this one
+   *  started to end (`app quit`, `home set` restarting the app) can see it end — a blocking `cli` leaves it unreaped. */
+  data.cliAwait = async (unset, ...args) => {
+    const p = startIn(envWithout(unset), args)
+    const { code } = await p.ends(120_000)
+    return { code, out: p.out, err: p.err, json: () => JSON.parse(p.out) }
+  }
+  /** `echoctl status`, read as JSON (`watcher` the running app's, `armed` the arm waiting); `unset` as `cliWithout`. */
+  data.status = (unset = []) => data.cliWithout(unset, {}, 'status').json()
+  /** The data's events (`<home>/.echo/events.jsonl`), each read as JSON, from the `from`th on: `data.events().length`
+   *  before a step, `data.events(n)` after it. */
+  data.events = (from = 0) => {
+    const f = path.join(data.home, '.echo', 'events.jsonl')
+    return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).slice(from).map((l) => JSON.parse(l)) : []
+  }
+  /** The Echo app on this data: `echoctl app run --no-tray --background` (this checkout's debug build, the data's
+   *  file-fed calls; `unset` as `cliWithout`), started as `data.start` starts a process, once its watcher answers
+   *  (30 s). `quit()` is `echoctl app quit` (its result), then the process's end (30 s, else killed and failed). */
+  data.app = async ({ unset = [] } = {}) => {
+    const app = startIn(envWithout(unset), ['app', 'run', '--no-tray', '--background'])
+    const t0 = Date.now()
+    while ((data.status(unset).watcher || {}).pid !== app.pid) {
+      if (app.ended || Date.now() - t0 > 30_000) {
+        app.kill('SIGKILL')
+        await app.done
+        throw new Error(`the Echo app didn't start: ${app.err || data.appLog()}`)
+      }
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    app.quit = async () => {
+      const r = await data.cliAwait(unset, 'app', 'quit')
+      await app.ends()
+      return r
+    }
+    return app
+  }
+  /** The pids of the `echoctl app run` processes on this data's config (the user's own Echo, on another, left out). */
+  data.apps = () => {
+    const pids = spawnSync('pgrep', ['-f', 'echoctl app run'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean)
+    return pids.filter((p) => spawnSync('ps', ['eww', '-o', 'command=', '-p', p], { encoding: 'utf8' }).stdout.split(/\s/).includes(`ECHOCTL_CONFIG_DIR=${data.env.ECHOCTL_CONFIG_DIR}`)).map(Number)
+  }
+  /** The commands of a process's children (`pgrep -P`): what the app has started (a dialog's `osascript`). */
+  data.childrenOf = (pid) => spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean)
+    .map((p) => spawnSync('ps', ['-o', 'command=', '-p', p], { encoding: 'utf8' }).stdout.trim()).filter(Boolean)
+  /** What the app logged (`--background`: `<home>/.echo/app.log`), or nothing yet. */
+  data.appLog = () => (data.exists(data.home, '.echo', 'app.log') ? data.read(data.home, '.echo', 'app.log') : '')
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
   data.json = (...p) => JSON.parse(data.read(...p))
   data.exists = (...p) => fs.existsSync(path.join(...p))
