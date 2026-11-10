@@ -70,6 +70,15 @@ export class CalendarPage extends AppPage {
     return this.card(subject).getByRole('button', { name, exact: true })
   }
 
+  /** Close the open meeting card, if any, as a person does before opening another: since #352 a card sits inside the
+   *  grid and can cover the next meeting. */
+  async closeCard() {
+    const open = this.main.getByRole('complementary')
+    if (!(await open.count())) return
+    await open.first().getByRole('button', { name: this.data.text.cal.close, exact: true }).click()
+    await open.first().waitFor({ state: 'detached' })
+  }
+
   /** Open the card of a meeting of a series (of the meetings of that subject, the one whose card offers the series'
    *  choice "Record every meeting"). */
   async openSeries(subject) {
@@ -87,6 +96,7 @@ export class CalendarPage extends AppPage {
   async openWith(subject, button) {
     await this.event(subject).first().waitFor()
     for (const ev of await this.event(subject).all()) {
+      await this.closeCard()
       await ev.click()
       await this.cardHeading(subject).waitFor()
       if (await this.cardButton(subject, button).waitFor({ timeout: 2_000 }).then(() => true, () => false)) return
