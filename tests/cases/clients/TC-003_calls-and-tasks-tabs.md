@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, calls, tasks]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-003: Client Calls lists the calls of its threads; Tasks shows the piles with Others folded

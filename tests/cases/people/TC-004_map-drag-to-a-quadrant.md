@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, map]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-004: A person dragged on the Map to "Manage closely" gets high influence and interest

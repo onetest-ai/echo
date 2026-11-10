@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, remove]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-006: A client without threads is removed after a confirmation; its link then says "This client is gone"

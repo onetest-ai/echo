@@ -312,5 +312,189 @@
     "folderA": "folder-a",
     "delay": 4,
     "wrongModel": "no-such-model"
+  },
+  "clients": {
+    "own": {
+      "id": "initech",
+      "group": "Initech · your company",
+      "facts": "0 threads · initech.example"
+    },
+    "groups": [
+      "Acme",
+      "Globex"
+    ],
+    "acme": {
+      "id": "acme",
+      "name": "Acme",
+      "facts": "1 thread · acme.example",
+      "tabs": [
+        "Overview",
+        "Calls1",
+        "Tasks1",
+        "People",
+        "Profile"
+      ],
+      "thread": {
+        "id": "acme-rollout",
+        "name": "Acme rollout"
+      },
+      "card": "Acme rollout Active",
+      "cardLines": [
+        "1 call · last today",
+        "0 of 1 story done",
+        "1 I owe"
+      ],
+      "about": "Pilot customer in Berlin.",
+      "typed": "x",
+      "call": "Acme weekly sync",
+      "notCall": "Initech planning",
+      "callDay": "Today, ",
+      "piles": [
+        [
+          "I owe",
+          1
+        ],
+        [
+          "Owed to me",
+          0
+        ],
+        [
+          "Waiting for others",
+          0
+        ],
+        [
+          "Nobody named",
+          0
+        ]
+      ],
+      "mine": "Send Acme the SSO checklist",
+      "other": "Answer the security questionnaire",
+      "otherOwner": "Omar Haddad",
+      "others": 1,
+      "detailsPath": "Acme rollout › SSO for the Berlin pilot"
+    },
+    "globex": {
+      "id": "globex",
+      "name": "Globex",
+      "facts": "1 thread · globex.example",
+      "domain": "globex.example",
+      "alias": "GBX",
+      "newDomain": "globex.net",
+      "thread": "Globex pilot Active 1 call",
+      "newThread": {
+        "name": "Globex support",
+        "id": "globex-support",
+        "placeholder": "New thread for Globex"
+      }
+    },
+    "hooli": {
+      "id": "hooli",
+      "name": "Hooli",
+      "domain": "hooli.example",
+      "group": "Hooli"
+    },
+    "org": {
+      "name": "Contoso Partners",
+      "id": "contoso-partners",
+      "domain": "contoso.example",
+      "options": [
+        "Contoso Partners · contoso.example",
+        "Globex · globex.example"
+      ]
+    }
+  },
+  "people": {
+    "thread": {
+      "name": "People lab",
+      "id": "people-lab"
+    },
+    "call": "acme-weekly-sync",
+    "seen": [
+      {
+        "name": "Dana Lee",
+        "email": "dana@acme.example",
+        "org": "Acme",
+        "calls": "1/1",
+        "last": "today"
+      },
+      {
+        "name": "Omar Haddad",
+        "email": "omar@acme.example",
+        "org": "Acme",
+        "calls": "1/1",
+        "last": "today"
+      }
+    ],
+    "dana": {
+      "name": "Dana Lee",
+      "key": "dana@acme.example",
+      "org": "Acme"
+    },
+    "omar": {
+      "name": "Omar Haddad"
+    },
+    "place": {
+      "to": "Manage closely",
+      "influence": 3,
+      "interest": 3,
+      "then": "Monitor"
+    },
+    "suggestions": [
+      {
+        "who": "Dana Lee",
+        "field": "stance",
+        "value": "champion",
+        "quote": "We need the SSO checklist from you by the end of today."
+      },
+      {
+        "who": "Omar Haddad",
+        "field": "influence",
+        "value": 3,
+        "quote": "Omar will answer the security questionnaire by Friday."
+      },
+      {
+        "who": "Omar Haddad",
+        "field": "title",
+        "value": "Security lead",
+        "quote": "Omar will answer the security questionnaire by Friday."
+      }
+    ],
+    "asks": [
+      "Is Dana Lee a champion?",
+      "Omar Haddad's influence: high?",
+      "Omar Haddad is Security lead?"
+    ],
+    "firstRow": "Is Dana Lee a champion? “We need the SSO checklist from you by the end of today.” Acme weekly sync · today · 00:13",
+    "added": 3,
+    "changing": "Omar Haddad is Security lead →",
+    "changed": "Head of Security",
+    "edit": {
+      "title": "Head of IT",
+      "subtitle": "Head of IT · Acme",
+      "stance": "supporter",
+      "role": "Sponsor"
+    },
+    "orgByDomain": "Acme (by mail domain)",
+    "saw": "1 of 1",
+    "dup": {
+      "name": "Dana L",
+      "entry": "Dana L <dlee@acme.example>",
+      "email": "dlee@acme.example",
+      "option": "Dana Lee · dana@acme.example"
+    },
+    "pat": {
+      "entry": "Pat Novak <pat@acme.example>",
+      "name": "Pat Novak",
+      "email": "pat@acme.example",
+      "org": "Acme"
+    },
+    "lena": {
+      "entry": "Lena Fox <lena@contoso.example>",
+      "name": "Lena Fox",
+      "domain": "contoso.example",
+      "line": "lena@contoso.example · contoso.example",
+      "org": "Contoso",
+      "orgId": "contoso"
+    }
   }
 }

@@ -367,5 +367,126 @@
     "claimTaken": "a Claude Code session's claim taken over by Write minutes",
     "minutesModelBack": "minutes model virtual",
     "userNotes": "my-notes.md"
+  },
+  "clients": {
+    "routes": {
+      "projects": "#projects",
+      "client": "#client/{id}/{tab}",
+      "thread": "#project/{id}/"
+    },
+    "openClient": "Open {name}",
+    "yourCompany": "your company",
+    "client": "client",
+    "noThreads": "No threads for this client yet — add one on Profile.",
+    "ownSwitch": "Your own company",
+    "ownLine": "Your own company (internal work)",
+    "ownHint": "Its people are your colleagues: they never count as a client's people.",
+    "tabs": {
+      "overview": "Overview",
+      "calls": "Calls",
+      "tasks": "Tasks",
+      "profile": "Profile"
+    },
+    "rows": {
+      "name": "Name",
+      "aliases": "Other names",
+      "domains": "Mail domains",
+      "kind": "Kind",
+      "logo": "Logo",
+      "threads": "Threads"
+    },
+    "notOwn": "A client, partner or vendor",
+    "domainsHint": "A call is this client's when half of its outside people come from these domains.",
+    "aboutHead": "About {name}",
+    "aboutEmpty": "Nothing yet — who they are, what you do for them, who matters.",
+    "noMinutes": "no minutes yet",
+    "keeps": "A client with threads stays: move or delete them first.",
+    "stillHas": "{id} still has projects: move or delete them first",
+    "removeAsk": "Remove {name}?",
+    "gone": "This client is gone",
+    "backToThreads": "Back to the threads",
+    "orgRemoved": "{id} removed"
+  },
+  "people": {
+    "views": [
+      "Map",
+      "Org chart",
+      "List"
+    ],
+    "map": "Map",
+    "org": "Org chart",
+    "list": "List",
+    "legend": [
+      "champion",
+      "supporter",
+      "neutral",
+      "sceptic",
+      "blocker"
+    ],
+    "nobody": "Nobody in this thread yet",
+    "nobodyList": "Nobody in this thread yet.",
+    "seenLine": "{n} people were in its calls — add them from List, then drag them where they stand.",
+    "seenCap": "Seen in calls",
+    "notIn": "{n} aren't in this thread yet",
+    "notInOne": "{n} isn't in this thread yet",
+    "columns": [
+      "Person",
+      "Organisation",
+      "Role",
+      "Stance",
+      "Calls",
+      "Talk",
+      "Owes",
+      "Last seen",
+      "Contact"
+    ],
+    "add": "Add",
+    "quadrants": [
+      "Keep satisfied",
+      "Manage closely",
+      "Monitor",
+      "Keep informed"
+    ],
+    "answers": [
+      "Yes",
+      "No",
+      "Change…"
+    ],
+    "save": "Save",
+    "cancel": "Cancel",
+    "yourVersion": "Your version",
+    "newPersonPlaceholder": "Name, or name <email>",
+    "panel": {
+      "tab": "Person",
+      "describe": "Describe them…",
+      "sections": [
+        "Who they are",
+        "In {thread}",
+        "About them",
+        "What Echo saw"
+      ],
+      "inThread": [
+        "Role",
+        "Stance",
+        "Influence",
+        "Interest",
+        "Workstream",
+        "Governance",
+        "Works for here"
+      ],
+      "about": [
+        "Title",
+        "Organisation",
+        "Group",
+        "Reports to",
+        "Matters",
+        "Phone"
+      ],
+      "calls": "calls",
+      "title": "Title",
+      "role": "Role",
+      "sameFirst": "Same person as…",
+      "orgPlaceholder": "Who is {domain}?"
+    }
   }
 }

@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, organisations]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-008: A person from an unknown domain offers "Name this organisation"

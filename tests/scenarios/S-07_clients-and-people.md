@@ -21,6 +21,7 @@ cases:
   - tests/cases/people/TC-007_same-person-merge-and-split.md
   - tests/cases/people/TC-002_plus-person-adds-someone.md
   - tests/cases/people/TC-008_name-an-unknown-organisation.md
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # S-07: Clients and people: a client's page and tabs, a new thread and domains, a thread's people, a person's details

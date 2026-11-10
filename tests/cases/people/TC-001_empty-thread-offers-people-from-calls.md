@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, views]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-001: With nobody in the thread, People says so, offers the people seen in its calls; Map, Org chart and List are remembered

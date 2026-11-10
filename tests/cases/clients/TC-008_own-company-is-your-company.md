@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, internal]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-008: The user's company shows as "<name> · your company" and its people are colleagues

@@ -160,14 +160,14 @@ function projectCalls(p) {
     const ctl = c.why === 'pinned'
       ? `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="rules" title="Leave it to the rules">Unpin</button>`
       : `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="exclude" title="Take it out (the rules won't put it back)">Take out</button>`
-    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))} · ` : ''}${esc(WHY[c.why] || c.why)}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl">${ctl}</div></div>`
+    return `<div class="set-row" role="listitem"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))} · ` : ''}${esc(WHY[c.why] || c.why)}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl">${ctl}</div></div>`
   }).join('')
   const out = p.exclusions && p.exclusions.length ? `<p class="set-foot">${p.exclusions.length} call${p.exclusions.length === 1 ? '' : 's'} taken out by hand.</p>` : ''
   return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls match yet. Add a rule on Profile — a meeting series, the client\'s people, a Teams chat — or open a call and add it from its header.</div></div>'}</div>${out}</section>`
 }
 
 /** A token (× removes it) and the dashed "+ Add" that opens an inline box in its place. */
-const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="Remove">×</button>` : ''}</span>`
+const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="${remove.value != null ? esc(`Remove ${remove.value}`) : 'Remove'}">×</button>` : ''}</span>`
 function addTok(what, placeholder, extra = '') {
   if (S.pj.adding !== what) return `<button class="tok add" data-pj="adding" data-what="${what}">+ Add</button>`
   return `<span class="tok-in">${extra}<input id="pj-add-${what}" data-add="${what}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" autofocus></span>`
@@ -389,7 +389,7 @@ function clientView(data) {
   const c = (data.clients || []).find((x) => x.id === S.pj.client)
   if (!c) return `<div class="empty"><div><h3>This client is gone</h3><p><a href="#projects">Back to the threads</a></p></div></div>`
   const id = esc(c.id)
-  const row = (label, html) => `<div class="pf-row"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
+  const row = (label, html) => `<div class="pf-row"${label ? ` role="group" aria-label="${esc(label)}"` : ''}><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
   const ps = (data.projects || []).filter((p) => p.client === c.id)
   const name = S.pj.pfEdit === 'cname' ? `<input class="pf-in" id="pj-cname" data-client-field="name" data-id="${id}" value="${esc(c.name)}" aria-label="Name" autofocus>` : `<button class="pf-text" data-pj="pf-edit" data-what="cname">${esc(c.name)}</button>`
   const aliases = (c.aliases || []).map((a) => tok(esc(a), { op: 'client-list-remove', list: 'aliases', value: a })).join('') + addTok('alias', 'Another name — e.g. NW, Northwind Group')
@@ -460,9 +460,9 @@ function clientCalls(cd) {
   const rows = cd.calls.map((c) => {
     const d = c.started_at ? new Date(c.started_at) : null
     const chips = (c.threads || []).map((id) => projById(id)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('')
-    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
+    return `<div class="set-row" role="listitem"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
   }).join('')
-  return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`
+  return `<section class="set-sec"><div class="set-card"${rows ? ' role="list" aria-label="Calls"' : ''}>${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`
 }
 /** The Tasks activity's piles for this client's open threads. */
 function clientTasks(cd) {

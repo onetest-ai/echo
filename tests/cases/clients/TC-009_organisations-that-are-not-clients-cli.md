@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients, organisations, cli]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-009: Organisations that are not clients are kept with echoctl org add/set/remove; an account with threads cannot be removed

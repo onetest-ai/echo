@@ -8,6 +8,7 @@ module: people
 run: agent
 platform: any
 tags: [people, merge]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-007: "Same person as…" merges two people; "Not the same" splits an address off

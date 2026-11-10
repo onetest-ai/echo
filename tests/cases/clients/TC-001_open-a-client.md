@@ -8,6 +8,7 @@ module: clients
 run: agent
 platform: any
 tags: [clients]
+auto: [tests/auto/specs/S-07.spec.mjs]
 ---
 
 # TC-001: A client opens from Thread actions or the Threads list, on tabs Overview, Calls, Tasks, People, Profile
