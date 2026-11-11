@@ -41,7 +41,7 @@ tags: [prep, calls, response]
 | 9 | Open "Coming up today" → "Globex sponsor update" (it has a prep: `#upcoming/<id>`); then make it a call of today: in `$ECHOCTL_HOME/calls/<today>_…-globex-steering/meeting.json` set `"id"` to `ev-m20` (after `. <dir>/env`) | Within seconds the view moves to that call's Prep tab (`#call/<name>/prep`; a meeting with no prep lands on the call's Minutes); "Coming up today" says 12 and lists no "Globex sponsor update"; `target/debug/echoctl prep --upcoming` lists 12 without it |
 
 ## Expected Final State
-Coming up today is unfolded with 13 rows.
+Coming up today is unfolded with 12 rows ("Globex sponsor update" became a call of today in step 9).
 
 ## Teardown
 - Click "Coming up today" to fold it again

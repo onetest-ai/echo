@@ -24,7 +24,7 @@ tags: [today, needs-you-now, layout]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#today` and wait for "Needs you now" | Two rows (`section.nd .nd-row`) |
 | 2 | Run `browser_evaluate` with `() => [...document.querySelectorAll('section.nd .nd-a')].map((a) => ({ w: Math.round(a.getBoundingClientRect().width), names: [...a.querySelectorAll('button')].map((b) => [b.getAttribute('aria-label'), b.title, b.innerText.trim()]) }))` | Each row's actions are at most 130 px wide; the mail row's buttons are `["Read and reply","Read and reply","Reply"]` (the word Reply and an envelope) and `["Claude — work on this, or Yolo","Claude — work on this, or Yolo",""]` (My work's ✦, an icon); the Teams row's first is `["Reply in Teams","Reply in Teams","Reply"]` with Teams' logo (`svg.nd-logo`), then the same ✦ |
-| 3 | Click the first row's ✦ ("Claude — work on this, or Yolo") | My work's Claude dialog opens: "Claude", the item's source and words where a task's title goes (escaped: the hostile words show as text), the skill field "Just the message — or type to find a skill (N)", "Work on it", "Yolo", "Cancel" |
+| 3 | Click the first row's ✦ ("Claude — work on this, or Yolo") | My work's Claude dialog opens: "Claude", the item's source and words where a task's title goes (escaped: the hostile words show as text), the skill field (the skill Echo finds the best fit already in it, or, when none fits, empty with "Just the message — or type to find a skill (N)"), "Work on it", "Yolo", "Cancel" |
 | 4 | Click "Cancel" | The dialog closes; both rows are still listed |
 
 ## Expected Final State

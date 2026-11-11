@@ -37,7 +37,7 @@ export function apply(ctx) {
   }
   ctx.command('heard', () => {
     let heard = []
-    try { heard = JSON.parse(ctx.store.read('heard.json')) } catch (e) {}
+    try { heard = JSON.parse(ctx.store.read('heard.json') || '[]') } catch (e) {}
     return { heard, accepted, refused }
   })
 }
