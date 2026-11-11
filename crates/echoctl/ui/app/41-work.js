@@ -258,7 +258,9 @@ document.addEventListener('drop', (e) => {
   if (!cell || !cell.dataset.drop || !id) return
   e.preventDefault()
   cell.classList.remove('over')
-  const n = S.pj.work && S.pj.work.nodes[id]
+  // An item of this thread's work only (its own key: an id like "__proto__" from a dragged element is none).
+  const nodes = S.pj.work && S.pj.work.nodes
+  const n = nodes && Object.hasOwn(nodes, id) ? nodes[id] : null
   const col = boardOf().columns.find((c) => c.id === cell.dataset.drop)
   if (!n || !col || n.column === col.id && cardCategory(n) === col.state) return
   const set = { column: col.id }
