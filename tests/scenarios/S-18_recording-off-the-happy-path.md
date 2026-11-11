@@ -34,6 +34,9 @@ cases:
   - tests/cases/recording/TC-025_stop-while-echo-is-busy.md
   - tests/cases/transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md
   - tests/cases/transcription/TC-012_a-calls-language-changed-during-it.md
+  - tests/cases/privacy/TC-008_deliver-send-never-goes-to-an-address-a-model-picked-or-to-anyone-before-the-sign-in.md
+  - tests/cases/recording/TC-028_a-meeting-about-to-start-shows-in-the-pill-with-its-time-and-record-it.md
+  - tests/cases/recording/TC-029_a-memo-records-the-mic-alone-stop-ends-it-at-once-and-its-threads-follow-what-was-said.md
 auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
@@ -119,6 +122,9 @@ prelude" in every case below).
 | 25 | `recording/TC-025_stop-while-echo-is-busy.md` | — | After stage 11's teardown quit the prelude's app: step 1 starts its own (it freezes it with `kill -STOP`) |
 | 26 | `transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md` | — | After stage 25's teardown quit its app: step 1 starts its own. A 126 s call on laptop speakers (a made-up echo), about 2.5 minutes |
 | 27 | `transcription/TC-012_a-calls-language-changed-during-it.md` | — | After stage 26's teardown quit its app: step 1 starts its own. A 15 s Ukrainian call recorded as English, its language changed once both sides were transcribed |
+| 28 | `privacy/TC-008_deliver-send-never-goes-to-an-address-a-model-picked-or-to-anyone-before-the-sign-in.md` | — | — |
+| 30 | `recording/TC-028_a-meeting-about-to-start-shows-in-the-pill-with-its-time-and-record-it.md` | — | — |
+| 31 | `recording/TC-029_a-memo-records-the-mic-alone-stop-ends-it-at-once-and-its-threads-follow-what-was-said.md` | — | — |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again

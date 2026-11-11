@@ -35,6 +35,10 @@ cases:
   - tests/cases/plugins/TC-007_remove-asks-before-it-removes.md
   - tests/cases/plugins/TC-008_remove-keep-data-leaves-its-settings.md
   - tests/cases/plugins/TC-012_remove-a-marketplace-from-the-menu.md
+  - tests/cases/plugins/TC-014_installed-plugin-adds-its-window-part-and-switching-off-takes-it-out.md
+  - tests/cases/plugins/TC-015_update-that-asks-for-more-shows-the-new-lines-and-waits-for-a-yes.md
+  - tests/cases/plugins/TC-016_plugin-hears-only-the-events-its-sheet-named.md
+  - tests/cases/plugins/TC-017_plugin-claude-runs-and-session-skills-only-as-its-sheet-said.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -97,6 +101,10 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 29 | `plugins/TC-007_remove-asks-before-it-removes.md` | 26 | Acme notes is installed by stage 26: skip the precondition lines. On stage 28's view: in step 1 skip the navigation, click "Remove…". Skip its teardown |
 | 30 | `plugins/TC-008_remove-keep-data-leaves-its-settings.md` | 26 | Acme notes is installed by stage 26: skip the precondition lines. On stage 29's view: in step 2 skip the navigation (click "Remove…", then "Remove, keep data"). In its teardown run only the `rm -r`: keep `acme-local` for stage 31 |
 | 31 | `plugins/TC-012_remove-a-marketplace-from-the-menu.md` | 22 | `acme-local` is there from stage 22: skip the precondition lines and step 1. On stage 30's view: in step 2 skip the navigation (click the tab "Marketplaces" and "⋯" on "acme-local") |
+| 32 | `plugins/TC-014_installed-plugin-adds-its-window-part-and-switching-off-takes-it-out.md` | — | — |
+| 33 | `plugins/TC-015_update-that-asks-for-more-shows-the-new-lines-and-waits-for-a-yes.md` | — | — |
+| 34 | `plugins/TC-016_plugin-hears-only-the-events-its-sheet-named.md` | — | — |
+| 35 | `plugins/TC-017_plugin-claude-runs-and-session-skills-only-as-its-sheet-said.md` | — | — |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.
