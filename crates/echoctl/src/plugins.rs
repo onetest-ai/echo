@@ -105,7 +105,7 @@ fn widget_height() -> String {
 }
 
 /// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
-pub const WIDGET_KINDS: [&str; 5] = ["stat", "stats", "list", "status", "card"];
+pub const WIDGET_KINDS: [&str; 6] = ["stat", "stats", "chart", "list", "status", "card"];
 
 /// Each enabled plugin's manifest (one it can't read is left out).
 pub fn enabled_manifests() -> Vec<(String, Manifest)> {

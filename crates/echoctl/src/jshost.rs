@@ -1134,7 +1134,7 @@ mod tests {
             plugins::read_manifest(&d).map(|_| ()).map_err(|e| e.to_string())
         };
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), true).is_ok());
-        assert!(with(json!({"id": "a", "label": "A", "kind": "chart"}), true).unwrap_err().contains("kind Echo doesn't draw"));
+        assert!(with(json!({"id": "a", "label": "A", "kind": "map"}), true).unwrap_err().contains("kind Echo doesn't draw"));
         assert!(with(json!({"id": "A b", "label": "A", "kind": "stat"}), true).unwrap_err().contains("plain, unique id"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "refresh": 5}), true).unwrap_err().contains("60 s"));

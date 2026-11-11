@@ -151,6 +151,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-22",
+   "feature": "A plugin's widget kinds beyond the first five: chart (bar, bars, line — points titled with their value, the last one marked), a stat's progress bar, and on any kind a link (echo:// opens in Echo; https asks 'Open <host> in the browser?' before it leaves) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
