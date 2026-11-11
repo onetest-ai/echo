@@ -221,6 +221,11 @@ pub fn set_param(widget: &str, key: &str, value: &str) -> Result<Vec<Item>> {
     })
 }
 
+/// A widget's size on Today (S, M or L); off Today, the first size it takes.
+pub fn size_on_today(widget: &str) -> String {
+    load().into_iter().find(|i| i.widget == widget).map(|i| i.size).or_else(|| widgets::find(widget).ok().and_then(|w| w.sizes.first().map(|s| s.to_string()))).unwrap_or_else(|| "M".into())
+}
+
 /// A widget's settings as Today has them: its defaults, then what the user set (a value it no longer takes, dropped).
 pub fn params_of(widget: &str) -> serde_json::Map<String, serde_json::Value> {
     let mut out = serde_json::Map::new();

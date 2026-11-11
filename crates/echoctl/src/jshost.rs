@@ -759,11 +759,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "widgets.set" => {
-            widget_store(id, &s(&arg[0]), Some(&arg[1]), None)?;
+            widget_store(id, &s(&arg[0]), Some(&arg[1]), None, None)?;
             Value::Null
         }
         "widgets.clear" => {
-            widget_store(id, &s(arg), None, None)?;
+            widget_store(id, &s(arg), None, None, None)?;
             Value::Null
         }
         "inbox.clear" => {
@@ -1038,8 +1038,8 @@ fn widgets_file(id: &str) -> PathBuf {
 }
 
 /// A widget's last data (`None`: cleared), or why its provider couldn't answer (the data before kept) — one the
-/// plugin declares, at most 64 KB.
-fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str>) -> Result<()> {
+/// plugin declares, at most 64 KB; `size`: the size its provider was asked for.
+fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
     let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
     if !declared {
         bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
@@ -1065,6 +1065,9 @@ fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str
         (d, None) => {
             last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
         }
+    }
+    if let Some(size) = size {
+        last["size"] = json!(size);
     }
     all.insert(widget.into(), last);
     std::fs::create_dir_all(plugins::data_dir(id))?;
@@ -1113,18 +1116,21 @@ pub fn widget_ask(plugin: &str, widget: &str) {
 /// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
 pub fn widget_ask_now(plugin: &str, widget: &str) {
     // Its settings as Today has them (defaults, then the user's), given to the provider.
-    let params = crate::today_layout::params_of(&format!("plugin:{plugin}:{widget}"));
-    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params }), Duration::from_secs(5)) {
+    // and the size it has there (S, M, L), so it can give as much as fits.
+    let id = format!("plugin:{plugin}:{widget}");
+    let (params, size) = (crate::today_layout::params_of(&id), crate::today_layout::size_on_today(&id));
+    let size = Some(size.as_str());
+    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size }), Duration::from_secs(5)) {
         // Kept — or, refused (over 64 KB), why, its data before kept.
         Ok(v) => {
-            if let Err(e) = widget_store(plugin, widget, Some(&v), None) {
-                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")));
+            if let Err(e) = widget_store(plugin, widget, Some(&v), None, size) {
+                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")), size);
             }
         }
         // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
         // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
-        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""))),
-        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")))),
+        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""), size)),
+        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")), size)),
     }
 }
 
@@ -1168,6 +1174,21 @@ pub fn inbox_items() -> Vec<(String, String, Value)> {
 mod tests {
     use super::*;
 
+    fn got_size(plugin: &str, widget: &str) -> String {
+        widget_last(plugin, widget).and_then(|l| l["data"]["items"][0]["sub"].as_str().map(str::to_owned)).unwrap_or_default()
+    }
+
+    /// The size its provider last answered for, once it is `want` (or what it was after 5 s).
+    fn wait_size(plugin: &str, widget: &str, want: &str) -> String {
+        for _ in 0..100 {
+            if got_size(plugin, widget) == want {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        got_size(plugin, widget)
+    }
+
     #[test]
     fn a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set() {
         let (_env, root) = paths::testenv::folders("jshost-widgets");
@@ -1183,7 +1204,7 @@ mod tests {
             d.join("main.js"),
             r#"
             export function apply(ctx) {
-              ctx.widgets.provide('builds', ({ size }) => ({ items: [{ title: 'main #41 passed' }] }))
+              ctx.widgets.provide('builds', ({ size }) => ({ items: [{ title: 'main #41 passed', sub: `at ${size}` }] }))
               ctx.widgets.provide('health', ({ params }) => ({ state: 'ok', title: `CI on ${params.branch}` }))
               ctx.command('green', () => { ctx.widgets.set('health', { state: 'ok', title: 'All green' }); return 1 })
               ctx.command('stranger', () => ctx.widgets.set('nope', { state: 'ok' }))
@@ -1227,9 +1248,15 @@ mod tests {
         // Answered with nothing (cleared): no place, not a wait.
         let off = crate::widgets::data("plugin:ci:health", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
         assert_eq!((off["empty"].as_bool(), off["pending"].as_bool()), (Some(true), Some(false)));
-        // Today takes it like Echo's own.
+        assert_eq!(got_size("ci", "builds"), "at M", "off Today: the first size it takes");
+        // Today takes it like Echo's own; its provider is told the size it has there, and asked again when resized.
         crate::today_layout::add("plugin:ci:builds", Some("L"), None).unwrap();
         assert!(crate::today_layout::load().iter().any(|i| i.widget == "plugin:ci:builds" && i.size == "L"));
+        crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!(wait_size("ci", "builds", "at L"), "at L", "added at L: asked again although not stale");
+        crate::today_layout::resize("plugin:ci:builds", "M").unwrap();
+        crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!(wait_size("ci", "builds", "at M"), "at M", "resized to M");
         // Its settings: declared in the manifest, set on Today, given to its provider.
         crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
         widget_ask_now("ci", "health");
