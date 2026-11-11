@@ -1,5 +1,5 @@
 ---
-id: TC-037
+id: TC-038
 title: A widget two rows high (echoctl today height, or 1 / 2 in its edit header) takes its row and the next, the widgets beside it; one it can't take is refused
 priority: high
 type: functional
@@ -11,7 +11,7 @@ data: standard
 tags: [today, widgets, layout, height, edit]
 ---
 
-# TC-037: A widget two rows high takes its row and the next
+# TC-038: A widget two rows high takes its row and the next
 
 **Module:** Today | **Priority:** High | **Type:** Functional
 
@@ -36,7 +36,10 @@ tags: [today, widgets, layout, height, edit]
 | 5 | Click Edit Today (the pencil) | The right panel opens, Today at 2 columns: My work, Next meeting, Needs you now… one under another (no room beside a widget two rows high: it is one row high). My work's frame has "Size" S M (S pressed) and "Height" ↕ 1 2 (2 pressed, label "My work · this week: 2 rows high"); Recorded this week isn't on Today; Your day · strip isn't on Today either — a widget that takes one height has no Height group (check The day's choices has one, Your day · agenda has one) |
 | 6 | Click My work's "1" | `target/debug/echoctl today` shows My work without `height`; its "1" is pressed |
 | 7 | Click My work's "2", then Done; close the right panel if it is open | Back to step 4's page |
-| 8 | `target/debug/echoctl today reset`; reload | Today as it comes: no widget two rows high |
+| 8 | `target/debug/echoctl today reset`, `target/debug/echoctl today height core:needs.now 2`, `target/debug/echoctl today move core:needs.now --before core:calendar.next`, `target/debug/echoctl today add core:calls.week --size S --below core:calendar.next`; reload | Needs you now two rows high on the left, Next meeting and Recorded this week beside it. Needs you now's list is taller than they are: it scrolls inside its frame (its bottom is the pair's bottom; scrolled to the end its last item shows), nothing of it over The day's choices below |
+| 9 | `target/debug/echoctl today reset`, `target/debug/echoctl today height core:tasks.mine 2`, `target/debug/echoctl today move core:tasks.mine --after core:calendar.next`; reload | My work in the middle of its row (Next meeting, My work, Needs you now): one row high, the order kept (no `.td-pair`) |
+| 10 | Click Edit Today | My work's Height "2" stays pressed, greyed, its label "My work · this week: 2 rows high, drawn one row here" (its hover says why) |
+| 11 | Done; `target/debug/echoctl today reset`; reload | Today as it comes: no widget two rows high |
 
 ## Expected Final State
 Today's layout is the default again.
@@ -48,4 +51,4 @@ Today's layout is the default again.
 - Changes Today's layout, then resets it.
 
 ## Notes
-- Only the first widget two rows high in a row is; in the row it takes, one more is one row high (the node test `today-layout.test.mjs` covers it, and one column, nothing beside it, an empty widget).
+- A widget two rows high is drawn so only first or last in its row (nothing reorders), with a column and something beside it; one in the rows a tall one takes is one row high. The node test `today-layout.test.mjs` covers each; edit mode says when one is drawn one row (`todayTallIds`).

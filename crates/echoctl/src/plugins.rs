@@ -309,8 +309,8 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
             bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
         }
-        if !matches!(w.heights.as_slice(), [1] | [2] | [1, 2] | [2, 1]) {
-            bail!("widget “{}” takes heights of 1 and 2 rows, each once", w.id);
+        if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
+            bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
         }
         if !["hug", "fill"].contains(&w.height.as_str()) {
             bail!("widget “{}” is hug or fill high", w.id);

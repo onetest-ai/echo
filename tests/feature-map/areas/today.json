@@ -181,7 +181,7 @@
   },
   {
    "id": "F-TODAY-25",
-   "feature": "A widget two rows high (height 2: Your day, My work, Needs you now, Next meeting, the day's choices, Threads at a glance, Routine cards; a plugin's that declares it) takes its row and the next: on the left when it is first in its row, else on the right, the rest of its row and the next row laid beside it in the columns left; with no room beside it (one column, or as wide as the page) or nothing beside it, it is one row high",
+   "feature": "A widget two rows high (height 2: Your day, My work, Needs you now, Next meeting, the day's choices, Threads at a glance, Routine cards; a plugin's that declares it, with 1) takes its row and the next: on the left when it is first in its row, on the right when it is last (nothing reorders), the rest of its row and the next row laid beside it in the columns left, its content scrolling inside when taller than they are; in the middle of its row, in the rows another one takes, with no room beside it (one column, or as wide as the page) or nothing beside it, it is one row high, and its edit header says so (2 pressed, 'drawn one row here'); a height written by hand that isn't 1 or 2 is 1",
    "priority": "high",
    "check": "agent",
    "axes": []

@@ -8,7 +8,7 @@ const src = appSource()
 const start = src.indexOf('// ── today layout:')
 const end = src.indexOf('// end of the today layout block', start)
 assert.ok(start >= 0 && end > start, 'the today layout block not found in app.js')
-const { todayCols, todayLines, todayPlan } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines, todayPlan }`)()
+const { todayCols, todayLines, todayPlan, todayTallIds } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines, todayPlan, todayTallIds }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -121,6 +121,19 @@ test('one row high when nothing is beside it, at one column, or empty; only one 
   assert.equal(tallShow(todayLines([[W('a', 1, { height: 2 })], [W('b', 1, { height: 2 }), W('c', 1)], [W('d', 3)]], 3)), '[a:1 left | b:1 c:1] / d:3')
   // An empty next row: the one after is next.
   assert.equal(tallShow(todayLines([[W('a', 1, { height: 2 })], [W('x', 1, { empty: true })], [W('b', 2)]], 3)), '[a:1 left | b:2]')
+})
+
+test('in the middle of its row it is one row high: nothing reorders', () => {
+  const rows = [[W('next', 1), W('mine', 1, { height: 2 }), W('needs', 1)], [W('choices', 2)]]
+  assert.equal(tallShow(todayLines(rows, 3)), 'next:1 mine:1 needs:1 / choices:2')
+  assert.deepEqual(todayTallIds(todayLines(rows, 3)), [])
+})
+
+test('todayTallIds names the widgets drawn two rows high, not those set so but drawn one', () => {
+  const rows = [[W('a', 1, { height: 2 }), W('b', 1, { height: 2 })], [W('c', 1, { height: 2 })], [W('d', 2, { height: 2 })]]
+  // a takes its row and the next: b and c beside it are one row high; d has nothing beside it.
+  assert.deepEqual(todayTallIds(todayLines(rows, 3)), ['a'])
+  assert.deepEqual(todayTallIds(todayLines(rows, 1)), [], 'one column: none')
 })
 
 test('the plan lays two-rows-high widgets beside a held column too', () => {

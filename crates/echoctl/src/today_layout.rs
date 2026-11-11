@@ -15,7 +15,7 @@ use crate::{paths, widgets};
 pub struct Item {
     pub widget: String,
     pub size: String,
-    #[serde(default = "one", skip_serializing_if = "is_one")]
+    #[serde(default = "one", skip_serializing_if = "is_one", deserialize_with = "height_or_one")]
     pub height: u8,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub row: bool,
@@ -29,6 +29,10 @@ fn one() -> u8 {
 }
 fn is_one(h: &u8) -> bool {
     *h == 1
+}
+/// A height as written (a hand edit may hold anything): 2, else 1 — never a reason to lose the layout.
+fn height_or_one<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
+    Ok(if serde_json::Value::deserialize(d)? == 2 { 2 } else { 1 })
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -373,6 +377,9 @@ mod tests {
         // A height the widget doesn't take (a hand edit) is 1.
         std::fs::write(file(), r#"{"items":[{"widget":"core:calls.week","size":"S","height":2,"row":true}]}"#).unwrap();
         assert_eq!(load()[0].height, 1);
+        // One that isn't a height at all: 1, and the rest of the layout kept.
+        std::fs::write(file(), r#"{"items":[{"widget":"core:tasks.mine","size":"S","height":"tall","row":true},{"widget":"core:needs.now","size":"M","height":2.5}]}"#).unwrap();
+        assert_eq!(load().iter().map(|i| (i.widget.as_str(), i.height)).collect::<Vec<_>>(), [("core:tasks.mine", 1), ("core:needs.now", 1)]);
     }
 
     #[test]

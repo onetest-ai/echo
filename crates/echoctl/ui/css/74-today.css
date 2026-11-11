@@ -263,5 +263,6 @@
 /* A widget two rows high: it in its columns, the lines beside it in the others; as tall as they are. */
 .td-pair { display: grid; gap: 16px; align-items: stretch; }
 .td-tall { min-height: 280px; contain: size; display: flex; flex-direction: column; min-width: 0; }
-.td-tall > .td-sec, .td-tall > .tw { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Whatever the widget draws (.td-sec, .td-card, a plugin's, an edit frame) scrolls inside, never over the next line. */
+.td-tall > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .td-tall > .tw > .tw-in { flex: 1 1 auto; max-height: none; }

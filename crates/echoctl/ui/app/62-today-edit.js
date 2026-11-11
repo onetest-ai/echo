@@ -40,8 +40,11 @@ function todayEditCell(id, html, size) {
     return `<label class="tw-param">${esc(p.label)} <select id="${fid}" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}">${now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   }
   // Its height (1 or 2 rows) when it takes both.
-  const h = item.height || 1, hs = w.heights || [1]
-  const heights = hs.length > 1 ? `<span class="tw-seg tw-hseg" role="group" aria-label="Height"><span aria-hidden="true">↕</span>${hs.map((x) => `<button type="button" class="${x === h ? 'on' : ''}" data-tw-height="${x}" data-tw-id="${esc(id)}" aria-pressed="${x === h}" aria-label="${esc(w.label)}: ${x} row${x === 1 ? '' : 's'} high" title="${x === 1 ? 'One row high' : 'Two rows high: its row and the next'}">${x}</button>`).join('')}</span>` : ''
+  // Set two rows high but drawn one (no column or nothing beside it, the middle of its row, another tall one in these
+  // rows): the 2 stays pressed — it is the setting — and says why it is one row here.
+  const h = item.height || 1, hs = w.heights || [1], flat = h === 2 && !(S.tdTall || []).includes(id)
+  const say = (x) => (x === 1 ? 'One row high' : flat ? 'Two rows high, drawn one row here: it needs a column beside it with something in it, first or last in its row, and no other widget two rows high in these rows' : 'Two rows high: its row and the next')
+  const heights = hs.length > 1 ? `<span class="tw-seg tw-hseg${flat ? ' flat' : ''}" role="group" aria-label="Height"><span aria-hidden="true">↕</span>${hs.map((x) => `<button type="button" class="${x === h ? 'on' : ''}" data-tw-height="${x}" data-tw-id="${esc(id)}" aria-pressed="${x === h}" aria-label="${esc(w.label)}: ${x} row${x === 1 ? '' : 's'} high${x === 2 && flat ? ', drawn one row here' : ''}" title="${esc(say(x))}">${x}</button>`).join('')}</span>` : ''
   const params = (w.params || []).length
   const gear = params ? `<button type="button" id="tw-gear-${esc(id.replace(/[^a-z0-9-]/gi, '-'))}" class="icon-btn tw-gear${S.tdParams === id ? ' on' : ''}" data-tw-gear="${esc(id)}" aria-expanded="${S.tdParams === id}" aria-label="${esc(w.label)}: settings" title="Settings">${ICON('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')}</button>` : ''
   const form = params && S.tdParams === id ? `<div class="tw-params" role="group" aria-label="Settings of ${esc(w.label)}">${w.params.map(pick).join('')}</div>` : ''

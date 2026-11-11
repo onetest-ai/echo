@@ -84,6 +84,7 @@ function todayView() {
   S.todayCols = cols
   todayWatch()
   const plan = todayPlan(rowsIn, cols)
+  S.tdTall = todayTallIds(plan.lines) // edit mode says when a widget set two rows high is drawn one
   // The page's only line takes the whole width: Your day alone on a quiet day isn't a third with two empty.
   const alone = !plan.hold && plan.lines.length === 1
   const lineHtml = (line, width = cols) => {
@@ -199,15 +200,16 @@ function todayCols(width, prev) {
 }
 /** The layout's rows ([[{id, span, height, fill, empty}]]) as lines of `cols` columns: empty widgets and rows take none;
  *  a row too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one.
- *  A widget two rows high (height 2, the first such in its row) takes its row and the next: a `tall` line — on the left
- *  when it is first in its row, else on the right — with the rest of its row and the next row laid beside it in the
- *  columns left (`lines`). With no column left beside it, or nothing to put there, it is one row high. */
+ *  A widget two rows high (height 2) first or last in its row takes its row and the next: a `tall` line — on the left
+ *  when first, on the right when last, so nothing reorders — with the rest of its row and the next row laid beside it
+ *  in the columns left (`lines`). In the middle of its row, with no column left beside it, or with nothing to put
+ *  there, it is one row high; so is one in the rows a tall one takes. `todayTallIds` says which are drawn tall. */
 function todayLines(rows, cols) {
   const lines = []
   const live = rows.map((row) => row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))).filter((r) => r.length)
   for (let r = 0; r < live.length; r++) {
     const items = live[r]
-    const t = items.findIndex((w) => w.height === 2)
+    const t = items[0].height === 2 ? 0 : items[items.length - 1].height === 2 ? items.length - 1 : -1
     if (t >= 0 && cols > 1) {
       const tall = { ...items[t], span: Math.min(items[t].span, cols - 1) }
       const one = (row) => row.map((w) => ({ ...w, height: 1 }))
@@ -249,6 +251,10 @@ function todayPlan(rows, cols) {
   const beside = todayLines(rows.slice(1), cols - 1)
   if (!beside.length) return { hold: null, down: null, lines: todayLines(rows, cols) }
   return { hold: { id: holder.id }, down: null, lines: beside }
+}
+/** The widgets a plan draws two rows high (its `tall` lines, beside a held column too). */
+function todayTallIds(lines) {
+  return lines.flatMap((l) => (l.tall ? [l.tall.id, ...todayTallIds(l.lines)] : []))
 }
 // end of the today layout block
 

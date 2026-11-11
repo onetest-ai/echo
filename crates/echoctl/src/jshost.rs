@@ -1395,7 +1395,7 @@ mod tests {
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "refresh": 5}), true).unwrap_err().contains("60 s"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "heights": [1, 2]}), true).is_ok());
-        for bad in [json!([3]), json!([]), json!([2, 2])] {
+        for bad in [json!([3]), json!([]), json!([2, 2]), json!([2])] {
             assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "heights": bad}), true).unwrap_err().contains("heights of 1 and 2 rows"));
         }
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), false).unwrap_err().contains("host half"));
