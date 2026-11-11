@@ -76,6 +76,12 @@ function recordButton(attrs, label, primary = true, memo = false) {
 // ── views ──────────────────────────────────────────────────────────────────────────────────
 const MAC = /Mac/.test(navigator.platform || navigator.userAgent)
 const MOD = MAC ? '⌘' : 'Ctrl+'
+// ── tray words: where Echo's octopus lives, as the system calls it (#420): macOS's menu bar, Windows' notification area.
+const trayWords = (windows) => windows
+  ? { octopus: 'the octopus in the notification area', startAtLogin: 'Echo runs in the notification area from when you sign in.' }
+  : { octopus: 'the menu-bar octopus', startAtLogin: 'Echo runs in the menu bar from when you log in.' }
+const TRAY = trayWords(/Windows/.test(navigator.userAgent))
+// end of the tray-words block
 
 /** A calendar meeting about to start (3 min before … 4 min after), not recorded or armed yet; not a Zoom or Google Meet
  *  one (Echo can't record it yet). */
@@ -363,7 +369,7 @@ function listToggle() {
 
 function emptyMain() {
   if (S.calls && !S.calls.length) {
-    return `<div class="empty"><div>${mark()}<h3>No calls yet</h3><p>Use Record at the top of this window or the menu-bar octopus. Echo transcribes each call on this computer when it ends.</p></div></div>`
+    return `<div class="empty"><div>${mark()}<h3>No calls yet</h3><p>Use Record at the top of this window or ${TRAY.octopus}. Echo transcribes each call on this computer when it ends.</p></div></div>`
   }
   return `${listToggle()}<div class="empty"><div>${mark()}<h3>Pick a call</h3><p>Its minutes, your notes, the transcript, chat and shared screens open here.</p></div></div>`
 }

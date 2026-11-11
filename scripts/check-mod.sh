@@ -56,6 +56,8 @@ node crates/echoctl/ui/settings-search.test.mjs
 node crates/echoctl/ui/own-title-bar.test.mjs
 # `window --selftest`'s terminal check: no POSIX arithmetic on Windows, the output line as proof (selftestTerm, #419).
 node crates/echoctl/ui/selftest-terminal.test.mjs
+# Where the octopus lives, in the platform's words: the menu bar on macOS, the notification area on Windows (trayWords, #420).
+node crates/echoctl/ui/tray-words.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
