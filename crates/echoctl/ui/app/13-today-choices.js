@@ -6,8 +6,10 @@
 
 // ── day choices: what to decide today (no DOM: `today-choices.test.mjs`) ─────────────────────────────────────────
 /** Today's choices still to make, in time order: `{kind: 'overlap', members, pick, why, at}` for two or more you accepted
- *  at once (not over), `{kind: 'invite', item, suggest: 'accept'|'decline', why, at}` for an invite still to answer. */
-function dayChoices(day, now) {
+ *  at once (not over) — `pick` null when Echo has no reason to suggest one (your call) — and `{kind: 'invite', item,
+ *  suggest: 'accept'|'decline', why, at}` for an invite still to answer. `ctx`: `due` — the threads with a promise of
+ *  yours due today or late; `clients` — client id → name. */
+function dayChoices(day, now, ctx = {}) {
   const t = (s) => new Date(s)
   const yes = (x) => !['notResponded', 'tentativelyAccepted', 'declined'].includes(x.response)
   const len = (x) => t(x.end || x.start) - t(x.start)
@@ -26,20 +28,21 @@ function dayChoices(day, now) {
   if (cur.length) clusters.push(cur)
   for (const members of clusters) {
     if (members.length < 2) continue
-    // Echo's suggestion: the one you organise, else one in a thread, else the longer, else the earlier.
+    // Echo suggests one only for a reason the design names, met by exactly one of them (the user's decision,
+    // 2026-11-11): you organise it, else a promise of yours in its thread is due, else it is a client's. No reason: no
+    // suggestion — your call.
+    const due = ctx.due || new Set(), clients = ctx.clients || {}
+    const dueIn = (x) => (x.threads || []).find((p) => due.has(p.id))
+    const clientOf = (x) => (x.threads || []).find((p) => p.client && clients[p.client])
     const rules = [
       [(x) => x.response === 'organizer', () => 'you organise it'],
-      [(x) => (x.threads || []).length > 0, (x) => `in ${x.threads[0].name}`],
+      [(x) => !!dueIn(x), (x) => `a promise in ${dueIn(x).name} is due`],
+      [(x) => !!clientOf(x), (x) => `${clients[clientOf(x).client]}'s`],
     ]
     let pick = null, why = ''
     for (const [has, say] of rules) {
       const hits = members.filter(has)
       if (hits.length === 1) { pick = hits[0]; why = say(pick); break }
-    }
-    if (!pick) {
-      const longest = Math.max(...members.map(len))
-      const longer = members.filter((x) => len(x) === longest)
-      pick = longer[0]; why = longer.length === 1 ? 'the longer' : t(longer[0].start) < t(longer[1].start) ? 'the earlier' : 'the first of them'
     }
     out.push({ kind: 'overlap', members, pick, why, at: t(members[0].start) })
   }
@@ -48,9 +51,15 @@ function dayChoices(day, now) {
     if (x.kind !== 'meeting' || x.response !== 'notResponded' || !x.start || t(x.end || x.start) <= now) continue
     const at = going.filter((g) => t(g.start) < t(x.end || x.start) && t(x.start) < t(g.end || g.start)).sort((a, b) => t(a.start) - t(b.start))
     // Where you go then: the one Echo suggests keeping, when it is among them, else the first.
-    const picks = out.filter((c) => c.kind === 'overlap').map((c) => c.pick)
-    const clash = at.find((g) => picks.includes(g)) || at[0]
-    out.push({ kind: 'invite', item: x, suggest: clash ? 'decline' : 'accept', why: clash ? `you go to ${clash.subject || 'another meeting'} then` : 'your day is free then', at: t(x.start) })
+    const overlaps = out.filter((c) => c.kind === 'overlap')
+    const picked = at.find((g) => overlaps.some((c) => c.pick === g))
+    // At a time you go elsewhere: that meeting — the one Echo suggests keeping, or your only one; a choice not made
+    // yet says only that you accepted others then.
+    const open = !picked && at.find((g) => overlaps.some((c) => !c.pick && c.members.includes(g)))
+    const why = picked ? `you go to ${picked.subject || 'another meeting'} then`
+      : open ? `you accepted ${overlaps.find((c) => c.members.includes(open)).members.length} others then`
+      : at.length ? `you go to ${at[0].subject || 'another meeting'} then` : 'your day is free then'
+    out.push({ kind: 'invite', item: x, suggest: at.length ? 'decline' : 'accept', why, at: t(x.start) })
   }
   return out.sort((a, b) => a.at - b.at)
 }
@@ -58,7 +67,10 @@ function dayChoices(day, now) {
 
 /** The widget: a line a choice; nothing to decide, nothing drawn (temporal). */
 function dayChoicesView(d, now) {
-  const cs = dayChoices(d.day, now)
+  // Its reasons: the threads where a promise of yours is due today or late (My work), and the clients' names.
+  const mine = (((d.work || {}).mine || {}).items || []).filter((t) => t.late || (t.due && new Date(t.due + 'T12:00').toDateString() === now.toDateString()))
+  const clients = Object.fromEntries(((S.pj.data && S.pj.data.clients) || []).filter((c) => c.account !== false).map((c) => [c.id, c.name]))
+  const cs = dayChoices(d.day, now, { due: new Set(mine.map((t) => t.project)), clients })
   if (!cs.length) return ''
   const busy = S.tdResp || {}
   const btn = (x, how, label, primary) => {
@@ -83,7 +95,7 @@ function dayChoicesView(d, now) {
     const acts = confirm
       ? `<span class="set-sub">${others(confirm).length ? `Decline ${esc(others(confirm).map(name).join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.` : 'Nothing to decline.'}${yours(confirm).length ? ` Yours — ${esc(yours(confirm).map(name).join(', '))} — stays: cancel it in Outlook.` : ''}</span>${others(confirm).length ? '<button' : '<span hidden'} class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}${others(confirm).length ? '</button>' : '</span>'}<button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
       : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(name(x))}</button>`).join('')
-    return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map(name).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(name(x))}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. Echo suggests <b>${esc(name(c.pick))}</b> — ${esc(c.why)}</div><div class="ch-acts">${acts}</div></div></div>`
+    return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map(name).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(name(x))}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. ${c.pick ? `Echo suggests <b>${esc(name(c.pick))}</b> — ${esc(c.why)}` : 'Echo has no reason to pick one — your call.'}</div><div class="ch-acts">${acts}</div></div></div>`
   }).join('')
   return `<section class="td-sec ch-sec" aria-label="The day's choices"><h2>The day's choices <span class="set-sub">${cs.length}</span></h2><div class="ch-list" role="list">${lines}</div></section>`
 }
