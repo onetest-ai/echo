@@ -1,15 +1,79 @@
 {
   "id": "widget-demo",
   "name": "Widget demo",
-  "version": "0.1.0",
-  "summary": "A test plugin: one Today widget of each kind Echo draws (tests/cases/today/TC-029).",
+  "version": "0.2.0",
+  "summary": "A test plugin: Today widgets of each kind Echo draws, an action and links (tests/cases/today/TC-029, TC-031).",
   "main": "main.js",
   "widgets": [
-    { "id": "open", "label": "Open tickets", "about": "a number", "kind": "stat", "sizes": ["S", "M"] },
-    { "id": "sprint", "label": "Sprint", "about": "a few numbers", "kind": "stats", "sizes": ["M", "L"] },
-    { "id": "builds", "label": "Last builds", "about": "a list", "kind": "list", "sizes": ["M", "L"] },
-    { "id": "ci", "label": "CI", "about": "ok, warn or bad", "kind": "status", "sizes": ["S", "M"] },
-    { "id": "note", "label": "Note", "about": "a card of text", "kind": "card", "sizes": ["M", "L"] },
-    { "id": "broken", "label": "Broken", "about": "data Echo can't draw", "kind": "stat", "sizes": ["S", "M"] }
+    {
+      "id": "open",
+      "label": "Open tickets",
+      "about": "a number",
+      "kind": "stat",
+      "sizes": [
+        "S",
+        "M"
+      ]
+    },
+    {
+      "id": "sprint",
+      "label": "Sprint",
+      "about": "a few numbers",
+      "kind": "stats",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "trend",
+      "label": "Calls a day",
+      "about": "a chart",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "builds",
+      "label": "Last builds",
+      "about": "a list",
+      "kind": "list",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "ci",
+      "label": "CI",
+      "about": "ok, warn or bad",
+      "kind": "status",
+      "sizes": [
+        "S",
+        "M"
+      ]
+    },
+    {
+      "id": "note",
+      "label": "Note",
+      "about": "a card of text",
+      "kind": "card",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "broken",
+      "label": "Broken",
+      "about": "data Echo can't draw",
+      "kind": "stat",
+      "sizes": [
+        "S",
+        "M"
+      ]
+    }
   ]
 }

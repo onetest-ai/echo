@@ -48,8 +48,33 @@ test('a status: ok / warn / bad; a card: title and text, lines kept; an unknown 
   refused('status', { state: 'red' }, 'state: ok, warn or bad')
   assert.match(draw('card', { title: 'Brief', text: 'one\ntwo' }, 'M'), /one<br>two/)
   refused('card', {}, 'title or text')
-  refused('chart', { x: 1 }, "doesn't draw the kind chart")
+  refused('map', { x: 1 }, "doesn't draw the kind map")
   refused('stat', 'not an object', 'not an object')
+})
+
+test('a chart: bar and line as SVG with each point titled, bars as rows; wrong points refused', () => {
+  const points = [{ label: 'Mon', value: 3 }, { label: 'Tue', value: 7 }, { label: 'Wed', value: 5 }]
+  const bar = draw('chart', { type: 'bar', points, unit: 'calls' }, 'M')
+  assert.equal((bar.match(/<rect /g) || []).length, 3)
+  assert.match(bar, /<title>Tue: 7 calls<\/title>/)
+  assert.match(draw('chart', { type: 'line', points }, 'M'), /<polyline points="/)
+  assert.equal((draw('chart', { type: 'bars', points }, 'M').match(/class="pw-bl"/g) || []).length, 3)
+  refused('chart', { type: 'pie', points }, 'type: bar, bars or line')
+  refused('chart', { type: 'bar', points: [{ label: 'x', value: 'many' }] }, "point 1's value is not a number")
+  assert.ok(!draw('chart', { type: 'bar', points: [{ label: '<b>x</b>', value: 1 }] }, 'M').includes('<b>x'), 'labels escaped')
+})
+
+test("a stat's progress; any kind's open (echo:// a link, https a button that asks) and actions (its plugin's commands)", () => {
+  assert.match(draw('stat', { value: '$500', progress: { used: 300, of: 800 } }, 'M'), /width:37\.5%/)
+  assert.match(draw('stat', { value: 1, open: 'echo://task/acme/T1' }, 'M'), /<a class="link-btn" href="echo:\/\/task\/acme\/T1">Open<\/a>/)
+  const https = draw('stat', { value: 1, open: 'https://ci.example/run/1' }, 'M')
+  assert.match(https, /data-pw-open="https:\/\/ci\.example\/run\/1"/)
+  assert.ok(!https.includes('<a '), 'never a plain outside link')
+  assert.ok(!draw('stat', { value: 1, open: 'javascript:alert(1)' }, 'M').includes('Open'))
+  const acts = draw('status', { state: 'bad', title: 'CI', actions: [{ label: 'Re-run', command: 'rerun', args: { id: '"><img>' } }] }, 'M')
+  assert.match(acts, /data-pw-cmd="rerun"/)
+  assert.ok(!acts.includes('"><img>'), 'args escaped in the attribute')
+  refused('stat', { value: 1, actions: [{ label: 'x' }] }, 'action 1 needs a command')
 })
 
 let failed = 0
