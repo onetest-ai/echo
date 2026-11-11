@@ -190,9 +190,10 @@ function renderNow() {
 
 /** Put the event card next to the event it belongs to, inside the calendar's grid (never over the activity bar, the
  *  calendar's own head — Day, Week — or another panel): right of it if there is room, else left; neither (a block
- *  across the day), over the block's right part; level with it (#338). */
+ *  across the day), over the block's right part; level with it (#338). On Today, beside the meeting of Your day it was
+ *  opened from (`todayAnchor`), inside Today's view. */
 function placeDetail() {
-  const card = $('.detail'), ev = $('.ev[aria-selected="true"]')
+  const card = $('.detail'), ev = $('.ev[aria-selected="true"]') || $('[data-td-ev][aria-current="true"]')
   if (!card || !ev) return
   const pane = (ev.closest('#calgrid') || ev.closest('#r-primary') || document.body).getBoundingClientRect()
   const r = ev.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight, gap = 8, pad = 12

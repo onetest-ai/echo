@@ -154,6 +154,15 @@ test('views of a removed plugin are forgotten', () => {
   assert.deepEqual(Object.keys(Layout.toJSON().views), ['claude'])
 })
 
+test('a layout saved showing a view that is gone (Today\'s Meeting, now a popover) loads: the area shows its first view', () => {
+  Layout.load({ right: { open: true, active: 'meeting' }, bottom: { open: true, active: 'meeting' }, views: { meeting: { area: 'bottom' } } })
+  Layout.prune(VIEWS)
+  assert.deepEqual(Layout.toJSON().views, {})
+  const e = Layout.effective(1180, 760, VIEWS)
+  assert.equal(e.right.active, 'tasks')
+  assert.equal(e.bottom.active, 'claude')
+})
+
 test('malformed saved values fall back to the defaults', () => {
   Layout.load({ right: { open: 'yes', size: 99999, active: 4 }, bottom: { size: 'big' }, views: { claude: { area: 'left' } } })
   const j = Layout.toJSON()

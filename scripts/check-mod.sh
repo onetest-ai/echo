@@ -81,6 +81,8 @@ node crates/echoctl/ui/today-calendar.test.mjs
 node crates/echoctl/ui/today-edit.test.mjs
 # The day's choices: overlaps you accepted, what Echo suggests, invites to answer (dayChoices).
 node crates/echoctl/ui/today-choices.test.mjs
+# A meeting of Your day opened as Calendar's popover: which one, beside which of its forms (tdFormOf, tdPick).
+node crates/echoctl/ui/today-popover.test.mjs
 # A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).
 node crates/echoctl/ui/today-plugin-widgets.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.

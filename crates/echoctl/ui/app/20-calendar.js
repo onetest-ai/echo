@@ -304,11 +304,3 @@ document.addEventListener('keydown', (ev) => {
 })
 // The user scrolling (a wheel, not the grid's own scroll a render restores) or resizing the window closes it too.
 for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) closeEventMenu(false) }, { passive: true })
-
-// A meeting's card in the right panel: Your day's line opens it on Today (`12-today.js`, `todayMeeting`).
-PANEL_VIEWS.push({
-  id: 'meeting', label: 'Meeting', area: 'right',
-  icon: ICON('<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/>'),
-  when: () => S.view === 'today' && !!S.tdSel && !!(S.tdCal && (S.tdCal.events || []).some((e) => e.id === S.tdSel)),
-  render: () => { const e = S.tdCal.events.find((x) => x.id === S.tdSel); return `<div class="cal td-meeting">${eventDetail(e, new Date())}</div>` },
-})
