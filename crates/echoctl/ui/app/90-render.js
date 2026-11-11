@@ -239,6 +239,8 @@ function renderNow() {
     // Scrolled to once; its turn stays marked through later draws of this call (#370: thread data arriving redrew the
     // transcript and lost it).
     if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jumpShown = { call: S.selected, t: S.jump }; S.jump = null; jumped = true }
+    // The mark ends with a search, or once the user leaves that call's transcript.
+    else if (S.jumpShown && (S.find.trim() || S.selected !== S.jumpShown.call || S.tab !== 'transcript')) S.jumpShown = null
     else pane.scrollTop = scroll
   }
   const lt2 = $('#live-transcript')
