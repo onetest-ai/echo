@@ -31,14 +31,15 @@ tags: [today, widgets, plugins, layout]
 | 4 | Close the earlier tab. `target/debug/echoctl today remove plugin:widget-demo:open`; `target/debug/echoctl today add plugin:widget-demo:builds --size M --above core:needs.now` (a list, never asked); open `{{base_url}}/#today` in a new tab, note Needs you now's top, wait for its rows | "Last builds" holds its place with the placeholder, then its rows within a few seconds, no reload; Needs you now within 2 px of where it was (a list's height depends on its rows: the placeholder is a few rows high) |
 | 5 | Reload | "Last builds" at once with its rows, no placeholder (its last answer is drawn) |
 | 6 | `target/debug/echoctl today add plugin:widget-demo:board --size M --above core:needs.now`; close the earlier tab (an open Today would ask for it first), open `{{base_url}}/#today` in a new tab and snapshot at once | "Sprint board" holds its place with the same placeholder until its page is drawn; then three boxes ("5 To do", "2 Doing", "9 <i>Done</i>" as text) in that place; never "Couldn't draw this — its page isn't loaded" |
+| 7 | `target/debug/echoctl plugin install hang-demo --yes` (the same test marketplace: one widget whose plugin never answers); `target/debug/echoctl today add plugin:hang-demo:hang --size M --above core:needs.now`; close the earlier tab, open `{{base_url}}/#today` in a new tab and snapshot at once, then again after 10 s (no reload) | "Never answers" first holds its place with the placeholder; after its ask fails (about 5 s) it keeps its frame and label with one line "Couldn't get its data — hang-demo didn't answer __widget:hang within 5 s" (the error as text), not busy, no placeholder; it doesn't vanish |
 
 ## Expected Final State
 A widget waiting for its plugin's first answer, or for its window half, keeps its place and size with a placeholder; what is under it doesn't jump when the answer comes.
 
 ## Teardown
-- `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove widget-demo`; `tests/fixtures/serve.sh down <dir>`
+- `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove widget-demo`; `target/debug/echoctl plugin remove hang-demo`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
 - The same holds for the other kinds of the test plugin (`sprint` stats, `trend` chart): each fills in a few seconds and Needs you now stays within 2 px.
-- A plugin that never answers: its ask fails after a few seconds and the placeholder goes (no place, as for nothing to show).
+- A plugin that never answers (step 7): the frame stays with why, the user's decision (2026-11-11); it goes once its plugin answers: Echo asks again after the widget's refresh (60 s at least), and Today draws the answer at its next read.
 - A widget whose plugin answered "nothing to show" still takes no place (F-TODAY-19); only one never answered holds it.

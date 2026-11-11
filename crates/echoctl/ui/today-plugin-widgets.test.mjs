@@ -9,9 +9,19 @@ const a = src.indexOf('// ── plugin widget:'), b = src.indexOf('// end of th
 assert.ok(a >= 0 && b > a, 'the plugin widget block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const draw = new Function('esc', `${src.slice(a, b)}\nreturn pluginWidgetHtml`)(esc)
+const failedView = new Function('esc', `${src.slice(a, b)}\nreturn pluginWidgetFailed`)(esc)
 const tests = []
 const test = (name, f) => tests.push([name, f])
 const refused = (kind, data, why) => assert.throws(() => draw(kind, data, 'M'), (e) => e.message.includes(why), `${kind}: ${why}`)
+
+test('never answered and its ask failed: why, escaped; answered with nothing, being asked, or with earlier data: none', () => {
+  const err = "mix-demo didn't answer __widget:hang within 5 s <b>"
+  assert.equal(failedView({ empty: true, error: err, at: null, pending: false }), `<p class="set-sub warn">Couldn't get its data — mix-demo didn&#39;t answer __widget:hang within 5 s &lt;b&gt;</p>`)
+  assert.equal(failedView({ empty: true, error: null, at: '2026-11-11T10:00:00Z', pending: false }), '', 'answered with nothing: no place')
+  assert.equal(failedView({ empty: true, error: null, at: null, pending: true }), '', 'being asked: the placeholder')
+  assert.equal(failedView({ empty: false, error: err, at: '2026-11-11T10:00:00Z', data: { value: 1 } }), '', 'its last data, dated')
+  assert.equal(failedView({ empty: true, error: err, at: '2026-11-11T10:00:00Z' }), '', 'cleared, then a failed ask: still no place')
+})
 
 test('a stat: the value big, its label; a tone colours it', () => {
   const h = draw('stat', { value: 42, label: 'open tickets', tone: 'warn' }, 'M')

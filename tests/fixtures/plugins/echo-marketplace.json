@@ -1,6 +1,13 @@
 {
   "name": "test-plugins",
   "plugins": [
-    { "id": "widget-demo", "source": "./plugins/widget-demo" }
+    {
+      "id": "widget-demo",
+      "source": "./plugins/widget-demo"
+    },
+    {
+      "id": "hang-demo",
+      "source": "./plugins/hang-demo"
+    }
   ]
 }
