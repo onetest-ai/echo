@@ -1781,7 +1781,6 @@
     "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
     "homeVar": "ECHOCTL_HOME",
     "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
-    "armedPrefix": "armed",
     "armedWhileRecording": "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)",
     "runNoTray": "app run --background --no-tray"
   },

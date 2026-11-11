@@ -482,7 +482,7 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     }
   })
 
-  test('25 · A Stop while Echo is frozen for a moment ends the recording once it is free, and the next meeting stays armed', covers('recording/TC-025', 'F-REC-05', 'F-REC-02'), async () => {
+  test('25 · A Stop while Echo is frozen for a moment ends the recording once it is free, and the next meeting stays armed', covers('recording/TC-025', 'F-REC-05'), async () => {
     test.setTimeout(3 * 60_000)
     const s = set().busy
     expect(hangUp()).toBe(r().noCall)
