@@ -59,6 +59,15 @@
    "axes": [
     "thread.sources"
    ]
+  },
+  {
+   "id": "F-M365-07",
+   "feature": "Mail sent from a thread's item (`m365 mail send|reply --task <thread>/<item>`, the follow-up-mail skill) is followed by it: replies in its conversation (no source rule; trusted senders only) come back as the thread's evidence saying which item they answer, and the sync clears or updates its wait",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "thread.sources"
+   ]
   }
  ]
 }

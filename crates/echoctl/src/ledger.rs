@@ -487,6 +487,10 @@ pub struct Node {
     /// Open items in other threads this one waits on (`depends_on`): `{thread, node, title, owner, state}`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub xwaits: Vec<Value>,
+    /// Mail the user sent from it (`m365 mail send|reply --task`, #92): `{conversation, subject, to, at, reply_at}`;
+    /// `reply_at` is the first reply's time once the thread holds one (its mail evidence in that conversation).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sent: Vec<Value>,
 }
 
 /// The valid links of a value (an older or hand-written event may hold anything).
@@ -577,6 +581,7 @@ fn node_of(e: &Value) -> Node {
         mirror_of: None,
         also_in: vec![],
         xwaits: vec![],
+        sent: vec![],
     }
 }
 
@@ -649,6 +654,17 @@ pub struct Tree {
     pub evidence: BTreeMap<String, Value>,
 }
 
+/// When a sent mail was first answered: the earliest mail of the thread in its conversation after `at`, not the user's.
+fn reply_at(ev: &BTreeMap<String, Value>, conversation: &str, at: &str) -> Option<String> {
+    let sent = chrono::DateTime::parse_from_rfc3339(at).ok()?;
+    ev.values()
+        .filter(|e| e["kind"] == "mail" && !conversation.is_empty() && e["conversation"] == conversation && e["turns"][0]["speaker"] != "Me")
+        .filter_map(|e| e["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()))
+        .filter(|t| *t > sent)
+        .min()
+        .map(|t| t.to_rfc3339())
+}
+
 /// The tree as the events say, up to the last evidence processed.
 pub fn fold(l: &Ledger) -> Result<Tree> {
     fold_events(&l.events()?, l.evidence())
@@ -707,6 +723,13 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 n.insert(x.id.clone(), x);
             }
             "note" => notes.entry(s(&e["node"]).unwrap_or_default()).or_default().push(e.clone()),
+            // Mail the user sent from an item: its conversation's replies come back to it (`ledger::mail_sync`).
+            "sent" => {
+                let id = chase(&n, e["node"].as_str().unwrap_or(""));
+                if let Some(x) = n.get_mut(&id) {
+                    x.sent.push(json!({"conversation": e["conversation"], "subject": e["subject"], "to": e["to"], "at": e["at"], "reply_at": null}));
+                }
+            }
             "agent" => {
                 let id = chase(&n, e["node"].as_str().unwrap_or(""));
                 if !n.contains_key(&id) {
@@ -884,6 +907,11 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 hist(x, e, true, json!({}));
             }
             _ => {}
+        }
+    }
+    for x in n.values_mut() {
+        for m in &mut x.sent {
+            m["reply_at"] = json!(reply_at(&ev, m["conversation"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or("")));
         }
     }
     let ids: Vec<String> = n.keys().cloned().collect();
@@ -1561,6 +1589,74 @@ mod tests {
         let known: BTreeSet<String> = ["c3".to_string()].into();
         assert_eq!(about_thread(&found, &src(&["Acme Platform"]), &known), [true, true, false, true, true], "a conversation the thread already holds");
         assert_eq!(about_thread(&found, &src(&[]), &none), [true; 5], "no subjects: every mail of its people");
+    }
+
+    #[test]
+    fn mail_sent_from_an_item_is_followed_until_someone_answers() {
+        let (_env, l, id) = setup("ledger-mail-sent");
+        ensure_first_epic(&l).unwrap();
+        human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Regroup"})).unwrap();
+        let t = human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Get Dana's dates", "internal_owner": "Me"})).unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(task_ref(&format!("{id}/{t}")).unwrap(), (id.clone(), t.clone()));
+        assert!(task_ref("no-slash").is_err() && task_ref(&format!("{id}/T999")).is_err() && task_ref("nowhere/T001").is_err());
+        assert!(mail_sent(&id, "T999", "conv-1", "x", &[]).is_err(), "no such item");
+        assert!(mail_sent(&id, &t, " ", "x", &[]).is_err(), "nothing to follow");
+        mail_sent(&id, &t, "conv-1", "Dates for the regroup", &["dana@northwind.example".into()]).unwrap();
+        let sent = fold(&l).unwrap().nodes[&t].sent.clone();
+        assert_eq!((sent.len(), sent[0]["conversation"].as_str(), sent[0]["to"][0].as_str()), (1, Some("conv-1"), Some("dana@northwind.example")));
+        assert!(sent[0]["reply_at"].is_null(), "no reply yet");
+        let f = followed(&id);
+        assert_eq!((f.len(), f[0].1.as_str(), f[0].3.as_str()), (1, t.as_str(), "conv-1"));
+        // Mail in that conversation: the user's own and an older one don't answer it; Dana's later one does.
+        let at = chrono::DateTime::parse_from_rfc3339(sent[0]["at"].as_str().unwrap()).unwrap();
+        let mail = |key: &str, mins: i64, who: &str, conv: &str| {
+            let item = json!({"id": key, "kind": "mail", "conversation": conv, "at": (at + chrono::Duration::minutes(mins)).to_rfc3339(), "date": "2026-11-11", "title": "RE: Dates",
+                              "turns": [{"ts": "10:00:00", "speaker": who, "text": "x"}]});
+            fs::write(l.dir.join(format!("evidence/{key}.json")), item.to_string()).unwrap();
+        };
+        mail("mail-old", -60, "Dana Kowal", "conv-1");
+        mail("mail-mine", 5, "Me", "conv-1");
+        mail("mail-other", 10, "Dana Kowal", "conv-2");
+        assert!(fold(&l).unwrap().nodes[&t].sent[0]["reply_at"].is_null(), "not an answer yet");
+        mail("mail-dana", 30, "Dana Kowal", "conv-1");
+        let reply = fold(&l).unwrap().nodes[&t].sent[0]["reply_at"].as_str().map(str::to_owned).unwrap();
+        assert_eq!(chrono::DateTime::parse_from_rfc3339(&reply).unwrap(), at + chrono::Duration::minutes(30));
+        // A closed item follows nothing.
+        human_event(&id, &json!({"op": "edit", "node": t, "set": {"state": "done"}})).unwrap();
+        assert!(followed(&id).is_empty());
+    }
+
+    #[test]
+    fn a_reply_is_someone_elses_later_mail_and_says_which_item_it_answers() {
+        let m = |i: &str, at: &str, from: &str| json!({"id": i, "at": at, "from": {"email": from}});
+        let mut invite = m("invite", "2026-11-11T12:00:00Z", "dana@northwind.example");
+        invite["invite"] = json!(true);
+        let msgs = [m("before", "2026-11-11T09:00:00Z", "dana@northwind.example"), m("mine", "2026-11-11T11:00:00Z", "Me@Initech.example"), m("dana", "2026-11-11T11:30:00Z", "dana@northwind.example"), invite];
+        let mine = |e: &str| e == "me@initech.example";
+        let got: Vec<&str> = replies(&msgs, "2026-11-11T10:00:00Z", &mine).iter().filter_map(|x| x["id"].as_str()).collect();
+        assert_eq!(got, ["dana"]);
+        let item = answering(json!({"id": "mail-1", "kind": "mail", "date": "2026-11-11", "title": "RE: Dates", "turns": []}), "T001", "Get Dana's dates");
+        assert!(render_md(&item).contains("answers: T001 “Get Dana's dates” (a reply to mail Me sent from it)"), "{}", render_md(&item));
+    }
+
+    #[test]
+    fn a_followed_reply_a_source_also_read_still_says_which_item_it_answers() {
+        let (_env, l, _id) = setup("ledger-mail-answers");
+        let mail = |key: &str| json!({"id": key, "kind": "mail", "conversation": "conv-1", "at": "2026-11-11T10:00:00+00:00", "date": "2026-11-11", "title": "RE: Dates",
+                                      "turns": [{"ts": "10:00:00", "speaker": "Dana Kowal", "text": "The 24th works."}]});
+        // The thread's mail source read Dana's reply first; the followed conversation brings the same mail.
+        let mut items = vec![mail("mail-a")];
+        take_reply(&mut items, mail("mail-a"), "T001", "Get Dana's dates");
+        take_reply(&mut items, mail("mail-b"), "T001", "Get Dana's dates");
+        assert_eq!(items.len(), 2, "one copy each");
+        assert!(items.iter().all(|x| x["answers"]["node"] == "T001"), "{items:?}");
+        // One already on disk (read before it was followed): it learns which item it answers, and isn't written anew.
+        let first = write_mail_items(&l, &[mail("mail-c")]).unwrap();
+        assert_eq!(first, ["mail-c"]);
+        let again = write_mail_items(&l, &[answering(mail("mail-c"), "T001", "Get Dana's dates")]).unwrap();
+        assert!(again.is_empty(), "not new evidence");
+        assert_eq!(l.evidence()["mail-c"]["answers"]["node"], "T001");
+        assert!(fs::read_to_string(l.evidence_md("mail-c")).unwrap().contains("answers: T001"));
     }
 
     #[test]

@@ -16,4 +16,4 @@ description: "Use when a task is to write a follow-up mail after a meeting — t
 
    A fact the call doesn't give stays a `[placeholder]`: never invent a date, a figure or a name.
 4. Show the user the mail as it would go (the send command without `--yes`) and change it until they are happy.
-5. Send only when they say so. Then close the task with a note of what was sent, to whom (the `echo:manage` skill).
+5. Send only when they say so, from the task: `--task <thread>/<item>` on `m365 mail send` or `m365 mail reply` (the item the `echo://task/<thread>/<item>` link names). The task then follows the conversation: replies come back to it, and it shows in Tasks → Waiting if none comes within 3 days. Note on the task what was sent and to whom (the `echo:manage` skill); close it only when nothing more is awaited.

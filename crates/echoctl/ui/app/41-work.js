@@ -15,6 +15,9 @@ const RECORD_TEXT = {
   risk: { word: 'response', label: 'Response', empty: 'No response yet', placeholder: 'What we do about it: mitigation, fallback, who watches it — Markdown' },
 }
 const LEVEL_LABEL = { low: 'low', med: 'medium', high: 'high' }
+// ── sent mail: a mail sent from the item (#92) as its row says it — when, to whom, answered or not (`day`: a date as shown).
+const sentMailLine = (m, day) => `Mail sent ${day(m.at)}${(m.to || []).length ? ` to ${m.to.join(', ')}` : ''}${m.reply_at ? ` · replied ${day(m.reply_at)}` : ', no reply yet'}`
+// end of the sent-mail block
 function workOpenCount() {
   const w = S.pj.work
   if (!w || !w.nodes) return 0
@@ -361,6 +364,7 @@ function workPanel() {
     n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
     ...(n.kind === 'task' ? modeRows(S.pj.sel, n, val) : []),
     n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
+    (n.sent || []).length ? ['Mail', n.sent.map((m) => esc(sentMailLine(m, (t) => new Date(t).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })))).join('<br>')] : null,
     (n.waiting_on || []).length ? ['Waits for', titles(n.waiting_on)] : null,
     (n.blocks || []).length ? ['Holds up', titles(n.blocks)] : null,
     // Work in other threads (#20): the same work, or what it waits on / holds up there.

@@ -21,6 +21,8 @@ const ASKS_MAX: usize = 15;
 const ASKS_PER_STORY: usize = 2;
 /// An owed task with no word for this long is worth asking about.
 const QUIET_DAYS: i64 = 5;
+/// Mail sent from a task with no reply for this long: it waits for that reply (Waiting for others, #92).
+pub const MAIL_REPLY_DAYS: i64 = 3;
 /// Or one due within this many days.
 const DUE_SOON: i64 = 3;
 
@@ -115,6 +117,12 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
             "mode": if pile == "mine" { crate::taskmodes::of(modes, &p.id, n) } else { Value::Null },
         }),
     )
+}
+
+/// A task's sent mails with no reply yet, sent at least `MAIL_REPLY_DAYS` before `now` (RFC 3339).
+fn unanswered<'a>(n: &'a Node, now: &str) -> Vec<&'a Value> {
+    let Some(now) = at(now) else { return vec![] };
+    n.sent.iter().filter(|m| m["reply_at"].is_null() && m["at"].as_str().and_then(at).is_some_and(|t| now - t >= chrono::Duration::days(MAIL_REPLY_DAYS))).collect()
 }
 
 /// Overdue first, then the nearest date, then undated ones that went quiet longest.
@@ -226,6 +234,16 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
                 let c = &cards[&n.id].1;
                 waits.push(json!({"project": p.id, "id": n.id, "wait": true, "title": w["what"].as_str().unwrap_or("an answer"), "who": w["who"], "owner": w["who"],
                                   "waiting_for": w, "after": [], "blocks": [mine], "due": null, "late": false, "quiet": c["quiet"], "story": c["story"], "last": c["last"]}));
+            }
+        }
+        // Mail the user sent from a task, unanswered for `MAIL_REPLY_DAYS`: they wait for that reply, whoever's task it is.
+        for n in &tasks {
+            for m in unanswered(n, now) {
+                let who = m["to"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).filter(|w| !w.is_empty());
+                let c = &cards[&n.id].1;
+                waits.push(json!({"project": p.id, "id": n.id, "wait": true, "mail": m, "title": format!("a reply to “{}”", m["subject"].as_str().unwrap_or("your mail")),
+                                  "who": who, "owner": who, "waiting_for": {"who": who, "what": "a reply to your mail", "since": m["at"]},
+                                  "after": [], "blocks": [{"id": n.id, "title": n.title}], "due": null, "late": false, "quiet": c["quiet"], "story": c["story"], "last": c["last"]}));
             }
         }
         // An owed task my work waits on is in both: I check it, and it stops me.
@@ -391,6 +409,33 @@ mod tests {
         });
         assert_eq!(my_names(&me, &nodes), vec!["Alex Morgan".to_string(), "Me".to_string()]);
         assert!(my_names(&me, &json!({})).is_empty());
+    }
+
+    #[test]
+    fn a_mail_sent_from_a_task_waits_for_its_reply_after_three_days() {
+        let (_env, _root) = crate::paths::testenv::folders("tasks-mail-sent");
+        let id = projects::create("Acme platform", None, None).unwrap().id;
+        let l = ledger::Ledger::of(&id).unwrap();
+        ledger::ensure_first_epic(&l).unwrap();
+        ledger::human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Cut-over"})).unwrap();
+        let t = ledger::human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Agree the cut-over date", "internal_owner": "Me"})).unwrap()["id"].as_str().unwrap().to_string();
+        ledger::mail_sent(&id, &t, "conv-1", "Cut-over date", &["dana@acme.example".into()]).unwrap();
+        let me = Me::of(None);
+        let today = chrono::Local::now().date_naive();
+        let waiting = |days: i64| {
+            let now = (chrono::Local::now() + chrono::Duration::days(days) + chrono::Duration::minutes(1)).to_rfc3339();
+            across_with(&projects::list(), &me, &[], today, &now).unwrap()["piles"]["waiting"].as_array().unwrap().iter().filter(|c| c["mail"].is_object()).cloned().collect::<Vec<Value>>()
+        };
+        assert!(waiting(2).is_empty(), "two days: not yet");
+        let w = waiting(MAIL_REPLY_DAYS);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert_eq!((w[0]["id"].as_str(), w[0]["title"].as_str(), w[0]["who"].as_str()), (Some(t.as_str()), Some("a reply to “Cut-over date”"), Some("dana@acme.example")));
+        // Answered: it waits no more.
+        std::fs::create_dir_all(l.dir.join("evidence")).unwrap();
+        let reply = json!({"id": "mail-r", "kind": "mail", "conversation": "conv-1", "at": (chrono::Local::now() + chrono::Duration::hours(1)).to_rfc3339(), "date": "2026-11-11",
+                           "title": "RE: Cut-over date", "turns": [{"ts": "10:00:00", "speaker": "Dana Doe", "text": "The 24th works."}]});
+        std::fs::write(l.dir.join("evidence/mail-r.json"), reply.to_string()).unwrap();
+        assert!(waiting(MAIL_REPLY_DAYS).is_empty());
     }
 
     #[test]

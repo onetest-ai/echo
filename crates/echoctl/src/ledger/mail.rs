@@ -40,9 +40,16 @@ pub(super) fn mail_item(m: &Value) -> Option<Value> {
     }))
 }
 
+/// A reply to mail the user sent from an item, as evidence that says which item it answers (`answers`): the sync is
+/// told, and clears or updates what the item waits for.
+pub(super) fn answering(mut item: Value, node: &str, title: &str) -> Value {
+    item["answers"] = json!({"node": node, "title": title});
+    item
+}
+
 /// Whether an address is the user's: the one in Settings → About me, or (with the Brain) the signed-in
 /// account's local part at any of their domains.
-pub(super) fn mail_me() -> impl Fn(&str) -> bool {
+pub fn mail_me() -> impl Fn(&str) -> bool {
     let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
     #[cfg(feature = "brain")]
     let local = crate::brain::sources::me_local();
@@ -82,6 +89,60 @@ pub fn mail_state(project: &str) -> Value {
     calls::read_json(&mails_file(project)).as_object().map(|o| Value::Object(o.clone())).unwrap_or_else(|| json!({}))
 }
 
+/// How long a mail sent from an item is followed for its replies.
+pub const SENT_FOLLOW_DAYS: i64 = 30;
+
+/// `<thread>/<node>` (`m365 mail send|reply --task`): the thread and its item, checked to be there.
+pub fn task_ref(r: &str) -> Result<(String, String)> {
+    let (p, n) = r.split_once('/').filter(|(p, n)| !p.is_empty() && !n.is_empty()).ok_or_else(|| anyhow!("--task takes <thread>/<item>, e.g. acme-rollout/T003"))?;
+    let t = fold(&Ledger::of(p)?)?;
+    let id = t.nodes.get(n).map(|x| x.id.clone()).ok_or_else(|| anyhow!("no item {n} in thread {p}"))?;
+    Ok((p.to_string(), id))
+}
+
+/// Mail the user sent from an item (#92): its conversation is followed, its replies come back to the item.
+pub fn mail_sent(project: &str, node: &str, conversation: &str, subject: &str, to: &[String]) -> Result<()> {
+    anyhow::ensure!(!conversation.trim().is_empty(), "Microsoft 365 gave no conversation to follow");
+    let l = Ledger::of(project)?;
+    let _lock = l.lock()?;
+    anyhow::ensure!(fold(&l)?.nodes.contains_key(node), "no item {node} in thread {project}");
+    l.append(&[json!({"type": "sent", "node": node, "conversation": conversation, "subject": subject, "to": to, "at": Local::now().to_rfc3339()})])
+}
+
+/// The conversations the thread follows for replies: its open items' sent mails of the last `SENT_FOLLOW_DAYS`, one
+/// a conversation — (state key, item, its title, conversation, when it was sent).
+pub(super) fn followed(project: &str) -> Vec<(String, String, String, String, String)> {
+    // Most threads never sent a mail from an item: their ledger isn't folded for it (`mail_due` asks every tick).
+    let Ok(l) = Ledger::of(project) else { return vec![] };
+    if !l.events().is_ok_and(|e| e.iter().any(|x| x["type"] == "sent")) {
+        return vec![];
+    }
+    let Ok(t) = fold(&l) else { return vec![] };
+    let since = Local::now() - chrono::Duration::days(SENT_FOLLOW_DAYS);
+    let mut out: Vec<(String, String, String, String, String)> = vec![];
+    for x in t.nodes.values().filter(|x| !closed(&x.state)) {
+        for m in &x.sent {
+            let (Some(c), Some(at)) = (m["conversation"].as_str(), m["at"].as_str()) else { continue };
+            let recent = chrono::DateTime::parse_from_rfc3339(at).is_ok_and(|t| t > since);
+            if recent && !out.iter().any(|f| f.3 == c) {
+                out.push((format!("sent:{}", short(c)), x.id.clone(), x.title.clone(), c.to_string(), at.to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// The replies in a followed conversation: its mails after the user's went, none of them the user's, no invites.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn replies<'a>(msgs: &'a [Value], at: &str, mine: &dyn Fn(&str) -> bool) -> Vec<&'a Value> {
+    let Ok(sent) = chrono::DateTime::parse_from_rfc3339(at) else { return vec![] };
+    msgs.iter()
+        .filter(|m| m["invite"] != true)
+        .filter(|m| m["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t > sent))
+        .filter(|m| !mine(&m["from"]["email"].as_str().unwrap_or("").to_lowercase()))
+        .collect()
+}
+
 /// A mail source not checked for `CHAT_EVERY_MIN` (or never).
 pub fn mail_due(p: &crate::projects::Project) -> bool {
     // Without the Brain built in mail isn't read: never due (it would be every tick).
@@ -89,9 +150,8 @@ pub fn mail_due(p: &crate::projects::Project) -> bool {
         return false;
     }
     let st = mail_state(&p.id);
-    p.sources.iter().filter(|s| s.kind == "mail").any(|s| {
-        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
-    })
+    let due = |k: &str| st[k]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN));
+    p.sources.iter().filter(|s| s.kind == "mail").any(|s| due(&s.id)) || followed(&p.id).iter().any(|f| due(&f.0))
 }
 
 /// Read the project's ✉ Mail sources (`domain:` / `person:` rules, as the Brain reads them) into its
@@ -106,7 +166,8 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
     use crate::brain::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
     let p = crate::projects::load(project)?;
     let rules: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "mail").cloned().collect();
-    if rules.is_empty() {
+    let follow = followed(project);
+    if rules.is_empty() && follow.is_empty() {
         return Ok(vec![]);
     }
     let l = Ledger::of(project)?;
@@ -119,9 +180,9 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
     let known: BTreeSet<String> = l.evidence().values().filter(|e| e["kind"] == "mail").filter_map(|e| e["conversation"].as_str().map(str::to_owned)).collect();
     if snd.org_domains.is_empty() {
         // Nobody can be told a colleague: nothing is judged, every source reads this window next time.
-        for s in &rules {
-            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-            state[&s.id]["error"] = json!("couldn't read your organisation's domains: mail waits");
+        for k in rules.iter().map(|s| s.id.as_str()).chain(follow.iter().map(|f| f.0.as_str())) {
+            state[k]["checked_at"] = json!(Local::now().to_rfc3339());
+            state[k]["error"] = json!("couldn't read your organisation's domains: mail waits");
         }
     } else {
         let me = me_local();
@@ -173,26 +234,89 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
                 o.remove("error");
             }
         }
+        // Mail the user sent from an item: every reply in its conversation, whatever its subject or address (no
+        // source rule: the user started it), told which item it answers. Who may speak is judged as above (R8).
+        let mine = mail_me();
+        for (key, node, title, conv, at) in &follow {
+            state[key]["checked_at"] = json!(Local::now().to_rfc3339());
+            let msgs = match crate::graph::conversation(conv) {
+                Ok(m) => m,
+                Err(e) => {
+                    state[key]["error"] = json!(format!("{e:#}"));
+                    continue;
+                }
+            };
+            let mut n = 0;
+            for m in replies(&msgs, at, &mine) {
+                let from = m["from"]["email"].as_str().unwrap_or("").to_lowercase();
+                let who = m["from"]["name"].as_str().unwrap_or(&from).to_string();
+                let (auth, id, mat, subject) = (m["auth"].as_str().unwrap_or("none"), m["id"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or("(no subject)"));
+                match snd.mail(&client, &from, auth) {
+                    Verdict::Trusted => {
+                        if let Some(item) = mail_item(m) {
+                            n += 1;
+                            take_reply(&mut items, item, node, title);
+                        }
+                    }
+                    Verdict::Ignored => {}
+                    Verdict::Unverified => snd.note_unverified(&client, &from, &who, id, mat, subject, auth),
+                    Verdict::Waiting => snd.wait(&client, &from, &who, "mail", id, mat, subject, auth == "pass", None),
+                }
+            }
+            state[key]["read_at"] = json!(Local::now().to_rfc3339());
+            state[key]["found"] = json!(n);
+            state[key]["node"] = json!(node);
+            if let Some(o) = state[key].as_object_mut() {
+                o.remove("error");
+            }
+        }
         let _ = senders::save_merged(&mut snd);
     }
     // Sources no longer watched forget their state (one added back reads its 30 days again).
     if let Some(o) = state.as_object_mut() {
-        o.retain(|k, _| rules.iter().any(|s| &s.id == k));
+        o.retain(|k, _| rules.iter().any(|s| &s.id == k) || follow.iter().any(|f| &f.0 == k));
     }
+    let written = write_mail_items(&l, &items)?;
+    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
+    Ok(written)
+}
+
+/// A reply in a followed conversation into a read's items: the copy a mail source already took (the same mail) says
+/// which item it answers, else it goes in as its own.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn take_reply(items: &mut Vec<Value>, item: Value, node: &str, title: &str) {
+    match items.iter_mut().find(|x| x["id"] == item["id"]) {
+        Some(x) => *x = answering(x.take(), node, title),
+        None => items.push(answering(item, node, title)),
+    }
+}
+
+/// A read's mails as evidence, each once: a mail doesn't change, so one already there stays — but learns which item
+/// it answers when it is a followed reply and doesn't say so yet (read before by a source, or added by hand).
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn write_mail_items(l: &Ledger, items: &[Value]) -> Result<Vec<String>> {
     let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
+    ensure_first_epic(l)?;
     let mut written = vec![];
-    for item in &items {
+    for item in items {
         let id = item["id"].as_str().unwrap_or("").to_string();
         let path = l.dir.join("evidence").join(format!("{id}.json"));
-        if path.exists() || written.contains(&id) {
-            continue; // a mail doesn't change; one the user added by hand is already there
+        if written.contains(&id) {
+            continue;
+        }
+        if path.exists() {
+            let mut had = calls::read_json(&path);
+            if item["answers"].is_object() && !had["answers"].is_object() && had.is_object() {
+                had["answers"] = item["answers"].clone();
+                fs::write(l.evidence_md(&id), render_md(&had))?;
+                crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(&had)?)?;
+            }
+            continue;
         }
         fs::write(l.evidence_md(&id), render_md(item))?;
         crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(item)?)?;
         written.push(id);
     }
-    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
     Ok(written)
 }
 

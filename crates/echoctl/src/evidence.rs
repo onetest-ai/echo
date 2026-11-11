@@ -14,6 +14,10 @@ pub fn render_md(x: &Value) -> String {
     if let Some(p) = x["people"].as_array().filter(|p| !p.is_empty()) {
         head.push(format!("people: {}", p.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")));
     }
+    // A reply to mail the user sent from an item (`ledger::mail_sync`): which item it answers.
+    if let Some(n) = x["answers"]["node"].as_str() {
+        head.push(format!("answers: {n} “{}” (a reply to mail Me sent from it)", x["answers"]["title"].as_str().unwrap_or("")));
+    }
     let mut body: Vec<String> = x["turns"].as_array().map(|a| a.iter().map(|t| format!("[{}] {}: {}", t["ts"].as_str().unwrap_or(""), t["speaker"].as_str().unwrap_or("?"), t["text"].as_str().unwrap_or(""))).collect()).unwrap_or_default();
     if let Some(t) = x["text"].as_str().filter(|t| !t.is_empty()) {
         body.push(t.to_string());
