@@ -160,11 +160,10 @@ scenario(test, 'S-17', 'A recorded call end to end: record, take notes, transcri
       await expect.poll(() => inCall().for_s, { timeout: 60_000, intervals: [200] }).toBeGreaterThanOrEqual(m.hangUpAt)
       call('end')
       hungUp = Date.now()
-      await expect.poll(() => events(main.from), { timeout: 60_000 }).toContain(ev().recordingStopped)
+      await expect.poll(() => events(main.from), { timeout: 60_000, intervals: [100] }).toContain(ev().recordingStopped)
       main.hungUp = hungUp
-      // The window follows within seconds (the call no longer says Recording): a note after that has no time.
-      await expect(view.tabNamed(a().recordingTab)).toHaveCount(0, { timeout: 15_000 })
-
+      // At once, without waiting for the window to show the call ended (it may still say Recording): the app, asked
+      // at the note's first key, no longer records the call, so the note gets no time (#358).
       await view.newNote.press(data.text.shell.keys.escape)
       await view.newNote.fill(n.after)
       await view.newNote.press(data.text.shell.keys.enter)
