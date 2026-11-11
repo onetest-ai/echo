@@ -17,7 +17,7 @@ external_id: TC-WIN-001
 
 ## Preconditions
 - Echo running in the menu bar with at least one recorded call: the dev build on test data (`make_data.py <dir> --ai fake`, `. <dir>/env`, `echoctl app run --background` without `--no-tray`), or an installed Echo
-- **No other Echo runs:** `pgrep -fl echoctl` lists only this run's app, else BLOCKED (as `recording/TC-019`); Hide from the Dock off (`hide_dock_icon` false)
+- **No other Echo runs:** `pgrep -fl echoctl` lists only this run's app, checked before the case and right before every click; any other match is BLOCKED (as `recording/TC-019`); Hide from the Dock off (`hide_dock_icon` false)
 
 ## Steps
 

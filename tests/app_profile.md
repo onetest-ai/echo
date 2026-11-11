@@ -445,7 +445,7 @@ clean-install runs, below, on a Mac where Echo has never been):
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
   "Sync now" (What moved, thread work), "Claude" panel in the footer, "Claude can" work, "Claude about this thread".
-- The tray and the native window while the user's own Echo runs (see "Recording with file-fed calls": No tray), "Memo",
+- The tray and the native window while the user's own Echo runs (see "Recording with file-fed calls": No tray; where none runs, `recording/TC-019` and `window/TC-011` are agent-run), "Memo",
   Teams itself and permissions prompts ("Record next call" and recording a call run with file-fed calls): Health's
   "Ask for permissions".
 - Plugin marketplaces over the network, installs, updates, "Check for updates", speech model downloads, "Read again".

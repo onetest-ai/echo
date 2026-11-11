@@ -17,7 +17,7 @@ tags: [recording, tray]
 ## Preconditions
 - Echo running as an app with its tray icon: the dev build on file-fed test data (`make_data.py <dir> --ai fake`, `. <dir>/env`, `echoctl app run` without `--no-tray`; calls from `tests/fixtures/call.py`: `app_profile.md` → "Recording with file-fed calls"), or an installed Echo and a Teams test call
 - Not in a call, not armed
-- **No other Echo runs:** `pgrep -fl echoctl` lists only this run's app; anything else (the user's own Echo) makes the case BLOCKED — never click a menu-bar item that may be another Echo's
+- **No other Echo runs:** `pgrep -fl echoctl` lists only this run's app — checked before the case and again right before every click; any other match (the user's Echo, a launcher, another `echoctl` call) makes the case BLOCKED, never filtered away — so no click can reach another Echo
 
 ## Steps
 

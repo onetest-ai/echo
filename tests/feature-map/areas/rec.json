@@ -110,7 +110,7 @@
    "id": "F-REC-13",
    "feature": "The tray icon shows idle, armed and recording; its menu has status, Record, Stop, recent calls and Echo's flows",
    "priority": "high",
-   "check": "agent",
+   "check": "person",
    "axes": [
     "app.record"
    ]
