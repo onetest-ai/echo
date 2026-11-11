@@ -2003,6 +2003,10 @@
       "narrow": {
         "width": 700,
         "height": 1000
+      },
+      "tall": {
+        "width": 1440,
+        "height": 1700
       }
     },
     "next": {
@@ -2071,6 +2075,234 @@
       "noReply": "notResponded",
       "maybe": "tentativelyAccepted",
       "organizer": "organizer"
+    },
+    "edit": {
+      "parts": [
+        "All",
+        "Calendar",
+        "Tasks",
+        "Calls",
+        "Needs you",
+        "Routines"
+      ],
+      "onlyWhile": " — shows only while it has something",
+      "moves": {
+        "up": "to a row above",
+        "down": "to a row below",
+        "left": "before the one beside it",
+        "right": "after the one beside it"
+      },
+      "tab": "Add a widget",
+      "search": "calen",
+      "showPrep": "Show prep"
+    },
+    "choices": {
+      "heading": "The day's choices {n}",
+      "atOnce": "At once: {names}",
+      "or": " or ",
+      "invite": "Invite: {subject}",
+      "accepted": "You accepted {n} at once. Echo suggests {pick} — {why}",
+      "keep": "Keep {name}",
+      "notAnswered": "{subject} not answered",
+      "suggests": "Echo suggests: {how} — {why}",
+      "answers": [
+        "Accept",
+        "Maybe",
+        "Decline"
+      ],
+      "sending": "Sending…",
+      "confirm": "Decline {names}? The organisers are told.",
+      "yours": "Yours — {names} — stays: cancel it in Outlook.",
+      "namesSep": ", ",
+      "declineThem": "Decline them",
+      "cancel": "Cancel",
+      "refused": "not signed in to Microsoft 365 — echoctl calendar login",
+      "command": "echoctl calendar login",
+      "within": 15
+    },
+    "glance": {
+      "line": "{name}: {done} done this week, {todo} to do, {waiting} waiting",
+      "segments": [
+        [
+          "done",
+          "{n} done this week",
+          "--me"
+        ],
+        [
+          "todo",
+          "{n} to do",
+          "--warn"
+        ],
+        [
+          "waiting",
+          "{n} waiting",
+          "--danger"
+        ]
+      ],
+      "key": [
+        "done this week",
+        "to do",
+        "waiting"
+      ],
+      "atM": 5,
+      "atL": 10,
+      "more": "{n} more in Threads",
+      "threadsRoute": "#projects",
+      "workRoute": "#project/{id}/work",
+      "doneCount": "task{s} since Monday",
+      "doneShown": 4,
+      "glanceSize": "M",
+      "doneSize": "M",
+      "large": "L",
+      "small": "S"
+    },
+    "week": {
+      "fields": [
+        "since",
+        "today",
+        "calls",
+        "memos",
+        "recorded_min",
+        "with_minutes",
+        "days"
+      ],
+      "calls": "calls, {n} of them memos",
+      "hours": "hours recorded",
+      "minutes": "minutes recorded",
+      "withMinutes": "with minutes",
+      "callsButton": "Calls",
+      "day": "^{weekday}: {n} calls?{today}$",
+      "todayMark": " \\(today\\)",
+      "callsRoute": "^#call(s$|/)",
+      "memo": "memo",
+      "meta": "meta.json",
+      "notes": "notes.md",
+      "S": "S",
+      "M": "M"
+    },
+    "plugin": {
+      "folder": "tests/fixtures/plugins",
+      "market": "test-plugins",
+      "id": "widget-demo",
+      "name": "Widget demo",
+      "version": "0.2.0",
+      "sheet": [
+        "Runs its own code in Echo, with your rights",
+        "Adds 7 widgets you can put on Today"
+      ],
+      "installed": "Installed Widget demo 0.2.0",
+      "prefix": "plugin:widget-demo:",
+      "widgets": {
+        "open": "Open tickets",
+        "sprint": "Sprint",
+        "trend": "Calls a day",
+        "builds": "Last builds",
+        "ci": "CI",
+        "note": "Note",
+        "broken": "Broken"
+      },
+      "order": [
+        "open",
+        "sprint",
+        "trend",
+        "builds",
+        "ci",
+        "note",
+        "broken"
+      ],
+      "warn": "{\"state\":\"warn\"}",
+      "bad": "{\"state\":\"bad\"}",
+      "ciCmd": "ci",
+      "noteCmd": "note",
+      "clearNote": "clear-note",
+      "open": {
+        "value": "12",
+        "label": "open tickets"
+      },
+      "ci": {
+        "title": "CI",
+        "failed": "main #42 failed",
+        "green": "main is green",
+        "openLink": "Open",
+        "rerun": "Re-run",
+        "ask": "Open ci.example in the browser? Click Open again · Cancel",
+        "cancel": "Cancel",
+        "askStart": "Open ci.example in the browser?"
+      },
+      "broken": "Couldn't draw this — a stat needs value",
+      "sprint": [
+        [
+          "21",
+          "done",
+          "--me"
+        ],
+        [
+          "8",
+          "to do",
+          null
+        ],
+        [
+          "2",
+          "blocked",
+          "--danger"
+        ]
+      ],
+      "builds": [
+        [
+          "main #41 passed",
+          "2 min ago"
+        ],
+        [
+          "Open the task",
+          null
+        ],
+        [
+          "<img src=x onerror=alert(1)> kept as text",
+          null
+        ]
+      ],
+      "taskRoute": "#project/acme-rollout/work",
+      "taskTitle": "Send the SSO checklist",
+      "taskLink": "echo://task/acme-rollout/T001",
+      "note": {
+        "title": "Release notes",
+        "text": "Ship Friday.\nTell support."
+      },
+      "listKind": "list",
+      "trend": {
+        "bars": 5,
+        "first": "Mon",
+        "last": "Fri · 4 calls",
+        "note": "Busiest on Tuesday.",
+        "hover": "Tue: 7 calls",
+        "kind": "chart",
+        "type": "bar"
+      },
+      "badColour": "--danger"
+    },
+    "routines": {
+      "cards": [
+        {
+          "title": "Morning brief",
+          "about": "Routine · Morning brief",
+          "text": "# Brief\n\n- The day's first thing\n",
+          "id": "^core:routines\\.card\\.routine-morning-brief-[0-9a-f]+$"
+        },
+        {
+          "title": "Friday review",
+          "about": "Routine · Friday review",
+          "text": "Review the week.\n",
+          "id": "^core:routines\\.card\\.routine-friday-review-[0-9a-f]+$"
+        }
+      ],
+      "sent": "Sent",
+      "part": "Routines",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "gotIt": "Got it",
+      "size": "M"
     }
   }
 }

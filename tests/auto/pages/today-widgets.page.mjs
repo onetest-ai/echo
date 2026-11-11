@@ -292,24 +292,32 @@ export class TodayWidgetsPage extends TodayPage {
 
   async spot(target, side) {
     const b = await target.boundingBox()
-    const at = { above: [0.5, 0.1], below: [0.5, 0.9], before: [0.25, 0.5], after: [0.75, 0.5] }[side] || [0.5, 0.5]
+    const at = { above: [0.5, 0.06], below: [0.5, 0.94], before: [0.25, 0.5], after: [0.75, 0.5] }[side] || [0.5, 0.5]
     return { x: b.width * at[0], y: b.height * at[1] }
   }
 
   /** The line drawn while a drag is over a frame, before the drop: which side it marks. */
   async hoverDrag(from, to, side) {
     const a = await from.boundingBox()
-    const b = await to.boundingBox()
-    const p = await this.spot(to, side)
     await this.page.mouse.move(a.x + 12, a.y + 10)
     await this.page.mouse.down()
+    await this.page.mouse.move(a.x + 30, a.y + 24, { steps: 4 })
+    // Measured once the drag has begun (the page may move as it starts).
+    const b = await to.boundingBox()
+    const p = await this.spot(to, side)
     await this.page.mouse.move(b.x + p.x, b.y + p.y, { steps: 8 })
+    // A drag's events lag the pointer: nudged there until the page has seen it over that spot.
+    for (let i = 0; i < 10 && (await this.markOn(to)) !== side; i++) await this.page.mouse.move(b.x + p.x + (i % 2), b.y + p.y, { steps: 2 })
   }
 
   /** The line Today draws on a frame while a drag is over it: on its top or bottom edge (`above`, `below`), its left or
    *  right one (`before`, `after`), or null. */
   async dropMark(label) {
-    return this.frame(label).evaluate((el) => {
+    return this.markOn(this.frame(label))
+  }
+
+  async markOn(frame) {
+    return frame.evaluate((el) => {
       const s = getComputedStyle(el, '::after')
       if (s.content === 'none' || s.content === 'normal') return null
       if (s.height === '3px' && s.width !== '3px') return s.top === '-6px' ? 'above' : 'below'
@@ -397,7 +405,8 @@ export class TodayWidgetsPage extends TodayPage {
 
   /** A meeting's name on a choice's line (a click opens its card). */
   choiceMeeting(name, subject) {
-    return this.choice(name).getByText(subject, { exact: true })
+    // (The suggested one is named again in the line's sentence: the first is the name a click opens.)
+    return this.choice(name).getByText(subject, { exact: true }).first()
   }
 
   /** A thread's line of Threads at a glance (its name says its counts), its link, its bar's segments by their titles. */
@@ -445,6 +454,44 @@ export class TodayWidgetsPage extends TodayPage {
       }))
     }
     return out
+  }
+
+  /** A date's weekday as the window names it ("Wednesday"): a `YYYY-MM-DD`. */
+  async weekday(date) {
+    return this.page.evaluate((d) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'long' }), date)
+  }
+
+  /** The command a notice shows as code ("echoctl calendar login"). */
+  noticeCode() {
+    return this.page.getByRole('status', { name: 'Notices', exact: true }).getByRole('code')
+  }
+
+  /** A plugin's status widget's dot: its colour (the dot is drawn, not read: it has no text of its own). */
+  async dotColour(name) {
+    return this.widget(name).evaluate((el) => {
+      const dot = [...el.querySelectorAll('*')].find((x) => !x.children.length && !x.textContent.trim() && x.getBoundingClientRect().width > 0 && x.getBoundingClientRect().width <= 16)
+      return dot ? getComputedStyle(dot).backgroundColor : null
+    })
+  }
+
+  /** A plugin's chart (its image, named by its points); its marks as drawn: what a hover on each says, and its colour. */
+  chart(name) {
+    return this.widget(name).getByRole('img')
+  }
+
+  async chartMarks(name) {
+    return this.chart(name).evaluate((svg) => [...svg.children].filter((m) => m.firstElementChild && m.firstElementChild.tagName === 'title')
+      .map((m) => ({ says: m.firstElementChild.textContent, fill: getComputedStyle(m).fill, opacity: getComputedStyle(m).opacity })))
+  }
+
+  /** A widget's link, by its text. */
+  widgetLink(name, text) {
+    return this.widget(name).getByRole('link', { name: text, exact: true })
+  }
+
+  /** A widget's images (a plugin's text shown as text draws none). */
+  widgetImages(name) {
+    return this.widget(name).getByRole('img')
   }
 
   /** A text of a widget, as it reads; one that matches. */

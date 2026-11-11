@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, calls]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-028: Recorded this week

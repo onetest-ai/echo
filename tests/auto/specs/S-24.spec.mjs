@@ -8,7 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { useData, fill, literal } from '../support/data.mjs'
+import { useData, fill, literal, ROOT } from '../support/data.mjs'
 import { covers, scenario } from '../support/covers.mjs'
 import { MeetingPage } from '../pages/meeting.page.mjs'
 import { TodayPage } from '../pages/today.page.mjs'
@@ -28,6 +28,21 @@ const opened = () => (data.exists(data.dir, data.text.recording.openLog) ? data.
 const layout = () => data.cli('today').json()
 const shown = (id) => data.cli('widget', 'show', id).json()
 const catalogOf = (id) => data.text.widgets.catalog.find((w) => w.id === id)
+/** The test plugin with a widget of each kind (tests/fixtures/plugins), installed in this data's own config; and taken
+ *  off again with its marketplace. */
+const installDemo = () => {
+  const p = data.text.widgets.plugin
+  const add = data.cli('plugin', 'marketplace', 'add', path.join(ROOT, p.folder), '--name', p.market)
+  if (add.code !== 0) throw new Error(add.err)
+  const r = data.cli('plugin', 'install', p.id, '--yes')
+  if (r.code !== 0) throw new Error(r.err)
+  return r
+}
+const removeDemo = () => {
+  const p = data.text.widgets.plugin
+  data.cli('plugin', 'remove', p.id)
+  data.cli('plugin', 'marketplace', 'remove', p.market)
+}
 
 scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => {
   test("5 · A recurring meeting's card shows its series' rule — Record, Ask or Don't record, and its language; pressing the chosen one changes nothing", covers('calendar/TC-018', 'F-CAL-13'), async ({ page }) => {
@@ -285,8 +300,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     // Three columns: Your day holds the first (1fr 2fr), as tall as what is beside it, sticky and at most the view's
     // height, opened on now and scrolling inside; the choices across Next and Needs you now.
     const threeColumns = async () => {
+      await expect.poll(async () => (await today.hold()).held).toBe(true)
       const h = await today.hold()
-      expect(h.held).toBe(true)
       near(h.besideWidth, 2 * h.width)
       near(h.column, h.beside)
       expect(h.height).toBeLessThanOrEqual(h.view)
@@ -592,6 +607,498 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       data.cli('today', 'reset')
     }
     expect(layout()).toEqual(w.default)
+  })
+
+  test('47 · Edit Today frames each widget: sizes, moves, ×, a drag onto an edge or a half; Add a widget searches, previews and adds; Reset and Done', covers('today/TC-025', 'F-TODAY-15'), async ({ page }) => {
+    const w = data.text.widgets
+    const { id } = w
+    const e = w.edit
+    const label = (i) => catalogOf(i).label
+    const [day, next, needs, choices, cards, mine, glance, strip] = [id.agenda, id.next, id.needs, id.choices, id.cards, id.mine, id.glance, id.strip].map(label)
+    const at = (i) => layout().findIndex((x) => x.widget === i)
+    const today = new TodayWidgetsPage(page, data)
+    try {
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      await today.editToday.click()
+      // The head: Add a widget, Reset to the default, Done; each widget framed with its moves, sizes and ×.
+      for (const b of [today.addWidget, today.resetLayout, today.done]) await expect(b).toBeVisible()
+      for (const item of w.default) {
+        const l = label(item.widget)
+        await expect(today.frame(l)).toBeVisible()
+        for (const z of catalogOf(item.widget).sizes) await expect(today.frameSize(l, z)).toHaveAttribute('aria-pressed', String(z === item.size))
+        await expect(today.frameRemove(l)).toBeVisible()
+      }
+      await expect(today.frameMove(day, e.moves.down)).toBeVisible()
+      for (const m of [e.moves.up, e.moves.left, e.moves.right]) await expect(today.frameMove(day, m)).toHaveCount(0)
+      await expect(today.frameMove(mine, e.moves.up)).toBeVisible()
+      await expect(today.frameMove(mine, e.moves.down)).toHaveCount(0)
+      await expect(today.frame(cards).getByText(catalogOf(id.cards).about + e.onlyWhile, { exact: true })).toBeVisible()
+      // Its content shown but inert: a click on Next meeting's thread chip (which opens the thread) does nothing.
+      const prep = await today.frame(next).getByRole('region', { name: next, exact: true }).getByRole('button').first().boundingBox()
+      await page.mouse.click(prep.x + prep.width / 2, prep.y + prep.height / 2)
+      await seconds(1)
+      expect(today.hash()).toBe(data.text.shell.routes.today)
+      // Add a widget on the right: search, parts, a row a widget ("on Today" or Add), the picked one's preview.
+      await expect(today.panelTab(today.rightPanel, e.tab)).toHaveAttribute('aria-selected', 'true')
+      await expect(today.widgetSearch).toBeVisible()
+      await expect(today.parts.getByRole('button')).toHaveText(e.parts)
+      expect(await today.catalogLabels()).toEqual(w.catalog.map((x) => x.label))
+      for (const x of w.catalog) {
+        const on = w.default.some((d) => d.widget === x.id)
+        await expect(today.catalogOn(x.label)).toHaveCount(on ? 1 : 0)
+        await expect(today.catalogAdd(x.label)).toHaveCount(on ? 0 : 1)
+      }
+      await expect(today.rightPanel.getByLabel(/^Preview of /)).toBeVisible()
+      // Sizes: S, then M again (its default).
+      await today.frameSize(mine, 'S').click()
+      await expect.poll(() => layout()[at(id.mine)].size).toBe('S')
+      await today.frameSize(mine, 'M').click()
+      await expect.poll(() => layout()[at(id.mine)].size).toBe('M')
+      await expect(today.frameSize(mine, 'M')).toHaveAttribute('aria-pressed', 'true')
+      // My work dragged onto Needs you now's top edge: the line above Needs while over it; dropped, a row of its own above.
+      // (The window made tall enough for both frames to be in view: a drag can't scroll.)
+      await page.setViewportSize(w.sizes.tall)
+      await today.hoverDrag(today.frame(mine), today.frame(needs), 'above')
+      await expect.poll(() => today.dropMark(needs)).toBe('above')
+      await page.mouse.up()
+      await expect.poll(() => at(id.mine)).toBe(at(id.needs) - 1)
+      expect(layout()[at(id.mine)].row).toBe(true)
+      expect(layout()[at(id.needs)].row).toBe(true)
+      await expect.poll(() => today.frameRows([mine, needs])).toEqual([[mine], [needs]])
+      // Threads at a glance (not on Today) dragged from the panel onto My work's right half: beside it, after it.
+      await today.catalogRow(glance).click()
+      await expect(today.preview(glance, 'M')).toBeVisible()
+      await today.hoverDrag(today.catalogRow(glance), today.frame(mine), 'after')
+      await expect.poll(() => today.dropMark(mine)).toBe('after')
+      await page.mouse.up()
+      await expect.poll(() => at(id.glance)).toBe(at(id.mine) + 1)
+      expect(layout()[at(id.glance)].row).toBeFalsy()
+      // × takes it off; the panel offers Add again.
+      await today.frameRemove(glance).click()
+      await expect.poll(() => at(id.glance)).toBe(-1)
+      await expect(today.catalogAdd(glance)).toBeVisible()
+      await page.setViewportSize(w.sizes.wide)
+      // The strip takes M and L: S greyed; Add at M puts it on a new last row.
+      await today.catalogRow(strip).click()
+      await expect(today.pickSize('S')).toBeDisabled()
+      await today.pickSize('M').click()
+      await today.addAt('M').click()
+      await expect.poll(() => layout().at(-1)).toEqual({ row: true, size: 'M', widget: id.strip })
+      // Today read again after the add (the panel then says "on Today"), before typing: a refresh while the search has
+      // the keyboard takes it away (reported, not this case's step).
+      await expect(today.catalogOn(strip)).toBeVisible()
+      // The search keeps the keyboard, a letter at a time: Calendar's widgets listed, the part back on All.
+      await today.part(catalogOf(id.mine).part).click()
+      await today.widgetSearch.click()
+      await today.widgetSearch.pressSequentially(e.search, { delay: 60 })
+      await expect(today.widgetSearch).toBeFocused()
+      await expect(today.widgetSearch).toHaveValue(e.search)
+      await expect(today.part(e.parts[0])).toHaveAttribute('aria-pressed', 'true')
+      const hits = w.catalog.filter((x) => `${x.label} ${x.about} ${x.part}`.toLowerCase().includes(e.search)).map((x) => x.label)
+      expect(hits).toContain(next)
+      expect(await today.catalogLabels()).toEqual(hits)
+      // Done: no frames, the panel closed; Today keeps the changes after a reload.
+      const kept = layout()
+      await today.done.click()
+      await expect(today.frame(mine)).toHaveCount(0)
+      await expect(today.panelTab(today.rightPanel, e.tab)).toHaveCount(0)
+      await today.reloadToday()
+      expect(layout()).toEqual(kept)
+      await expect(today.widget(w.name.strip)).toBeVisible()
+      // Reset to the default: Today as it comes, still in edit mode with Add a widget open (narrower: one under another).
+      await today.editToday.click()
+      await today.resetLayout.click()
+      await expect.poll(() => layout()).toEqual(w.default)
+      await expect(today.done).toBeVisible()
+      await expect(today.panelTab(today.rightPanel, e.tab)).toHaveAttribute('aria-selected', 'true')
+      await expect.poll(() => today.frameRows([day, next, needs, choices, cards, mine])).toEqual([[day, next], [needs], [choices], [cards], [mine]])
+      expect((await today.hold(day)).held).toBe(true)
+      // By keyboard: ↑ on My work moves it to a row above the one before it; the keyboard stays on its move button.
+      await today.frameMove(mine, e.moves.up).focus()
+      await page.keyboard.press(data.text.shell.keys.enter)
+      await expect.poll(() => at(id.mine)).toBe(at(id.cards) - 1)
+      await expect(today.frameMove(mine, e.moves.up)).toBeFocused()
+      expect(await today.framesInRows([day, next, needs, choices, cards, mine])).toBe(true)
+      // × by keyboard: off Today, the keyboard on the next widget's ×.
+      await today.frameRemove(next).focus()
+      await page.keyboard.press(data.text.shell.keys.enter)
+      await expect.poll(() => at(id.next)).toBe(-1)
+      await expect(today.frameRemove(needs)).toBeFocused()
+      // Narrow: Add a widget in the head opens the panel again (over the page).
+      await page.setViewportSize(w.sizes.narrow)
+      // (The panel may close by itself as the window narrows: then there is nothing to close.)
+      await today.closePanel(today.rightPanel).click({ timeout: 3_000 }).catch(() => {})
+      await expect(today.widgetSearch).toBeHidden()
+      await today.addWidget.click()
+      await expect(today.panelTab(today.rightPanel, e.tab)).toBeVisible()
+      await expect(today.widgetSearch).toBeVisible()
+      await today.panelDone.click()
+      await expect(today.frame(mine)).toHaveCount(0)
+    } finally {
+      data.cli('today', 'reset')
+    }
+    expect(layout()).toEqual(w.default)
+  })
+
+  test("48 · The day's choices: meetings at once with the one Echo suggests and why, invites with its answer; Keep asks before declining; an answer without Microsoft 365 says why and sends nothing", covers('today/TC-026', 'F-TODAY-16'), async ({ page }) => {
+    const w = data.text.widgets
+    const x = w.choices
+    const s = set().widgets.choices
+    // Its lines hold until the meetings under way end, 20 minutes after the build (the case reads them within 15).
+    expect(Date.now() - data.built, 'stage 48 reads the choices within 15 minutes of the data build').toBeLessThan(x.within * 60_000)
+    const today = new TodayWidgetsPage(page, data)
+    const sameButtons = async (name, suggested) => {
+      const b = await today.choiceButtons(name)
+      const pick = b.find((y) => y.name === suggested)
+      expect(pick).toBeTruthy()
+      for (const y of b.filter((z) => z !== pick)) {
+        expect(y.filled).not.toBe(pick.filled)
+        expect(y.filled).toBe(b.find((z) => z !== pick).filled)
+      }
+      return b
+    }
+    try {
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      await expect(today.widget(w.name.choices).getByRole('heading', { name: fill(x.heading, { n: s.count }), level: 2 })).toBeVisible()
+      expect(await today.choices()).toEqual(s.order)
+      const times = []
+      for (const l of s.order) times.push((await today.choiceTime(l)).text)
+      // A line of meetings at once: its time amber, "A or B or …", Echo's suggestion and why, a Keep each, the pick filled.
+      const first = s.order[0]
+      expect((await today.choiceTime(first)).colour).toBe(await today.themeColour(w.day.colours.choice))
+      await expect(today.choice(first).getByText(fill(x.accepted, { n: s.first.members.length, pick: s.first.pick, why: s.first.why }), { exact: true })).toBeVisible()
+      for (const m of s.first.members) await expect(today.choiceMeeting(first, m)).toBeVisible()
+      const keeps = await sameButtons(first, fill(x.keep, { name: s.first.pick }))
+      expect(keeps.map((b) => b.name)).toEqual(s.first.members.map((m) => fill(x.keep, { name: m })))
+      // The invites: one where you go (Decline), one at a free time between the two lines of meetings at once (Accept).
+      for (const inv of [s.busy, s.free]) {
+        const name = fill(x.invite, inv)
+        await expect(today.choice(name).getByText(fill(x.notAnswered, inv), { exact: true })).toBeVisible()
+        await expect(today.choice(name).getByText(fill(x.suggests, inv), { exact: true })).toBeVisible()
+        expect((await sameButtons(name, inv.how)).map((b) => b.name)).toEqual(x.answers)
+      }
+      const free = s.order.indexOf(fill(x.invite, s.free))
+      expect(s.order[free - 2].startsWith(fill(x.atOnce, { names: '' }))).toBe(true)
+      expect(s.order[free + 1].startsWith(fill(x.atOnce, { names: '' }))).toBe(true)
+      expect(times).toEqual([...times].sort((a, b) => new Date(`2000-01-01 ${a}`) - new Date(`2000-01-01 ${b}`)))
+      // Keep one that isn't suggested: nothing sent, the others named, yours stays; Cancel brings the Keeps back.
+      const before = { layout: layout(), agenda: data.status().agenda }
+      await today.choiceButton(first, fill(x.keep, { name: s.first.keep })).click()
+      await expect(today.choice(first).getByText(fill(x.confirm, { names: s.first.declined.join(x.namesSep) }))).toBeVisible()
+      await expect(today.choice(first).getByText(fill(x.yours, { names: s.first.yours.join(x.namesSep) }))).toBeVisible()
+      await expect(today.choiceButton(first, x.declineThem)).toBeFocused()
+      await today.choiceButton(first, x.cancel).click()
+      await expect(today.choiceButton(first, fill(x.keep, { name: s.first.keep }))).toBeFocused()
+      await expect(today.choice(first).getByRole('button')).toHaveCount(s.first.members.length)
+      // Accept without Microsoft 365: Sending…, the buttons off, then the notice says why; nothing answered.
+      expect(data.exists(data.env.ECHOCTL_CONFIG_DIR, data.text.m365.token)).toBe(false)
+      const freeLine = fill(x.invite, s.free)
+      await today.choiceButton(freeLine, s.free.how).click()
+      await expect(today.choiceButton(freeLine, x.sending)).toBeDisabled()
+      await expect(today.noticeSays(x.refused)).toBeVisible({ timeout: 15_000 })
+      await expect(today.noticeCode()).toHaveText(x.command)
+      await expect(today.choice(freeLine).getByRole('button')).toHaveText(x.answers)
+      for (const b of x.answers) await expect(today.choiceButton(freeLine, b)).toBeEnabled()
+      await today.noticeOk().click()
+      expect(layout()).toEqual(before.layout)
+      expect(data.status().agenda).toEqual(before.agenda)
+      expect(data.exists(data.env.ECHOCTL_CONFIG_DIR, data.text.m365.token)).toBe(false)
+      // A meeting's name on a line: its card on the right.
+      await today.choiceMeeting(first, s.first.meeting).click()
+      await expect(today.panelTab(today.rightPanel, w.day.meetingTab)).toHaveAttribute('aria-selected', 'true')
+      await expect(today.meetingCard(s.first.meeting)).toBeVisible()
+      await today.meetingCard(s.first.meeting).getByRole('button', { name: w.day.close, exact: true }).click()
+      // Taken off, gone; reset, back (it is in the default).
+      expect(data.cli('today', 'remove', w.id.choices).code).toBe(0)
+      await today.reloadToday()
+      await expect(today.widget(w.name.choices)).toHaveCount(0)
+      expect(data.cli('today', 'reset').code).toBe(0)
+      await today.reloadToday()
+      await expect(today.widget(w.name.choices)).toBeVisible()
+    } finally {
+      data.cli('today', 'reset')
+    }
+    expect(layout()).toEqual(w.default)
+  })
+
+  test('49 · Threads at a glance (a bar a thread: done this week, to do, waiting, and its total) and Done this week, at M and at L / S; a name opens its Work, a task its details', covers('today/TC-027', 'F-TODAY-17'), async ({ page }) => {
+    const w = data.text.widgets
+    const { name: n, id } = w
+    const x = w.glance
+    const s = set().widgets.glance
+    const today = new TodayWidgetsPage(page, data)
+    try {
+      const g = shown(id.glance)
+      expect(g.since).toMatch(/^\d{4}-\d\d-\d\d$/)
+      expect(new Date(`${g.since}T12:00:00`).getDay()).toBe(1)
+      expect(g.threads).toHaveLength(s.threads)
+      expect(g.threads[0].name).toBe(s.first)
+      expect(g.threads.slice(-s.last.length).map((t) => t.name).sort()).toEqual(s.last)
+      for (const t of g.threads.slice(-s.last.length)) expect(t).toMatchObject({ todo: 1, total: 1 })
+      for (let i = 1; i < g.threads.length; i++) expect(g.threads[i].total).toBeLessThanOrEqual(g.threads[i - 1].total)
+      for (const d of g.done) expect(d.thread).toBeTruthy()
+      const ons = g.done.map((d) => d.on)
+      expect(ons).toEqual([...ons].sort().reverse())
+      expect(data.cli('today', 'add', id.glance, '--size', x.glanceSize, '--above', id.needs).code).toBe(0)
+      expect(data.cli('today', 'add', id.done, '--size', x.doneSize, '--after', id.glance).code).toBe(0)
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      expect((await today.rows([n.glance, n.done, n.needs]))[0]).toEqual([n.glance, n.done])
+      // At M: five threads, each its name, its bar (green, amber, red, each as wide as its count) and its total; the key.
+      const top = g.threads.slice(0, x.atM)
+      expect(await today.glanceLines()).toEqual(top.map((t) => fill(x.line, t)))
+      for (const t of top) {
+        await expect(today.glanceTotal(t.name)).toHaveText(String(t.total))
+        const looks = []
+        for (const [k, title, colour] of x.segments) {
+          if (!t[k]) { await expect(today.segment(t.name, fill(title, { n: 0 }))).toHaveCount(0); continue }
+          const look = await today.segmentLook(t.name, fill(title, { n: t[k] }))
+          expect(look.colour).toBe(await today.themeColour(colour))
+          looks.push([look.width, t[k]])
+        }
+        for (const [width, count] of looks) expect(Math.abs(width / count - looks[0][0] / looks[0][1])).toBeLessThan(2)
+      }
+      for (const k of x.key) await expect(today.widgetSays(n.glance, k)).toBeVisible()
+      // Done this week: the number since Monday, up to four with their thread.
+      await expect(today.widgetSays(n.done, String(g.done.length))).toBeVisible()
+      await expect(today.widgetSays(n.done, fill(x.doneCount, { s: g.done.length === 1 ? '' : 's' }))).toBeVisible()
+      const doneRows = today.widget(n.done).getByRole('listitem')
+      await expect(doneRows).toHaveCount(Math.min(g.done.length, x.doneShown))
+      for (const [i, d] of g.done.slice(0, x.doneShown).entries()) await expect(doneRows.nth(i)).toHaveText(`${d.title}${d.thread}`)
+      // A thread's name: its Work; a done task: its details on the right.
+      await today.glanceLink(top[0].name).click()
+      await expect.poll(() => today.hash()).toBe(fill(x.workRoute, top[0]))
+      await today.openToday()
+      await today.widgetButton(n.done, g.done[0].title).click()
+      await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+      await expect(today.rightPanel.getByRole('heading', { name: g.done[0].title, level: 3 })).toBeVisible()
+      await today.closePanel(today.rightPanel).click()
+      // At L ten threads and "2 more in Threads" (it opens Threads); Done this week at S only the number.
+      expect(data.cli('today', 'size', id.glance, x.large).code).toBe(0)
+      expect(data.cli('today', 'size', id.done, x.small).code).toBe(0)
+      await today.reloadToday()
+      expect((await today.glanceLines()).map((l) => l.split(':')[0])).toEqual(s.atL)
+      for (const t of s.atL.slice(5)) await expect(today.glanceTotal(t)).toHaveText('1')
+      await expect(today.widgetSays(n.done, String(g.done.length))).toBeVisible()
+      await expect(today.widget(n.done).getByRole('listitem')).toHaveCount(0)
+      await today.widgetButton(n.glance, fill(x.more, { n: s.more })).click()
+      await expect.poll(() => today.hash()).toBe(x.threadsRoute)
+      expect(data.cli('today', 'reset').code).toBe(0)
+      await today.openToday()
+      await expect(today.widget(n.glance)).toHaveCount(0)
+      await expect(today.widget(n.done)).toHaveCount(0)
+    } finally {
+      data.cli('today', 'reset')
+    }
+    expect(layout()).toEqual(w.default)
+  })
+
+  test('50 · Recorded this week: the calls since Monday (memos counted), the time and how many have minutes, at M a bar a day; a click opens Calls; `widget show` gives the same', covers('today/TC-028', 'F-TODAY-18'), async ({ page }) => {
+    const w = data.text.widgets
+    const { name: n, id } = w
+    const x = w.week
+    const today = new TodayWidgetsPage(page, data)
+    try {
+      const v = shown(id.week)
+      expect(Object.keys(v).sort()).toEqual([...x.fields].sort())
+      expect(v.days.map((d) => d.date)[0]).toBe(v.since)
+      expect(v.days).toHaveLength(7)
+      // The same counted from the calls' folders, since Monday up to today (by the date their name starts with).
+      const local = (iso) => { const t = new Date(iso); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}` }
+      const calls = fs.readdirSync(path.join(data.home, 'calls')).map((f) => {
+        const meta = data.json(data.home, 'calls', f, x.meta)
+        const date = (/^(\d{4}-\d\d-\d\d)/.exec(f) || [])[1] || local(meta.started_at)
+        return { date, meta, notes: data.exists(data.home, 'calls', f, x.notes) }
+      }).filter((c) => c.date >= v.since && c.date <= v.today)
+      const minutes = calls.reduce((a, c) => a + (c.meta.ended_at ? (new Date(c.meta.ended_at) - new Date(c.meta.started_at)) / 60000 : 0), 0)
+      expect(v).toMatchObject({ calls: calls.length, memos: calls.filter((c) => c.meta.kind === x.memo).length, with_minutes: calls.filter((c) => c.notes).length, recorded_min: Math.round(minutes) })
+      for (const d of v.days) expect(d.calls).toBe(calls.filter((c) => c.date === d.date).length)
+      expect(v.memos).toBeGreaterThan(1)
+      expect(v.calls).toBeGreaterThan(v.memos)
+      expect(v.recorded_min).toBeGreaterThanOrEqual(60)
+      // At S: the three numbers, no bars.
+      expect(data.cli('today', 'add', id.week, '--size', x.S, '--above', id.needs).code).toBe(0)
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      const numbers = async () => {
+        await expect(today.widgetButton(n.week, x.callsButton)).toBeVisible()
+        for (const [num, label] of [[v.calls, fill(x.calls, { n: v.memos })], [Math.round(v.recorded_min / 6) / 10, x.hours], [v.with_minutes, x.withMinutes]]) {
+          await expect(today.widgetSays(n.week, String(num))).toBeVisible()
+          await expect(today.widgetSays(n.week, label)).toBeVisible()
+        }
+      }
+      await numbers()
+      await expect(today.weekDays()).toHaveCount(0)
+      // At M: a bar a day, Monday to Sunday, as tall as its calls (the tallest full), today's day bold; nothing out of its frame.
+      expect(data.cli('today', 'size', id.week, x.M).code).toBe(0)
+      await today.reloadToday()
+      await numbers()
+      const bars = await today.weekBars()
+      const most = Math.max(...v.days.map((d) => d.calls))
+      // The tallest day's bar fills its track (its border aside), an empty day's is flat.
+      const tallest = Math.max(...bars.map((b) => b.height))
+      expect(tallest).toBeGreaterThan(bars[0].full - 4)
+      for (const [i, d] of v.days.entries()) {
+        const isToday = d.date === v.today
+        expect(bars[i].name).toMatch(new RegExp(fill(x.day, { weekday: await today.weekday(d.date), n: d.calls, today: isToday ? x.todayMark : '' })))
+        expect(Math.abs(bars[i].height - (d.calls / most) * tallest)).toBeLessThanOrEqual(1)
+        expect(bars[i].bold).toBe(isToday)
+      }
+      expect(await today.overflows(n.week)).toEqual([])
+      // A click on its numbers, and on the heading's Calls: Calls.
+      await today.widgetSays(n.week, x.withMinutes).click()
+      await expect.poll(() => today.hash()).toMatch(new RegExp(x.callsRoute))
+      await today.openToday()
+      await today.widgetButton(n.week, x.callsButton).click()
+      await expect.poll(() => today.hash()).toMatch(new RegExp(x.callsRoute))
+      // Narrow and dark: the numbers and the seven bars inside the frame, nothing cut.
+      await page.emulateMedia({ colorScheme: 'dark' })
+      await page.setViewportSize(w.sizes.narrow)
+      await today.openToday()
+      expect(await today.windowColour()).toBe(data.text.settings.appearance.window.dark)
+      await numbers()
+      await expect(today.weekDays()).toHaveCount(7)
+      expect(await today.overflows(n.week)).toEqual([])
+      expect(data.cli('today', 'reset').code).toBe(0)
+      await today.reloadToday()
+      await expect(today.widget(n.week)).toHaveCount(0)
+    } finally {
+      data.cli('today', 'reset')
+    }
+    expect(layout()).toEqual(w.default)
+  })
+
+  test("51 · A plugin's widgets on Today: counted on its install sheet, in the catalog under its name, drawn by kind with its text escaped and links only to echo://; data Echo can't draw says why", covers('today/TC-029', 'F-TODAY-19'), async ({ page }) => {
+    const w = data.text.widgets
+    const x = w.plugin
+    const pid = (k) => `${x.prefix}${k}`
+    const label = x.widgets
+    const today = new TodayWidgetsPage(page, data)
+    const dialogs = []
+    page.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss() })
+    try {
+      // Installed from the test marketplace, into this data's own config only.
+      const install = installDemo()
+      for (const line of x.sheet) expect(install.out).toContain(line)
+      expect(install.out).toContain(x.installed)
+      const ours = data.cli('widget', 'list').json().filter((e) => e.id.startsWith(x.prefix))
+      expect(ours.map((e) => e.id)).toEqual(x.order.map(pid))
+      for (const e of ours) expect(e).toMatchObject({ part: x.name, label: label[e.id.slice(x.prefix.length)] })
+      for (const e of ours) expect(e.sizes.length).toBeGreaterThan(0)
+      const builds = shown(pid('builds'))
+      expect(builds).toMatchObject({ kind: x.listKind, empty: false })
+      expect(builds.data.items).toHaveLength(x.builds.length)
+      // Put on Today: open, ci, broken at S in a row above Needs you now, sprint and builds at M, note on its own.
+      for (const args of [['open', 'S', '--above', w.id.needs], ['ci', 'S', '--after', pid('open')], ['broken', 'S', '--after', pid('ci')], ['sprint', 'M', '--above', w.id.needs], ['builds', 'M', '--after', pid('sprint')], ['note', 'M']]) {
+        const r = data.cli('today', 'add', pid(args[0]), '--size', args[1], ...args.slice(2))
+        expect(r.code, r.err).toBe(0)
+      }
+      expect(data.cli('plugin', 'call', x.id, x.ciCmd, x.warn).code).toBe(0)
+      expect(data.cli('plugin', 'call', x.id, x.noteCmd).code).toBe(0)
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      await expect(async () => {
+        await today.reloadToday()
+        for (const k of ['open', 'ci', 'broken', 'sprint', 'builds', 'note']) await expect(today.widget(label[k])).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 20_000 })
+      const warn = await today.themeColour(w.day.colours.choice)
+      await expect(today.widgetSays(label.open, x.open.value)).toBeVisible()
+      expect(await today.textColour(label.open, x.open.value)).toBe(warn)
+      await expect(today.widgetSays(label.open, x.open.label)).toBeVisible()
+      expect(await today.dotColour(label.ci)).toBe(warn)
+      await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(2) // its heading and its status' title
+      await expect(today.widgetSays(label.ci, x.ci.failed)).toBeVisible()
+      await expect(today.widgetSays(label.broken, x.broken)).toBeVisible()
+      for (const [value, what, colour] of x.sprint) {
+        await expect(today.widgetSays(label.sprint, value)).toBeVisible()
+        await expect(today.widgetSays(label.sprint, what)).toBeVisible()
+        if (colour) expect(await today.textColour(label.sprint, value)).toBe(await today.themeColour(colour))
+      }
+      const lines = today.widget(label.builds).getByRole('listitem')
+      await expect(lines).toHaveText(x.builds.map(([t, sub]) => (sub ? `${t}${sub}` : t)))
+      await expect(today.widgetLink(label.builds, x.builds[1][0])).toHaveAttribute('href', x.taskLink)
+      await expect(lines.nth(2).getByRole('link')).toHaveCount(0)
+      await expect(today.widgetImages(label.builds)).toHaveCount(0)
+      await expect(today.widget(label.note).getByText(x.note.title, { exact: true })).toBeVisible()
+      await expect(today.widget(label.note).getByRole('paragraph')).toHaveText(x.note.text.replace('\n', ''))
+      expect(await today.widget(label.note).getByRole('paragraph').innerText()).toBe(x.note.text)
+      expect(dialogs).toEqual([])
+      // Open the task: Echo's own place for echo://task/…, its details on the right.
+      await today.widgetLink(label.builds, x.builds[1][0]).click()
+      await expect.poll(() => today.hash()).toBe(x.taskRoute)
+      await expect(today.rightPanel.getByRole('heading', { name: x.taskTitle, level: 3 })).toBeVisible()
+      // The note cleared: gone from Today, `widget show` says it's empty.
+      expect(data.cli('plugin', 'call', x.id, x.clearNote).code).toBe(0)
+      await today.openToday()
+      await today.reloadToday()
+      await expect(today.widget(label.open)).toBeVisible()
+      await expect(today.widget(label.note)).toHaveCount(0)
+      expect(shown(pid('note')).empty).toBe(true)
+      // Add a widget, part "Widget demo": its seven with their about lines, the ones on Today "on Today".
+      await today.editToday.click()
+      await today.part(x.name).click()
+      expect(await today.catalogLabels()).toEqual(ours.map((e) => e.label))
+      for (const e of ours) {
+        await expect(today.catalogRow(e.label)).toContainText(e.about)
+        await expect(today.catalogOn(e.label)).toHaveCount(e.id === pid('trend') ? 0 : 1)
+      }
+      await today.done.click()
+      expect(dialogs).toEqual([])
+    } finally {
+      data.cli('today', 'reset')
+      removeDemo()
+    }
+    expect(layout()).toEqual(w.default)
+    expect(data.cli('widget', 'list').json().filter((e) => e.id.startsWith(x.prefix))).toEqual([])
+    expect(data.cli('plugin', 'list').out).not.toContain(x.market)
+  })
+
+  test("52 · Each routine that sends Today a card is a widget of its own: put where you want it, its card drawn there, Routine cards shows the rest; Got it hides it until the next", covers('today/TC-030', 'F-TODAY-20'), async ({ page }) => {
+    const w = data.text.widgets
+    const x = w.routines
+    const [brief, review] = x.cards
+    const today = new TodayWidgetsPage(page, data)
+    const send = (card) => data.cliIn(card.text, 'deliver', 'send', 'today', '--title', card.title, '--file', '/dev/stdin', '--about', card.about)
+    try {
+      for (const card of x.cards) {
+        const r = send(card)
+        expect(r.code, r.err).toBe(0)
+        expect(r.out.trim()).toBe(x.sent)
+      }
+      const list = data.cli('widget', 'list').json()
+      const of = (card) => list.find((e) => new RegExp(card.id).test(e.id))
+      for (const card of x.cards) expect(of(card)).toMatchObject({ part: x.part, label: card.about, sizes: x.sizes })
+      expect(data.cli('today', 'add', of(brief).id, '--size', x.size, '--before', w.id.needs).code).toBe(0)
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      // The brief in Next meeting's row (Needs you now wraps under it), with Got it; the review in Routine cards below.
+      expect(await today.rows([w.name.next, brief.title, w.name.needs])).toEqual([[w.name.next, brief.title], [w.name.needs]])
+      await expect(today.widgetButton(brief.title, x.gotIt)).toBeVisible()
+      await expect(today.widget(review.title)).toBeVisible()
+      await expect(today.main.getByRole('region', { name: brief.title, exact: true })).toHaveCount(1)
+      expect((await today.box(review.title)).y).toBeGreaterThan((await today.box(w.name.needs)).y)
+      // Got it: the brief gone, the review stays; sent again, the brief is back in its place.
+      await today.widgetButton(brief.title, x.gotIt).click()
+      await expect(today.widget(brief.title)).toHaveCount(0)
+      await expect(today.widget(review.title)).toBeVisible()
+      expect(send(brief).code).toBe(0)
+      await today.reloadToday()
+      expect(await today.rows([w.name.next, brief.title, w.name.needs])).toEqual([[w.name.next, brief.title], [w.name.needs]])
+      // Reset: both in Routine cards.
+      expect(data.cli('today', 'reset').code).toBe(0)
+      await today.reloadToday()
+      for (const card of x.cards) await expect(today.widget(card.title)).toBeVisible()
+      expect((await today.box(brief.title)).y).toBeGreaterThan((await today.box(w.name.needs)).y)
+    } finally {
+      data.cli('today', 'reset')
+      // The cards read (Got it), as the data had none.
+      await today.openToday()
+      for (const card of x.cards) if (await today.widget(card.title).count()) await today.widgetButton(card.title, x.gotIt).click()
+    }
+    expect(layout()).toEqual(w.default)
+    for (const card of x.cards) await expect(today.widget(card.title)).toHaveCount(0)
   })
 
   // Not a stage of the manual S-24 (it takes an item its Won't do stages need); here it runs last, after them.

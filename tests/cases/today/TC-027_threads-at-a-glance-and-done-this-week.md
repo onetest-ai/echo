@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, tasks, threads]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-027: Threads at a glance and Done this week
