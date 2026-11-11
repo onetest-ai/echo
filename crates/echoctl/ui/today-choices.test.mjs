@@ -24,6 +24,14 @@ test('two you accepted at once: a choice, Echo suggesting the one you organise',
   assert.equal(show(cs), 'Acme sync or Hiring panel → Hiring panel (you organise it)')
 })
 
+test("none you organise: the one you're required at (the others optional); yours first; two required, the next reason", () => {
+  const req = { invited_as: 'required' }, opt = { invited_as: 'optional' }
+  assert.equal(show(dayChoices([mt('Town hall', 10, 0, 11, 0, 'accepted', opt), mt('Design review', 10, 0, 10, 30, 'accepted', req)], day(9, 0))), "Town hall or Design review → Design review (you're a required attendee)")
+  assert.equal(show(dayChoices([mt('Board', 10, 0, 11, 0, 'organizer'), mt('Design review', 10, 0, 10, 30, 'accepted', req)], day(9, 0))), 'Board or Design review → Board (you organise it)')
+  assert.equal(show(dayChoices([mt('Ops', 10, 0, 11, 0, 'accepted', req), mt('Design review', 10, 0, 10, 30, 'accepted', req)], day(9, 0))), 'Ops or Design review → your call')
+  assert.equal(show(dayChoices([mt('Ops', 10, 0, 11, 0, 'accepted', opt), mt('Design review', 10, 0, 10, 30)], day(9, 0))), 'Ops or Design review → your call', 'optional is no reason, nor not knowing')
+})
+
 test("none yours: a promise due in its thread, else a client's; no such reason, no suggestion (the user's call)", () => {
   const g = { id: 'g', name: 'Globex pilot', client: 'globex' }, a = { id: 'a', name: 'Acme rollout', client: 'acme' }
   const ctx = { due: new Set(['g']), clients: { globex: 'Globex', acme: 'Acme' } }

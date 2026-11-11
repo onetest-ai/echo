@@ -197,6 +197,8 @@ pub(crate) fn day() -> Vec<Value> {
     let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
     // What the calendar knows of Teams' transcripts (for a meeting nobody recorded).
     let offers = crate::teams_transcript::offers();
+    // The user's address, for how they are invited to each meeting (required or optional).
+    let me = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|p| p.email).map(|e| e.to_lowercase());
     let mut used = vec![false; calls_today.len()];
     let mut out: Vec<Value> = vec![];
     let day_of = |t: Option<&str>| time(t).map(|t| t.with_timezone(&Local).format("%Y-%m-%d").to_string());
@@ -221,6 +223,7 @@ pub(crate) fn day() -> Vec<Value> {
         let transcript = (hit.is_none() && ended && m.teams_join_url().is_some()).then(|| offers.get(&event).map(|o| o["transcript"].clone()).unwrap_or(Value::Null));
         out.push(json!({
             "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes, "app": m.app().map(|a| a.key()), "response": m.response,
+            "invited_as": me.as_ref().and_then(|e| m.invited_as.get(e)),
             "importable": transcript.is_some(), "transcript": transcript,
             "people": m.attendees.len() + m.organizer.iter().count(),
             "threads": crate::projects::for_event(&m),

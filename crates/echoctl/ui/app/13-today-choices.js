@@ -29,13 +29,14 @@ function dayChoices(day, now, ctx = {}) {
   for (const members of clusters) {
     if (members.length < 2) continue
     // Echo suggests one only for a reason the design names, met by exactly one of them (the user's decision,
-    // 2026-11-11): you organise it, else a promise of yours in its thread is due, else it is a client's. No reason: no
-    // suggestion — your call.
+    // 2026-11-11): you organise it, else you're a required attendee (#402), else a promise of yours in its thread is
+    // due, else it is a client's. No reason: no suggestion — your call.
     const due = ctx.due || new Set(), clients = ctx.clients || {}
     const dueIn = (x) => (x.threads || []).find((p) => due.has(p.id))
     const clientOf = (x) => (x.threads || []).find((p) => p.client && clients[p.client])
     const rules = [
       [(x) => x.response === 'organizer', () => 'you organise it'],
+      [(x) => x.invited_as === 'required', () => "you're a required attendee"],
       [(x) => !!dueIn(x), (x) => `a promise in ${dueIn(x).name} is due`],
       [(x) => !!clientOf(x), (x) => `${clients[clientOf(x).client]}'s`],
     ]
