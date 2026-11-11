@@ -1792,6 +1792,7 @@
         "id": "core:calendar.agenda",
         "kind": "day",
         "label": "Your day · agenda",
+        "params": [],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1805,6 +1806,7 @@
         "id": "core:calendar.calendar",
         "kind": "day",
         "label": "Your day · calendar",
+        "params": [],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1818,6 +1820,7 @@
         "id": "core:calendar.strip",
         "kind": "day",
         "label": "Your day · strip",
+        "params": [],
         "part": "Calendar",
         "sizes": [
           "M",
@@ -1831,6 +1834,7 @@
         "id": "core:calendar.choices",
         "kind": "choices",
         "label": "The day's choices",
+        "params": [],
         "part": "Calendar",
         "sizes": [
           "M",
@@ -1844,6 +1848,7 @@
         "id": "core:calendar.next",
         "kind": "next",
         "label": "Next meeting",
+        "params": [],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1858,6 +1863,18 @@
         "id": "core:tasks.glance",
         "kind": "glance",
         "label": "Threads at a glance",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
         "part": "Tasks",
         "sizes": [
           "M",
@@ -1871,6 +1888,18 @@
         "id": "core:tasks.done",
         "kind": "glance",
         "label": "Done this week",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
         "part": "Tasks",
         "sizes": [
           "S",
@@ -1884,6 +1913,7 @@
         "id": "core:calls.week",
         "kind": "calls",
         "label": "Recorded this week",
+        "params": [],
         "part": "Calls",
         "sizes": [
           "S",
@@ -1897,6 +1927,7 @@
         "id": "core:tasks.mine",
         "kind": "work",
         "label": "My work · this week",
+        "params": [],
         "part": "Tasks",
         "sizes": [
           "S",
@@ -1910,6 +1941,7 @@
         "id": "core:needs.now",
         "kind": "needs",
         "label": "Needs you now",
+        "params": [],
         "part": "Needs you",
         "sizes": [
           "M",
@@ -1923,6 +1955,7 @@
         "id": "core:routines.cards",
         "kind": "cards",
         "label": "Routine cards",
+        "params": [],
         "part": "Routines",
         "sizes": [
           "M",
@@ -2185,12 +2218,12 @@
       "market": "test-plugins",
       "id": "widget-demo",
       "name": "Widget demo",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "sheet": [
-        "Runs its own code in Echo, with your rights",
-        "Adds 7 widgets you can put on Today"
+        "Runs its own code in Echo and in the Echo window, with your rights",
+        "Adds 8 widgets you can put on Today"
       ],
-      "installed": "Installed Widget demo 0.3.0",
+      "installed": "Installed Widget demo 0.4.0",
       "prefix": "plugin:widget-demo:",
       "widgets": {
         "open": "Open tickets",
@@ -2199,7 +2232,8 @@
         "builds": "Last builds",
         "ci": "CI",
         "note": "Note",
-        "broken": "Broken"
+        "broken": "Broken",
+        "board": "Sprint board"
       },
       "order": [
         "open",
@@ -2208,7 +2242,8 @@
         "builds",
         "ci",
         "note",
-        "broken"
+        "broken",
+        "board"
       ],
       "warn": "{\"state\":\"warn\"}",
       "bad": "{\"state\":\"bad\"}",

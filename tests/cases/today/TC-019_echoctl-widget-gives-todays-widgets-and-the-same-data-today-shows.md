@@ -36,7 +36,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl widget list` | JSON: the eleven widgets of Test Data, in that order (a plugin's and a routine's card widgets after them when there are some), each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill) and `temporal` as in the table |
+| 1 | `target/debug/echoctl widget list` | JSON: the eleven widgets of Test Data, in that order (a plugin's and a routine's card widgets after them when there are some), each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill) and `temporal` as in the table, and `params` (its settings: today/TC-032) |
 | 2 | In the page: `fetch('/api/widgets').then(r => r.json())` | The same eleven ids, in the same order |
 | 3 | `target/debug/echoctl widget show core:tasks.mine` and, in the page, `fetch('/api/today').then(r => r.json())` | The CLI's `mine.items` are the page's `work.mine.items`: the same titles, in the same order (My work's "I owe" cards) |
 | 4 | `target/debug/echoctl widget show core:needs.now` | `items` as the page's `needs.items` (the same ids), and `"empty": false` (the data has items in the last 24 h) |

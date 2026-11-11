@@ -563,7 +563,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widget(n.strip).getByRole('separator', { name: /^Now / })).toHaveCount(1)
       const ticks = await today.stripTicks()
       expect(ticks[0]).toBeLessThanOrEqual(c2.from)
-      expect(ticks.at(-1)).toBeGreaterThanOrEqual(c2.to)
+      // (Every 2 hours from the first: an odd first hour ends a tick before 18.)
+      expect(ticks.at(-1)).toBeGreaterThan(c2.to - c2.tick)
       ticks.slice(1).forEach((t, i) => expect(t - ticks[i]).toBe(c2.tick))
       expect(await today.blockLook(n.strip, s.maybe)).toMatchObject({ border: 'dashed' })
       // Two at once: each a part of the bar's height, one under the other.
@@ -1036,13 +1037,13 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widget(label.open)).toBeVisible()
       await expect(today.widget(label.note)).toHaveCount(0)
       expect(shown(pid('note')).empty).toBe(true)
-      // Add a widget, part "Widget demo": its seven with their about lines, the ones on Today "on Today".
+      // Add a widget, part "Widget demo": its eight with their about lines, the ones on Today "on Today".
       await today.editToday.click()
       await today.part(x.name).click()
       expect(await today.catalogLabels()).toEqual(ours.map((e) => e.label))
       for (const e of ours) {
         await expect(today.catalogRow(e.label)).toContainText(e.about)
-        await expect(today.catalogOn(e.label)).toHaveCount(e.id === pid('trend') ? 0 : 1)
+        await expect(today.catalogOn(e.label)).toHaveCount([pid('trend'), pid('board')].includes(e.id) ? 0 : 1)
       }
       await today.done.click()
       expect(dialogs).toEqual([])
