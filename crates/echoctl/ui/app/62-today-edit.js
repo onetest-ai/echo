@@ -159,7 +159,7 @@ function addWidgetPanel() {
     pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
-  return `<div class="tw-panel"><div class="tw-top"><div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div><input class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div><div class="tw-list" role="list" aria-label="Widgets">${rows}</div>${pick}</div>`
+  return `<div class="tw-panel"><div class="tw-top"><div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div><input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div><div class="tw-list" role="list" aria-label="Widgets">${rows}</div>${pick}</div>`
 }
 
 PANEL_VIEWS.push({
@@ -193,9 +193,8 @@ document.addEventListener('click', (e) => {
 })
 document.addEventListener('input', (e) => {
   if (!e.target.dataset || !e.target.dataset.twQ) return
+  // Drawn again, the search keeps the keyboard and its caret (its id: the render's focus restore).
   S.tdQ = e.target.value; S.tdPart = 'All'; render()
-  // The panel is drawn again: the search keeps the keyboard and the caret at the end.
-  const q = $('.tw-q'); if (q && document.activeElement !== q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length) }
 })
 
 // Dragging: a widget on Today (move) or one from the panel (add at the picked size).

@@ -28,7 +28,7 @@ tags: [today, widgets, edit-mode, drag-and-drop]
 | 4 | In the panel pick "Next meeting"; drag its row onto the right half of My work | A line on My work's right edge while over; dropped, Next meeting sits right after My work in its row |
 | 5 | Click × on Next meeting | It is off Today; in the panel it has Add again |
 | 6 | Pick "Your day · strip" (S is greyed: it takes M and L); click "Add at M" | The strip is added on a new last row at M |
-| 7 | Type "calen" in the search, a letter at a time | The search keeps the keyboard; Your day's widgets and Next meeting listed (label, about or part matches), the part back on All |
+| 7 | Type "calen" in the search, a letter at a time | The search keeps the keyboard (also when Today is refreshed from the app meanwhile, #391); Your day's widgets and Next meeting listed (label, about or part matches), the part back on All |
 | 8 | Click Done | No frames, the panel closes; Today keeps the changes after a reload |
 | 9 | Edit Today → "Reset to the default" | Today as it comes, still in edit mode with Add a widget open (so the page is narrower: Next and Needs you now one under another beside Your day): Your day holding the first column; beside it Next meeting, Needs you now, the choices, My work |
 | 10 | Edit Today again; Tab to My work's "↑" ("Move My work · this week to a row above") and press Enter | My work moves to a row of its own above the row before it; the focus stays on its move button; each frame ends inside its row (no frame under the next row) |
