@@ -44,7 +44,8 @@ class Data:
         self.home = os.path.join(base, "home")
         self.config = os.path.join(base, "config")
         self.set = name
-        self.bin = os.environ.get("ECHOCTL_BIN") or os.path.join(ROOT, "target", "debug", "echoctl")
+        # Windows: the file is echoctl.exe (#418).
+        self.bin = os.environ.get("ECHOCTL_BIN") or os.path.join(ROOT, "target", "debug", "echoctl.exe" if os.name == "nt" else "echoctl")
         self.env = dict(os.environ, ECHOCTL_HOME=self.home, ECHOCTL_CONFIG_DIR=self.config)
         # Outside any Claude Code session (a run inside one would be refused or marked as a child).
         for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "AI_AGENT"):
