@@ -42,7 +42,7 @@ JS
 ```
 - The marketplace is added: `echoctl plugin marketplace add "$M" --name acme-local` (prints `Added acme-local: 1 plugins`)
 
-**Changes:** `<config dir>/plugins/` (the marketplace, the installed plugin), `<data>/.echo/plugins/acme-speaker/` (its settings and what it saves)
+**Changes:** `<config dir>/plugins/` (the marketplace, the installed plugin, the addresses the user lists), `<data>/.echo/plugins/acme-speaker/` (what it saves)
 
 ## Test Data
 

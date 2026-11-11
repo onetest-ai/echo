@@ -1087,6 +1087,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));
+        let _ = fs::remove_file(addresses_file(id));
     }
     Ok(())
 }
@@ -1109,6 +1110,18 @@ fn secrets_file(id: &str) -> PathBuf {
     plugins_dir().join("secrets").join(format!("{id}.json"))
 }
 
+/// The addresses the user listed (`uses.network.hosts_from`), outside the plugin's store: nothing the plugin writes
+/// can reach this file, whatever name it uses.
+fn addresses_file(id: &str) -> PathBuf {
+    plugins_dir().join("addresses").join(format!("{id}.json"))
+}
+
+/// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
+    read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
+}
+
 fn read_map(path: &Path) -> serde_json::Map<String, Value> {
     fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
@@ -1121,7 +1134,10 @@ fn installed_manifest(id: &str) -> Result<Manifest> {
 /// The settings as the page shows them: each definition with its value (a secret only as set / not).
 pub fn settings_view(id: &str) -> Result<Vec<Value>> {
     let m = installed_manifest(id)?;
-    let vals = read_map(&data_dir(id).join("settings.json"));
+    let mut vals = read_map(&data_dir(id).join("settings.json"));
+    let listed = address_settings(&m.uses);
+    vals.retain(|k, _| !listed.contains(k));
+    vals.extend(read_map(&addresses_file(id)));
     let secrets = read_map(&secrets_file(id));
     Ok(m.settings
         .iter()
@@ -1140,7 +1156,7 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
 /// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&secrets_file(id)).remove(key).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
 }
 
 /// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
@@ -1161,11 +1177,18 @@ pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
     if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
         bail!("{} isn't a folder", value.as_str().unwrap_or(""));
     }
-    if address_settings(&m.uses).iter().any(|k| k == key) {
+    let is_address = address_settings(&m.uses).iter().any(|k| k == key);
+    if is_address {
         addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
     }
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    if def.kind == "secret" {
+    if is_address {
+        let f = addresses_file(id);
+        fs::create_dir_all(f.parent().unwrap())?;
+        let mut all = read_map(&f);
+        all.insert(key.into(), value);
+        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
+    } else if def.kind == "secret" {
         let f = secrets_file(id);
         fs::create_dir_all(f.parent().unwrap())?;
         let mut all = read_map(&f);

@@ -123,7 +123,7 @@
   },
   {
    "id": "F-PLUG-13",
-   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old and downloads left half-written (`.part`) over an hour old; the rest of the store is the plugin's to clean",
+   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old and its own half-written downloads (`.part`) over an hour old; the rest of the store, the plugin's own `.part` files too, is the plugin's to clean",
    "priority": "medium",
    "check": "agent",
    "axes": [
