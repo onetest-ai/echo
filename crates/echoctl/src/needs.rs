@@ -433,7 +433,7 @@ mod tests {
         let a = crate::projects::create("Pilot", None, None).unwrap();
         let b = crate::projects::create("Rollout", None, None).unwrap();
         crate::projects::update(&a.id, |p| {
-            p.sources.push(crate::projects::Source { kind: "teams_chat".into(), id: "19:pilot".into(), name: None, exclude: vec![] });
+            p.sources.push(crate::projects::Source { kind: "teams_chat".into(), id: "19:pilot".into(), ..Default::default() });
             Ok(())
         })
         .unwrap();

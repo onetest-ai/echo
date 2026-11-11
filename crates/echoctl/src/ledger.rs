@@ -1551,6 +1551,18 @@ mod tests {
         assert_eq!(quote_in(&id, &ev, "prepare the agents demo").unwrap().unwrap()["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
     }
 
+    #[test]
+    fn a_mail_source_with_subjects_reads_its_mail_and_the_rest_of_their_conversations() {
+        let src = |subject: &[&str]| crate::projects::Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: subject.iter().map(|w| w.to_string()).collect(), ..Default::default() };
+        let m = |subject: &str, conv: &str| json!({"subject": subject, "conversation": conv});
+        let found = [m("Acme Platform status", "c1"), m("Quick question", "c1"), m("Lunch on Friday", "c2"), m("RE: dates", "c3"), m("Acme platform: APX cut-over", "c4")];
+        let none = BTreeSet::new();
+        assert_eq!(about_thread(&found, &src(&["Acme Platform"]), &none), [true, true, false, false, true], "its subject, or its conversation's");
+        let known: BTreeSet<String> = ["c3".to_string()].into();
+        assert_eq!(about_thread(&found, &src(&["Acme Platform"]), &known), [true, true, false, true, true], "a conversation the thread already holds");
+        assert_eq!(about_thread(&found, &src(&[]), &none), [true; 5], "no subjects: every mail of its people");
+    }
+
     #[cfg(feature = "brain")]
     #[test]
     fn mail_waits_while_nobody_can_be_told_a_colleague() {

@@ -82,7 +82,8 @@ pub enum ProjectCmd {
         #[arg(long)]
         remove: Option<usize>,
     },
-    /// A source the project reads: --mail <domain or address>, --channel <team id>|<channel id> (--name
+    /// A source the project reads: --mail <domain, address or * (anyone)> (--subject "w1, w2": only mail whose
+    /// subject, or its conversation's, contains one; * needs it), --channel <team id>|<channel id> (--name
     /// to show), --folder <path> (--exclude <glob>…: what in it not to read) into the Brain; --chat <chat
     /// id> (19:…) a meeting chat its work reads between calls; or --remove <kind:id> as `show` lists them
     #[cfg(feature = "brain")]
@@ -90,6 +91,9 @@ pub enum ProjectCmd {
         id: String,
         #[arg(long)]
         mail: Option<String>,
+        /// With --mail: the subjects it reads ("Acme Platform, APX"); given again, they replace the source's
+        #[arg(long)]
+        subject: Option<String>,
         #[arg(long)]
         channel: Option<String>,
         #[arg(long)]
@@ -393,7 +397,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             show(&p)?
         }
         #[cfg(feature = "brain")]
-        ProjectCmd::Source { id, mail, channel, folder, chat, exclude, name, remove } => {
+        ProjectCmd::Source { id, mail, subject, channel, folder, chat, exclude, name, remove } => {
+            anyhow::ensure!(subject.is_none() || mail.is_some(), "--subject goes with --mail");
+            let subject = subject.as_deref().map(projects::subject_words);
             let add = match (mail, channel, folder) {
                 _ if chat.is_some() => {
                     let c = chat.clone().unwrap_or_default().trim().to_string();
@@ -420,9 +426,15 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                 }
                 if let Some((kind, sid)) = &add {
                     match p.sources.iter_mut().find(|s| &s.kind == kind && &s.id == sid) {
-                        Some(s) if !exclude.is_empty() => s.exclude = exclude.clone(),
-                        Some(_) => {}
-                        None => p.sources.push(projects::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), exclude: exclude.clone() }),
+                        Some(s) => {
+                            if !exclude.is_empty() {
+                                s.exclude = exclude.clone();
+                            }
+                            if let Some(w) = &subject {
+                                s.subject = w.clone();
+                            }
+                        }
+                        None => p.sources.push(projects::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), exclude: exclude.clone(), subject: subject.clone().unwrap_or_default() }),
                     }
                 }
                 Ok(())

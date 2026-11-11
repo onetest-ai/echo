@@ -590,7 +590,11 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') return render()
     const c = ((S.pj.data && S.pj.data.clients) || []).find((x) => x.id === S.pj.client)
     if (what === 'term' && v) projectSend('term_add', { term: v })
-    if (what === 'mail' && v) { projectSend('source_add', { kind: 'mail', source: v }); setTimeout(() => loadSourceState(true), 1500) }
+    if (what === 'mail') {
+      // The address field and the subject field: Enter in either adds the source with both.
+      const who = (($('#pj-add-mail') || {}).value || '').trim(), subject = (($('#pj-add-mail-subject') || {}).value || '').trim()
+      if (who) { projectSend('source_add', { kind: 'mail', source: who, subject }); setTimeout(() => loadSourceState(true), 1500) }
+    }
     if (what === 'exclude') { projectSend('source_exclude', { source: el.dataset.root, exclude: v.split(',').map((g) => g.trim()).filter(Boolean) }); setTimeout(() => loadSourceState(true), 1500) }
     if (what === 'rule') {
       const kind = ($('#pj-add-kind') || {}).value || 'series'

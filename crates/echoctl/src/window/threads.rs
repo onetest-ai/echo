@@ -153,9 +153,11 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 _ => anyhow::bail!("not a source: {kind}"),
             };
             let name = opt("name");
+            // A mail source's subjects ("Acme Platform, APX"); mail from anyone needs them (`projects::check`).
+            let subject = if kind == "mail" { pj::subject_words(&s("subject").unwrap_or_default()) } else { vec![] };
             pj::update(&id, |p| {
                 if !p.sources.iter().any(|x| x.kind == kind && x.id == sid) {
-                    p.sources.push(pj::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), ..Default::default() });
+                    p.sources.push(pj::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), subject: subject.clone(), ..Default::default() });
                 }
                 Ok(())
             })?;
