@@ -53,10 +53,11 @@ function within(p, ms, timer = setTimeout) {
 
 // ── notes scroll: where My notes' list is after a redraw (no DOM: `notes-scroll.test.mjs`) ──────────────────────
 /** The list's scrollTop after a redraw replaced it: `was` the old list `{ call, top, height, client }`, `now` the new
- *  `{ call, height }`. Another call's list: null (it opens at its top). At its end (or not scrolling) it follows the
+ *  `{ call, height }` (`call` its folder name). Another call's list: null (it opens at its top). At its end (or not scrolling) it follows the
  *  end, as new entries come; else it stays where the user scrolled. */
 function notesScroll(was, now) {
-  if (!was || !now || was.call !== now.call) return null
+  // The same call by its stamp (date and time): a call retitled while it records is still that call.
+  if (!was || !now || String(was.call).slice(0, 17) !== String(now.call).slice(0, 17)) return null
   return was.top + was.client >= was.height - 24 ? now.height : was.top
 }
 // end of the notes scroll block

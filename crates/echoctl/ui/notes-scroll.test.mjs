@@ -31,6 +31,7 @@ test('a list that did not scroll yet follows the end once it does', () => {
 test("another call's list opens at its top (nothing kept)", () => {
   assert.equal(notesScroll({ call: CALL, top: 400, height: 881, client: 202 }, { call: '2026-11-10_120000-globex-pilot', height: 500 }), null)
   assert.equal(notesScroll(null, { call: CALL, height: 500 }), null, 'no list before (the panel just opened)')
+  assert.equal(notesScroll({ call: CALL, top: 400, height: 881, client: 202 }, { call: CALL.slice(0, 17) + '-acme-weekly-sync-renamed', height: 881 }), 400, 'the same call, retitled while it records')
 })
 
 let failed = 0

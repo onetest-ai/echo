@@ -108,7 +108,9 @@
    "feature": "The timeline stays where it was scrolled when the panel is drawn again (a live update, a note added, the time in the note box), following new entries when scrolled to its end; another call's opens at its top. Each note's time is a small chip inline before its text, as in the minutes",
    "priority": "high",
    "check": "agent",
-   "axes": []
+   "axes": [
+    "call.status"
+   ]
   }
  ]
 }
