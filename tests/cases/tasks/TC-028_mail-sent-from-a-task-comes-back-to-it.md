@@ -49,4 +49,4 @@ The task follows its mail's conversation; B's reply is evidence of the thread th
 ## Notes
 - Tasks → Waiting after 3 days without a reply is not walked here (it takes 3 days): `tasks::tests::a_mail_sent_from_a_task_waits_for_its_reply_after_three_days`.
 - The reply's words reach the task through the thread's sync (the extractor reads the `answers:` line and clears or updates its wait); that run is the sync's own case.
-- A reply from an outside sender waits in the Inbox as any mail (`privacy/TC-009`); trusted, it comes back to the task.
+- A reply from an outside sender waits in the Inbox as any mail (`privacy/TC-009`): until it is trusted the task still says "no reply yet" (and waits in Tasks after 3 days); trusted, it comes back to the task.

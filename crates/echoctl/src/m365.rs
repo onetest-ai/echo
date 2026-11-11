@@ -182,7 +182,11 @@ pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: O
     // From an item: a draft first, so its conversation is known, then sent; the item follows that conversation.
     let draft = graph::request("POST", "/me/messages", Body::Json(&message), None, &[])?;
     let id = draft["id"].as_str().ok_or_else(|| anyhow!("Microsoft 365 made no draft"))?;
-    graph::request("POST", &format!("/me/messages/{}/send", enc(id)), Body::None, None, &["Content-Length: 0"])?;
+    if let Err(e) = graph::request("POST", &format!("/me/messages/{}/send", enc(id)), Body::None, None, &["Content-Length: 0"]) {
+        // Not sent: its draft goes too, so a retry doesn't leave one each time.
+        let gone = graph::request("DELETE", &format!("/me/messages/{}", enc(id)), Body::None, None, &[]).is_ok();
+        return Err(e.context(if gone { "not sent" } else { "not sent (its draft is still in Drafts)" }));
+    }
     let addresses: Vec<String> = to.iter().filter_map(|r| r["emailAddress"]["address"].as_str().map(str::to_owned)).collect();
     Ok(followed(json!({"sent": true, "to": would["to"], "subject": subject}), &p, &n, draft["conversationId"].as_str().unwrap_or(""), subject, &addresses))
 }
@@ -205,12 +209,21 @@ fn followed(mut out: Value, project: &str, node: &str, conversation: &str, subje
 pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, task: Option<&str>, yes: bool) -> Result<Value> {
     let task = task.map(crate::ledger::task_ref).transpose()?;
     let (md, _) = markdown_file(file)?;
-    let mut out = mail_reply_text(id, all, &md, ai, yes)?;
+    anyhow::ensure!(!md.trim().is_empty(), "the reply is empty");
+    // The mail answered, read once before anything is sent: nothing after the send can fail it.
+    let m = graph::message(id)?;
+    let mut out = reply_to(&m, id, all, &md, ai, yes)?;
     // From an item (#92): the reply is in the mail's conversation, which the item now follows.
     if let Some((p, n)) = task {
         if out["sent"] == true {
-            let m = graph::message(id)?;
-            let to: Vec<String> = m["from"]["email"].as_str().map(str::to_owned).into_iter().collect();
+            let mine = crate::ledger::mail_me();
+            let mut to: Vec<String> = vec![];
+            let people = std::iter::once(&m["from"]).chain(if all { m["to"].as_array().map(|a| a.as_slice()).unwrap_or_default() } else { &[] });
+            for e in people.filter_map(|x| x["email"].as_str()).map(str::to_lowercase) {
+                if !mine(&e) && !to.contains(&e) {
+                    to.push(e);
+                }
+            }
             out = followed(out, &p, &n, m["conversation"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or(""), &to);
         } else {
             out["would"]["task"] = json!(format!("{p}/{n}"));
@@ -222,7 +235,11 @@ pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, task: Opti
 /// A reply in the user's own words (Today's Read and reply: their click on Reply is the yes).
 pub fn mail_reply_text(id: &str, all: bool, md: &str, ai: Option<&str>, yes: bool) -> Result<Value> {
     anyhow::ensure!(!md.trim().is_empty(), "the reply is empty");
-    let m = graph::message(id)?;
+    reply_to(&graph::message(id)?, id, all, md, ai, yes)
+}
+
+/// A reply to mail `m` (Graph id `id`), already read.
+fn reply_to(m: &Value, id: &str, all: bool, md: &str, ai: Option<&str>, yes: bool) -> Result<Value> {
     let html = crate::minutes::markdown_html(md);
     let html = with_notice(html, ai);
     let would = json!({"reply_to": {"subject": m["subject"], "from": m["from"], "at": m["at"]}, "to": if all { "everyone on it" } else { "its sender" }, "text": md});

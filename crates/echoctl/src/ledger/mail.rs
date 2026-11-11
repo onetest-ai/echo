@@ -49,7 +49,7 @@ pub(super) fn answering(mut item: Value, node: &str, title: &str) -> Value {
 
 /// Whether an address is the user's: the one in Settings → About me, or (with the Brain) the signed-in
 /// account's local part at any of their domains.
-pub(super) fn mail_me() -> impl Fn(&str) -> bool {
+pub fn mail_me() -> impl Fn(&str) -> bool {
     let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
     #[cfg(feature = "brain")]
     let local = crate::brain::sources::me_local();
@@ -112,7 +112,12 @@ pub fn mail_sent(project: &str, node: &str, conversation: &str, subject: &str, t
 /// The conversations the thread follows for replies: its open items' sent mails of the last `SENT_FOLLOW_DAYS`, one
 /// a conversation — (state key, item, its title, conversation, when it was sent).
 pub(super) fn followed(project: &str) -> Vec<(String, String, String, String, String)> {
-    let Ok(t) = Ledger::of(project).and_then(|l| fold(&l)) else { return vec![] };
+    // Most threads never sent a mail from an item: their ledger isn't folded for it (`mail_due` asks every tick).
+    let Ok(l) = Ledger::of(project) else { return vec![] };
+    if !l.events().is_ok_and(|e| e.iter().any(|x| x["type"] == "sent")) {
+        return vec![];
+    }
+    let Ok(t) = fold(&l) else { return vec![] };
     let since = Local::now() - chrono::Duration::days(SENT_FOLLOW_DAYS);
     let mut out: Vec<(String, String, String, String, String)> = vec![];
     for x in t.nodes.values().filter(|x| !closed(&x.state)) {
@@ -250,7 +255,7 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
                     Verdict::Trusted => {
                         if let Some(item) = mail_item(m) {
                             n += 1;
-                            items.push(answering(item, node, title));
+                            take_reply(&mut items, item, node, title);
                         }
                     }
                     Verdict::Ignored => {}
@@ -271,20 +276,47 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
     if let Some(o) = state.as_object_mut() {
         o.retain(|k, _| rules.iter().any(|s| &s.id == k) || follow.iter().any(|f| &f.0 == k));
     }
+    let written = write_mail_items(&l, &items)?;
+    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
+    Ok(written)
+}
+
+/// A reply in a followed conversation into a read's items: the copy a mail source already took (the same mail) says
+/// which item it answers, else it goes in as its own.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn take_reply(items: &mut Vec<Value>, item: Value, node: &str, title: &str) {
+    match items.iter_mut().find(|x| x["id"] == item["id"]) {
+        Some(x) => *x = answering(x.take(), node, title),
+        None => items.push(answering(item, node, title)),
+    }
+}
+
+/// A read's mails as evidence, each once: a mail doesn't change, so one already there stays — but learns which item
+/// it answers when it is a followed reply and doesn't say so yet (read before by a source, or added by hand).
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn write_mail_items(l: &Ledger, items: &[Value]) -> Result<Vec<String>> {
     let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
+    ensure_first_epic(l)?;
     let mut written = vec![];
-    for item in &items {
+    for item in items {
         let id = item["id"].as_str().unwrap_or("").to_string();
         let path = l.dir.join("evidence").join(format!("{id}.json"));
-        if path.exists() || written.contains(&id) {
-            continue; // a mail doesn't change; one the user added by hand is already there
+        if written.contains(&id) {
+            continue;
+        }
+        if path.exists() {
+            let mut had = calls::read_json(&path);
+            if item["answers"].is_object() && !had["answers"].is_object() && had.is_object() {
+                had["answers"] = item["answers"].clone();
+                fs::write(l.evidence_md(&id), render_md(&had))?;
+                crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(&had)?)?;
+            }
+            continue;
         }
         fs::write(l.evidence_md(&id), render_md(item))?;
         crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(item)?)?;
         written.push(id);
     }
-    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
     Ok(written)
 }
 

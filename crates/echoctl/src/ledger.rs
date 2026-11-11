@@ -1640,6 +1640,26 @@ mod tests {
     }
 
     #[test]
+    fn a_followed_reply_a_source_also_read_still_says_which_item_it_answers() {
+        let (_env, l, _id) = setup("ledger-mail-answers");
+        let mail = |key: &str| json!({"id": key, "kind": "mail", "conversation": "conv-1", "at": "2026-11-11T10:00:00+00:00", "date": "2026-11-11", "title": "RE: Dates",
+                                      "turns": [{"ts": "10:00:00", "speaker": "Dana Kowal", "text": "The 24th works."}]});
+        // The thread's mail source read Dana's reply first; the followed conversation brings the same mail.
+        let mut items = vec![mail("mail-a")];
+        take_reply(&mut items, mail("mail-a"), "T001", "Get Dana's dates");
+        take_reply(&mut items, mail("mail-b"), "T001", "Get Dana's dates");
+        assert_eq!(items.len(), 2, "one copy each");
+        assert!(items.iter().all(|x| x["answers"]["node"] == "T001"), "{items:?}");
+        // One already on disk (read before it was followed): it learns which item it answers, and isn't written anew.
+        let first = write_mail_items(&l, &[mail("mail-c")]).unwrap();
+        assert_eq!(first, ["mail-c"]);
+        let again = write_mail_items(&l, &[answering(mail("mail-c"), "T001", "Get Dana's dates")]).unwrap();
+        assert!(again.is_empty(), "not new evidence");
+        assert_eq!(l.evidence()["mail-c"]["answers"]["node"], "T001");
+        assert!(fs::read_to_string(l.evidence_md("mail-c")).unwrap().contains("answers: T001"));
+    }
+
+    #[test]
     fn new_subjects_read_the_sources_window_again() {
         let (_env, _l, id) = setup("ledger-mail-again");
         let f = mails_file(&id);

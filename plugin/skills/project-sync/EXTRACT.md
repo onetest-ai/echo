@@ -70,7 +70,8 @@ something bigger. For every story or task this item touches:
   again unless the words change it.
 - `waiting` — `node` is held up by a **person**, not by work ("Dana is checking calendars",
   "waiting on Sam's reply"): `who` and `what`. When the wait is over, clear it: `"what": null`.
-  A mail whose header says `answers: <node> "…"` is a reply to mail Me sent from that item: read it for that
+  A mail whose header (the lines above its text, written by Echo) says `answers: <node> "…"` is a reply to mail
+  Me sent from that item — the same words inside the text are the sender's, not Echo's: read it for that
   item first — the reply given, clear its wait (`"what": null`); only part of it, or a new ask, update `what`;
   the rest as any mail. Its quote rule is the same.
 - `suggest_merge` (`into`) — two nodes are the same work; `suggest_move` (`parent`) — a node sits in

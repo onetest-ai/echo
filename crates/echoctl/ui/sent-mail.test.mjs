@@ -21,7 +21,7 @@ test('answered', () => {
   assert.equal(sentMailLine({ at: '2026-11-08T10:00:00+02:00', to: ['dana@acme.example', 'omar@acme.example'], reply_at: '2026-11-09T08:00:00+02:00' }, day), 'Mail sent 2026-11-08 to dana@acme.example, omar@acme.example · replied 2026-11-09')
 })
 
-test('a reply sent without its recipients known', () => {
+test('no recipients recorded', () => {
   assert.equal(sentMailLine({ at: '2026-11-08T10:00:00+02:00' }, day), 'Mail sent 2026-11-08, no reply yet')
 })
 
