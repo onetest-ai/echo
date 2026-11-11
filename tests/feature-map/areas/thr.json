@@ -200,6 +200,15 @@
     "thread.sync",
     "thread.ai"
    ]
+  },
+  {
+   "id": "F-THR-21",
+   "feature": "A mail source can be limited to subjects (`--subject \"w1, w2\"`, the Sources form's subject field): it reads a mail only when its subject, or its conversation's, contains one of them; `--mail *` reads anyone's mail with those words and needs them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.sources"
+   ]
   }
  ]
 }

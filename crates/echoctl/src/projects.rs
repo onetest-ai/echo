@@ -205,6 +205,28 @@ pub struct Source {
     /// A folder's globs of what not to read (`Archive/`, `*draft*`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// A mail source's subjects ("Acme Platform", "APX"): it reads a mail only when its subject, or its
+    /// conversation's, contains one of them (as a call's `subject` rule). None: every mail of its people.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subject: Vec<String>,
+}
+
+impl Source {
+    /// Whether a mail's subject is one this source reads: it contains one of its subjects, or it names none.
+    pub fn about(&self, subject: &str) -> bool {
+        self.subject.is_empty() || self.subject.iter().any(|w| contains_words(subject, w))
+    }
+}
+
+/// Subjects as typed ("Acme Platform, APX"): each trimmed, empty and repeated ones dropped.
+pub fn subject_words(typed: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for w in typed.split(',').map(str::trim).filter(|w| !words(w).is_empty()) {
+        if !out.iter().any(|x| words(x) == words(w)) {
+            out.push(w.to_string());
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -516,7 +538,7 @@ fn norm_domains(ds: &[String]) -> Vec<String> {
 }
 
 /// Words of a subject, for "contains" (lowercase, letters and digits).
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
 
@@ -730,6 +752,10 @@ fn check(p: &Project, clients: &[Client]) -> Result<()> {
         if empty {
             bail!("a {} rule needs a value", r.kind());
         }
+    }
+    // Mail from anyone is a thread's only by its subject.
+    if p.sources.iter().any(|s| s.kind == "mail" && s.id == "any:*" && s.subject.is_empty()) {
+        bail!("mail from anyone needs subjects (--subject \"Acme Platform, APX\")");
     }
     Ok(())
 }
@@ -1826,5 +1852,31 @@ mod tests {
         let recent = c[0]["recent_calls"].as_array().unwrap();
         assert_eq!(recent.len(), 1, "only earlier calls with minutes: {recent:?}");
         assert!(recent[0]["highlights"].to_string().contains("24 Nov"));
+    }
+
+    #[test]
+    fn a_mail_source_reads_only_its_subjects_and_mail_from_anyone_needs_them() {
+        let (_env, _root) = paths::testenv::folders("projects-mail-subject");
+        assert_eq!(subject_words(" Acme Platform, APX,, acme  platform ,  "), ["Acme Platform", "APX"], "trimmed, empty and repeated dropped");
+        let src = Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: subject_words("Acme Platform, APX"), ..Default::default() };
+        assert!(src.about("RE: Acme Platform — status"));
+        assert!(src.about("apx cut-over"), "any case");
+        assert!(!src.about("Acme Platformer launch"), "whole words only");
+        assert!(!src.about("Lunch on Friday"));
+        assert!(Source { kind: "mail".into(), id: "domain:acme.example".into(), ..Default::default() }.about("anything"), "no subjects: every mail");
+        let p = create("Acme Platform", None, None).unwrap();
+        let any = |subject: Vec<String>| Source { kind: "mail".into(), id: "any:*".into(), subject, ..Default::default() };
+        let e = update(&p.id, |p| {
+            p.sources.push(any(vec![]));
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("needs subjects"), "{e:#}");
+        update(&p.id, |p| {
+            p.sources.push(any(vec!["Acme Platform".into()]));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(load(&p.id).unwrap().sources[0].subject, ["Acme Platform"]);
     }
 }

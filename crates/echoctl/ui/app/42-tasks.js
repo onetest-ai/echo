@@ -195,7 +195,10 @@ function folderSummary(root) {
   return { line: [`${read} file${read === 1 ? '' : 's'} read`, pending ? `${pending} page${pending === 1 ? '' : 's'} to read from their images` : '', not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.n, err }
 }
 function sourceLabel(x) {
-  if (x.kind === 'mail') return x.id.startsWith('person:') ? `mail with ${x.id.slice(7)}` : `mail with ${x.id.replace(/^domain:/, '')}`
+  if (x.kind === 'mail') {
+    const who = x.id === 'any:*' ? 'any mail' : x.id.startsWith('person:') ? `mail with ${x.id.slice(7)}` : `mail with ${x.id.replace(/^domain:/, '')}`
+    return (x.subject || []).length ? `${who} · subject: ${x.subject.join(', ')}` : who
+  }
   return x.name || x.id
 }
 /** A thread's meeting chats, read into its work between calls (`ledger::chat_sync`), with the chats
@@ -247,9 +250,9 @@ function threadSources(p, cl) {
     const teams = Array.isArray(m365.teams) ? m365.teams : []
     channel = `<span class="tok-in"><select data-src-team aria-label="Team" autofocus><option value="">${teams.length ? 'Team…' : m365.teams && m365.teams.error ? 'Teams unavailable' : 'Loading teams…'}</option>${teams.map((t) => `<option value="${esc(t.id)}"${t.id === team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>${team ? `<select data-src-channel aria-label="Channel"><option value="">${chans && chans.length ? 'Channel…' : 'Loading…'}</option>${(chans || []).filter((c) => !have.has(`teams_channel:${team}|${c.id}`)).map((c) => `<option value="${esc(c.id)}" data-name="${esc(teams.find((t) => t.id === team).name + ' › ' + c.name)}">${esc(c.name)}${c.membership === 'private' ? ' (private)' : ''}</option>`).join('')}</select>` : ''}</span>`
   }
-  const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain or an address — acme.example, jane@acme.example" aria-label="Mail with" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
+  const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain, an address or * — acme.example, jane@acme.example" aria-label="Mail with" autofocus><input id="pj-add-mail-subject" data-add="mail" placeholder="Only subjects with — Acme Platform, APX (needed with *)" aria-label="Only subjects with"></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
   return chatSources(p) + others.map(chip).join('') + suggest + channel + mail + folderBtn
-    + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into Recall, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
+    + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into Recall, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses, and by its subject when the source names words; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
 }
 document.addEventListener('change', (e) => {
   const t = e.target

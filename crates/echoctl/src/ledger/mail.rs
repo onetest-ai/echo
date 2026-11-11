@@ -51,6 +51,19 @@ pub(super) fn mail_me() -> impl Fn(&str) -> bool {
     move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
 }
 
+/// Which of a read's mails are about the thread, by its source's subjects: a mail whose subject contains one, and
+/// any other mail of a conversation such a mail is in (a reply that changed the subject), or one the thread already
+/// holds mail of (`known`). A source naming no subjects keeps them all.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(super) fn about_thread(found: &[Value], src: &crate::projects::Source, known: &BTreeSet<String>) -> Vec<bool> {
+    if src.subject.is_empty() {
+        return vec![true; found.len()];
+    }
+    let mut convs = known.clone();
+    convs.extend(found.iter().filter(|m| src.about(m["subject"].as_str().unwrap_or(""))).filter_map(|m| m["conversation"].as_str().map(str::to_owned)));
+    found.iter().map(|m| src.about(m["subject"].as_str().unwrap_or("")) || m["conversation"].as_str().is_some_and(|c| convs.contains(c))).collect()
+}
+
 /// How far back a mail source's first read goes, and how far each later read looks again.
 #[cfg(feature = "brain")]
 pub(super) const MAIL_FIRST_DAYS: i64 = 30;
@@ -102,6 +115,8 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
     let mut snd = senders::load();
     snd.refresh_org();
     let mut items: Vec<Value> = vec![];
+    // The conversations the thread already holds mail of: their replies are its, whatever their subject.
+    let known: BTreeSet<String> = l.evidence().values().filter(|e| e["kind"] == "mail").filter_map(|e| e["conversation"].as_str().map(str::to_owned)).collect();
     if snd.org_domains.is_empty() {
         // Nobody can be told a colleague: nothing is judged, every source reads this window next time.
         for s in &rules {
@@ -122,7 +137,7 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
             if let Some(t) = p.since.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).and_then(|d| d.and_hms_opt(0, 0, 0)).and_then(|d| d.and_local_timezone(Local).single()) {
                 since = since.max(t.with_timezone(&chrono::Utc));
             }
-            let found = match crate::graph::mail(&rule.kql(), since, MAIL_MAX) {
+            let found = match crate::graph::mail(&rule.kql(&s.subject), since, MAIL_MAX) {
                 Ok(f) => f,
                 Err(e) => {
                     state[&s.id]["error"] = json!(format!("{e:#}"));
@@ -130,7 +145,8 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
                 }
             };
             let mut n = 0;
-            for m in &found {
+            let about = about_thread(&found, s, &known);
+            for (m, _) in found.iter().zip(&about).filter(|(_, a)| **a) {
                 let people = not_me(std::iter::once(&m["from"]).chain(m["to"].as_array().into_iter().flatten()), me.as_deref());
                 // Graph's search is fuzzy: only mail that really has these people; a broadcast isn't a thread's.
                 if m["invite"] == true || people.len() > MAX_PEOPLE || !rule.matches(&people) {
@@ -196,6 +212,21 @@ pub fn reread_sources(client: &str) -> Result<()> {
             crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
         }
     }
+    Ok(())
+}
+
+/// A mail source whose subjects changed: the thread reads its first window again at the next sync, by the new words
+/// (Recall too: `brain::sources::read_again`). Items already in the thread stay.
+pub fn read_mail_again(project: &str, rule: &str) -> Result<()> {
+    let f = mails_file(project);
+    let mut st = calls::read_json(&f);
+    if let Some(o) = st.as_object_mut().and_then(|o| o.get_mut(rule)).and_then(Value::as_object_mut) {
+        o.remove("read_at");
+        o.remove("checked_at");
+        crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
+    }
+    #[cfg(feature = "brain")]
+    crate::brain::sources::read_again("mail", rule)?;
     Ok(())
 }
 

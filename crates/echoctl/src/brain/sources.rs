@@ -52,6 +52,17 @@ pub fn state() -> Value {
     std::fs::read(state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}))
 }
 
+/// Read a source again from the start at the next sync (its subjects changed): what it holds is judged anew.
+pub fn read_again(kind: &str, id: &str) -> Result<()> {
+    let mut st = state();
+    if let Some(o) = st.as_object_mut() {
+        if o.remove(&format!("{kind}:{id}")).is_some() {
+            save_state(&st)?;
+        }
+    }
+    Ok(())
+}
+
 fn save_state(v: &Value) -> Result<()> {
     paths::write_atomic(&state_path(), serde_json::to_string_pretty(v)?.as_bytes())?;
     Ok(())
@@ -62,10 +73,15 @@ fn save_state(v: &Value) -> Result<()> {
 pub enum MailRule {
     Domain(String),
     Person(String),
+    /// `any:*`: anyone's mail, read by its source's subjects alone (`projects::Source::about`).
+    Any,
 }
 
 impl MailRule {
     pub fn parse(id: &str) -> Option<MailRule> {
+        if id == "any:*" {
+            return Some(MailRule::Any);
+        }
         let (k, v) = id.split_once(':')?;
         let v = v.trim().trim_start_matches('@').to_lowercase();
         if v.is_empty() || v.contains(char::is_whitespace) || v.contains('"') {
@@ -78,12 +94,23 @@ impl MailRule {
         }
     }
 
-    /// Graph's search (fuzzy: what it returns is checked with `matches`).
-    pub fn kql(&self) -> String {
-        let v = match self {
-            MailRule::Domain(d) | MailRule::Person(d) => d,
-        };
-        format!("from:{v} OR to:{v}")
+    /// Graph's search (fuzzy: what it returns is checked with `matches` and the source's subjects). Mail from
+    /// anyone is searched by its subjects; an address's or a domain's by its people only, so a reply that changed
+    /// the subject still comes with its conversation. A subject is searched as its words, all of them (no quotes:
+    /// `graph::mail` quotes the whole query), the subjects grouped so the received date holds for each.
+    pub fn kql(&self, subject: &[String]) -> String {
+        match self {
+            MailRule::Domain(v) | MailRule::Person(v) => format!("from:{v} OR to:{v}"),
+            MailRule::Any => {
+                let groups: Vec<String> = subject
+                    .iter()
+                    .map(|w| projects::words(w).iter().map(|x| format!("subject:{x}")).collect::<Vec<_>>().join(" "))
+                    .filter(|g| !g.is_empty())
+                    .map(|g| format!("({g})"))
+                    .collect();
+                format!("({})", groups.join(" OR "))
+            }
+        }
     }
 
     /// Exact: someone in the mail has this address, or an address at this domain.
@@ -91,6 +118,7 @@ impl MailRule {
         people.iter().any(|e| match self {
             MailRule::Domain(d) => e.rsplit_once('@').is_some_and(|(_, x)| x == d || x.ends_with(&format!(".{d}"))),
             MailRule::Person(p) => e == p,
+            MailRule::Any => true,
         })
     }
 }
@@ -99,11 +127,15 @@ impl MailRule {
 /// the rule a thread stores.
 pub fn mail_source(typed: &str) -> Result<String> {
     let t = typed.trim();
+    if t == "*" || t == "any:*" {
+        return Ok("any:*".into());
+    }
     let rule = if t.starts_with("domain:") || t.starts_with("person:") { t.to_string() } else if t.contains('@') && !t.starts_with('@') { format!("person:{t}") } else { format!("domain:{t}") };
     match MailRule::parse(&rule) {
         Some(MailRule::Domain(d)) => Ok(format!("domain:{d}")),
         Some(MailRule::Person(p)) => Ok(format!("person:{p}")),
-        None => anyhow::bail!("Type a domain (acme.example) or an address (jane@acme.example)."),
+        Some(MailRule::Any) => Ok("any:*".into()),
+        None => anyhow::bail!("Type a domain (acme.example), an address (jane@acme.example) or * (anyone, by subject)."),
     }
 }
 
@@ -138,10 +170,14 @@ fn threads_for(refs: &Value, watched: &[(projects::Project, projects::Source)]) 
     let mut out: Vec<Value> = vec![];
     let mut seen = BTreeSet::new();
     let people: Vec<String> = refs["people"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_lowercase)).collect();
+    // A conversation's subjects, as the thread's own reading takes them (`ledger::mail::about_thread`): any of its
+    // mails'. A document read before subjects were kept has none: it stays where it was until it is read again.
+    let subjects: Option<Vec<&str>> = refs["subjects"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect());
     for (p, s) in watched {
+        let about = || subjects.as_ref().is_none_or(|all| all.iter().any(|x| s.about(x)) || s.subject.is_empty());
         let hit = match (refs["kind"].as_str(), s.kind.as_str()) {
             (Some("channel"), "teams_channel") => refs["channel"].as_str() == Some(s.id.as_str()),
-            (Some("mail"), "mail") => MailRule::parse(&s.id).is_some_and(|r| r.matches(&people)),
+            (Some("mail"), "mail") => MailRule::parse(&s.id).is_some_and(|r| r.matches(&people)) && about(),
             _ => false,
         };
         if hit && seen.insert(p.id.clone()) {
@@ -342,7 +378,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             }
             _ => {
                 let rule = MailRule::parse(&s.id).ok_or_else(|| anyhow::anyhow!("not a mail rule: {}", s.id))?;
-                let found = graph::mail(&rule.kql(), since - Duration::days(1), CAP)?;
+                let found = graph::mail(&rule.kql(&s.subject), since - Duration::days(1), CAP)?;
                 let mut n = 0;
                 for m in found {
                     let people = not_me(std::iter::once(&m["from"]).chain(m["to"].as_array().into_iter().flatten()), me.as_deref());
@@ -462,7 +498,13 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             continue;
         }
         let subject = first["subject"].as_str().unwrap_or("(no subject)");
-        let refs = json!({"kind": "mail", "conversation": c, "people": people, "url": first["url"]});
+        let mut subjects: Vec<&str> = vec![];
+        for x in msgs.iter().filter_map(|m| m["subject"].as_str()) {
+            if !subjects.contains(&x) {
+                subjects.push(x);
+            }
+        }
+        let refs = json!({"kind": "mail", "conversation": c, "people": people, "url": first["url"], "subjects": subjects});
         let threads = threads_for(&refs, &w);
         if threads.is_empty() {
             continue;
@@ -626,10 +668,39 @@ mod tests {
         assert!(MailRule::parse("domain:a b.com").is_none());
         assert!(MailRule::parse("domain:x\"y.com").is_none());
         assert!(MailRule::parse("other:x.com").is_none());
-        assert_eq!(d.kql(), "from:acme.example OR to:acme.example");
+        assert_eq!(d.kql(&["Acme Platform".into()]), "from:acme.example OR to:acme.example", "an address's or a domain's subjects are checked here, not searched");
         assert_eq!(mail_source(" @Acme.example ").unwrap(), "domain:acme.example");
         assert_eq!(mail_source("Jane@X.org").unwrap(), "person:jane@x.org");
         assert!(mail_source("not a domain").is_err());
+    }
+
+    #[test]
+    fn mail_from_anyone_is_searched_and_kept_by_its_subjects() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-sources-subject");
+        assert_eq!(mail_source(" * ").unwrap(), "any:*");
+        let any = MailRule::parse("any:*").unwrap();
+        assert_eq!(any, MailRule::Any);
+        assert!(any.matches(&["x@anyone.example".into()]));
+        assert_eq!(any.kql(&["Acme Platform".into(), "APX".into(), "O'Brien".into()]), "((subject:acme subject:platform) OR (subject:apx) OR (subject:o subject:brien))", "words, no quotes (`graph::mail` quotes the query)");
+        let id = projects::create("Acme Platform", None, None).unwrap().id;
+        projects::update(&id, |p| {
+            p.sources.push(projects::Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: vec!["Acme Platform".into()], ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        let conv = |subjects: &[&str]| json!({"kind": "mail", "people": ["jane@acme.example"], "subjects": subjects});
+        assert_eq!(threads_for(&conv(&["Acme Platform status"]), &watched()).len(), 1);
+        assert_eq!(threads_for(&conv(&["Quick question", "RE: Acme Platform status"]), &watched()).len(), 1, "any mail of the conversation, as the thread's own reading");
+        assert!(threads_for(&conv(&["Lunch on Friday"]), &watched()).is_empty(), "the same person's other mail isn't the thread's");
+        let before = json!({"kind": "mail", "people": ["jane@acme.example"]});
+        assert_eq!(threads_for(&before, &watched()).len(), 1, "read before subjects were kept: it stays until read again");
+        // New words: the source reads its window again by them (its state forgotten).
+        std::fs::create_dir_all(crate::brain::dir()).unwrap();
+        let mut st = state();
+        st["mail:person:jane@acme.example"] = json!({"since": "2026-11-01T00:00:00Z"});
+        save_state(&st).unwrap();
+        read_again("mail", "person:jane@acme.example").unwrap();
+        assert!(state()["mail:person:jane@acme.example"].is_null());
     }
 
     #[test]
