@@ -25,15 +25,15 @@ function tplWord() {
 }
 // ── template save: what a save of the open template sends (no DOM: `templates-save.test.mjs`) ──
 const TplSave = {
-  /** `fixed` only once the switch was set in this editor (`fixedSet`): any other edit keeps what the file has. */
-  message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedSet ? { fixed: !!d.fixed } : {}) }),
+  /** `fixed` only with the switch's own change (`switched`): any other edit keeps what the file has. */
+  message: (d, switched = false) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(switched ? { fixed: !!d.fixed } : {}) }),
 }
 // end of the template save block
-function tplSave() {
+function tplSave(switched = false) {
   const d = TPL.draft
   if (!d || !d.id) return
   tplWord()
-  send(TplSave.message(d))
+  send(TplSave.message(d, switched))
 }
 function templatesSettings() {
   if (!TPL.data) { loadTemplates().then(render); return `<h2>Templates</h2><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(4)}</div>` }
@@ -328,7 +328,7 @@ document.addEventListener('change', (e) => {
   else if (el.id === 'tp-word') { tplSave(); render() }
   else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
-  else if (el.matches('[data-tpl-fixed]')) { d.fixed = el.checked; d.fixedSet = true; tplSave(); render() }
+  else if (el.matches('[data-tpl-fixed]')) { d.fixed = el.checked; tplSave(true); render() }
 })
 document.addEventListener('input', (e) => {
   if (TPL.skNew && e.target.id === 'sk-name') TPL.skNew.name = e.target.value

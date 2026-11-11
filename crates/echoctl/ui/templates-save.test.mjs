@@ -12,7 +12,12 @@ const { TplSave } = new Function(`${src.slice(start, end)}\nreturn { TplSave }`)
 const d = { id: 'default', header: '# {title}', match: [], sections: [{ heading: 'Summary', instruction: '' }], fixed: false }
 // An edit that isn't the switch sends no `fixed`: the app keeps what the file has, also when it changed meanwhile.
 assert.deepEqual(TplSave.message(d), { cmd: 'template_save', id: 'default', header: '# {title}', match: [], sections: d.sections })
-// Once the switch is set in this editor, every save carries it.
-assert.equal(TplSave.message({ ...d, fixed: true, fixedSet: true }).fixed, true)
-assert.equal(TplSave.message({ ...d, fixed: false, fixedSet: true }).fixed, false)
+// The switch's own change sends it, on or off.
+assert.equal(TplSave.message({ ...d, fixed: true }, true).fixed, true)
+assert.equal(TplSave.message({ ...d, fixed: false }, true).fixed, false)
+// Ticked, saved; then the file changes elsewhere (another editor, Claude) and the header is edited here: that save
+// still sends no `fixed`, so the file's newer choice stays.
+const ticked = { ...d, fixed: true }
+assert.equal(TplSave.message(ticked, true).fixed, true)
+assert.equal('fixed' in TplSave.message({ ...ticked, header: '# {title} · {date}' }), false)
 console.log('templates-save: ok')
