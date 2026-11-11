@@ -90,7 +90,11 @@ const PRELUDE: &str = r#"
       list: (dir) => call('store.list', dir || ''),
       remove: (path) => call('store.remove', path),
       path: (path) => call('store.path', path || ''),
+      /** What it keeps in its store (`dir`: one folder of it): {bytes, files} — its own files only, not its settings. */
+      size: (dir) => call('store.size', dir || ''),
     },
+    /** Its `cache/` (Echo removes what is there over 7 days): `size()` {bytes, files}. */
+    cache: { size: () => call('store.size', 'cache') },
     settings: { get: (key) => call('settings.get', key), set: (key, value) => call('settings.set', [key, value]) },
     /** HTTPS to the hosts its manifest names (`uses.network.hosts`): {status, body}. */
     http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
@@ -768,6 +772,29 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             Value::Null
         }
+        "store.size" => {
+            let base = plugins::data_dir(id);
+            let dir = if s(arg).is_empty() { base.clone() } else { store_path(id, &s(arg))? };
+            let (mut bytes, mut files) = (0u64, 0u64);
+            fn walk(d: &Path, f: &mut dyn FnMut(&Path, u64)) {
+                for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                    let Ok(t) = e.file_type() else { continue };
+                    if t.is_dir() {
+                        walk(&e.path(), f);
+                    } else if t.is_file() {
+                        f(&e.path(), e.metadata().map(|m| m.len()).unwrap_or(0));
+                    }
+                }
+            }
+            // The user's settings, written by Echo, aren't the plugin's.
+            walk(&dir, &mut |p, n| {
+                if p != base.join("settings.json") {
+                    bytes += n;
+                    files += 1;
+                }
+            });
+            json!({"bytes": bytes, "files": files})
+        }
         "store.path" => json!(if s(arg).is_empty() { plugins::data_dir(id) } else { store_path(id, &s(arg))? }.display().to_string()),
         "settings.get" => plugins::setting(id, &s(arg)).unwrap_or(Value::Null),
         // The plugin's own files as installed (templates, prompts), read-only.
@@ -1427,6 +1454,7 @@ mod tests {
               ctx.command('escape', () => ctx.store.read('../../config.json'))
               ctx.command('boom', () => { throw new Error('nope') })
               ctx.command('md', () => ctx.markdown('**hi** <b>'))
+              ctx.command('size', () => { ctx.store.write('cache/clip.mp3', '12345'); return [ctx.store.size(), ctx.cache.size(), ctx.store.size('notes')] })
             }
             "#,
         )
@@ -1444,6 +1472,9 @@ mod tests {
         assert_eq!(greet.unwrap(), "hello Ann from hello");
         assert_eq!(call("hello", "save", &json!({"text": "x"})).unwrap(), json!(["a.txt"]));
         assert_eq!(call("hello", "read", &json!({})).unwrap(), "x");
+        // What it keeps, all of it or its cache: its own files only — the user's settings, written by Echo, aren't counted.
+        std::fs::write(plugins::data_dir("hello").join("settings.json"), "{\"k\": \"a long value\"}").unwrap();
+        assert_eq!(call("hello", "size", &json!({})).unwrap(), json!([{"bytes": 6, "files": 2}, {"bytes": 5, "files": 1}, {"bytes": 1, "files": 1}]));
         assert_eq!(call("hello", "later", &json!({})).unwrap(), 42);
         assert!(call("hello", "escape", &json!({})).unwrap_err().to_string().contains("inside the plugin"));
         assert_eq!(call("hello", "boom", &json!({})).unwrap_err().to_string(), "nope");

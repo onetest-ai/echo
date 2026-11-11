@@ -1,6 +1,6 @@
 ---
 id: TC-019
-title: When a plugin's host half starts, Echo removes what lay in its cache/ over 7 days and downloads left half-written, and keeps everything else of its store
+title: When a plugin's host half starts, Echo removes what lay in its cache/ over 7 days and downloads left half-written, and keeps everything else of its store; the plugin can ask how much it keeps
 priority: medium
 type: functional
 requirements: [F-PLUG-13]
@@ -24,7 +24,7 @@ tags: [plugins, store, cache, host-half]
 M="$D/market-cache"; mkdir -p "$M/plugins/acme-cache"
 echo '{"name":"acme-local","plugins":[{"id":"acme-cache","source":"./plugins/acme-cache"}]}' > "$M/echo-marketplace.json"
 echo '{"id":"acme-cache","name":"Acme cache","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js"}' > "$M/plugins/acme-cache/echo-plugin.json"
-printf "export function apply(ctx) { ctx.command('ping', () => 'pong') }\n" > "$M/plugins/acme-cache/main.js"
+printf "export function apply(ctx) { ctx.command('ping', () => 'pong'); ctx.command('size', () => [ctx.store.size(), ctx.cache.size()]) }\n" > "$M/plugins/acme-cache/main.js"
 echoctl plugin marketplace add "$M" --name acme-local && echoctl plugin install acme-cache --yes
 ```
 
@@ -52,6 +52,7 @@ Files in the plugin's store (`S="$ECHOCTL_HOME/.echo/plugins/acme-cache"`), each
 | 1 | Make the files: `S="$ECHOCTL_HOME/.echo/plugins/acme-cache"; mkdir -p "$S/cache/deep" "$S/audio"; mkdir -p "$S/book"; for f in cache/old.mp3 cache/deep/old.png cache/new.mp3 audio/b.mp3.123-4.part audio/c.mp3.123-5.part audio/old.mp3 notes.txt book/chapter.part; do echo x > "$S/$f"; done; touch -t $(date -v-8d +%Y%m%d%H%M) "$S/cache/old.mp3" "$S/cache/deep/old.png"; touch -t $(date -v-1d +%Y%m%d%H%M) "$S/cache/new.mp3"; touch -t $(date -v-2H +%Y%m%d%H%M) "$S/audio/b.mp3.123-4.part" "$S/book/chapter.part"; touch -t $(date -v-30d +%Y%m%d%H%M) "$S/audio/old.mp3" "$S/notes.txt"` | No output |
 | 2 | `echoctl plugin call acme-cache ping` (it starts the plugin's host half; if it answers `no command “ping”`, wait 2 s and run it again) | `pong` |
 | 3 | `cd "$S" && find . -type f \| sort` | Exactly `./audio/c.mp3.123-5.part`, `./audio/old.mp3`, `./book/chapter.part`, `./cache/new.mp3`, `./notes.txt` (and `./settings.json` if it exists): the old cache files and the stale `.part` are gone, the rest kept |
+| 4 | `echo '{"k":"a value the user set"}' > "$S/settings.json"`; `echoctl plugin call acme-cache size` | `[{"bytes": 10, "files": 5}, {"bytes": 2, "files": 1}]`: the five files it keeps (2 bytes each), its cache's one — the settings file Echo writes for the user isn't counted |
 
 ## Expected Final State
 The plugin's `cache/` holds only what is under 7 days old; no download of Echo's (`<name>.<pid>-<n>.part`) older than an hour is left; everything outside `cache/` is as it was.

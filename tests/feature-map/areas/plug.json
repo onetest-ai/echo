@@ -123,7 +123,7 @@
   },
   {
    "id": "F-PLUG-13",
-   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old and its own half-written downloads (`.part`) over an hour old; the rest of the store, the plugin's own `.part` files too, is the plugin's to clean",
+   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old and its own half-written downloads (`.part`) over an hour old; the rest of the store, the plugin's own `.part` files too, is the plugin's to clean; the plugin can ask how much it keeps — `ctx.store.size(dir?)` and `ctx.cache.size()` give {bytes, files} of its own files (not the settings Echo writes for the user)",
    "priority": "medium",
    "check": "agent",
    "axes": [
