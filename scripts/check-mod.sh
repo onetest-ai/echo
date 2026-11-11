@@ -20,6 +20,8 @@ node crates/echoctl/ui/workbench.test.mjs
 node crates/echoctl/ui/my-notes.test.mjs
 # Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
 node crates/echoctl/ui/note-time.test.mjs
+# Where My notes' list is after a redraw: kept, or following its end (notesScroll).
+node crates/echoctl/ui/notes-scroll.test.mjs
 # The ⌘K palette's ranking (Palette).
 node crates/echoctl/ui/palette.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).
