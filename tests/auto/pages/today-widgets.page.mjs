@@ -662,7 +662,7 @@ export class TodayWidgetsPage extends TodayPage {
   }
 
   settingsOf(label) {
-    return this.frame(label).getByRole('group', { name: `${label}: settings`, exact: true })
+    return this.frame(label).getByRole('group', { name: `Settings of ${label}`, exact: true })
   }
 
   setting(label, name) {

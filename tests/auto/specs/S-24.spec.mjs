@@ -303,8 +303,9 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     // Three columns: Your day holds the first (1fr 2fr), as tall as what is beside it, sticky and at most the view's
     // height, opened on now and scrolling inside; the choices across Next and Needs you now.
     const threeColumns = async () => {
-      await expect.poll(async () => (await today.hold()).held).toBe(true)
-      const h = await today.hold()
+      // The measure the wait saw: one taken after it may land on a frame Today's refresh is replacing (all 0).
+      let h
+      await expect.poll(async () => { h = await today.hold(); return h.held && h.width > 0 }).toBe(true)
       near(h.besideWidth, 2 * h.width)
       near(h.column, h.beside)
       expect(h.height).toBeLessThanOrEqual(h.view)
@@ -398,7 +399,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(data.cli('today', 'move', id.next, '--above', id.needs).code).toBe(0)
       await today.openToday()
       // On top, across what is beside Your day, Needs you now under it.
-      expect(await today.rows([n.next, n.needs, n.choices])).toEqual([[n.next], [n.needs], [n.choices]])
+      // (Today draws its widgets as their data comes: wait for the row, don't read it once.)
+      await expect.poll(() => today.rows([n.next, n.needs, n.choices])).toEqual([[n.next], [n.needs], [n.choices]])
       expect(Math.abs((await today.box(n.next)).width - (await today.box(n.choices)).width)).toBeLessThanOrEqual(2)
       const time = await today.clock(start)
       if (new Date(start) <= new Date()) await expect(today.widgetSays(n.next, fill(x.since, { time }))).toBeVisible()
