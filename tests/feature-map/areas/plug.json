@@ -129,6 +129,16 @@
    "axes": [
     "plugin.enabled"
    ]
+  },
+  {
+   "id": "F-PLUG-14",
+   "feature": "Addresses a plugin may reach (a `network.hosts_from` setting) sent from the window are saved only after the user allows them in a dialog of the system's ('Let <plugin> reach these addresses?', Don't allow / Allow): typed in the plugin's settings or sent by the plugin's own window half, a no (or no answer) saves nothing and says so; a list that isn't allowed is refused before asking; an emptied list or the list as saved asks nothing; `echoctl plugin set` (the user at their terminal) saves without asking",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.setting",
+    "plugin.uses"
+   ]
   }
  ]
 }
