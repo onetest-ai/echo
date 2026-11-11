@@ -159,7 +159,9 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
     let last = crate::jshost::widget_last(plugin, widget);
     let every = w.refresh.max(60);
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
-    if stale {
+    // Resized since its provider was last asked: asked again for the new size.
+    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on_today(&format!("plugin:{plugin}:{widget}")).as_str()));
+    if stale || resized {
         crate::jshost::widget_ask(plugin, widget);
     }
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);

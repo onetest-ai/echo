@@ -1159,6 +1159,46 @@ pub fn setting(id: &str, key: &str) -> Option<Value> {
     read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
 }
 
+/// When the user last said no to a plugin's addresses from the window: for a minute after, the page's requests for it
+/// are refused without a dialog, so a page can't keep asking until the user gives in.
+static REFUSED: Mutex<BTreeMap<String, std::time::Instant>> = Mutex::new(BTreeMap::new());
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn refused_lately(id: &str) -> bool {
+    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).get(id).is_some_and(|t| t.elapsed().as_secs() < 60)
+}
+
+/// For a setting from the window: the plugin's name and the addresses to allow, when `value` lists addresses it may
+/// reach (checked first, so a wrong one is refused at once); `None` for anything else or an empty list (it narrows).
+/// The list as saved is asked about too: a check against the saved file would race with a save under way.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn addresses_to_allow(id: &str, key: &str, value: &Value) -> Result<Option<(String, Vec<String>)>> {
+    let m = installed_manifest(id)?;
+    let text = value.as_str().unwrap_or("").trim();
+    if !address_settings(&m.uses).iter().any(|k| k == key) || text.is_empty() {
+        return Ok(None);
+    }
+    if text.chars().count() > 2000 {
+        bail!("an address list is 2000 characters at most");
+    }
+    let label = m.settings.iter().find(|s| s.key == key).map_or(key, |s| s.label.as_str());
+    addresses::parse_list(text).with_context(|| format!("“{label}” isn't an address the plugin may reach"))?;
+    let name: String = m.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    Ok(Some((name, text.split([',', ' ', '\n', '\r', '\t']).filter(|p| !p.is_empty()).map(str::to_owned).collect())))
+}
+
+/// The user's yes, in a dialog of the system's, to `name` reaching `list`. Development builds and tests:
+/// `ECHOCTL_ALLOW_ADDRESSES=yes|no` answers instead (never in a release build).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn allow_addresses(name: &str, list: &[String]) -> bool {
+    #[cfg(debug_assertions)]
+    if let Ok(a) = std::env::var("ECHOCTL_ALLOW_ADDRESSES") {
+        return a == "yes";
+    }
+    let msg = format!("Let {name} reach these addresses?\n\n{}\n\nAllow only if you entered them yourself.", list.join("\n"));
+    crate::app::ask(&msg, &["Don't allow", "Allow"], "Don't allow").as_deref() == Some("Allow")
+}
+
 /// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
 pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
     uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
@@ -1306,7 +1346,26 @@ pub fn page_op(v: &Value) -> Result<()> {
     match s("op").as_str() {
         "enable" => set_enabled(&s("id"), v["on"].as_bool().unwrap_or(true)).inspect(|_| reload()),
         "remove" => remove(&s("id"), v["keep_data"].as_bool().unwrap_or(true)).inspect(|_| reload()),
-        "set" => set_setting(&s("id"), &s("key"), &v["value"]),
+        "set" => {
+            let (id, key, value) = (s("id"), s("key"), v["value"].clone());
+            match addresses_to_allow(&id, &key, &value)? {
+                Some(_) if BUSY.lock().is_ok_and(|b| b.contains_key(&format!("plugin:{id}"))) => bail!("Not saved: {id} is busy (being installed, updated or asking you); try again in a moment"),
+                Some(_) if refused_lately(&id) => bail!("Not saved: you didn't allow these addresses a moment ago"),
+                // Addresses a plugin may reach: the page can't be told apart from a plugin's own window half, so the
+                // user says yes outside it, in a dialog of the system's.
+                Some((name, list)) => {
+                    background(format!("plugin:{id}"), "Waiting for you to allow the addresses…", move || {
+                        if !allow_addresses(&name, &list) {
+                            REFUSED.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), std::time::Instant::now());
+                            bail!("Not saved: you didn't allow {name} to reach {}", list.join(", "));
+                        }
+                        set_setting(&id, &key, &value)
+                    });
+                    Ok(())
+                }
+                None => set_setting(&id, &key, &value),
+            }
+        }
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
         "market_remove" => market_remove(&s("name")),
         "market_add" => {
@@ -1479,6 +1538,35 @@ mod tests {
             vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed; plain http only inside your own network)"]
         );
         assert!(describe(&uses(json!({"network": {}}))).is_err(), "neither a host nor a setting");
+    }
+
+    #[test]
+    fn addresses_from_the_window_wait_for_the_users_yes_and_nothing_else_does() {
+        let (_env, root) = paths::testenv::folders("plugins-allow");
+        let mk = root.join("market");
+        let d = mk.join("plugins/sneak");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(
+            d.join(MANIFEST),
+            json!({"id": "sneak", "name": "Acme sneak", "version": "0.1.0", "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS", "type": "string"}, {"key": "voice", "label": "Voice", "type": "string"}]})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "sneak", "source": "./plugins/sneak"}]}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        refresh(&name).unwrap();
+        install("sneak", Some(&name), &review("sneak", Some(&name)).unwrap().uses).unwrap();
+        let ask = |key: &str, v: &str| addresses_to_allow("sneak", key, &json!(v));
+        assert_eq!(ask("tts", "http://10.0.0.*:*, https://a.acme.example").unwrap(), Some(("Acme sneak".to_string(), vec!["http://10.0.0.*:*".to_string(), "https://a.acme.example".to_string()])));
+        assert!(ask("tts", "http://example.com").unwrap_err().to_string().contains("“TTS” isn't an address"), "a wrong list is refused at once, no dialog, by its label");
+        assert_eq!(ask("voice", "alto").unwrap(), None, "not an address setting");
+        assert_eq!(ask("tts", "  ").unwrap(), None, "emptied: it only narrows");
+        set_setting("sneak", "tts", &json!("http://10.0.0.*:*")).unwrap();
+        assert!(ask("tts", "http://10.0.0.*:*").unwrap().is_some(), "the list as saved is asked about too (no race with a save)");
+        assert!(ask("tts", &format!("http://10.0.0.1,{}", " ".repeat(2001))).is_ok(), "spaces trimmed");
+        assert!(ask("tts", &"http://10.0.0.1,".repeat(200)).unwrap_err().to_string().contains("2000"));
+        assert!(ask("tts", "http://10.0.*.*:*").unwrap().is_some(), "a wider one asks again");
     }
 
     #[test]
