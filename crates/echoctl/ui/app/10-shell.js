@@ -428,6 +428,39 @@ function doc() {
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
 }
 
+/** Draws the Calls view in the primary area (`renderNow`). */
+function drawCalls() {
+  // The list, the call's header and its pane — on the Minutes tab, the pane's bar and the frame
+  // apart (the frame reloads only when the call or its minutes change; detaching it would reload
+  // it too).
+  $('#r-ld').classList.toggle('list-open', S.listOpen)
+  patch($('#r-list'), list())
+  const d = doc(), main = $('#r-main')
+  if (d.plain !== undefined) {
+    main.dataset.mode = 'plain'
+    patch(main, d.plain)
+  } else {
+    if (main.dataset.mode !== 'doc') {
+      main.dataset.mode = 'doc'
+      patch(main, '<header class="doc-head" id="r-head"></header><div class="pane" id="pane"></div>')
+    }
+    patch($('#r-head'), d.head)
+    const pane = $('#pane')
+    if (d.frame !== undefined) {
+      if (pane.dataset.mode !== 'frame') {
+        pane.dataset.mode = 'frame'
+        pane.classList.add('framed')
+        patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div></div>')
+      }
+      patch($('#minutes-bar'), d.bar)
+      patch($('#minutes-slot'), d.frame)
+    } else {
+      if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
+      patch(pane, d.pane)
+    }
+  }
+}
+
 /** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it
  *  hides one until its source sends the next), your day (today's meetings: the call, Show prep or Prepare, Record when
  *  it starts) and your work (Tasks' piles, a few of each). An empty part isn't drawn. */

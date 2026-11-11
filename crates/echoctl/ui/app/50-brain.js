@@ -35,6 +35,16 @@ async function loadBrainNode() {
 }
 const clientName = (id) => id === '-' ? 'No client' : ((projClient(id) || {}).name || id)
 const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
+/** Draws the Knowledge view in the primary area (`renderNow`). */
+function drawBrain(primary) {
+  patch(primary, `<main class="main">${brainView()}</main>`)
+  // A plugin's Knowledge tab draws after the page is in (its graph).
+  const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
+  const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
+  try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
+  drawGraph()
+  drawPeople()
+}
 function brainView() {
   const ktabs = knowledgeTabs()
   const kt = ktabs.find((x) => x.tab === S.br.tab)

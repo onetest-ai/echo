@@ -150,85 +150,19 @@ function renderNow() {
     patch(primary, `<main class="main plug-act">${html}</main>`)
     try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
   } else if (S.view === 'settings') {
-    patch(primary, `<main class="main">${settingsView()}</main>`)
-    // The template just chosen or made, in view in a long list.
-    if (TPL.scrollTo) { TPL.scrollTo = false; const r = $('.tp-row.on'); if (r) r.scrollIntoView({ block: 'nearest' }) }
+    drawSettings(primary)
   } else if (S.view === 'brain') {
-    patch(primary, `<main class="main">${brainView()}</main>`)
-    // A plugin's Knowledge tab draws after the page is in (its graph).
-    const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
-    const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
-    try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
-    drawGraph()
-    drawPeople()
+    drawBrain(primary)
   } else if (S.view === 'today') {
-    // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep.
-    const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
-    patch(primary, `<main class="main">${todayView()}</main>`)
-    // Today's view height, on the element (not in the HTML, which would then change with the window and be redrawn).
-    const td = $('.td')
-    if (td && S.tdView) td.style.setProperty('--td-view', `${S.tdView}px`)
-    // Your day opens on now: the line at the top with what comes next under it (one row of the past above it);
-    // drawn again, it stays where it was scrolled.
-    const r = $('.td-rows'), now = r && r.querySelector('.td-now')
-    // The row before the line starts at the top — whole, never cut (a fixed offset cut it).
-    const past = now && now.previousElementSibling, from = past || now
-    if (r && r !== rows) {
-      const place = () => {
-        if (!r.isConnected) return
-        const top0 = r.getBoundingClientRect().top - r.scrollTop, at = (el) => el.getBoundingClientRect().top - top0
-        let to = keep != null ? keep : from ? at(from) : 0
-        // Late in the day the list can't scroll that far: the nearest whole row above, the rest faded at the bottom.
-        const max = r.scrollHeight - r.clientHeight
-        if (keep == null && to > max) to = Math.max(0, ...[...r.children].map(at).filter((y) => y <= max))
-        r.scrollTop = Math.max(0, to)
-      }
-      place()
-      // Again once Today's layout has settled (a held column takes its height a moment later, #368): a list not yet
-      // scrollable would have been left at its top.
-      setTimeout(place)
-    }
+    drawToday(primary)
   } else if (S.view === 'tasks') {
-    patch(primary, `<main class="main">${tasksView()}</main>`)
+    drawTasks(primary)
   } else if (S.view === 'projects') {
-    patch(primary, `<main class="main">${projectsView()}</main>`)
-    drawOrgLinks()
+    drawProjects(primary)
   } else if (S.view === 'calendar') {
-    const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
-    patch(primary, `<main class="main">${calendarView()}</main>`)
-    const g = $('#calgrid')
-    // First open: around now, or 08:00 on a week without today.
-    if (g && g !== grid) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop - 120 : 8 * Number(g.dataset.hour)))
+    drawCalendar(primary)
   } else {
-    // The list, the call's header and its pane — on the Minutes tab, the pane's bar and the frame
-    // apart (the frame reloads only when the call or its minutes change; detaching it would reload
-    // it too).
-    $('#r-ld').classList.toggle('list-open', S.listOpen)
-    patch($('#r-list'), list())
-    const d = doc(), main = $('#r-main')
-    if (d.plain !== undefined) {
-      main.dataset.mode = 'plain'
-      patch(main, d.plain)
-    } else {
-      if (main.dataset.mode !== 'doc') {
-        main.dataset.mode = 'doc'
-        patch(main, '<header class="doc-head" id="r-head"></header><div class="pane" id="pane"></div>')
-      }
-      patch($('#r-head'), d.head)
-      const pane = $('#pane')
-      if (d.frame !== undefined) {
-        if (pane.dataset.mode !== 'frame') {
-          pane.dataset.mode = 'frame'
-          pane.classList.add('framed')
-          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div></div>')
-        }
-        patch($('#minutes-bar'), d.bar)
-        patch($('#minutes-slot'), d.frame)
-      } else {
-        if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
-        patch(pane, d.pane)
-      }
-    }
+    drawCalls()
   }
   fillTranscripts()
   tickClocks()

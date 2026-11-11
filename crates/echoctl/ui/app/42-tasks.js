@@ -29,6 +29,10 @@ function taskCard(c, pile) {
     <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
 }
+/** Draws the Tasks view in the primary area (`renderNow`). */
+function drawTasks(primary) {
+  patch(primary, `<main class="main">${tasksView()}</main>`)
+}
 function tasksView() {
   const d = S.tk.data
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
