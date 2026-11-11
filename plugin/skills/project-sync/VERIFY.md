@@ -26,6 +26,9 @@ Verdicts
 - **A recording is proof.** When the item is itself the session (its transcript is that meeting),
   that supports `held` for that session.
 - **A promise is not progress.** "I'll send it" supports neither `progress` nor `done`.
+- **One thread at a time.** A packet with `also_in` comes from an item shared with other threads: `supports` only
+  when the words are about this thread's work (`thread`, the node's `path`); a quote about another thread's work
+  is `wrong`, whatever the node's title.
 - `weak` — the right session, person or topic, but the words don't state the change.
 - `wrong` — contradicts the claim, or is about a different node (a quote about another story's
   session is wrong even when the topic is close).

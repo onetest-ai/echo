@@ -419,8 +419,14 @@ pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
             "answer" => format!("this question is answered: {}", e["text"].as_str().unwrap_or("")),
             _ => e["effect"].as_str().unwrap_or("").to_string(),
         };
-        out.push(json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
-                        "quote": e["quote"], "evidence": format!("{} {}", e["date"].as_str().unwrap_or(""), item["title"].as_str().unwrap_or("")), "context": ctx}));
+        let mut packet = json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
+                        "quote": e["quote"], "evidence": format!("{} {}", e["date"].as_str().unwrap_or(""), item["title"].as_str().unwrap_or("")), "context": ctx});
+        // An item in several threads: the verifier checks the change is about this thread's work.
+        if let Some(a) = e["evidence"].as_str().and_then(|i| super::mail::also_in(project, i)) {
+            packet["thread"] = json!(crate::projects::load(project).map(|p| p.name).unwrap_or_default());
+            packet["also_in"] = a;
+        }
+        out.push(packet);
     }
     Ok(out)
 }

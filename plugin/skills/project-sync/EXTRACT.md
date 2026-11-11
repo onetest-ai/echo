@@ -39,6 +39,11 @@ First, once: `$L pending` — each item's `.md` path. Then for each evidence id 
    (it is your session's own and is allowed). **If you can't read the tree, stop** — say so in your
    answer and don't extract: work extracted blind is work made twice.
 2. Read the item's `.md` file (its path is in `$L pending`) in full. "Me" is the user.
+   **An item in several threads** (`also_in` in `$L pending`: the other threads by name, `others` counted): take
+   from it only what concerns **this** thread — judged by its `notes`, `brief`, `terms`, people and open work in
+   `$L context` — and leave the rest to the others. A turn about another thread's work is never this thread's
+   work, even when this thread's people say it; when a passage could belong to either, leave it out. An item with
+   nothing for this thread is done with a note (step 5).
 3. Write `<run folder>/<evidence id>.json` (a JSON array, schema below): **pass 1, then pass 2**.
 4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection: write only the fixed entries to
    `<run folder>/<id>_fix.json` and `$L apply --evidence <id> --proposals <run folder>/<id>_fix.json`; at most

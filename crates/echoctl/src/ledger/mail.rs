@@ -452,8 +452,28 @@ pub fn pending(project: &str) -> Result<Vec<Value>> {
     Ok(order(&ev)
         .into_iter()
         .filter(|i| !done.contains(i))
-        .map(|i| json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()}))
+        .map(|i| {
+            let mut v = json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()});
+            if let Some(a) = also_in(project, &i) {
+                v["also_in"] = a;
+            }
+            v
+        })
         .collect())
+}
+
+/// The other threads an evidence item is in too (a call, chat or mail in several): by name those on this thread's AI
+/// profile, the rest only counted — a thread's name is its text, and goes only to its own profile's model.
+pub(crate) fn also_in(project: &str, evid: &str) -> Option<Value> {
+    let all = crate::projects::list();
+    let profile = |p: &crate::projects::Project| p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
+    let mine = all.iter().find(|p| p.id == project).map(profile)?;
+    let others: Vec<&crate::projects::Project> = all.iter().filter(|p| p.id != project && Ledger::of(&p.id).is_ok_and(|l| l.dir.join("evidence").join(format!("{evid}.json")).is_file())).collect();
+    if others.is_empty() {
+        return None;
+    }
+    let named: Vec<&str> = others.iter().filter(|p| profile(p) == mine).map(|p| p.name.as_str()).collect();
+    Some(json!({"threads": named, "others": others.len() - named.len()}))
 }
 
 pub fn mark_processed(project: &str, evid: &str, note: &str) -> Result<()> {

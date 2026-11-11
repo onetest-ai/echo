@@ -1178,6 +1178,9 @@ pub fn context(project: &str) -> Result<Value> {
     Ok(json!({
         "project": p.name, "stage": p.stage.id(), "client": client.map(|c| &c.name),
         "client_domains": client.map(|c| &c.domains), "notes": p.notes,
+        // What the thread is about, for an item it shares with other threads: its brief (cut) and its terms.
+        "brief": crate::projects::brief(&p.id).ok().filter(|b| !b.trim().is_empty()).map(|b| if b.chars().count() > 1500 { format!("{}…", b.chars().take(1500).collect::<String>()) } else { b }),
+        "terms": p.terms.iter().map(|t| t.term.as_str()).collect::<Vec<_>>(),
         // About me (the user's `me.md`): who "Me" is and how they work — defaults the words can override.
         "me_profile": crate::calls::me_profile(),
         "people": p.people,
@@ -1291,6 +1294,43 @@ mod tests {
         fs::write(l.dir.join("evidence/2026-10-28_110000.json"), serde_json::to_vec(&item).unwrap()).unwrap();
         ensure_first_epic(&l).unwrap();
         (env, l, p.id)
+    }
+
+    #[test]
+    fn an_item_in_several_threads_is_read_for_this_thread_only() {
+        let (_env, l, id) = setup("ledger-also-in");
+        let ev = "2026-10-28_110000";
+        crate::projects::update(&id, |p| {
+            p.terms = vec![crate::projects::Term { term: "SSO".into(), kind: None, note: None }];
+            Ok(())
+        })
+        .unwrap();
+        fs::write(crate::paths::home().join("projects").join(&id).join("brief.md"), "Aurora: the Berlin pilot's sign-on.").unwrap();
+        // The same call in two other threads: one on this thread's AI profile, one pinned to another.
+        let same = crate::projects::create("Borealis", None, None).unwrap();
+        let other = crate::projects::create("Cygnus", None, None).unwrap();
+        crate::projects::update(&other.id, |p| {
+            p.ai_profile = Some("elsewhere".into());
+            Ok(())
+        })
+        .unwrap();
+        for t in [&same.id, &other.id] {
+            let o = Ledger::of(t).unwrap();
+            fs::create_dir_all(o.dir.join("evidence")).unwrap();
+            fs::copy(l.dir.join(format!("evidence/{ev}.json")), o.dir.join(format!("evidence/{ev}.json"))).unwrap();
+        }
+        let p = pending(&id).unwrap();
+        assert_eq!(p[0]["also_in"], json!({"threads": ["Borealis"], "others": 1}), "another profile's thread only counted, never named");
+        let c = context(&id).unwrap();
+        assert_eq!((c["brief"].as_str(), c["terms"].clone()), (Some("Aurora: the Berlin pilot's sign-on."), json!(["SSO"])));
+        apply(&id, ev, &[json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works", "Review passed"], "quote": "Then SSO has to land first"}),
+                         json!({"op": "status", "node": "s1", "effect": "due", "due_text": "24th of November", "quote": "the pilot moves to the 24th of November"})]).unwrap();
+        let packets = super::apply::verify_prep(&id, false).unwrap();
+        assert!(!packets.is_empty() && packets.iter().all(|k| k["thread"] == "Aurora" && k["also_in"]["threads"] == json!(["Borealis"])), "{packets:?}");
+        // An item in this thread only: nothing about others.
+        fs::remove_file(Ledger::of(&same.id).unwrap().dir.join(format!("evidence/{ev}.json"))).unwrap();
+        fs::remove_file(Ledger::of(&other.id).unwrap().dir.join(format!("evidence/{ev}.json"))).unwrap();
+        assert!(pending(&id).unwrap().iter().all(|i| i.get("also_in").is_none()));
     }
 
     #[test]
