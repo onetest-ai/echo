@@ -152,7 +152,7 @@ function tabBody(c, segs, chat, frames) {
       ? `<p style="color:var(--text-3)">Listening. The live transcript appears here as people speak.</p>`
       : `<p style="color:var(--text-3)">${c.status === 'transcribing' ? 'Transcribing on this computer. This takes about a quarter of the call length.' : 'No transcript for this call.'}</p>`
     return `<div class="from-bar"><input class="search" id="find" placeholder="Find in transcript" value="${esc(S.find)}" style="max-width:280px" aria-label="Find in transcript"></div>
-      ${turnsHtml(segs, S.find.trim().toLowerCase(), S.jump, noteMarks(c))}`
+      ${turnsHtml(segs, S.find.trim().toLowerCase(), S.jump != null ? S.jump : S.jumpShown && S.jumpShown.call === c.name && !S.find.trim() ? S.jumpShown.t : null, noteMarks(c))}`
   }
   if (S.tab === 'chat') {
     return `<div class="chat">${chat.map((m) => `<article class="msg"><header><b>${esc(m.from)}</b><time>${m.t == null ? '' : m.t < 0 ? 'before the call' : clock(m.t)}</time></header>

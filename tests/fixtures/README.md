@@ -46,7 +46,7 @@ a microphone or reads a real Teams, and `call.py` makes its calls.
 |---|---|---|
 | `small` | The data the existing cases and scenarios are written against: Sam Rivera at Initech, clients Acme and Globex, 3 calls, 2 threads, 7 work items, a 5-meeting agenda (`tests/app_profile.md`, "What the test data holds") | 3 calls · 2 threads · 7 items · 5 people · 5 meetings |
 | `standard` | Every value of every state axis of `tests/feature-map/axes/` that test data can hold (the rest are skipped, with the reason, below), and the axis groups of `combinations.json` covered pairwise | 96 calls (56 main ones, 40 all-hands of last spring so the list pages past 60) · 17 threads · ~147 items · 19 people · 40 meetings |
-| `hostile` | `standard` without its seven small threads (#370), plus others' text in every place of `hostile.json`: HTML and script (`<img onerror>`, `<script>`, `javascript:` links), a 10 000-character word, right-to-left and combining characters, emoji and Cyrillic, Markdown that looks like links or headings. Each piece carries a marker `HOSTILE-NN` | standard + 5 calls, 1 thread, 3 items, 2 meetings; ~120 marked pieces |
+| `hostile` | `standard`, plus others' text in every place of `hostile.json`: HTML and script (`<img onerror>`, `<script>`, `javascript:` links), a 10 000-character word, right-to-left and combining characters, emoji and Cyrillic, Markdown that looks like links or headings. Each piece carries a marker `HOSTILE-NN` | standard + 5 calls, 1 thread, 3 items, 2 meetings; ~120 marked pieces |
 
 Every set's config has `calendar_command: []`, so the calendar is off: a sync never runs the msgraph skill from your
 real `~/.claude` and never replaces the set's agenda with your real meetings (#242). Microsoft 365 sign-ins live in the
@@ -70,7 +70,7 @@ a busy day.
   internal-tooling (on_hold, no client), legacy-migration (done, client removed), tyrell-bid (lost five days ago),
   acme-hackathon (cancelled). Besides them, seven small active threads, four for Wonka and three for Cyberdyne, each
   with a story and one task (no owner, no date, nothing shared with the others): Today's Threads at a glance has 12
-  threads, more than the 10 it shows at L. Not in `hostile` (#370).
+  threads, more than the 10 it shows at L.
 - **Work**: acme-rollout's items come from its calls through the ledger's own path (`ledger sync`, `apply`,
   `verify-apply`): created, verified, weak, wrong, to check, kept yours, a pending merge and move. acme-renewal's
   quote is the same item as one in acme-rollout, whose "done" is heard there. The user's own items cover the node
