@@ -93,6 +93,9 @@ pub struct WidgetDef {
     pub sizes: Vec<String>,
     #[serde(default = "widget_height")]
     pub height: String,
+    /// The rows of Today's grid it may take: 1, 2 (`[1]` when not said).
+    #[serde(default = "widget_heights")]
+    pub heights: Vec<u8>,
     /// How often Echo asks its provider again while Today shows it, in seconds (60 at least; 60 when not said).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh: Option<u64>,
@@ -161,6 +164,9 @@ fn widget_sizes() -> Vec<String> {
 }
 fn widget_height() -> String {
     "hug".into()
+}
+fn widget_heights() -> Vec<u8> {
+    vec![1]
 }
 
 /// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
@@ -302,6 +308,9 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         let mut seen = std::collections::HashSet::new();
         if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
             bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+        }
+        if !matches!(w.heights.as_slice(), [1] | [2] | [1, 2] | [2, 1]) {
+            bail!("widget “{}” takes heights of 1 and 2 rows, each once", w.id);
         }
         if !["hug", "fill"].contains(&w.height.as_str()) {
             bail!("widget “{}” is hug or fill high", w.id);

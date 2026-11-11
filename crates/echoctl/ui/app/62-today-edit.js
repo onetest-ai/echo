@@ -1,5 +1,5 @@
 // ── Today's edit mode and Add a widget (#315; Workbench `WidgetsGallery`, its working prototype): Edit frames each
-// widget — grip, name, S M L, × — drag it to move (a widget's top or bottom quarter: a new row above / below; its left or
+// widget — grip, name, S M L, 1 2 (rows high), × — drag it to move (a widget's top or bottom quarter: a new row above / below; its left or
 // right half: before / after it; the end: last); Add a widget on the right: search, parts, a row a widget, the picked
 // one previewed at its sizes, Add or drag it in. Every change is `today_layout` (window/today.rs) → today_layout::place,
 // as `echoctl today` does.
@@ -39,11 +39,14 @@ function todayEditCell(id, html, size) {
     if (p.type === 'bool') return `<label class="tw-param"><input id="${fid}" type="checkbox" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}" ${now(p) ? 'checked' : ''}> ${esc(p.label)}</label>`
     return `<label class="tw-param">${esc(p.label)} <select id="${fid}" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}">${now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   }
+  // Its height (1 or 2 rows) when it takes both.
+  const h = item.height || 1, hs = w.heights || [1]
+  const heights = hs.length > 1 ? `<span class="tw-seg tw-hseg" role="group" aria-label="Height"><span aria-hidden="true">↕</span>${hs.map((x) => `<button type="button" class="${x === h ? 'on' : ''}" data-tw-height="${x}" data-tw-id="${esc(id)}" aria-pressed="${x === h}" aria-label="${esc(w.label)}: ${x} row${x === 1 ? '' : 's'} high" title="${x === 1 ? 'One row high' : 'Two rows high: its row and the next'}">${x}</button>`).join('')}</span>` : ''
   const params = (w.params || []).length
   const gear = params ? `<button type="button" id="tw-gear-${esc(id.replace(/[^a-z0-9-]/gi, '-'))}" class="icon-btn tw-gear${S.tdParams === id ? ' on' : ''}" data-tw-gear="${esc(id)}" aria-expanded="${S.tdParams === id}" aria-label="${esc(w.label)}: settings" title="Settings">${ICON('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')}</button>` : ''
   const form = params && S.tdParams === id ? `<div class="tw-params" role="group" aria-label="Settings of ${esc(w.label)}">${w.params.map(pick).join('')}</div>` : ''
   const body = html || `<div class="tw-empty set-sub">${esc(w.about || '')}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span>${gear}<button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>${form}<div class="tw-in" inert>${body}</div></section>`
+  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span>${heights}${gear}<button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>${form}<div class="tw-in" inert>${body}</div></section>`
 }
 
 /** The zone after the last widget: a widget dropped there goes last, on a row of its own. */
@@ -173,7 +176,7 @@ PANEL_VIEWS.push({
 
 document.addEventListener('click', (e) => {
   if (S.view !== 'today' || !e.target.closest) return
-  const t = e.target.closest('[data-tw-gear],[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
+  const t = e.target.closest('[data-tw-gear],[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-height],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
   if (!t) return
   const d = t.dataset
   if (d.twGear) { S.tdParams = S.tdParams === d.twGear ? null : d.twGear; return render() }
@@ -183,6 +186,7 @@ document.addEventListener('click', (e) => {
   if (d.twDone) return todayEditDone()
   if (d.twReset) return todayLayoutDo({ op: 'reset' })
   if (d.twSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twSize })
+  if (d.twHeight) return todayLayoutDo({ op: 'height', widget: d.twId, height: Number(d.twHeight) })
   if (d.twRemove) {
     const all = twRows().flat(), i = all.indexOf(d.twRemove), next = all[i + 1] || all[i - 1]
     if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(S.today.layout), at: Date.now() }

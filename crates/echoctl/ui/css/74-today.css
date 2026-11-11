@@ -260,3 +260,8 @@
 .pw-bn { font-size: 11.5px; color: var(--text-2); }
 .pw-foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 8px; }
 .pw-ask { margin-top: 6px; }
+/* A widget two rows high: it in its columns, the lines beside it in the others; as tall as they are. */
+.td-pair { display: grid; gap: 16px; align-items: stretch; }
+.td-tall { min-height: 280px; contain: size; display: flex; flex-direction: column; min-width: 0; }
+.td-tall > .td-sec, .td-tall > .tw { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.td-tall > .tw > .tw-in { flex: 1 1 auto; max-height: none; }

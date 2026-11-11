@@ -21,22 +21,24 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 ## Test Data
 
-| Widget | Kind | Temporal |
-|---|---|---|
-| `core:calendar.agenda`, `core:calendar.calendar`, `core:calendar.strip` | day | no |
-| `core:calendar.choices` | choices | yes |
-| `core:calendar.next` | next | yes |
-| `core:tasks.glance`, `core:tasks.done` | glance | no |
-| `core:calls.week` | calls | no |
-| `core:tasks.mine` | work | no |
-| `core:needs.now` | needs | yes |
-| `core:routines.cards` | cards | yes |
+| Widget | Kind | Temporal | Heights |
+|---|---|---|---|
+| `core:calendar.agenda`, `core:calendar.calendar` | day | no | 1, 2 |
+| `core:calendar.strip` | day | no | 1 |
+| `core:calendar.choices` | choices | yes | 1, 2 |
+| `core:calendar.next` | next | yes | 1, 2 |
+| `core:tasks.glance` | glance | no | 1, 2 |
+| `core:tasks.done` | glance | no | 1 |
+| `core:calls.week` | calls | no | 1 |
+| `core:tasks.mine` | work | no | 1, 2 |
+| `core:needs.now` | needs | yes | 1, 2 |
+| `core:routines.cards` | cards | yes | 1, 2 |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl widget list` | JSON: the eleven widgets of Test Data, in that order (a plugin's and a routine's card widgets after them when there are some), each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill) and `temporal` as in the table, and `params` (its settings: today/TC-032) |
+| 1 | `target/debug/echoctl widget list` | JSON: the eleven widgets of Test Data, in that order (a plugin's and a routine's card widgets after them when there are some), each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill), `heights` (rows high it may take) and `temporal` as in the table, and `params` (its settings: today/TC-032) |
 | 2 | In the page: `fetch('/api/widgets').then(r => r.json())` | The same eleven ids, in the same order |
 | 3 | `target/debug/echoctl widget show core:tasks.mine` and, in the page, `fetch('/api/today').then(r => r.json())` | The CLI's `mine.items` are the page's `work.mine.items`: the same titles, in the same order (My work's "I owe" cards) |
 | 4 | `target/debug/echoctl widget show core:needs.now` | `items` as the page's `needs.items` (the same ids), and `"empty": false` (the data has items in the last 24 h) |

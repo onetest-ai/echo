@@ -168,6 +168,7 @@ fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> 
             Ok(items)
         }
         "size" => l::resize(w, v["size"].as_str().unwrap_or("")),
+        "height" => l::set_height(w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),
         "remove" => l::remove(w),
         "reset" => l::reset(),
         op => anyhow::bail!("Today's layout: no change {op:?}"),
