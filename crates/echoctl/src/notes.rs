@@ -825,7 +825,13 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             r.policy = None;
             if r.state == "failed" && format!("{e:#}").contains("can't be read") {
                 let p = crate::ai::call_profile_id(dir).ok().and_then(|id| crate::ai::Settings::load().ok()?.get(&id).ok());
-                r.policy = p.and_then(|p| crate::ai::without_policy(&let_go, || crate::ai::unreadable(&p, &home))).map(|(file, choice)| json!({"file": file, "choice": choice}));
+                // (Where that profile's Claude Code runs: the built-in one's own folder.)
+                r.policy = p
+                    .and_then(|p| {
+                        let cwd = if p.kind == crate::ai::Kind::System { crate::ai::system_folder().unwrap_or_else(|_| home.clone()) } else { home.clone() };
+                        crate::ai::without_policy(&let_go, || crate::ai::unreadable(&p, &cwd))
+                    })
+                    .map(|(file, choice)| json!({"file": file, "choice": choice}));
             }
             save(dir, &r);
             release_claim(dir);

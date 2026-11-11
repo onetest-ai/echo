@@ -239,7 +239,8 @@ fn machine_wide(name: &str) -> bool {
 /// there. Any other (a profile's cached server settings) refuses until the user chooses (`unreadable`). None: let go.
 fn unread(why: &str, name: &str) -> Option<String> {
     let machine = machine_wide(name);
-    if let_go(name) && (!machine || denied(name)) {
+    // Only a file the system won't let this user read: Claude Code, run as the same user, can't read it either.
+    if let_go(name) && denied(name) {
         return None;
     }
     if machine && !denied(name) {
@@ -248,17 +249,19 @@ fn unread(why: &str, name: &str) -> Option<String> {
     Some(format!("{why} ({name} can't be read)"))
 }
 
-/// What the user may choose when a run was refused for a policy file it couldn't read (#404): `"anyway"` — a managed
-/// file the system won't let anyone but the admin read (Claude Code starts without it), or the built-in profile's own
-/// cached settings; `"system"` — a profile's own cached server settings: run on Claude Code (as configured) instead.
+/// What the user may choose when a run was refused for a policy file it couldn't read (#404): `"anyway"` — a file the
+/// system won't let this user read (Claude Code, as the same user, starts without it); `"system"` — a profile's own
+/// cached server settings that can't be taken: write on Claude Code (as configured) instead. None: nothing to offer
+/// (a cache of the built-in profile's own that isn't JSON: Claude Code fetches those settings again itself).
 pub fn unreadable(p: &Profile, cwd: &Path) -> Option<(String, &'static str)> {
     let bad = |f: &Path| f.try_exists().unwrap_or(true) && read_policy_json(f).is_err() && !let_go(&f.display().to_string());
-    if let Some(f) = managed_files().ok()?.into_iter().find(|f| bad(f) && denied(&f.display().to_string())) {
+    let shut = |f: &Path| bad(f) && denied(&f.display().to_string());
+    if let Some(f) = managed_files().ok()?.into_iter().find(|f| shut(f)) {
         return Some((f.display().to_string(), "anyway"));
     }
     if p.kind == Kind::System {
         let dirs = system_config_dirs(cwd).ok()?;
-        return dirs.iter().map(|d| d.join("remote-settings.json")).find(|f| bad(f)).map(|f| (f.display().to_string(), "anyway"));
+        return dirs.iter().map(|d| d.join("remote-settings.json")).find(|f| shut(f)).map(|f| (f.display().to_string(), "anyway"));
     }
     let f = p.config_folder().join("remote-settings.json");
     bad(&f).then(|| (f.display().to_string(), "system"))
