@@ -79,9 +79,9 @@ echoctl plugin marketplace list | add <owner/repo> | remove <name> | update
 ## Minutes templates
 
 The shapes minutes are written in (the user edits them in Settings → Templates). `echoctl templates` prints each one
-— `id`, `kind` (builtin / edited / yours), `match` (words of a meeting title it is for), `header`, `sections` — the
-`values` a template may name in braces, and `folder`, where the user's own live. To make or change one, write
-`<folder>/<id>.md` — lower-case id, words joined by `-`; the id of a built-in changes it:
+— `id`, `kind` (builtin / edited / yours), `match` (words of a meeting title it is for), `fixed` (Keep every section),
+`header`, `sections` — the `values` a template may name in braces, and `folder`, where the user's own live. To make or
+change one, write `<folder>/<id>.md` — lower-case id, words joined by `-`; the id of a built-in changes it:
 
 ```
 ---
@@ -100,7 +100,9 @@ One sentence: why we met. Then **Highlights**: 3–7 bullets, each `**Topic:** w
 
 Before the first `## ` is the header: how the minutes start. `{value}` from `values` is filled in; any other `{…}`
 is an instruction in the template's words; the rest is kept as written. Under each `## heading`: what to write there,
-in the user's words and formats (a table, bullets). Show the user the template before writing it; the next minutes
+in the user's words and formats (a table, bullets). `fixed: true` on a line after `match:` makes the template keep
+every section (Settings → Templates → Keep every section): its minutes have all its sections, in order; keep that
+line when rewriting a template that has it; never on the memo. Show the user the template before writing it; the next minutes
 of a matching call follow it, and Write again with… in a call's Minutes uses it at once.
 
 Meeting types (what kind of meeting a call was — Client, Internal… — and how to tell each, which the minutes classify

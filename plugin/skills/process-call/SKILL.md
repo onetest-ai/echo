@@ -68,15 +68,16 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
 - Every `##` section is there, in its order, its heading as written. One with nothing to record
   keeps its heading and gets the single line `_None recorded._`, unless its words say what to
   write then ("Not scheduled").
-- The one exception: a section whose words say when it applies ("only when…") is left out
+- One exception to that: a section whose words say when it applies ("only when…") is left out
   when that doesn't hold.
-- No other `##` section: the user's headings (`user_headings`) become `###` topics inside the
-  section they belong in (the one the template's words name for them, if any). If no template
-  section is left at all, they go under one `## Notes` section: the user's notes are never dropped.
-- No heading cap (`heading_budget` is null): never merge or drop a section.
-- On screen and In the chat go into the template's own section for each: a heading that starts
-  or ends with "On screen" / "In the chat". A template without one gets it after its last
-  section, as for any template.
+- No other `##` section, apart from the two below: the user's headings (`user_headings`) become
+  `###` topics inside the section they belong in (the one the template's words name for them, if
+  any). If every section was left out (each says "only when…" and none holds), they go under one
+  `## Notes` section: the user's notes are never dropped.
+- No heading cap (`heading_budget` is null): never merge or drop a section to fit.
+- On screen and In the chat go into the template's own section for each (which heading is which:
+  step 4, "Shared screens"); a template without one gets it after its last section, as for any
+  template.
 
 ## 3b. Meeting type (before you write)
 `context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
@@ -128,8 +129,8 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   owner and time from the transcript, and drop one the transcript doesn't bear out (a live note can
   mishear, or be overtaken minutes later). `gaps` were never read live; past `covered_until` there
   are none.
-- Otherwise use the template's sections (not a fixed template: step 3), at most `heading_budget` headings in total (merge or
-  drop the least relevant). Follow each section's instruction.
+- Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
+  drop the least relevant; a fixed template has no cap: step 3). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.
 - Remote speakers share one track. It is labelled "Remote", or with people's names where Teams
   showed who was speaking, or "Speaker 1", "Speaker 2", … where Echo told voices apart without a
@@ -149,7 +150,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   where the name appears anyway: people in the attendees line (`[Jane Doe](echo://person/…)`), the
   thread or client once in the header, the previous meeting in "Since last time". Only links from
   `links`, copied exactly — never make one up. Times stay `[mm:ss]`.
-- Ground every line in the transcript. Leave a section out rather than pad it (a fixed template: `_None recorded._` instead, step 3).
+- Ground every line in the transcript. Leave a section out rather than pad it (a fixed template: `_None recorded._`, or the section's own words for that case, instead: step 3).
 - **Diagrams:** when a process, flow or architecture was walked through (or the user asks for
   one), draw it as a ```` ```mermaid ```` block (`flowchart TD`; one short line per node, `<br>` for
   breaks, `{{…}}` for human decisions). The Echo window draws it. Only steps that were said or
@@ -170,7 +171,7 @@ folder) lists them all, one JSON line each — Read it; its `file` is relative t
 (`frames/42m10s.jpg` → Read `<dir>/frames/42m10s.jpg`). Look at the frames with Read: the sample, and on a longer call
 also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section (a fixed template's own, step 3): one bullet per
-meaningful frame, `[mm:ss]`, the frame's file name (`05m07s.jpg`) and what it showed, only facts visible in the image: describe what
+meaningful frame, `[mm:ss]`, the frame's file name as plain text (`05m07s.jpg`, not a link) and what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
 should show; if you can't tell, write "shared screen" and nothing more. A frame's `shared_by`
 says whose screen it was, not who presented it. Skip frames that are just video tiles or the
