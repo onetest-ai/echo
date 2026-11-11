@@ -109,7 +109,12 @@ pub fn collect() -> Collected {
                 format!("Minutes failed: {}", call_title(&d)),
                 run.message.as_deref().unwrap_or("Claude Code didn't finish them").chars().take(160).collect(),
                 false,
-                vec![act("Write again", true, json!({"cmd": "write_notes", "call": name})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                // A policy file Echo couldn't read (#404): the user's choice waits here too.
+                match run.policy.as_ref().map(|p| (p["choice"].as_str(), p["file"].as_str())) {
+                    Some((Some("system"), _)) => vec![act("Write on Claude Code (as configured)", true, json!({"cmd": "write_notes", "call": name, "profile": crate::ai::SYSTEM})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                    Some((Some("anyway"), Some(f))) => vec![act("Write anyway", true, json!({"cmd": "write_notes", "call": name, "without_policy": f})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                    _ => vec![act("Write again", true, json!({"cmd": "write_notes", "call": name})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                },
                 Some(format!("call/{name}/minutes")),
             )),
             _ => {}

@@ -43,7 +43,7 @@ tags: [claude, ai-profiles, policy, cli]
 | 4 | `target/debug/echoctl ai login work; echo "exit $?"` | `Error: your organisation's Claude Code policy decides where requests go — use the "Claude Code (as configured)" profile (<$F>)` and `exit 1`: no sign-in starts |
 | 5 | `target/debug/echoctl ai status work \| grep problem` | `"problem"` holds the same sentence, ending `(<$F>)` |
 | 6 | `echo '{"apiKeyHelper": "/usr/bin/true"}' > "$F"`, then `target/debug/echoctl notes <call> --wait` | `Error: your organisation's Claude Code policy decides where requests go — use the "Claude Code (as configured)" profile (<$F>) (log: …)` |
-| 7 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | `Error: your organisation's Claude Code policy decides where requests go — use the "Claude Code (as configured)" profile (<$F> can't be read) (log: …)`: a policy Echo can't read refuses too (to confirm with the user, see Notes) |
+| 7 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | `Error: your organisation's Claude Code policy decides where requests go — use the "Claude Code (as configured)" profile (<$F> can't be read) (log: …)`, then a line saying how to write them on Claude Code (as configured) instead: `echoctl notes '<call name>' --profile system --wait`; the call keeps its profile (Claude · work) until the user chooses |
 | 8 | `echo '{"model": "sonnet"}' > "$F"`, then `target/debug/echoctl notes <call> --wait` | `Error: test data: Claude Code is a fake here (log: …)`: a policy that can't route lets the run start |
 
 ## Expected Final State
@@ -53,6 +53,6 @@ While a policy that could route (a routing variable in `env`, a key helper, or a
 - `rm -f "$F"`; `tests/fixtures/serve.sh down <dir>` and remove `<dir>`.
 
 ## Notes
-- To confirm with the user: step 7 (a policy file Echo can't read is refused too) and the refusal's wording for it are not stated in F-AI-06's text ("admin policy that could route Claude Code … refuses the runs it would affect"); the step stays as the safe reading, to be kept or dropped by the user's answer.
+- Step 7: the user's decision (#404) — a profile's own policy file Echo can't read asks to write the minutes on Claude Code (as configured); the choice itself is claude/TC-029.
 - The machine-wide sources (`/Library/Application Support/ClaudeCode/managed-settings.json` and its `managed-settings.d/`, macOS managed preferences, Windows policy keys) are read by the same check but need root or the registry: a person checks them (create the file with `sudo`, run step 2 with a real profile, remove it with `sudo rm`; never on the user's real `~/echo`). Not covered by this case.
 - The profile "Claude Code (as configured)" (`system`) is not refused by this check: it is the user's own setup, so its policy is the user's own.

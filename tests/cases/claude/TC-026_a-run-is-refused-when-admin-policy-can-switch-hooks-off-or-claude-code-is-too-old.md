@@ -57,7 +57,7 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 | 1 | `echo '{"disableAllHooks": true}' > "$F"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` | `Error: the minutes run needs Echo's guard (a Claude Code hook), and a Claude Code policy switches hooks off or can't be read — ask for hooks to be allowed, or run /echo:process-call in a Claude Code session (<$F>) (log: …/claude.log)` and `exit 1` |
 | 2 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence without the `(log: …)` part; the fake never started (no "fake 026 stopped here") |
 | 3 | `echo '{"allowManagedHooksOnly": true}' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same `Error: the minutes run needs Echo's guard …` with `(<$F>)` |
-| 4 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same sentence, ending `(<$F> can't be read)` (to confirm with the user, see Notes) |
+| 4 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same sentence, ending `(<$F> can't be read)`, then how to write them on Claude Code (as configured) instead (`--profile system`); `notes-run.json` has `failed` (the choice itself: claude/TC-029) |
 | 5 | `echo '{"model": "sonnet"}' > "$F"; rm -f "$D/started"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` (the fake's version is 2.1.200) | The policy check passes, then the run is refused for the version, before Claude Code was given anything: `Error: … Claude Code 2.1.200 is too old to write minutes …`, telling to update Claude Code to 2.1.295 or later (how: `claude update`), then `exit 1`; the message does not say "Try again" or point at a button (this is the terminal); `ls "$D/started"` finds nothing (no run was started, no prompt given); no "fake 026 stopped here" |
 | 6 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence about 2.1.200 and updating to 2.1.295 or later |
 | 7 | `echo 2.1.294 > "$D/fake-version"; rm -f "$D/started"; target/debug/echoctl notes <call> --wait; ls "$D/started"` | `Error: … Claude Code 2.1.294 is too old to write minutes …` with the same advice; `ls` finds nothing |
@@ -70,6 +70,6 @@ A policy that switches hooks off (or can't be read) and a Claude Code older than
 - `rm -f "$F" "$D/fake-version"; mv "$D/bin/claude.fake" "$D/bin/claude"`; `tests/fixtures/serve.sh down <dir>` and remove `<dir>`.
 
 ## Notes
-- To confirm with the user: step 4 (an unreadable policy file refuses the run) is not stated in F-CC-02's text ("admin policy can switch hooks off"); kept as the safe reading.
+- Step 4: the user's decision (#404) — an unreadable policy file asks instead of only refusing; see claude/TC-029.
 - Machine-wide policy (`managed-settings.json` under `/Library/Application Support/ClaudeCode`, macOS managed preferences, Windows policy keys) is read by the same check but needs root: a person creates the file with `sudo` and removes it after, on test data only.
 - Plugin runs and thread syncs use the same checks (`claudejob`, `projectsync`); this case checks the minutes run.

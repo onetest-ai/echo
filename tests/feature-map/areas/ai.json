@@ -54,11 +54,14 @@
   },
   {
    "id": "F-AI-06",
-   "feature": "Admin policy that could route Claude Code or switch hooks off refuses the runs it would affect",
+   "feature": "Admin policy that could route Claude Code or switch hooks off refuses the runs it would affect; a policy file Echo can't read asks (#404): a profile's own file offers Claude Code (as configured), a managed file only the admin may read offers to write anyway, a broken managed one says Claude Code won't start with it",
    "priority": "high",
    "check": "person",
    "axes": [
     "ai.kind"
+   ],
+   "cases": [
+    "claude/TC-029"
    ]
   },
   {

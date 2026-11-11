@@ -1457,6 +1457,12 @@ mod tests {
         assert!(set_notes_model("nobody", "x").is_err());
     }
 
+    /// Root reads any file: a permission test means nothing then.
+    #[cfg(unix)]
+    fn nix_root() -> bool {
+        std::process::Command::new("id").arg("-u").output().is_ok_and(|o| o.stdout.starts_with(b"0"))
+    }
+
     #[test]
     fn a_policy_that_switches_hooks_off_is_found() {
         assert!(restricts_hooks(&json!({"allowManagedHooksOnly": true})) && restricts_hooks(&json!({"settings": {"disableAllHooks": true}})));
@@ -1471,7 +1477,21 @@ mod tests {
         assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("remote-settings.json")));
         fs::write(&cached, "not json").unwrap();
         assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("can't be read")));
+        // #404: the profile's own cached settings unreadable — the choice offered is Claude Code (as configured); a
+        // yes to go without a file lets go only one the system won't let this user read (Claude Code can't either).
+        assert_eq!(unreadable(&p, Path::new(".")), Some((cached.display().to_string(), "system")));
+        let file = cached.display().to_string();
+        assert!(without_policy(std::slice::from_ref(&file), || hooks_conflict(&p, Path::new("."))).is_err(), "readable, not JSON: not let go");
+        #[cfg(unix)]
+        if !nix_root() {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cached, fs::Permissions::from_mode(0o000)).unwrap();
+            assert!(without_policy(std::slice::from_ref(&file), || hooks_conflict(&p, Path::new("."))).is_ok(), "denied: let go");
+            assert!(hooks_conflict(&p, Path::new(".")).is_err(), "the yes was for those runs only");
+            fs::set_permissions(&cached, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         fs::remove_file(&cached).unwrap();
+        assert_eq!(unreadable(&p, Path::new(".")), None);
         assert_eq!(hooks_conflict(&p, Path::new(".")).unwrap(), [p.config_folder()], "checked: the profile's folder");
     }
 
