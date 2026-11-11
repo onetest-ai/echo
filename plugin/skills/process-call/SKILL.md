@@ -64,6 +64,20 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
   including formats it shows (a table's columns, bullet shapes, bold labels).
 `template.header` and `template.sections` are the same, split.
 
+**A fixed template** (`template.fixed` true): its sections are the whole shape of the minutes.
+- Every `##` section is there, in its order, its heading as written. One with nothing to record
+  keeps its heading and gets the single line `_None recorded._`, unless its words say what to
+  write then ("Not scheduled").
+- The one exception: a section whose words say when it applies ("only when…") is left out
+  when that doesn't hold.
+- No other `##` section: the user's headings (`user_headings`) become `###` topics inside the
+  section they belong in (the one the template's words name for them, if any). If no template
+  section is left at all, they go under one `## Notes` section: the user's notes are never dropped.
+- No heading cap (`heading_budget` is null): never merge or drop a section.
+- On screen and In the chat go into the template's own section for each: a heading that starts
+  or ends with "On screen" / "In the chat". A template without one gets it after its last
+  section, as for any template.
+
 ## 3b. Meeting type (before you write)
 `context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
 from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
@@ -101,7 +115,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
 - Start with the template's header.
 - **If the user took notes** (`user_notes`): their notes are the backbone. Keep every point
   they wrote, expand it from the transcript, and use their `user_headings` as section headings
-  before the template's. Never drop or contradict something the user wrote.
+  before the template's (a fixed template: `###` topics inside its sections, step 3). Never drop or contradict something the user wrote.
   Notes tied to a moment: `- [12:05] …` is about that time of the call — expand it from what was said
   around then and put it in the section on that topic; a `  > "…"` line under a note quotes the words
   it is about. `? …` is the user's question (an open question unless the call answered it), `! …` a
@@ -114,7 +128,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   owner and time from the transcript, and drop one the transcript doesn't bear out (a live note can
   mishear, or be overtaken minutes later). `gaps` were never read live; past `covered_until` there
   are none.
-- Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
+- Otherwise use the template's sections (not a fixed template: step 3), at most `heading_budget` headings in total (merge or
   drop the least relevant). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.
 - Remote speakers share one track. It is labelled "Remote", or with people's names where Teams
@@ -135,7 +149,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   where the name appears anyway: people in the attendees line (`[Jane Doe](echo://person/…)`), the
   thread or client once in the header, the previous meeting in "Since last time". Only links from
   `links`, copied exactly — never make one up. Times stay `[mm:ss]`.
-- Ground every line in the transcript. Leave a section out rather than pad it.
+- Ground every line in the transcript. Leave a section out rather than pad it (a fixed template: `_None recorded._` instead, step 3).
 - **Diagrams:** when a process, flow or architecture was walked through (or the user asks for
   one), draw it as a ```` ```mermaid ```` block (`flowchart TD`; one short line per node, `<br>` for
   breaks, `{{…}}` for human decisions). The Echo window draws it. Only steps that were said or
@@ -155,14 +169,19 @@ that changed the screen most. On a longer call, `frames.index` (`frames.jsonl` i
 folder) lists them all, one JSON line each — Read it; its `file` is relative to the call's folder
 (`frames/42m10s.jpg` → Read `<dir>/frames/42m10s.jpg`). Look at the frames with Read: the sample, and on a longer call
 also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
-slide, names on a diagram, the agenda) and add a short **On screen** section: one bullet per
-meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image: describe what
+slide, names on a diagram, the agenda) and add a short **On screen** section (a fixed template's own, step 3): one bullet per
+meaningful frame, `[mm:ss]`, the frame's file name (`05m07s.jpg`) and what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
 should show; if you can't tell, write "shared screen" and nothing more. A frame's `shared_by`
 says whose screen it was, not who presented it. Skip frames that are just video tiles or the
 Teams UI.
 
-Then prune: keep exactly the frames the **On screen** section cites and move the rest to Echo's trash (video
+**Which heading is which:** the On screen section is a heading (`##` or deeper, any case) whose
+text starts or ends with "On screen", a `:` or `.` at its end aside — so `On screen — slides`
+and `Appendix: On screen` count — together with any heading nested inside it; the In the chat
+section is the same with "In the chat".
+
+Then prune: keep exactly the frames the **On screen** section cites (its bullets, also under headings nested in it) and move the rest to Echo's trash (video
 tiles, Teams UI, near-duplicates of a kept slide) — `echoctl frames <dir> --keep
 <file1>,<file2>,…` (the file names, as in the frames' `file`), or `--keep none` if none was useful. Frames you
 didn't look at (more than 12) are judged by their neighbours: keep one per distinct slide.
@@ -171,7 +190,7 @@ didn't look at (more than 12) are judged by their neighbours: keep one per disti
 The meeting's Teams chat: `[{t, from, text, files}]`, `t` in seconds on the transcript's clock
 (negative = before the recording). It is the third stream next to voice and screen: what was
 written, not said. Use it — links and files shared, questions asked in writing, numbers pasted,
-"+1"s that are really decisions — and add a short **In the chat** section (sender, what, `[mm:ss]`)
+"+1"s that are really decisions — and add a short **In the chat** section (sender, what, `[mm:ss]`; a fixed template's own, step 3)
 for anything not already covered by the spoken notes. Written commitments are action items too.
 Senders are real names: they can also confirm who a remote speaker was when the transcript
 shows the same point being made. Skip greetings and "joining in 2 min".
