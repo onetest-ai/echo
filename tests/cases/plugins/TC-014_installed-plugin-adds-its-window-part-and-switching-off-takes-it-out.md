@@ -43,7 +43,7 @@ EOF
 | 1 | `echoctl plugin install acme-greeter --yes`; then `echoctl plugin list` | The first prints the sheet line `• Runs its own code in the Echo window, with your rights` and `Installed Acme greeter 0.1.0`; in the list's `installed`, the entry `acme-greeter` has `"enabled": true` and `"client": "client.js"` |
 | 2 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#settings/plugins` (tab "Installed") | The group "Acme greeter" is a row with the switch "Acme greeter on" on (`aria-checked="true"`); the row has no "Has a problem" mark; the detail shows no text "Its window part didn't load" |
 | 3 | In Settings' left list find the heading "From plugins"; click the button "Acme greeter" under it | The URL is `{{base_url}}/#settings/acme-greeter:main`; the heading "Acme greeter" and the text "Greetings are on." are shown |
-| 4 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="acme-weekly-sync"]`, open "Call actions" | The menu lists the item "Greet the call" after "Ask Claude about this call" and before "Delete…" |
+| 4 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="acme-weekly-sync"]`, open "Call actions" | The menu lists the item "Greet the call" |
 | 5 | Click the item "Greet the call" | The URL is `{{base_url}}/#tasks` (what the button was told to do) |
 | 6 | Click "Actions ⌘K" (`[data-pal-open]`), type `hello` in "Action" | An entry "Say hello (Acme greeter)" is listed, in the group "Plugins" |
 | 7 | Click that entry | The palette closes; the URL is `{{base_url}}/#settings/acme-greeter:main` |
@@ -61,6 +61,6 @@ Acme greeter is installed and on, and all four parts of its window half (Call ac
 - `tests/fixtures/serve.sh down <dir>`; close the test tab
 
 ## Notes
-- The window half is trusted code loaded into the page (`apply(ctx)` in `33-plugins-client.js`); what it adds is taken out in `unloadPlugin` when the plugin is switched off or removed. Step 10 is the check of that, part by part.
+- The window half is trusted code that adds its four parts to the window when it loads; switching the plugin off or removing it must take every part out again. Step 10 is the check of that, part by part.
 - The plugin has no host half, so its sheet is the one line about the window; it asks for nothing else of Echo.
 - The panel tab's name and the palette entry's text are the plugin's own (`label`); the palette's group name for a plugin that gives none is "Plugins" (drawn in capitals by the style).

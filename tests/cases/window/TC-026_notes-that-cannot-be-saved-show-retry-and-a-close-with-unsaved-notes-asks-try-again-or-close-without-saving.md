@@ -1,12 +1,13 @@
 ---
 id: TC-026
-title: Notes that can't be saved show "Retry"; a close with unsaved notes asks "Try again / Close without saving", and once they can be saved it goes on
+title: Notes that can't be saved show "Retry", which saves them once they can be; closing the window with unsaved notes asks "Try again / Close without saving"; "Try again" saves and closes
 priority: high
 type: functional
 requirements: [F-NOTES-11]
 module: window
 run: agent
 platform: any
+user_steps: ["Opens Echo's own window on the run's data (`echoctl window`), types a note, closes the window with its close button, clicks Try again and Close without saving in the banner (steps 8-13)"]
 tags: [notes, files, data-loss, close]
 ---
 
@@ -16,16 +17,16 @@ tags: [notes, files, data-loss, close]
 
 ## Preconditions
 - Test data built right before the run: `tests/fixtures/serve.sh up <dir> <port>` (the small set); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); shell steps run after `. <dir>/env`
-- **How a save is made to fail:** the call's folder is made read-only (`chmod 555`), so the file `my-notes.md` can't be written (`calls::save_my_notes`: "Permission denied"). Acme weekly sync (today's) has no `my-notes.md` yet. **Steps 2 and 7 run `chmod` on that one call folder of the run's data**: the exception to the runner's read-only Bash, on the run's own data only. It is undone in step 7 and again in the Teardown
-- **The close handshake, in a served window.** The app's close (the window's close button, Cmd+Q, an update) asks the page to save with `window.echo.prepareClose(n, close)` and answers the user from what the page replies (`tray/leaving.rs`). A browser tab has no native window, so steps 6 and 9 call that same entry point from the page with `browser_evaluate` (`n` is the handshake number: 1, then 2; `true` is "a close"). The page's side is checked here: the notes saved first, the banner, its two buttons. That the native window then stays open or closes is the app's half: not reachable here (see Notes)
-- My notes is open in the right panel on Acme weekly sync (steps 1–2)
+- **How a save is made to fail (no user-level way):** the call's folder is made read-only (`chmod 555`), so the notes file `my-notes.md` can't be written. Acme weekly sync (today's) has no `my-notes.md` yet. **Steps 2, 6, 9, 12 run `chmod` on that one call folder of the run's data**: the exception to the runner's read-only Bash, on the run's own data only. The Teardown makes it writable again
+- **Why the close is a person's part.** Closing the window is the user's click on the native window's close button; a browser tab has no such window, and its close or reload doesn't go through Echo's close handshake (the notes are saved first, then the window closes). So steps 8–13 are done by a person in Echo's own window (`user_steps`): the agent prepares the folder, the person closes, the agent checks the files. The run is BLOCKED, not failed, if the person is not there
+- My notes is open in the right panel on Acme weekly sync (step 1)
 
 ## Test Data
 
 | Field | Value |
 |-------|-------|
 | Call | Acme weekly sync (today): `A=$(ls "$ECHOCTL_HOME/calls" \| grep -- '-acme-weekly-sync$' \| tail -1)`; its folder `$ECHOCTL_HOME/calls/$A`, no `my-notes.md` |
-| Note | `Send Dana the SSO dates` |
+| Notes | `Send Dana the SSO dates`, `Book the Berlin room`, `Discard this line` |
 
 ## Steps
 
@@ -33,25 +34,29 @@ tags: [notes, files, data-loss, close]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calls`, wait for "Acme weekly sync", click the row `[data-call$="-acme-weekly-sync"]` (today's), open My notes (`[data-panel-flip="notes"]`) | My notes shows the note box `#note-input` and the state `#notes-state` "Saved"; no error notice |
 | 2 | In Bash: `A=$(ls "$ECHOCTL_HOME/calls" \| grep -- '-acme-weekly-sync$' \| tail -1); chmod 555 "$ECHOCTL_HOME/calls/$A"; ls -ld "$ECHOCTL_HOME/calls/$A"` | The folder's mode reads `dr-xr-xr-x` |
-| 3 | Type `Send Dana the SSO dates` into `#note-input` and press Enter; wait 3 s | The list shows "Send Dana the SSO dates"; an error notice (`.notice.error`) reads "Your notes couldn't be saved: …" and the message contains "Permission denied", with a button "Retry"; the state `#notes-state` reads "Couldn't save: …" with the same message |
+| 3 | Type `Send Dana the SSO dates` into `#note-input` and press Enter; wait 3 s | The list shows "Send Dana the SSO dates"; an error notice (`.notice.error`) says the notes couldn't be saved and gives the reason, with a button "Retry"; the state `#notes-state` reads "Couldn't save" with a reason |
 | 4 | Run `ls "$ECHOCTL_HOME/calls/$A" \| grep -c my-notes` | `0`: nothing was written |
-| 5 | Click "Retry"; wait 3 s | The notice is there again with "Retry" and "Permission denied" (the save was tried and failed again); the note is still listed |
-| 6 | Type `Book the Berlin room` into `#note-input` without pressing Enter; run `browser_evaluate` `() => { window.echo.prepareClose(1, true); return true }`; wait 3 s; snapshot | A banner over the window (`.toast.error`) reads "Your notes couldn't be saved: …" (the message contains "Permission denied") with two buttons: "Try again" (`[data-cmd="close-retry"]`) and "Close without saving" (`[data-cmd="close-now"]`). The typed line is not lost: the list now holds "Book the Berlin room" too. The note box is not read-only (`#note-input` has no `readonly`): the user can still copy their text |
-| 7 | In Bash: `chmod 755 "$ECHOCTL_HOME/calls/$A"; ls -ld "$ECHOCTL_HOME/calls/$A"` | The folder's mode reads `drwxr-xr-x` |
-| 8 | Click "Try again" in the banner | The banner is gone (the page asks the app to close again; a served window has no app to answer, so step 9 plays its answer); the notes are still unsaved: `ls "$ECHOCTL_HOME/calls/$A" \| grep -c my-notes` prints `0` |
-| 9 | `browser_evaluate` `() => { window.echo.prepareClose(2, true); return true }`; wait 3 s; snapshot, then run `cat "$ECHOCTL_HOME/calls/$A/my-notes.md"` | No banner and no error notice; `#notes-state` reads "Saved"; `#note-input` has `readonly` (the editors stay read-only while Echo closes); `my-notes.md` holds both notes: a line with `Send Dana the SSO dates` and a line with `Book the Berlin room` |
+| 5 | Click "Retry"; wait 3 s | The folder is still read-only, so the notice is there again with "Retry"; the note is still listed |
+| 6 | In Bash: `chmod 755 "$ECHOCTL_HOME/calls/$A"`; then click "Retry"; wait 3 s; run `cat "$ECHOCTL_HOME/calls/$A/my-notes.md"` | The notice is gone and `#notes-state` reads "Saved"; `my-notes.md` holds a line with `Send Dana the SSO dates` |
+| 7 | In Bash: `chmod 555 "$ECHOCTL_HOME/calls/$A"; ls -ld "$ECHOCTL_HOME/calls/$A"`; then in the served window reload `{{base_url}}/` (it is only a viewer from here on) | The folder's mode reads `dr-xr-xr-x` |
+| 8 | **The user does:** with `. <dir>/env` loaded, runs `target/debug/echoctl window` (Echo's own window on this data), opens Acme weekly sync, opens My notes, types `Book the Berlin room` into the note box **without pressing Enter**, and clicks the window's close button | The window does not close. A banner over it says the notes couldn't be saved, with two buttons: "Try again" and "Close without saving". The typed line is not lost (it is listed or still in the box) and the box can still be edited: the user can copy their text |
+| 9 | In Bash: `grep -c "Berlin" "$ECHOCTL_HOME/calls/$A/my-notes.md"; chmod 755 "$ECHOCTL_HOME/calls/$A"` | The notes file has no "Berlin" in it (`0`); the folder is writable again |
+| 10 | **The user does:** clicks "Try again" in the banner | The notes are saved and then the window closes (it is gone) |
+| 11 | In Bash: `cat "$ECHOCTL_HOME/calls/$A/my-notes.md"` | A line with `Send Dana the SSO dates` and a line with `Book the Berlin room` |
+| 12 | In Bash: `chmod 555 "$ECHOCTL_HOME/calls/$A"`. **The user does:** runs `target/debug/echoctl window` again, opens Acme weekly sync and My notes, types `Discard this line` without Enter, clicks the window's close button, and in the banner clicks "Close without saving" | The banner appears as in step 8; "Close without saving" closes the window at once |
+| 13 | In Bash: `chmod 755 "$ECHOCTL_HOME/calls/$A"; grep -c "Discard this line" "$ECHOCTL_HOME/calls/$A/my-notes.md"; grep -c "Berlin" "$ECHOCTL_HOME/calls/$A/my-notes.md"` | `0` then `1`: the discarded line was not saved, and the saved notes are untouched |
 
 ## Expected Final State
-Failed saves were reported with a Retry that tried again and failed again; the close with unsaved notes was refused with the banner "Try again / Close without saving" and kept every typed word; with the folder writable again the next close saved both notes into `my-notes.md` and went on (read-only editors, "Saved").
+Failed saves were reported with a Retry that failed while the folder was read-only and saved once it was writable; the close with unsaved notes kept the window open with "Try again / Close without saving" and kept every typed word; "Try again", with the folder writable, saved both notes into `my-notes.md` and then closed the window; "Close without saving" closed it without saving the new line.
 
 ## Teardown
-- Run `chmod 755 "$ECHOCTL_HOME/calls/$A"` (a read-only folder can't be removed with the rest of the run's data; it is already writable after step 7, so this only covers a run that stopped before it)
-- Reload `{{base_url}}/` (unfreezes the editors that step 9 made read-only) and close the panel
+- Run `chmod 755 "$ECHOCTL_HOME/calls/$A"` (a read-only folder can't be removed with the rest of the run's data; this covers a run that stopped before step 9 or 13)
+- The person closes any Echo window still open on the data
+- Reload `{{base_url}}/` and close the panel
 - `tests/fixtures/serve.sh down <dir>`; remove `$(dirname <dir>)` when the run is over
 
 ## Notes
-- Covers the page's half of F-NOTES-11: the notice and "Retry" (`15-my-notes.js`, `notes-retry` → `NotesSync.save`), and the close's banner and buttons (`14-call.js` `toasts`; `99-refresh.js` `prepareClose`; `90-render.js` `close-retry`, `close-now`). The error text after "Couldn't save:" is the OS's: only "Permission denied" is asserted.
-- The app's half is person-run, in Echo's own window with a note typed and `chmod 555` on the call's folder: the close button leaves the window open and shows the banner; "Try again" closes once the folder is writable again; "Close without saving" closes the window and the unsaved text is gone. The handshake's logic is Rust-tested in `tray/leaving.rs` (`close_ready` with `ok: false` for a close shows the page's banner, for a quit or an update it asks the user).
-- "Close without saving" sends `close_now`, which a served window ignores: not clicked here.
+- Covers F-NOTES-11 as the feature map words it: notes that can't be saved show Retry; closing with unsaved notes asks "Try again / Close without saving". That "Try again" saves and then closes is the criterion asserted in steps 10–11; a served window can't show it (no native close), which is why it is a person's step.
+- The reason after "Couldn't save" is the OS's wording and is not asserted.
 - The close saving a note that was typed but not added, on a folder that works, is the third trigger of `F-NOTES-07` that `window/TC-018` leaves to a person.
-- Written 2026-11-11 from the code; not yet run. If step 3's message is not "Permission denied" (a different OS wording), the case needs that line only, not the rest.
+- Rewritten 2026-11-11 from F-NOTES-11 and #17 (an earlier draft called the page's close entry from a script, which never closed anything); not yet run.

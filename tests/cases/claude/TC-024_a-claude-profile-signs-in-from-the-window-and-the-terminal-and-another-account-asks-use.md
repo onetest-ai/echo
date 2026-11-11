@@ -22,10 +22,10 @@ tags: [claude, ai-profiles, signin, cli]
 - **A fake `claude` that can sign in**, in place of the data's fake (which refuses `auth login`): `mv "$D/bin/claude" "$D/bin/claude.fake"`, then write `$D/bin/claude` (`chmod +x`):
   ```sh
   #!/bin/sh
-  # The data's fake + a sign-in. `auth login` records its arguments in the profile folder (login.args) and does what $D/fake-login says: ok (the folder is signed in to sam@initech.example from then on), anything else: waits, as for a browser that never comes back. Anything else: the data's fake.
+  # The data's fake + a sign-in. `auth login` does what $D/fake-login says: ok (the folder is signed in to sam@initech.example from then on), anything else: waits, as for a browser that never comes back. Anything else: the data's fake.
   d="$(dirname "$0")/.."
   case "$1 $2" in
-  "auth login") echo "$@" > "$CLAUDE_CONFIG_DIR/login.args"
+  "auth login")
     case "$(cat "$d/fake-login" 2>/dev/null)" in
       ok) touch "$CLAUDE_CONFIG_DIR/signed-in"; echo "Login successful."; exit 0;;
       *) exec sleep 120;;
@@ -36,7 +36,7 @@ tags: [claude, ai-profiles, signin, cli]
   ```
 - `echo hang > "$D/fake-login"`
 
-**Changes:** `<config dir>/ai.json` (the default profile; the account recorded for `out` and `other`), `<config dir>/claude/out/` (the fake's `signed-in` and `login.args`)
+**Changes:** `<config dir>/ai.json` (the default profile; the account recorded for `out` and `other`), `<config dir>/claude/out/` (the fake's `signed-in`)
 
 ## Test Data
 
@@ -53,16 +53,15 @@ tags: [claude, ai-profiles, signin, cli]
 |---|--------|----------------|
 | 1 | `target/debug/echoctl ai default out` | Prints `new calls use Claude · out` |
 | 2 | Load `{{base_url}}/` and wait for the text "isn't signed in."; read `.pill-note` | "Claude · out isn't signed in." and the button "Sign in…" |
-| 3 | Click "Sign in…" in the note; read the note; then `cat "$ECHOCTL_CONFIG_DIR/claude/out/login.args"` | The note reads "Sign in to Claude · out in your browser…" with a button "Cancel" and the hint "Browser didn't open? Cancel, then run `echoctl ai login out` in Terminal" with a "Copy" button; `login.args` holds `auth login --claudeai` |
+| 3 | Click "Sign in…" in the note; read the note | The note reads "Sign in to Claude · out in your browser…" with a button "Cancel" and the hint "Browser didn't open? Cancel, then run `echoctl ai login out` in Terminal" with a "Copy" button |
 | 4 | Click "Cancel" in the note | Within 15 s the note is "Claude · out isn't signed in." with "Sign in…" again; `target/debug/echoctl ai status out` has `"signed_in": false` and `"account": null` |
 | 5 | `echo ok > "$D/fake-login"`, then click "Sign in…" in the note | The note reads "Signed in as sam@initech.example · initech (max)." |
 | 6 | `target/debug/echoctl ai status out` | `"signed_in": true`, `"account": "sam@initech.example · initech (max)"`, `"expected_account": "sam@initech.example · initech"` (the first sign-in recorded the account) |
 | 7 | `rm "$ECHOCTL_CONFIG_DIR/claude/out/signed-in"`, then `target/debug/echoctl ai status out \| grep signed_in` | `"signed_in": false` |
-| 8 | `target/debug/echoctl ai login out; echo "exit $?"`, then `cat "$ECHOCTL_CONFIG_DIR/claude/out/login.args"` | Prints "Login successful." then `Claude · out is signed in as sam@initech.example · initech (max)` and `exit 0`; `login.args` is now `auth login --claudeai --email sam@initech.example` (the recorded account's email pre-filled) |
+| 8 | `target/debug/echoctl ai login out; echo "exit $?"` | Prints "Login successful." then `Claude · out is signed in as sam@initech.example · initech (max)` and `exit 0` |
 | 9 | `target/debug/echoctl ai default other`, reload `{{base_url}}/` and wait for the text "not sam@initech.example"; read `.pill-note` | "Claude · other is signed in as sam.rivera@globex.example · globex, not sam@initech.example · initech." with the buttons "Use sam.rivera@globex.example · globex" and "Sign in again…" |
-| 10 | `target/debug/echoctl ai status other \| grep problem` | `"problem"` is a text starting "Claude · other is signed in as sam.rivera@globex.example · globex, not sam@initech.example · initech — Use sam.rivera@globex.example · globex in the Echo window, or sign in again" |
-| 11 | Click "Use sam.rivera@globex.example · globex" | Within 20 s `.pill-note` is gone from the page |
-| 12 | `target/debug/echoctl ai status other \| grep -E 'problem\|expected_account'` | `"expected_account": "sam.rivera@globex.example · globex"` and `"problem": null` |
+| 10 | Click "Use sam.rivera@globex.example · globex" | Within 20 s `.pill-note` is gone from the page |
+| 11 | `target/debug/echoctl ai status other \| grep expected_account`; reload `{{base_url}}/` and wait 5 s | `"expected_account": "sam.rivera@globex.example · globex"`; `.pill-note` is still absent: the window no longer asks about the account |
 
 ## Expected Final State
 `out` signed in from the window and again from the terminal, with its account recorded; the Cancel left it signed out; `other` accepted the account it is signed in to.

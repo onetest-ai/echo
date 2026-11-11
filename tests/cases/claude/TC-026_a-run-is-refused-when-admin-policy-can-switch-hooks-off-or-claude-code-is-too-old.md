@@ -22,21 +22,25 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 - **A fake Claude Code that tells its version**, in place of the data's fake: `mv "$D/bin/claude" "$D/bin/claude.fake"`, then write `$D/bin/claude` (`chmod +x`):
   ```sh
   #!/bin/sh
-  # A minutes run reports the version in $D/fake-version (default 2.1.200) on its init line, then fails after 3 s. Anything else: the data's fake.
+  # `--version` says the version in $D/fake-version (default 2.1.200). A minutes run (ECHOCTL_RUN_CALL set) is recorded
+  # in $D/started with what it was given on stdin, reports the same version on its init line, and fails after 3 s.
+  # Anything else: the data's fake.
+  d="$(dirname "$0")/.."
+  v=$(cat "$d/fake-version" 2>/dev/null || echo 2.1.200)
+  case "$1" in --version) echo "$v (Claude Code)"; exit 0;; esac
   if [ -n "$ECHOCTL_RUN_CALL" ] && [ -z "$ECHOCTL_RUN_MODE" ]; then
-    cat > /dev/null
-    v=$(cat "$(dirname "$0")/../fake-version" 2>/dev/null || echo 2.1.200)
+    date > "$d/started"; cat >> "$d/started"
     echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-026\",\"claude_code_version\":\"$v\"}"
     echo '{"type":"assistant","message":{"model":"sonnet","content":[{"type":"text","text":"Reading the transcript."}]}}'
     sleep 3
     echo '{"type":"result","is_error":true,"result":"fake 026 stopped here"}'
     exit 1
   fi
-  exec "$(dirname "$0")/claude.fake" "$@"
+  exec "$d/bin/claude.fake" "$@"
   ```
-- Minimum Echo needs: Claude Code 2.1.295 (`guard::MIN_CLAUDE`)
+- Echo needs Claude Code 2.1.295 or later for minutes runs (README: "Minutes runs need Claude Code 2.1.295 or later")
 
-**Changes:** `$F`, `$D/fake-version`, `<call>/notes-run.json` and `claude.log`
+**Changes:** `$F`, `$D/fake-version`, `$D/started`, `<call>/notes-run.json` and `claude.log`
 
 ## Test Data
 
@@ -44,7 +48,7 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 |-------|-------|
 | Policies | `{"disableAllHooks": true}` · `{"allowManagedHooksOnly": true}` |
 | Hooks refusal | `the minutes run needs Echo's guard (a Claude Code hook), and a Claude Code policy switches hooks off or can't be read — ask for hooks to be allowed, or run /echo:process-call in a Claude Code session (<$F>)` |
-| Versions | 2.1.200, 2.1.294 (too old), 2.1.295 (enough) |
+| Versions | 2.1.200 and 2.1.294 (too old), 2.1.295 (enough) |
 
 ## Steps
 
@@ -53,18 +57,20 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 | 1 | `echo '{"disableAllHooks": true}' > "$F"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` | `Error: the minutes run needs Echo's guard (a Claude Code hook), and a Claude Code policy switches hooks off or can't be read — ask for hooks to be allowed, or run /echo:process-call in a Claude Code session (<$F>) (log: …/claude.log)` and `exit 1` |
 | 2 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence without the `(log: …)` part; the fake never started (no "fake 026 stopped here") |
 | 3 | `echo '{"allowManagedHooksOnly": true}' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same `Error: the minutes run needs Echo's guard …` with `(<$F>)` |
-| 4 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same sentence, ending `(<$F> can't be read)` |
-| 5 | `echo '{"model": "sonnet"}' > "$F"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` | Passes the hook check: Claude Code starts and the run ends with `Error: Claude Code 2.1.200 is too old for minutes runs — update it (`claude update`) to 2.1.295 or later, then click Try again (log: …)` and `exit 1` (the fake's default version 2.1.200) |
-| 6 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed Claude Code 2.1.200 is too old for minutes runs — update it (`claude update`) to 2.1.295 or later, then click Try again` |
-| 7 | `echo 2.1.294 > "$D/fake-version"; target/debug/echoctl notes <call> --wait` | `Error: Claude Code 2.1.294 is too old for minutes runs — update it (`claude update`) to 2.1.295 or later, then click Try again (log: …)` |
-| 8 | `echo 2.1.295 > "$D/fake-version"; target/debug/echoctl notes <call> --wait` | `Error: fake 026 stopped here (log: …)`: a Claude Code that is new enough is not stopped |
+| 4 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same sentence, ending `(<$F> can't be read)` (to confirm with the user, see Notes) |
+| 5 | `echo '{"model": "sonnet"}' > "$F"; rm -f "$D/started"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` (the fake's version is 2.1.200) | The policy check passes, then the run is refused for the version, before Claude Code was given anything: `Error: Claude Code 2.1.200 is too old for minutes runs …`, telling to update Claude Code to 2.1.295 or later (how: `claude update`), then `exit 1`; the message does not say "Try again" or point at a button (this is the terminal); `ls "$D/started"` finds nothing (no run was started, no prompt given); no "fake 026 stopped here" |
+| 6 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence about 2.1.200 and updating to 2.1.295 or later |
+| 7 | `echo 2.1.294 > "$D/fake-version"; rm -f "$D/started"; target/debug/echoctl notes <call> --wait; ls "$D/started"` | `Error: Claude Code 2.1.294 is too old for minutes runs …` with the same advice; `ls` finds nothing |
+| 8 | `echo 2.1.295 > "$D/fake-version"; target/debug/echoctl notes <call> --wait; cat "$D/started"` | `Error: fake 026 stopped here (log: …)`: a Claude Code that is new enough is not stopped; `$D/started` now exists (the run reached Claude Code) |
 
 ## Expected Final State
-A policy that switches hooks off (or can't be read) and a Claude Code older than 2.1.295 each end the minutes run with their own sentence and `failed` in `notes-run.json`, before the model works on the call; 2.1.295 is let through.
+A policy that switches hooks off (or can't be read) and a Claude Code older than 2.1.295 each end the minutes run with their own sentence and `failed` in `notes-run.json`, before Claude Code is started or given anything; 2.1.295 is let through.
 
 ## Teardown
 - `rm -f "$F" "$D/fake-version"; mv "$D/bin/claude.fake" "$D/bin/claude"`; `tests/fixtures/serve.sh down <dir>` and remove `<dir>`.
 
 ## Notes
+- To confirm with the user: step 4 (an unreadable policy file refuses the run) is not stated in F-CC-02's text ("admin policy can switch hooks off"); kept as the safe reading.
+- Steps 5–7 FAIL today: the version is only read from the run's first output line, after the run has started and the prompt has gone in, and the CLI message says "click Try again" (window wording). Issue #400 (A too-old Claude Code is found only after the minutes run has started). The case asserts the feature's text (F-CC-02: a run is refused when Claude Code is older than Echo needs), so it fails until #400 is fixed.
 - Machine-wide policy (`managed-settings.json` under `/Library/Application Support/ClaudeCode`, macOS managed preferences, Windows policy keys) is read by the same check but needs root: a person creates the file with `sudo` and removes it after, on test data only.
 - Plugin runs and thread syncs use the same checks (`claudejob`, `projectsync`); this case checks the minutes run.
