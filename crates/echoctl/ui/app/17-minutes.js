@@ -15,6 +15,15 @@ function minutesTab(c) {
 const notesNowBtn = (run) => {
   return run && run.state === 'queued' && run.wait === 'call' && run.may_start && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
 }
+/** After a run refused for a Claude Code policy file Echo couldn't read (#404): the user's choice, as a button —
+ *  Claude Code (as configured) instead, or without that file (Claude Code can't read it either). */
+function policyChoice(run) {
+  const p = run && run.state === 'failed' && run.policy
+  if (!p || !p.file) return ''
+  if (p.choice === 'system') return `<button class="btn" data-cmd="write-notes" data-profile="system" title="Claude Code as you or your organisation set it up">Write on Claude Code (as configured)</button>`
+  if (p.choice === 'anyway') return `<button class="btn" data-cmd="write-notes" data-without-policy="${esc(p.file)}" title="Claude Code can't read ${esc(p.file)} either, so it starts without it">Write anyway</button>`
+  return ''
+}
 function minutesBar(c) {
   const run = c.notes_run
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
@@ -24,7 +33,7 @@ function minutesBar(c) {
   else if (run && (run.state === 'failed' || run.state === 'needs_login')) {
     const p = run.state === 'needs_login' && profileOf(run.profile)
     const signin = p && p.kind === 'claude' ? `<button class="btn ghost" data-signin="${esc(p.id)}">Sign in…</button>` : ''
-    status = `<span class="grow warn">The last update didn't finish: ${esc(run.message || '')}</span>${signin}<button class="btn ghost" data-cmd="write-notes">Try again</button>${log}`
+    status = `<span class="grow warn">The last update didn't finish: ${esc(run.message || '')}</span>${signin}${policyChoice(run)}<button class="btn ghost" data-cmd="write-notes">Try again</button>${log}`
   } else if (run && run.state === 'skipped') status = `<span class="grow">${esc(run.message || 'The last update wrote nothing.')}</span>`
   // Opening or showing the page is in the call's ⋯ menu: this bar is only for what is going on.
   return status
@@ -145,7 +154,7 @@ function minutesHint(c, heading, lead) {
       : `Claude Code writes them with <b>${esc(model)}</b>, as it is set up (menu → AI for calls → Minutes model, while it is the profile new calls use).`
   const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these minutes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
   return box(heading, `${ring}<p>${esc(lead)}</p>${moved}<p class="alt">${where}</p>${sign}`,
-    `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${later}${log}`) + session
+    `${pick}${policyChoice(run)}<button class="btn primary" data-cmd="write-notes">${label}</button>${later}${log}`) + session
 }
 
 // ── What moved: a view of the right panel (was beside the minutes; the minutes now take the tab's width) ──

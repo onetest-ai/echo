@@ -314,6 +314,13 @@ pub(super) fn act(v: &Value) -> bool {
                     }
                 }
             }
+            // Without a policy file Claude Code can't read either: the user's yes for this call (#404).
+            if let Some(f) = v["without_policy"].as_str().filter(|f| !f.is_empty()) {
+                if let Err(e) = crate::notes::let_policy_go(&d, f) {
+                    crate::notes::refuse(&d, &format!("{e:#}"));
+                    return true;
+                }
+            }
             // Write again with… another template: the call's from now on — chosen last, once nothing else can refuse.
             if let Some(t) = v["template"].as_str().filter(|t| !t.is_empty()) {
                 if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {

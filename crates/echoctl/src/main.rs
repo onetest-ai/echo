@@ -182,6 +182,12 @@ enum Cmd {
         /// The asking session's folder (with --auto)
         #[arg(long = "for")]
         session: Option<std::path::PathBuf>,
+        /// Write them with this AI profile from now on (`echoctl ai list`): the call's profile changes
+        #[arg(long)]
+        profile: Option<String>,
+        /// Write them without this Claude Code policy file, which Claude Code can't read either (when a run said so)
+        #[arg(long = "without-policy")]
+        without_policy: Option<String>,
     },
     /// AI profiles: which model (and account) writes a call's live notes and minutes
     Ai {
@@ -733,7 +739,7 @@ fn main() -> Result<()> {
         Cmd::App { cmd } => cli::app::app(cmd),
         Cmd::Home { cmd } => cli::app::home(cmd),
         Cmd::Calendar { cmd } => cli::calendar::calendar(cmd),
-        Cmd::Notes { call, wait, auto, session: _ } => cli::calls::notes(call, wait, auto),
+        Cmd::Notes { call, wait, auto, session: _, profile, without_policy } => cli::calls::notes(call, wait, auto, profile, without_policy),
         Cmd::Ai { cmd } => cli::app::ai(cmd),
         Cmd::Live { cmd } => cli::capture::live(cmd),
         Cmd::Prep { call, upcoming, show, write } => cli::calendar::prep(call, upcoming, show, write),

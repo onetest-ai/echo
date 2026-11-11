@@ -71,6 +71,10 @@ pub struct Run {
     /// The minutes as the last `done` run left them; carried over by every later run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minutes: Option<Written>,
+    /// Refused for a Claude Code policy file it couldn't read (#404): `{file, choice}` — `choice` "system" (run on Claude
+    /// Code (as configured) instead) or "anyway" (run without that file: Claude Code can't read it either).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<Value>,
     /// The call had minutes when this run was admitted (an update): the window keeps showing them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub had_minutes: bool,
@@ -367,7 +371,16 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
     match r.state.as_str() {
         "done" => println!("Minutes written: {}", dir.join("notes.md").display()),
         "skipped" => println!("No minutes: {}", r.message.unwrap_or_default()),
-        _ => bail!("{} (log: {})", r.message.unwrap_or_else(|| "failed".into()), dir.join(LOG).display()),
+        _ => {
+            // A policy file it couldn't read (#404): how to choose, in this terminal.
+            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let choose = match (r.policy.as_ref().and_then(|p| p["choice"].as_str()), r.policy.as_ref().and_then(|p| p["file"].as_str())) {
+                (Some("system"), _) => format!("\nTo write them on Claude Code (as configured) instead: echoctl notes '{name}' --profile {} --wait", crate::ai::SYSTEM),
+                (Some("anyway"), Some(f)) => format!("\nClaude Code can't read that file either, so it starts without it. To write them anyway: echoctl notes '{name}' --without-policy '{f}' --wait"),
+                _ => String::new(),
+            };
+            bail!("{} (log: {}){choose}", r.message.unwrap_or_else(|| "failed".into()), dir.join(LOG).display())
+        }
     }
     Ok(())
 }
@@ -757,6 +770,24 @@ fn ready_for_notes(stamp: &str, dir: &Path, r: &mut Run) -> (PathBuf, Result<cra
 /// The call's profile can't be used: a sign-in problem (signed out, another account, a sign-in
 /// that didn't end in time) becomes `needs_login` naming the profile — the window offers Sign in…
 /// or Use <account> — anything else `failed`.
+/// The policy files the user let this call's minutes go without (`meta.json` `policy_ok`, #404).
+fn policy_let_go(dir: &Path) -> Vec<String> {
+    let meta: Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    meta["policy_ok"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+
+/// The user's yes to write this call's minutes without a policy file Claude Code can't read either (#404).
+pub fn let_policy_go(dir: &Path, file: &str) -> Result<()> {
+    calls::update_meta(dir, |meta| {
+        let mut v: Vec<Value> = meta["policy_ok"].as_array().cloned().unwrap_or_default();
+        if !v.iter().any(|x| x == file) {
+            v.push(json!(file));
+        }
+        meta["policy_ok"] = json!(v);
+        Ok(())
+    })
+}
+
 fn not_ready(r: &mut Run, e: &anyhow::Error) {
     r.message = Some(format!("{e:#}"));
     r.finished_at = Some(Local::now());
@@ -778,7 +809,9 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     // The place is held by this process until the run ends (a dead holder = an interrupted run).
     // The call's profile: strict, never another one (`ai.rs`). Its lease is held for the whole
     // run: no sign-in changes the account under it.
-    let (now, ready) = ready_for_notes(&call_stamp, dir, &mut r);
+    // Policy files the user let these minutes go without (#404).
+    let let_go = policy_let_go(dir);
+    let (now, ready) = crate::ai::without_policy(&let_go, || ready_for_notes(&call_stamp, dir, &mut r));
     let dir: &Path = &now; // retitled while it waited: carry on in the folder as it is named now
     if r.auto && quitting() {
         withdraw(dir); // started again at the next launch
@@ -788,6 +821,12 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         Ok(p) => p,
         Err(e) => {
             not_ready(&mut r, &e);
+            // Refused for a policy file Echo couldn't read: what the user may choose (#404).
+            r.policy = None;
+            if r.state == "failed" && format!("{e:#}").contains("can't be read") {
+                let p = crate::ai::call_profile_id(dir).ok().and_then(|id| crate::ai::Settings::load().ok()?.get(&id).ok());
+                r.policy = p.and_then(|p| crate::ai::without_policy(&let_go, || crate::ai::unreadable(&p, &home))).map(|(file, choice)| json!({"file": file, "choice": choice}));
+            }
             save(dir, &r);
             release_claim(dir);
             return Ok(dir.to_path_buf());
@@ -847,10 +886,20 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     } else {
         cfg.notes_in.clone().filter(|d| d.is_dir()).unwrap_or_else(|| home.clone())
     };
+    // What to offer when a policy file can't be read (#404).
+    r.policy = None;
+    let offer = |r: &mut Run, why: &str| {
+        if why.contains("can't be read") {
+            r.policy = crate::ai::without_policy(&let_go, || crate::ai::unreadable(profile, &cwd)).map(|(file, choice)| json!({"file": file, "choice": choice}));
+        }
+    };
     // The guard must run (`guard.rs`): not under a policy that switches settings-file hooks off.
-    let checked = match crate::ai::hooks_conflict(profile, &cwd) {
+    let checked = match crate::ai::without_policy(&let_go, || crate::ai::hooks_conflict(profile, &cwd)) {
         Ok(f) => f,
-        Err(why) => return fail(&mut r, why),
+        Err(why) => {
+            offer(&mut r, &why);
+            return fail(&mut r, why);
+        }
     };
     // One spelling of the call for the prompt, the rules, the guard and the CLI (`resolve_call`
     // inside the run gives the resolved path).
@@ -881,7 +930,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
     let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
-    let mut child = match crate::ai::guard_ready(profile, &cwd, "write minutes").and_then(|()| admit_child(|| {
+    let mut child = match crate::ai::without_policy(&let_go, || crate::ai::guard_ready(profile, &cwd, "write minutes").and_then(|()| admit_child(|| {
         let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env(calls::RUN_ID, &run_id).env(crate::guard::RUN_CALL, dir).env(crate::guard::RUN_CLIS, run_clis(&plugin).join("\n"));
@@ -889,11 +938,12 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             c.env(crate::guard::RUN_PREVIOUS, p);
         }
         Ok(c.spawn()?)
-    })) {
+    }))) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("couldn't start Claude Code: {e:#}");
             let _ = writeln!(log, "{}  {msg}", stamp());
+            offer(&mut r, &msg);
             return fail(&mut r, msg);
         }
     };

@@ -51,7 +51,11 @@ pub fn policy_conflict(p: &Profile) -> Option<String> {
     }
     for (name, v) in sources {
         match v {
-            Err(_) => return Some(format!("{WHY} ({name} can't be read)")),
+            Err(_) => {
+                if let Some(why) = unread(WHY, &name) {
+                    return Some(why);
+                }
+            }
             Ok(v) if routes(&v) => return Some(format!("{WHY} ({name})")),
             Ok(_) => {}
         }
@@ -108,7 +112,11 @@ pub fn hooks_conflict(p: &Profile, cwd: &Path) -> Result<Vec<PathBuf>, String> {
     }
     for (name, v) in sources {
         match v {
-            Err(_) => return Err(format!("{WHY} ({name} can't be read)")),
+            Err(_) => {
+                if let Some(why) = unread(WHY, &name) {
+                    return Err(why);
+                }
+            }
             Ok(v) if restricts_hooks(&v) => return Err(format!("{WHY} ({name})")),
             Ok(_) => {}
         }
@@ -197,6 +205,63 @@ pub(super) fn restricts_hooks(v: &Value) -> bool {
     // A policy helper decides the settings when Claude Code starts: Echo can't tell what it allows.
     let doc = |v: &Value| v["disableAllHooks"] == true || v["allowManagedHooksOnly"] == true || v.get("policyHelper").is_some() || v.get("policyHelpers").is_some();
     doc(v) || doc(&v["settings"])
+}
+
+thread_local! {
+    /// The policy files the user let a run go without, for the runs this thread starts (`without_policy`).
+    static WITHOUT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `f` with these unreadable policy files let go (the user's yes for the call, #404): a run doesn't wait on a file
+/// Claude Code can't read either.
+pub fn without_policy<R>(files: &[String], f: impl FnOnce() -> R) -> R {
+    WITHOUT.with(|w| *w.borrow_mut() = files.to_vec());
+    let r = f();
+    WITHOUT.with(|w| w.borrow_mut().clear());
+    r
+}
+
+fn let_go(name: &str) -> bool {
+    WITHOUT.with(|w| w.borrow().iter().any(|x| x == name))
+}
+
+fn denied(name: &str) -> bool {
+    fs::read(name).is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
+fn machine_wide(name: &str) -> bool {
+    managed_files().is_ok_and(|f| f.iter().any(|x| x.display().to_string() == name))
+}
+
+/// A policy file that can't be read (#404), per Claude Code's own rule (code.claude.com/docs/en/managed-settings): a
+/// managed file the system won't let it read is left out — so a run goes on when the user said yes for it; one it
+/// reads but can't take (not a JSON object, an I/O error) stops Claude Code from starting at all — a run can't help
+/// there. Any other (a profile's cached server settings) refuses until the user chooses (`unreadable`). None: let go.
+fn unread(why: &str, name: &str) -> Option<String> {
+    let machine = machine_wide(name);
+    if let_go(name) && (!machine || denied(name)) {
+        return None;
+    }
+    if machine && !denied(name) {
+        return Some(format!("Claude Code won't start while the policy file {name} is as it is (it isn't a JSON object it can read) — ask your admin to fix it"));
+    }
+    Some(format!("{why} ({name} can't be read)"))
+}
+
+/// What the user may choose when a run was refused for a policy file it couldn't read (#404): `"anyway"` — a managed
+/// file the system won't let anyone but the admin read (Claude Code starts without it), or the built-in profile's own
+/// cached settings; `"system"` — a profile's own cached server settings: run on Claude Code (as configured) instead.
+pub fn unreadable(p: &Profile, cwd: &Path) -> Option<(String, &'static str)> {
+    let bad = |f: &Path| f.try_exists().unwrap_or(true) && read_policy_json(f).is_err() && !let_go(&f.display().to_string());
+    if let Some(f) = managed_files().ok()?.into_iter().find(|f| bad(f) && denied(&f.display().to_string())) {
+        return Some((f.display().to_string(), "anyway"));
+    }
+    if p.kind == Kind::System {
+        let dirs = system_config_dirs(cwd).ok()?;
+        return dirs.iter().map(|d| d.join("remote-settings.json")).find(|f| bad(f)).map(|f| (f.display().to_string(), "anyway"));
+    }
+    let f = p.config_folder().join("remote-settings.json");
+    bad(&f).then(|| (f.display().to_string(), "system"))
 }
 
 pub(super) fn read_policy_json(f: &Path) -> Result<Value, String> {

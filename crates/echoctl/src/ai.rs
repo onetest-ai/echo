@@ -1471,7 +1471,16 @@ mod tests {
         assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("remote-settings.json")));
         fs::write(&cached, "not json").unwrap();
         assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("can't be read")));
+        // #404: the profile's own cached settings unreadable — the choice offered is Claude Code (as configured); a
+        // yes for that file (the call's `policy_ok`) lets the profile's check go on, as for a managed file nobody
+        // but the admin may read.
+        assert_eq!(unreadable(&p, Path::new(".")), Some((cached.display().to_string(), "system")));
+        let file = cached.display().to_string();
+        assert!(without_policy(std::slice::from_ref(&file), || hooks_conflict(&p, Path::new("."))).is_ok());
+        assert_eq!(without_policy(std::slice::from_ref(&file), || unreadable(&p, Path::new("."))), None);
+        assert!(hooks_conflict(&p, Path::new(".")).is_err(), "the yes was for those runs only");
         fs::remove_file(&cached).unwrap();
+        assert_eq!(unreadable(&p, Path::new(".")), None);
         assert_eq!(hooks_conflict(&p, Path::new(".")).unwrap(), [p.config_folder()], "checked: the profile's folder");
     }
 

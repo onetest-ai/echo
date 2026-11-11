@@ -558,11 +558,13 @@ document.addEventListener('click', (e) => {
     case 'write-notes': {
       // The run reads the user's notes: they are saved first, or it doesn't start.
       const call = S.selected
-      const pid = S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null
+      // A choice after a policy file Echo couldn't read (#404): another profile, or without that file.
+      const pid = t.dataset.profile || (S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null)
+      const without = t.dataset.withoutPolicy || undefined
       // A note typed or edited and not added yet is part of them.
       if (commitPendingNotes()) render()
       NotesSync.flush(call).then(() => {
-        send({ cmd: 'write_notes', call, profile: pid || undefined })
+        send({ cmd: 'write_notes', call, profile: pid || undefined, without_policy: without })
         if (S.call && S.selected === call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
       }, (err) => { S.notice = `Your notes couldn't be saved (${err.message}), so the minutes weren't started.`; render() })
       return

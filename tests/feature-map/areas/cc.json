@@ -19,6 +19,9 @@
    "check": "person",
    "axes": [
     "ai.kind"
+   ],
+   "cases": [
+    "claude/TC-029"
    ]
   },
   {

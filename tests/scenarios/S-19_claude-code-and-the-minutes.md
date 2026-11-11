@@ -26,6 +26,7 @@ cases:
   - tests/cases/claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-or-claude-code-is-too-old.md
   - tests/cases/claude/TC-027_the-claude-panel-runs-the-echo-folder-session-and-restart-and-new-conversation-ask-first.md
   - tests/cases/claude/TC-028_the-status-line-in-a-claude-code-session-shows-echo-recording-armed-next-and-toasts-failures.md
+  - tests/cases/claude/TC-029_a-policy-file-echo-cant-read-asks-instead-of-only-refusing.md
 auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
@@ -92,6 +93,7 @@ Done once, before stage 1, timed as the stage `prelude`. Every Bash call starts 
 | 16 | `claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-or-claude-code-is-too-old.md` | — | — |
 | 17 | `claude/TC-027_the-claude-panel-runs-the-echo-folder-session-and-restart-and-new-conversation-ask-first.md` | — | — |
 | 18 | `claude/TC-028_the-status-line-in-a-claude-code-session-shows-echo-recording-armed-next-and-toasts-failures.md` | — | — |
+| 19 | `claude/TC-029_a-policy-file-echo-cant-read-asks-instead-of-only-refusing.md` | — | — |
 
 ## Notes
 - **Four model runs, one per condition that truly differs:** Write now on a call due for automatic minutes (A), Write minutes on a call the gate skipped and a session held (B), Write minutes on a call that ended while automatic minutes were off (C), and the automatic catch-up after a quit (D). Every check that can read a run reads one of those: the user's notes (stage 2) are in run A's call, the session's claim (stage 3) is refused during run A and taken over by run B, the two folders (stage 4) are runs A and B, the model (stage 5) is run B's. Stage 5's wrong model fails before any model time. Before 2026-11-08 the scenario started six runs: stage 2 wrote its own call's minutes and stage 3 its own (Initech planning).

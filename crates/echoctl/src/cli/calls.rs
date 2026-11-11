@@ -4,7 +4,17 @@ use anyhow::Result;
 
 use crate::{calls, notes, paths, taskmodes, watch};
 
-pub fn notes(call: String, wait: bool, auto: bool) -> Result<()> {
+pub fn notes(call: String, wait: bool, auto: bool, profile: Option<String>, without_policy: Option<String>) -> Result<()> {
+    // The user's own choices for this call, before its run (#404).
+    if profile.is_some() || without_policy.is_some() {
+        let dir = calls::resolve_call(&call)?;
+        if let Some(id) = &profile {
+            crate::ai::set_call_profile(&dir, id)?;
+        }
+        if let Some(f) = &without_policy {
+            notes::let_policy_go(&dir, f)?;
+        }
+    }
     if auto {
         notes::request_auto(&call)
     } else {
