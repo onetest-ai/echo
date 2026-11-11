@@ -3,8 +3,8 @@
 // start refused (stage 1), quit and start again (2), another data folder (3: its own app, started twice) — and the
 // window following the system's light and dark (4). Stage 3 records a call fed from files and transcribes it: the
 // speech model comes only from the test's own folder (ECHOCTL_TEST_MODELS); without it, stage 3 skips.
-// Stage 3's restart keeps --no-tray (#351): no dev tray icon shows on the real menu bar (asserted here once that fix
-// is stable).
+// Stage 3's restart keeps --no-tray (#351): no dev tray icon shows on the real menu bar (the restarted app's state and
+// command line say so).
 // Not here: stages 5–12 are a person's (start at login, `app start`, the native window and its Dock icon, updates from
 // GitHub, offline, the network).
 import fs from 'node:fs'
@@ -87,14 +87,15 @@ scenario(test, 'S-21', 'Living with Echo: quit, one instance, another folder, ap
     const home2 = path.join(data.dir, s.newHome)
     const watcher = () => data.status(free).watcher
     fs.symlinkSync(models(), path.join(data.env.ECHOCTL_CONFIG_DIR, sp().models))
-    let first, set1, set2, info, armed, old, folder, calls2, restarted, quitted
+    let first, firstState, set1, set2, info, armed, old, folder, calls2, restarted, restartedState, command, quitted
     try {
       for (const args of [['model', 'use', s.model], ['config', '--languages', s.language]]) expect(data.cli(...args).code).toBe(0)
       set1 = cli('home', 'set', data.home)
       info = cli('home').json()
       old = callFiles(data.home)
       first = await data.app({ unset: free })
-      expect(watcher().pid).toBe(first.pid)
+      firstState = watcher()
+      expect(firstState.pid).toBe(first.pid)
 
       fs.writeFileSync(path.join(data.dir, data.text.recording.openLog), '')
       set2 = await data.cliAwait(free, 'home', 'set', home2)
@@ -102,7 +103,9 @@ scenario(test, 'S-21', 'Living with Echo: quit, one instance, another folder, ap
       // The debug build restarted itself on the new folder (never `open` of an installed Echo, #142), without its tray as
       // before (#351).
       await expect.poll(() => (watcher() || {}).pid, { timeout: 30_000 }).toBeTruthy()
-      restarted = watcher().pid
+      restartedState = watcher()
+      restarted = restartedState.pid
+      command = data.commandOf(restarted)
       expect(restarted).not.toBe(first.pid)
       expect(data.read(data.dir, data.text.recording.openLog)).toBe('')
       expect(cli('home').json().home).toBe(home2)
@@ -128,6 +131,10 @@ scenario(test, 'S-21', 'Living with Echo: quit, one instance, another folder, ap
     expect(set1.out.trim()).toBe(fill(a().dataFolder, { path: data.home }))
     expect(info.home_source).toBe(a().chosen)
     expect(set2.out.trim().split('\n')).toEqual([fill(a().stopped, { pid: first.pid }), fill(a().dataFolder, { path: home2 }), fill(a().started, { pid: restarted })])
+    // Started without its tray, the restarted app runs without it too (#351): its state says so, and its command line.
+    expect(firstState.no_tray).toBe(true)
+    expect(restartedState.no_tray).toBe(true)
+    expect(command.endsWith(` ${a().runNoTray}`), command).toBe(true)
     expect(armed.out.trim()).toBe(a().armed)
     expect(calls2).toEqual([folder])
     expect(folder).toMatch(new RegExp(`-${literal(s.call.slug)}$`))

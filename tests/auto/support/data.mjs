@@ -167,6 +167,8 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
   /** The commands of a process's children (`pgrep -P`): what the app has started (a dialog's `osascript`). */
   data.childrenOf = (pid) => spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean)
     .map((p) => spawnSync('ps', ['-o', 'command=', '-p', p], { encoding: 'utf8' }).stdout.trim()).filter(Boolean)
+  /** A process's command line (`ps -o command=`): how it was started. */
+  data.commandOf = (pid) => spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim()
   /** What the app logged (`--background`: `<home>/.echo/app.log`), or nothing yet. */
   data.appLog = () => (data.exists(data.home, '.echo', 'app.log') ? data.read(data.home, '.echo', 'app.log') : '')
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
