@@ -977,6 +977,8 @@ fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str
 static WIDGETS: Mutex<()> = Mutex::new(());
 /// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
 static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Widgets asked for again while being asked: one more ask once this one is in.
+static AGAIN: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
 
 /// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
 /// `{data, at, asked, error?}`.
@@ -992,13 +994,20 @@ pub fn widget_ask(plugin: &str, widget: &str) {
     {
         let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
         if asking.contains(&key) {
+            // Asked while an ask is on its way (a setting just changed): asked once more after it.
+            AGAIN.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
             return;
         }
         asking.push(key.clone());
     }
     let (plugin, widget) = (plugin.to_string(), widget.to_string());
     std::thread::spawn(move || {
-        widget_ask_now(&plugin, &widget);
+        loop {
+            widget_ask_now(&plugin, &widget);
+            if !AGAIN.lock().unwrap_or_else(|e| e.into_inner()).remove(&key) {
+                break;
+            }
+        }
         ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
     });
 }

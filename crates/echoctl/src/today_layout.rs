@@ -93,8 +93,11 @@ fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
 /// the widget it leaves hands its row start on. The order is the list's; nothing else moves.
 pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Side)>) -> Vec<Item> {
     let mut out = items.to_vec();
+    // A widget moved keeps its settings.
+    let mut kept = serde_json::Map::new();
     if let Some(i) = out.iter().position(|x| x.widget == widget) {
         let gone = out.remove(i);
+        kept = gone.params;
         if gone.row {
             if let Some(next) = out.get_mut(i) {
                 next.row = true;
@@ -102,6 +105,7 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
         }
     }
     let mut new = item(widget, size, false);
+    new.params = kept;
     let at = match target.and_then(|(t, side)| out.iter().position(|x| x.widget == t).map(|i| (i, side))) {
         None => {
             new.row = true;
@@ -297,6 +301,9 @@ mod tests {
         set_param("core:tasks.done", "period", "month").unwrap();
         assert_eq!(params_of("core:tasks.done")["period"], "month");
         assert_eq!(load().iter().find(|i| i.widget == "core:tasks.done").unwrap().params["period"], "month", "kept on disk");
+        // Moved (the CLI or a drag), it keeps them.
+        move_to("core:tasks.done", Some(("core:calendar.agenda", Side::Above))).unwrap();
+        assert_eq!(params_of("core:tasks.done")["period"], "month", "kept through a move");
     }
 
     #[test]

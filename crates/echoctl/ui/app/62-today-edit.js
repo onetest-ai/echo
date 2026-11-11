@@ -23,11 +23,17 @@ function todayEditCell(id, html, size) {
   const moves = Object.entries(MV).filter(([k]) => can[k]).map(([k, [a, say]]) => `<button type="button" data-tw-move="${k}" data-tw-id="${esc(id)}" aria-label="Move ${esc(w.label)} ${say}" title="Move ${say}">${a}</button>`).join('')
   // Its settings (⚙): a select a choice, thread or client, a box a yes/no; changed, Today's layout says it.
   const item = ((S.today && S.today.layout) || []).find((i) => i.widget === id) || {}
-  const now = (p) => (item.params && item.params[p.key] !== undefined ? item.params[p.key] : p.default)
+  const optsOf = (p) => (p.type === 'choice' ? p.options.map((o) => [o, o])
+    : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => t.group !== 'closed').map((t) => [t.id, t.name])
+    : p.type === 'client' ? ((S.pj.data && S.pj.data.clients) || []).map((c) => [c.id, c.name]) : [])
+  // What the widget uses: the value set if it still takes it, else its default (as `params_of` does).
+  const now = (p) => {
+    const v = item.params && item.params[p.key]
+    if (v !== undefined && (p.type === 'bool' ? typeof v === 'boolean' : optsOf(p).some(([o]) => o === v))) return v
+    return p.default
+  }
   const pick = (p) => {
-    const opts = p.type === 'choice' ? p.options.map((o) => [o, o])
-      : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => !(t.stage && /closed|done/.test(t.stage))).map((t) => [t.id, t.name])
-      : p.type === 'client' ? ((S.pj.data && S.pj.data.clients) || []).map((c) => [c.id, c.name]) : []
+    const opts = optsOf(p)
     if (p.type === 'bool') return `<label class="tw-param"><input type="checkbox" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}" ${now(p) ? 'checked' : ''}> ${esc(p.label)}</label>`
     return `<label class="tw-param">${esc(p.label)} <select data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}">${now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   }
