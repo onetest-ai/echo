@@ -145,7 +145,12 @@ pub fn templates_view() -> Value {
 
 /// The user's file a template comes from (none: it is Echo's own).
 pub(super) fn file_of(id: &str) -> Option<PathBuf> {
-    all_templates().into_iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(t.path))
+    file_in(&all_templates(), id)
+}
+
+/// `file_of` among these templates (read once).
+fn file_in(all: &[Template], id: &str) -> Option<PathBuf> {
+    all.iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(&t.path))
 }
 
 /// A new template's id from its name: the call folders' slug (`Client kickoff` → `client-kickoff`), never a name
@@ -204,7 +209,7 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     }
     anyhow::ensure!(n > 0, "a template needs at least one section");
     // Its own file; a built-in changed for the first time: `<id>.md` (its id is Echo's, no path in it).
-    let file = file_of(&id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
+    let file = file_in(&all, &id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
     fs::create_dir_all(templates_dir())?;
     paths::write_atomic(&file, body.trim_end().as_bytes())?;
     TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

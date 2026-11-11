@@ -14,18 +14,21 @@ const row = (fixed) => ({ id: 'default', kind: 'edited', fixed })
 
 // An edit that isn't the switch sends no `fixed`: the app keeps what the file has, also when it changed meanwhile.
 assert.deepEqual(TplSave.message(d), { cmd: 'template_save', id: 'default', header: '# {title}', match: [], sections: d.sections })
-// The switch set here is sent, on or off, with every save until the file has it.
+// The switch set here is sent, on or off, with every save until a save that wrote it is answered.
 const ticked = { ...d, fixed: true, fixedPending: true }
 assert.equal(TplSave.message(ticked).fixed, true)
 assert.equal(TplSave.message({ ...d, fixed: false, fixedPending: true }).fixed, false)
-// The save was refused (the file still off): still pending, the next save sends it again.
-assert.deepEqual(TplSave.saved(ticked, row(false)), { fixed: true, fixedPending: true })
-// The file has it: no longer sent. Then the file changes elsewhere and the header is edited here: no `fixed` is sent,
-// and the app's answer shows the file's newer value.
-const done = { ...ticked, ...TplSave.saved(ticked, row(true)) }
-assert.equal(done.fixedPending, false)
+// A refused save has no answer: the switch is still pending and goes with the next save.
+// The save that wrote it is answered (`sent`: what it wrote), and the file changed elsewhere before Echo read it back:
+// no longer pending, the file's value shown, and a later edit here sends no `fixed`.
+const done = { ...ticked, ...TplSave.saved(ticked, row(false), true) }
+assert.deepEqual({ fixed: done.fixed, fixedPending: done.fixedPending }, { fixed: false, fixedPending: false })
 assert.equal('fixed' in TplSave.message({ ...done, header: '# {title} · {date}' }), false)
-assert.deepEqual(TplSave.saved(done, row(false)), { fixed: false, fixedPending: false })
+// Unticked again before the first save was answered: that answer (it wrote `true`) leaves the new choice pending.
+const back = { ...d, fixed: false, fixedPending: true }
+assert.deepEqual(TplSave.saved(back, row(true), true), { fixed: false, fixedPending: true })
+// Nothing pending: an answer shows the file's value (it may have changed elsewhere).
+assert.deepEqual(TplSave.saved(d, row(true), null), { fixed: true, fixedPending: false })
 // Create sends the switch as set in the new template's form, with its name.
 const made = TplSave.create({ ...d, id: null, fixed: true }, 'Board review')
 assert.equal(made.fixed, true)
