@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-PREP-01",
-   "feature": "Calls → \"Coming up today\" (folded) counts today's meetings still to come and names the next (\"Now\" for one going on); open, each row shows time, length, people, thread icons and opens its prep; a meeting already a call today (being recorded or recorded) leaves it — it is in the calls list; its view, if open, moves to the call's Prep tab (Minutes when it has no prep); in time order",
+   "feature": "Calls → \"Coming up today\" (folded) counts today's meetings still to come and names the next (\"Now\" for one going on); open, each row shows time, length, people, thread icons and opens its prep; a meeting already a call today (being recorded or recorded; its call as Your day and Calendar link it, so one held at an earlier time before the meeting moved doesn't count) leaves it — it is in the calls list; its view, if open, moves to the call's Prep tab (Minutes when it has no prep); in time order",
    "priority": "high",
    "check": "agent",
    "axes": [

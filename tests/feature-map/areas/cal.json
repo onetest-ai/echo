@@ -32,7 +32,7 @@
   },
   {
    "id": "F-CAL-04",
-   "feature": "A meeting block shows recorded (green), \"Will record\", past, and opens its card; a recorded call with no meeting shows as its own block that opens the call; a meeting's call is the one of its event recorded at its time (from 10 min before it to its end, at least 30 min after its start; the nearest its start), so a call of the same event at another time (a meeting moved or held again) is a block of its own, never the meeting's",
+   "feature": "A meeting block shows recorded (green), \"Will record\", past, and opens its card; a recorded call with no meeting shows as its own block that opens the call; a meeting's call is the one of its event recorded at its time — saved with this start (an arm, however early it was joined) or started from 10 min before it to its end, at least 30 min after its start; the one being recorded first, else the nearest its start — so a call of the same event at another time (a meeting moved or held again) is a block of its own, never the meeting's",
    "priority": "high",
    "check": "agent",
    "axes": [
