@@ -164,9 +164,11 @@ pub(super) fn template_id(name: &str) -> String {
 /// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
 /// edited, and Reset brings Echo's back); a new one takes its id from `name` and may not take an existing one.
 /// `fixed`: keep every section; `None` keeps what the template has (off for a new one and a built-in's first edit).
+/// Never written for the memo.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &str, sections: &[Value], fixed: Option<bool>) -> Result<String> {
-    let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
+    let all = all_templates();
+    let known: Vec<String> = all.iter().map(|t| t.name.clone()).collect();
     let id = match id.filter(|i| !i.is_empty()) {
         Some(i) => {
             anyhow::ensure!(known.iter().any(|k| k == i), "there is no template {i}");
@@ -182,7 +184,7 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     };
     let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let words: Vec<String> = words.iter().map(|w| one_line(w).to_lowercase().replace([',', '[', ']', '"'], "")).filter(|w| !w.is_empty()).collect();
-    let fixed = id != "memo" && fixed.unwrap_or_else(|| all_templates().iter().any(|t| t.name == id && t.fixed));
+    let fixed = id != "memo" && fixed.unwrap_or_else(|| all.iter().any(|t| t.name == id && t.fixed));
     let mut body = format!("---\nname: {id}\nmatch: [{}]\n{}---\n", words.join(", "), if fixed { "fixed: true\n" } else { "" });
     // Its header as written, but a line starting a section stays one level down (it is the header's).
     let header: Vec<String> = header.trim().lines().map(|l| if l.starts_with("## ") { format!("#{l}") } else { l.to_string() }).collect();

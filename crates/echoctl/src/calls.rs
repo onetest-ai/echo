@@ -355,7 +355,7 @@ pub struct Template {
     /// What comes before its first section (`## `): the minutes' start — title line, participants, frontmatter.
     pub header: String,
     pub sections: Vec<Value>,
-    /// Keep every section (`fixed: true` in its frontmatter): the minutes have exactly its sections. Never the memo's.
+    /// Keep every section (`fixed: true` in its frontmatter): the minutes keep all its sections, in order. Never the memo's.
     pub fixed: bool,
     #[serde(skip)]
     keywords: Vec<String>,
@@ -456,7 +456,7 @@ pub fn context(call: &str) -> Result<()> {
 }
 
 /// What `echoctl context` prints.
-pub(crate) fn context_value(call: &str) -> Result<Value> {
+fn context_value(call: &str) -> Result<Value> {
     let dir = resolve_call(call)?;
     let meta = read_json(&dir.join("meta.json"));
     let meeting = MeetingContext::load(&dir)?;
@@ -526,7 +526,7 @@ pub(crate) fn context_value(call: &str) -> Result<Value> {
         "dominant_language": dominant_language,
         "user_notes": user_notes.exists().then(|| user_notes.display().to_string()),
         "user_headings": user_headings,
-        // None for a template that keeps every section.
+        // null for a template that keeps every section.
         "heading_budget": (!fixed).then(|| heading_budget(chars)),
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
@@ -1336,6 +1336,8 @@ mod tests {
         assert_eq!(fs::read_to_string(&file).unwrap(), "---\nname: steering\nmatch: [weekly]\n---\n# {title}\n\n## Summary\nshort");
         template_save(Some("discussion"), "", &[], "", &secs, None).unwrap();
         assert!(!fs::read_to_string(templates_dir().join("discussion.md")).unwrap().contains("fixed:"), "a built-in's first edit is off");
+        template_save(Some("memo"), "", &[], "", &secs, Some(true)).unwrap();
+        assert!(!fs::read_to_string(templates_dir().join("memo.md")).unwrap().contains("fixed:"), "never for the memo");
     }
 
     #[test]
