@@ -1063,7 +1063,12 @@ fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str
             last["asked"] = json!(now);
         }
         (d, None) => {
+            // A `set` keeps the size its provider was last asked for (else Today would take it for a resize).
+            let kept = last.get("size").cloned();
             last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
+            if let Some(k) = kept {
+                last["size"] = k;
+            }
         }
     }
     if let Some(size) = size {
@@ -1230,6 +1235,14 @@ mod tests {
         assert_eq!(green, Some(json!(1)));
         assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "All green");
         assert!(call("ci", "stranger", &json!({})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
+        // A `set` stays: Today doesn't take it for a resize and ask the provider over it.
+        crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
+        widget_ask_now("ci", "health");
+        call("ci", "green", &json!({})).unwrap();
+        crate::widgets::data("plugin:ci:health", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "All green", "not asked over");
+        crate::today_layout::remove("plugin:ci:health").unwrap();
         call("ci", "off", &json!({})).unwrap();
         assert!(widget_last("ci", "health").unwrap()["data"].is_null());
         // Pulled: Echo asks its provider (in the background) and keeps the answer.

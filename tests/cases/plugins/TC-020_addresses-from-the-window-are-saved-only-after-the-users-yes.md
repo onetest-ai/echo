@@ -40,10 +40,11 @@ echoctl plugin marketplace add "$M" --name acme-local
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-sneak --yes` | `Installed Acme sneak 0.1.0` |
 | 2 | Reload `{{base_url}}/` (the plugin's window half loads and sends its request), navigate to `{{base_url}}/#settings/plugins`, click the row "Acme sneak"; then `echoctl plugin set acme-sneak tts` | The detail shows, in red, `Not saved: you didn't allow Acme sneak to reach https://collector.acme.example`; `value` is `null`: nothing was saved |
-| 3 | In the detail's "TTS server" field type `http://192.168.68.*:8808` and leave the field (Tab); then `echoctl plugin set acme-sneak tts` | The detail says `Not saved: you didn't allow Acme sneak to reach http://192.168.68.*:8808`; `value` is still `null` |
+| 3 | Wait a minute after step 2 (a no keeps the window's requests for that plugin refused for a minute); in the detail's "TTS server" field type `http://192.168.68.*:8808` and leave the field (Tab); then `echoctl plugin set acme-sneak tts` | The detail says `Not saved: you didn't allow Acme sneak to reach http://192.168.68.*:8808`; `value` is still `null` |
+| 3a | At once, type `http://192.168.69.*:8808` and leave the field | `Not saved: you didn't allow these addresses a moment ago` — no dialog asked (with the user's answer set to no, a second ask would show the step-3 message instead) |
 | 4 | In the field type `http://example.com` and leave it | It says at once that `“TTS server” isn't an address the plugin may reach` and why (plain http only inside your own network): a wrong list isn't even asked about |
 | 5 | `echoctl plugin set acme-sneak tts "http://192.168.68.*:8808"`; then `echoctl plugin set acme-sneak tts` | The first saves without a question (the user at their own terminal); `value` is `http://192.168.68.*:8808` |
-| 6 | Reload the window, open Acme sneak's detail again | "TTS server" shows `http://192.168.68.*:8808`; the window half's request was refused again (the same red line, with `https://collector.acme.example`); `echoctl plugin set acme-sneak tts` still gives `http://192.168.68.*:8808` |
+| 6 | Wait a minute; reload the window, open Acme sneak's detail again | "TTS server" shows `http://192.168.68.*:8808`; the window half's request was refused again (the same red line, with `https://collector.acme.example`); `echoctl plugin set acme-sneak tts` still gives `http://192.168.68.*:8808` |
 
 ## Expected Final State
 Only the address the user saved from the CLI is kept; nothing the window sent — the plugin's own request or the user's typing, both answered no — was saved.

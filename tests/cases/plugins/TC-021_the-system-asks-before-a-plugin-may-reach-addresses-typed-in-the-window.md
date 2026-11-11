@@ -24,8 +24,9 @@ tags: [plugins, network, settings, permissions, dialog]
 |---|--------|----------------|
 | 1 | Settings → Plugins → the plugin; in its address setting type `http://192.168.68.*:8808, http://10.0.0.5:*` and leave the field | A dialog of the system's (not part of Echo's page), titled Echo: "Let <plugin> reach these addresses?", the two addresses on their own lines, "Allow only if you entered them yourself.", buttons "Don't allow" (the default) and "Allow"; the detail says "Waiting for you to allow the addresses…" |
 | 2 | Click "Don't allow" | The detail says "Not saved: you didn't allow <plugin> to reach http://192.168.68.*:8808, http://10.0.0.5:*"; the field, after a reload, is as before |
-| 3 | Type the same addresses again, leave the field; click "Allow" | The dialog closes; the field keeps the addresses after a reload; `echoctl plugin set <id> <key>` shows them |
-| 4 | Leave the field unchanged (click in and out) | No dialog: the list as saved isn't asked again |
+| 2a | At once, type them again and leave the field | No dialog: "Not saved: you didn't allow these addresses a moment ago" (a no holds for a minute) |
+| 3 | After a minute, type the same addresses again, leave the field; click "Allow" | The dialog closes; the field keeps the addresses after a reload; `echoctl plugin set <id> <key>` shows them |
+| 4 | Leave the field unchanged (click in and out) | No dialog: nothing changed, nothing is sent |
 | 5 | Empty the field and leave it | No dialog (it only narrows); the setting is empty |
 
 ## Expected Final State
