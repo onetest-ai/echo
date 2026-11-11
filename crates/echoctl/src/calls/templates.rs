@@ -110,6 +110,7 @@ pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
     ("title", "the meeting's title (its invite's subject, else the call's title)"),
     ("date", "the day of the call, as 2026-11-04 (`started_at`)"),
     ("time", "when it started, as 14:00 (`started_at`, local time)"),
+    ("end", "when it ended, as 14:43 (`ended_at`, local time)"),
     ("duration", "how long it was, as 43 min (`duration_min`)"),
     ("participants", "who took part: colleagues, then external, each linked from `links.people`"),
     ("colleagues", "the colleagues on the call, linked"),

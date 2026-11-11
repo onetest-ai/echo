@@ -451,6 +451,12 @@ const MIN_MEMO_CHARS: usize = 20;
 
 /// `echoctl context <call>`: the input bundle for writing notes, as JSON.
 pub fn context(call: &str) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(&context_value(call)?)?);
+    Ok(())
+}
+
+/// What `echoctl context` prints.
+pub(crate) fn context_value(call: &str) -> Result<Value> {
     let dir = resolve_call(call)?;
     let meta = read_json(&dir.join("meta.json"));
     let meeting = MeetingContext::load(&dir)?;
@@ -496,11 +502,14 @@ pub fn context(call: &str) -> Result<()> {
     }
     let subject = subject_of(&dir);
     let previous = previous_subject(&dir).and_then(|s| previous_with_notes(&s, Some(&dir)));
+    let template = if memo { memo_template() } else { template_for(&dir) };
+    let fixed = template.as_ref().is_some_and(|t| t.fixed);
 
     let out = json!({
         "dir": dir.display().to_string(),
         "title": subject,
         "started_at": meta["started_at"],
+        "ended_at": meta["ended_at"],
         "duration_min": (duration_min * 10.0).round() / 10.0,
         "speech_min": (speech_s / 6.0).round() / 10.0,
         "me": cfg.me,
@@ -517,11 +526,12 @@ pub fn context(call: &str) -> Result<()> {
         "dominant_language": dominant_language,
         "user_notes": user_notes.exists().then(|| user_notes.display().to_string()),
         "user_headings": user_headings,
-        "heading_budget": heading_budget(chars),
+        // None for a template that keeps every section.
+        "heading_budget": (!fixed).then(|| heading_budget(chars)),
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
-        "template": if memo { memo_template() } else { template_for(&dir) },
+        "template": template,
         // What `{date}`, `{participants}`… in it stand for.
         "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
@@ -542,8 +552,7 @@ pub fn context(call: &str) -> Result<()> {
         // the previous meeting of the series, the people Echo knows by address.
         "links": minutes_links(&dir, meeting.as_ref(), previous.as_deref()),
     });
-    println!("{}", serde_json::to_string_pretty(&out)?);
-    Ok(())
+    Ok(out)
 }
 
 /// The echo:// links a call's minutes may carry: `{threads, clients, previous, people}`, each with its `link`. People
@@ -1337,6 +1346,35 @@ mod tests {
         let rows = templates_view()["templates"].as_array().cloned().unwrap();
         let row = rows.iter().find(|r| r["id"] == "default").unwrap();
         assert_eq!((row["kind"].as_str(), row["fixed"].as_bool()), (Some("edited"), Some(true)));
+    }
+
+    #[test]
+    fn context_gives_the_end_and_no_heading_cap_for_a_fixed_template() {
+        let (_env, root) = crate::paths::testenv::folders("context-fixed");
+        let d = root.join("home/calls/2026-11-04_100000-steering");
+        fs::create_dir_all(&d).unwrap();
+        let meta = |end: &str| format!(r#"{{"title":"Steering","started_at":"2026-11-04T10:00:00+02:00"{end}}}"#);
+        fs::write(d.join("meta.json"), meta(r#","ended_at":"2026-11-04T10:43:00+02:00""#)).unwrap();
+        let v = context_value(d.to_str().unwrap()).unwrap();
+        assert_eq!(v["ended_at"], "2026-11-04T10:43:00+02:00");
+        assert!(v["heading_budget"].is_u64() && v["template"]["fixed"] == false);
+        assert!(v["template_values"].as_array().unwrap().iter().any(|x| x["name"] == "end"));
+        let own = paths::state_dir().join("templates");
+        fs::create_dir_all(&own).unwrap();
+        fs::write(own.join("default.md"), "---\nname: default\nmatch: []\nfixed: true\n---\n## Summary\nx\n").unwrap();
+        let v = context_value(d.to_str().unwrap()).unwrap();
+        assert!(v["template"]["fixed"] == true && v["heading_budget"].is_null());
+        fs::write(d.join("meta.json"), meta("")).unwrap();
+        assert!(context_value(d.to_str().unwrap()).unwrap()["ended_at"].is_null());
+        // A memo: its own template, never fixed, so the cap stays.
+        let m = root.join("home/calls/2026-11-04_120000-memo");
+        fs::create_dir_all(&m).unwrap();
+        fs::write(m.join("meta.json"), r#"{"title":"Memo","kind":"memo","started_at":"2026-11-04T12:00:00+02:00","ended_at":"2026-11-04T12:05:00+02:00"}"#).unwrap();
+        fs::write(own.join("memo.md"), "---\nname: personal\nmatch: []\nfixed: true\n---\n## Per thread\nx\n").unwrap();
+        let v = context_value(m.to_str().unwrap()).unwrap();
+        assert!(v["memo"] == true && v["template"]["fixed"] == false && v["heading_budget"].is_u64());
+        assert_eq!(v["ended_at"], "2026-11-04T12:05:00+02:00");
+        assert!(v["template_values"].as_array().unwrap().iter().any(|x| x["name"] == "end"));
     }
 
     #[test]
