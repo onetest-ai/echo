@@ -245,6 +245,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
+        // A mail the run writes (`echoctl compose`) is noted here, for its outcome (`drafts::of_run`).
+        c.env(crate::drafts::RUN_DRAFTS, spec.run_dir.join("drafts.jsonl"));
         if let Some(t) = &spec.task {
             c.env(guard::RUN_TASK, t).env(guard::RUN_PROFILE, &profile.id);
         }

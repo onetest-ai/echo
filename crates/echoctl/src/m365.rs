@@ -5,7 +5,8 @@
 //!
 //! **Nothing leaves without `--yes`**: a send, a reply, a post or an upload without it only says what would go where
 //! (`{sent: false, would}`) — the session shows that to the user and runs it again with `--yes` after their yes. A run
-//! Echo started (minutes, a thread's sync, a routine) can't send or draft (`ECHOCTL_HEADLESS`). Both are conventions the
+//! Echo started (minutes, a thread's sync, a routine, Yolo) can't send, reply or post (`ECHOCTL_HEADLESS`); it may leave
+//! a draft in the user's Drafts, which only the user sends (#135, `drafts::compose`). Both are conventions the
 //! session follows, not a lock: `--yes` is a flag a model can pass, and a session allowed every command (the folder
 //! session with no permission prompts, a routine in skip mode) could unset the variable. The real gate is Claude
 //! Code's own permission prompt on the command — what a session reads (mail, chats) is others' words.
@@ -286,11 +287,18 @@ pub fn event_respond(event: &str, how: &str, yes: bool) -> Result<Value> {
 
 /// A draft in the user's Drafts (nothing is sent): its link, to open and send from Outlook.
 pub fn mail_draft(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>) -> Result<Value> {
-    not_in_run()?;
+    // A draft is never sent: the user opens it in Outlook and sends it (runs Echo started may leave one, #135).
     let (_, html) = markdown_file(file)?;
     let html = with_notice(html, ai);
     let v = graph::request("POST", "/me/messages", Body::Json(&json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients(to)?, "ccRecipients": recipients(cc)?})), None, &[])?;
     Ok(json!({"draft": true, "id": v["id"], "url": v["webLink"]}))
+}
+
+/// A draft of plain text (`echoctl compose`): its lines kept, nothing in it read as markup.
+pub fn draft_text(to: &[String], cc: &[String], subject: &str, text: &str) -> Result<Value> {
+    let html = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\n', "<br>");
+    let v = graph::request("POST", "/me/messages", Body::Json(&json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients(to)?, "ccRecipients": recipients(cc)?})), None, &[])?;
+    Ok(json!({"draft": true, "id": v["id"], "url": v["webLink"].as_str().filter(|u| u.starts_with("https://"))}))
 }
 
 fn not_sent(would: Value) -> Value {
@@ -587,6 +595,32 @@ mod tests {
         let u = drive_upload(&f, "Documents/x.md", false).unwrap();
         assert_eq!(u["sent"], false);
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn a_run_echo_started_may_leave_a_draft_but_never_sends_replies_or_posts() {
+        // Under the test env's lock (the variable is the process's): a run Echo started, not signed in.
+        let (_env, root) = crate::paths::testenv::folders("m365-run-draft");
+        let f = root.join("msg.md");
+        std::fs::write(&f, "Hi Kim").unwrap();
+        std::env::set_var("ECHOCTL_HEADLESS", "1");
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                std::env::remove_var("ECHOCTL_HEADLESS");
+            }
+        }
+        let _unset = Unset;
+        let refused = |r: Result<Value>| r.is_err_and(|e| format!("{e:#}").contains("refused inside a run"));
+        // A draft goes past the run's refusal (it fails here only for want of a sign-in).
+        let d = mail_draft(&["kim@acme.example".into()], &[], "Slots", &f, None).unwrap_err();
+        assert!(!format!("{d:#}").contains("refused inside a run"), "{d:#}");
+        assert!(!format!("{:#}", draft_text(&["kim@acme.example".into()], &[], "Slots", "Hi").unwrap_err()).contains("refused inside a run"));
+        // Sending, replying and posting stay refused.
+        assert!(refused(mail_send(&["kim@acme.example".into()], &[], "Slots", &f, None, None, true)));
+        // (A reply reads the mail it answers first: with no sign-in it stops there, before its refusal.)
+        assert!(mail_reply_text("AAMk", false, "Hi", None, true).is_err());
+        assert!(refused(chat_send(None, Some("kim@acme.example"), &f, None, true)));
     }
 
     #[test]

@@ -33,6 +33,13 @@ pub(super) fn settings_snapshot() -> Value {
         "folder_skip_permissions": c.is_some_and(|c| c.folder_skip_permissions),
         "hide_dock_icon": c.is_some_and(|c| c.hide_dock_icon),
         "own_title_bar": on(c.map(|c| c.own_title_bar)),
+        // Where mail drafts go (#135): the choice as stored (null: the default, `drafts_now` says which).
+        "drafts": c.and_then(|c| c.drafts.clone()),
+        "drafts_now": match crate::drafts::chosen(&crate::config::Config { drafts: c.and_then(|c| c.drafts.clone()), ..Default::default() }, crate::graph::account().is_some()) {
+            crate::drafts::Where::M365 => "m365",
+            crate::drafts::Where::MailApp => "mail-app",
+            crate::drafts::Where::App(_) => "app",
+        },
         "capture_frames": c.is_some_and(|c| c.capture_frames),
         "follow_app_mute": on(c.map(|c| c.follow_app_mute)),
         "capture_ui": on(c.map(|c| c.capture_ui)),
@@ -165,6 +172,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "folder_skip_permissions" => cfg.folder_skip_permissions = b()?,
         "hide_dock_icon" => cfg.hide_dock_icon = b()?,
         "own_title_bar" => cfg.own_title_bar = Some(b()?),
+        "drafts" => cfg.drafts = crate::drafts::setting(value.as_str().unwrap_or(""))?,
         "capture_frames" => {
             cfg.capture_frames = b()?;
             #[cfg(target_os = "macos")]

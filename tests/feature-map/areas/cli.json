@@ -99,6 +99,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-CLI-12",
+   "feature": "`compose` writes a mail as a draft where drafts go (`config --drafts m365 | mail-app | app:<app> | default`): Microsoft 365 Drafts (the mail app instead when it can't, saying why), the default mail app or the app chosen; it never sends, and where drafts go can't be changed inside a run Echo started",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

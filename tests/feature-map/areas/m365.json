@@ -68,6 +68,15 @@
    "axes": [
     "thread.sources"
    ]
+  },
+  {
+   "id": "F-M365-08",
+   "feature": "A run Echo started (Yolo) may leave a mail draft in Microsoft 365 Drafts, never send, reply or post; its outcome names where each draft is and links to a Microsoft 365 one",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "m365.signin"
+   ]
   }
  ]
 }
