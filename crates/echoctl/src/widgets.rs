@@ -9,7 +9,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 /// A widget the catalog offers: where it comes from, what it shows, the sizes it takes (S, M, L: 1, 2, 3 columns),
-/// how tall it is (`hug` its content, `fill` its column) and whether it is temporal (on Today only while its data
+/// how tall it is (`hug` its content, `fill` its column), how many rows of Today's grid it may take (`heights`: 1, 2)
+/// and whether it is temporal (on Today only while its data
 /// isn't `empty`).
 /// A plugin's widget (`plugin:<plugin>:<widget>`) is owned text from its manifest; Echo's own are constants.
 #[derive(Serialize, Clone, Debug)]
@@ -21,6 +22,7 @@ pub struct Widget {
     pub kind: Cow<'static, str>,
     pub sizes: Cow<'static, [&'static str]>,
     pub height: Cow<'static, str>,
+    pub heights: Cow<'static, [u8]>,
     pub temporal: bool,
     /// A plugin's widget: how often Echo asks its provider again, in seconds (Echo's own: 0, unused).
     #[serde(skip)]
@@ -33,7 +35,7 @@ pub struct Widget {
 // One line a widget in the catalog below: its fields in the struct's order.
 #[allow(clippy::too_many_arguments)]
 fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static str, kind: &'static str, sizes: &'static [&'static str], height: &'static str, temporal: bool) -> Widget {
-    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal, refresh: 0, params: vec![] }
+    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), heights: Cow::Borrowed(&[1]), temporal, refresh: 0, params: vec![] }
 }
 
 /// The period Threads at a glance and Done this week count: this week (from Monday) or this month.
@@ -47,18 +49,23 @@ pub fn core() -> Vec<Widget> {
         w.params = p;
         w
     };
+    // One or two rows high.
+    let two = |mut w: Widget| {
+        w.heights = Cow::Borrowed(&[1, 2]);
+        w
+    };
     vec![
-    w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false),
-    w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false),
+    two(w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false)),
+    two(w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false)),
     w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
-    w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true),
-    w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true),
-    with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period()]),
+    two(w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true)),
+    two(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true)),
+    two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period()])),
     with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period()]),
     w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false),
-    w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false),
-    w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true),
-    w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true),
+    two(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false)),
+    two(w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true)),
+    two(w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true)),
     ]
 }
 
@@ -76,6 +83,7 @@ pub fn catalog() -> Vec<Widget> {
             kind: Cow::Borrowed("card1"),
             sizes: Cow::Borrowed(&["M", "L"]),
             height: Cow::Borrowed("hug"),
+            heights: Cow::Borrowed(&[1]),
             temporal: true,
             refresh: 0,
             params: vec![],
@@ -91,6 +99,7 @@ pub fn catalog() -> Vec<Widget> {
                 kind: Cow::Owned(d.kind),
                 sizes: Cow::Owned(d.sizes.iter().filter_map(|s| ["S", "M", "L"].into_iter().find(|x| x == s)).collect()),
                 height: Cow::Owned(d.height),
+                heights: Cow::Owned(d.heights),
                 // A plugin's widget is on Today while its plugin has given it something to show.
                 temporal: true,
                 refresh: d.refresh.unwrap_or(60).max(60),

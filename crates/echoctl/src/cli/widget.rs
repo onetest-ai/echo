@@ -9,7 +9,7 @@ use crate::{tasks, watch, widgets};
 
 #[derive(Subcommand)]
 pub enum WidgetCmd {
-    /// The widgets Today can show (JSON): id, part, label, kind, sizes, height, temporal
+    /// The widgets Today can show (JSON): id, part, label, kind, sizes, height, heights, temporal
     List,
     /// A widget's data (JSON), as Today gets it; a temporal widget's says `empty` when it has nothing
     Show { id: String },
@@ -61,7 +61,7 @@ impl Target {
 
 #[derive(Subcommand)]
 pub enum TodayCmd {
-    /// Today's widgets in order (JSON): widget, size (S, M, L), row (starts a new row)
+    /// Today's widgets in order (JSON): widget, size (S, M, L), height (2 rows; 1 when not said), row (starts a new row)
     Show,
     /// Put a widget on Today (`echoctl widget list` names them); --size, and where
     Add {
@@ -79,6 +79,8 @@ pub enum TodayCmd {
     },
     /// Change a widget's size on Today: S, M or L (1, 2, 3 columns), of those it takes
     Size { widget: String, size: String },
+    /// Change a widget's height on Today: 1 or 2 rows (two: its row and the next, the widgets beside it), of those it takes
+    Height { widget: String, height: u8 },
     /// Set one of a widget's settings: `echoctl today set core:tasks.glance period month`
     Set { widget: String, key: String, value: String },
     /// Take a widget off Today
@@ -93,6 +95,7 @@ pub fn today(cmd: Option<TodayCmd>) -> Result<()> {
         TodayCmd::Add { widget, size, target } => layout::add(&widget, size.as_deref(), target.get())?,
         TodayCmd::Move { widget, target } => layout::move_to(&widget, target.get())?,
         TodayCmd::Size { widget, size } => layout::resize(&widget, &size)?,
+        TodayCmd::Height { widget, height } => layout::set_height(&widget, height)?,
         TodayCmd::Set { widget, key, value } => layout::set_param(&widget, &key, &value)?,
         TodayCmd::Remove { widget } => layout::remove(&widget)?,
         TodayCmd::Reset => layout::reset()?,

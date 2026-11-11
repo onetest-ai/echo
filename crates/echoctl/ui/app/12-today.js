@@ -76,19 +76,30 @@ function todayView() {
   const FILL = ['core:calendar.agenda', 'core:tasks.mine', 'core:calendar.calendar']
   const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const SPAN = { S: 1, M: 2, L: 3 }
-  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), fill: FILL.includes(id), empty: !parts[id] && !S.tdEdit })))
+  const high = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.height || 1]))
+  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), height: high[id] || 1, fill: FILL.includes(id), empty: !parts[id] && !S.tdEdit })))
   // Measured on every draw (the width may have changed on another page), then watched while Today shows.
   const tdWidth = todayWidth()
   const cols = tdWidth ? todayCols(tdWidth, S.todayCols) : S.todayCols || 3
   S.todayCols = cols
   todayWatch()
   const plan = todayPlan(rowsIn, cols)
+  S.tdTall = todayTallIds(plan.lines) // edit mode says when a widget set two rows high is drawn one
+  // The page's only line takes the whole width: Your day alone on a quiet day isn't a third with two empty.
+  const alone = !plan.hold && plan.lines.length === 1
   const lineHtml = (line, width = cols) => {
-    // In edit mode a widget is framed: grip, name, S M L, × (13-today-edit.js); an empty one shows what it is.
+    // In edit mode a widget is framed: grip, name, S M L, 1 2, × (13-today-edit.js); an empty one shows what it is.
     const part = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
-    // The columns a hug line doesn't use stay empty: a lone S is a third of three columns, not the whole row.
-    // (A fill line takes the whole width: Your day alone on a quiet day isn't a third with two empty.)
-    const used = line.items.reduce((a, i) => a + i.span, 0), spare = line.fill ? 0 : width - used
+    // Two rows high: it in its columns, the lines beside it in the rest, on its other side.
+    if (line.tall) {
+      const t = line.tall, w = width - t.span
+      const tall = `<div class="td-tall">${part(t.id)}</div>`, rest = `<div class="td-rest">${line.lines.map((l) => lineHtml(l, w)).join('')}</div>`
+      const fr = t.side === 'left' ? [t.span, w] : [w, t.span]
+      return `<div class="td-pair" style="grid-template-columns: minmax(0, ${fr[0]}fr) minmax(0, ${fr[1]}fr)">${t.side === 'left' ? tall + rest : rest + tall}</div>`
+    }
+    // The columns a line doesn't use stay empty, a fill line's too: a lone S is a third of three columns, Your day at M
+    // two thirds — its size shows.
+    const used = line.items.reduce((a, i) => a + i.span, 0), spare = alone ? 0 : width - used
     if (!line.fill && line.items.length === 1 && spare <= 0) return part(line.items[0].id)
     // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
     const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
@@ -187,13 +198,29 @@ function todayCols(width, prev) {
   while (up < 3 && fits(up + 1, TD_UNFOLD)) up++
   return Math.max(prev, Math.min(base, up))
 }
-/** The layout's rows ([[{id, span, fill, empty}]]) as lines of `cols` columns: empty widgets and rows take none; a row
- *  too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one. */
+/** The layout's rows ([[{id, span, height, fill, empty}]]) as lines of `cols` columns: empty widgets and rows take none;
+ *  a row too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one.
+ *  A widget two rows high (height 2) first or last in its row takes its row and the next: a `tall` line — on the left
+ *  when first, on the right when last, so nothing reorders — with the rest of its row and the next row laid beside it
+ *  in the columns left (`lines`). In the middle of its row, with no column left beside it, or with nothing to put
+ *  there, it is one row high; so is one in the rows a tall one takes. `todayTallIds` says which are drawn tall. */
 function todayLines(rows, cols) {
   const lines = []
-  for (const row of rows) {
-    const items = row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))
-    if (!items.length) continue
+  const live = rows.map((row) => row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))).filter((r) => r.length)
+  for (let r = 0; r < live.length; r++) {
+    const items = live[r]
+    const t = items[0].height === 2 ? 0 : items[items.length - 1].height === 2 ? items.length - 1 : -1
+    if (t >= 0 && cols > 1) {
+      const tall = { ...items[t], span: Math.min(items[t].span, cols - 1) }
+      const one = (row) => row.map((w) => ({ ...w, height: 1 }))
+      const rest = items.filter((_, i) => i !== t), next = live[r + 1] || []
+      if (rest.length || next.length) {
+        const beside = todayLines([one(rest), one(next)], cols - tall.span)
+        lines.push({ items: [{ id: tall.id, span: tall.span }], tall: { id: tall.id, span: tall.span, side: t === 0 ? 'left' : 'right' }, lines: beside, fill: !!tall.fill || beside.some((l) => l.fill) })
+        r++
+        continue
+      }
+    }
     let total = items.reduce((a, w) => a + w.span, 0)
     while (total > cols) {
       const widest = items.reduce((m, w) => (w.span > m.span ? w : m), items[0])
@@ -224,6 +251,10 @@ function todayPlan(rows, cols) {
   const beside = todayLines(rows.slice(1), cols - 1)
   if (!beside.length) return { hold: null, down: null, lines: todayLines(rows, cols) }
   return { hold: { id: holder.id }, down: null, lines: beside }
+}
+/** The widgets a plan draws two rows high (its `tall` lines, beside a held column too). */
+function todayTallIds(lines) {
+  return lines.flatMap((l) => (l.tall ? [l.tall.id, ...todayTallIds(l.lines)] : []))
 }
 // end of the today layout block
 

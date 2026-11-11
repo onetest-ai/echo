@@ -9,16 +9,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::{paths, widgets};
 
-/// A widget on Today: which, how wide (S, M, L: 1, 2, 3 columns), and whether it starts a new row.
+/// A widget on Today: which, how wide (S, M, L: 1, 2, 3 columns), how high (1 or 2 rows), and whether it starts a
+/// new row.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct Item {
     pub widget: String,
     pub size: String,
+    #[serde(default = "one", skip_serializing_if = "is_one", deserialize_with = "height_or_one")]
+    pub height: u8,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub row: bool,
     /// Its settings the user set (the rest are the widget's defaults: `params_of`).
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub params: serde_json::Map<String, serde_json::Value>,
+}
+
+fn one() -> u8 {
+    1
+}
+fn is_one(h: &u8) -> bool {
+    *h == 1
+}
+/// A height as written (a hand edit may hold anything): 2, else 1 — never a reason to lose the layout.
+fn height_or_one<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
+    Ok(if serde_json::Value::deserialize(d)? == 2 { 2 } else { 1 })
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -50,7 +64,7 @@ fn file() -> PathBuf {
 }
 
 fn item(widget: &str, size: &str, row: bool) -> Item {
-    Item { widget: widget.into(), size: size.into(), row, params: Default::default() }
+    Item { widget: widget.into(), size: size.into(), height: 1, row, params: Default::default() }
 }
 
 /// Today as it has been: Needs you now and the routines' cards across, then Your day (2 columns) beside My work (1).
@@ -81,6 +95,9 @@ fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
             if !w.sizes.contains(&i.size.as_str()) {
                 i.size = w.sizes[0].into();
             }
+            if !w.heights.contains(&i.height) {
+                i.height = 1;
+            }
         }
     }
     if let Some(first) = items.first_mut() {
@@ -93,11 +110,12 @@ fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
 /// the widget it leaves hands its row start on. The order is the list's; nothing else moves.
 pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Side)>) -> Vec<Item> {
     let mut out = items.to_vec();
-    // A widget moved keeps its settings.
-    let mut kept = serde_json::Map::new();
+    // A widget moved keeps its settings and its height.
+    let (mut kept, mut height) = (serde_json::Map::new(), 1);
     if let Some(i) = out.iter().position(|x| x.widget == widget) {
         let gone = out.remove(i);
         kept = gone.params;
+        height = gone.height;
         if gone.row {
             if let Some(next) = out.get_mut(i) {
                 next.row = true;
@@ -106,6 +124,7 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
     }
     let mut new = item(widget, size, false);
     new.params = kept;
+    new.height = height;
     let at = match target.and_then(|(t, side)| out.iter().position(|x| x.widget == t).map(|i| (i, side))) {
         None => {
             new.row = true;
@@ -198,6 +217,20 @@ pub fn resize(widget: &str, size: &str) -> Result<Vec<Item>> {
     change(|mut items| {
         let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
         i.size = size;
+        Ok(items)
+    })
+}
+
+/// A widget's height on Today: 1 or 2 rows, of those it takes.
+pub fn set_height(widget: &str, height: u8) -> Result<Vec<Item>> {
+    let w = widgets::find(widget)?;
+    if !w.heights.contains(&height) {
+        let takes: Vec<String> = w.heights.iter().map(|h| h.to_string()).collect();
+        bail!("{widget} is {} row{} high, not {height}", takes.join(" or "), if takes == ["1"] { "" } else { "s" });
+    }
+    change(|mut items| {
+        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+        i.height = height;
         Ok(items)
     })
 }
@@ -324,6 +357,29 @@ mod tests {
         // A widget the catalog doesn't have now (a plugin off) keeps its place through a change.
         std::fs::write(file(), r#"{"items":[{"widget":"plugin:x:y","size":"M","row":true},{"widget":"core:tasks.mine","size":"M"}]}"#).unwrap();
         assert_eq!(show(&resize("core:tasks.mine", "S").unwrap()), "| plugin:x:y core:tasks.mine");
+    }
+
+    #[test]
+    fn a_height_is_one_the_widget_takes_kept_through_a_move_and_one_when_it_isnt_taken() {
+        let (_env, _) = paths::testenv::folders("today-layout-height");
+        let err = |r: Result<Vec<Item>>| r.unwrap_err().to_string();
+        assert!(err(set_height("core:tasks.mine", 3)).contains("is 1 or 2 rows high, not 3"));
+        assert!(err(set_height("core:calls.week", 2)).contains("is 1 row high, not 2"));
+        assert!(err(set_height("core:tasks.glance", 2)).contains("isn't on Today"));
+        let after = set_height("core:tasks.mine", 2).unwrap();
+        assert_eq!(after.iter().find(|i| i.widget == "core:tasks.mine").unwrap().height, 2);
+        let disk: serde_json::Value = serde_json::from_slice(&std::fs::read(file()).unwrap()).unwrap();
+        let on_disk = |w: &str| disk["items"].as_array().unwrap().iter().find(|i| i["widget"] == w).unwrap()["height"].clone();
+        assert_eq!(on_disk("core:tasks.mine"), 2, "kept on disk");
+        assert!(on_disk("core:needs.now").is_null(), "1 is not written");
+        move_to("core:tasks.mine", Some(("core:needs.now", Side::Before))).unwrap();
+        assert_eq!(load().iter().find(|i| i.widget == "core:tasks.mine").unwrap().height, 2, "kept through a move");
+        // A height the widget doesn't take (a hand edit) is 1.
+        std::fs::write(file(), r#"{"items":[{"widget":"core:calls.week","size":"S","height":2,"row":true}]}"#).unwrap();
+        assert_eq!(load()[0].height, 1);
+        // One that isn't a height at all: 1, and the rest of the layout kept.
+        std::fs::write(file(), r#"{"items":[{"widget":"core:tasks.mine","size":"S","height":"tall","row":true},{"widget":"core:needs.now","size":"M","height":2.5}]}"#).unwrap();
+        assert_eq!(load().iter().map(|i| (i.widget.as_str(), i.height)).collect::<Vec<_>>(), [("core:tasks.mine", 1), ("core:needs.now", 1)]);
     }
 
     #[test]

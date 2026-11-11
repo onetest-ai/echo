@@ -8,7 +8,7 @@ const src = appSource()
 const start = src.indexOf('// ── today layout:')
 const end = src.indexOf('// end of the today layout block', start)
 assert.ok(start >= 0 && end > start, 'the today layout block not found in app.js')
-const { todayCols, todayLines, todayPlan } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines, todayPlan }`)()
+const { todayCols, todayLines, todayPlan, todayTallIds } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines, todayPlan, todayTallIds }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -90,6 +90,57 @@ test('a fill alone on the first row at span 1 holds the first column; the rest b
   const p2 = todayPlan([[W('day', 1, true)], [W('next', 1, false, true)], [W('mine', 2, true, true)]], 3)
   assert.equal(p2.hold, null)
   assert.equal(ids(p2), 'day:1')
+})
+
+// A widget two rows high (#441): its row and the next, the rest beside it.
+const tallShow = (lines) => lines.map((l) => (l.tall ? `[${l.tall.id}:${l.tall.span} ${l.tall.side} | ${show(l.lines)}]` : show([l]))).join(' / ')
+
+test('a widget two rows high takes its row and the next, the rest of its row and the next row beside it', () => {
+  const rows = [[W('mine', 1, { height: 2, fill: true }), W('next', 1), W('needs', 1)], [W('choices', 2)], [W('glance', 3)]]
+  assert.equal(tallShow(todayLines(rows, 3)), '[mine:1 left | next:1 needs:1 / choices:2] / glance:3')
+  const l = todayLines(rows, 3)[0]
+  assert.equal(l.fill, true, 'a fill widget makes its line fill')
+  assert.deepEqual(l.items, [{ id: 'mine', span: 1 }], 'its span counts as the line\'s')
+})
+
+test('not first in its row: on the right; the widgets before it beside it, in order', () => {
+  const rows = [[W('next', 1), W('needs', 1), W('mine', 1, { height: 2 })], [W('choices', 2)]]
+  assert.equal(tallShow(todayLines(rows, 3)), '[mine:1 right | next:1 needs:1 / choices:2]')
+})
+
+test('two rows high at M beside one column; wider than the page leaves a column beside it', () => {
+  assert.equal(tallShow(todayLines([[W('day', 2, { height: 2 })], [W('a', 1), W('b', 1)]], 3)), '[day:2 left | a:1 / b:1]', 'b wraps under a in one column')
+  assert.equal(tallShow(todayLines([[W('day', 3, { height: 2 })], [W('a', 1)]], 3)), '[day:2 left | a:1]', 'L narrows to leave one column')
+})
+
+test('one row high when nothing is beside it, at one column, or empty; only one of a row counts', () => {
+  assert.equal(tallShow(todayLines([[W('day', 2, { height: 2 })]], 3)), 'day:2', 'nothing beside it')
+  assert.equal(tallShow(todayLines([[W('day', 2, { height: 2 })], [W('a', 1)]], 1)), 'day:1 / a:1', 'one column: stacked')
+  assert.equal(tallShow(todayLines([[W('day', 2, { height: 2, empty: true })], [W('a', 1)]], 3)), 'a:1', 'empty: no space')
+  // The next row's own tall widget is one row high beside the first.
+  assert.equal(tallShow(todayLines([[W('a', 1, { height: 2 })], [W('b', 1, { height: 2 }), W('c', 1)], [W('d', 3)]], 3)), '[a:1 left | b:1 c:1] / d:3')
+  // An empty next row: the one after is next.
+  assert.equal(tallShow(todayLines([[W('a', 1, { height: 2 })], [W('x', 1, { empty: true })], [W('b', 2)]], 3)), '[a:1 left | b:2]')
+})
+
+test('in the middle of its row it is one row high: nothing reorders', () => {
+  const rows = [[W('next', 1), W('mine', 1, { height: 2 }), W('needs', 1)], [W('choices', 2)]]
+  assert.equal(tallShow(todayLines(rows, 3)), 'next:1 mine:1 needs:1 / choices:2')
+  assert.deepEqual(todayTallIds(todayLines(rows, 3)), [])
+})
+
+test('todayTallIds names the widgets drawn two rows high, not those set so but drawn one', () => {
+  const rows = [[W('a', 1, { height: 2 }), W('b', 1, { height: 2 })], [W('c', 1, { height: 2 })], [W('d', 2, { height: 2 })]]
+  // a takes its row and the next: b and c beside it are one row high; d has nothing beside it.
+  assert.deepEqual(todayTallIds(todayLines(rows, 3)), ['a'])
+  assert.deepEqual(todayTallIds(todayLines(rows, 1)), [], 'one column: none')
+})
+
+test('the plan lays two-rows-high widgets beside a held column too', () => {
+  const rows = [[W('day', 1, { fill: true })], [W('mine', 1, { height: 2 }), W('next', 1)], [W('needs', 1)]]
+  const p = todayPlan(rows, 3)
+  assert.equal(p.hold.id, 'day')
+  assert.equal(tallShow(p.lines), '[mine:1 left | next:1 / needs:1]')
 })
 
 let failed = 0
