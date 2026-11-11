@@ -684,9 +684,39 @@ fn figure(dest: &str, alt: &str, images: &mut Images) -> String {
 /// the figure gets no caption (an invisible separator: never typed in minutes).
 const ATTACHED: &str = "\u{2063}";
 
-/// The minutes' "On screen" section names what was shown by its time ("- [08:41] Slide 4/6 …");
-/// the screenshot of that moment goes right under its line, so text and picture read together.
-/// The nearest kept frame within 30 s, each once; a bullet that cites a frame itself is left alone.
+/// The On screen section's heading: its text starts or ends with "on screen" (a trailing `:` or `.` aside).
+fn on_screen(text: &str) -> bool {
+    let t = text.trim().trim_end_matches([':', '.']).trim_end().to_lowercase();
+    t.starts_with("on screen") || t.ends_with("on screen")
+}
+
+/// The first frame file a bullet names: `<digits>m<two digits>s.jpg` or `.png` as a whole word, in any case (lowercased).
+fn named_frame(text: &str) -> Option<String> {
+    let t = text.to_ascii_lowercase();
+    let b = t.as_bytes();
+    let word = |k: usize| k < b.len() && b[k].is_ascii_alphanumeric();
+    (0..b.len()).find_map(|i| {
+        if !b[i].is_ascii_digit() || (i > 0 && word(i - 1)) {
+            return None;
+        }
+        let mut j = i;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        let m = t.get(j..j + 5)?.as_bytes();
+        if !(m[0] == b'm' && m[1].is_ascii_digit() && m[2].is_ascii_digit() && m[3] == b's' && m[4] == b'.') {
+            return None;
+        }
+        let ext = t.get(j + 5..j + 8)?;
+        ((ext == "jpg" || ext == "png") && !word(j + 8)).then(|| t[i..j + 8].to_string())
+    })
+}
+
+/// The minutes' "On screen" section (a heading that starts or ends with "On screen", with the headings nested in it)
+/// names what was shown ("- [08:41] Slide 4/6 (08m41s.jpg)"); the screenshot goes right under its line, so text and
+/// picture read together. A bullet that names a kept frame's file gets that one, the first bullet to name it (a later
+/// one, or one naming no kept frame, gets none); any other the nearest kept frame within 30 s that no bullet names, each
+/// once. A bullet that cites a frame itself is left alone.
 fn attach_screens(md: &str, frames: &[Frame]) -> String {
     let heading = |l: &str| {
         let t = l.trim_start();
@@ -704,35 +734,62 @@ fn attach_screens(md: &str, frames: &[Frame]) -> String {
         }
     };
     let lines: Vec<&str> = md.lines().collect();
-    let mut used: Vec<&str> = vec![];
-    let mut out: Vec<String> = vec![];
+    // Each stamped bullet of the section: the line after its own (its continuation lines stay with it), its time,
+    // and the frame it names. A bullet that cites a frame itself has none.
+    let mut bullets: Vec<(usize, f64, Option<String>)> = vec![];
     let mut section: Option<usize> = None; // the On screen heading's level while inside it
     let mut i = 0;
     while i < lines.len() {
         let l = lines[i];
         if let Some((level, text)) = heading(l) {
-            section = if text.starts_with("on screen") { Some(level) } else if section.is_some_and(|s| level <= s) { None } else { section };
+            section = match section {
+                Some(s) if level > s => Some(s),
+                _ => on_screen(&text).then_some(level),
+            };
         }
-        out.push(l.to_string());
         i += 1;
         let Some(at) = section.and(stamp(l)) else { continue };
-        // The bullet's own continuation lines stay with it.
         let mut item = l.to_string();
         while i < lines.len() && lines[i].starts_with(char::is_whitespace) && !lines[i].trim().is_empty() {
             item.push_str(lines[i]);
-            out.push(lines[i].to_string());
             i += 1;
         }
-        if item.contains("](frames/") {
-            continue;
+        if !item.contains("](frames/") {
+            bullets.push((i, at, named_frame(&item)));
         }
-        let best = frames
-            .iter()
-            .filter(|f| !used.contains(&f.name.as_str()) && (f.t - at).abs() <= 30.0)
-            .min_by(|a, b| (a.t - at).abs().total_cmp(&(b.t - at).abs()));
-        if let Some(f) = best {
-            used.push(&f.name);
-            out.push(format!("  ![{ATTACHED}](frames/{})", f.name));
+    }
+    // A kept frame a bullet names is that bullet's, the first to name it.
+    let mut owned: Vec<&str> = vec![];
+    let owners: Vec<Option<&str>> = bullets
+        .iter()
+        .map(|(_, _, n)| {
+            let n = n.as_deref().filter(|n| frames.iter().any(|f| f.name == *n) && !owned.contains(n))?;
+            owned.push(n);
+            Some(n)
+        })
+        .collect();
+    let mut used: Vec<&str> = vec![];
+    let mut attach: Vec<(usize, &str)> = vec![];
+    for ((end, at, names), owner) in bullets.iter().zip(&owners) {
+        let pick = if names.is_some() {
+            *owner
+        } else {
+            frames
+                .iter()
+                .filter(|f| !owned.contains(&f.name.as_str()) && !used.contains(&f.name.as_str()) && (f.t - at).abs() <= 30.0)
+                .min_by(|a, b| (a.t - at).abs().total_cmp(&(b.t - at).abs()))
+                .map(|f| f.name.as_str())
+        };
+        if let Some(n) = pick {
+            used.push(n);
+            attach.push((*end, n));
+        }
+    }
+    let mut out: Vec<String> = vec![];
+    for (k, l) in lines.iter().enumerate() {
+        out.push(l.to_string());
+        if let Some((_, n)) = attach.iter().find(|(end, _)| *end == k + 1) {
+            out.push(format!("  ![{ATTACHED}](frames/{n})"));
         }
     }
     let mut s = out.join("\n");
@@ -1277,6 +1334,61 @@ mod tests {
 
     fn load_frames(name: &str) -> Option<(&'static str, Vec<u8>)> {
         ["01m02s.jpg", "08m41s.jpg", "30m00s.jpg"].contains(&name).then(|| ("image/jpeg", vec![1, 2, 3]))
+    }
+
+    fn jpgs(names: &[(&str, f64)]) -> Vec<Frame> {
+        names.iter().map(|(n, t)| Frame { name: (*n).into(), t: *t, shared_by: None }).collect()
+    }
+
+    /// The frame attached right under a bullet (its text as written), if any.
+    fn after(got: &str, bullet: &str) -> Option<String> {
+        let rest = &got[got.find(bullet)? + bullet.len()..];
+        rest.strip_prefix(&format!("\n  ![{ATTACHED}](frames/")).and_then(|r| r.split_once(')')).map(|(n, _)| n.to_string())
+    }
+
+    #[test]
+    fn on_screen_sections_start_or_end_with_on_screen_and_hold_nested_headings() {
+        let f = jpgs(&[("01m05s.jpg", 65.0), ("05m07s.jpg", 307.0)]);
+        for h in ["## Appendix: On screen", "## On screen — slides", "## On screen:"] {
+            assert_eq!(after(&attach_screens(&format!("{h}\n- [01:05] A\n"), &f), "- [01:05] A").as_deref(), Some("01m05s.jpg"), "{h}");
+        }
+        assert_eq!(after(&attach_screens("## Not a screen\n- [01:05] A\n", &f), "- [01:05] A"), None);
+        let md = "## Appendix: On screen\n### On screen — first\n- [01:05] A\n### Second topic\n- [05:07] B\n## Decisions\n- [01:06] C\n";
+        let got = attach_screens(md, &f);
+        assert_eq!((after(&got, "- [01:05] A").as_deref(), after(&got, "- [05:07] B").as_deref(), after(&got, "- [01:06] C")), (Some("01m05s.jpg"), Some("05m07s.jpg"), None));
+    }
+
+    #[test]
+    fn a_named_screenshot_goes_to_its_bullet_and_never_to_another() {
+        let f = jpgs(&[("01m05s.jpg", 65.0), ("01m10s.jpg", 70.0), ("05m07s.jpg", 307.0), ("105m07s.jpg", 6307.0)]);
+        let got = attach_screens("## Appendix: On screen\n- [01:06] The plan (05m07s.jpg)\n- [01:09] The agenda\n", &f);
+        assert_eq!((after(&got, "(05m07s.jpg)").as_deref(), after(&got, "The agenda").as_deref()), (Some("05m07s.jpg"), Some("01m10s.jpg")));
+        let got = attach_screens("## On screen\n- [01:05] Agenda\n- [01:10] Detail `01m05s.jpg`\n", &f);
+        assert_eq!((after(&got, "Agenda").as_deref(), after(&got, "`01m05s.jpg`").as_deref()), (Some("01m10s.jpg"), Some("01m05s.jpg")));
+        let got = attach_screens("## On screen\n- [105:07] Late (105m07s.jpg)\n", &f);
+        assert_eq!(after(&got, "(105m07s.jpg)").as_deref(), Some("105m07s.jpg"));
+        let got = attach_screens("## On screen\n- [05:07] One (05m07s.jpg)\n- [05:08] Again (05m07s.jpg)\n- [01:07] Gone (09m09s.jpg)\n", &f);
+        assert_eq!((after(&got, "Again (05m07s.jpg)"), after(&got, "Gone (09m09s.jpg)")), (None, None), "no substitute: {got}");
+    }
+
+    #[test]
+    fn a_named_screenshot_is_found_in_any_case_and_before_a_full_stop() {
+        let f = jpgs(&[("01m05s.jpg", 65.0), ("05m07s.jpg", 307.0)]);
+        let got = attach_screens("## On screen\n- [01:06] The plan 05M07S.JPG\n- [01:07] Shown in 01m05s.jpg.\n", &f);
+        assert_eq!((after(&got, "05M07S.JPG").as_deref(), after(&got, "01m05s.jpg.").as_deref()), (Some("05m07s.jpg"), Some("01m05s.jpg")));
+    }
+
+    #[test]
+    fn a_bullet_with_its_own_picture_is_left_as_written() {
+        fn any(_: &str) -> Option<(&'static str, Vec<u8>)> {
+            Some(("image/jpeg", vec![1, 2, 3]))
+        }
+        let f = jpgs(&[("01m05s.jpg", 65.0), ("05m07s.jpg", 307.0)]);
+        let md = "## On screen\n- [01:00] Timeline (05m07s.jpg)\n  ![Timeline](frames/01m05s.jpg)\n- [05:05] Later\n";
+        let got = attach_screens(md, &f);
+        assert!(got.contains("(05m07s.jpg)\n  ![Timeline](frames/01m05s.jpg)\n- [05:05] Later"), "untouched: {got}");
+        assert_eq!(after(&got, "- [05:05] Later").as_deref(), Some("05m07s.jpg"), "05m07s stayed free");
+        assert_eq!(render(md, "T", None, &any, &f).matches("<figure>").count(), 2);
     }
 
     #[test]
