@@ -4324,7 +4324,8 @@
         "Summary",
         "Decisions",
         "Action items",
-        "Open questions"
+        "Open questions",
+        "Appendix: On screen"
       ],
       "thread": {
         "link": "echo://thread/acme-rollout",
@@ -4877,7 +4878,8 @@
         "Summary",
         "Decisions",
         "Action items",
-        "Open questions"
+        "Open questions",
+        "Appendix: On screen"
       ]
     },
     "kickoff": {

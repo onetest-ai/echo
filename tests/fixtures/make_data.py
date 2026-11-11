@@ -437,7 +437,7 @@ def write_call(d, c):
         for t in c["frames"]:
             f = f"frames/{t // 60:02d}m{t % 60:02d}s.png"
             with open(f"{p}/{f}", "wb") as fh:
-                fh.write(PNG)
+                fh.write(png(c.get("frame_widths", {}).get(t, 1)))
             lines.append(json.dumps({"t": t, "file": f, "change": 1.0, "shared_by": c.get("shared_by")}))
         d.write(f"{p}/frames.jsonl", "\n".join(lines) + "\n")
     if c.get("ui_log"):  # what Echo read of Teams' call window while recording (`ax::SpeakingLog`): tiles and the participants list
@@ -473,15 +473,15 @@ def slug_of(title):
     return s[:60] or "call"
 
 
-def png():
-    """A 1×1 PNG (a shared screen's frame: the window only needs an image)."""
+def png(width=1):
+    """A width×1 PNG (a shared screen's frame: the window only needs an image; widths tell frames apart)."""
     import struct
     import zlib
 
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(b"\x00\x30\x60\x90")) + chunk(b"IEND", b""))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\x00" + b"\x30\x60\x90" * width)) + chunk(b"IEND", b""))
 
 
 PNG = png()
@@ -1033,7 +1033,7 @@ def build_calls(d, H):
     acme_before = [p["dana"], p["omar"], p["rita"], p["priya"]]  # Priya: a colleague seen in the thread's calls, not placed
     notes1 = minutes_md("Acme weekly sync", ["SSO for the Berlin pilot is on track [00:13]", "The questionnaire waits for legal [00:31]"],
                         ["The pilot goes ahead in Berlin [04:10]"], ["Me — send the access list reminder to Omar [00:58]", "Rita Gomez — finish the dry run [00:45]"],
-                        ["Who replaces Yuki on the distribution list? [02:31]"])
+                        ["Who replaces Yuki on the distribution list? [02:31]"]) + "\n## Appendix: On screen\n- [01:00] The rollout timeline (05m07s.png)\n- [01:10] The agenda slide\n"
     my_notes = ("# During the call\n\n- [00:12] Dana says the checklist went out on Monday\n- [00:31] ? Does legal need the old contract too\n"
                 "- [00:45] ! Pilot starts in Berlin only\n- [ ] [00:58] Remind Omar about the access list\n- [x] [01:10] Send the agenda\n"
                 "- [01:30] ⚑ Budget owner is Rita\n  > \"she owns the budget\"\n- a note without a time\n")
@@ -1057,7 +1057,7 @@ def build_calls(d, H):
         return c
     # Today.
     call("acme-sync-today", at(-3), 30, "Acme weekly sync", acme_people, ACME_SYNC_TODAY, ("notes", "done", "tried"), ("call", "one", "invite"),
-         event="ev-acme-sync", series="S-ACME-WEEKLY", notes=notes1, chat=chat, frames=[65, 307], shared_by="Dana Lee", my_notes=my_notes, live=live, log=True,
+         event="ev-acme-sync", series="S-ACME-WEEKLY", notes=notes1, chat=chat, frames=[65, 307], frame_widths={65: 3, 307: 5}, shared_by="Dana Lee", my_notes=my_notes, live=live, log=True,
          actions=[action("acmt0001", "Me", "Send the access list reminder to Omar", "We are still waiting for the access list from Omar", due=now.strftime("%Y-%m-%d")),
                   action("acmt0002", "Rita Gomez", "Finish the dry run", "Rita started the data migration dry run yesterday", status="done")],
          run={"state": "done", "profile": "work", "model": "sonnet", "started_at": iso(at(-2.4)), "finished_at": iso(at(-2.35)), "message": None, "pid": None, "session_id": None, "auto": True},

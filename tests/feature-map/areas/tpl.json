@@ -14,7 +14,7 @@
   },
   {
    "id": "F-TPL-02",
-   "feature": "The minutes list shows each template as Built in, Edited or Yours with what it is for (any call no other matches, memos only, its title words, only when chosen)",
+   "feature": "The minutes list shows each template as Built in, Edited or Yours with what it is for (any call no other matches, memos only, its title words, only when chosen); a template that keeps every section reads \"N sections, all kept\"",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -24,7 +24,7 @@
   },
   {
    "id": "F-TPL-03",
-   "feature": "The editor saves each change at once: the header card with its {values} (ⓘ inserts one), title words as chips (Enter or comma adds, × removes), sections (heading, what to write, ↑ ↓, trash but on the last, + Add a section)",
+   "feature": "The editor saves each change at once: the header card with its {values} (`{end}` among them; ⓘ inserts one), title words as chips (Enter or comma adds, × removes), sections (heading, what to write, ↑ ↓, trash but on the last, + Add a section)",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -62,6 +62,15 @@
    "id": "F-TPL-07",
    "feature": "`echoctl templates` lists the templates, the values and the folder",
    "priority": "low",
+   "check": "agent",
+   "axes": [
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-TPL-08",
+   "feature": "Keep every section: with it on, a template's sections all stay in the minutes, in order (`_None recorded._` when empty; a section that says \"only when…\" only then), and the user's note headings go inside them; a checkbox in the editor and in New template, `fixed: true` in the file; never for the memo",
+   "priority": "medium",
    "check": "agent",
    "axes": [
     "template.kind"
