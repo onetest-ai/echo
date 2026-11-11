@@ -449,11 +449,62 @@ pub fn pending(project: &str) -> Result<Vec<Value>> {
     let l = Ledger::of(project)?;
     let ev = l.evidence();
     let done = processed(&l.events()?);
+    let others = Others::new(project);
     Ok(order(&ev)
         .into_iter()
         .filter(|i| !done.contains(i))
-        .map(|i| json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()}))
+        .map(|i| {
+            let mut v = json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()});
+            if let Some(a) = others.as_ref().and_then(|o| o.of(&i, &ev[&i])) {
+                v["also_in"] = a;
+            }
+            v
+        })
         .collect())
+}
+
+/// How many items wait to be read (no other thread looked at).
+pub fn pending_count(project: &str) -> Result<usize> {
+    let l = Ledger::of(project)?;
+    let done = processed(&l.events()?);
+    Ok(l.evidence().keys().filter(|i| !done.contains(*i)).count())
+}
+
+/// The other threads an evidence item belongs to — a call by the threads' own rules, pins and exclusions now (not by
+/// which ledgers happen to hold it), a mail or chat by the ledgers that read it. By name those on this thread's AI
+/// profile, the rest only counted: a thread's name is its text, and goes only to its own profile's model. Loaded once.
+pub(crate) struct Others {
+    project: String,
+    profile: String,
+    all: Vec<(String, String, String)>,
+}
+
+impl Others {
+    pub(crate) fn new(project: &str) -> Option<Others> {
+        let default = crate::ai::default_id();
+        let all: Vec<(String, String, String)> = crate::projects::list().into_iter().map(|p| (p.id.clone(), p.name.clone(), p.ai_profile.clone().unwrap_or_else(|| default.clone()))).collect();
+        let profile = all.iter().find(|(id, _, _)| id == project)?.2.clone();
+        Some(Others { project: project.to_string(), profile, all })
+    }
+
+    pub(crate) fn of(&self, evid: &str, item: &Value) -> Option<Value> {
+        let ids: Vec<String> = if item["source"] == "call" {
+            let dir = item["call"].as_str().map(|c| crate::paths::calls_dir().join(c)).filter(|d| d.is_dir()).or_else(|| crate::calls::by_stamp(evid))?;
+            // A memo split by thread: this thread has its own part already.
+            if crate::memo::parts_for(&dir, &self.project).is_some_and(|s| !s.is_empty()) {
+                return None;
+            }
+            crate::projects::of_call(&dir).ok()?.into_iter().map(|(p, _)| p.id).collect()
+        } else {
+            self.all.iter().filter(|(id, _, _)| Ledger::of(id).is_ok_and(|l| l.dir.join("evidence").join(format!("{evid}.json")).is_file())).map(|(id, _, _)| id.clone()).collect()
+        };
+        let others: Vec<&(String, String, String)> = self.all.iter().filter(|(id, _, _)| *id != self.project && ids.contains(id)).collect();
+        if others.is_empty() {
+            return None;
+        }
+        let named: Vec<&str> = others.iter().filter(|(_, _, p)| *p == self.profile).map(|(_, n, _)| n.as_str()).collect();
+        Some(json!({"threads": named, "others": others.len() - named.len()}))
+    }
 }
 
 pub fn mark_processed(project: &str, evid: &str, note: &str) -> Result<()> {

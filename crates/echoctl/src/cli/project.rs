@@ -766,7 +766,10 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
                     std::fs::write(&f, serde_json::to_vec_pretty(&packets)?)?;
                     // How the user works (About me), for judging what counts as done or handed over.
                     let me = calls::me_profile().and_then(|t| calls::me_parts(&t, &["identity", "patterns"], 2500));
-                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f, "me_patterns": me }));
+                    // What this thread is about, for packets from an item it shares with other threads (`also_in`).
+                    let shared = packets.as_array().is_some_and(|a| a.iter().any(|p| p.get("also_in").is_some()));
+                    let scope = shared.then(|| ledger::thread_scope(id)).flatten();
+                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f, "me_patterns": me, "thread_scope": scope }));
                 }
                 None => print_json(&packets),
             }

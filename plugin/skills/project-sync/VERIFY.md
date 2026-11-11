@@ -5,7 +5,7 @@ the **claimed change on this specific node** (its `path` shows workstream › st
 `supports` changes the tree.
 
 1. `$L verify-prep --out <run folder>/packets.json` — its answer may carry `me_patterns`: how the
-   user ("Me") works, from their About me. Use it to read the context (e.g. "submitted" means the
+   user ("Me") works, from their About me, and `thread_scope` (see "One thread at a time"). Use it to read the context (e.g. "submitted" means the
    prep is done; work Me "passed to" someone is that person's), never instead of the words.
 2. Read that file. For each packet write `{"mid": "…", "verdict": "supports|weak|wrong", "reason":
    "≤ 15 words"}` into `<run folder>/verdicts.json` (a JSON array covering every packet).
@@ -26,6 +26,10 @@ Verdicts
 - **A recording is proof.** When the item is itself the session (its transcript is that meeting),
   that supports `held` for that session.
 - **A promise is not progress.** "I'll send it" supports neither `progress` nor `done`.
+- **One thread at a time.** A packet with `also_in` comes from an item shared with other threads; `thread_scope` in
+  verify-prep's answer says what this thread is about (notes, brief, terms). `supports` only when the words are
+  about this thread's work — the node's `path` is in it, and "A recording is proof" still holds for its sessions; a
+  quote plainly about another thread's work is `wrong`, whatever the node's title.
 - `weak` — the right session, person or topic, but the words don't state the change.
 - `wrong` — contradicts the claim, or is about a different node (a quote about another story's
   session is wrong even when the topic is close).

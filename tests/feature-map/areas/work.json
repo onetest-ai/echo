@@ -166,6 +166,13 @@
    "axes": [
     "node.history"
    ]
+  },
+  {
+   "id": "F-WORK-17",
+   "feature": "A call, chat or mail in several threads is read by each thread's sync for that thread only: `pending` lists the other threads it is in (by name those on the same AI profile, the rest counted), `context` gives the thread's brief and terms to judge by, the extractor takes only what concerns this thread, and the verifier's packets carry the thread and `also_in` so a quote about another thread's work is judged wrong",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

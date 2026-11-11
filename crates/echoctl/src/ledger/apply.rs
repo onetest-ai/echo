@@ -381,6 +381,13 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
 // ── verify ──────────────────────────────────────────────────────────────────────────────────────
 
 /// The claims a verifier must judge (each with its words in context). `weak`: also those judged weak.
+/// How many claims wait for the verifier (`verify_prep`'s count, without building the packets).
+pub fn verify_count(project: &str) -> Result<usize> {
+    let evs = Ledger::of(project)?.events()?;
+    let judged: BTreeSet<String> = evs.iter().filter(|e| e["type"] == "verdict").filter_map(|e| s(&e["mid"])).collect();
+    Ok(evs.iter().filter(|e| needs_verdict(e) && s(&e["mid"]).is_none_or(|m| !judged.contains(&m))).count())
+}
+
 pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
     let l = Ledger::of(project)?;
     let evs = l.events()?;
@@ -388,6 +395,8 @@ pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
     let latest: BTreeMap<String, String> = evs.iter().filter(|e| e["type"] == "verdict").filter_map(|e| Some((s(&e["mid"])?, s(&e["verdict"])?))).collect();
     let n = fold_events(&evs, ev.clone())?.nodes;
     let mut out = vec![];
+    let others = super::mail::Others::new(project);
+    let name = crate::projects::load(project).map(|p| p.name).unwrap_or_default();
     for e in evs.iter().filter(|e| needs_verdict(e)) {
         let mid = s(&e["mid"]).unwrap_or_default();
         if let Some(v) = latest.get(&mid) {
@@ -419,8 +428,14 @@ pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
             "answer" => format!("this question is answered: {}", e["text"].as_str().unwrap_or("")),
             _ => e["effect"].as_str().unwrap_or("").to_string(),
         };
-        out.push(json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
-                        "quote": e["quote"], "evidence": format!("{} {}", e["date"].as_str().unwrap_or(""), item["title"].as_str().unwrap_or("")), "context": ctx}));
+        let mut packet = json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
+                        "quote": e["quote"], "evidence": format!("{} {}", e["date"].as_str().unwrap_or(""), item["title"].as_str().unwrap_or("")), "context": ctx});
+        // An item in several threads: the verifier checks the change is about this thread's work.
+        if let Some(a) = e["evidence"].as_str().and_then(|i| others.as_ref()?.of(i, &item)) {
+            packet["thread"] = json!(name);
+            packet["also_in"] = a;
+        }
+        out.push(packet);
     }
     Ok(out)
 }
