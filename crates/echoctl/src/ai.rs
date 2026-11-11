@@ -833,8 +833,10 @@ impl Ready {
 /// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
 /// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends). Installing it forgets this process's observations and cached checks.
+/// Unix: a shell script. Windows: the same in PowerShell, started by a `.cmd` (`stubborn` is Unix's: Windows stops
+/// the tree with `taskkill /F`); most tests that use it are still Unix-only (#423).
 #[cfg(test)]
-#[cfg_attr(not(unix), allow(dead_code))] // the fake is a shell script: only Unix tests use it
+#[cfg_attr(not(unix), allow(dead_code))] // most of its users are Unix-only tests
 pub mod fake {
     use super::*;
 
@@ -848,6 +850,67 @@ pub mod fake {
     }
 
     pub fn install(root: &Path) -> Fake {
+        #[cfg(unix)]
+        let f = install_script(root);
+        #[cfg(windows)]
+        let f = install_windows(root);
+        *FAKE_CLAUDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *REFUSED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        Fake
+    }
+
+    /// Windows: `fake-claude.cmd` runs `fake-claude.ps1` with its arguments; bytes in and out as they are (the
+    /// replies are UTF-8, a console code page would garble them).
+    #[cfg(windows)]
+    fn install_windows(root: &Path) -> PathBuf {
+        fs::write(
+            root.join("fake-claude.ps1"),
+            r#"$d = $env:CLAUDE_CONFIG_DIR
+function Out-File-Bytes($name) { $b = [IO.File]::ReadAllBytes((Join-Path $d $name)); $o = [Console]::OpenStandardOutput(); $o.Write($b, 0, $b.Length); $o.Flush() }
+function Out-Text($s) { $b = [Text.Encoding]::UTF8.GetBytes($s); $o = [Console]::OpenStandardOutput(); $o.Write($b, 0, $b.Length); $o.Flush() }
+function Has($name) { Test-Path -LiteralPath (Join-Path $d $name) }
+function Hang { $b = [IO.File]::ReadAllBytes((Join-Path $d 'p.hang')); $e = [Console]::OpenStandardError(); $e.Write($b, 0, $b.Length); $e.Flush(); Start-Sleep -Seconds 60; exit 0 }
+$a1 = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
+$a2 = if ($args.Count -gt 1) { [string]$args[1] } else { '' }
+if ($a1 -eq '--version') {
+  if (Has 'version') { Out-File-Bytes 'version' } else { Out-Text "2.1.400 (Claude Code)`n" }
+} elseif ($a1 -eq 'auth' -and $a2 -eq 'status') {
+  [IO.File]::AppendAllText((Join-Path $d 'status.count'), "x`n")
+  if (Has 'slow') { Start-Sleep -Seconds 1 }
+  if (Has 'stall') { Start-Sleep -Seconds 30 }
+  Out-File-Bytes 'status.json'
+} elseif ($a1 -eq '-p') {
+  if (($args -join ' ') -like '*stream-json*') {
+    if (Has 'p.hang') { Hang }
+    $in = New-Object IO.StreamReader([Console]::OpenStandardInput(), (New-Object Text.UTF8Encoding $false))
+    while ($null -ne ($l = $in.ReadLine())) {
+      [IO.File]::AppendAllText((Join-Path $d 'p.turns'), "$l`n", (New-Object Text.UTF8Encoding $false))
+      Out-File-Bytes 'p.reply'; Out-Text "`n"
+    }
+  } else {
+    $f = [IO.File]::Create((Join-Path $d 'p.stdin')); [Console]::OpenStandardInput().CopyTo($f); $f.Close()
+    if (Has 'p.hang') { Hang }
+    Out-File-Bytes 'p.reply'
+  }
+} elseif ($a1 -eq 'auth' -and $a2 -eq 'login') {
+  [IO.File]::WriteAllText((Join-Path $d 'login.args'), (($args -join ' ') + "`n"))
+  $how = if (Has 'login') { (Get-Content -Raw (Join-Path $d 'login')).Trim() } else { '' }
+  if ($how -eq 'ok') { Copy-Item (Join-Path $d 'after.json') (Join-Path $d 'status.json'); Out-Text "Login successful.`n" }
+  elseif ($how -eq 'fail') { [Console]::Error.WriteLine('Login failed: Request failed with status code 400'); exit 1 }
+  elseif ($how -eq 'hang') { [IO.File]::WriteAllText((Join-Path $d 'login.pid'), "$PID`n"); Start-Sleep -Seconds 60 }
+}
+"#,
+        )
+        .unwrap();
+        let f = root.join("fake-claude.cmd");
+        fs::write(&f, "@\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0fake-claude.ps1\" %*\r\n@exit /b %ERRORLEVEL%\r\n").unwrap();
+        f
+    }
+
+    #[cfg(unix)]
+    fn install_script(root: &Path) -> PathBuf {
         let f = root.join("fake-claude");
         fs::write(
             &f,
@@ -868,16 +931,9 @@ esac
 "#,
         )
         .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        *FAKE_CLAUDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
-        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *REFUSED.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        Fake
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+        f
     }
 
     pub fn signed_in(email: &str) -> String {
