@@ -63,6 +63,11 @@ function pjLinked(p) {
 }
 const projClient = (id) => ((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === id)
 
+/** Draws the Threads view in the primary area (`renderNow`). */
+function drawProjects(primary) {
+  patch(primary, `<main class="main">${projectsView()}</main>`)
+  drawOrgLinks()
+}
 function projectsView() {
   const data = S.pj.data
   if (!data) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`

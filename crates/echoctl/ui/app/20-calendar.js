@@ -61,6 +61,14 @@ function eventState(e, now) {
   return { s, en, past, live, recordable }
 }
 
+/** Draws the Calendar view in the primary area (`renderNow`). */
+function drawCalendar(primary) {
+  const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
+  patch(primary, `<main class="main">${calendarView()}</main>`)
+  const g = $('#calgrid')
+  // First open: around now, or 08:00 on a week without today.
+  if (g && g !== grid) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop - 120 : 8 * Number(g.dataset.hour)))
+}
 function calendarView() {
   const d = S.cal.data
   const { start, days } = calRange()

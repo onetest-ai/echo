@@ -16,6 +16,8 @@ node crates/echoctl/ui/notes-sync.test.mjs
 node crates/echoctl/ui/calendar-dates.test.mjs
 # The window's workbench: activities, call tabs, calendar actions, and where panel views go.
 node crates/echoctl/ui/workbench.test.mjs
+# Which handler a click runs: the nearest element a handler matches, then the first handler that holds (clickFor).
+node crates/echoctl/ui/clicks.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
 # Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).

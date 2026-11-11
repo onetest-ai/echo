@@ -19,6 +19,10 @@ test('Today comes first, then Calls (list beside the call) and Calendar (one col
   assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['today', 'single', false], ['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
 })
 
+test('each of Echo\'s own views draws itself, but Calls: the list beside the call, drawn when no activity draws', () => {
+  assert.deepEqual(ACTIVITIES.filter((a) => a.draw).map((a) => a.id), ['today', 'calendar', 'projects', 'tasks', 'brain', 'settings'])
+})
+
 test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {
   assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0 })), ['transcript', 'minutes'])
   assert.equal(callTabs({ recording: true, chat: 0, frames: 0 })[0][3], true)

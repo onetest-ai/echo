@@ -79,6 +79,12 @@ const seg = (key, cur, opts, label = '') => `<div class="seg" role="group"${labe
 const actBtn = (action, label, arg = '', primary = false) => `<button class="btn${primary ? ' primary' : ''}" data-act="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${esc(label)}</button>`
 const LANG_LIST = ['en', 'uk', 'ru', 'es', 'de', 'fr', 'it', 'pl', 'pt', 'nl', 'cs', 'ro', 'tr', 'he', 'ar', 'hi', 'ja', 'zh', 'ko']
 
+/** Draws the Settings view in the primary area (`renderNow`). */
+function drawSettings(primary) {
+  patch(primary, `<main class="main">${settingsView()}</main>`)
+  // The template just chosen or made, in view in a long list.
+  if (TPL.scrollTo) { TPL.scrollTo = false; const r = $('.tp-row.on'); if (r) r.scrollIntoView({ block: 'nearest' }) }
+}
 function settingsView() {
   const st = S.settings
   const own = Plugins.sections.find((x) => x.id === S.setSection)
