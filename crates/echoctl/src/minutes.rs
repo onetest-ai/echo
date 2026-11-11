@@ -694,9 +694,8 @@ fn on_screen(text: &str) -> bool {
 fn named_frame(text: &str) -> Option<String> {
     let t = text.to_ascii_lowercase();
     let b = t.as_bytes();
-    let word = |k: usize| k < b.len() && b[k].is_ascii_alphanumeric();
     (0..b.len()).find_map(|i| {
-        if !b[i].is_ascii_digit() || (i > 0 && word(i - 1)) {
+        if !b[i].is_ascii_digit() || t[..i].chars().next_back().is_some_and(char::is_alphanumeric) {
             return None;
         }
         let mut j = i;
@@ -708,11 +707,12 @@ fn named_frame(text: &str) -> Option<String> {
             return None;
         }
         let ext = t.get(j + 5..j + 8)?;
-        ((ext == "jpg" || ext == "png") && !word(j + 8)).then(|| t[i..j + 8].to_string())
+        ((ext == "jpg" || ext == "png") && !t[j + 8..].chars().next().is_some_and(char::is_alphanumeric)).then(|| t[i..j + 8].to_string())
     })
 }
 
-/// The minutes' "On screen" section (a heading that starts or ends with "On screen", with the headings nested in it)
+/// The minutes' "On screen" section (a `##` or deeper heading that starts or ends with "On screen", with the headings
+/// nested in it)
 /// names what was shown ("- [08:41] Slide 4/6 (08m41s.jpg)"); the screenshot goes right under its line, so text and
 /// picture read together. A bullet that names a kept frame's file gets that one, the first bullet to name it (a later
 /// one, or one naming no kept frame, gets none); any other the nearest kept frame within 30 s that no bullet names, each
@@ -744,7 +744,7 @@ fn attach_screens(md: &str, frames: &[Frame]) -> String {
         if let Some((level, text)) = heading(l) {
             section = match section {
                 Some(s) if level > s => Some(s),
-                _ => on_screen(&text).then_some(level),
+                _ => (level >= 2 && on_screen(&text)).then_some(level),
             };
         }
         i += 1;
@@ -1376,6 +1376,23 @@ mod tests {
         let f = jpgs(&[("01m05s.jpg", 65.0), ("05m07s.jpg", 307.0)]);
         let got = attach_screens("## On screen\n- [01:06] The plan 05M07S.JPG\n- [01:07] Shown in 01m05s.jpg.\n", &f);
         assert_eq!((after(&got, "05M07S.JPG").as_deref(), after(&got, "01m05s.jpg.").as_deref()), (Some("05m07s.jpg"), Some("01m05s.jpg")));
+    }
+
+    #[test]
+    fn a_named_screenshot_is_a_whole_word_next_to_any_letter() {
+        let f = jpgs(&[("01m05s.jpg", 65.0), ("05m07s.jpg", 307.0)]);
+        let got = attach_screens("## On screen\n- [01:05] Slide é05m07s.jpg\n- [05:07] Named (05m07s.jpg)\n", &f);
+        assert_eq!((after(&got, "é05m07s.jpg").as_deref(), after(&got, "Named (05m07s.jpg)").as_deref()), (Some("01m05s.jpg"), Some("05m07s.jpg")));
+        let got = attach_screens("## On screen\n- [01:06] Slide 05m07s.jpgé\n", &f);
+        assert_eq!(after(&got, "05m07s.jpgé").as_deref(), Some("01m05s.jpg"), "not a name: the time guess");
+    }
+
+    #[test]
+    fn a_title_never_opens_the_on_screen_section() {
+        let f = jpgs(&[("01m05s.jpg", 65.0)]);
+        let md = "# Review: On screen\n\n## Decisions\n- [01:05] C\n";
+        assert_eq!(after(&attach_screens(md, &f), "- [01:05] C"), None);
+        assert_eq!(render(md, "T", None, &|_: &str| Some(("image/jpeg", vec![1, 2, 3])), &f).matches("<figure>").count(), 0);
     }
 
     #[test]
