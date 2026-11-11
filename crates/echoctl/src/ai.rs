@@ -834,7 +834,8 @@ impl Ready {
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
 /// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends). Installing it forgets this process's observations and cached checks.
 /// Unix: a shell script. Windows: the same in PowerShell, started by a `.cmd` (`stubborn` is Unix's: Windows stops
-/// the tree with `taskkill /F`); most tests that use it are still Unix-only (#423).
+/// the tree with `taskkill /T /F`; its `login.pid` is PowerShell's, a grandchild under `cmd.exe`, not the started child);
+/// most tests that use it are still Unix-only (#423).
 #[cfg(test)]
 #[cfg_attr(not(unix), allow(dead_code))] // most of its users are Unix-only tests
 pub mod fake {
@@ -862,19 +863,22 @@ pub mod fake {
     }
 
     /// Windows: `fake-claude.cmd` runs `fake-claude.ps1` with its arguments; bytes in and out as they are (the
-    /// replies are UTF-8, a console code page would garble them).
+    /// replies are UTF-8, a console code page would garble them); a missing file fails it (exit 1), as `cat` does. The
+    /// `.cmd` names PowerShell by its full path: under `cargo test` PATH holds every native library folder of the
+    /// build, longer than the 8191 characters cmd.exe reads, so cmd.exe sees it empty.
     #[cfg(windows)]
     fn install_windows(root: &Path) -> PathBuf {
         fs::write(
             root.join("fake-claude.ps1"),
-            r#"$d = $env:CLAUDE_CONFIG_DIR
+            r#"$ErrorActionPreference = 'Stop'
+$d = $env:CLAUDE_CONFIG_DIR
 function Out-File-Bytes($name) { $b = [IO.File]::ReadAllBytes((Join-Path $d $name)); $o = [Console]::OpenStandardOutput(); $o.Write($b, 0, $b.Length); $o.Flush() }
 function Out-Text($s) { $b = [Text.Encoding]::UTF8.GetBytes($s); $o = [Console]::OpenStandardOutput(); $o.Write($b, 0, $b.Length); $o.Flush() }
 function Has($name) { Test-Path -LiteralPath (Join-Path $d $name) }
 function Hang { $b = [IO.File]::ReadAllBytes((Join-Path $d 'p.hang')); $e = [Console]::OpenStandardError(); $e.Write($b, 0, $b.Length); $e.Flush(); Start-Sleep -Seconds 60; exit 0 }
 $a1 = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
 $a2 = if ($args.Count -gt 1) { [string]$args[1] } else { '' }
-if ($a1 -eq '--version') {
+if ($a1 -eq '--version' -and $a2 -eq '') {
   if (Has 'version') { Out-File-Bytes 'version' } else { Out-Text "2.1.400 (Claude Code)`n" }
 } elseif ($a1 -eq 'auth' -and $a2 -eq 'status') {
   [IO.File]::AppendAllText((Join-Path $d 'status.count'), "x`n")
