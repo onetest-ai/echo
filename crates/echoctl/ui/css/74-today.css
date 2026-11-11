@@ -245,7 +245,7 @@
 /* A widget its plugin hasn't answered yet: its place held, about the height its kind draws (a list's
    depends on its rows: a few). */
 .pw-wait { overflow: hidden; }
-.pw-wait.k-stat { height: 66px; } .pw-wait.k-stats { height: 43px; } .pw-wait.k-list { height: 140px; }
+.pw-wait.k-stat { height: 66px; } .pw-wait.k-stat.s-S { height: 44px; } .pw-wait.k-stats { height: 43px; } .pw-wait.k-list { height: 140px; }
 .pw-wait.k-page { height: 72px; } .pw-wait.k-chart { height: 131px; }
 .pw-chart line { stroke: var(--line-strong); }
 .pw-chart rect { fill: color-mix(in srgb, var(--accent) 55%, transparent); }

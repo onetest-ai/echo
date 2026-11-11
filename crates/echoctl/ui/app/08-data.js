@@ -78,19 +78,19 @@ async function loadToday() {
   todayWaitForPlugins()
 }
 /** A plugin's widget not answered yet (`pending`) holds its place (#410); its answer comes in the background, so Today
- *  is read again while one waits — soon, then less often (0.5, 1, 2, 4, 8 s): an answer, or the plugin's failed ask,
- *  ends the wait either way. */
+ *  is read again while one waits — soon, then less often (0.5, 1, 2, 4, then every 8 s, a minute in all): an answer,
+ *  or the plugin's failed ask, ends the wait either way. */
 function todayWaitForPlugins() {
   const waiting = Object.values((S.today && S.today.plugins) || {}).some((w) => w && w.pending)
   clearTimeout(S.todayWaitTimer)
   if (!waiting) { S.todayWaitTry = 0; return }
   const n = S.todayWaitTry = (S.todayWaitTry || 0) + 1
-  if (n > 5) return
+  if (n > 11) return
   S.todayWaitTimer = setTimeout(async () => {
     if (S.view !== 'today') return
     await loadToday()
     render()
-  }, 500 * 2 ** (n - 1))
+  }, Math.min(8000, 500 * 2 ** (n - 1)))
 }
 async function loadTasks() {
   try { S.tk.data = await get('api/tasks') } catch { /* app restarting */ }
