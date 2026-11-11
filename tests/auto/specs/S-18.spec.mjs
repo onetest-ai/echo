@@ -4,10 +4,11 @@
 // one expired (2), a call nobody opted in to (3), a call armed in the middle (6), arm and stop from the terminal (7)
 // and what that stop leaves of the call (8), the pill's Stop in the window (9), a drop and a rejoin (11), each on a
 // call of its own; a capture stopped by Ctrl-C (4) and one killed (5) beside the app; silence (12) and two remote
-// voices (13) in the recordings prepared once a build; a Stop while the app is frozen (25, an app of its own). Speech
-// models only from the test's own folder (ECHOCTL_TEST_MODELS): without it, the stages that transcribe or read a
-// prepared recording skip.
+// voices (13) in the recordings prepared once a build; a Stop while the app is frozen, with an arm made during the
+// recording for the next call (25, an app of its own). Speech models only from the test's own folder
+// (ECHOCTL_TEST_MODELS): without it, the stages that transcribe or read a prepared recording skip.
 // Not here:
+// - an arm made during a memo and its words (#350): no stage of S-18 records a memo;
 // - stage 10 (recording/TC-012, ask mode): Echo's own "Record?" dialog opens on the Mac's screen and is answered
 //   through System Events;
 // - stages 14–24 (privacy/TC-002, recording/TC-023, TC-007, TC-008, permissions/TC-006, recording/TC-009, TC-010,
@@ -481,7 +482,7 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     }
   })
 
-  test('25 · A Stop while Echo is frozen for a moment ends the recording once it is free, and the next meeting stays armed', covers('recording/TC-025', 'F-REC-05'), async () => {
+  test('25 · A Stop while Echo is frozen for a moment ends the recording once it is free, and the next meeting stays armed', covers('recording/TC-025', 'F-REC-05', 'F-REC-02'), async () => {
     test.setTimeout(3 * 60_000)
     const s = set().busy
     expect(hangUp()).toBe(r().noCall)
@@ -513,10 +514,10 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
       quit = await own.quit()
     }
     expect(quit.code, quit.err).toBe(0)
-    // The arm is taken: it waits for the next call, as the state after the Stop shows (its exact words, #350, are
-    // checked here once that fix is stable).
+    // The arm is taken and says it is for the next call, not that a recording starts now (#350): it waits, as the
+    // state after the Stop shows.
     expect(next.code, next.err).toBe(0)
-    expect(next.out.trim().startsWith(a().armedPrefix)).toBe(true)
+    expect(next.out.trim()).toBe(a().armedWhileRecording)
     expect(stop.out.trim()).toBe(`${fill(a().stopping, { folder: recording })} ${a().busy}`)
     expect(files).toEqual([a().stopRequest, a().armedFile])
     expect(after.watcher).toMatchObject({ recording: null, armed: true })

@@ -1781,7 +1781,9 @@
     "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
     "homeVar": "ECHOCTL_HOME",
     "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
-    "armedPrefix": "armed"
+    "armedPrefix": "armed",
+    "armedWhileRecording": "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)",
+    "runNoTray": "app run --background --no-tray"
   },
   "widgets": {
     "_about": "Today's widgets (S-24 stages 41–52): the catalog `echoctl widget list` gives, Today as it comes (`echoctl today`), the widgets' names on the page, edit mode and Add a widget, and the CLI's refusals",
