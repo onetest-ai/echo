@@ -151,7 +151,7 @@
   },
   {
    "id": "F-WORK-15",
-   "feature": "\"Link to an item in another thread\" finds open items by title or id; Same work · done there / done here, or depends; a mirror shows its master's status, owner and due; Unlink undoes both sides; a thread's sync is told another thread's linked items (their ids, titles, thread) only when that thread is on the same AI profile — one pinned to another is only counted",
+   "feature": "\"Link to an item in another thread\" finds open items by title or id; Same work · done there / done here, or depends; a mirror shows its master's status, owner and due; Unlink undoes both sides; a thread's sync is told another thread's linked items (their ids, titles, thread) only when that thread is on the same AI profile — one pinned to another (or unknown) is only counted, and a mirror of its item shows no owner or what it waits for, only its state, due and since when it waits",
    "priority": "medium",
    "check": "agent",
    "axes": [

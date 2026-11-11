@@ -1099,12 +1099,15 @@ pub fn context(project: &str) -> Result<Value> {
     let p = crate::projects::load(project)?;
     let t = fold_linked(project)?;
     let n = &t.nodes;
-    // Threads on another AI profile: their ids, names and item titles never reach this thread's model (strict routing).
+    // Only threads known to be on this thread's AI profile are named; any other thread's ids, names, item titles,
+    // owners and waits never reach this thread's model (strict routing) — an unknown thread counts as another.
     let default = crate::ai::default_id();
     let mine = p.ai_profile.clone().unwrap_or_else(|| default.clone());
-    let foreign: BTreeSet<String> = crate::projects::list().into_iter().filter(|q| q.ai_profile.clone().unwrap_or_else(|| default.clone()) != mine).map(|q| q.id).collect();
-    fn view(n: &BTreeMap<String, Node>, x: &Node, foreign: &BTreeSet<String>) -> Value {
-        let away = |v: &Value| v["thread"].as_str().is_some_and(|t| foreign.contains(t));
+    let same: BTreeSet<String> = crate::projects::list().into_iter().filter(|q| q.ai_profile.clone().unwrap_or_else(|| default.clone()) == mine).map(|q| q.id).collect();
+    fn view(n: &BTreeMap<String, Node>, x: &Node, same: &BTreeSet<String>) -> Value {
+        let away = |v: &Value| v["thread"].as_str().is_some_and(|t| !same.contains(t));
+        // A mirror shows its master's owners and wait: only when the master's thread is on this profile.
+        let master_away = x.mirror_of.as_ref().is_some_and(away);
         let named = |v: &Value| format!("{} {} (thread {})", v["node"].as_str().unwrap_or(""), v["title"].as_str().unwrap_or(""), v["thread"].as_str().unwrap_or(""));
         let lines = |xs: &[Value]| {
             let mut out: Vec<String> = xs.iter().filter(|v| !away(v)).map(named).collect();
@@ -1131,6 +1134,9 @@ pub fn context(project: &str) -> Result<Value> {
             d["description"] = json!(if t.chars().count() > 400 { format!("{}…", t.chars().take(400).collect::<String>()) } else { t.clone() });
         }
         for (k, v) in [("internal_owner", &x.internal_owner), ("client_owner", &x.client_owner), ("delegated_by", &x.delegated_by), ("due", &x.due)] {
+            if master_away && k != "due" {
+                continue;
+            }
             if let Some(v) = v {
                 d[k] = json!(v);
             }
@@ -1145,7 +1151,11 @@ pub fn context(project: &str) -> Result<Value> {
             d["holds_up"] = json!(x.blocks.iter().filter_map(|i| n.get(i).map(|y| format!("{i} {}", y.title))).collect::<Vec<_>>());
         }
         if let Some(w) = &x.waiting_for {
-            d["waiting_for"] = json!(format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or("")));
+            d["waiting_for"] = json!(if master_away {
+                format!("waiting (since {})", w["since"].as_str().unwrap_or(""))
+            } else {
+                format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or(""))
+            });
         }
         if !x.pinned.is_empty() {
             d["pinned_by_human"] = json!(x.pinned);
@@ -1173,7 +1183,7 @@ pub fn context(project: &str) -> Result<Value> {
             d["last"] = h["date"].clone();
         }
         for (k, name) in [("story", "stories"), ("task", "tasks")] {
-            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c], foreign)).collect();
+            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c], same)).collect();
             if !xs.is_empty() {
                 d[name] = json!(xs);
             }
@@ -1199,7 +1209,7 @@ pub fn context(project: &str) -> Result<Value> {
         "me_profile": crate::calls::me_profile(),
         "people": p.people,
         "evidence_processed": {"count": t.order.len(), "latest": t.order.iter().rev().take(5).rev().map(|c| format!("{} {}", t.evidence[c]["date"].as_str().unwrap_or(""), t.evidence[c]["title"].as_str().unwrap_or(""))).collect::<Vec<_>>()},
-        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e, &foreign)).collect::<Vec<_>>(),
+        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e, &same)).collect::<Vec<_>>(),
         "epics_without_work": epics.iter().filter(|e| e.children.is_empty()).map(|e| format!("{} {}", e.id, e.title)).collect::<Vec<_>>(),
     }))
 }
@@ -1552,9 +1562,12 @@ mod tests {
         assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
         // The mirror's own history keeps its evidence ("What this call changed" still lists it).
         assert!(fold(&l).unwrap().nodes["T001"].history.iter().any(|h| h["op"] == "status" && h["evidence"] == ev));
-        // The sync's context names the other thread's items while it is on the same AI profile…
+        // The sync's context names the other thread's items while it is on the same AI profile — and the master's owner
+        // and wait, through its mirror…
+        human_event(&other, &json!({"op": "edit", "node": master, "set": {"state": "open", "internal_owner": "Priya Nair",
+            "waiting_for": {"who": "Ravi Mehta", "what": "the IdP metadata from Globex", "since": "2026-10-29"}}})).unwrap();
         let shown = context(&id).unwrap().to_string();
-        assert!(shown.contains("IdP contract") && shown.contains(&other), "{shown}");
+        assert!(shown.contains("IdP contract") && shown.contains(&other) && shown.contains("IdP metadata") && shown.contains("Priya Nair"), "{shown}");
         // …and never once it is pinned to another: only that such an item exists (strict routing).
         crate::projects::update(&other, |p| {
             p.ai_profile = Some("elsewhere".into());
@@ -1563,6 +1576,7 @@ mod tests {
         .unwrap();
         let shown = context(&id).unwrap().to_string();
         assert!(!shown.contains("SAML configuration") && !shown.contains("IdP contract") && !shown.contains(&other), "{shown}");
+        assert!(!shown.contains("IdP metadata") && !shown.contains("Ravi Mehta") && !shown.contains("Priya Nair"), "{shown}");
         assert!(shown.contains("a thread on another AI profile"), "{shown}");
     }
 
