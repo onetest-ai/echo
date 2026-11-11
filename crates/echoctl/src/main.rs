@@ -341,6 +341,9 @@ enum Cmd {
         /// Plain-text body
         #[arg(long)]
         body_file: std::path::PathBuf,
+        /// A model wrote it (its name): the draft says so
+        #[arg(long)]
+        ai: Option<String>,
     },
     /// Your profile for notes and follow-ups (<home>/.echo/me.md): print its path (creates it)
     Me,
@@ -700,8 +703,8 @@ fn main() -> Result<()> {
         Cmd::Delete { call } => calls::delete(&call),
         Cmd::Frames { call, keep } => calls::prune_frames(&call, &keep),
         Cmd::Html { call, open, auto } => minutes::command(&call, open, auto),
-        Cmd::Compose { to, cc, subject, body_file } => {
-            let v = drafts::compose(&to, &cc, &subject, &body_file)?;
+        Cmd::Compose { to, cc, subject, body_file, ai } => {
+            let v = drafts::compose(&to, &cc, &subject, &body_file, ai.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }

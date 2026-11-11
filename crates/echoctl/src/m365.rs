@@ -604,6 +604,13 @@ mod tests {
         let f = root.join("msg.md");
         std::fs::write(&f, "Hi Kim").unwrap();
         std::env::set_var("ECHOCTL_HEADLESS", "1");
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                std::env::remove_var("ECHOCTL_HEADLESS");
+            }
+        }
+        let _unset = Unset;
         let refused = |r: Result<Value>| r.is_err_and(|e| format!("{e:#}").contains("refused inside a run"));
         // A draft goes past the run's refusal (it fails here only for want of a sign-in).
         let d = mail_draft(&["kim@acme.example".into()], &[], "Slots", &f, None).unwrap_err();
@@ -614,7 +621,6 @@ mod tests {
         // (A reply reads the mail it answers first: with no sign-in it stops there, before its refusal.)
         assert!(mail_reply_text("AAMk", false, "Hi", None, true).is_err());
         assert!(refused(chat_send(None, Some("kim@acme.example"), &f, None, true)));
-        std::env::remove_var("ECHOCTL_HEADLESS");
     }
 
     #[test]

@@ -77,12 +77,16 @@ pub fn mailto(to: &[String], cc: &[String], subject: &str, body: &str) -> String
 
 /// `echoctl compose`: the draft where the user wants it (`chosen`); a Microsoft 365 draft that can't be made opens in
 /// the default mail app instead, and says why. Never sends. Returns what was done (`{draft, where, url?, note?}`).
-pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path) -> Result<Value> {
-    let body = fs::read_to_string(body_file).with_context(|| format!("reading {}", body_file.display()))?;
+pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path, ai: Option<&str>) -> Result<Value> {
+    let mut body = fs::read_to_string(body_file).with_context(|| format!("reading {}", body_file.display()))?;
+    // A model wrote it: the draft says so, wherever it goes (`deliver::ai_notice`).
+    if let Some(m) = ai.map(str::trim).filter(|m| !m.is_empty()) {
+        body = format!("{}\n\n{}", body.trim_end(), crate::deliver::ai_notice(m));
+    }
     let cfg = Config::load().unwrap_or_default();
     let mut out = match chosen(&cfg, crate::graph::account().is_some()) {
         Where::M365 => match crate::m365::draft_text(to, cc, subject, &body) {
-            Ok(v) => json!({"draft": true, "where": "m365", "url": v["url"]}),
+            Ok(v) => json!({"draft": true, "where": "m365", "id": v["id"], "url": v["url"]}),
             Err(e) => {
                 open(&mailto(to, cc, subject, &body), None)?;
                 json!({"draft": true, "where": "mail-app", "note": format!("not in Microsoft 365 Drafts ({e:#}): opened in the mail app instead")})
@@ -92,10 +96,14 @@ pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path) ->
             open(&mailto(to, cc, subject, &body), None)?;
             json!({"draft": true, "where": "mail-app"})
         }
-        Where::App(a) => {
-            open(&mailto(to, cc, subject, &body), Some(&a))?;
-            json!({"draft": true, "where": "app", "app": app_name(&a)})
-        }
+        Where::App(a) => match open(&mailto(to, cc, subject, &body), Some(&a)) {
+            Ok(()) => json!({"draft": true, "where": "app", "app": app_name(&a)}),
+            // The app is gone or won't open: the default mail app instead, saying why.
+            Err(e) => {
+                open(&mailto(to, cc, subject, &body), None)?;
+                json!({"draft": true, "where": "mail-app", "note": format!("{} didn't open ({e:#}): opened in the mail app instead", app_name(&a))})
+            }
+        },
     };
     out["to"] = json!(to);
     out["subject"] = json!(subject);
@@ -111,7 +119,7 @@ fn app_name(a: &str) -> String {
 /// Open a `mailto:` link in the default mail app, or in `app`. A development build with `ECHOCTL_TEST_MAIL_DRAFTS` set
 /// (test data) writes it to that file instead: no mail app opens.
 fn open(url: &str, app: Option<&str>) -> Result<()> {
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, test))]
     if let Some(f) = std::env::var_os("ECHOCTL_TEST_MAIL_DRAFTS") {
         let mut log = fs::OpenOptions::new().create(true).append(true).open(&f)?;
         writeln!(log, "{}{url}", app.map(|a| format!("[{a}] ")).unwrap_or_default())?;
@@ -123,7 +131,7 @@ fn open(url: &str, app: Option<&str>) -> Result<()> {
         if let Some(a) = app {
             c.args(["-a", a]);
         }
-        c.arg(url).status()?;
+        anyhow::ensure!(c.arg(url).status()?.success(), "`open` couldn't open it");
     }
     #[cfg(windows)]
     match app {
@@ -144,15 +152,51 @@ fn note_in_run(v: &Value) {
     }
 }
 
-/// The drafts a run made, for its outcome (`today::yolo_task`): those it noted in `file`, at most 10.
+/// The drafts a run made, for its outcome (`today::yolo_task`): those it noted in `file`, at most 10. The run can write
+/// that file too, so nothing in it is taken on its word: a Microsoft 365 draft is linked only as Microsoft 365 gives it
+/// (`draft_link`: there, by its id, still a draft); every other line is text the page escapes, with no link.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn of_run(file: &Path) -> Vec<Value> {
-    fs::read_to_string(file).map(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take(10).collect()).unwrap_or_default()
+pub fn of_run(file: &Path, draft_link: impl Fn(&str) -> Option<String>) -> Vec<Value> {
+    let lines: Vec<Value> = fs::read_to_string(file).map(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take(10).collect()).unwrap_or_default();
+    lines
+        .into_iter()
+        .map(|d| {
+            let s = |k: &str| d[k].as_str().map(|v| v.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
+            let to: Vec<String> = d["to"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).take(10).map(|t| t.chars().take(200).collect()).collect();
+            let url = (d["where"] == "m365").then(|| s("id")).flatten().and_then(|id| draft_link(&id));
+            json!({"where": s("where"), "app": s("app"), "subject": s("subject"), "to": to, "note": s("note"), "url": url})
+        })
+        .collect()
+}
+
+/// A Microsoft 365 draft's link, as Microsoft 365 gives it: the message by its id is there and still a draft.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn m365_draft_link(id: &str) -> Option<String> {
+    let m = crate::graph::request("GET", &format!("/me/messages/{}?$select=isDraft,webLink", crate::m365::enc(id)), crate::graph::Body::None, None, &[]).ok()?;
+    (m["isDraft"] == true).then(|| m["webLink"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)).flatten()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Environment variables set for a test, put back when it ends — a failed assertion too.
+    struct Vars(Vec<&'static str>);
+    impl Vars {
+        fn set(vars: &[(&'static str, &Path)]) -> Vars {
+            for (k, v) in vars {
+                std::env::set_var(k, v);
+            }
+            Vars(vars.iter().map(|(k, _)| *k).collect())
+        }
+    }
+    impl Drop for Vars {
+        fn drop(&mut self) {
+            for k in &self.0 {
+                std::env::remove_var(k);
+            }
+        }
+    }
 
     #[test]
     fn drafts_go_where_the_user_said_else_to_microsoft_365_when_signed_in() {
@@ -186,23 +230,38 @@ mod tests {
         let (log, run) = (root.join("mail-drafts.log"), root.join("drafts.jsonl"));
         let body = root.join("body.txt");
         fs::write(&body, "Hi Kim,\nwhich slots work?").unwrap();
-        std::env::set_var("ECHOCTL_TEST_MAIL_DRAFTS", &log);
-        std::env::set_var(RUN_DRAFTS, &run);
-        let v = compose(&["kim@acme.example".into()], &[], "Training slots?", &body).unwrap();
+        let _vars = Vars::set(&[("ECHOCTL_TEST_MAIL_DRAFTS", &log), (RUN_DRAFTS, &run)]);
+        let v = compose(&["kim@acme.example".into()], &[], "Training slots?", &body, Some("sonnet")).unwrap();
+        assert!(fs::read_to_string(&log).unwrap().contains("Written%20by%20AI%20%28Claude%2C%20sonnet%29"), "a model's draft says so");
         assert_eq!((v["where"].as_str(), v["draft"].as_bool()), (Some("mail-app"), Some(true)));
         assert!(fs::read_to_string(&log).unwrap().starts_with("mailto:kim@acme.example?subject=Training%20slots%3F"));
         // A chosen app gets the same link.
         Config { drafts: Some("app:Spark".into()), ..Default::default() }.save().unwrap();
-        compose(&["kim@acme.example".into()], &[], "Again", &body).unwrap();
+        compose(&["kim@acme.example".into()], &[], "Again", &body, None).unwrap();
         assert!(fs::read_to_string(&log).unwrap().lines().nth(1).unwrap().starts_with("[Spark] mailto:"));
         // Microsoft 365 chosen, not signed in: the mail app instead, and the outcome says why.
         Config { drafts: Some("m365".into()), ..Default::default() }.save().unwrap();
-        let v = compose(&["kim@acme.example".into()], &[], "Third", &body).unwrap();
+        let v = compose(&["kim@acme.example".into()], &[], "Third", &body, None).unwrap();
         assert_eq!(v["where"], "mail-app");
         assert!(v["note"].as_str().unwrap().contains("not in Microsoft 365 Drafts"), "{v}");
-        let noted = of_run(&run);
+        let noted = of_run(&run, |_| None);
         assert_eq!(noted.iter().map(|d| d["subject"].as_str().unwrap()).collect::<Vec<_>>(), ["Training slots?", "Again", "Third"]);
-        std::env::remove_var("ECHOCTL_TEST_MAIL_DRAFTS");
-        std::env::remove_var(RUN_DRAFTS);
+    }
+
+    #[test]
+    fn a_link_the_run_wrote_itself_is_never_shown() {
+        let (_env, root) = crate::paths::testenv::folders("drafts-forged");
+        let run = root.join("drafts.jsonl");
+        // The run can write its own drafts file: a forged line with a link of its own, and a real draft's id.
+        fs::write(&run, [
+            json!({"draft": true, "where": "m365", "url": "https://evil.example/login", "subject": "Re: invoice"}).to_string(),
+            json!({"draft": true, "where": "m365", "id": "AAMk-real", "url": "https://evil.example/2", "subject": "Slots", "to": ["kim@acme.example"]}).to_string(),
+            json!({"draft": true, "where": "m365", "id": "AAMk-gone", "url": "https://evil.example/3", "subject": "Gone"}).to_string(),
+        ].join("\n")).unwrap();
+        let graph = |id: &str| (id == "AAMk-real").then(|| "https://outlook.office365.com/owa/?ItemID=AAMk-real".to_string());
+        let d = of_run(&run, graph);
+        assert_eq!(d[0]["url"], Value::Null, "no id: no link");
+        assert_eq!(d[1]["url"], "https://outlook.office365.com/owa/?ItemID=AAMk-real", "the link Microsoft 365 gives, not the file's");
+        assert_eq!(d[2]["url"], Value::Null, "not a draft there (sent, deleted, made up): no link");
     }
 }

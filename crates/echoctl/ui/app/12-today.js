@@ -688,7 +688,7 @@ function todayAskBar() {
   // A status (read out as it changes), named for what it reports.
   if (!a || a.state === 'working') return '<div class="td-askbar" role="status" aria-label="Yolo"><span class="set-sub">Yolo: Claude is on it…</span></div>'
   // Its mail drafts (#135): where each is, a Microsoft 365 one linked (only an https link).
-  const drafts = (a.drafts || []).map((d) => `<br><span class="set-sub">${esc(draftLine(d))}</span>${d.where === 'm365' && /^https:\/\//i.test(d.url || '') ? ` <a class="wp-link" href="${esc(d.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}`).join('')
+  const drafts = (a.drafts || []).map((d) => `<br><span class="set-sub">${esc(draftLine(d))}</span>${d.where === 'm365' && /^https:\/\/outlook\.(office|office365|live)\.com\//i.test(d.url || '') ? ` <a class="wp-link" href="${esc(d.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}`).join('')
   return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
@@ -707,9 +707,12 @@ document.addEventListener('change', (e) => {
   if (t.matches && t.matches('[data-drafts]')) {
     if (t.value === 'app') { S.draftsApp = true; return render() }
     S.draftsApp = false
-    return setSetting('drafts', t.value || 'default')
+    if (S.settings) S.settings.drafts = t.value || null
+    send({ cmd: 'settings_set', key: 'drafts', value: t.value || 'default' })
+    return render()
   }
-  if (t.matches && t.matches('[data-drafts-app]') && t.value.trim()) { S.draftsApp = false; return setSetting('drafts', `app:${t.value.trim()}`) }
+  // An app the app may refuse (Windows: a program that isn't there): the row shows what was saved.
+  if (t.matches && t.matches('[data-drafts-app]') && t.value.trim()) { S.draftsApp = false; send({ cmd: 'settings_set', key: 'drafts', value: `app:${t.value.trim()}` }); setTimeout(() => loadSettings().then(render), 600) }
 })
 
 /** The Claude dialog for a task, two actions on the same skill and words: Work on it — into the Claude panel's live
