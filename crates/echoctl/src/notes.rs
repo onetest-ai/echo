@@ -881,7 +881,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
     let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
-    let mut child = match admit_child(|| {
+    let mut child = match crate::ai::guard_ready(profile, &cwd, "write minutes").and_then(|()| admit_child(|| {
         let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env(calls::RUN_ID, &run_id).env(crate::guard::RUN_CALL, dir).env(crate::guard::RUN_CLIS, run_clis(&plugin).join("\n"));
@@ -889,7 +889,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             c.env(crate::guard::RUN_PREVIOUS, p);
         }
         Ok(c.spawn()?)
-    }) {
+    })) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("couldn't start Claude Code: {e:#}");
@@ -946,7 +946,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                         if stopped.is_none() && !crate::guard::new_enough(v) {
                             let [a, b, c] = crate::guard::MIN_CLAUDE;
                             stopped = Some(format!(
-                                "Claude Code {} is too old for minutes runs — update it (`claude update`) to {a}.{b}.{c} or later, then click Try again",
+                                "Claude Code {} is too old to write minutes — update it (`claude update`) to {a}.{b}.{c} or later",
                                 if v.is_empty() { "(of unknown version)" } else { v }
                             ));
                             kill(pid);

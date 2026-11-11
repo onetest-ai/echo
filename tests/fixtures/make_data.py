@@ -566,7 +566,7 @@ FAKE_CLAUDE = """#!/bin/sh
 # Fake Claude Code for Echo's test data: answers `--version` and `auth status` (by the AI profile's folder) and
 # refuses everything else, so a click on Write minutes, Prepare or Send to Claude fails at once instead of
 # reaching a real account.
-case "$1" in --version) echo "2.0.0 (Claude Code, test fake)"; exit 0;; esac
+case "$1" in --version) echo "2.1.400 (Claude Code, test fake)"; exit 0;; esac
 # Today's Won't do: a run whose prompt holds a phrase of <dir>/fake-answers.tsv (the comment a case types) gets that
 # line's canned answer, as Claude Code's last stream line; every other run is refused below.
 if [ -f "$(dirname "$0")/../fake-answers.tsv" ]; then
