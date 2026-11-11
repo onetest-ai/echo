@@ -193,9 +193,8 @@ document.addEventListener('click', (e) => {
 })
 document.addEventListener('input', (e) => {
   if (!e.target.dataset || !e.target.dataset.twQ) return
+  // Drawn again, the search keeps the keyboard and its caret (its id: the render's focus restore).
   S.tdQ = e.target.value; S.tdPart = 'All'; render()
-  // The panel is drawn again: the search keeps the keyboard and the caret at the end.
-  const q = $('.tw-q'); if (q && document.activeElement !== q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length) }
 })
 
 // Dragging: a widget on Today (move) or one from the panel (add at the picked size).
