@@ -21,14 +21,18 @@ assert.equal(TplSave.message({ ...d, fixed: false, fixedPending: true }).fixed, 
 // A refused save has no answer: the switch is still pending and goes with the next save.
 // The save that wrote it is answered (`sent`: what it wrote), and the file changed elsewhere before Echo read it back:
 // no longer pending, the file's value shown, and a later edit here sends no `fixed`.
-const done = { ...ticked, ...TplSave.saved(ticked, row(false), true) }
+const done = { ...ticked, ...TplSave.saved(ticked, 'default', row(false), true) }
 assert.deepEqual({ fixed: done.fixed, fixedPending: done.fixedPending }, { fixed: false, fixedPending: false })
 assert.equal('fixed' in TplSave.message({ ...done, header: '# {title} · {date}' }), false)
 // Unticked again before the first save was answered: that answer (it wrote `true`) leaves the new choice pending.
 const back = { ...d, fixed: false, fixedPending: true }
-assert.deepEqual(TplSave.saved(back, row(true), true), { fixed: false, fixedPending: true })
+assert.deepEqual(TplSave.saved(back, 'default', row(true), true), { fixed: false, fixedPending: true })
 // Nothing pending: an answer shows the file's value (it may have changed elsewhere).
-assert.deepEqual(TplSave.saved(d, row(true), null), { fixed: true, fixedPending: false })
+assert.deepEqual(TplSave.saved(d, 'default', row(true), null), { fixed: true, fixedPending: false })
+// The answer to another template's save (Default's, while Discussion is open with its switch pending after a
+// refused save) changes nothing in the open one.
+const other = { ...d, id: 'discussion', fixed: true, fixedPending: true }
+assert.deepEqual(TplSave.saved(other, 'default', { id: 'discussion', fixed: false }, true), {})
 // Create sends the switch as set in the new template's form, with its name.
 const made = TplSave.create({ ...d, id: null, fixed: true }, 'Board review')
 assert.equal(made.fixed, true)

@@ -29,9 +29,10 @@ const TplSave = {
   message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedPending ? { fixed: !!d.fixed } : {}) }),
   /** A new template's Create, with the switch as set in its form. */
   create: (d, name) => ({ ...TplSave.message({ ...d, fixedPending: true }), name }),
-  /** The app saved (`sent`: the switch that save wrote, or null): pending until a save wrote the switch as set here;
-   *  with none pending the file's (`row`) is shown. */
-  saved: (d, row, sent) => {
+  /** The app saved template `id` (`sent`: the switch that save wrote, or null): pending until a save of this template
+   *  wrote the switch as set here; with none pending the file's (`row`) is shown. Another template's answer: nothing. */
+  saved: (d, id, row, sent) => {
+    if (id !== d.id) return {}
     const pending = !!d.fixedPending && sent !== !!d.fixed
     return { fixed: pending ? !!d.fixed : !!(row && row.fixed), fixedPending: pending }
   },
