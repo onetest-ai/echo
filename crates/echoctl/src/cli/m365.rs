@@ -199,9 +199,6 @@ pub enum DeliverCmd {
         /// A model wrote it (its name): the message says so
         #[arg(long)]
         ai: Option<String>,
-        /// Mail to these addresses instead of you (comma-separated)
-        #[arg(long, default_value = "")]
-        to: String,
     },
 }
 
@@ -249,11 +246,12 @@ pub fn deliver_command(cmd: DeliverCmd) -> Result<()> {
     }
     match cmd {
         DeliverCmd::Status => print_json(&deliver::status()),
-        DeliverCmd::Send { kind, title, file, about, ai, to } => {
+        // To you only (#401): mail to others is `echoctl m365 mail send`, which sends only after the user's yes; a
+        // routine's addresses go through its plugin (`ctx.deliver`), as the user set them.
+        DeliverCmd::Send { kind, title, file, about, ai } => {
             deliver::ready(&kind)?;
-            let to: Vec<String> = to.split(',').map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned).collect();
             let markdown = std::fs::read_to_string(file)?;
-            deliver::send(&kind, &deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to })?;
+            deliver::send(&kind, &deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &[] })?;
             println!("Sent");
         }
         DeliverCmd::Test { kind } => {

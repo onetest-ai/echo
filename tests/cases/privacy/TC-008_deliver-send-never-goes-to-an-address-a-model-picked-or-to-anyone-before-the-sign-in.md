@@ -40,7 +40,7 @@ tags: [privacy, deliver, guard, m365]
 | 6 | Run the same probe with `ECHOCTL_RUN_MODE=routine ECHOCTL_RUN_HOME="$ECHOCTL_HOME" ECHOCTL_RUN_CLIS=echoctl` in place of `ECHOCTL_RUN_CALL=…` | "Echo (this routine reads only): echoctl deliver isn't one of the commands a read-only routine uses", "exit 2" |
 | 7 | Run the same probe with `ECHOCTL_RUN_MODE=ask ECHOCTL_RUN_CALL="$CALL" ECHOCTL_RUN_CLIS=echoctl` and the command `echoctl deliver test mail` | "Echo (this call's Claude session reads only): echoctl deliver isn't one of the commands this session uses", "exit 2" |
 | 8 | For comparison run the first probe with the command `echoctl context <the value of $CALL>` | No output, "exit 0" (the guard lets a run's own commands through) |
-| 9 | Run `printf '## Hi\n\nText.\n' \| target/debug/echoctl deliver send today --title "Own note" --file /dev/stdin --to ana@globex.example; echo "exit $?"` and `cat $ECHOCTL_HOME/.echo/today-cards.json` | The command is refused: stderr says `--to` does not apply to Today (an address is not for Today, the user's own page), no "Sent", "exit 1"; the cards file holds no card "Own note" and no text `ana@globex.example` (`grep -c globex.example` prints 0) |
+| 9 | Run `printf '## Hi\n\nText.\n' \| target/debug/echoctl deliver send today --title "Own note" --file /dev/stdin --to ana@globex.example; echo "exit $?"` and `cat $ECHOCTL_HOME/.echo/today-cards.json` | The command is refused (`deliver send` takes no `--to`: it sends to you only), exit not 0; nothing sent; `today-cards.json` has no "Own note" card and no address |
 | 10 | Run `printf '## Hi\n\nText.\n' \| target/debug/echoctl deliver send today --title "Own note" --file /dev/stdin` and `cat $ECHOCTL_HOME/.echo/today-cards.json` | "Sent"; the file holds one card, `"title": "Own note"`, `"seen": false` (the user's own Today still takes a send) |
 
 ## Expected Final State
@@ -50,7 +50,6 @@ No send left the computer: Teams and Mail refused with the sign-in message, ever
 - Remove `$(dirname <dir>)`; nothing outside the run's folder was touched.
 
 ## Notes
-- Step 9 FAILS today: `deliver send today --to <address>` prints "Sent" and silently ignores `--to` (#401, `deliver send`: --to is accepted for Today). The case asserts F-M365-04 ("send only to the user's own Teams chat and mailbox") and the plugin rule that Deliver never goes to an address a model picked.
-- Mail `--to`: whether the CLI keeps `--to` for mail at all, and which addresses it may take (the user's own mailbox, addresses the user set on a routine, or an address shown to the user first) is decided in #401. This case asserts no address as accepted; add the mail `--to` steps once #401 is decided.
+- `deliver send` has no `--to` (#401): it sends to you only. Mail to others goes through `echoctl m365 mail send`, which sends only after the user's yes; a routine's addresses go through its plugin, as the user set them.
 - Not shown here, needs the real sign-in (person, with the person's own test account and mailbox, nothing sent to anyone else): signed in, `echoctl deliver test teams` lands "Echo test" in the account's own Teams chat with itself; `echoctl deliver test mail` lands one mail "Echo test" in the account's own Inbox and not in Sent. Settings → Sends to you → "Send a test" does the same from the window (`settings/TC-020` shows the signed-out rows).
 - Step 4's wording is for the build with plugins (`js`, the default); a build without them says "“telegram” isn't a way Echo sends".
