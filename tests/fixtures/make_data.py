@@ -2367,8 +2367,7 @@ def build_standard(d, hostile=False):
     build_agenda(d, H)
     build_inbox(d, H)
     finish_calls(d)
-    if not H:  # hostile: the jump to a transcript moment loses its highlight with them (S-27 stage 10, #370)
-        build_more_threads(d)
+    build_more_threads(d)
     if H:
         build_hostile_calls(d, H)
         build_injection_call(d)

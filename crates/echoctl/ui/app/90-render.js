@@ -236,7 +236,9 @@ function renderNow() {
   let jumped = false
   if (pane) {
     const j = $('#jump')
-    if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jump = null; jumped = true }
+    // Scrolled to once; its turn stays marked through later draws of this call (#370: thread data arriving redrew the
+    // transcript and lost it).
+    if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jumpShown = { call: S.selected, t: S.jump }; S.jump = null; jumped = true }
     else pane.scrollTop = scroll
   }
   const lt2 = $('#live-transcript')
