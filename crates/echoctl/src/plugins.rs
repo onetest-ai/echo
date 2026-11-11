@@ -179,12 +179,22 @@ pub fn app_file_rel(entry: &str) -> Result<(&'static str, &str)> {
         .find_map(|(p, b)| entry.strip_prefix(p).map(|r| (*b, r)))
         .ok_or_else(|| anyhow!("“{entry}”: a file of another app starts with ~/, %APPDATA%/ or %LOCALAPPDATA%/"))?;
     let parts: Vec<&str> = rel.split('/').collect();
-    if rel.is_empty() || entry.len() > 200 || parts.iter().any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['*', '?', '\\', ':'])) {
+    // Plain names only — a trailing dot or space, or `~`, is another name on Windows (`.ssh.`, `SSH~1`).
+    if rel.is_empty() || entry.len() > 200 || parts.iter().any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['*', '?', '\\', ':', '~']) || p.ends_with(['.', ' '])) {
         bail!("“{entry}”: one file by its plain path");
     }
-    const SECRETS: [&str; 6] = [".ssh", ".gnupg", ".aws", "keychains", ".kube", ".docker"];
-    if parts.iter().any(|p| SECRETS.contains(&p.to_ascii_lowercase().as_str())) {
-        bail!("“{entry}”: not a place that holds secrets");
+    // An app's own settings only: `~/Library/Application Support/<app>/…`, `~/.config/<app>/…`, or
+    // `%APPDATA%/<app>/…` / `%LOCALAPPDATA%/<app>/…` — never Echo's, never a place or name that holds credentials.
+    let app = match (base, parts.as_slice()) {
+        ("~", ["Library", "Application Support", app, _, ..]) | ("~", [".config", app, _, ..]) => *app,
+        ("%APPDATA%" | "%LOCALAPPDATA%", [app, _, ..]) => *app,
+        _ => bail!("“{entry}”: an app's own file under ~/Library/Application Support/<app>/, ~/.config/<app>/, %APPDATA%/<app>/ or %LOCALAPPDATA%/<app>/"),
+    };
+    const NOT_APPS: [&str; 10] = ["echo", "gh", "git", "gcloud", "claude", "op", "1password", "google", "microsoft", "mozilla"];
+    const SECRETS: [&str; 10] = ["cookies", "login data", "credentials", "hosts.yml", "token", "tokens", "secrets", "keychains", "auth.json", ".credentials.json"];
+    let lower = |p: &&str| p.to_ascii_lowercase();
+    if NOT_APPS.contains(&app.to_ascii_lowercase().as_str()) || parts.iter().map(lower).any(|p| SECRETS.iter().any(|s| p == *s || p.starts_with(&format!("{s}.")))) {
+        bail!("“{entry}”: not a file that holds Echo's or another app's credentials");
     }
     Ok((base, rel))
 }
@@ -1610,7 +1620,12 @@ mod tests {
             describe(&uses(json!({"files": {"read": ["~/Library/Application Support/obsidian/obsidian.json", "%APPDATA%/obsidian/obsidian.json"]}}))).unwrap(),
             vec!["Reads these files of other apps on this computer: “~/Library/Application Support/obsidian/obsidian.json” and “%APPDATA%/obsidian/obsidian.json”"]
         );
-        for bad in [json!([]), json!(["/etc/passwd"]), json!(["~/../x"]), json!(["~/.ssh/id_rsa"]), json!(["~/Library/Keychains/login.keychain-db"]), json!(["~/notes/*.md"]), json!(["~/"]), json!(["~/a//b"])] {
+        for bad in [
+            json!([]), json!(["/etc/passwd"]), json!(["~/../x"]), json!(["~/.ssh/id_rsa"]), json!(["~/Library/Keychains/login.keychain-db"]), json!(["~/notes/*.md"]), json!(["~/"]), json!(["~/a//b"]),
+            json!(["~/Library/Application Support/echo/graph.json"]), json!(["%APPDATA%/echo/graph.json"]), json!(["~/.config/gh/hosts.yml"]), json!(["~/.netrc"]),
+            json!(["~/Library/Application Support/Google/Chrome/Default/Cookies"]), json!(["~/.ssh./id_rsa"]), json!(["~/SSH~1/id_rsa"]), json!(["%APPDATA%/acme /x.json"]),
+            json!(["~/.config/acme/credentials.json"]), json!(["~/.config/acme/token"]), json!(["~/.zsh_history"]),
+        ] {
             assert!(describe(&uses(json!({"files": {"read": bad.clone()}}))).is_err(), "{bad}");
         }
         let env = |k: &str| match k {
@@ -1621,6 +1636,7 @@ mod tests {
         assert_eq!(app_file("~/Library/Application Support/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("/Users/sam/Library/Application Support/obsidian/obsidian.json")));
         assert_eq!(app_file("%APPDATA%/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("C:/Users/sam/AppData/Roaming/obsidian/obsidian.json")));
         assert_eq!(app_file("%LOCALAPPDATA%/x/y.json", env).unwrap(), None, "not on this computer");
+        assert!(app_file_rel("~/.config/acme/app.json").is_ok());
     }
 
     #[test]

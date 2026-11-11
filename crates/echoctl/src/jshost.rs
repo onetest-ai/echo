@@ -254,6 +254,9 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
 fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     use std::io::Write as _;
     use crate::app::NoWindow;
+    if opts["save"].as_str().is_some_and(|s| !s.is_empty()) || opts["method"].as_str().is_some_and(|m| !m.eq_ignore_ascii_case("GET")) {
+        read_only_here("a request other than GET")?;
+    }
     let m = plugins::read_manifest(&package_dir(id)?)?;
     let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
     // What the user listed, each checked again as when it was saved (the file may have been edited since).
@@ -651,6 +654,15 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
     m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
 }
 
+/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
+/// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
+fn read_only_here(what: &str) -> Result<()> {
+    if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
+        bail!("{what} isn't allowed in a read-only routine");
+    }
+    Ok(())
+}
+
 /// …and, within it, `flag` set (the install sheet named that part).
 fn uses_flag(id: &str, cap: &str, flag: &str) -> Result<()> {
     if uses(id, cap)?[flag].as_bool() != Some(true) {
@@ -819,6 +831,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "settings.set" => {
+            read_only_here("changing files or settings")?;
             let m = plugins::read_manifest(&package_dir(id)?)?;
             if plugins::address_settings(&m.uses).contains(&s(&arg[0])) {
                 bail!("only you set the addresses {id} may reach (its setting “{}”)", s(&arg[0]));
@@ -886,6 +899,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
         }
         "echo.dictionary.add" => {
+            read_only_here("changing files or settings")?;
             if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == "dictionary")) {
                 bail!("{id} didn't ask to add to your dictionary when it was installed");
             }
@@ -922,6 +936,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!(String::from_utf8_lossy(&buf))
         }
         "fs.write" => {
+            read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;
             let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
             if f.is_dir() {
@@ -932,13 +947,16 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "fs.move" => {
+            read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;
             let from = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
             let to = crate::grants::writable(id, &s(&arg[0]), &s(&arg[2]))?;
             if !from.exists() {
                 bail!("“{}” isn't there", s(&arg[1]));
             }
-            if to.exists() {
+            // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
+            let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
+            if to.exists() && !same {
                 bail!("“{}” is there already", s(&arg[2]));
             }
             std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
@@ -946,6 +964,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "fs.remove" => {
+            read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;
             let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
             if f.is_dir() {
@@ -987,6 +1006,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
         // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
         "claude.run" => {
+            read_only_here("a Claude run")?;
             // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
             plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
@@ -1088,6 +1108,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(Value::Null)
         }
         "deliver.send" => {
+            read_only_here("sending")?;
             let kind = arg[0].as_str().unwrap_or("");
             // Only the ways its install sheet named, or its own.
             plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;
@@ -1704,6 +1725,13 @@ mod tests {
             assert_eq!(std::fs::read_to_string(outside.join("secret.md")).unwrap(), "no");
             assert!(!outside.join("x.md").exists() && !outside.join("deeper").exists());
         }
+        // Hidden files (other programs' settings and code) and Echo's own folders are never written.
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        assert!(run("writer", "write", json!({"path": ".obsidian/plugins/x/main.js", "text": "x"})).unwrap_err().contains("is hidden"));
+        assert!(run("writer", "write", json!({"path": "Notes/.git/hooks/pre-commit", "text": "x"})).unwrap_err().contains("is hidden"));
+        assert!(run("writer", "write", json!({"path": "Notes...", "text": "x"})).is_err(), "a name ending in a dot");
+        assert!(crate::grants::grant("writer", &paths::config_dir()).unwrap_err().to_string().contains("Echo's own files"));
+        assert!(crate::grants::grant("writer", &paths::home()).unwrap_err().to_string().contains("Echo's own files"), "a folder holding the data folder's .echo");
         // A plugin that only reads can't.
         assert!(run("reader", "write", json!({"path": "Notes/R.md", "text": "x"})).unwrap_err().contains("folders.write"));
         assert!(!vault.join("Notes/R.md").exists());

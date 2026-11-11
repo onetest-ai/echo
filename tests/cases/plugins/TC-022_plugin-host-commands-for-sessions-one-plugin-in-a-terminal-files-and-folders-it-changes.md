@@ -55,6 +55,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 4 | `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-vault add` | The vault's path: the folder is given to Acme vault |
 | 5 | `echoctl plugin call acme-vault write '{"path":"Notes/New.md","text":"# New"}'`; `… move '{"from":"Old.md","to":"Archive/Old.md"}'`; `… remove '{"path":"Notes/New.md"}'`; then `cd "$D/vault" && find . -type f \| sort` | Each answers `null`; the files are `./Archive/Old.md` and `./People/Dana.md` |
 | 6 | `… move '{"from":"Archive/Old.md","to":"People/Dana.md"}'`; `… write '{"path":"out/x.md","text":"x"}'`; `… write '{"path":"../outside/x.md","text":"x"}'`; `… remove '{"path":"People"}'`; then `ls "$D/outside"` | Each fails (`is there already`, `leads outside`, not a path inside, `is a folder with files in it`); `$D/outside` still holds only `secret.md` |
+| 6a | `… write '{"path":".obsidian/x.json","text":"x"}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault write '{"path":"Notes/R.md","text":"x"}'`; `ECHOCTL_PICK_FOLDER="$ECHOCTL_CONFIG_DIR" echoctl plugin call acme-vault add` | The first fails (`is hidden`); the second fails (`isn't allowed in a read-only routine`: a plugin command a routine runs changes nothing); the third fails (`holds Echo's own files`) |
 | 7 | `HOME="$D/fakehome" echoctl plugin call acme-vault config '{"entry":"~/.config/acme/app.json"}'`; then the same with `"entry":"~/.ssh/id_rsa"` | The first prints the file's text (`{"vaults":[…]}`); the second fails: `didn't name “~/.ssh/id_rsa” in uses.files.read` |
 
 ## Expected Final State

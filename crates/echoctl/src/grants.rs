@@ -65,12 +65,22 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
     if !dir.is_dir() {
         bail!("{} isn't a folder", dir.display());
     }
+    if holds_echo(&dir) {
+        bail!("{} holds Echo's own files (its settings, grants and secrets): pick a folder inside it, apart from those", dir.display());
+    }
     let mut list = folders(id);
     if !list.contains(&dir) {
         list.push(dir.clone());
         save_folders(id, &list)?;
     }
     Ok(dir)
+}
+
+/// Whether `dir` is, or holds, Echo's settings folder or the data folder's own `.echo`.
+fn holds_echo(dir: &Path) -> bool {
+    // Each by its real path, also before it exists (its parent's real path and its name).
+    let real = |d: PathBuf| dunce::canonicalize(&d).ok().or_else(|| Some(dunce::canonicalize(d.parent()?).ok()?.join(d.file_name()?)));
+    [crate::paths::config_dir(), crate::paths::home().join(".echo")].into_iter().filter_map(real).any(|d| dir.starts_with(&d) || d.starts_with(dir))
 }
 
 /// Take a folder back from plugin `id`.
@@ -105,6 +115,14 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     if full == root {
         bail!("not the folder itself");
     }
+    // Hidden files and folders (`.git`, `.obsidian/plugins`…) hold other programs' code and settings: never written.
+    if Path::new(rel).components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
+        bail!("“{rel}” is hidden: a plugin changes notes, not other programs' files");
+    }
+    // Never Echo's own folders (a grant from before they were refused).
+    if holds_echo(&root) {
+        bail!("{} holds Echo's own files: a plugin doesn't change them", root.display());
+    }
     if std::fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_symlink()) {
         bail!("“{rel}” is a link: a plugin changes files, not links");
     }
@@ -123,7 +141,8 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim_start_matches("./");
     let p = Path::new(rel);
-    if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
+    // A name ending in a dot or a space is another name on Windows (`...` is the folder itself, `CON .txt` a device).
+    if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(n) if !n.to_string_lossy().ends_with(['.', ' ']))) {
         bail!("“{rel}” isn't a path inside {}", root.display());
     }
     // Windows' device names (CON, NUL, COM1…) open a device, not a file, in any folder.
