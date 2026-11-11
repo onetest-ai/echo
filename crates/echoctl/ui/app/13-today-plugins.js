@@ -126,10 +126,17 @@ document.addEventListener('click', async (e) => {
   if (open) {
     e.preventDefault()
     const url = open.dataset.pwOpen
-    if (S.pwOpen === url && Date.now() - (S.pwOpenAt || 0) <= 30000) { S.pwOpen = null; send({ cmd: 'open_url', url }); return render() }
+    // The keyboard stays on this widget's Open (the line redrawn).
+    const back = () => setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
+    if (S.pwOpen === url && Date.now() - (S.pwOpenAt || 0) <= 30000) { S.pwOpen = null; send({ cmd: 'open_url', url }); render(); return back() }
     S.pwOpen = url
     S.pwOpenAt = Date.now()
-    return render()
+    render()
+    return back()
   }
-  if (e.target.closest('[data-pw-open-no]')) { S.pwOpen = null; render() }
+  if (e.target.closest('[data-pw-open-no]')) {
+    S.pwOpen = null
+    render()
+    setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
+  }
 })

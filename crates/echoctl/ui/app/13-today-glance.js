@@ -9,7 +9,7 @@ function glanceView(g, size) {
   const max = size === 'L' ? 10 : 5, shown = threads.slice(0, max)
   const when = g.period === 'month' ? 'this month' : 'this week'
   const seg = (n, cls, total, say) => (n ? `<span class="gl-${cls}" style="flex:${n}" title="${n} ${say}"></span>` : '')
-  const rows = shown.map((t) => `<div class="gl-row" role="listitem" aria-label="${esc(`${t.name}: ${t.done} done ${when}, ${t.todo} to do, ${t.waiting} waiting`)}"><a class="link-btn gl-name" href="#project/${encodeURIComponent(t.id)}/work">${esc(t.name)}</a><span class="gl-bar">${seg(t.done, 'done', t.total, `done ${when}`)}${seg(t.todo, 'todo', t.total, 'to do')}${seg(t.waiting, 'wait', t.total, 'waiting')}</span><span class="gl-n mono">${t.total}</span></div>`).join('')
+  const rows = shown.map((t) => `<div class="gl-row" role="listitem" aria-label="${esc(`${t.name}: ${t.done} done ${when}, ${t.todo} to do, ${t.waiting} waiting`)}"><a class="link-btn gl-name" href="#project/${encodeURIComponent(t.id)}/work" title="${esc(t.name)}">${esc(t.name)}</a><span class="gl-bar">${seg(t.done, 'done', t.total, `done ${when}`)}${seg(t.todo, 'todo', t.total, 'to do')}${seg(t.waiting, 'wait', t.total, 'waiting')}</span><span class="gl-n mono">${t.total}</span></div>`).join('')
   const more = threads.length > max ? `<button class="link-btn gl-more" data-go="projects">${threads.length - max} more in Threads</button>` : ''
   return `<section class="td-sec gl-sec" aria-label="Threads at a glance"><h2>Threads at a glance</h2><div role="list">${rows}</div><div class="gl-foot"><span class="gl-key set-sub"><span><i class="gl-done"></i>done ${when}</span><span><i class="gl-todo"></i>to do</span><span><i class="gl-wait"></i>waiting</span></span>${more}</div></section>`
 }
