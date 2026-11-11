@@ -194,9 +194,10 @@ function evDay(d, now) {
   const n = Math.round((a - b) / 864e5)
   return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n === -1 ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
 }
-/** How far off it is, coloured by state: in 12 min / now · 8 min left / recorded / over. */
+/** How far off it is, coloured by state: in 12 min / now · 8 min left / recording / recorded / over. */
 function evRel(e, st, now) {
   const span = (cls, t) => ` <span class="ec-rel ${cls}">· ${esc(t)}</span>`
+  if (e.recorded && e.recorded.status === 'recording') return span('live', 'recording')
   if (e.recorded) return span('done', 'recorded')
   if (e.cancelled) return span('muted', 'cancelled')
   if (st.live) return span('live', `now · ${Math.max(1, Math.round((st.en - now) / 60000))} min left`)

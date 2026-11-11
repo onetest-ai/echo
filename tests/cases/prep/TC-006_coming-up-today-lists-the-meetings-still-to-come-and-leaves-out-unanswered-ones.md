@@ -38,7 +38,7 @@ tags: [prep, calls, response]
 | 6 | Read the row "Initech architecture board" that starts latest (the one to come) | Its meta spans hold the time, "25 min" and "Alex Chen, Priya Nair +1"; no thread icon |
 | 7 | Read the row "Globex office hours" | Its meta holds the time, "30 min", "Kim Park", and a thread icon (Globex pilot) |
 | 8 | Read the `title` of every row | "Prep ready" for "Globex sponsor update" only; "No prep yet" for the other twelve |
-| 9 | Open "Coming up today" → "Globex sponsor update" (it has a prep: `#upcoming/<id>`); then make it a call of today: in `$ECHOCTL_HOME/calls/<today>_…-globex-steering/meeting.json` set `"id"` to `ev-m20` (after `. <dir>/env`) | Within seconds the view moves to that call's Prep tab (`#call/<name>/prep`; a meeting with no prep lands on the call's Minutes); "Coming up today" says 12 and lists no "Globex sponsor update"; `target/debug/echoctl prep --upcoming` lists 12 without it |
+| 9 | Open "Coming up today" → "Globex sponsor update" (it has a prep: `#upcoming/<id>`); then make it a call of today, as its arm would save it: in `$ECHOCTL_HOME/calls/<today>_…-globex-steering/meeting.json` set `"id"` to `ev-m20` and `"start"` to Globex sponsor update's `start` as `target/debug/echoctl prep --upcoming` gives it (after `. <dir>/env`) | Within seconds the view moves to that call's Prep tab (`#call/<name>/prep`; a meeting with no prep lands on the call's Minutes); "Coming up today" says 12 and lists no "Globex sponsor update"; `target/debug/echoctl prep --upcoming` lists 12 without it |
 
 ## Expected Final State
 Coming up today is unfolded with 12 rows ("Globex sponsor update" became a call of today in step 9).

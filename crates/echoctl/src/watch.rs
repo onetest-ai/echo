@@ -214,7 +214,7 @@ fn for_plugins(event: &str, d: &serde_json::Value) -> Option<serde_json::Value> 
     })
 }
 
-fn parse_time(s: &Option<String>) -> Option<DateTime<Utc>> {
+pub(crate) fn parse_time(s: &Option<String>) -> Option<DateTime<Utc>> {
     let s = s.as_deref()?;
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))

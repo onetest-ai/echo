@@ -269,6 +269,7 @@ function agendaView(d, now) {
     const mn = x.minutes || {}, ct = mn.counts || {}, bits = []
     const held = [ct.decisions ? `${ct.decisions} decision${ct.decisions === 1 ? '' : 's'}` : '', ct.actions ? `${ct.actions} action${ct.actions === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
     if (x.call && mn.state === 'ready') bits.push(`<button class="link-btn${mn.unread ? ' ag-new' : ''}" data-call="${esc(x.call)}" data-call-tab="minutes">${mn.unread ? 'new minutes' : 'minutes'}${held ? ` · ${esc(held)}` : ''}</button>`)
+    else if (mn.state === 'recording') bits.push('recording…')
     else if (mn.state === 'writing') bits.push('writing the minutes…')
     else if (mn.state === 'transcribing') bits.push('transcribing…')
     // Its transcription failed: why, and the call, which says how to transcribe it again (#421).

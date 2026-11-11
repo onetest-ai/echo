@@ -322,9 +322,70 @@ pub fn meeting_now(now: DateTime<Utc>) -> Option<MeetingContext> {
     hits.into_iter().next().map(|(_, m)| m)
 }
 
+/// A call as `call_of_meeting` weighs it: the event id and start its `meeting.json` saved, when it started, and whether
+/// it is being recorded now.
+#[derive(Clone, Copy, Default)]
+pub struct CallOf<'a> {
+    pub id: Option<&'a str>,
+    pub meeting_start: Option<DateTime<Utc>>,
+    pub started: Option<DateTime<Utc>>,
+    pub recording: bool,
+}
+
+/// A time as the calendar and `meeting.json` write it (RFC 3339, or Graph's naive UTC).
+pub fn when(s: Option<&str>) -> Option<DateTime<Utc>> {
+    watch::parse_time(&s.map(str::to_owned))
+}
+
+/// Which of `calls` is the call of the meeting `id` at `start`..`end`: one carrying its id that is this occurrence — its
+/// `meeting.json` saved this start (an arm carries the meeting however early it was joined), or it started from
+/// `MATCH_EARLY_MIN` before it to its end (at least `MATCH_LATE_MIN` after its start, as `meeting_now` attaches it) —
+/// the one being recorded first, else the nearest its start. A meeting moved or held again keeps its id but not its
+/// start: a call of it at another time is a call of its own, never this one's. The index in `calls`.
+pub fn call_of_meeting<'a>(id: &str, start: DateTime<Utc>, end: Option<DateTime<Utc>>, calls: impl IntoIterator<Item = CallOf<'a>>) -> Option<usize> {
+    let from = start - Duration::minutes(MATCH_EARLY_MIN);
+    let to = end.unwrap_or(start).max(start + Duration::minutes(MATCH_LATE_MIN));
+    calls
+        .into_iter()
+        .enumerate()
+        .filter(|(_, c)| c.id == Some(id))
+        .filter(|(_, c)| c.meeting_start == Some(start) || c.started.is_some_and(|t| (from..=to).contains(&t)))
+        .min_by_key(|(_, c)| (!c.recording, c.started.map_or(i64::MAX, |t| (t - start).num_seconds().abs())))
+        .map(|(i, _)| i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meetings_call_is_the_one_of_its_id_recorded_at_its_time() {
+        let start = DateTime::parse_from_rfc3339("2026-11-11T19:30:00Z").unwrap().with_timezone(&Utc);
+        let at = |m: i64| Some(start + Duration::minutes(m));
+        let end = at(30);
+        // A call of `id` that started at minute `m`, its meeting.json saved with the meeting starting at minute `saved`.
+        let c = |id: &'static str, m: i64, saved: Option<i64>| CallOf { id: Some(id), started: at(m), meeting_start: saved.and_then(at), recording: false };
+        // Held at 15:31 and 15:32 (the meeting then at 15:30, since moved to 19:30, same id), recorded again at 19:32;
+        // another event at 19:31.
+        let calls = [c("ev", -239, Some(-240)), c("ev", -238, Some(-240)), c("other", 1, Some(0)), c("ev", 2, Some(0))];
+        assert_eq!(call_of_meeting("ev", start, end, calls), Some(3));
+        // Not held yet at its new time: none, never the earlier calls.
+        assert_eq!(call_of_meeting("ev", start, end, calls[..3].iter().copied()), None);
+        // Without its start saved: from 10 min early; the nearest its start wins; a short meeting's call up to 30 min after.
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", -10, None), c("ev", -11, None)]), Some(0));
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", 20, None), c("ev", -3, None)]), Some(1));
+        assert_eq!(call_of_meeting("ev", start, at(15), [c("ev", 25, None)]), Some(0));
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", 31, None), CallOf { started: at(0), ..Default::default() }]), None);
+        // Joined 20 min early by its arm (Join & record, Record when it starts) or a Teams transcript from before it: its
+        // saved start is this one's. Saved with another start, it isn't.
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", -20, Some(0))]), Some(0));
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", -20, Some(-240))]), None);
+        // Restarted within the meeting: the part being recorded, not the first.
+        let parts = [c("ev", 1, Some(0)), CallOf { recording: true, ..c("ev", 12, Some(0)) }];
+        assert_eq!(call_of_meeting("ev", start, end, parts), Some(1));
+        // A recording of another occurrence doesn't win.
+        assert_eq!(call_of_meeting("ev", start, end, [c("ev", 1, Some(0)), CallOf { recording: true, ..c("ev", -238, Some(-240)) }]), Some(0));
+    }
 
     /// #242: test data sets `calendar_command: []`, and its calendar stays off even where the user has the msgraph
     /// skill installed — the sync never reads their real meetings into it.

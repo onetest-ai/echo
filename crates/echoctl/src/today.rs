@@ -208,6 +208,9 @@ pub(crate) fn day() -> Vec<Value> {
     // The user's address, for how they are invited to each meeting (required or optional).
     let me = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|p| p.email).map(|e| e.to_lowercase());
     let mut used = vec![false; calls_today.len()];
+    // The call recording now says so, not "transcribing" (its minutes wait for its end).
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
+    let minutes = |d: &std::path::Path| if recording.as_deref() == Some(d) { json!({"state": "recording"}) } else { minutes(d) };
     let mut out: Vec<Value> = vec![];
     let day_of = |t: Option<&str>| time(t).map(|t| t.with_timezone(&Local).format("%Y-%m-%d").to_string());
     for m in crate::watch::agenda() {
@@ -215,7 +218,16 @@ pub(crate) fn day() -> Vec<Value> {
             continue;
         }
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
-        let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
+        // Its call: the one of its id recorded at its time (a call of it at another time is a line of its own).
+        let hit = crate::calendar::when(m.start.as_deref()).and_then(|s| {
+            let calls = calls_today.iter().map(|(d, meta, cm)| crate::calendar::CallOf {
+                id: cm.as_ref().and_then(|c| c.id.as_deref()),
+                meeting_start: cm.as_ref().and_then(|c| crate::calendar::when(c.start.as_deref())),
+                started: time(meta["started_at"].as_str()),
+                recording: recording.as_deref() == Some(d.as_path()),
+            });
+            crate::calendar::call_of_meeting(&event, s, crate::calendar::when(m.end.as_deref()), calls)
+        });
         // Every meeting but those the user declined (unless they recorded it, or set it to record): Your day says which
         // they go to, which they haven't answered and which are a maybe (`response`).
         if m.response.as_deref() == Some("declined") && hit.is_none() && !scheduled.contains(&event) {
@@ -810,5 +822,55 @@ mod tests {
         crate::watch::write_agenda(&[meeting("Today's review", noon)]).unwrap();
         let d = day();
         assert_eq!(d.iter().map(|m| m["subject"].as_str().unwrap()).collect::<Vec<_>>(), ["Today's review"]);
+    }
+
+    #[test]
+    fn a_meeting_held_again_is_the_recording_of_its_time_not_an_earlier_calls_minutes() {
+        // A meeting moved to later the same day keeps its calendar id: the call recorded at its old time and the one
+        // recording now both carry it. Your day linked the meeting to the earlier call (its minutes on the line) and
+        // showed the recording as a call of its own, folded under the meeting as "skipped · transcribing…".
+        let (_env, _root) = paths::testenv::folders("today-meeting-held-again");
+        let start = Local::now().date_naive().and_hms_opt(12, 0, 0).unwrap().and_local_timezone(Local).unwrap();
+        let ev: MeetingContext = serde_json::from_value(json!({"id": "ev-sync", "subject": "Acme weekly sync", "start": start.to_rfc3339(),
+            "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap();
+        crate::watch::write_agenda(std::slice::from_ref(&ev)).unwrap();
+        // A call started `at`, of the meeting as it was then (starting `held`): its meeting.json saves that start.
+        let call = |at: DateTime<Local>, held: DateTime<Local>, ended: bool| {
+            let dir = paths::calls_dir().join(format!("{}-acme-weekly-sync", at.format("%Y-%m-%d_%H%M%S")));
+            fs::create_dir_all(&dir).unwrap();
+            let end = ended.then(|| (at + chrono::Duration::minutes(20)).to_rfc3339());
+            fs::write(dir.join("meta.json"), json!({"title": "Acme weekly sync", "started_at": at.to_rfc3339(), "ended_at": end}).to_string()).unwrap();
+            MeetingContext { start: Some(held.to_rfc3339()), ..ev.clone() }.save(&dir).unwrap();
+            dir
+        };
+        let old = start - chrono::Duration::hours(4);
+        let earlier = call(old, old, true);
+        fs::write(earlier.join("notes.md"), "# Acme weekly sync\n\n## Decisions\n- Pilot in Berlin\n").unwrap();
+        let live = call(start + chrono::Duration::minutes(2), start, false);
+        fs::create_dir_all(paths::state_dir()).unwrap();
+        fs::write(paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": Utc::now().to_rfc3339(), "app": "teams",
+            "in_call": true, "armed": false, "recording": live.display().to_string()}).to_string()).unwrap();
+        let name = |d: &std::path::Path| d.file_name().unwrap().to_string_lossy().into_owned();
+
+        let d = day();
+        let meetings: Vec<&Value> = d.iter().filter(|x| x["kind"] == "meeting").collect();
+        assert_eq!(meetings.len(), 1, "{d:#?}");
+        assert_eq!(meetings[0]["call"], name(&live), "the meeting is the call recording at its time: {d:#?}");
+        assert_eq!(meetings[0]["minutes"]["state"], "recording", "recording, not transcribing, and no other call's minutes: {d:#?}");
+        // The earlier call is still there, at its own time, with its own minutes; the recording isn't listed twice.
+        let calls: Vec<&Value> = d.iter().filter(|x| x["kind"] == "call").collect();
+        assert_eq!(calls.len(), 1, "{d:#?}");
+        assert_eq!(calls[0]["call"], name(&earlier));
+        assert_eq!(calls[0]["minutes"]["state"], "ready");
+        // Not held yet at its new time: the meeting has no call, and the earlier call's minutes aren't on it.
+        fs::remove_dir_all(&live).unwrap();
+        let d = day();
+        let meeting = d.iter().find(|x| x["kind"] == "meeting").unwrap();
+        assert!(meeting["call"].is_null() && meeting["minutes"].is_null(), "{d:#?}");
+        assert_eq!(d.iter().filter(|x| x["kind"] == "call").map(|x| x["call"].clone()).collect::<Vec<_>>(), [json!(name(&earlier))]);
+        // Joined 20 min early by its arm (Join & record): its meeting.json saved this start, so it is this meeting's call.
+        let early = call(start - chrono::Duration::minutes(20), start, true);
+        let d = day();
+        assert_eq!(d.iter().find(|x| x["kind"] == "meeting").unwrap()["call"], name(&early), "{d:#?}");
     }
 }
