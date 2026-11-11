@@ -240,6 +240,8 @@ function agendaView(d, now) {
     if (x.call && mn.state === 'ready') bits.push(`<button class="link-btn${mn.unread ? ' ag-new' : ''}" data-call="${esc(x.call)}" data-call-tab="minutes">${mn.unread ? 'new minutes' : 'minutes'}${held ? ` · ${esc(held)}` : ''}</button>`)
     else if (mn.state === 'writing') bits.push('writing the minutes…')
     else if (mn.state === 'transcribing') bits.push('transcribing…')
+    // Its transcription failed: why, and the call, which says how to transcribe it again (#421).
+    else if (mn.state === 'transcribe_failed') bits.push(`<span class="warn" title="${esc(mn.why || '')}">transcription failed${mn.why ? `: ${esc(String(mn.why).split('\n')[0].replace(/^Error:\s*/, '').split(' — ')[0].slice(0, 80))}` : ''}</span> <button class="link-btn" data-call="${esc(x.call)}" data-call-tab="minutes">how to retry</button>`)
     else if (mn.state === 'at' && mn.at) bits.push(`minutes at ${esc(hm(new Date(mn.at)))}`)
     else if (mn.state === 'failed') bits.push(`<span class="warn" title="${esc(mn.why || '')}">minutes failed</span> <button class="link-btn" data-today-retry="${esc(x.call)}">try again</button>`)
     else if (x.call) bits.push(`<button class="link-btn" data-call="${esc(x.call)}">the call</button>`)
