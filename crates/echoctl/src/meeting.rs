@@ -59,6 +59,9 @@ pub struct MeetingContext {
     /// tentativelyAccepted, declined, notResponded, none.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub answers: std::collections::BTreeMap<String, String>,
+    /// How each person is invited (Graph `type`, by lowercased address): required or optional (rooms left out).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub invited_as: std::collections::BTreeMap<String, String>,
     /// Those who declined: not among `attendees`, shown last in the call's header.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declined: Vec<Person>,

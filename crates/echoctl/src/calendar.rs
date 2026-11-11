@@ -163,6 +163,9 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
     let answers = invited.iter()
         .filter_map(|x| Some((x.pointer("/emailAddress/address")?.as_str()?.to_lowercase(), said(x)?)))
         .collect();
+    let invited_as = invited.iter()
+        .filter_map(|x| Some((x.pointer("/emailAddress/address")?.as_str()?.to_lowercase(), x.get("type")?.as_str()?.to_owned())))
+        .collect();
     Some(MeetingContext {
         id: ev.get("id").and_then(Value::as_str).map(str::to_owned),
         subject: Some(subject),
@@ -173,6 +176,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         attendees: attendees.into_iter().filter_map(person).collect(),
         declined: declined.into_iter().filter_map(person).collect(),
         answers,
+        invited_as,
         join_url: join_link(ev),
         response: ev.pointer("/responseStatus/response").and_then(Value::as_str).map(str::to_owned),
         vocabulary: vec![],
@@ -497,6 +501,10 @@ mod tests {
         assert_eq!(m.answers.get("kim@globex.example").map(String::as_str), Some("accepted"), "by the lowercased address");
         assert_eq!(m.answers.get("noor@globex.example").map(String::as_str), Some("tentativelyAccepted"));
         assert!(!m.answers.contains_key("room4@globex.example"));
+        // How each person is invited, by the lowercased address (#402): rooms left out.
+        assert_eq!(m.invited_as.get("kim@globex.example").map(String::as_str), Some("required"));
+        assert_eq!(m.invited_as.get("noor@globex.example").map(String::as_str), Some("optional"));
+        assert!(!m.invited_as.contains_key("room4@globex.example"));
     }
 
     #[test]
