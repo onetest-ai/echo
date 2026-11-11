@@ -14,15 +14,21 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     }
-    // Windows: Echo's icon in echoctl.exe. Only when building on Windows (a host check): the
-    // Windows check from macOS has no resource compiler and needs no icon.
+    // Windows: Echo's icon and name in echoctl.exe (the taskbar names a program by its FileDescription,
+    // #420). Only when building on Windows (a host check): the Windows check from macOS has no
+    // resource compiler and needs neither.
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=../../packaging/windows/echo.rc");
         println!("cargo:rerun-if-changed=../../packaging/windows/echo.ico");
-        embed_resource::compile("../../packaging/windows/echo.rc", embed_resource::NONE)
+        println!("cargo:rerun-if-changed=../../Cargo.toml");
+        // The numeric version ("0.9.0-beta" → 0, 9, 0) for the resource's FILEVERSION.
+        let version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+        let mut n = version.split('-').next().unwrap_or_default().split('.').map(|p| p.parse::<u16>().unwrap_or(0));
+        let macros = ["ECHO_V1", "ECHO_V2", "ECHO_V3"].map(|m| format!("{m}={}", n.next().unwrap_or(0)));
+        embed_resource::compile("../../packaging/windows/echo.rc", &macros)
             .manifest_optional()
-            .expect("embedding Echo's icon");
+            .expect("embedding Echo's icon and name");
     }
 }
 

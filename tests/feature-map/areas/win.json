@@ -21,7 +21,7 @@
   },
   {
    "id": "F-WIN-03",
-   "feature": "The window works on Windows (Echo's own title bar by default, the native one when turned off; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox)",
+   "feature": "The window works on Windows (Echo's own title bar by default, the native one when turned off; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox) and speaks Windows' words: the octopus in the notification area, never the menu bar; the taskbar names the app Echo",
    "priority": "medium",
    "check": "person",
    "axes": []
