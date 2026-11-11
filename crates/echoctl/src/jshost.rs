@@ -979,15 +979,15 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             if !uses(id, "files")?["read"].as_array().is_some_and(|a| a.iter().any(|f| f.as_str() == Some(entry.as_str()))) {
                 bail!("{id} didn't name “{entry}” in uses.files.read when it was installed");
             }
-            match plugins::app_file(&entry, |k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from))? {
-                // The file itself, not a link to another: it is what the sheet named.
-                Some(f) if std::fs::symlink_metadata(&f).is_ok_and(|m| m.is_file()) => {
+            // The file as the sheet named it: no link anywhere below its base (`plugins::app_file_real`).
+            match plugins::app_file_real(&entry, |k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from))? {
+                Some(f) => {
                     use std::io::Read;
                     let mut buf = vec![];
                     std::fs::File::open(&f)?.take(1 << 20).read_to_end(&mut buf)?;
                     json!(String::from_utf8_lossy(&buf))
                 }
-                _ => Value::Null,
+                None => Value::Null,
             }
         }
         "system.which" => {

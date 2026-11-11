@@ -41,3 +41,15 @@ pub fn app_file(entry: &str, var: impl Fn(&str) -> Option<PathBuf>) -> Result<Op
     };
     Ok(root.map(|r| r.join(rel)))
 }
+
+/// The file an entry of `uses.files.read` names, when it is there as named: no link anywhere below its base (a folder
+/// above it that is a link or junction would lead elsewhere, e.g. to Echo's own settings) — its real path is its
+/// base's real path joined with the named parts.
+pub fn app_file_real(entry: &str, var: impl Fn(&str) -> Option<PathBuf>) -> Result<Option<PathBuf>> {
+    let (_, rel) = app_file_rel(entry)?;
+    let Some(f) = app_file(entry, var)? else { return Ok(None) };
+    let base = f.to_string_lossy().strip_suffix(rel).map(PathBuf::from);
+    let (Some(base), Ok(real)) = (base, dunce::canonicalize(&f)) else { return Ok(None) };
+    let Ok(base) = dunce::canonicalize(base) else { return Ok(None) };
+    Ok((real == base.join(rel) && real.is_file()).then_some(real))
+}

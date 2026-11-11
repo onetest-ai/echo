@@ -31,7 +31,9 @@ use crate::paths;
 
 pub mod addresses;
 mod appfiles;
-pub use appfiles::{app_file, app_file_rel};
+pub use appfiles::{app_file_real, app_file_rel};
+#[cfg(test)]
+use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
 
@@ -1609,6 +1611,25 @@ mod tests {
         assert_eq!(app_file("%APPDATA%/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("C:/Users/sam/AppData/Roaming/obsidian/obsidian.json")));
         assert_eq!(app_file("%LOCALAPPDATA%/x/y.json", env).unwrap(), None, "not on this computer");
         assert!(app_file_rel("~/.config/acme/app.json").is_ok());
+        // Read only as named: a link anywhere below the base (here a folder above the file) leads elsewhere: not read.
+        let (_env, root) = paths::testenv::folders("plugins-app-file");
+        let home = root.join("home-of-sam");
+        fs::create_dir_all(home.join(".config/acme")).unwrap();
+        fs::write(home.join(".config/acme/app.json"), "{}").unwrap();
+        let h = home.clone();
+        let env = move |k: &str| (k == "HOME").then(|| h.clone());
+        assert!(app_file_real("~/.config/acme/app.json", env.clone()).unwrap().is_some_and(|f| f.ends_with(".config/acme/app.json")));
+        assert_eq!(app_file_real("~/.config/acme/none.json", env.clone()).unwrap(), None, "not there");
+        #[cfg(unix)]
+        {
+            let elsewhere = root.join("echo-config");
+            fs::create_dir_all(&elsewhere).unwrap();
+            fs::write(elsewhere.join("app.json"), "secret").unwrap();
+            std::os::unix::fs::symlink(&elsewhere, home.join(".config/other")).unwrap();
+            assert_eq!(app_file_real("~/.config/other/app.json", env.clone()).unwrap(), None, "a linked folder above the file");
+            std::os::unix::fs::symlink(elsewhere.join("app.json"), home.join(".config/acme/linked.json")).unwrap();
+            assert_eq!(app_file_real("~/.config/acme/linked.json", env).unwrap(), None, "the file itself a link");
+        }
     }
 
     #[test]
