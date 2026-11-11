@@ -84,7 +84,7 @@
   },
   {
    "id": "F-PREP-09",
-   "feature": "A prep of a thread's meeting has \"From linked threads\": each open linked thread (parent, parts, related; not one of the meeting's own threads) with its latest decisions and open items; In short's model gets them only from threads on its own AI profile",
+   "feature": "A prep of a thread's meeting has \"From linked thread\": each open linked thread (parent, parts, related; not one of the meeting's own threads) with its latest decisions and open items — only linked threads on the AI profile the meeting's threads share (none when they run on different ones), so the prep, its In short and whoever reads it (`echoctl read echo://prep/…`, Recall) never hold another profile's records",
    "priority": "medium",
    "check": "agent",
    "axes": [

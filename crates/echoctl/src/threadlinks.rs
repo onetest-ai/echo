@@ -33,27 +33,28 @@ pub struct Link {
 }
 
 /// Link `id` to `to`: part of it (a thread is part of one other at most: a new parent replaces the old) or related.
+/// Checked under the projects lock, against the profiles as they are then.
 pub fn link(id: &str, to: &str, kind: Kind) -> Result<Project> {
     if id == to {
         bail!("a thread can't be linked to itself");
     }
-    let all = projects::list();
-    let Some(other) = all.iter().find(|p| p.id == to) else { bail!("no thread {to:?}") };
-    if other.links.iter().any(|l| l.to == id) {
-        bail!("{} already links to this thread: change it there (`project link {to} --to {id} --remove`)", other.name);
-    }
-    if kind == Kind::PartOf {
-        // Up from the new parent: reaching this thread would make a loop.
-        let mut at = to.to_string();
-        for _ in 0..all.len() {
-            match all.iter().find(|p| p.id == at).and_then(|p| p.links.iter().find(|l| l.kind == Kind::PartOf)) {
-                Some(l) if l.to == id => bail!("{} is part of this thread already (a loop)", other.name),
-                Some(l) => at = l.to.clone(),
-                None => break,
+    projects::update(id, |p| {
+        let all = projects::list();
+        let Some(other) = all.iter().find(|o| o.id == to) else { bail!("no thread {to:?}") };
+        if other.links.iter().any(|l| l.to == id) {
+            bail!("{} already links to this thread: change it there (`project link {to} --to {id} --remove`)", other.name);
+        }
+        if kind == Kind::PartOf {
+            // Up from the new parent: reaching this thread would make a loop.
+            let mut at = to.to_string();
+            for _ in 0..all.len() {
+                match all.iter().find(|o| o.id == at).and_then(|o| o.links.iter().find(|l| l.kind == Kind::PartOf)) {
+                    Some(l) if l.to == id => bail!("{} is part of this thread already (a loop)", other.name),
+                    Some(l) => at = l.to.clone(),
+                    None => break,
+                }
             }
         }
-    }
-    projects::update(id, |p| {
         p.links.retain(|l| l.to != to && !(kind == Kind::PartOf && l.kind == Kind::PartOf));
         p.links.push(Link { to: to.to_string(), kind });
         Ok(())
@@ -63,11 +64,15 @@ pub fn link(id: &str, to: &str, kind: Kind) -> Result<Project> {
 /// Take the link between `id` and `to` away, whichever side keeps it.
 pub fn unlink(id: &str, to: &str) -> Result<Project> {
     projects::load(id)?;
-    if projects::load(to).is_ok_and(|o| o.links.iter().any(|l| l.to == id)) {
+    let mut there = false;
+    if projects::load(to).is_ok() {
         projects::update(to, |o| {
+            there = o.links.iter().any(|l| l.to == id);
             o.links.retain(|l| l.to != id);
             Ok(())
         })?;
+    }
+    if there {
         return projects::load(id);
     }
     projects::update(id, |p| {
@@ -78,6 +83,11 @@ pub fn unlink(id: &str, to: &str) -> Result<Project> {
         }
         Ok(())
     })
+}
+
+/// The AI profile a thread's jobs run on.
+pub fn profile_of(p: &Project) -> String {
+    p.ai_profile.clone().unwrap_or_else(crate::ai::default_id)
 }
 
 /// A thread's links seen from it, both sides (`all`: every thread): `part_of` its parent, `part` a thread that is part
@@ -99,6 +109,17 @@ pub fn of(p: &Project, all: &[Project]) -> Vec<Value> {
     }
     out.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     out.into_iter().map(|(_, _, v)| v).collect()
+}
+
+/// A thread's view as a run Echo started reads it (`run`: the run's AI profile): only links to threads on that profile,
+/// by name, without their work; the others not at all.
+pub fn for_run(v: &mut Value, run: &str) {
+    if let Some(ls) = v["links"].as_array_mut() {
+        ls.retain(|l| projects::load(l["id"].as_str().unwrap_or("")).is_ok_and(|o| !run.is_empty() && profile_of(&o) == run));
+        for l in ls.iter_mut() {
+            l.as_object_mut().map(|o| o.remove("work"));
+        }
+    }
 }
 
 const OPEN: [&str; 4] = ["open", "in_progress", "waiting", "blocked"];
@@ -152,6 +173,37 @@ mod tests {
         // A deleted thread is left out.
         projects::delete(&w.id).unwrap();
         assert_eq!(kinds(&r.id), []);
+        // A new thread that gets the trashed one's id starts with no links.
+        let again = projects::create("Widget", None, None).unwrap();
+        assert_eq!(again.id, w.id);
+        assert_eq!(kinds(&again.id), []);
+        assert_eq!(projects::load(&r.id).unwrap().links, vec![]);
+    }
+
+    #[test]
+    fn a_run_sees_only_links_on_its_profile_by_name() {
+        let _env = testenv::folders("threadlinks-run");
+        let a = projects::create("Widget", None, None).unwrap().id;
+        let b = projects::create("Widget security", None, None).unwrap().id;
+        let c = projects::create("Widget rollout", None, None).unwrap().id;
+        projects::update(&b, |p| {
+            p.ai_profile = Some("work".into());
+            Ok(())
+        })
+        .unwrap();
+        link(&a, &b, Kind::Related).unwrap();
+        link(&c, &a, Kind::PartOf).unwrap();
+        let mut v = projects::view(&projects::load(&a).unwrap(), true).unwrap();
+        assert_eq!(v["links"].as_array().unwrap().len(), 2);
+        for_run(&mut v, &crate::ai::default_id());
+        let ls = v["links"].as_array().unwrap();
+        assert_eq!(ls.iter().map(|l| l["id"].as_str().unwrap()).collect::<Vec<_>>(), [c.as_str()]);
+        assert!(ls[0].get("work").is_none());
+        let mut v = projects::view(&projects::load(&a).unwrap(), true).unwrap();
+        for_run(&mut v, "");
+        assert_eq!(v["links"], json!([]), "a run with no profile sees none");
+        // A list's view carries no links at all.
+        assert!(projects::view(&projects::load(&c).unwrap(), false).unwrap().get("links").is_none());
     }
 
     #[test]

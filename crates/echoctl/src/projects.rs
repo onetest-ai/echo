@@ -929,6 +929,11 @@ pub fn delete(id: &str) -> Result<()> {
     fs::create_dir_all(&trash)?;
     let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
+    // Its links go with it: a new thread may get its id.
+    for mut o in list().into_iter().filter(|o| o.links.iter().any(|l| l.to == id)) {
+        o.links.retain(|l| l.to != id);
+        write_json(&profile_path(&o.id)?, &o)?;
+    }
     Ok(())
 }
 
@@ -1341,6 +1346,8 @@ pub(crate) fn call_row(d: &Path, why: &str) -> Value {
 /// A project as the window and `project show` give it.
 pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
     let mut v = serde_json::to_value(p)?;
+    // The stored side of its links only: `links` is both sides, with calls (below).
+    v.as_object_mut().map(|o| o.remove("links"));
     v["group"] = json!(p.stage.group());
     let b = brief(&p.id)?;
     v["brief_html"] = json!(crate::minutes::markdown_html(&b));

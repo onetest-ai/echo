@@ -354,11 +354,8 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
     let show = |p: &projects::Project| -> Result<()> {
         let mut v = projects::view(p, true)?;
-        // A run reads its own thread only: its linked threads by name, not their work.
         if notes::headless() {
-            for l in v["links"].as_array_mut().into_iter().flatten() {
-                l.as_object_mut().map(|o| o.remove("work"));
-            }
+            threadlinks::for_run(&mut v, &std::env::var(guard::RUN_PROFILE).unwrap_or_default());
         }
         print_json(&v);
         Ok(())

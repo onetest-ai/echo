@@ -431,20 +431,23 @@ fn gather(m: &MeetingContext, threads: &[projects::Project]) -> Value {
     })
 }
 
-/// The meeting's threads' open linked threads (#95), not one of its own: each with its latest decisions and open items,
-/// and its AI profile (what may reach In short's model).
+/// The meeting's threads' open linked threads (#95), not one of its own: each with its latest decisions and open items.
+/// Only when the meeting's threads share one AI profile, and only linked threads on that profile: a prep is read as
+/// the meeting's threads' (`links::read`, Recall), so another profile's records never go into it.
 fn linked(threads: &[projects::Project]) -> Vec<Value> {
+    let profiles: std::collections::BTreeSet<String> = threads.iter().map(crate::threadlinks::profile_of).collect();
+    let [profile] = profiles.iter().collect::<Vec<_>>()[..] else { return vec![] };
     let all = projects::list();
     let mut seen: std::collections::BTreeSet<String> = threads.iter().map(|p| p.id.clone()).collect();
     let mut out = vec![];
     for l in threads.iter().flat_map(|t| crate::threadlinks::of(t, &all)) {
         let id = l["id"].as_str().unwrap_or("").to_string();
-        if l["closed"] == true || !seen.insert(id.clone()) {
+        let same = all.iter().find(|p| p.id == id).is_some_and(|p| &crate::threadlinks::profile_of(p) == profile);
+        if l["closed"] == true || !same || !seen.insert(id.clone()) {
             continue;
         }
         let d = crate::threadlinks::digest(&id, 5, 3);
-        let profile = all.iter().find(|p| p.id == id).and_then(|p| p.ai_profile.clone()).unwrap_or_else(crate::ai::default_id);
-        out.push(json!({"id": id, "name": l["name"], "kind": l["kind"], "profile": profile, "decisions": d["decisions"], "open": d["open"]}));
+        out.push(json!({"id": id, "name": l["name"], "kind": l["kind"], "decisions": d["decisions"], "open": d["open"]}));
     }
     out
 }
@@ -559,12 +562,7 @@ pub fn write(m: &MeetingContext) -> Result<Value> {
         let profile = profiles.into_iter().next().unwrap_or_default();
         // Who reads it: their own name in the facts is "you".
         let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| format!("The reader is {}.\n\n", m.name)).unwrap_or_default();
-        // A linked thread's records reach the model only when it runs on this profile too.
-        let mut shown = p.clone();
-        if let Some(a) = shown["linked"].as_array_mut() {
-            a.retain(|l| l["profile"] == profile.as_str());
-        }
-        let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&shown));
+        let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&p));
         match crate::ai::ready(&profile).and_then(|r| crate::livenotes::complete_text(r.profile(), SYSTEM, &facts, 900).map(|t| (t, Some(crate::livenotes::text_model(r.profile()))))) {
             Ok((text, model)) => match parse_answer(&text) {
                 Some((rel, short)) => {
@@ -678,6 +676,35 @@ pub fn meeting(id: &str) -> Option<MeetingContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prep_holds_only_linked_threads_on_its_threads_profile_and_reads_back_so() {
+        let _env = crate::paths::testenv::folders("prep-linked-profile");
+        let a = projects::create("Widget", None, None).unwrap();
+        let b = projects::create("Widget security", None, None).unwrap();
+        let c = projects::create("Widget rollout", None, None).unwrap();
+        projects::update(&b.id, |p| {
+            p.ai_profile = Some("work".into());
+            Ok(())
+        })
+        .unwrap();
+        crate::threadlinks::link(&a.id, &b.id, crate::threadlinks::Kind::Related).unwrap();
+        crate::threadlinks::link(&c.id, &a.id, crate::threadlinks::Kind::PartOf).unwrap();
+        let a = projects::load(&a.id).unwrap();
+        let p = gather(&MeetingContext::default(), std::slice::from_ref(&a));
+        let ids: Vec<&str> = p["linked"].as_array().unwrap().iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, [c.id.as_str()], "the thread on another profile is left out");
+        // Read back as a session would read the prep: only what was kept.
+        let f = file("0123abcd");
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(&f, serde_json::to_vec(&p).unwrap()).unwrap();
+        let text = crate::links::read("echo://prep/0123abcd").unwrap();
+        assert!(text.contains("From the linked thread Widget rollout:"), "{text}");
+        assert!(!text.contains("Widget security"), "{text}");
+        // The meeting's threads on two profiles: no linked threads at all.
+        let b = projects::load(&b.id).unwrap();
+        assert_eq!(gather(&MeetingContext::default(), &[a, b])["linked"], json!([]));
+    }
 
     #[test]
     fn a_meeting_already_a_call_today_leaves_coming_up_and_names_its_call() {
