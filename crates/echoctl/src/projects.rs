@@ -437,6 +437,9 @@ pub struct Project {
     pub ai_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Its links to other whole threads, kept on this side only (`threadlinks`): what it is part of, what it relates to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<crate::threadlinks::Link>,
     pub created_at: String,
 }
 
@@ -796,6 +799,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         notes: String::new(),
         ai_profile: None,
         model: None,
+        links: vec![],
         created_at: now,
     };
     check(&p, &clients()?)?;
@@ -925,6 +929,11 @@ pub fn delete(id: &str) -> Result<()> {
     fs::create_dir_all(&trash)?;
     let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
+    // Its links go with it: a new thread may get its id.
+    for mut o in list().into_iter().filter(|o| o.links.iter().any(|l| l.to == id)) {
+        o.links.retain(|l| l.to != id);
+        write_json(&profile_path(&o.id)?, &o)?;
+    }
     Ok(())
 }
 
@@ -1337,6 +1346,8 @@ pub(crate) fn call_row(d: &Path, why: &str) -> Value {
 /// A project as the window and `project show` give it.
 pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
     let mut v = serde_json::to_value(p)?;
+    // The stored side of its links only: `links` is both sides, with calls (below).
+    v.as_object_mut().map(|o| o.remove("links"));
     v["group"] = json!(p.stage.group());
     let b = brief(&p.id)?;
     v["brief_html"] = json!(crate::minutes::markdown_html(&b));
@@ -1357,6 +1368,15 @@ pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
         v["chat_state"] = crate::ledger::chat_state(&p.id);
         v["mail_state"] = crate::ledger::mail_state(&p.id);
         v["chat_suggestions"] = json!(crate::ledger::chat_suggestions(p));
+        // Its linked threads, each with what it holds now (Brief → Linked threads).
+        v["links"] = crate::threadlinks::of(p, &list())
+            .into_iter()
+            .map(|mut l| {
+                let d = crate::threadlinks::digest(l["id"].as_str().unwrap_or(""), 5, 3);
+                l["work"] = d;
+                l
+            })
+            .collect();
     }
     Ok(v)
 }
@@ -1610,6 +1630,7 @@ mod tests {
             notes: String::new(),
             ai_profile: None,
             model: None,
+            links: vec![],
             created_at: String::new(),
         };
         let f = |others: &[&str]| CallFacts { others: others.iter().map(|s| s.to_string()).collect(), ..Default::default() };

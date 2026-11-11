@@ -209,6 +209,33 @@
    "axes": [
     "thread.sources"
    ]
+  },
+  {
+   "id": "F-THR-22",
+   "feature": "`echoctl project link <id> --to <id> --kind part-of|related` links two threads (a thread is part of at most one other: a new parent replaces the old); `--remove` unlinks; it refuses the thread itself, an unknown thread, a pair already linked from the other side and a loop of part-of; `project show` lists the links (`links`: id, name, kind part_of / part / related, stage)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage"
+   ]
+  },
+  {
+   "id": "F-THR-23",
+   "feature": "A thread's header shows \"Part of <thread> →\" and \"Related: <threads>\", each opening that thread; a thread with no links shows neither",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage"
+   ]
+  },
+  {
+   "id": "F-THR-24",
+   "feature": "Brief → Linked threads lists its parent, the threads that are part of it and related threads, each with its stage, its open items (count and the first five) and its latest decisions (three); a linked thread that was deleted is left out",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage"
+   ]
   }
  ]
 }

@@ -89,3 +89,6 @@ img.pj-ic { background: #fff; }
 .pj-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pj-name h2 { min-width: 0; }
 
+.pj-links { margin: -10px 0 14px; }
+.pj-link .pj-name { gap: 8px; flex-wrap: wrap; }
+.pj-link-items { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }

@@ -49,6 +49,7 @@ mod people;
 mod prep;
 mod projectsync;
 mod tasks;
+mod threadlinks;
 mod taskmodes;
 mod glance;
 mod today;
