@@ -376,7 +376,9 @@ reads none of it.
   (first process whose unix id is <its pid>) to click button "Record" of window 1'` — always by that pid.
 - **No tray, no native window.** With the user's own Echo running, System Events can't keep the two `echoctl`
   menu-bar items apart (asked for the dev app's menu by its pid, it returned the installed Echo's), so a click could
-  reach the user's Echo: cases run the app with `--no-tray` and use `echoctl` and the served window instead.
+  reach the user's Echo: cases run the app with `--no-tray` and use `echoctl` and the served window instead. Only
+  `recording/TC-019` and `window/TC-011` drive the tray and the native window, and only when `pgrep -fl echoctl` shows
+  no other Echo (else BLOCKED).
 - **Speakers** (`recording/TC-018`) need NVIDIA's NeMo-Speech runtime, which a debug build doesn't carry:
   `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run.
 - **Minutes on a call** need at least 3 minutes and 1,500 characters (`calls::gate`): a copy of the prepared

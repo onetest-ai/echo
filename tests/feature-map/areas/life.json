@@ -62,7 +62,7 @@
    "id": "F-LIFE-08",
    "feature": "Closing the window keeps Echo in the menu bar and the Dock (unless Hide from the Dock); a Dock click opens it again",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.general"
    ]
