@@ -163,7 +163,7 @@ fn widget_height() -> String {
 }
 
 /// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
-pub const WIDGET_KINDS: [&str; 6] = ["stat", "stats", "chart", "list", "status", "card"];
+pub const WIDGET_KINDS: [&str; 7] = ["stat", "stats", "chart", "list", "status", "card", "page"];
 
 /// Each enabled plugin's manifest (one it can't read is left out).
 pub fn enabled_manifests() -> Vec<(String, Manifest)> {
@@ -258,6 +258,9 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
         if m.main.is_none() {
             bail!("widget “{}” needs a host half (main) to give its data", w.id);
+        }
+        if w.kind == "page" && m.client.is_none() {
+            bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
         }
         check_params(&w.id, &w.params)?;
     }

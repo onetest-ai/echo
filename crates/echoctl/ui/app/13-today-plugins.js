@@ -85,7 +85,15 @@ function pluginWidgetView(id, w, size) {
   if (S.pwOpen && Date.now() - (S.pwOpenAt || 0) > 30000) S.pwOpen = null
   if (!w || w.empty) return ''
   let body
-  try { body = pluginWidgetHtml(w.kind, w.data, size) } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
+  try {
+    if (w.kind === 'page') {
+      // Its own page: drawn by its client half (`ctx.widgets.draw`), in Echo's frame.
+      const draw = Plugins.widgetDraw[id]
+      if (!draw) throw new Error('its page isn\'t loaded (the plugin\'s window half)')
+      const theme = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      body = `<div class="pw-page">${String(draw({ data: w.data, size, theme }) ?? '')}</div>`
+    } else body = pluginWidgetHtml(w.kind, w.data, size)
+  } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   const stale = w.error ? `<span class="set-sub" title="${esc(w.error)}">· from ${esc(hm(new Date(w.at)))}</span>` : ''
   // An outside link asked for: its host said before it opens (a second click on Open).
   const ask = S.pwOpen && body.includes(`data-pw-open="${esc(S.pwOpen)}"`) ? `<div class="pw-ask set-sub">Open ${esc((() => { try { return new URL(S.pwOpen).host } catch { return 'the link' } })())} in the browser? Click Open again · <button type="button" class="link-btn" data-pw-open-no="1">Cancel</button></div>` : ''

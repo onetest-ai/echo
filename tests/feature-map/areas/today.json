@@ -165,6 +165,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-24",
+   "feature": "A plugin's own page as a widget (kind page, the manifest needing a window half): its window half draws it with ctx.widgets.draw(widget, ({data, size, theme}) => HTML) inside Echo's frame, from the data its host half gives (provide / set); the plugin escapes its text (ctx.ui.esc); unloaded with the plugin (off: not drawn, its place kept)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

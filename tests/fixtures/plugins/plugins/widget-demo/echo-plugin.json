@@ -1,8 +1,8 @@
 {
   "id": "widget-demo",
   "name": "Widget demo",
-  "version": "0.3.0",
-  "summary": "A test plugin: Today widgets of each kind Echo draws, an action and links (tests/cases/today/TC-029, TC-031).",
+  "version": "0.4.0",
+  "summary": "A test plugin: Today widgets of each kind Echo draws, its own page, an action, links and a setting (tests/cases/today/TC-029, TC-031–TC-033).",
   "main": "main.js",
   "widgets": [
     {
@@ -86,6 +86,17 @@
         "S",
         "M"
       ]
+    },
+    {
+      "id": "board",
+      "label": "Sprint board",
+      "about": "its own page",
+      "kind": "page",
+      "sizes": [
+        "M",
+        "L"
+      ]
     }
-  ]
+  ],
+  "client": "client.js"
 }

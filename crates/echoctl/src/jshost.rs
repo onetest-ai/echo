@@ -1159,6 +1159,7 @@ mod tests {
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "refresh": 5}), true).unwrap_err().contains("60 s"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), false).unwrap_err().contains("host half"));
+        assert!(with(json!({"id": "a", "label": "A", "kind": "page"}), true).unwrap_err().contains("needs a window half (client)"));
         let param = |p: Value| with(json!({"id": "a", "label": "A", "kind": "stat", "params": [p]}), true);
         assert!(param(json!({"key": "team", "label": "Team", "type": "thread"})).is_ok());
         assert!(param(json!({"key": "team", "label": "Team", "type": "colour"})).unwrap_err().contains("type Echo doesn't know"));
