@@ -152,7 +152,7 @@ fn counts(dir: &std::path::Path) -> Value {
 }
 
 /// A call's minutes as Today shows them: being written, coming at a time, written (new until opened, with what they
-/// hold), or failed (with why).
+/// hold), or failed (with why) — or its transcription failed (with why).
 fn minutes(dir: &std::path::Path) -> Value {
     let written = dir.join("notes.md").exists();
     let run = crate::notes::status(dir);
@@ -166,6 +166,14 @@ fn minutes(dir: &std::path::Path) -> Value {
     }
     if let Some(r) = run.as_ref().filter(|r| r.state == "failed" || r.state == "needs_login") {
         return json!({"state": "failed", "why": r.message});
+    }
+    // Its transcription failed (no speech model, …): said with why, not "transcribing" for good (#421) — once the call
+    // ended, and not while it is transcribed again (the call's own status reads the same way).
+    let ended = calls::read_json(&dir.join("meta.json"))["ended_at"].is_string();
+    if ended && !dir.join("transcript.md").exists() && !dir.join(crate::transcribe_marker()).exists() {
+        if let Ok(why) = std::fs::read_to_string(dir.join("transcribe.error")) {
+            return json!({"state": "transcribe_failed", "why": why.trim()});
+        }
     }
     let auto = crate::notes::auto_state(dir);
     match auto["due"].as_str() {
@@ -672,6 +680,30 @@ mod tests {
         assert_eq!(m["counts"], json!({"decisions": 2, "actions": 1, "questions": 1}));
         minutes_seen(&dir).unwrap();
         assert_eq!(minutes(&dir)["unread"], false);
+    }
+
+    #[test]
+    fn a_failed_transcription_says_it_failed_and_why_not_transcribing() {
+        // #421: with automatic minutes on, a call or memo whose transcription failed (no speech model) said
+        // "transcribing…" for good.
+        let (_env, home) = paths::testenv::folders("today-transcribe-failed");
+        crate::config::Config { auto_minutes_since: Some(Utc::now() - chrono::Duration::hours(1)), ..Default::default() }.save().unwrap();
+        let dir = home.join("calls").join("2026-11-05_100000-memo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), json!({"ended_at": Utc::now().to_rfc3339()}).to_string()).unwrap();
+        fs::write(dir.join("mic.wav"), b"RIFF").unwrap();
+        assert_eq!(minutes(&dir)["state"], "transcribing", "no transcript yet, nothing failed: still transcribing");
+        fs::write(dir.join("transcribe.error"), "no transcription model yet — choose one in Settings → Transcription\n").unwrap();
+        let m = minutes(&dir);
+        assert_eq!(m["state"], "transcribe_failed", "{m}");
+        assert_eq!(m["why"], "no transcription model yet — choose one in Settings → Transcription");
+        // Transcribed again: transcribing, as the call's own status says, until it lands or fails again.
+        fs::write(dir.join(crate::transcribe_marker()), "").unwrap();
+        assert_eq!(minutes(&dir)["state"], "transcribing");
+        fs::remove_file(dir.join(crate::transcribe_marker())).unwrap();
+        // Still recording (no end yet): not said failed.
+        fs::write(dir.join("meta.json"), "{}").unwrap();
+        assert_ne!(minutes(&dir)["state"], "transcribe_failed");
     }
 
     #[cfg(feature = "js")]
