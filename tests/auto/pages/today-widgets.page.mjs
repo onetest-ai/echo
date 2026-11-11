@@ -201,6 +201,10 @@ export class TodayWidgetsPage extends TodayPage {
     return this.main.getByRole('list', { name: 'Your day by the hour', exact: true })
   }
 
+  get calendarBlocks() {
+    return this.calendarList.getByRole('listitem')
+  }
+
   stripBar() {
     return this.main.getByRole('list', { name: 'Your day in one bar', exact: true })
   }
@@ -492,6 +496,148 @@ export class TodayWidgetsPage extends TodayPage {
   /** A widget's images (a plugin's text shown as text draws none). */
   widgetImages(name) {
     return this.widget(name).getByRole('img')
+  }
+
+  // ── What a widget holds, for checks that read it (texts, headings, lists, titles) ──
+
+  /** A text of a widget that matches a pattern (a time line, a sentence starting so). */
+  widgetMatch(name, pattern) {
+    return this.widget(name).getByText(pattern)
+  }
+
+  /** A heading inside a widget ("Walk in knowing", "The day's choices 5"), at a level. */
+  widgetHeading(name, heading, level) {
+    return this.widget(name).getByRole('heading', { name: heading, exact: true, level })
+  }
+
+  /** Any heading of a widget that starts with these words (to check it is gone). */
+  widgetHeadings(name, words) {
+    return this.widget(name).getByRole('heading', { name: new RegExp(`^${literal(words)}`) })
+  }
+
+  /** The items of a widget's list: its first or last list (0, -1), or the list of that name. */
+  widgetItems(name, list = 0) {
+    const lists = this.widget(name).getByRole('list', typeof list === 'string' ? { name: list, exact: true } : undefined)
+    return (typeof list === 'string' ? lists : list < 0 ? lists.last() : lists.nth(list)).getByRole('listitem')
+  }
+
+  /** What a hover over a part of a widget says (its title). */
+  widgetTitled(name, title) {
+    return this.widget(name).getByTitle(title, { exact: true })
+  }
+
+  /** A widget's buttons whose names start with these words (a thread's chip: its icon's name, then its name). */
+  widgetButtonStarting(name, words) {
+    return this.widget(name).getByRole('button', { name: new RegExp(`^${literal(words)}\\b`) })
+  }
+
+  /** Every region of that name on Today (one widget's place: 1). */
+  widgetsNamed(name) {
+    return this.main.getByRole('region', { name, exact: true })
+  }
+
+  /** A widget's paragraph (a card's text) and its links in a list's item. */
+  widgetParagraph(name) {
+    return this.widget(name).getByRole('paragraph')
+  }
+
+  itemLinks(name, i) {
+    return this.widgetItems(name).nth(i).getByRole('link')
+  }
+
+  /** A heading of the Details on the right (a task's title). */
+  detailsHeading(title) {
+    return this.rightPanel.getByRole('heading', { name: title, level: 3, exact: true })
+  }
+
+  // ── Your day's lines, by position and by what they say ──
+
+  /** Every line of that subject; the line at a position; a line's text that matches. */
+  linesOf(subject) {
+    return this.yourDay.getByRole('listitem', { name: subject, exact: true })
+  }
+
+  lineAt(i) {
+    return this.yourDay.getByRole('listitem').nth(i)
+  }
+
+  async lineCount() {
+    return this.yourDay.getByRole('listitem').count()
+  }
+
+  lineMatch(subject, pattern) {
+    return this.line(subject).getByText(pattern)
+  }
+
+  lineAtMatch(i, pattern) {
+    return this.lineAt(i).getByText(pattern)
+  }
+
+  /** Show N skipped (its count read). */
+  get showSkipped() {
+    return this.yourDay.getByRole('button', { name: new RegExp(this.w.day.showSkipped) })
+  }
+
+  /** The Meeting card on the right: its heading, a text starting so, a select, a button. */
+  meetingCardHeading(subject) {
+    return this.meetingCard(subject).getByRole('heading', { name: subject, exact: true })
+  }
+
+  meetingCardMatch(subject, pattern) {
+    return this.meetingCard(subject).getByText(pattern)
+  }
+
+  meetingCardSelect(subject, name) {
+    return this.meetingCard(subject).getByRole('combobox', { name, exact: true })
+  }
+
+  meetingCardButton(subject, name) {
+    return this.meetingCard(subject).getByRole('button', { name, exact: true })
+  }
+
+  /** The strip's line now. */
+  get stripNow() {
+    return this.widget(this.w.name.strip).getByRole('separator', { name: new RegExp(`^${literal(this.w.day.nowPrefix)}`) })
+  }
+
+  // ── Edit mode's frames and Add a widget ──
+
+  /** A frame's text as it reads; the first button of the widget inside it. */
+  frameSays(label, text) {
+    return this.frame(label).getByText(text, { exact: true })
+  }
+
+  frameInnerButton(label) {
+    return this.frame(label).getByRole('region', { name: label, exact: true }).getByRole('button').first()
+  }
+
+  /** Add a widget's part buttons; the picked widget's preview, whichever it is. */
+  get partButtons() {
+    return this.parts.getByRole('button')
+  }
+
+  get anyPreview() {
+    return this.rightPanel.getByLabel(new RegExp(`^${literal(this.w.edit.preview)}`))
+  }
+
+  // ── The day's choices ──
+
+  /** A text of a choice's line, as it reads or containing these words; its buttons. */
+  choiceSays(name, text) {
+    return this.choice(name).getByText(text, { exact: true })
+  }
+
+  choiceContains(name, text) {
+    return this.choice(name).getByText(text)
+  }
+
+  choiceAllButtons(name) {
+    return this.choice(name).getByRole('button')
+  }
+
+  /** A choice's buttons read at one moment: their texts and whether each is disabled. */
+  async choiceStates(name) {
+    return this.choice(name).evaluate((el) => [...el.querySelectorAll('button')].map((b) => ({ text: b.textContent.trim(), disabled: b.disabled })))
   }
 
   /** A text of a widget, as it reads; one that matches. */

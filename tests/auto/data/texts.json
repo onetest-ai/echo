@@ -2093,7 +2093,8 @@
         "noReply": "--text-3",
         "newMinutes": "--accent"
       },
-      "minutesRoute": "^#call/[^/]+/minutes$"
+      "minutesRoute": "^#call/[^/]+/minutes$",
+      "nowPrefix": "Now "
     },
     "calendar": {
       "stripHeading": "Your day {n} meetings",
@@ -2127,7 +2128,8 @@
       },
       "tab": "Add a widget",
       "search": "calen",
-      "showPrep": "Show prep"
+      "showPrep": "Show prep",
+      "preview": "Preview of "
     },
     "choices": {
       "heading": "The day's choices {n}",
@@ -2318,7 +2320,85 @@
         "type": "bar"
       },
       "badColour": "--danger",
-      "progress": "12 of 20"
+      "progress": "12 of 20",
+      "ids": {
+        "open": "plugin:widget-demo:open",
+        "sprint": "plugin:widget-demo:sprint",
+        "trend": "plugin:widget-demo:trend",
+        "builds": "plugin:widget-demo:builds",
+        "ci": "plugin:widget-demo:ci",
+        "note": "plugin:widget-demo:note",
+        "broken": "plugin:widget-demo:broken",
+        "board": "plugin:widget-demo:board"
+      },
+      "place": [
+        [
+          "open",
+          "S",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:open"
+        ],
+        [
+          "broken",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ],
+        [
+          "sprint",
+          "M",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "builds",
+          "M",
+          "--after",
+          "plugin:widget-demo:sprint"
+        ],
+        [
+          "note",
+          "M"
+        ]
+      ],
+      "drawn": [
+        "open",
+        "ci",
+        "broken",
+        "sprint",
+        "builds",
+        "note"
+      ],
+      "notPlaced": [
+        "trend",
+        "board"
+      ],
+      "chartPlace": [
+        [
+          "trend",
+          "M",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:trend"
+        ],
+        [
+          "open",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ]
+      ]
     },
     "routines": {
       "cards": [
@@ -2343,6 +2423,17 @@
       ],
       "gotIt": "Got it",
       "size": "M"
+    },
+    "size": {
+      "S": "S",
+      "M": "M",
+      "L": "L"
+    },
+    "side": {
+      "above": "above",
+      "below": "below",
+      "before": "before",
+      "after": "after"
     }
   }
 }
