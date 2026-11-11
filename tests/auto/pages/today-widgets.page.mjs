@@ -653,4 +653,33 @@ export class TodayWidgetsPage extends TodayPage {
   async textColour(name, text) {
     return this.colourOf(this.widgetSays(name, text))
   }
+
+  // ── A widget's settings (⚙ on its frame) and a plugin's own page ──
+
+  /** A frame's ⚙ ("Done this week: settings"), the settings it opens under its header, one of them by its label. */
+  settingsButton(label) {
+    return this.frame(label).getByRole('button', { name: `${label}: settings`, exact: true })
+  }
+
+  settingsOf(label) {
+    return this.frame(label).getByRole('group', { name: `${label}: settings`, exact: true })
+  }
+
+  setting(label, name) {
+    return this.settingsOf(label).getByRole('combobox', { name: new RegExp(`^${literal(name)}\\b`) })
+  }
+
+  /** A plugin's own page (kind page) as its window half drew it: its boxes' texts, the size and theme Echo gave it (what
+   *  its box says), and whether any text of the widget is italic (its text escaped: none). */
+  async pageWidget(name) {
+    return this.widget(name).evaluate((el) => {
+      const box = el.querySelector('[data-size]')
+      return box && {
+        size: box.dataset.size,
+        theme: box.dataset.theme,
+        boxes: [...box.children].map((b) => b.innerText.replace(/\s+/g, ' ').trim()),
+        italic: [...el.querySelectorAll('*')].some((x) => getComputedStyle(x).fontStyle === 'italic'),
+      }
+    })
+  }
 }
