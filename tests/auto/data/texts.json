@@ -2185,12 +2185,12 @@
       "market": "test-plugins",
       "id": "widget-demo",
       "name": "Widget demo",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "sheet": [
         "Runs its own code in Echo, with your rights",
         "Adds 7 widgets you can put on Today"
       ],
-      "installed": "Installed Widget demo 0.2.0",
+      "installed": "Installed Widget demo 0.3.0",
       "prefix": "plugin:widget-demo:",
       "widgets": {
         "open": "Open tickets",
@@ -2249,6 +2249,10 @@
       ],
       "builds": [
         [
+          "Branch main",
+          null
+        ],
+        [
           "main #41 passed",
           "2 min ago"
         ],
@@ -2278,7 +2282,8 @@
         "kind": "chart",
         "type": "bar"
       },
-      "badColour": "--danger"
+      "badColour": "--danger",
+      "progress": "12 of 20"
     },
     "routines": {
       "cards": [

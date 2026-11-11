@@ -1018,15 +1018,15 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       }
       const lines = today.widget(label.builds).getByRole('listitem')
       await expect(lines).toHaveText(x.builds.map(([t, sub]) => (sub ? `${t}${sub}` : t)))
-      await expect(today.widgetLink(label.builds, x.builds[1][0])).toHaveAttribute('href', x.taskLink)
-      await expect(lines.nth(2).getByRole('link')).toHaveCount(0)
+      await expect(today.widgetLink(label.builds, x.builds[2][0])).toHaveAttribute('href', x.taskLink)
+      await expect(lines.nth(3).getByRole('link')).toHaveCount(0)
       await expect(today.widgetImages(label.builds)).toHaveCount(0)
       await expect(today.widget(label.note).getByText(x.note.title, { exact: true })).toBeVisible()
       await expect(today.widget(label.note).getByRole('paragraph')).toHaveText(x.note.text.replace('\n', ''))
       expect(await today.widget(label.note).getByRole('paragraph').innerText()).toBe(x.note.text)
       expect(dialogs).toEqual([])
       // Open the task: Echo's own place for echo://task/…, its details on the right.
-      await today.widgetLink(label.builds, x.builds[1][0]).click()
+      await today.widgetLink(label.builds, x.builds[2][0]).click()
       await expect.poll(() => today.hash()).toBe(x.taskRoute)
       await expect(today.rightPanel.getByRole('heading', { name: x.taskTitle, level: 3 })).toBeVisible()
       // The note cleared: gone from Today, `widget show` says it's empty.
