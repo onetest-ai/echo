@@ -36,19 +36,19 @@ test('Windows types no POSIX arithmetic', () => {
 
 test("Windows: cmd.exe's output line proves the command ran", () => {
   const t = selftestTerm(true)
-  assert.equal(t.ran(buffer(['Microsoft Windows [Version 10.0.26300]', '', 'C:\data>echo self42test', 'self42test', '', 'C:\data>'])), true)
+  assert.equal(t.ran(buffer(['Microsoft Windows [Version 10.0.26300]', '', 'C:\\data>echo self42test', 'self42test', '', 'C:\\data>'])), true)
 })
 
 test("Windows: PowerShell's output line proves it too", () => {
-  assert.equal(selftestTerm(true).ran(buffer(['PS C:\data> echo self42test', 'self42test', 'PS C:\data>'])), true)
+  assert.equal(selftestTerm(true).ran(buffer(['PS C:\\data> echo self42test', 'self42test', 'PS C:\\data>'])), true)
 })
 
 test('Windows: the typed command alone, echoed back, is not output', () => {
-  assert.equal(selftestTerm(true).ran(buffer(['C:\data>echo self42test'])), false)
+  assert.equal(selftestTerm(true).ran(buffer(['C:\\data>echo self42test'])), false)
 })
 
 test('Windows: a long prompt wrapping the typed command is not output either', () => {
-  assert.equal(selftestTerm(true).ran(buffer([`C:\${'x'.repeat(73)}>echo `, { text: 'self42test', wrapped: true }])), false)
+  assert.equal(selftestTerm(true).ran(buffer([`C:\\${'x'.repeat(73)}>echo `, { text: 'self42test', wrapped: true }])), false)
 })
 
 let failed = 0
