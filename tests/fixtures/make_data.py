@@ -2577,4 +2577,8 @@ def sh(s):
 
 
 if __name__ == "__main__":
+    # Windows reads and writes files in its code page by default; the data is UTF-8 (“ ”, Cyrillic, the hostile set):
+    # the run itself is made again in Python's UTF-8 mode (#453).
+    if os.name == "nt" and not sys.flags.utf8_mode:
+        sys.exit(subprocess.call([sys.executable, "-X", "utf8", *sys.argv]))
     main()
