@@ -236,24 +236,50 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
     call_within(&p.plugin, "__deliver", &json!({"kind": kind, "msg": msg}), Duration::from_secs(90)).map(|_| ())
 }
 
-/// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, through curl (its config on stdin, so
-/// headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
+/// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, or to the address the user entered in a setting its
+/// manifest lists in `network.hosts_from` (plain http too, inside the user's own network), through curl (its config on
+/// stdin, so headers and body never show on a command line). {status, body}; at most 10 MB, 60 s. With `save: <path>`
+/// (relative, in the plugin's store) a 2xx answer's bytes go to that file and the answer is {status, body: "", saved,
+/// bytes}: the body is text, so audio and images can't come through it.
 fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     use std::io::Write as _;
     use crate::app::NoWindow;
     let m = plugins::read_manifest(&package_dir(id)?)?;
-    let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
-    let rest = url.strip_prefix("https://").ok_or_else(|| anyhow!("only https:// addresses"))?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if host.contains('@') || host.contains(':') || !hosts.iter().any(|h| h == host) {
-        bail!("{id} may reach only the hosts its manifest names ({})", hosts.join(", "));
-    }
-    let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"));
+    let net = m.uses.get("network");
+    let hosts: Vec<String> = net.and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
+    // What the user entered, each checked again as when it was saved (the file may have been edited since).
+    let granted: Vec<String> = net.and_then(|v| v["hosts_from"].as_array().cloned()).unwrap_or_default().iter().filter_map(|k| plugins::setting(id, k.as_str()?)).filter_map(|v| plugins::user_origin(v.as_str()?).ok()).collect();
+    let lower = url.to_ascii_lowercase();
+    let refuse = || anyhow!("{id} may reach only the hosts its manifest names ({}) and the addresses you enter in its settings ({})", hosts.join(", "), granted.join(", "));
+    let host = if let Some(o) = granted.iter().find(|o| lower.strip_prefix(o.as_str()).is_some_and(|r| r.is_empty() || r.starts_with(['/', '?', '#']))) {
+        o.split("://").nth(1).unwrap_or("")
+    } else {
+        let rest = url.strip_prefix("https://").ok_or_else(refuse)?;
+        let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if host.contains('@') || host.contains(':') || !hosts.iter().any(|h| h == host) {
+            return Err(refuse());
+        }
+        host
+    };
+    let save = match opts["save"].as_str().filter(|s| !s.is_empty()) {
+        Some(rel) => {
+            let to = store_path(id, rel)?;
+            std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
+            let mut part = to.clone().into_os_string();
+            part.push(".part");
+            Some((rel, to, PathBuf::from(part)))
+        }
+        None => None,
+    };
+    let q =|s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"));
     let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
     if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
         bail!("method {method}");
     }
     let mut cfg = format!("url = {}\nrequest = \"{method}\"\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", q(url));
+    if let Some((_, _, part)) = &save {
+        cfg.push_str(&format!("output = {}\n", q(&part.to_string_lossy())));
+    }
     for (k, v) in opts["headers"].as_object().cloned().unwrap_or_default() {
         cfg.push_str(&format!("header = {}\n", q(&format!("{k}: {}", v.as_str().unwrap_or("")))));
     }
@@ -265,11 +291,24 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
     let out = child.wait_with_output()?;
     if !out.status.success() {
+        if let Some((_, _, part)) = &save {
+            let _ = std::fs::remove_file(part);
+        }
         bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
-    Ok(json!({"status": code.trim().parse::<u16>().unwrap_or(0), "body": body}))
+    let status = code.trim().parse::<u16>().unwrap_or(0);
+    let Some((rel, to, part)) = save else { return Ok(json!({"status": status, "body": body})) };
+    if (200..300).contains(&status) {
+        let bytes = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        std::fs::rename(&part, &to)?;
+        return Ok(json!({"status": status, "body": "", "saved": rel, "bytes": bytes}));
+    }
+    // Not a success: what the server said (text, cut), not a file.
+    let said = std::fs::read(&part).map(|b| String::from_utf8_lossy(&b[..b.len().min(4096)]).into_owned()).unwrap_or_default();
+    let _ = std::fs::remove_file(&part);
+    Ok(json!({"status": status, "body": said}))
 }
 
 /// Async operations and command calls in flight, numbered.
@@ -1216,6 +1255,93 @@ mod tests {
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
+        sync();
+    }
+
+    /// A small http server on this computer: `/clip` answers bytes that aren't UTF-8, `/text` a word, any other path 404.
+    fn serve_clips() -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut s in listener.incoming().flatten() {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let (code, body): (&str, Vec<u8>) = match head.split_whitespace().nth(1).unwrap_or("") {
+                    "/clip" => ("200 OK", vec![0xff, 0xfb, 0x90, 0x00, 0x80, 0xfe]),
+                    "/text" => ("200 OK", b"hello".to_vec()),
+                    _ => ("404 Not Found", b"nope".to_vec()),
+                };
+                let _ = write!(s, "HTTP/1.1 {code}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn a_plugin_reaches_the_address_the_user_entered_and_saves_what_it_downloads() {
+        let (_env, root) = paths::testenv::folders("jshost-net");
+        let mk = root.join("market");
+        let d = mk.join("plugins/fetcher");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("echo-plugin.json"),
+            json!({"id": "fetcher", "name": "Fetcher", "version": "0.1.0", "main": "main.js",
+                   "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS server", "type": "string"}]})
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('ping', () => 'pong')
+              ctx.command('get', async (a) => await ctx.http.fetch(a.url))
+              ctx.command('save', async (a) => await ctx.http.fetch(a.url, { save: a.to }))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "fetcher", "source": "./plugins/fetcher"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("fetcher", Some(&name)).unwrap().uses;
+        assert!(agreed.iter().any(|l| l.contains("the address you enter in its setting “tts”")), "the sheet names the setting: {agreed:?}");
+        plugins::install("fetcher", Some(&name), &agreed).unwrap();
+        sync();
+        let up = (0..50).find_map(|_| call("fetcher", "ping", &json!({})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(up, Some(json!("pong")));
+
+        let port = serve_clips();
+        let at = |path: &str| json!({"url": format!("http://127.0.0.1:{port}{path}")});
+        let refused = |r: Result<Value>| r.unwrap_err().to_string();
+        // Until the user enters an address, the plugin reaches nothing.
+        assert!(refused(call("fetcher", "get", &at("/text"))).contains("may reach only"));
+        // An address that isn't allowed is refused where it is saved, and nothing is kept.
+        assert!(plugins::set_setting("fetcher", "tts", &json!("http://example.com")).unwrap_err().to_string().contains("isn't an address the plugin may reach"));
+        assert!(refused(call("fetcher", "get", &at("/text"))).contains("may reach only"));
+        // The user's own address (plain http, a port): reached, and only that origin.
+        plugins::set_setting("fetcher", "tts", &json!(format!("http://127.0.0.1:{port}"))).unwrap();
+        assert_eq!(call("fetcher", "get", &at("/text")).unwrap(), json!({"status": 200, "body": "hello"}));
+        assert!(refused(call("fetcher", "get", &json!({"url": format!("http://127.0.0.1:{}/text", port.wrapping_add(1))}))).contains("may reach only"), "another port");
+        assert!(refused(call("fetcher", "get", &json!({"url": format!("http://127.0.0.1:{port}.evil.example/text")}))).contains("may reach only"), "a longer name");
+        assert!(refused(call("fetcher", "get", &json!({"url": "https://example.com/"}))).contains("may reach only"), "a host nobody named");
+        // `save`: the bytes land in the plugin's store as they came (not as text); a failure leaves no file.
+        let saved = call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/clip"), "to": "audio/a.mp3"})).unwrap();
+        assert_eq!(saved, json!({"status": 200, "body": "", "saved": "audio/a.mp3", "bytes": 6}));
+        assert_eq!(std::fs::read(plugins::data_dir("fetcher").join("audio/a.mp3")).unwrap(), vec![0xff, 0xfb, 0x90, 0x00, 0x80, 0xfe]);
+        let gone = call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/gone"), "to": "audio/b.mp3"})).unwrap();
+        assert_eq!(gone, json!({"status": 404, "body": "nope"}));
+        let left: Vec<_> = std::fs::read_dir(plugins::data_dir("fetcher").join("audio")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["a.mp3"], "no b.mp3 and no half-written .part");
+        assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/clip"), "to": "../x.mp3"}))).contains("inside the plugin"));
+        plugins::remove("fetcher", false).unwrap();
         sync();
     }
 
