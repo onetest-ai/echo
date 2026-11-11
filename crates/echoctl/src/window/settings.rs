@@ -355,7 +355,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         "template_save" => {
             let words: Vec<String> = v["match"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_owned)).collect();
             let sections: Vec<Value> = v["sections"].as_array().cloned().unwrap_or_default();
-            match crate::calls::template_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), &words, v["header"].as_str().unwrap_or(""), &sections) {
+            match crate::calls::template_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), &words, v["header"].as_str().unwrap_or(""), &sections, None) {
                 // `true`: a new one (the window selects it).
                 Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {})", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
                 Err(e) => notice(&format!("{e:#}")),
