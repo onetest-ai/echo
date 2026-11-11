@@ -16,6 +16,7 @@ const LIVE_STATE = {
   signing_in: 'Waiting for the sign-in',
   paused: 'Paused',
   local: 'Off: the model is on this computer',
+  off: 'Off',
   ended: 'The call ended',
 }
 
@@ -72,9 +73,11 @@ function liveUsage(u) {
 function liveBox(c) {
   const l = c.live || {}, st = l.status || {}, n = l.notes
   const recording = c.status === 'recording'
+  // Recording with live notes off: said at once, with where to turn them on (#399), and no notes promised.
+  const off = recording && !st.enabled && !st.settings_error
   // Nothing kept and not recording (live notes off, or on with none written): My notes as without them.
-  if (!hasLive(c) || (!recording && !n && !(l.answers || []).length)) return ''
-  const state = st.paused ? 'paused' : st.state || (recording ? 'waiting' : 'ended')
+  if (!(hasLive(c) || off) || (!recording && !n && !(l.answers || []).length)) return ''
+  const state = off ? 'off' : st.paused ? 'paused' : st.state || (recording ? 'waiting' : 'ended')
   let line = LIVE_STATE[state] || ''
   if (state === 'updated' && n && n.updated_at) line = `Updated ${ago(n.updated_at)}`
   const p = profileOf(l.profile)
@@ -86,9 +89,9 @@ function liveBox(c) {
   const failedFor = st.needs_sign_in && profileOf(st.needs_sign_in)
   const sign = failedFor ? (signinNote(failedFor) || `<div class="signin error"><span class="signin-text">${esc(st.error || '')}</span><span class="signin-acts"><button class="btn primary" data-signin="${esc(failedFor.id)}">Sign in…</button></span></div>`)
     : signinNote(p)
-  const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off (menu → AI for calls → Live notes during calls).' : (!failedFor && st.state === 'failed' && st.error) || ''
+  const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off. Turn them on in Settings → AI & minutes → Live notes during calls.' : (!failedFor && st.state === 'failed' && st.error) || ''
   // Why there is no Now yet (none of the draft's items either).
-  const why = n ? '' : !recording ? 'No live notes for this call.'
+  const why = n || off ? '' : !recording ? 'No live notes for this call.'
     : st.paused ? 'Paused — no live notes until you resume.'
     : st.needs_sign_in ? `No live notes until ${profileName(st.needs_sign_in)} can be used.`
     : st.state === 'signing_in' ? 'No live notes until the sign-in is done.'
@@ -102,7 +105,7 @@ function liveBox(c) {
     : `<span class="live-model">${esc(profileName(l.profile))}</span>`
   const menu = S.liveMenu ? `<div class="menu nl-menu" role="menu" aria-label="Live notes">
       <div class="menu-label">Model for this call</div><div class="nl-model">${model}${p ? `<span class="hint">${esc(profileWhere(p))}</span>` : ''}</div>
-      ${recording ? `<div class="menu-sep"></div><button class="menu-item" role="menuitem" data-cmd="${st.paused ? 'live-resume' : 'live-pause'}">${st.paused ? 'Resume live notes' : 'Pause live notes'}</button>` : ''}
+      ${recording && !off ? `<div class="menu-sep"></div><button class="menu-item" role="menuitem" data-cmd="${st.paused ? 'live-resume' : 'live-pause'}">${st.paused ? 'Resume live notes' : 'Pause live notes'}</button>` : ''}
       <div class="menu-sep"></div><button class="menu-item" role="menuitem" data-cmd="ask-claude">${ICON(CLAUDE_MARK)}Ask Claude about this call</button>
     </div>` : ''
   return `<section class="nt-live" aria-label="Live notes">
