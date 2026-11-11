@@ -34,6 +34,27 @@ async function tick() {
 }
 const typingNotes = () => document.activeElement && (document.activeElement.id === 'my-notes' || document.activeElement.id === 'me-profile')
 
+// ── selftest terminal: what `window --selftest` types into the shell and how it knows the command ran (#419).
+// macOS and Linux: a POSIX shell computes the answer, so it can't be the typed text. Windows: cmd.exe (COMSPEC; PowerShell
+// alike) has no `$((…))`, so the command is plain and the proof is its output line: the whole line, not the prompt's
+// echo of what was typed, nor a wrapped continuation of it.
+const selftestTerm = (windows) => windows
+  ? {
+      input: 'echo self42test\r',
+      ran: (b) => {
+        for (let i = 0; i < b.length; i++) { const l = b.getLine(i); if (l && !l.isWrapped && l.translateToString(true).trim() === 'self42test') return true }
+        return false
+      },
+    }
+  : {
+      input: 'echo self$((40+2))test\r',
+      ran: (b) => {
+        for (let i = 0; i < b.length; i++) { const l = b.getLine(i); if (l && l.translateToString().includes('self42test')) return true }
+        return false
+      },
+    }
+// end of the selftest-terminal block
+
 window.echo = {
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
@@ -205,14 +226,11 @@ window.echo = {
       out.xterm = (await fetch('assets/vendor/xterm.js')).status === 200 && typeof window.Terminal === 'function' && !!window.FitAddon
       // A terminal end to end: the app starts a shell, a command typed here runs, its output comes back.
       out.terminal = out.xterm && await new Promise((resolve) => {
-        const key = 'selftest-term', e = termEntry(key)
+        const key = 'selftest-term', e = termEntry(key), t = selftestTerm(/Windows/.test(navigator.userAgent))
         let over = false
         const done = (ok) => { if (over) return; over = true; clearInterval(iv); clearInterval(check); if (e.id != null) send({ cmd: 'pty_close', id: e.id }); e.id = null; Terms.delete(key); e.el.remove(); resolve(ok) }
-        const iv = setInterval(() => { if (e.id != null) { clearInterval(iv); send({ cmd: 'pty_input', id: e.id, data: 'echo self$((40+2))test\r' }) } }, 50)
-        const check = setInterval(() => {
-          const b = e.term.buffer.active
-          for (let i = 0; i < b.length; i++) { const l = b.getLine(i); if (l && l.translateToString().includes('self42test')) return done(true) }
-        }, 100)
+        const iv = setInterval(() => { if (e.id != null) { clearInterval(iv); send({ cmd: 'pty_input', id: e.id, data: t.input }) } }, 50)
+        const check = setInterval(() => { if (t.ran(e.term.buffer.active)) done(true) }, 100)
         setTimeout(() => done(false), 8000)
         send({ cmd: 'pty_open', kind: 'shell', key, cols: 80, rows: 24 })
       })

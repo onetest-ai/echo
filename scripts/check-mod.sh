@@ -54,6 +54,8 @@ node crates/echoctl/ui/work-status.test.mjs
 node crates/echoctl/ui/settings-search.test.mjs
 # Settings → Layout's "Echo's own title bar": a Windows-only row, absent (and unsearchable) elsewhere (#76).
 node crates/echoctl/ui/own-title-bar.test.mjs
+# `window --selftest`'s terminal check: no POSIX arithmetic on Windows, the output line as proof (selftestTerm, #419).
+node crates/echoctl/ui/selftest-terminal.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
