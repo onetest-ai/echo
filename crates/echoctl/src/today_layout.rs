@@ -16,6 +16,9 @@ pub struct Item {
     pub size: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub row: bool,
+    /// Its settings the user set (the rest are the widget's defaults: `params_of`).
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub params: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -47,7 +50,7 @@ fn file() -> PathBuf {
 }
 
 fn item(widget: &str, size: &str, row: bool) -> Item {
-    Item { widget: widget.into(), size: size.into(), row }
+    Item { widget: widget.into(), size: size.into(), row, params: Default::default() }
 }
 
 /// Today as it has been: Needs you now and the routines' cards across, then Your day (2 columns) beside My work (1).
@@ -90,8 +93,11 @@ fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
 /// the widget it leaves hands its row start on. The order is the list's; nothing else moves.
 pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Side)>) -> Vec<Item> {
     let mut out = items.to_vec();
+    // A widget moved keeps its settings.
+    let mut kept = serde_json::Map::new();
     if let Some(i) = out.iter().position(|x| x.widget == widget) {
         let gone = out.remove(i);
+        kept = gone.params;
         if gone.row {
             if let Some(next) = out.get_mut(i) {
                 next.row = true;
@@ -99,6 +105,7 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
         }
     }
     let mut new = item(widget, size, false);
+    new.params = kept;
     let at = match target.and_then(|(t, side)| out.iter().position(|x| x.widget == t).map(|i| (i, side))) {
         None => {
             new.row = true;
@@ -195,6 +202,38 @@ pub fn resize(widget: &str, size: &str) -> Result<Vec<Item>> {
     })
 }
 
+/// Set one of a widget's settings on Today (`value` as text: a choice's option, true / false, a thread's or a client's
+/// id), refusing a key it doesn't have or a value it doesn't take.
+pub fn set_param(widget: &str, key: &str, value: &str) -> Result<Vec<Item>> {
+    let w = widgets::find(widget)?;
+    let def = w.params.iter().find(|p| p.key == key).ok_or_else(|| {
+        let keys: Vec<&str> = w.params.iter().map(|p| p.key.as_str()).collect();
+        anyhow::anyhow!("{widget} has no setting {key:?}{}", if keys.is_empty() { String::new() } else { format!(" (it has {})", keys.join(", ")) })
+    })?;
+    let v = if def.kind == "bool" { serde_json::Value::Bool(matches!(value, "true" | "yes" | "on")) } else { serde_json::Value::String(value.to_string()) };
+    if !def.takes(&v) {
+        bail!("{widget}'s {key} doesn't take {value:?}{}", if def.kind == "choice" { format!(" ({})", def.options.join(", ")) } else { String::new() });
+    }
+    change(|mut items| {
+        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+        i.params.insert(key.into(), v.clone());
+        Ok(items)
+    })
+}
+
+/// A widget's settings as Today has them: its defaults, then what the user set (a value it no longer takes, dropped).
+pub fn params_of(widget: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::new();
+    let Ok(w) = widgets::find(widget) else { return out };
+    let set = load().into_iter().find(|i| i.widget == widget).map(|i| i.params).unwrap_or_default();
+    for p in &w.params {
+        if let Some(v) = set.get(&p.key).filter(|v| p.takes(v)).or(p.default.as_ref()) {
+            out.insert(p.key.clone(), v.clone());
+        }
+    }
+    out
+}
+
 pub fn remove(widget: &str) -> Result<Vec<Item>> {
     change(|items| {
         let i = items.iter().position(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
@@ -247,6 +286,24 @@ mod tests {
         assert_eq!(t("c", Some(("a", Side::After))), "| a c b", "c leaves nothing behind but its row");
         // Onto itself: still one of it.
         assert_eq!(t("b", Some(("b", Side::After))).matches('b').count(), 1);
+    }
+
+    #[test]
+    fn a_widgets_settings_are_kept_on_today_checked_and_filled_from_its_defaults() {
+        let (_env, _) = paths::testenv::folders("today-layout-params");
+        assert_eq!(params_of("core:tasks.done")["period"], "week", "its default");
+        let err = |r: Result<Vec<Item>>| r.unwrap_err().to_string();
+        assert!(err(set_param("core:tasks.done", "period", "year")).contains("doesn't take \"year\" (week, month)"));
+        assert!(err(set_param("core:tasks.done", "colour", "red")).contains("has no setting \"colour\" (it has period)"));
+        assert!(err(set_param("core:tasks.mine", "period", "month")).contains("has no setting"));
+        assert!(err(set_param("core:tasks.done", "period", "month")).contains("isn't on Today"), "only a widget on Today");
+        add("core:tasks.done", Some("S"), None).unwrap();
+        set_param("core:tasks.done", "period", "month").unwrap();
+        assert_eq!(params_of("core:tasks.done")["period"], "month");
+        assert_eq!(load().iter().find(|i| i.widget == "core:tasks.done").unwrap().params["period"], "month", "kept on disk");
+        // Moved (the CLI or a drag), it keeps them.
+        move_to("core:tasks.done", Some(("core:calendar.agenda", Side::Above))).unwrap();
+        assert_eq!(params_of("core:tasks.done")["period"], "month", "kept through a move");
     }
 
     #[test]

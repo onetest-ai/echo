@@ -36,8 +36,14 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 v["next"] = crate::widgets::next_meeting(&day)["next"].clone();
             }
             // Threads at a glance and Done this week only when one is on Today (each thread's work is read for them).
-            if layout.iter().any(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done") {
-                v["glance"] = crate::glance::today();
+            // Each with its own period (a widget's setting): `glances` by widget.
+            let glances: serde_json::Map<String, Value> = layout
+                .iter()
+                .filter(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done")
+                .map(|i| (i.widget.clone(), crate::glance::today(crate::today_layout::params_of(&i.widget).get("period").and_then(Value::as_str).unwrap_or("week"))))
+                .collect();
+            if !glances.is_empty() {
+                v["glances"] = json!(glances);
             }
             // Plugins' widgets on Today: their last data, by id (each asked again in the background when stale).
             let tasks = json!({});
@@ -152,6 +158,15 @@ fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> 
     match v["op"].as_str().unwrap_or("") {
         "add" => l::add(w, v["size"].as_str(), target),
         "move" => l::move_to(w, target),
+        "params" => {
+            let items = l::set_param(w, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
+            // A plugin's widget is asked again at once with its new settings.
+            #[cfg(feature = "js")]
+            if let Some((plugin, widget)) = w.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                crate::jshost::widget_ask(plugin, widget);
+            }
+            Ok(items)
+        }
         "size" => l::resize(w, v["size"].as_str().unwrap_or("")),
         "remove" => l::remove(w),
         "reset" => l::reset(),

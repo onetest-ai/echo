@@ -977,6 +977,8 @@ fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str
 static WIDGETS: Mutex<()> = Mutex::new(());
 /// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
 static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Widgets asked for again while being asked: one more ask once this one is in.
+static AGAIN: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
 
 /// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
 /// `{data, at, asked, error?}`.
@@ -992,20 +994,29 @@ pub fn widget_ask(plugin: &str, widget: &str) {
     {
         let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
         if asking.contains(&key) {
+            // Asked while an ask is on its way (a setting just changed): asked once more after it.
+            AGAIN.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
             return;
         }
         asking.push(key.clone());
     }
     let (plugin, widget) = (plugin.to_string(), widget.to_string());
     std::thread::spawn(move || {
-        widget_ask_now(&plugin, &widget);
+        loop {
+            widget_ask_now(&plugin, &widget);
+            if !AGAIN.lock().unwrap_or_else(|e| e.into_inner()).remove(&key) {
+                break;
+            }
+        }
         ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
     });
 }
 
 /// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
 pub fn widget_ask_now(plugin: &str, widget: &str) {
-    match call_within(plugin, &format!("__widget:{widget}"), &json!({}), Duration::from_secs(5)) {
+    // Its settings as Today has them (defaults, then the user's), given to the provider.
+    let params = crate::today_layout::params_of(&format!("plugin:{plugin}:{widget}"));
+    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params }), Duration::from_secs(5)) {
         // Kept — or, refused (over 64 KB), why, its data before kept.
         Ok(v) => {
             if let Err(e) = widget_store(plugin, widget, Some(&v), None) {
@@ -1067,7 +1078,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let widgets = json!([
             {"id": "builds", "label": "Builds", "about": "the last builds", "kind": "list", "sizes": ["M", "L"]},
-            {"id": "health", "label": "CI health", "kind": "status"},
+            {"id": "health", "label": "CI health", "kind": "status", "params": [{"key": "branch", "label": "Branch", "type": "choice", "options": ["main", "dev"], "default": "main"}]},
         ]);
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "ci", "name": "CI", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
         std::fs::write(
@@ -1075,6 +1086,7 @@ mod tests {
             r#"
             export function apply(ctx) {
               ctx.widgets.provide('builds', ({ size }) => ({ items: [{ title: 'main #41 passed' }] }))
+              ctx.widgets.provide('health', ({ params }) => ({ state: 'ok', title: `CI on ${params.branch}` }))
               ctx.command('green', () => { ctx.widgets.set('health', { state: 'ok', title: 'All green' }); return 1 })
               ctx.command('stranger', () => ctx.widgets.set('nope', { state: 'ok' }))
               ctx.command('off', () => ctx.widgets.clear('health'))
@@ -1115,6 +1127,14 @@ mod tests {
         // Today takes it like Echo's own.
         crate::today_layout::add("plugin:ci:builds", Some("L"), None).unwrap();
         assert!(crate::today_layout::load().iter().any(|i| i.widget == "plugin:ci:builds" && i.size == "L"));
+        // Its settings: declared in the manifest, set on Today, given to its provider.
+        crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
+        widget_ask_now("ci", "health");
+        assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "CI on main", "the default");
+        crate::today_layout::set_param("plugin:ci:health", "branch", "dev").unwrap();
+        widget_ask_now("ci", "health");
+        assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "CI on dev");
+        assert!(crate::today_layout::set_param("plugin:ci:health", "branch", "prod").is_err());
         plugins::remove("ci", false).unwrap();
         sync();
     }
@@ -1139,6 +1159,11 @@ mod tests {
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "refresh": 5}), true).unwrap_err().contains("60 s"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), false).unwrap_err().contains("host half"));
+        let param = |p: Value| with(json!({"id": "a", "label": "A", "kind": "stat", "params": [p]}), true);
+        assert!(param(json!({"key": "team", "label": "Team", "type": "thread"})).is_ok());
+        assert!(param(json!({"key": "team", "label": "Team", "type": "colour"})).unwrap_err().contains("type Echo doesn't know"));
+        assert!(param(json!({"key": "k", "label": "K", "type": "choice"})).unwrap_err().contains("choice of 1–12 options"));
+        assert!(param(json!({"key": "k", "label": "K", "type": "choice", "options": ["a"], "default": "b"})).unwrap_err().contains("default isn't one it takes"));
     }
 
     #[test]

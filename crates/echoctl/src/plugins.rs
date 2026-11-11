@@ -95,6 +95,64 @@ pub struct WidgetDef {
     /// How often Echo asks its provider again while Today shows it, in seconds (60 at least; 60 when not said).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh: Option<u64>,
+    /// What the user may set on it (edit mode's ⚙, `echoctl today set`); its provider gets them as `params`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamDef>,
+}
+
+/// A widget's setting: `choice` (one of `options`), `bool`, `thread` (an open thread's id) or `client` (a client's id).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParamDef {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+}
+
+impl ParamDef {
+    /// Whether `v` is a value this setting takes (a thread or client: one that exists).
+    pub fn takes(&self, v: &Value) -> bool {
+        match self.kind.as_str() {
+            "choice" => v.as_str().is_some_and(|s| self.options.iter().any(|o| o == s)),
+            "bool" => v.is_boolean(),
+            "thread" => v.as_str().is_some_and(|s| crate::projects::list().iter().any(|p| p.id == s && !p.stage.closed())),
+            "client" => v.as_str().is_some_and(|s| crate::projects::clients().is_ok_and(|cs| cs.iter().any(|c| c.id == s))),
+            _ => false,
+        }
+    }
+}
+
+/// A widget's settings, checked: plain unique keys, labels, a type Echo knows, a choice's options, a default it takes.
+pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
+    let mut keys = std::collections::HashSet::new();
+    if params.len() > 6 {
+        bail!("widget “{widget}” has more than 6 settings");
+    }
+    for p in params {
+        if !valid_id(&p.key.replace('_', "-")) || !keys.insert(p.key.clone()) {
+            bail!("widget “{widget}”: setting “{}” needs a plain, unique key", p.key);
+        }
+        if p.label.trim().is_empty() || p.label.chars().count() > 40 {
+            bail!("widget “{widget}”: setting “{}” needs a label of 1–40 characters", p.key);
+        }
+        match p.kind.as_str() {
+            "choice" if p.options.is_empty() || p.options.len() > 12 || p.options.iter().any(|o| o.is_empty() || o.chars().count() > 40) => {
+                bail!("widget “{widget}”: setting “{}” is a choice of 1–12 options of 40 characters at most", p.key)
+            }
+            "choice" | "bool" | "thread" | "client" => {}
+            k => bail!("widget “{widget}”: setting “{}” has a type Echo doesn't know ({k}; choice, bool, thread, client)", p.key),
+        }
+        if let Some(d) = &p.default {
+            if matches!(p.kind.as_str(), "choice" | "bool") && !p.takes(d) {
+                bail!("widget “{widget}”: setting “{}”'s default isn't one it takes", p.key);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn widget_sizes() -> Vec<String> {
@@ -201,6 +259,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         if m.main.is_none() {
             bail!("widget “{}” needs a host half (main) to give its data", w.id);
         }
+        check_params(&w.id, &w.params)?;
     }
     for f in [&m.main, &m.client].into_iter().flatten() {
         let p = inside_plugin(dir, f)?;
