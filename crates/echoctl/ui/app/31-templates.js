@@ -25,15 +25,20 @@ function tplWord() {
 }
 // ── template save: what a save of the open template sends (no DOM: `templates-save.test.mjs`) ──
 const TplSave = {
-  /** A save of the open template: `fixed` only while the switch set here isn't the file's yet (`fixedPending`). */
-  message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedPending ? { fixed: !!d.fixed } : {}) }),
+  /** The last number given to a change of the switch. */
+  gen: 0,
+  /** The switch set here: pending, with a number of its own, so only the answer to a save that sent it ends it. */
+  toggle: (on) => ({ fixed: on, fixedPending: true, fixedGen: ++TplSave.gen }),
+  /** A save of the open template: the switch, with its number, only while it is pending. */
+  message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedPending ? { fixed: !!d.fixed, fixedGen: d.fixedGen } : {}) }),
   /** A new template's Create, with the switch as set in its form. */
   create: (d, name) => ({ ...TplSave.message({ ...d, fixedPending: true }), name }),
-  /** The app saved template `id` (`sent`: the switch that save wrote, or null): pending until a save of this template
-   *  wrote the switch as set here; with none pending the file's (`row`) is shown. Another template's answer: nothing. */
-  saved: (d, id, row, sent) => {
+  /** The app saved template `id` (`gen`: the switch's number that save sent, or null): pending until the answer to a
+   *  save of this template that sent its latest number; with none pending the file's (`row`) is shown. Another
+   *  template's answer: nothing. */
+  saved: (d, id, row, gen) => {
     if (id !== d.id) return {}
-    const pending = !!d.fixedPending && sent !== !!d.fixed
+    const pending = !!d.fixedPending && gen !== d.fixedGen
     return { fixed: pending ? !!d.fixed : !!(row && row.fixed), fixedPending: pending }
   },
 }
@@ -337,7 +342,7 @@ document.addEventListener('change', (e) => {
   else if (el.id === 'tp-word') { tplSave(); render() }
   else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
-  else if (el.matches('[data-tpl-fixed]')) { d.fixed = el.checked; d.fixedPending = true; tplSave(); render() }
+  else if (el.matches('[data-tpl-fixed]')) { Object.assign(d, TplSave.toggle(el.checked)); tplSave(); render() }
 })
 document.addEventListener('input', (e) => {
   if (TPL.skNew && e.target.id === 'sk-name') TPL.skNew.name = e.target.value
