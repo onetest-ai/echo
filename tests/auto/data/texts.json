@@ -1782,5 +1782,295 @@
     "homeVar": "ECHOCTL_HOME",
     "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
     "armedPrefix": "armed"
+  },
+  "widgets": {
+    "_about": "Today's widgets (S-24 stages 41–52): the catalog `echoctl widget list` gives, Today as it comes (`echoctl today`), the widgets' names on the page, edit mode and Add a widget, and the CLI's refusals",
+    "catalog": [
+      {
+        "about": "where you'll be, a reason on each line",
+        "height": "fill",
+        "id": "core:calendar.agenda",
+        "kind": "day",
+        "label": "Your day · agenda",
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "by the hour, overlaps side by side",
+        "height": "fill",
+        "id": "core:calendar.calendar",
+        "kind": "day",
+        "label": "Your day · calendar",
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the whole day in one bar",
+        "height": "hug",
+        "id": "core:calendar.strip",
+        "kind": "day",
+        "label": "Your day · strip",
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "meetings at once and invites to answer, with what Echo suggests",
+        "height": "hug",
+        "id": "core:calendar.choices",
+        "kind": "choices",
+        "label": "The day's choices",
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what to walk in knowing, who's coming",
+        "height": "hug",
+        "id": "core:calendar.next",
+        "kind": "next",
+        "label": "Next meeting",
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "a bar a thread: done this week, to do, waiting",
+        "height": "hug",
+        "id": "core:tasks.glance",
+        "kind": "glance",
+        "label": "Threads at a glance",
+        "part": "Tasks",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "how many tasks were done since Monday, and which",
+        "height": "hug",
+        "id": "core:tasks.done",
+        "kind": "glance",
+        "label": "Done this week",
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "calls recorded since Monday, their time, how many have minutes",
+        "height": "hug",
+        "id": "core:calls.week",
+        "kind": "calls",
+        "label": "Recorded this week",
+        "part": "Calls",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "late first, then by date; whose each one is",
+        "height": "fill",
+        "id": "core:tasks.mine",
+        "kind": "work",
+        "label": "My work · this week",
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the last 24 hours, where you watch",
+        "height": "hug",
+        "id": "core:needs.now",
+        "kind": "needs",
+        "label": "Needs you now",
+        "part": "Needs you",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what your routines delivered to Today, until read",
+        "height": "hug",
+        "id": "core:routines.cards",
+        "kind": "cards",
+        "label": "Routine cards",
+        "part": "Routines",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      }
+    ],
+    "default": [
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.agenda"
+      },
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.next"
+      },
+      {
+        "size": "M",
+        "widget": "core:needs.now"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:calendar.choices"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:routines.cards"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:tasks.mine"
+      }
+    ],
+    "id": {
+      "agenda": "core:calendar.agenda",
+      "calendar": "core:calendar.calendar",
+      "strip": "core:calendar.strip",
+      "choices": "core:calendar.choices",
+      "next": "core:calendar.next",
+      "glance": "core:tasks.glance",
+      "done": "core:tasks.done",
+      "week": "core:calls.week",
+      "mine": "core:tasks.mine",
+      "needs": "core:needs.now",
+      "cards": "core:routines.cards",
+      "nope": "core:nope"
+    },
+    "name": {
+      "yourDay": "Your day",
+      "strip": "Your day, the strip",
+      "next": "Next meeting",
+      "needs": "Needs you now",
+      "choices": "The day's choices",
+      "work": "My work · this week",
+      "glance": "Threads at a glance",
+      "done": "Done this week",
+      "week": "Recorded this week",
+      "cards": "Routine cards"
+    },
+    "unknown": "Error: no widget \"{id}\": `echoctl widget list` names them",
+    "takesNot": "Error: {id} takes {sizes}, not {size}",
+    "layoutFile": "today-layout.json",
+    "sizes": {
+      "wide": {
+        "width": 1440,
+        "height": 1000
+      },
+      "short": {
+        "width": 1440,
+        "height": 900
+      },
+      "narrow": {
+        "width": 700,
+        "height": 1000
+      }
+    },
+    "next": {
+      "since": "Now · since {time}",
+      "comingIn": "^Next · {time} · in \\d+ min$",
+      "person": "{n} person",
+      "people": "{n} people",
+      "sep": " · ",
+      "records": "records when it starts",
+      "walkIn": "Walk in knowing",
+      "youOwe": "You owe: {title}",
+      "waitsFor": "{from} waits for: {title}",
+      "openPrep": "Open prep",
+      "showPrep": "Show prep",
+      "join": "Join & record",
+      "ask": "Ask Claude about it",
+      "coming": "Who's coming",
+      "askThem": "Ask them",
+      "newcomer": "{name}, {role}, is new to this thread.",
+      "answered": "{name}, {answer}",
+      "recording": "● Recording starts with the call",
+      "expected": "Expected from you: {list}",
+      "listSep": "; ",
+      "prepRoute": "#upcoming/{id}",
+      "claudeTab": "Claude",
+      "notStarted": "Claude didn't start — send it again once the panel shows Claude.",
+      "teams": "teams",
+      "declined": "declined",
+      "reply": "reply",
+      "show": 3,
+      "askShown": 2
+    },
+    "day": {
+      "now": "now",
+      "next": "next",
+      "maybe": "maybe",
+      "skipped": "skipped",
+      "showSkipped": "^Show \\d+ skipped$",
+      "hideSkipped": "Hide the skipped",
+      "atOnce": "^\\d+ others at once$",
+      "workPrefix": "Your work: ",
+      "meetingTab": "Meeting",
+      "close": "Close",
+      "people": "People",
+      "when": "Today · ",
+      "colours": {
+        "next": "--accent",
+        "choice": "--warn",
+        "going": "--me",
+        "maybe": "--accent",
+        "noReply": "--text-3",
+        "newMinutes": "--accent"
+      },
+      "minutesRoute": "^#call/[^/]+/minutes$"
+    },
+    "calendar": {
+      "stripHeading": "Your day {n} meetings",
+      "from": 9,
+      "to": 18,
+      "tick": 2,
+      "calendarSize": "M",
+      "stripSize": "L"
+    },
+    "api": {
+      "meeting": "meeting",
+      "noReply": "notResponded",
+      "maybe": "tentativelyAccepted",
+      "organizer": "organizer"
+    }
   }
 }

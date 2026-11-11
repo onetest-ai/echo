@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, your-day, agenda]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-023: Your day says where you'll be, a reason on each line

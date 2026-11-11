@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, layout, cli]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-020: echoctl today arranges Today's widgets, and the page follows

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, your-day, calendar, strip]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-024: Your day as a calendar and as a strip

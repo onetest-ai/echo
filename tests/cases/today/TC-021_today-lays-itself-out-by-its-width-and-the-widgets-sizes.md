@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, layout, responsive]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-021: Today lays itself out by its width and the widgets' sizes

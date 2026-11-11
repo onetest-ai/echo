@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, cli]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-019: echoctl widget gives Today's widgets and the same data Today shows
@@ -23,7 +24,10 @@ tags: [today, widgets, cli]
 | Widget | Kind | Temporal |
 |---|---|---|
 | `core:calendar.agenda`, `core:calendar.calendar`, `core:calendar.strip` | day | no |
+| `core:calendar.choices` | choices | yes |
 | `core:calendar.next` | next | yes |
+| `core:tasks.glance`, `core:tasks.done` | glance | no |
+| `core:calls.week` | calls | no |
 | `core:tasks.mine` | work | no |
 | `core:needs.now` | needs | yes |
 | `core:routines.cards` | cards | yes |
@@ -32,8 +36,8 @@ tags: [today, widgets, cli]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl widget list` | JSON: the seven widgets of Test Data, in that order, each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill) and `temporal` as in the table |
-| 2 | In the page: `fetch('/api/widgets').then(r => r.json())` | The same seven ids, in the same order |
+| 1 | `target/debug/echoctl widget list` | JSON: the eleven widgets of Test Data, in that order (a plugin's and a routine's card widgets after them when there are some), each with `part`, `label`, `about`, `kind`, `sizes` (of S, M, L), `height` (hug or fill) and `temporal` as in the table |
+| 2 | In the page: `fetch('/api/widgets').then(r => r.json())` | The same eleven ids, in the same order |
 | 3 | `target/debug/echoctl widget show core:tasks.mine` and, in the page, `fetch('/api/today').then(r => r.json())` | The CLI's `mine.items` are the page's `work.mine.items`: the same titles, in the same order (My work's "I owe" cards) |
 | 4 | `target/debug/echoctl widget show core:needs.now` | `items` as the page's `needs.items` (the same ids), and `"empty": false` (the data has items in the last 24 h) |
 | 5 | `target/debug/echoctl widget show core:nope` | Exit code 1, "no widget \"core:nope\": `echoctl widget list` names them" |
