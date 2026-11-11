@@ -96,7 +96,7 @@ window.echo = {
         // Deleted: nothing chosen. Reset: Echo's own again, in the editor.
         const x = !rm.del && list.find((y) => y.id === rm.id)
         TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null
-      } else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
+      } else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) Object.assign(TPL.draft, { kind: x.kind }, TplSave.saved(TPL.draft, x)) }
       render()
     })
   },

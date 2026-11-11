@@ -25,15 +25,19 @@ function tplWord() {
 }
 // ── template save: what a save of the open template sends (no DOM: `templates-save.test.mjs`) ──
 const TplSave = {
-  /** `fixed` only with the switch's own change (`switched`): any other edit keeps what the file has. */
-  message: (d, switched = false) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(switched ? { fixed: !!d.fixed } : {}) }),
+  /** A save of the open template: `fixed` only while the switch set here isn't the file's yet (`fixedPending`). */
+  message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedPending ? { fixed: !!d.fixed } : {}) }),
+  /** A new template's Create, with the switch as set in its form. */
+  create: (d, name) => ({ ...TplSave.message({ ...d, fixedPending: true }), name }),
+  /** The app saved: the switch stays pending until the file (`row`) has it; with none pending the file's is shown. */
+  saved: (d, row) => ({ fixed: d.fixedPending ? !!d.fixed : !!(row && row.fixed), fixedPending: !!d.fixedPending && !!row && !!row.fixed !== !!d.fixed }),
 }
 // end of the template save block
-function tplSave(switched = false) {
+function tplSave() {
   const d = TPL.draft
   if (!d || !d.id) return
   tplWord()
-  send(TplSave.message(d, switched))
+  send(TplSave.message(d))
 }
 function templatesSettings() {
   if (!TPL.data) { loadTemplates().then(render); return `<h2>Templates</h2><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(4)}</div>` }
@@ -285,7 +289,7 @@ document.addEventListener('click', (e) => {
     d.name = name
     tplWord()
     // The app answers `templateSaved(id, true)` and the window selects it; a refusal leaves the draft, with the notice.
-    send({ cmd: 'template_save', name, header: d.header, match: d.match, sections: d.sections, fixed: !!d.fixed })
+    send(TplSave.create(d, name))
     return
   }
   if (t.dataset.tplReset !== undefined || t.dataset.tplDel !== undefined) {
@@ -328,7 +332,7 @@ document.addEventListener('change', (e) => {
   else if (el.id === 'tp-word') { tplSave(); render() }
   else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
-  else if (el.matches('[data-tpl-fixed]')) { d.fixed = el.checked; tplSave(true); render() }
+  else if (el.matches('[data-tpl-fixed]')) { d.fixed = el.checked; d.fixedPending = true; tplSave(); render() }
 })
 document.addEventListener('input', (e) => {
   if (TPL.skNew && e.target.id === 'sk-name') TPL.skNew.name = e.target.value
