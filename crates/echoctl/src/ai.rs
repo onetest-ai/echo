@@ -586,10 +586,11 @@ pub fn prepare_claude(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> 
 /// Before a guarded run (minutes, a thread's sync, a routine's or plugin's job): is the Claude Code `p` would start new
 /// enough for the guard (`guard::MIN_CLAUDE`)? Asked with `--version`, before it is started or given anything (#400).
 pub fn guard_ready(p: &Profile, cwd: &Path, what: &str) -> Result<()> {
-    let out = prepare_claude(p, &["--version".into()], cwd, false)?.stdin(std::process::Stdio::null()).output()?;
-    // Its "2.1.310 (Claude Code)", wherever a login shell's own output put it.
-    let text = String::from_utf8_lossy(&out.stdout);
-    let v = text.split_whitespace().find(|w| w.split('.').count() == 3 && w.split('.').all(|n| n.parse::<u32>().is_ok())).unwrap_or("").to_string();
+    let mut child = claude_command(p, &["--version".into()], cwd, false)?;
+    let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).context("asking Claude Code its version")?;
+    // Its line "2.1.310 (Claude Code)", wherever a login shell's own output put it (only that line: another
+    // program's version must not pass for it).
+    let v = out.lines().find(|l| l.contains("(Claude Code")).and_then(|l| l.split_whitespace().next()).unwrap_or("").to_string();
     if crate::guard::new_enough(&v) {
         return Ok(());
     }
@@ -1010,6 +1011,9 @@ mod tests {
         let [a, b, c] = crate::guard::MIN_CLAUDE;
         assert!(e.contains("Claude Code 2.1.200 is too old to write minutes") && e.contains(&format!("{a}.{b}.{c} or later")), "{e}");
         assert!(e.contains("claude update") && !e.contains("Try again"), "{e}");
+        // Another program's version from the login shell doesn't pass for Claude Code's.
+        fs::write(fake::file(&p, "version"), "Python 3.12.1\n2.1.200 (Claude Code)\n").unwrap();
+        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("Claude Code 2.1.200 is too old"));
         fs::write(fake::file(&p, "version"), "").unwrap();
         assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
         fs::write(fake::file(&p, "version"), format!("{a}.{b}.{c} (Claude Code)\n")).unwrap();
