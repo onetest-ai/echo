@@ -75,6 +75,9 @@ test("a stat's progress; any kind's open (echo:// a link, https a button that as
   assert.match(acts, /data-pw-cmd="rerun"/)
   assert.ok(!acts.includes('"><img>'), 'args escaped in the attribute')
   refused('stat', { value: 1, actions: [{ label: 'x' }] }, 'action 1 needs a command')
+  assert.match(draw('list', { items: [], actions: [{ label: 'Refresh', command: 'refresh' }] }, 'M'), /data-pw-cmd="refresh"/, 'an empty list keeps its actions')
+  assert.ok(!draw('stat', { value: 1, open: 'https://good.example\\@evil.example' }, 'M').includes('data-pw-open'), 'a backslash link is dropped')
+  refused('chart', { type: 'bar', points: [{ label: 'x', value: null }] }, "point 1's value is not a number")
 })
 
 let failed = 0

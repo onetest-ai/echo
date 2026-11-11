@@ -12,13 +12,13 @@ function pluginWidgetHtml(kind, data, size) {
   const tone = (t) => (TONES.includes(t) ? ` tone-${t}` : '')
   // A link only to Echo's own places; anything else is shown as text.
   const linked = (text, link) => (typeof link === 'string' && /^echo:\/\/[a-z]+\//.test(link) ? `<a class="link-btn" href="${esc(link)}">${esc(text)}</a>` : esc(text))
-  const num = (v, what) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`${what} is not a number`); return n }
+  const num = (v, what) => { const n = typeof v === 'number' || (typeof v === 'string' && v.trim()) ? Number(v) : NaN; if (!Number.isFinite(n)) throw new Error(`${what} is not a number`); return n }
   // Any kind may say where it opens (`open`: echo:// in Echo, https after a confirm) and up to 3 actions (its plugin's
   // commands, run on a click).
   const foot = () => {
     const bits = []
     if (typeof d.open === 'string' && /^echo:\/\/[a-z]+\//.test(d.open)) bits.push(`<a class="link-btn" href="${esc(d.open)}">Open</a>`)
-    else if (typeof d.open === 'string' && /^https:\/\/[^\s"<>]+$/.test(d.open)) bits.push(`<button type="button" class="link-btn" data-pw-open="${esc(d.open)}">Open</button>`)
+    else if (typeof d.open === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(d.open)) bits.push(`<button type="button" class="link-btn" data-pw-open="${esc(d.open)}">Open</button>`)
     if (Array.isArray(d.actions)) for (const [i, a] of d.actions.slice(0, 3).entries()) {
       if (!a || typeof a.command !== 'string' || !a.command) throw new Error(`action ${i + 1} needs a command`)
       bits.push(`<button type="button" class="btn sm" data-pw-cmd="${esc(a.command)}" data-pw-args="${esc(JSON.stringify(a.args ?? {}))}">${esc(str(a.label, `action ${i + 1}'s label`, 40) || a.command)}</button>`)
@@ -62,7 +62,7 @@ function pluginWidgetHtml(kind, data, size) {
   if (kind === 'list') {
     if (!Array.isArray(d.items)) throw new Error('a list needs items: [{title, sub?, link?}]')
     const items = d.items.slice(0, size === 'L' ? 10 : size === 'S' ? 3 : 5)
-    if (!items.length) return `<p class="set-sub">${esc(str(d.empty, 'empty') || 'Nothing here.')}</p>`
+    if (!items.length) return `<p class="set-sub">${esc(str(d.empty, 'empty') || 'Nothing here.')}</p>${foot()}`
     return `<div class="pw-list" role="list">${items.map((x, i) => `<div class="pw-li" role="listitem"><span>${linked(str(x && x.title, `item ${i + 1}'s title`), x && x.link)}</span>${x && x.sub ? `<span class="set-sub">${esc(str(x.sub, `item ${i + 1}'s sub`))}</span>` : ''}</div>`).join('')}</div>${foot()}`
   }
   if (kind === 'status') {
@@ -81,6 +81,8 @@ function pluginWidgetHtml(kind, data, size) {
 /** A plugin's widget on Today: its label, then its kind drawn from its data; nothing yet (or cleared): nothing drawn;
  *  data Echo can't draw: "Couldn't draw this" with why; when its provider failed, its last data, dated. */
 function pluginWidgetView(id, w, size) {
+  // A question about an outside link lapses after 30 s (left for another view and back, it isn't still armed).
+  if (S.pwOpen && Date.now() - (S.pwOpenAt || 0) > 30000) S.pwOpen = null
   if (!w || w.empty) return ''
   let body
   try { body = pluginWidgetHtml(w.kind, w.data, size) } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
@@ -104,15 +106,20 @@ document.addEventListener('click', async (e) => {
     S.pwOpen = null
     let args = {}
     try { args = JSON.parse(act.dataset.pwArgs || '{}') } catch { /* none */ }
-    try { await get(`api/plugin/${encodeURIComponent(plugin)}/call/${encodeURIComponent(act.dataset.pwCmd)}?args=${encodeURIComponent(JSON.stringify(args))}`) } catch (x) { window.echo.notice(`${act.textContent}: ${x.message || x}`) }
+    // The call answers {value} or {error}: a refused or failing command says so.
+    try {
+      const r = await get(`api/plugin/${encodeURIComponent(plugin)}/call/${encodeURIComponent(act.dataset.pwCmd)}?args=${encodeURIComponent(JSON.stringify(args))}`)
+      if (r && r.error) window.echo.notice(`${act.textContent}: ${r.error}`)
+    } catch (x) { window.echo.notice(`${act.textContent}: ${x.message || x}`) }
     return loadToday().then(render)
   }
   const open = e.target.closest('[data-pw-open]')
   if (open) {
     e.preventDefault()
     const url = open.dataset.pwOpen
-    if (S.pwOpen === url) { S.pwOpen = null; send({ cmd: 'open_url', url }); return render() }
+    if (S.pwOpen === url && Date.now() - (S.pwOpenAt || 0) <= 30000) { S.pwOpen = null; send({ cmd: 'open_url', url }); return render() }
     S.pwOpen = url
+    S.pwOpenAt = Date.now()
     return render()
   }
   if (e.target.closest('[data-pw-open-no]')) { S.pwOpen = null; render() }
