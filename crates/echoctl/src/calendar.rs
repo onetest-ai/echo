@@ -22,7 +22,7 @@ use crate::watch;
 /// Offer window, as in the watcher: a meeting stays relevant until 4 min after its start.
 const STILL_RELEVANT_AFTER_START: i64 = 4;
 /// A recording matches a meeting from 10 min before its start until its end.
-const MATCH_EARLY_MIN: i64 = 10;
+pub(crate) const MATCH_EARLY_MIN: i64 = 10;
 /// …or until this long after its start (later only for meetings under 2 h).
 const MATCH_LATE_MIN: i64 = 30;
 
