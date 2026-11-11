@@ -18,6 +18,7 @@ cases:
   - tests/cases/tasks/TC-012_close-from-today.md
   - tests/cases/tasks/TC-013_no-active-threads.md
   - tests/cases/tasks/TC-014_no-open-tasks.md
+  - tests/cases/tasks/TC-027_work-on-it-types-one-line-into-the-claude-panel-on-the-threads-profile-or-says-why-not.md
 auto: [tests/auto/specs/S-08.spec.mjs]
 ---
 
@@ -57,6 +58,7 @@ auto: [tests/auto/specs/S-08.spec.mjs]
 | 12 | `tasks/TC-012_close-from-today.md` | — | Skip its Teardown (keep T001 of Acme rollout done for stage 14; note the `mid` anyway) |
 | 13 | `tasks/TC-013_no-active-threads.md` | — | — |
 | 14 | `tasks/TC-014_no-open-tasks.md` | — | Its precondition finds T001 of Acme rollout already done (stage 12) and marks the others done; note T001 with them, so its Teardown reopens it too |
+| 15 | `tasks/TC-027_work-on-it-types-one-line-into-the-claude-panel-on-the-threads-profile-or-says-why-not.md` | — | — |
 
 ## Notes
 - Stages 1 to 4 read the data as built on one visit to Tasks (the prelude's). They come first because stages 7 and 8 hand Omar's task over.

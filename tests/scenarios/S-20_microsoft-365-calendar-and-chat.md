@@ -15,6 +15,8 @@ cases:
   - tests/cases/calendar/TC-003_other-app-id.md
   - tests/cases/calendar/TC-004_sign-out.md
   - tests/cases/calendar/TC-011_without-m365.md
+  - tests/cases/privacy/TC-009_thread-mail-is-read-only-from-the-user-colleagues-and-trusted-authenticated-senders.md
+  - tests/cases/calendar/TC-027_the-week-comes-from-microsoft-365-and-a-failed-read-says-so-without-freezing-the-window.md
 ---
 
 # S-20: Microsoft 365: sign in, the calendar, scheduled and joined recordings, chats, sign out
@@ -51,6 +53,8 @@ cases:
 | 9 | `calendar/TC-003_other-app-id.md` | — | — |
 | 10 | `calendar/TC-004_sign-out.md` | — | — |
 | 11 | `calendar/TC-011_without-m365.md` | 10 | — |
+| 12 | `privacy/TC-009_thread-mail-is-read-only-from-the-user-colleagues-and-trusted-authenticated-senders.md` | — | — |
+| 13 | `calendar/TC-027_the-week-comes-from-microsoft-365-and-a-failed-read-says-so-without-freezing-the-window.md` | — | — |
 
 ## Notes
 - Sign-in is the user's, once; the agent never types a password. Stage 9 signs in twice more: that is its subject.

@@ -33,6 +33,8 @@ cases:
   - tests/cases/calls/TC-024_try-again-fails-at-once-and-says-why.md
   - tests/cases/calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md
   - tests/cases/calls/TC-036_restore-brings-a-deleted-call-back.md
+  - tests/cases/calls/TC-040_a-recording-call-with-live-notes-on-shows-the-live-transcript-alone-kept-at-its-end.md
+  - tests/cases/calls/TC-041_with-live-notes-off-a-recording-call-says-how-to-turn-them-on-and-sends-nothing-to-a-model.md
 auto: [tests/auto/specs/S-23.spec.mjs]
 ---
 
@@ -88,6 +90,8 @@ auto: [tests/auto/specs/S-23.spec.mjs]
 | 27 | `calls/TC-024_try-again-fails-at-once-and-says-why.md` | — | In step 1 skip the navigation |
 | 28 | `calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md` | — | In step 1 skip the navigation. Teardown: run the `echoctl restore` only, skip its reload (stage 29 needs the trash to hold one folder, not the list) |
 | 29 | `calls/TC-036_restore-brings-a-deleted-call-back.md` | — | In step 1 skip the navigation (the list is shown). **Skip its teardown** (the last stage) |
+| 30 | `calls/TC-040_a-recording-call-with-live-notes-on-shows-the-live-transcript-alone-kept-at-its-end.md` | — | — |
+| 31 | `calls/TC-041_with-live-notes-off-a-recording-call-says-how-to-turn-them-on-and-sends-nothing-to-a-model.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.
