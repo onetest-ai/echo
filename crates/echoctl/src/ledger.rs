@@ -1099,7 +1099,24 @@ pub fn context(project: &str) -> Result<Value> {
     let p = crate::projects::load(project)?;
     let t = fold_linked(project)?;
     let n = &t.nodes;
-    fn view(n: &BTreeMap<String, Node>, x: &Node) -> Value {
+    // Only threads known to be on this thread's AI profile are named; any other thread's ids, names, item titles,
+    // owners and waits never reach this thread's model (strict routing) — an unknown thread counts as another.
+    let default = crate::ai::default_id();
+    let mine = p.ai_profile.clone().unwrap_or_else(|| default.clone());
+    let same: BTreeSet<String> = crate::projects::list().into_iter().filter(|q| q.ai_profile.clone().unwrap_or_else(|| default.clone()) == mine).map(|q| q.id).collect();
+    fn view(n: &BTreeMap<String, Node>, x: &Node, same: &BTreeSet<String>) -> Value {
+        let away = |v: &Value| v["thread"].as_str().is_some_and(|t| !same.contains(t));
+        // A mirror shows its master's owners and wait: only when the master's thread is on this profile.
+        let master_away = x.mirror_of.as_ref().is_some_and(away);
+        let named = |v: &Value| format!("{} {} (thread {})", v["node"].as_str().unwrap_or(""), v["title"].as_str().unwrap_or(""), v["thread"].as_str().unwrap_or(""));
+        let lines = |xs: &[Value]| {
+            let mut out: Vec<String> = xs.iter().filter(|v| !away(v)).map(named).collect();
+            let hidden = xs.iter().filter(|v| away(v)).count();
+            if hidden > 0 {
+                out.push(format!("{hidden} item(s) in a thread on another AI profile"));
+            }
+            out
+        };
         if closed(&x.state) {
             return json!({"id": x.id, "title": x.title, "state": x.state});
         }
@@ -1117,6 +1134,9 @@ pub fn context(project: &str) -> Result<Value> {
             d["description"] = json!(if t.chars().count() > 400 { format!("{}…", t.chars().take(400).collect::<String>()) } else { t.clone() });
         }
         for (k, v) in [("internal_owner", &x.internal_owner), ("client_owner", &x.client_owner), ("delegated_by", &x.delegated_by), ("due", &x.due)] {
+            if master_away && k != "due" {
+                continue;
+            }
             if let Some(v) = v {
                 d[k] = json!(v);
             }
@@ -1131,7 +1151,11 @@ pub fn context(project: &str) -> Result<Value> {
             d["holds_up"] = json!(x.blocks.iter().filter_map(|i| n.get(i).map(|y| format!("{i} {}", y.title))).collect::<Vec<_>>());
         }
         if let Some(w) = &x.waiting_for {
-            d["waiting_for"] = json!(format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or("")));
+            d["waiting_for"] = json!(if master_away {
+                format!("waiting (since {})", w["since"].as_str().unwrap_or(""))
+            } else {
+                format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or(""))
+            });
         }
         if !x.pinned.is_empty() {
             d["pinned_by_human"] = json!(x.pinned);
@@ -1139,13 +1163,13 @@ pub fn context(project: &str) -> Result<Value> {
         // One piece of work raised in two threads (#20): known here — don't create it again; what is said
         // about it here still counts (a status change goes to it).
         if let Some(m) = &x.mirror_of {
-            d["also_tracked_in"] = json!(format!("{} {} (thread {}) — the same work; its state is shown from there", m["node"].as_str().unwrap_or(""), m["title"].as_str().unwrap_or(""), m["thread"].as_str().unwrap_or("")));
+            d["also_tracked_in"] = json!(if away(m) { "a thread on another AI profile — the same work; its state is shown from there".to_string() } else { format!("{} — the same work; its state is shown from there", named(m)) });
         }
         if !x.also_in.is_empty() {
-            d["also_raised_in"] = json!(x.also_in.iter().map(|a| format!("{} {} (thread {})", a["node"].as_str().unwrap_or(""), a["title"].as_str().unwrap_or(""), a["thread"].as_str().unwrap_or(""))).collect::<Vec<_>>());
+            d["also_raised_in"] = json!(lines(&x.also_in));
         }
         if !x.xwaits.is_empty() {
-            d["waits_for_other_threads"] = json!(x.xwaits.iter().map(|w| format!("{} {} (thread {})", w["node"].as_str().unwrap_or(""), w["title"].as_str().unwrap_or(""), w["thread"].as_str().unwrap_or(""))).collect::<Vec<_>>());
+            d["waits_for_other_threads"] = json!(lines(&x.xwaits));
         }
         let pend: Vec<String> = x.history.iter().filter(|h| h["type"] == "agent" && needs_verdict(h) && h["verdict"].is_null()).map(|h| format!("{}@{}", h["effect"].as_str().or(h["op"].as_str()).unwrap_or(""), h["date"].as_str().unwrap_or(""))).collect();
         if !pend.is_empty() {
@@ -1159,7 +1183,7 @@ pub fn context(project: &str) -> Result<Value> {
             d["last"] = h["date"].clone();
         }
         for (k, name) in [("story", "stories"), ("task", "tasks")] {
-            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c])).collect();
+            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c], same)).collect();
             if !xs.is_empty() {
                 d[name] = json!(xs);
             }
@@ -1185,7 +1209,7 @@ pub fn context(project: &str) -> Result<Value> {
         "me_profile": crate::calls::me_profile(),
         "people": p.people,
         "evidence_processed": {"count": t.order.len(), "latest": t.order.iter().rev().take(5).rev().map(|c| format!("{} {}", t.evidence[c]["date"].as_str().unwrap_or(""), t.evidence[c]["title"].as_str().unwrap_or(""))).collect::<Vec<_>>()},
-        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e)).collect::<Vec<_>>(),
+        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e, &same)).collect::<Vec<_>>(),
         "epics_without_work": epics.iter().filter(|e| e.children.is_empty()).map(|e| format!("{} {}", e.id, e.title)).collect::<Vec<_>>(),
     }))
 }
@@ -1538,6 +1562,22 @@ mod tests {
         assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
         // The mirror's own history keeps its evidence ("What this call changed" still lists it).
         assert!(fold(&l).unwrap().nodes["T001"].history.iter().any(|h| h["op"] == "status" && h["evidence"] == ev));
+        // The sync's context names the other thread's items while it is on the same AI profile — and the master's owner
+        // and wait, through its mirror…
+        human_event(&other, &json!({"op": "edit", "node": master, "set": {"state": "open", "internal_owner": "Priya Nair",
+            "waiting_for": {"who": "Ravi Mehta", "what": "the IdP metadata from Globex", "since": "2026-10-29"}}})).unwrap();
+        let shown = context(&id).unwrap().to_string();
+        assert!(shown.contains("IdP contract") && shown.contains(&other) && shown.contains("IdP metadata") && shown.contains("Priya Nair"), "{shown}");
+        // …and never once it is pinned to another: only that such an item exists (strict routing).
+        crate::projects::update(&other, |p| {
+            p.ai_profile = Some("elsewhere".into());
+            Ok(())
+        })
+        .unwrap();
+        let shown = context(&id).unwrap().to_string();
+        assert!(!shown.contains("SAML configuration") && !shown.contains("IdP contract") && !shown.contains(&other), "{shown}");
+        assert!(!shown.contains("IdP metadata") && !shown.contains("Ravi Mehta") && !shown.contains("Priya Nair"), "{shown}");
+        assert!(shown.contains("a thread on another AI profile"), "{shown}");
     }
 
     #[test]
