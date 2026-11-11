@@ -31,7 +31,7 @@ tags: [claude, minutes, templates, local-model]
 |---|--------|----------------|
 | 1 | Open `<call>` in Calls, its My notes, "Edit as text" (`textarea#my-notes`); at the end add the lines `# Logistics` and `- The pilot room is booked for the first week`; wait for "Saved" | The notes are saved |
 | 2 | Run `target/debug/echoctl context <call>` | `template.name` `client-kickoff`, `template.fixed` `false`, `heading_budget` a number, `user_headings` contains `Logistics` |
-| 3 | In the call's Minutes tab press "Write minutes" (or, if the call has minutes, "Write minutes again") | Within 15 seconds the tab shows "Writing minutes…" or "Updating the minutes…" |
+| 3 | In the call's Minutes tab press "Try again" in the bar "The last update didn't finish…" (its last run failed: calls/TC-023) | Within 15 seconds the tab shows "Updating the minutes…" |
 | 4 | Wait until `cat $ECHOCTL_HOME/calls/<call>/notes-run.json` shows a `state` other than "queued"/"running" (every 30 seconds, up to 20 minutes) | `state` "done" |
 | 5 | Run `grep -n '^##' $ECHOCTL_HOME/calls/<call>/notes.md` | A `## Logistics` heading comes before every heading of the Client kickoff template; no `### Logistics` |
 | 6 | Read the lines under `## Logistics` | They hold the point about the pilot room |

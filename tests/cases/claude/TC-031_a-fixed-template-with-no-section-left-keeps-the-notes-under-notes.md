@@ -34,7 +34,7 @@ tags: [claude, minutes, templates, local-model]
 | 3 | Run `target/debug/echoctl context <call>` | `user_headings` contains `Fallback topic` |
 | 4 | In the call's Minutes tab open "Call actions", under "Write again with" click "Only if" | Within 15 seconds the tab shows "Updating the minutes…" |
 | 5 | Wait until `cat $ECHOCTL_HOME/calls/<call>/notes-run.json` shows a `state` other than "queued"/"running" (every 30 seconds, up to 20 minutes) | `state` "done" |
-| 6 | Run `grep -n '^##' $ECHOCTL_HOME/calls/<call>/notes.md` | Exactly one `##` heading, `## Notes`, and under it `### Fallback topic`; no `## Office move` |
+| 6 | Run `grep -n '^## ' $ECHOCTL_HOME/calls/<call>/notes.md` and `grep -n '^### ' $ECHOCTL_HOME/calls/<call>/notes.md` | The first prints exactly one line, `## Notes`; the second includes `### Fallback topic`, after it; no `## Office move` |
 | 7 | Read the lines under `### Fallback topic` | They hold the point about the cap and finance |
 
 ## Expected Final State

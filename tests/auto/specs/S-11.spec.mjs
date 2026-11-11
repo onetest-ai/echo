@@ -1,6 +1,7 @@
 // S-11 Set Echo up your way — its stages with fixed checks (small data).
 // Not automated: stage 37 (window/TC-025, the release's announcement strip): it needs the speech models of an
 // installed Echo linked into the run's config, and its last step is the user's (Echo's own window and tray).
+// Not automated yet: stages 38–39 (templates/TC-019, TC-020: Keep every section), new.
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
