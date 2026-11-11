@@ -834,7 +834,7 @@ function attendeeLine(att) {
   return { tally: `<span class="at-tally">${tally}</span>`, people: `<div class="at" role="list" aria-label="Invited">${shown.map(chip).join('')}${more}</div>` }
 }
 
-/** A prep: In short, then Last time, Open with these people, New since then; Who's coming beside. `again`: it can
+/** A prep: In short, then Last time, Open with these people, New since then, From linked thread; Who's coming beside. `again`: it can
  *  be written again (the meeting is still to come). Its text is the user's own records, escaped. */
 function prepView(p, again) {
   if (!p) return ''
@@ -852,10 +852,11 @@ function prepView(p, again) {
   const expected = p.expected ? sec('Expected from you', exp ? `<ul>${exp}</ul>` : '<p class="set-sub" style="margin:0">Nothing waits on you.</p>') : ''
   const open = (p.open || []).length ? sec('Open with these people', `<ul>${p.open.map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : o.due ? ` · ${esc(day(o.due))}` : ''}</li>`).join('')}</ul>`) : ''
   const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}${n.snippet ? ` <span class="set-sub">“${esc(n.snippet)}”</span>` : ''}</li>`).join('')}</ul>`) : ''
+  const linked = (p.linked || []).filter((l) => (l.decisions || []).length || (l.open || []).length).map((l) => sec(`From linked thread · <a href="#project/${encodeURIComponent(l.id)}/brief">${esc(l.name)}</a>`, `<ul>${(l.decisions || []).map((x) => `<li><b>Decision</b> <a href="${esc(x.link)}">${esc(x.title)}</a></li>`).join('')}${(l.open || []).map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : ''}</li>`).join('')}</ul>`)).join('')
   const short = p.summary ? sec('In short', `<p class="pr-short">${esc(p.summary)}</p>`) : p.error ? `<p class="set-sub">${esc(p.error)}</p>` : ''
   const foot = `<div class="pr-foot"><span class="set-sub">Written ${esc(p.written_at ? hm(new Date(p.written_at)) : '')}${p.model ? ` · ${esc(p.model)}` : ''}</span>${again ? `<button class="btn ghost" data-prep-write="${esc(p.id)}">Write it again</button>` : ''}</div>`
-  const empty = !short && !last && !open && !fresh ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
-  return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${empty}${foot}</article></div>`
+  const empty = !short && !last && !open && !fresh && !linked ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
+  return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${linked}${empty}${foot}</article></div>`
 }
 
 /** The ⋯ menu's Write again with…: each minutes template but the one used now (the call's from then on), and the

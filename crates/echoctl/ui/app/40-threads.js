@@ -40,6 +40,27 @@ function sendLogo(file, op, id) {
 }
 const logoPicker = (op, id, label) => `<label class="btn pj-file">${esc(label)}<input type="file" accept="image/png,image/jpeg,image/webp" data-logo-op="${op}" data-id="${esc(id)}" aria-label="${esc(label)}"></label>`
 const stageTag = (id, long = false) => { const st = ProjectArt.stage(id); return `<span class="pj-stage ${esc(st.gid)}">${esc(long && st.group ? `${st.group} · ${st.label}` : st.label)}</span>` }
+/** A link to a thread's Brief (a hash, so the router opens it). */
+const pjA = (l, text = l.name) => `<a class="link-btn" href="#project/${encodeURIComponent(l.id)}/brief">${esc(text)}</a>`
+/** The header's thread links (#95): "Part of <thread> →" and "Related: <threads>"; nothing without links. */
+function pjLinksLine(p) {
+  const ls = p.links || [], parent = ls.find((l) => l.kind === 'part_of'), rel = ls.filter((l) => l.kind === 'related')
+  const bits = [parent ? `<span>Part of ${pjA(parent, `${parent.name} →`)}</span>` : '', rel.length ? `<span>Related: ${rel.map((l) => pjA(l)).join(', ')}</span>` : ''].filter(Boolean)
+  return bits.length ? `<div class="facts pj-links">${bits.join('')}</div>` : ''
+}
+const LINK_KIND = { part_of: 'Is part of', part: 'Part of this', related: 'Related' }
+const LINK_ITEM = { task: 'Task', risk: 'Risk', question: 'Question', decision: 'Decision' }
+/** Brief → Linked threads: each linked thread with its stage, its open items and its latest decisions. */
+function pjLinked(p) {
+  const ls = p.links || []
+  if (!ls.length) return ''
+  const item = (x) => `<li><b>${LINK_ITEM[x.kind] || esc(x.kind)}</b> <a href="${esc(x.link)}">${esc(x.title)}</a>${x.owner ? ` · ${esc(x.owner)}` : ''}${x.late ? ' · <span class="warn">late</span>' : ''}</li>`
+  const rows = ls.map((l) => {
+    const w = l.work || {}, items = [...(w.open || []), ...(w.decisions || [])]
+    return `<div class="set-row pj-link" role="listitem"><div style="min-width:0"><div class="pj-name"><span class="set-sub">${LINK_KIND[l.kind] || ''}</span>${pjA(l)}${stageTag(l.stage)}<span class="set-sub">${w.open_count || 0} open</span></div>${items.length ? `<ul class="pj-link-items">${items.map(item).join('')}</ul>` : ''}</div></div>`
+  }).join('')
+  return `<section class="set-sec"><h3>Linked threads</h3><div class="set-card" role="list" aria-label="Linked threads">${rows}</div></section>`
+}
 const projClient = (id) => ((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === id)
 
 function projectsView() {
@@ -104,7 +125,7 @@ function projectMain(data) {
   const facts = [`${p.call_count} call${p.call_count === 1 ? '' : 's'}`, p.since ? `since ${esc(p.since)}` : '', p.last_call ? `last call ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''].filter(Boolean).join(' · ')
   const menu = `<span class="pj-add-wrap pj-more"><button class="icon-btn" data-pj="menu" aria-haspopup="menu" aria-expanded="${S.pj.menu}" aria-label="Thread actions" title="Thread actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.pj.menu ? `<div class="menu" role="menu">${p.client ? `<button class="menu-item" role="menuitem" data-pj="client" data-id="${esc(p.client)}">Open ${esc(p.client_name || 'the client')}</button>` : ''}<button class="menu-item" role="menuitem" data-claude-about>Claude about this thread</button><button class="menu-item" role="menuitem" data-pj="sync">Sync now</button><div class="menu-sep" role="separator"></div><button class="menu-item danger" role="menuitem" data-pj="delete-ask">Delete…</button></div>` : ''}</span>`
   const confirmDel = S.pj.confirmDelete ? `<div class="notice"><span class="grow">Delete <b>${esc(p.name)}</b>? Its brief, profile and work go to the trash; its calls stay.</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="delete">Move to trash</button></div>` : ''
-  const head = `<header class="pj-head" role="group" aria-labelledby="pj-h"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2 id="pj-h">${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div></div><span class="grow"></span>${menu}</div>${confirmDel}
+  const head = `<header class="pj-head" role="group" aria-labelledby="pj-h"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2 id="pj-h">${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div>${pjLinksLine(p)}</div><span class="grow"></span>${menu}</div>${confirmDel}
     <div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button class="tab" role="tab" data-pj="tab" data-tab-id="${id}" aria-selected="${tab === id}">${label}</button>`).join('')}</div></header>`
   const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : projectBrief(p)
   return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' ? ' wide' : ''}">${body}</div>`

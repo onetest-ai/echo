@@ -427,7 +427,26 @@ fn gather(m: &MeetingContext, threads: &[projects::Project]) -> Value {
         "open": open,
         "new_since": news,
         "people": people(m, &ids),
+        "linked": linked(threads),
     })
+}
+
+/// The meeting's threads' open linked threads (#95), not one of its own: each with its latest decisions and open items,
+/// and its AI profile (what may reach In short's model).
+fn linked(threads: &[projects::Project]) -> Vec<Value> {
+    let all = projects::list();
+    let mut seen: std::collections::BTreeSet<String> = threads.iter().map(|p| p.id.clone()).collect();
+    let mut out = vec![];
+    for l in threads.iter().flat_map(|t| crate::threadlinks::of(t, &all)) {
+        let id = l["id"].as_str().unwrap_or("").to_string();
+        if l["closed"] == true || !seen.insert(id.clone()) {
+            continue;
+        }
+        let d = crate::threadlinks::digest(&id, 5, 3);
+        let profile = all.iter().find(|p| p.id == id).and_then(|p| p.ai_profile.clone()).unwrap_or_else(crate::ai::default_id);
+        out.push(json!({"id": id, "name": l["name"], "kind": l["kind"], "profile": profile, "decisions": d["decisions"], "open": d["open"]}));
+    }
+    out
 }
 
 /// `[c3] ` when the item is numbered for the model.
@@ -476,6 +495,15 @@ pub fn as_text(p: &Value) -> String {
         s += "\nNew since then:\n";
         for x in n {
             s += &format!("- {}{} {} from {}: {}\n", tag(x), x["date"].as_str().unwrap_or(""), x["kind"].as_str().unwrap_or(""), x["from"].as_str().unwrap_or(""), x["title"].as_str().unwrap_or(""));
+        }
+    }
+    for l in p["linked"].as_array().into_iter().flatten() {
+        s += &format!("\nFrom the linked thread {}:\n", l["name"].as_str().unwrap_or(""));
+        for x in l["decisions"].as_array().into_iter().flatten() {
+            s += &format!("- decision {}\n", x["title"].as_str().unwrap_or(""));
+        }
+        for x in l["open"].as_array().into_iter().flatten() {
+            s += &format!("- {} {}{}\n", x["kind"].as_str().unwrap_or(""), x["title"].as_str().unwrap_or(""), x["owner"].as_str().map(|w| format!(", owner {w}")).unwrap_or_default());
         }
     }
     if let Some(ps) = p["people"].as_array().filter(|n| !n.is_empty()) {
@@ -531,7 +559,12 @@ pub fn write(m: &MeetingContext) -> Result<Value> {
         let profile = profiles.into_iter().next().unwrap_or_default();
         // Who reads it: their own name in the facts is "you".
         let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| format!("The reader is {}.\n\n", m.name)).unwrap_or_default();
-        let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&p));
+        // A linked thread's records reach the model only when it runs on this profile too.
+        let mut shown = p.clone();
+        if let Some(a) = shown["linked"].as_array_mut() {
+            a.retain(|l| l["profile"] == profile.as_str());
+        }
+        let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&shown));
         match crate::ai::ready(&profile).and_then(|r| crate::livenotes::complete_text(r.profile(), SYSTEM, &facts, 900).map(|t| (t, Some(crate::livenotes::text_model(r.profile()))))) {
             Ok((text, model)) => match parse_answer(&text) {
                 Some((rel, short)) => {

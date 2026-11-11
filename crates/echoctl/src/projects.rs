@@ -437,6 +437,9 @@ pub struct Project {
     pub ai_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Its links to other whole threads, kept on this side only (`threadlinks`): what it is part of, what it relates to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<crate::threadlinks::Link>,
     pub created_at: String,
 }
 
@@ -796,6 +799,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         notes: String::new(),
         ai_profile: None,
         model: None,
+        links: vec![],
         created_at: now,
     };
     check(&p, &clients()?)?;
@@ -1357,6 +1361,15 @@ pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
         v["chat_state"] = crate::ledger::chat_state(&p.id);
         v["mail_state"] = crate::ledger::mail_state(&p.id);
         v["chat_suggestions"] = json!(crate::ledger::chat_suggestions(p));
+        // Its linked threads, each with what it holds now (Brief → Linked threads).
+        v["links"] = crate::threadlinks::of(p, &list())
+            .into_iter()
+            .map(|mut l| {
+                let d = crate::threadlinks::digest(l["id"].as_str().unwrap_or(""), 5, 3);
+                l["work"] = d;
+                l
+            })
+            .collect();
     }
     Ok(v)
 }
@@ -1610,6 +1623,7 @@ mod tests {
             notes: String::new(),
             ai_profile: None,
             model: None,
+            links: vec![],
             created_at: String::new(),
         };
         let f = |others: &[&str]| CallFacts { others: others.iter().map(|s| s.to_string()).collect(), ..Default::default() };

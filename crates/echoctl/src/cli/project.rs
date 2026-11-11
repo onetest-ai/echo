@@ -6,7 +6,7 @@ use clap::Subcommand;
 use super::print_json;
 #[cfg(feature = "brain")]
 use crate::brain;
-use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, tasks, watch};
+use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, tasks, threadlinks, watch};
 
 #[derive(Subcommand)]
 pub enum ProjectCmd {
@@ -164,6 +164,16 @@ pub enum ProjectCmd {
         /// Never suggest this one again
         #[arg(long)]
         reject: Option<String>,
+    },
+    /// Link two threads: --kind part-of (this one is part of --to) or related; --remove unlinks them
+    Link {
+        id: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long, value_parser = ["part-of", "related"], required_unless_present = "remove")]
+        kind: Option<String>,
+        #[arg(long, conflicts_with = "kind")]
+        remove: bool,
     },
     /// Move a project to the trash (its calls are untouched)
     Delete { id: String },
@@ -343,11 +353,22 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
     let show = |p: &projects::Project| -> Result<()> {
-        print_json(&projects::view(p, true)?);
+        let mut v = projects::view(p, true)?;
+        // A run reads its own thread only: its linked threads by name, not their work.
+        if notes::headless() {
+            for l in v["links"].as_array_mut().into_iter().flatten() {
+                l.as_object_mut().map(|o| o.remove("work"));
+            }
+        }
+        print_json(&v);
         Ok(())
     };
     match cmd {
         ProjectCmd::List => print_json(&projects::overview()?),
+        ProjectCmd::Link { id, to, kind, remove } => match kind {
+            Some(k) if !remove => show(&threadlinks::link(&id, &to, threadlinks::Kind::parse(&k)?)?)?,
+            _ => show(&threadlinks::unlink(&id, &to)?)?,
+        },
         ProjectCmd::Show { id } => show(&projects::load(&id)?)?,
         ProjectCmd::Create { name, client, stage } => {
             let stage = stage.as_deref().map(Stage::parse).transpose()?;
