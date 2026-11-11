@@ -240,44 +240,48 @@ document.addEventListener('change', (e) => {
   seriesSet(t, f, f === 'languages' ? (t.value ? [t.value] : []) : t.value || null)
 })
 
-document.addEventListener('click', (e) => {
-  // Any click closes the call's ⋯ menu (its own button toggles it).
-  const menuWas = S.menuOpen
-  if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
-  if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  // The sidebar open over a narrow page closes on a click beside it.
-  if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-wont-ok],[data-wont-send],[data-wont-edit],[data-wont-drop],[data-needs-todo],[data-needs-todo-ok],[data-needs-claude],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],[data-announce],a[data-ext]')
-  if (!t) { if (menuWas) render(); return }
-  // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
-  // brings the app's state.
-  const busySignin = (id, state) => { const p = profileOf(id); if (p) { p.signin = { state }; render() } }
-  if (t.dataset.signin) { send({ cmd: 'sign_in', profile: t.dataset.signin }); return busySignin(t.dataset.signin, 'starting') }
-  if (t.dataset.signinCancel) { send({ cmd: 'sign_in_cancel', profile: t.dataset.signinCancel }); return busySignin(t.dataset.signinCancel, 'stopping') }
-  if (t.dataset.signinAccept) { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') }
-  if (t.dataset.signinCheck) { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') }
-  if (t.dataset.ext !== undefined) { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return }
+// ── clicks: which handler a click on the page runs (no DOM: `clicks.test.mjs`) ───────────────────────────────
+/** The page's click handlers, in precedence: `{ sel, area, when(t, e), run(t, e) }` (`area`: the part of the window it
+ *  belongs to). */
+const CLICKS = []
+/** What a click is for: the nearest of its target's ancestors (the target first) that a handler's `sel` matches, and
+ *  the first handler, in CLICKS' order, whose `when` holds for that element (`c` null: none does). Null: no ancestor matches. */
+const clickFor = (target, e) => {
+  const t = target.closest(CLICKS.map((c) => c.sel).join(','))
+  return t ? { t, c: CLICKS.find((c) => c.when(t, e)) || null } : null
+}
+// end of the clicks block
+
+// Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
+// brings the app's state.
+const busySignin = (id, state) => { const p = profileOf(id); if (p) { p.signin = { state }; render() } }
+CLICKS.push(
+  { sel: '[data-signin]', area: 'settings', when: (t) => t.dataset.signin, run: (t) => { send({ cmd: 'sign_in', profile: t.dataset.signin }); return busySignin(t.dataset.signin, 'starting') } },
+  { sel: '[data-signin-cancel]', area: 'settings', when: (t) => t.dataset.signinCancel, run: (t) => { send({ cmd: 'sign_in_cancel', profile: t.dataset.signinCancel }); return busySignin(t.dataset.signinCancel, 'stopping') } },
+  { sel: '[data-signin-accept]', area: 'settings', when: (t) => t.dataset.signinAccept, run: (t) => { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') } },
+  { sel: '[data-signin-check]', area: 'settings', when: (t) => t.dataset.signinCheck, run: (t) => { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') } },
+  { sel: 'a[data-ext]', area: 'page', when: (t) => t.dataset.ext !== undefined, run: (t, e) => { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return } },
   // Settings
-  if (t.dataset.meEdit !== undefined) { S.meEdit = (S.settings && S.settings.me_profile && S.settings.me_profile.text) || ''; render(); const ta = $('#me-profile'); if (ta) ta.focus(); return }
-  if (t.dataset.meCancel !== undefined) { S.meEdit = null; return render() }
-  if (t.dataset.meSave !== undefined) return saveMeProfile()
-  if (t.dataset.setsec) return go(`settings/${t.dataset.setsec}`)
-  if (t.dataset.set) {
+  { sel: '[data-me-edit]', area: 'settings', when: (t) => t.dataset.meEdit !== undefined, run: (t) => { S.meEdit = (S.settings && S.settings.me_profile && S.settings.me_profile.text) || ''; render(); const ta = $('#me-profile'); if (ta) ta.focus(); return } },
+  { sel: '[data-me-cancel]', area: 'settings', when: (t) => t.dataset.meCancel !== undefined, run: (t) => { S.meEdit = null; return render() } },
+  { sel: '[data-me-save]', area: 'settings', when: (t) => t.dataset.meSave !== undefined, run: (t) => saveMeProfile() },
+  { sel: '[data-setsec]', area: 'settings', when: (t) => t.dataset.setsec, run: (t) => go(`settings/${t.dataset.setsec}`) },
+  { sel: '[data-set]', area: 'settings', when: (t) => t.dataset.set, run: (t) => {
     let val; try { val = JSON.parse(t.dataset.val) } catch { val = t.dataset.val }
     return setSetting(t.dataset.set, val)
-  }
-  if (t.dataset.announce !== undefined) { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id }); if (t.dataset.announce) send({ cmd: 'settings_action', action: t.dataset.announce, arg: t.dataset.arg || '' }); return render() }
-  if (t.dataset.act) { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return }
-  if (t.dataset.langDel) { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() }
-  if (t.dataset.vocabDel) { const v = (S.settings.vocabulary || []).filter((x) => x !== t.dataset.vocabDel); S.settings.vocabulary = v; send({ cmd: 'settings_set', key: 'vocabulary', value: v }); return render() }
-  if (t.dataset.themeSet !== undefined) return Theme.set(t.dataset.themeSet)
-  if (t.dataset.layoutMove) { Layout.move(t.dataset.layoutMove, t.dataset.to, PANEL_VIEWS); return layoutChanged() }
-  if (t.dataset.layoutReset !== undefined) { Layout.load({}); return layoutChanged() }
-  if (t.dataset.termOutput) { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() }
+  } },
+  { sel: '[data-announce]', area: 'shell', when: (t) => t.dataset.announce !== undefined, run: (t) => { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id }); if (t.dataset.announce) send({ cmd: 'settings_action', action: t.dataset.announce, arg: t.dataset.arg || '' }); return render() } },
+  { sel: '[data-act]', area: 'settings', when: (t) => t.dataset.act, run: (t) => { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return } },
+  { sel: '[data-lang-del]', area: 'settings', when: (t) => t.dataset.langDel, run: (t) => { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() } },
+  { sel: '[data-vocab-del]', area: 'settings', when: (t) => t.dataset.vocabDel, run: (t) => { const v = (S.settings.vocabulary || []).filter((x) => x !== t.dataset.vocabDel); S.settings.vocabulary = v; send({ cmd: 'settings_set', key: 'vocabulary', value: v }); return render() } },
+  { sel: '[data-theme-set]', area: 'settings', when: (t) => t.dataset.themeSet !== undefined, run: (t) => Theme.set(t.dataset.themeSet) },
+  { sel: '[data-layout-move]', area: 'settings', when: (t) => t.dataset.layoutMove, run: (t) => { Layout.move(t.dataset.layoutMove, t.dataset.to, PANEL_VIEWS); return layoutChanged() } },
+  { sel: '[data-layout-reset]', area: 'settings', when: (t) => t.dataset.layoutReset !== undefined, run: (t) => { Layout.load({}); return layoutChanged() } },
+  { sel: '[data-term-output]', area: 'terminals', when: (t) => t.dataset.termOutput, run: (t) => { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() } },
   // A Claude panel's restart / new conversation (#44): asked first while it runs.
-  if (t.dataset.brPclosed !== undefined) { S.br.pClosed = !S.br.pClosed; return render() }
-  if (t.dataset.convKeep !== undefined) { S.convAsk = null; return render() }
-  if (t.dataset.conv || t.dataset.convGo !== undefined) {
+  { sel: '[data-br-pclosed]', area: 'brain', when: (t) => t.dataset.brPclosed !== undefined, run: (t) => { S.br.pClosed = !S.br.pClosed; return render() } },
+  { sel: '[data-conv-keep]', area: 'terminals', when: (t) => t.dataset.convKeep !== undefined, run: (t) => { S.convAsk = null; return render() } },
+  { sel: '[data-conv],[data-conv-go]', area: 'terminals', when: (t) => t.dataset.conv || t.dataset.convGo !== undefined, run: (t) => {
     const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
     const key = t.dataset.termKey
     const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
@@ -286,13 +290,13 @@ document.addEventListener('click', (e) => {
     if (t.dataset.convGo === undefined && e && e.id != null && !e.exited) { S.convAsk = { key, session: v }; return render() }
     S.convAsk = null
     return termRestart(t.dataset.termKind, key, extra, v)
-  }
-  if (t.dataset.termStart) {
+  } },
+  { sel: '[data-term-start]', area: 'terminals', when: (t) => t.dataset.termStart, run: (t) => {
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
     if (sel) S.folderProfile = sel.value
     return termStart(t.dataset.termStart, t.dataset.termKey, { call: t.dataset.termCall, profile: sel ? sel.value : undefined })
-  }
-  if (t.dataset.noteEdit !== undefined) {
+  } },
+  { sel: '[data-note-edit]', area: 'notes', when: (t) => t.dataset.noteEdit !== undefined, run: (t) => {
     const i = Number(t.dataset.noteEdit), b = S.call && NoteDoc.parse(NotesSync.view(S.call.name).draft)[i]
     if (!b || !b.note || S.closing) return
     // Clicking a note's text to select it for copying isn't an edit.
@@ -304,12 +308,12 @@ document.addEventListener('click', (e) => {
     render()
     const ta = $('#note-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length) }
     return
-  }
-  if (t.dataset.editKind) { S.noteEdit.kind = t.dataset.editKind; render(); const ta = $('#note-edit'); if (ta) ta.focus(); return }
-  if (t.dataset.noteKind) { S.noteKind = t.dataset.noteKind; render(); const el = $('#note-input'); if (el) el.focus(); return }
-  if (t.dataset.noteDone !== undefined) { const b = NoteDoc.parse(NotesSync.view(S.call.name).draft)[Number(t.dataset.noteDone)]; return editNotes((text) => NoteDoc.change(text, Number(t.dataset.noteDone), { done: !(b && b.done) })) }
-  if (t.dataset.noteDel !== undefined) return editNotes((text) => NoteDoc.change(text, Number(t.dataset.noteDel), null))
-  if (t.dataset.panelFlip) {
+  } },
+  { sel: '[data-edit-kind]', area: 'notes', when: (t) => t.dataset.editKind, run: (t) => { S.noteEdit.kind = t.dataset.editKind; render(); const ta = $('#note-edit'); if (ta) ta.focus(); return } },
+  { sel: '[data-note-kind]', area: 'notes', when: (t) => t.dataset.noteKind, run: (t) => { S.noteKind = t.dataset.noteKind; render(); const el = $('#note-input'); if (el) el.focus(); return } },
+  { sel: '[data-note-done]', area: 'notes', when: (t) => t.dataset.noteDone !== undefined, run: (t) => { const b = NoteDoc.parse(NotesSync.view(S.call.name).draft)[Number(t.dataset.noteDone)]; return editNotes((text) => NoteDoc.change(text, Number(t.dataset.noteDone), { done: !(b && b.done) })) } },
+  { sel: '[data-note-del]', area: 'notes', when: (t) => t.dataset.noteDel !== undefined, run: (t) => editNotes((text) => NoteDoc.change(text, Number(t.dataset.noteDel), null)) },
+  { sel: '[data-panel-flip]', area: 'shell', when: (t) => t.dataset.panelFlip, run: (t) => {
     // A view's own button: show it, or close its panel when it is what the panel shows.
     const id = t.dataset.panelFlip, known = panelViews(), a = Layout.area(id, known)
     const eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
@@ -319,57 +323,57 @@ document.addEventListener('click', (e) => {
     if (eff.narrow && a === 'right') { S.overlay = !open; if (!open) Layout.show(id, known); return render() }
     if (open) Layout.toggle(a); else Layout.show(id, known)
     return layoutChanged()
-  }
-  if (t.dataset.panelShow) { Layout.show(t.dataset.panelShow, panelViews()); return layoutChanged() }
-  if (t.dataset.panelMove) { Layout.move(t.dataset.panelMove, t.dataset.to, panelViews()); return layoutChanged() }
-  if (t.dataset.panelToggle) {
+  } },
+  { sel: '[data-panel-show]', area: 'shell', when: (t) => t.dataset.panelShow, run: (t) => { Layout.show(t.dataset.panelShow, panelViews()); return layoutChanged() } },
+  { sel: '[data-panel-move]', area: 'shell', when: (t) => t.dataset.panelMove, run: (t) => { Layout.move(t.dataset.panelMove, t.dataset.to, panelViews()); return layoutChanged() } },
+  { sel: '[data-panel-toggle]', area: 'shell', when: (t) => t.dataset.panelToggle, run: (t) => {
     if (S.overlay && t.dataset.panelToggle === 'right') {
       if (Layout.effective(window.innerWidth, window.innerHeight, panelViews()).narrow) return closeOverlay()
       S.overlay = false // widened since: the docked panel's Close closes it below
     }
     Layout.toggle(t.dataset.panelToggle); return layoutChanged()
-  }
-  if (t.dataset.go) { S.barOver = false; return goActivity(t.dataset.go) }
-  if (t.dataset.ev !== undefined) { S.cal.selected = S.cal.selected === t.dataset.ev ? null : t.dataset.ev; return render() }
-  if (t.dataset.calclose) { S.cal.selected = null; return render() }
-  if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
-  if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
-  if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
-  if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
-  if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) }
-  if (t.dataset.upFold !== undefined) { S.upOpen = !S.upOpen; return render() }
-  if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
-  if (t.dataset.todayImport) {
+  } },
+  { sel: '[data-go]', area: 'shell', when: (t) => t.dataset.go, run: (t) => { S.barOver = false; return goActivity(t.dataset.go) } },
+  { sel: '[data-ev]', area: 'calendar', when: (t) => t.dataset.ev !== undefined, run: (t) => { S.cal.selected = S.cal.selected === t.dataset.ev ? null : t.dataset.ev; return render() } },
+  { sel: '[data-calclose]', area: 'calendar', when: (t) => t.dataset.calclose, run: (t) => { S.cal.selected = null; return render() } },
+  { sel: '[data-calmode]', area: 'calendar', when: (t) => t.dataset.calmode, run: (t) => { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) } },
+  { sel: '[data-calnav]', area: 'calendar', when: (t) => t.dataset.calnav !== undefined, run: (t) => { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) } },
+  { sel: '[data-cal-import]', area: 'calendar', when: (t) => t.dataset.calImport, run: (t) => { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() } },
+  { sel: '[data-schedule]', area: 'calendar', when: (t) => t.dataset.schedule, run: (t) => { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() } },
+  { sel: '[data-unschedule]', area: 'calendar', when: (t) => t.dataset.unschedule, run: (t) => { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() } },
+  { sel: '[data-call]', area: 'calls', when: (t) => t.dataset.call, run: (t) => { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) } },
+  { sel: '[data-up-fold]', area: 'calls', when: (t) => t.dataset.upFold !== undefined, run: (t) => { S.upOpen = !S.upOpen; return render() } },
+  { sel: '[data-up]', area: 'calls', when: (t) => t.dataset.up, run: (t) => { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) } },
+  { sel: '[data-today-import]', area: 'today', when: (t) => t.dataset.todayImport, run: (t) => {
     send({ cmd: 'calendar_import', id: t.dataset.todayImport })
     // Read again until it is in: the import runs in the background (about a minute).
     let n = 0
     const poll = () => loadToday().then(() => { render(); const x = ((S.today && S.today.day) || []).find((d) => d.event === t.dataset.todayImport); if (x && !x.call && (!x.import || x.import.busy) && ++n < 60) setTimeout(poll, 3000) })
     setTimeout(poll, 600)
     return
-  }
-  if (t.dataset.todayRetry) {
+  } },
+  { sel: '[data-today-retry]', area: 'today', when: (t) => t.dataset.todayRetry, run: (t) => {
     send({ cmd: 'write_notes', call: t.dataset.todayRetry })
     setTimeout(() => loadToday().then(render), 800)
     return
-  }
-  if (t.dataset.needsOpen !== undefined && t.dataset.needsOpen !== null && (t.dataset.needsOpen || t.dataset.chat)) {
+  } },
+  { sel: '[data-needs-open]', area: 'today', when: (t) => t.dataset.needsOpen !== undefined && t.dataset.needsOpen !== null && (t.dataset.needsOpen || t.dataset.chat), run: (t) => {
     // The Teams app on that message (its link as msteams:), else the chat.
     const u = t.dataset.needsOpen || `msteams:/l/chat/${encodeURIComponent(t.dataset.chat)}/0`
     return send({ cmd: 'open_url', url: u })
-  }
+  } },
   // Won't do: a dialog asks why, or who it's for (needed); confirmed, Claude notes it in the background (Asks).
-  if (t.dataset.needsWont) { S.needsDlg = { kind: 'wont', id: t.dataset.needsWont, note: '' }; render(); const n = $('#nd-note'); if (n) n.focus(); return }
-  if (t.dataset.needsWontOk) {
+  { sel: '[data-needs-wont]', area: 'today', when: (t) => t.dataset.needsWont, run: (t) => { S.needsDlg = { kind: 'wont', id: t.dataset.needsWont, note: '' }; render(); const n = $('#nd-note'); if (n) n.focus(); return } },
+  { sel: '[data-needs-wont-ok]', area: 'today', when: (t) => t.dataset.needsWontOk, run: (t) => {
     const id = t.dataset.needsWontOk, note = ((S.needsDlg && S.needsDlg.note) || '').trim()
     if (!note) { const n = $('#nd-note'); if (n) n.focus(); return }
     S.needsDlg = null
     if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
     todayWont(id, note)
     return render()
-  }
-  if (t.dataset.wontEdit) { const a = ((S.today && S.today.asks) || []).find((x) => x.id === t.dataset.wontEdit); S.wontEdit = { id: t.dataset.wontEdit, text: (a && a.draft && a.draft.text) || '' }; render(); const n = $('#wd-text'); if (n) n.focus(); return }
-  if (t.dataset.wontSend) {
+  } },
+  { sel: '[data-wont-edit]', area: 'today', when: (t) => t.dataset.wontEdit, run: (t) => { const a = ((S.today && S.today.asks) || []).find((x) => x.id === t.dataset.wontEdit); S.wontEdit = { id: t.dataset.wontEdit, text: (a && a.draft && a.draft.text) || '' }; render(); const n = $('#wd-text'); if (n) n.focus(); return } },
+  { sel: '[data-wont-send]', area: 'today', when: (t) => t.dataset.wontSend, run: (t) => {
     const id = t.dataset.wontSend, a = ((S.today && S.today.asks) || []).find((x) => x.id === id)
     const text = (S.wontEdit && S.wontEdit.id === id ? S.wontEdit.text : (a && a.draft && a.draft.text) || '').trim()
     if (!text) { const n = $('#wd-text'); if (n) n.focus(); return }
@@ -377,24 +381,24 @@ document.addEventListener('click', (e) => {
     send({ cmd: 'wont_send', ask: id, text })
     setTimeout(() => loadToday().then(render), 800)
     return render()
-  }
-  if (t.dataset.wontDrop) {
+  } },
+  { sel: '[data-wont-drop]', area: 'today', when: (t) => t.dataset.wontDrop, run: (t) => {
     const id = t.dataset.wontDrop
     send({ cmd: 'ask_drop', ask: id })
     if (S.wontEdit && S.wontEdit.id === id) S.wontEdit = null
     if (S.today && S.today.asks) S.today.asks = S.today.asks.filter((x) => x.id !== id)
     return render()
-  }
-  if (t.dataset.needsTodo) { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() }
+  } },
+  { sel: '[data-needs-todo]', area: 'today', when: (t) => t.dataset.needsTodo, run: (t) => { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() } },
   // ✦: My work's Claude dialog on the item itself (no task made) — Work on it or Yolo.
-  if (t.dataset.needsClaude) {
+  { sel: '[data-needs-claude]', area: 'today', when: (t) => t.dataset.needsClaude, run: (t) => {
     const item = (((S.today && S.today.needs) || {}).items || []).find((x) => x.id === t.dataset.needsClaude)
     if (!item) return
     S.claudeSend = { needs: item.id, project: item.thread || '', title: `${item.where || ''} — ${item.line || ''}`, today: true, open: true }
     if (!TPL.data) loadTemplates().then(render)
     return render()
-  }
-  if (t.dataset.needsTodoOk) {
+  } },
+  { sel: '[data-needs-todo-ok]', area: 'today', when: (t) => t.dataset.needsTodoOk, run: (t) => {
     const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
     if (!thread) { const el = $('#nd-thread'); if (el) el.focus(); return }
     send({ cmd: 'needs_decide', id, how: 'todo', thread, title })
@@ -402,33 +406,33 @@ document.addEventListener('click', (e) => {
     if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
     setTimeout(() => loadToday().then(render), 800)
     return render()
-  }
-  if (t.dataset.needsRead) {
+  } },
+  { sel: '[data-needs-read]', area: 'today', when: (t) => t.dataset.needsRead, run: (t) => {
     const item = ((S.today.needs || {}).items || []).find((x) => x.id === t.dataset.needsRead)
     const c = S.needsDlg = { kind: 'mail', id: t.dataset.needsRead, message: item && item.message, mail: null }
     get('api/needs/mail?id=' + encodeURIComponent(c.message || '')).then((m) => { if (S.needsDlg === c) { c.mail = m; render() } })
     return render()
-  }
-  if (t.dataset.needsSend) {
+  } },
+  { sel: '[data-needs-send]', area: 'today', when: (t) => t.dataset.needsSend, run: (t) => {
     const c = S.needsDlg, text = (($('#nd-reply') || {}).value || '').trim()
     if (!c || !text) return
     send({ cmd: 'needs_reply', id: c.id, message: c.message, text, all: t.dataset.all === '1' })
     S.needsDlg = null
     if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== c.id)
     return render()
-  }
-  if (t.dataset.needsOutlook) return send({ cmd: 'open_url', url: t.dataset.needsOutlook })
-  if (t.dataset.needsOff && (t.tagName === 'BUTTON' || e.target === t)) { S.needsDlg = null; return render() }
-  if (t.dataset.todayAskoff) { S.todayAskId = null; return render() }
-  if (t.dataset.todayClose) {
+  } },
+  { sel: '[data-needs-outlook]', area: 'today', when: (t) => t.dataset.needsOutlook, run: (t) => send({ cmd: 'open_url', url: t.dataset.needsOutlook }) },
+  { sel: '[data-needs-off]', area: 'today', when: (t, e) => t.dataset.needsOff && (t.tagName === 'BUTTON' || e.target === t), run: (t) => { S.needsDlg = null; return render() } },
+  { sel: '[data-today-askoff]', area: 'today', when: (t) => t.dataset.todayAskoff, run: (t) => { S.todayAskId = null; return render() } },
+  { sel: '[data-today-close]', area: 'today', when: (t) => t.dataset.todayClose, run: (t) => {
     S.todayClose = { project: t.dataset.project, node: t.dataset.todayClose, title: t.dataset.title }
     render()
     const n = $('#td-close-note'); if (n) n.focus()
     return
-  }
+  } },
   // Cancel, or a click on the dimmed page around the dialog (not inside it).
-  if (t.dataset.todayKeep && (t.tagName === 'BUTTON' || e.target === t)) { S.todayClose = null; return render() }
-  if (t.dataset.todayDone) {
+  { sel: '[data-today-keep]', area: 'today', when: (t, e) => t.dataset.todayKeep && (t.tagName === 'BUTTON' || e.target === t), run: (t) => { S.todayClose = null; return render() } },
+  { sel: '[data-today-done]', area: 'today', when: (t) => t.dataset.todayDone, run: (t) => {
     const note = ($('#td-close-note') || {}).value || ''
     S.todayClose = null
     send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' }, note: note.trim() || undefined } })
@@ -436,95 +440,110 @@ document.addEventListener('click', (e) => {
     if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
     setTimeout(() => loadToday().then(render), 800)
     return render()
-  }
-  if (t.dataset.todaySeen) { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() }
-  if (t.dataset.prepWrite) {
+  } },
+  { sel: '[data-today-seen]', area: 'today', when: (t) => t.dataset.todaySeen, run: (t) => { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() } },
+  { sel: '[data-prep-write]', area: 'prep', when: (t) => t.dataset.prepWrite, run: (t) => {
     send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite })
     // From the calendar: open it in Calls, where it shows as it is written.
     if (t.dataset.prepOpen) { S.cal.selected = null; return go(`upcoming/${t.dataset.prepWrite}`) }
     setTimeout(() => loadUpcoming().then(render), 800); return
-  }
-  if (t.dataset.evPrep) {
+  } },
+  { sel: '[data-ev-prep]', area: 'prep', when: (t) => t.dataset.evPrep, run: (t) => {
     // A recorded meeting's prep is its call's Prep tab; one still to come is in Coming up today.
     if (t.dataset.evCall) return go(`call/${t.dataset.evCall}/prep`)
     const ev = S.cal.data && (S.cal.data.events || []).find((x) => x.prep && x.prep.id === t.dataset.evPrep)
     S.cal.selected = null
     return ev && ev.recorded ? go(`call/${ev.recorded.name}/prep`) : go(`upcoming/${t.dataset.evPrep}`)
-  }
-  if (t.dataset.minutesOf) return go(`call/${t.dataset.minutesOf}/notes`)
-  if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
-  if (t.dataset.at) { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) }
-  if (t.dataset.frame) { S.lightbox = t.dataset.frame; return render() }
-  if (t.dataset.close) { S.lightbox = null; return render() }
-  if (t.dataset.copy) { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return }
-  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() })
-  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() })
-  switch (t.dataset.cmd) {
-    case 'record': return send({ cmd: 'record', languages: recordLang() })
-    case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang() })
-    case 'stop': S.stopAsk = false; render(); return send({ cmd: 'stop' })
-    // A memo stops at once (nothing else is recorded); a call asks first.
-    case 'stop-ask': if ((S.state || {}).recording_memo) { S.stopAsk = false; render(); return send({ cmd: 'stop' }) } S.stopAsk = true; return render()
-    case 'stop-keep': S.stopAsk = false; return render()
-    case 'list-toggle': S.listOpen = !S.listOpen; return render()
-    case 'call-menu': S.menuOpen = !S.menuOpen; return render()
-    case 'later-menu': S.laterOpen = !S.laterOpen; return render()
-    case 'later-15': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: 15 })
-    case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
-    case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
-    case 'claude-panel': return claudePanel()
-    // The account chip: open the Claude session, never fold it (the status bar's Claude toggles).
-    case 'claude-open': return claudePanel('claude-folder')
-    case 'bar-flip': return flipBar()
-    case 'win-min': return send({ cmd: 'window_min' })
-    case 'win-max': return send({ cmd: 'window_zoom' })
-    case 'win-close': return send({ cmd: 'close_request' })
-    case 'ask-claude': return askClaudeAboutCall()
-    case 'notes-raw': S.notesRaw = true; return render()
-    case 'notes-timeline': S.notesRaw = false; return render()
-    case 'note-flag': return addNote('flag')
-    case 'note-edit-save': return saveNoteEdit()
-    case 'note-edit-cancel': S.noteEdit = null; return render()
-    case 'reveal': render(); return send({ cmd: 'reveal', call: S.selected })
-    case 'show-log': return send({ cmd: 'show_log', call: S.selected })
-    case 'notes-now': { send({ cmd: 'notes_now', call: S.selected }); if (S.call && S.call.notes_run) { S.call.notes_run.now = true; S.call.notes_run.message = 'Starting now…' } return render() }
-    case 'write-notes': {
-      // The run reads the user's notes: they are saved first, or it doesn't start.
-      const call = S.selected
-      // A choice after a policy file Echo couldn't read (#404): another profile, or without that file.
-      const pid = t.dataset.profile || (S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null)
-      const without = t.dataset.withoutPolicy || undefined
-      // A note typed or edited and not added yet is part of them.
-      if (commitPendingNotes()) render()
-      NotesSync.flush(call).then(() => {
-        send({ cmd: 'write_notes', call, profile: pid || undefined, without_policy: without })
-        if (S.call && S.selected === call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
-      }, (err) => { S.notice = `Your notes couldn't be saved (${err.message}), so the minutes weren't started.`; render() })
-      return
+  } },
+  { sel: '[data-minutes-of]', area: 'calls', when: (t) => t.dataset.minutesOf, run: (t) => go(`call/${t.dataset.minutesOf}/notes`) },
+  { sel: '[data-tab]', area: 'call', when: (t) => t.dataset.tab, run: (t) => go(`call/${S.selected}/${t.dataset.tab}`) },
+  { sel: '[data-at]', area: 'call', when: (t) => t.dataset.at, run: (t) => { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) } },
+  { sel: '[data-frame]', area: 'call', when: (t) => t.dataset.frame, run: (t) => { S.lightbox = t.dataset.frame; return render() } },
+  { sel: '[data-close]', area: 'call', when: (t) => t.dataset.close, run: (t) => { S.lightbox = null; return render() } },
+  { sel: '[data-copy]', area: 'page', when: (t) => t.dataset.copy, run: (t) => { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return } },
+  { sel: '[data-arm]', area: 'calls', when: (t) => t.dataset.arm !== undefined, run: (t) => send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() }) },
+  { sel: '[data-join]', area: 'calendar', when: (t) => t.dataset.join !== undefined, run: (t) => send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() }) },
+  // The `data-cmd` buttons: recording, the window's own, the open call's. No case: nothing.
+  { sel: '[data-cmd]', area: 'commands', when: (t) => t.dataset.cmd !== undefined, run: (t) => {
+    switch (t.dataset.cmd) {
+      case 'record': return send({ cmd: 'record', languages: recordLang() })
+      case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang() })
+      case 'stop': S.stopAsk = false; render(); return send({ cmd: 'stop' })
+      // A memo stops at once (nothing else is recorded); a call asks first.
+      case 'stop-ask': if ((S.state || {}).recording_memo) { S.stopAsk = false; render(); return send({ cmd: 'stop' }) } S.stopAsk = true; return render()
+      case 'stop-keep': S.stopAsk = false; return render()
+      case 'list-toggle': S.listOpen = !S.listOpen; return render()
+      case 'call-menu': S.menuOpen = !S.menuOpen; return render()
+      case 'later-menu': S.laterOpen = !S.laterOpen; return render()
+      case 'later-15': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: 15 })
+      case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
+      case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
+      case 'claude-panel': return claudePanel()
+      // The account chip: open the Claude session, never fold it (the status bar's Claude toggles).
+      case 'claude-open': return claudePanel('claude-folder')
+      case 'bar-flip': return flipBar()
+      case 'win-min': return send({ cmd: 'window_min' })
+      case 'win-max': return send({ cmd: 'window_zoom' })
+      case 'win-close': return send({ cmd: 'close_request' })
+      case 'ask-claude': return askClaudeAboutCall()
+      case 'notes-raw': S.notesRaw = true; return render()
+      case 'notes-timeline': S.notesRaw = false; return render()
+      case 'note-flag': return addNote('flag')
+      case 'note-edit-save': return saveNoteEdit()
+      case 'note-edit-cancel': S.noteEdit = null; return render()
+      case 'reveal': render(); return send({ cmd: 'reveal', call: S.selected })
+      case 'show-log': return send({ cmd: 'show_log', call: S.selected })
+      case 'notes-now': { send({ cmd: 'notes_now', call: S.selected }); if (S.call && S.call.notes_run) { S.call.notes_run.now = true; S.call.notes_run.message = 'Starting now…' } return render() }
+      case 'write-notes': {
+        // The run reads the user's notes: they are saved first, or it doesn't start.
+        const call = S.selected
+        // A choice after a policy file Echo couldn't read (#404): another profile, or without that file.
+        const pid = t.dataset.profile || (S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null)
+        const without = t.dataset.withoutPolicy || undefined
+        // A note typed or edited and not added yet is part of them.
+        if (commitPendingNotes()) render()
+        NotesSync.flush(call).then(() => {
+          send({ cmd: 'write_notes', call, profile: pid || undefined, without_policy: without })
+          if (S.call && S.selected === call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
+        }, (err) => { S.notice = `Your notes couldn't be saved (${err.message}), so the minutes weren't started.`; render() })
+        return
+      }
+      case 'open-minutes': render(); return send({ cmd: 'open_minutes', call: S.selected })
+      case 'reveal-minutes': render(); return send({ cmd: 'reveal_minutes', call: S.selected })
+      case 'stamp': return stampNotes()
+      case 'notes-retry': NotesSync.save(S.selected); return render()
+      case 'kept-ok': NotesSync.clearKept(S.selected); return render()
+      case 'notice-ok': S.notice = null; return render()
+      case 'close-retry': S.closeError = null; render(); return send({ cmd: 'close_request' })
+      case 'close-now': return send({ cmd: 'close_now' })
+      case 'live-pause': return send({ cmd: 'live_pause', call: S.selected })
+      case 'live-resume': return send({ cmd: 'live_resume', call: S.selected })
+      case 'ask-delete': S.confirmDelete = true; return render()
+      case 'cancel-delete': S.confirmDelete = false; return render()
+      case 'delete': {
+        const name = S.selected
+        S.confirmDelete = false; S.selected = null; S.call = null
+        // A note being typed or edited for it goes with it.
+        if (sameCall(S.noteDraftCall, name)) { S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null }
+        if (S.noteEdit && sameCall(S.noteEdit.call, name)) S.noteEdit = null
+        S.calls = (S.calls || []).filter((c) => c.name !== name)
+        send({ cmd: 'delete', call: name })
+        return go('calls')
+      }
     }
-    case 'open-minutes': render(); return send({ cmd: 'open_minutes', call: S.selected })
-    case 'reveal-minutes': render(); return send({ cmd: 'reveal_minutes', call: S.selected })
-    case 'stamp': return stampNotes()
-    case 'notes-retry': NotesSync.save(S.selected); return render()
-    case 'kept-ok': NotesSync.clearKept(S.selected); return render()
-    case 'notice-ok': S.notice = null; return render()
-    case 'close-retry': S.closeError = null; render(); return send({ cmd: 'close_request' })
-    case 'close-now': return send({ cmd: 'close_now' })
-    case 'live-pause': return send({ cmd: 'live_pause', call: S.selected })
-    case 'live-resume': return send({ cmd: 'live_resume', call: S.selected })
-    case 'ask-delete': S.confirmDelete = true; return render()
-    case 'cancel-delete': S.confirmDelete = false; return render()
-    case 'delete': {
-      const name = S.selected
-      S.confirmDelete = false; S.selected = null; S.call = null
-      // A note being typed or edited for it goes with it.
-      if (sameCall(S.noteDraftCall, name)) { S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null }
-      if (S.noteEdit && sameCall(S.noteEdit.call, name)) S.noteEdit = null
-      S.calls = (S.calls || []).filter((c) => c.name !== name)
-      send({ cmd: 'delete', call: name })
-      return go('calls')
-    }
-  }
+  } },
+)
+
+document.addEventListener('click', (e) => {
+  // Any click closes the call's ⋯ menu (its own button toggles it).
+  const menuWas = S.menuOpen
+  if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
+  if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
+  // The sidebar open over a narrow page closes on a click beside it.
+  if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
+  const hit = clickFor(e.target, e)
+  if (!hit) { if (menuWas) render(); return }
+  if (hit.c) hit.c.run(hit.t, e)
 })
 
 // The user's notes: saved 1 s after the last keystroke, and when the editor loses focus (a tab
