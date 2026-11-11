@@ -9,6 +9,7 @@ export function apply(ctx) {
     { title: '<img src=x onerror=alert(1)> kept as text', link: 'https://evil.example' },
   ] }))
   ctx.widgets.provide('broken', () => ({ label: 'no value here' }))
+  ctx.widgets.provide('board', () => ({ cols: [{ name: 'To do', count: 5 }, { name: 'Doing', count: 2 }, { name: '<i>Done</i>', count: 9 }] }))
   ctx.widgets.provide('trend', () => ({ type: 'bar', unit: 'calls', points: [
     { label: 'Mon', value: 3 }, { label: 'Tue', value: 7 }, { label: 'Wed', value: 5 }, { label: 'Thu', value: 2 }, { label: 'Fri', value: 4 },
   ], note: 'Busiest on Tuesday.' }))

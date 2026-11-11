@@ -17,7 +17,7 @@ tags: [today, widgets, plugins, untrusted-text]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first; CLI steps after `. <dir>/env`; the browser 1440 × 1000
-- The test plugin installed as in today/TC-029 step 1 (`widget-demo` 0.3.0)
+- The test plugin installed as in today/TC-029 step 1 (`widget-demo` 0.4.0)
 
 ## Steps
 

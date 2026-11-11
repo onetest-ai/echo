@@ -4,6 +4,8 @@
 // Plugins, ⌘K actions. `ctx.call` runs a command of its host half (`/api/plugin/<id>/call/<command>`).
 // Everything a plugin added goes when it is switched off or removed (`unloadPlugin`).
 const Plugins = {
+  /** Its `page` widgets' drawing, by widget id (`plugin:<id>:<widget>`): ({data, size, theme}) → HTML. */
+  widgetDraw: {},
   /** slot name → [{plugin, id, label, icon, when(target), run(target)}] */
   slots: {},
   /** plugin id → {render() → html} */
@@ -39,6 +41,10 @@ function pluginCtx(id) {
       add: (slot, item) => { if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`); add(Plugins.slots[slot] = Plugins.slots[slot] || [], item) },
     },
     panels: { add: (v) => { PANEL_VIEWS.push({ area: 'right', ...v, id: `${id}:${v.id}`, plugin: id }); render() } },
+    /** Its `page` widgets (kind `page` in its manifest): draw(widget, ({data, size, theme}) => HTML) — data from its
+     *  host half (provide / set); every text through `ctx.ui.esc`. Draw from `data` only (the same data, the same HTML:
+     *  else Today is drawn again on every poll); a render() asked for while drawing is ignored. */
+    widgets: { draw: (widget, fn) => { Plugins.widgetDraw[`plugin:${id}:${widget}`] = fn; render() } },
     settings: {
       /** Its card in Settings → Plugins. */
       add: (v) => { Plugins.settings[id] = v; render() },
@@ -74,7 +80,7 @@ function pluginCtx(id) {
       graph: GraphView,
       newGraph: () => new graphology.Graph(),
     },
-    render: () => render(),
+    render: () => { if (!Plugins.drawing) render() },
   }
 }
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
@@ -109,6 +115,7 @@ function unloadPlugin(id) {
   Plugins.palette = Plugins.palette.filter((x) => x.plugin !== id)
   Plugins.sections = Plugins.sections.filter((x) => x.plugin !== id)
   delete Plugins.settings[id]
+  for (const k of Object.keys(Plugins.widgetDraw)) if (k.startsWith(`plugin:${id}:`)) delete Plugins.widgetDraw[k]
   for (let i = PANEL_VIEWS.length - 1; i >= 0; i--) if (PANEL_VIEWS[i].plugin === id) PANEL_VIEWS.splice(i, 1)
   delete Plugins.loaded[id]
 }
