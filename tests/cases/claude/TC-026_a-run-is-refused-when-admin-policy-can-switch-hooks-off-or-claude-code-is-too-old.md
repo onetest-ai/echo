@@ -17,7 +17,7 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 
 ## Preconditions
 - Standard data set: `tests/fixtures/serve.sh up <dir> <port> --set standard`. Every `echoctl` command is `target/debug/echoctl …` after `. <dir>/env`; `D="$(dirname "$ECHOCTL_HOME")"`
-- `F="$ECHOCTL_CONFIG_DIR/claude/work/remote-settings.json"` (server-managed settings in the profile's folder: a policy source Echo reads; no machine-wide file is touched)
+- `F="$ECHOCTL_CONFIG_DIR/claude/work/remote-settings.json"` (server-managed settings in the profile's folder: a policy source Echo reads; no machine-wide file is touched); `mkdir -p "$(dirname "$F")"` (the data has no such folder yet)
 - `<call>` is `$(ls -d $ECHOCTL_HOME/calls/*-initrode-intro)` (transcribed, no minutes, profile **Claude · work**)
 - **A fake Claude Code that tells its version**, in place of the data's fake: `mv "$D/bin/claude" "$D/bin/claude.fake"`, then write `$D/bin/claude` (`chmod +x`):
   ```sh
@@ -58,9 +58,9 @@ tags: [claude, minutes, guard, hooks, policy, cli]
 | 2 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence without the `(log: …)` part; the fake never started (no "fake 026 stopped here") |
 | 3 | `echo '{"allowManagedHooksOnly": true}' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same `Error: the minutes run needs Echo's guard …` with `(<$F>)` |
 | 4 | `echo 'not json' > "$F"`, then `target/debug/echoctl notes <call> --wait` | The same sentence, ending `(<$F> can't be read)` (to confirm with the user, see Notes) |
-| 5 | `echo '{"model": "sonnet"}' > "$F"; rm -f "$D/started"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` (the fake's version is 2.1.200) | The policy check passes, then the run is refused for the version, before Claude Code was given anything: `Error: Claude Code 2.1.200 is too old for minutes runs …`, telling to update Claude Code to 2.1.295 or later (how: `claude update`), then `exit 1`; the message does not say "Try again" or point at a button (this is the terminal); `ls "$D/started"` finds nothing (no run was started, no prompt given); no "fake 026 stopped here" |
+| 5 | `echo '{"model": "sonnet"}' > "$F"; rm -f "$D/started"`, then `target/debug/echoctl notes <call> --wait; echo "exit $?"` (the fake's version is 2.1.200) | The policy check passes, then the run is refused for the version, before Claude Code was given anything: `Error: … Claude Code 2.1.200 is too old to write minutes …`, telling to update Claude Code to 2.1.295 or later (how: `claude update`), then `exit 1`; the message does not say "Try again" or point at a button (this is the terminal); `ls "$D/started"` finds nothing (no run was started, no prompt given); no "fake 026 stopped here" |
 | 6 | `python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(r['state'], r['message'])" <call>/notes-run.json` | `failed ` + the same sentence about 2.1.200 and updating to 2.1.295 or later |
-| 7 | `echo 2.1.294 > "$D/fake-version"; rm -f "$D/started"; target/debug/echoctl notes <call> --wait; ls "$D/started"` | `Error: Claude Code 2.1.294 is too old for minutes runs …` with the same advice; `ls` finds nothing |
+| 7 | `echo 2.1.294 > "$D/fake-version"; rm -f "$D/started"; target/debug/echoctl notes <call> --wait; ls "$D/started"` | `Error: … Claude Code 2.1.294 is too old to write minutes …` with the same advice; `ls` finds nothing |
 | 8 | `echo 2.1.295 > "$D/fake-version"; target/debug/echoctl notes <call> --wait; cat "$D/started"` | `Error: fake 026 stopped here (log: …)`: a Claude Code that is new enough is not stopped; `$D/started` now exists (the run reached Claude Code) |
 
 ## Expected Final State
@@ -71,6 +71,5 @@ A policy that switches hooks off (or can't be read) and a Claude Code older than
 
 ## Notes
 - To confirm with the user: step 4 (an unreadable policy file refuses the run) is not stated in F-CC-02's text ("admin policy can switch hooks off"); kept as the safe reading.
-- Steps 5–7 FAIL today: the version is only read from the run's first output line, after the run has started and the prompt has gone in, and the CLI message says "click Try again" (window wording). Issue #400 (A too-old Claude Code is found only after the minutes run has started). The case asserts the feature's text (F-CC-02: a run is refused when Claude Code is older than Echo needs), so it fails until #400 is fixed.
 - Machine-wide policy (`managed-settings.json` under `/Library/Application Support/ClaudeCode`, macOS managed preferences, Windows policy keys) is read by the same check but needs root: a person creates the file with `sudo` and removes it after, on test data only.
 - Plugin runs and thread syncs use the same checks (`claudejob`, `projectsync`); this case checks the minutes run.

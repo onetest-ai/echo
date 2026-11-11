@@ -237,7 +237,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             }
         }
     }
-    let child = notes::admit_child(|| {
+    let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
         if let Some(t) = &spec.task {
@@ -252,7 +252,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             c.env(guard::RUN_SKILLS, crate::grants::skill_names(&session_plugins).join("\n"));
         }
         Ok(c.spawn()?)
-    });
+    }));
     let out = child.and_then(|c| crate::projectsync::finish_run_result(c, &mut log, spec.timeout, "run a plugin's job", "Echo quit during the run"));
     if let Some(f) = settings_file {
         let _ = fs::remove_file(f);

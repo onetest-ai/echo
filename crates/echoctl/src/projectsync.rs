@@ -221,6 +221,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
     a.push("Skill(echo:project-sync)".into());
     a.push(format!("Read({}/**)", abs(&dunce::canonicalize(plugin.join("skills").join("project-sync")).unwrap_or_else(|_| plugin.join("skills").join("project-sync")))));
     a.extend(clis.iter().flat_map(|cli| guard::PROJECT_STEPS.iter().map(move |s| format!("Bash({cli} project ledger {id} {s}:*)"))));
+    crate::ai::guard_ready(profile, cwd, "sync a thread")?;
     let child = notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, cwd, false)?;
         c.env(guard::RUN_MODE, "project").env(guard::RUN_LEDGER, &ledger).env(guard::RUN_DIR, run_dir).env(guard::RUN_PROJECT, id).env(guard::RUN_CLIS, clis.join("\n"));

@@ -508,8 +508,8 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
     let managed = p.kind.managed();
     let env = managed.then(|| routing_env(p));
     let mut args = args.to_vec();
-    // Model runs load only the profile's own settings; `claude auth …` takes no such option.
-    if managed && args.first().is_none_or(|a| a != "auth") {
+    // Model runs load only the profile's own settings; `claude auth …` and `--version` take no such option.
+    if managed && args.first().is_none_or(|a| a != "auth" && a != "--version") {
         args.extend(["--setting-sources".into(), "user".into()]);
     }
     let mut c = if use_shell {
@@ -581,6 +581,21 @@ pub fn prepare_claude(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> 
     let mut c = build_command(p, &claude, args, cwd, stdin, use_shell() && fake.is_none());
     detach(&mut c);
     Ok(c)
+}
+
+/// Before a guarded run (minutes, a thread's sync, a routine's or plugin's job): is the Claude Code `p` would start new
+/// enough for the guard (`guard::MIN_CLAUDE`)? Asked with `--version`, before it is started or given anything (#400).
+pub fn guard_ready(p: &Profile, cwd: &Path, what: &str) -> Result<()> {
+    let out = prepare_claude(p, &["--version".into()], cwd, false)?.stdin(std::process::Stdio::null()).output()?;
+    // Its "2.1.310 (Claude Code)", wherever a login shell's own output put it.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v = text.split_whitespace().find(|w| w.split('.').count() == 3 && w.split('.').all(|n| n.parse::<u32>().is_ok())).unwrap_or("").to_string();
+    if crate::guard::new_enough(&v) {
+        return Ok(());
+    }
+    let [a, b, c] = crate::guard::MIN_CLAUDE;
+    let found = if v.is_empty() { "(of unknown version)".to_string() } else { v };
+    bail!("Claude Code {found} is too old to {what} — update it (`claude update`) to {a}.{b}.{c} or later")
 }
 
 /// Claude Code for `p` in a terminal (the Echo window's Claude sessions): the command and
@@ -839,6 +854,7 @@ pub mod fake {
 d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
 case "$1 $2" in
+"--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
 "-p "*) case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
@@ -978,6 +994,29 @@ mod tests {
         drop(s);
         assert_eq!(lease(&p).unwrap().token, token, "the new token is what jobs read");
         assert_eq!(token_now(&p).unwrap(), token);
+    }
+
+    /// #400: a guarded run asks Claude Code's version first; one too old (or of no version) is refused before it is
+    /// started or given anything, and says how to update — no window's button named.
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_code_too_old_for_the_guard_is_refused_before_it_gets_anything() {
+        let (_env, root) = crate::paths::testenv::folders("ai-guard-ready");
+        let _fake = fake::install(&root);
+        let p = fake::profile("old", None, &fake::signed_in("pat@example.com"));
+        assert!(guard_ready(&p, &root, "write minutes").is_ok(), "the fake's own version is new enough");
+        fs::write(fake::file(&p, "version"), "2.1.200 (Claude Code)\n").unwrap();
+        let e = guard_ready(&p, &root, "write minutes").unwrap_err().to_string();
+        let [a, b, c] = crate::guard::MIN_CLAUDE;
+        assert!(e.contains("Claude Code 2.1.200 is too old to write minutes") && e.contains(&format!("{a}.{b}.{c} or later")), "{e}");
+        assert!(e.contains("claude update") && !e.contains("Try again"), "{e}");
+        fs::write(fake::file(&p, "version"), "").unwrap();
+        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
+        fs::write(fake::file(&p, "version"), format!("{a}.{b}.{c} (Claude Code)\n")).unwrap();
+        assert!(guard_ready(&p, &root, "write minutes").is_ok());
+        for f in ["p.stdin", "p.turns"] {
+            assert!(!fake::file(&p, f).exists(), "nothing was given to Claude Code: {f}");
+        }
     }
 
     #[cfg(unix)]
