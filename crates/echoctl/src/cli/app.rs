@@ -301,11 +301,20 @@ pub struct ConfigArgs {
     /// Model for live notes and quick questions during a call: haiku | <model id>
     #[arg(long)]
     pub live_model: Option<String>,
+    /// Where mail drafts go (`echoctl compose`, and the runs Echo starts): m365 (Microsoft 365 Drafts), mail-app (the
+    /// default mail app), app:<app> (macOS: its name; Windows: its program's full path), or default
+    #[arg(long)]
+    pub drafts: Option<String>,
 }
 
 pub fn config(args: ConfigArgs) -> Result<()> {
-    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } = args;
+    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model, drafts } = args;
     let mut cfg = config::Config::load()?;
+    if let Some(d) = drafts {
+        // The app named here is run with each draft: never chosen by a run Echo started.
+        anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: where drafts go is the user's to choose");
+        cfg.drafts = crate::drafts::setting(&d)?;
+    }
     if let Some(m) = live_model {
         cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");
     }

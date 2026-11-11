@@ -6,6 +6,7 @@ data: small
 cases:
   - tests/cases/cli/TC-001_project-tasks-piles.md
   - tests/cases/cli/TC-002_status-without-app.md
+  - tests/cases/cli/TC-020_compose-puts-the-draft-where-drafts-go.md
 auto: [tests/auto/specs/S-04.spec.mjs]
 ---
 
@@ -25,6 +26,7 @@ auto: [tests/auto/specs/S-04.spec.mjs]
 |---|------|------------|-----------|
 | 1 | `cli/TC-001_project-tasks-piles.md` | — | — |
 | 2 | `cli/TC-002_status-without-app.md` | — | — |
+| 3 | `cli/TC-020_compose-puts-the-draft-where-drafts-go.md` | — | — |
 
 ## Notes
 - CLI only: no browser needed, no prelude. Two read-only commands on one build: nothing to share or skip.

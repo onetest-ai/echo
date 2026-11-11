@@ -666,14 +666,51 @@ function todayYolo(c, skill, text) {
   const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 300) setTimeout(poll, 5000) })
   setTimeout(poll, 1000)
 }
+// ── drafts: where mail drafts go (#135) — the setting's line and a run's draft, as words (no DOM: `drafts.test.mjs`) ──
+const DRAFTS_WHERE = { m365: 'Microsoft 365 Drafts', 'mail-app': 'the default mail app', app: 'the app you chose' }
+/** The setting's line: where drafts go now, and whether that is Echo's default. */
+const draftsNow = (st) => {
+  const now = st.drafts ? (st.drafts.startsWith('app:') ? st.drafts.slice(4) : DRAFTS_WHERE[st.drafts] || st.drafts) : DRAFTS_WHERE[st.drafts_now] || DRAFTS_WHERE['mail-app']
+  return `Mail Claude writes for you — on its own (Yolo) or with echoctl compose — waits there as a draft; you send it. Now: ${now}${st.drafts ? '' : st.drafts_now === 'm365' ? ' (the default when Microsoft 365 is connected)' : ' (the default)'}.`
+}
+/** One draft a run made, as its outcome says it: where, to whom, about what; why it isn't where you chose. */
+const draftLine = (d) => {
+  const where = d.where === 'm365' ? 'A draft in Microsoft 365 Drafts' : d.where === 'app' ? `A draft opened in ${d.app || 'your mail app'}` : 'A draft opened in your mail app'
+  const what = `${d.subject ? ` — “${d.subject}”` : ''}${(d.to || []).length ? ` to ${d.to.join(', ')}` : ''}`
+  return `${where}${what}${d.note ? ` (${d.note})` : ''}`
+}
+// end of the drafts block
+
 /** The last ask's outcome above My work: what Claude changed (Undo), why it didn't, or that it is working. */
 function todayAskBar() {
   const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
   if (!S.todayAskId) return ''
   // A status (read out as it changes), named for what it reports.
   if (!a || a.state === 'working') return '<div class="td-askbar" role="status" aria-label="Yolo"><span class="set-sub">Yolo: Claude is on it…</span></div>'
-  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+  // Its mail drafts (#135): where each is, a Microsoft 365 one linked (only an https link).
+  const drafts = (a.drafts || []).map((d) => `<br><span class="set-sub">${esc(draftLine(d))}</span>${d.where === 'm365' && /^https:\/\//i.test(d.url || '') ? ` <a class="wp-link" href="${esc(d.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}`).join('')
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
+
+/** Settings → General → Where drafts go: Microsoft 365 Drafts, the default mail app, or an app named here. */
+function draftsRow(st) {
+  const win = /Windows/.test(navigator.userAgent)
+  const cur = st.drafts ? (st.drafts.startsWith('app:') ? 'app' : st.drafts) : ''
+  const pick = S.draftsApp || cur === 'app'
+  const opts = [['', "Echo's default"], ['m365', 'Microsoft 365 Drafts'], ['mail-app', 'The default mail app'], ['app', 'Another app…']]
+  const sel = `<select data-drafts aria-label="Where drafts go">${opts.map(([v, l]) => `<option value="${v}"${(pick ? 'app' : cur) === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+  const app = pick ? ` <input class="wp-in" data-drafts-app value="${esc(cur === 'app' ? st.drafts.slice(4) : '')}" placeholder="${win ? 'Its program: C:\\…\\OUTLOOK.EXE' : 'Its name: Microsoft Outlook'}" aria-label="The mail app"${S.draftsApp ? ' autofocus' : ''}>` : ''
+  return setRow('Where drafts go', esc(draftsNow(st)), sel + app)
+}
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.matches && t.matches('[data-drafts]')) {
+    if (t.value === 'app') { S.draftsApp = true; return render() }
+    S.draftsApp = false
+    return setSetting('drafts', t.value || 'default')
+  }
+  if (t.matches && t.matches('[data-drafts-app]') && t.value.trim()) { S.draftsApp = false; return setSetting('drafts', `app:${t.value.trim()}`) }
+})
 
 /** The Claude dialog for a task, two actions on the same skill and words: Work on it — into the Claude panel's live
  *  session, typed there as if by the user (`/my-skills:<id>`, the user's words); the conversation goes on there.

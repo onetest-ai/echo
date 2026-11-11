@@ -794,29 +794,6 @@ pub fn ensure_me_profile() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `echoctl compose`: open a pre-filled email in the default mail app (never sends).
-pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path) -> Result<()> {
-    let body = fs::read_to_string(body_file).with_context(|| format!("reading {}", body_file.display()))?;
-    let enc = |s: &str| -> String {
-        s.bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'@' => (b as char).to_string(),
-                _ => format!("%{b:02X}"),
-            })
-            .collect()
-    };
-    let mut url = format!("mailto:{}?subject={}&body={}", to.iter().map(|t| enc(t)).collect::<Vec<_>>().join(","), enc(subject), enc(&body));
-    if !cc.is_empty() {
-        url.push_str(&format!("&cc={}", cc.iter().map(|t| enc(t)).collect::<Vec<_>>().join(",")));
-    }
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&url).status()?;
-    #[cfg(windows)]
-    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
-    println!("opened a draft to {} in the mail app — review and send it there", to.join(", "));
-    Ok(())
-}
-
 /// `echoctl frames <call> --keep a.jpg,b.jpg | none`: keep only the frames the notes use,
 /// delete the rest (talking heads, Teams UI, near-duplicates) and rewrite `frames.jsonl`.
 pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {

@@ -177,6 +177,13 @@
     "set.claude_code",
     "set.health"
    ]
+  },
+  {
+   "id": "F-SET-20",
+   "feature": "General → Where drafts go: Echo's default (Microsoft 365 Drafts when connected, else the default mail app), Microsoft 365 Drafts, the default mail app or another app (macOS: its name; Windows: its program); the line says where drafts go now",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

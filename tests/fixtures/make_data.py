@@ -674,7 +674,9 @@ def setup_env(d, stale_plugin=True, test_market=True):
              "ECHOCTL_NOTES_NO_SHELL": "1",
              # `open` only logs: a run never brings up a browser, a Finder window or the installed Echo (`echoctl up`,
              # the restart after a data-folder change).
-             "ECHOCTL_TEST_OPEN_LOG_ONLY": "1"}
+             "ECHOCTL_TEST_OPEN_LOG_ONLY": "1",
+             # A development build writes a mail draft's mailto: link here instead of opening a mail app (`drafts::open`, any OS).
+             "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log"}
     d.env.update(extra)
     with open(f"{b}/env", "a") as f:
         f.write(f"export PATH={sh(b + '/bin')}:\"$PATH\" " + " ".join(f"{k}={sh(v)}" for k, v in extra.items() if k != "PATH") + "\n")

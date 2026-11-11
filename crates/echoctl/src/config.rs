@@ -80,6 +80,10 @@ pub struct Config {
     /// (#76). Default on (unset = on); off only when the user turned it off — and only then written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_title_bar: Option<bool>,
+    /// Where a mail draft goes (`drafts::setting`): `m365`, `mail-app` or `app:<name or program>`. Unset: Microsoft 365
+    /// Drafts when signed in, else the default mail app (#135).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drafts: Option<String>,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

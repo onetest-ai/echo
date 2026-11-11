@@ -62,6 +62,8 @@ node crates/echoctl/ui/selftest-terminal.test.mjs
 node crates/echoctl/ui/tray-words.test.mjs
 # A mail sent from an item: its row says when, to whom, and whether it was answered (sentMailLine, #92).
 node crates/echoctl/ui/sent-mail.test.mjs
+# Where mail drafts go: the setting's line and a run's draft as its outcome says it (draftsNow, draftLine, #135).
+node crates/echoctl/ui/drafts.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
