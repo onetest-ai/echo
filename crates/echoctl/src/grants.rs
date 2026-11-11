@@ -104,7 +104,9 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
 
 /// A path plugin `id` may write in one of its granted folders (`uses.folders.write`): the checks of `resolve`, and
 /// never a link itself — the deepest folder of it that exists already is, once links are followed, inside the root.
-/// The path as joined (not resolved): written by renaming a file into it, which replaces a file, never follows one.
+/// What exists of it by its real names (a link inside the root followed, an 8.3 alias like `OBSIDI~1` as its long
+/// name), the rest as typed — and no part of that hidden. Written by renaming a file into it, which replaces a file,
+/// never follows one.
 pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
     if !folders(id).contains(&root) {
@@ -130,10 +132,21 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     while let Some(a) = existing.filter(|a| !a.exists()) {
         existing = a.parent();
     }
-    match existing.map(dunce::canonicalize) {
-        Some(Ok(real)) if real.starts_with(&root) => Ok(full),
-        _ => bail!("“{rel}” leads outside {}", root.display()),
+    let (Some(at), Some(Ok(real_dir))) = (existing, existing.map(dunce::canonicalize)) else { bail!("“{rel}” leads outside {}", root.display()) };
+    if !real_dir.starts_with(&root) {
+        bail!("“{rel}” leads outside {}", root.display());
     }
+    // The real path: a link inside the root to its hidden folder (`hooks` → `.git/hooks`), or a Windows short name
+    // (`OBSIDI~1`, `GIT~1`), is checked as what it reaches; what is there already by its own name, not an alias of it
+    // (never a link itself: refused above).
+    let real = match dunce::canonicalize(&full) {
+        Ok(f) if f.starts_with(&root) => f,
+        _ => real_dir.join(full.strip_prefix(at).unwrap_or(Path::new(""))),
+    };
+    if real.strip_prefix(&root).is_ok_and(|r| r.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))) {
+        bail!("“{rel}” is hidden: a plugin changes notes, not other programs' files");
+    }
+    Ok(real)
 }
 
 /// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
@@ -152,6 +165,11 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
         matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit())
     }) {
         bail!("“{rel}” is a device name, not a file");
+    }
+    // Windows: `:` names a file's data stream (`a.md:x` makes an empty `a.md`), and `<>"|?*` aren't in names at all.
+    #[cfg(windows)]
+    if p.components().any(|c| c.as_os_str().to_string_lossy().chars().any(|ch| matches!(ch, ':' | '<' | '>' | '"' | '|' | '?' | '*') || ch.is_control())) {
+        bail!("“{rel}” isn't a file name Windows takes");
     }
     let full = root.join(p);
     // A link inside may point anywhere: what it resolves to must stay inside too — and that resolved path is

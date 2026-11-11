@@ -1730,6 +1730,40 @@ mod tests {
         assert!(run("writer", "write", json!({"path": ".obsidian/plugins/x/main.js", "text": "x"})).unwrap_err().contains("is hidden"));
         assert!(run("writer", "write", json!({"path": "Notes/.git/hooks/pre-commit", "text": "x"})).unwrap_err().contains("is hidden"));
         assert!(run("writer", "write", json!({"path": "Notes...", "text": "x"})).is_err(), "a name ending in a dot");
+        // A hidden folder by another name is hidden too: a link inside the vault to it, or Windows' short name of it.
+        std::fs::write(vault.join(".obsidian/app.json"), "{}").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(vault.join(".obsidian"), vault.join("settings")).unwrap();
+            assert!(run("writer", "write", json!({"path": "settings/x.json", "text": "x"})).unwrap_err().contains("is hidden"));
+            assert!(run("writer", "remove", json!({"path": "settings/app.json"})).unwrap_err().contains("is hidden"));
+        }
+        #[cfg(windows)]
+        {
+            // `C:\…\OBSIDI~1`: its 8.3 name, when the volume makes them (else nothing to check).
+            let short = |p: &std::path::Path| {
+                use std::os::windows::process::CommandExt;
+                let o = std::process::Command::new("cmd").arg("/c").raw_arg(format!("for %I in (\"{}\") do @echo %~snxI", p.display())).output().ok()?;
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty() && !s.starts_with('.'))
+            };
+            if let Some(s) = short(&vault.join(".obsidian")) {
+                assert!(run("writer", "write", json!({"path": format!("{s}/x.json"), "text": "x"})).unwrap_err().contains("is hidden"), "{s}");
+                assert!(run("writer", "remove", json!({"path": format!("{s}/app.json")})).unwrap_err().contains("is hidden"));
+                assert!(run("writer", "move", json!({"from": format!("{s}/app.json"), "to": "Stolen.json"})).unwrap_err().contains("is hidden"));
+                assert!(run("writer", "remove", json!({"path": s})).unwrap_err().contains("is hidden"), "the folder itself");
+            }
+            // A file written by its short name keeps its own long name.
+            std::fs::write(vault.join("averylongnotename.md"), "long").unwrap();
+            if let Some(s) = short(&vault.join("averylongnotename.md")).filter(|s| s != "averylongnotename.md") {
+                run("writer", "write", json!({"path": s, "text": "new"})).unwrap();
+                assert_eq!(std::fs::read_to_string(vault.join("averylongnotename.md")).unwrap(), "new");
+                assert!(!std::fs::read_dir(&vault).unwrap().flatten().any(|e| e.file_name().to_string_lossy() == s), "no file named {s}");
+            }
+            // `:` names a data stream: refused, and nothing left behind.
+            assert!(run("writer", "write", json!({"path": "People/X.md:ads", "text": "x"})).unwrap_err().contains("isn't a file name"));
+            assert!(!vault.join("People/.X.md").exists() && !vault.join("People/X.md").exists());
+        }
+        assert_eq!(std::fs::read_to_string(vault.join(".obsidian/app.json")).unwrap(), "{}");
         assert!(crate::grants::grant("writer", &paths::config_dir()).unwrap_err().to_string().contains("Echo's own files"));
         assert!(crate::grants::grant("writer", &paths::home()).unwrap_err().to_string().contains("Echo's own files"), "a folder holding the data folder's .echo");
         // A plugin that only reads can't.
