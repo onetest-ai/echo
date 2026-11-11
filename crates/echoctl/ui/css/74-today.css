@@ -242,6 +242,8 @@
 .pw-prog { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; margin-top: 6px; }
 .pw-prog span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .pw-chart { width: 100%; height: 90px; display: block; }
+/* A widget its plugin hasn't answered yet: its place held. A chart's height is known (its 90 px and its lines). */
+.pw-wait.k-chart { min-height: 131px; }
 .pw-chart line { stroke: var(--line-strong); }
 .pw-chart rect { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
 .pw-chart rect.last { fill: var(--accent); }

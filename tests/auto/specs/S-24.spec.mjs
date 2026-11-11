@@ -399,7 +399,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(data.cli('today', 'move', id.next, '--above', id.needs).code).toBe(0)
       await today.openToday()
       // On top, across what is beside Your day, Needs you now under it.
-      // (Today draws its widgets as their data comes: wait for the row, don't read it once.)
+      // (Read as soon as Today shows: wait for the row, don't read it once.)
       await expect.poll(() => today.rows([n.next, n.needs, n.choices])).toEqual([[n.next], [n.needs], [n.choices]])
       expect(Math.abs((await today.box(n.next)).width - (await today.box(n.choices)).width)).toBeLessThanOrEqual(2)
       const time = await today.clock(start)

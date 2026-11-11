@@ -17,6 +17,8 @@ const Plugins = {
   /** plugin id → its document listeners and style elements (taken out when it unloads). */
   owned: {},
   loaded: {},
+  /** plugin id → true once its client half's apply() has run (a page widget it never drew is then an error) */
+  applied: {},
   errors: {},
   /** What each slot was last drawn for: its buttons run on that. */
   targets: {},
@@ -96,6 +98,7 @@ async function loadPluginClients(snapshot) {
       const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(x.version)}`, location.href).href)
       if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
       await m.apply(pluginCtx(x.id))
+      Plugins.applied[x.id] = true
       delete Plugins.errors[x.id]
     } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
   }
@@ -118,6 +121,7 @@ function unloadPlugin(id) {
   for (const k of Object.keys(Plugins.widgetDraw)) if (k.startsWith(`plugin:${id}:`)) delete Plugins.widgetDraw[k]
   for (let i = PANEL_VIEWS.length - 1; i >= 0; i--) if (PANEL_VIEWS[i].plugin === id) PANEL_VIEWS.splice(i, 1)
   delete Plugins.loaded[id]
+  delete Plugins.applied[id]
 }
 /** A slot's buttons for `target`: `menu` (menu items) or `buttons`. */
 function slotItems(slot, target, style = 'buttons') {

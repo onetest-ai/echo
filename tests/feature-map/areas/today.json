@@ -133,10 +133,13 @@
   },
   {
    "id": "F-TODAY-19",
-   "feature": "A plugin's widgets on Today: declared in echo-plugin.json `widgets` (id, label, about, kind stat|stats|list|status|card, sizes, height, refresh at least 60 s; checked at install; the sheet says 'Adds N widgets you can put on Today'), in the catalog as plugin:<id>:<widget> under the plugin's name, put on with echoctl today or Add a widget; data from the host half's ctx.widgets.provide (asked by Echo in the background, 5 s, again after refresh) or set / clear (cleared: off Today), the last answer drawn at once (a failed ask keeps it, dated); Echo draws each kind, the plugin's text escaped, links only to echo://, data it can't draw says why",
+   "feature": "A plugin's widgets on Today: declared in echo-plugin.json `widgets` (id, label, about, kind stat|stats|list|status|card, sizes, height, refresh at least 60 s; checked at install; the sheet says 'Adds N widgets you can put on Today'), in the catalog as plugin:<id>:<widget> under the plugin's name, put on with echoctl today or Add a widget; data from the host half's ctx.widgets.provide (asked by Echo in the background, 5 s, again after refresh) or set / clear (cleared: off Today), the last answer drawn at once (a failed ask keeps it, dated); Echo draws each kind, the plugin's text escaped, links only to echo://, data it can't draw says why; one its plugin hasn't answered yet holds its place with a placeholder (the answer fills it, nothing else moves)",
    "priority": "high",
    "check": "agent",
-   "axes": []
+   "axes": [],
+   "cases": [
+    "today/TC-034"
+   ]
   },
   {
    "id": "F-TODAY-20",
@@ -168,10 +171,13 @@
   },
   {
    "id": "F-TODAY-24",
-   "feature": "A plugin's own page as a widget (kind page, the manifest needing a window half): its window half draws it with ctx.widgets.draw(widget, ({data, size, theme}) => HTML) inside Echo's frame, from the data its host half gives (provide / set); the plugin escapes its text (ctx.ui.esc); unloaded with the plugin (off: not drawn, its place kept)",
+   "feature": "A plugin's own page as a widget (kind page, the manifest needing a window half): its window half draws it with ctx.widgets.draw(widget, ({data, size, theme}) => HTML) inside Echo's frame, from the data its host half gives (provide / set); the plugin escapes its text (ctx.ui.esc); unloaded with the plugin (off: not drawn, its place kept); until its window half is loaded, a placeholder holds its place",
    "priority": "medium",
    "check": "agent",
-   "axes": []
+   "axes": [],
+   "cases": [
+    "today/TC-034"
+   ]
   }
  ]
 }
