@@ -42,7 +42,8 @@ function pluginCtx(id) {
     },
     panels: { add: (v) => { PANEL_VIEWS.push({ area: 'right', ...v, id: `${id}:${v.id}`, plugin: id }); render() } },
     /** Its `page` widgets (kind `page` in its manifest): draw(widget, ({data, size, theme}) => HTML) — data from its
-     *  host half (provide / set); every text through `ctx.ui.esc`. */
+     *  host half (provide / set); every text through `ctx.ui.esc`. Draw from `data` only (the same data, the same HTML:
+     *  else Today is drawn again on every poll); a render() asked for while drawing is ignored. */
     widgets: { draw: (widget, fn) => { Plugins.widgetDraw[`plugin:${id}:${widget}`] = fn; render() } },
     settings: {
       /** Its card in Settings → Plugins. */
@@ -79,7 +80,7 @@ function pluginCtx(id) {
       graph: GraphView,
       newGraph: () => new graphology.Graph(),
     },
-    render: () => render(),
+    render: () => { if (!Plugins.drawing) render() },
   }
 }
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
