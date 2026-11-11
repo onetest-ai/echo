@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use crate::app::NoWindow;
 use crate::paths;
 
+pub mod addresses;
 mod capabilities;
 pub use capabilities::*;
 
@@ -234,8 +235,10 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
     describe(&m.uses)?;
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
-        if !m.settings.iter().any(|s| s.key == k && s.kind == "string") {
-            bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin");
+        match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
+            None => bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin"),
+            Some(s) if s.default.is_some() => bail!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter"),
+            Some(_) => {}
         }
     }
     let mut ids = std::collections::HashSet::new();
@@ -1140,35 +1143,9 @@ pub fn setting(id: &str, key: &str) -> Option<Value> {
     read_map(&secrets_file(id)).remove(key).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
 }
 
-/// The origin (`scheme://host[:port]`, lower case) a user's address names, for a setting listed in
-/// `uses.network.hosts_from`: https to any host; plain http only to an address inside the user's own network.
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn user_origin(value: &str) -> Result<String> {
-    let v = value.trim().trim_end_matches('/');
-    let (https, rest) = match (v.strip_prefix("https://"), v.strip_prefix("http://")) {
-        (Some(r), _) => (true, r),
-        (_, Some(r)) => (false, r),
-        _ => bail!("an address starts with http:// or https://"),
-    };
-    let (host, port) = rest.rsplit_once(':').map_or((rest, None), |(h, p)| (h, Some(p)));
-    if host.is_empty() || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || port.is_some_and(|p| p.parse::<u16>().ok().filter(|n| *n > 0).is_none()) {
-        bail!("an address is a host name or number and an optional port, no path (e.g. http://192.168.1.20:8808)");
-    }
-    if !https && !own_network(host) {
-        bail!("plain http is only for an address inside your own network (192.168.x.x, 10.x.x.x, 172.16–31.x.x, localhost, *.local); use https for {host}");
-    }
-    Ok(format!("{}://{}", if https { "https" } else { "http" }, rest.to_ascii_lowercase()))
-}
-
-/// A private-range IPv4 number (no leading zeros: curl reads those as octal), `localhost` or a `.local` name.
-fn own_network(host: &str) -> bool {
-    let h = host.to_ascii_lowercase();
-    if h == "localhost" || h.ends_with(".local") {
-        return true;
-    }
-    let parts: Vec<&str> = h.split('.').collect();
-    let o: Vec<u8> = parts.iter().filter(|p| p.len() == 1 || !p.starts_with('0')).filter_map(|p| p.parse().ok()).collect();
-    parts.len() == 4 && o.len() == 4 && (o[0] == 10 || o[0] == 127 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && (16..=31).contains(&o[1])) || (o[0] == 169 && o[1] == 254))
+/// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
+pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
+    uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
 }
 
 /// Save one setting, checked against its definition; an empty secret forgets it.
@@ -1184,10 +1161,8 @@ pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
     if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
         bail!("{} isn't a folder", value.as_str().unwrap_or(""));
     }
-    if m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).is_some_and(|a| a.iter().any(|k| k.as_str() == Some(key))) {
-        if let Some(s) = value.as_str().filter(|s| !s.is_empty()) {
-            user_origin(s).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
-        }
+    if address_settings(&m.uses).iter().any(|k| k == key) {
+        addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
     }
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
     if def.kind == "secret" {
@@ -1470,15 +1445,15 @@ mod tests {
     }
 
     #[test]
-    fn the_sheet_says_a_plugin_reaches_the_address_the_user_enters() {
+    fn the_sheet_says_a_plugin_reaches_the_addresses_the_user_lists() {
         let uses = |v: Value| v.as_object().unwrap().clone();
         assert_eq!(
             describe(&uses(json!({"network": {"hosts_from": ["tts"]}}))).unwrap(),
-            vec!["Talks to the address you enter in its setting “tts” (plain http only inside your own network)"]
+            vec!["Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network)"]
         );
         assert_eq!(
             describe(&uses(json!({"network": {"hosts": ["api.acme.example"], "hosts_from": ["a", "b"]}}))).unwrap(),
-            vec!["Talks to api.acme.example over HTTPS and to the address you enter in its settings “a” and “b” (plain http only inside your own network)"]
+            vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed; plain http only inside your own network)"]
         );
         assert!(describe(&uses(json!({"network": {}}))).is_err(), "neither a host nor a setting");
     }
@@ -1501,24 +1476,14 @@ mod tests {
         assert!(manifest(json!(["tts"])).is_ok());
         assert!(manifest(json!(["nope"])).unwrap_err().to_string().contains("isn't a string setting"), "no such setting");
         assert!(manifest(json!(["on"])).unwrap_err().to_string().contains("isn't a string setting"), "not a string");
-    }
-
-    #[test]
-    fn an_address_the_user_enters_is_https_anywhere_or_plain_http_inside_their_network() {
-        for ok in ["http://192.168.68.116:8808", "http://192.168.68.116:8808/", "http://localhost:3000", "http://tts.local", "http://10.1.2.3", "http://172.16.0.1", "http://172.31.255.254", "http://127.0.0.1:1", "https://tts.acme.example", "https://tts.acme.example:8443"] {
-            assert!(user_origin(ok).is_ok(), "{ok}");
-        }
-        assert_eq!(user_origin(" https://TTS.Acme.example:8443/ ").unwrap(), "https://tts.acme.example:8443");
-        assert_eq!(user_origin("http://192.168.68.116:8808/").unwrap(), "http://192.168.68.116:8808");
-        // Plain http to the open internet, look-alikes, and numbers curl could read another way.
-        for public in ["http://example.com", "http://8.8.8.8", "http://172.32.0.1", "http://192.169.1.1", "http://localhost.evil.example", "http://192.168.1.1.evil.example", "http://010.0.0.1", "http://0x7f.0.0.1"] {
-            assert!(user_origin(public).is_err(), "{public}");
-        }
-        assert!(user_origin("http://example.com").unwrap_err().to_string().contains("own network"), "says why");
-        // Not an origin at all: a scheme, a host, an optional port — no path, no login, no brackets.
-        for bad in ["", "192.168.1.1", "ftp://192.168.1.1", "http://", "http://192.168.1.1:0", "http://192.168.1.1:99999", "http://192.168.1.1:x", "http://192.168.1.1/path", "http://me@192.168.1.1", "http://[::1]", "https://a b.example"] {
-            assert!(user_origin(bad).is_err(), "{bad}");
-        }
+        fs::write(
+            d.join(MANIFEST),
+            json!({"id": "p", "name": "P", "version": "0.1.0", "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS", "type": "string", "default": "https://tts.acme.example"}]})
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_manifest(&d).unwrap_err().to_string().contains("has a default"), "the author doesn't choose the address");
     }
 
     #[test]

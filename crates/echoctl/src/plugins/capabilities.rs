@@ -182,7 +182,7 @@ pub(super) fn describe_network(v: &Value) -> Result<String> {
     if !from.is_empty() {
         let quoted: Vec<String> = from.iter().map(|k| format!("“{k}”")).collect();
         let s = if from.len() == 1 { "setting" } else { "settings" };
-        parts.push(format!("the address you enter in its {s} {} (plain http only inside your own network)", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())));
+        parts.push(format!("the addresses you list in its {s} {} (wildcards allowed; plain http only inside your own network)", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())));
     }
     Ok(format!("Talks to {}", parts.join(" and to ")))
 }
