@@ -26,6 +26,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "folders", ready: true, describe: describe_folders },
     Capability { id: "echo", ready: true, describe: describe_echo },
     Capability { id: "events", ready: true, describe: describe_events },
+    Capability { id: "files", ready: true, describe: describe_files },
 ];
 
 /// What happens in Echo that a plugin may hear (`uses.events.on`, `ctx.on`), with the sheet's words. Payloads carry
@@ -228,23 +229,46 @@ pub(super) fn describe_sessions(v: &Value) -> Result<String> {
     if v["hints"].as_bool() == Some(true) {
         parts.push("tells Claude what it knows about the client or thread open in the window".to_string());
     }
+    let commands = strings(v, "commands")?;
+    if commands.len() > 20 || commands.iter().any(|c| c.is_empty() || c.len() > 40 || c.starts_with('_') || !c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')) {
+        bail!("“sessions” commands: up to 20 of its own command names (letters, digits, - and _)");
+    }
+    if !commands.is_empty() {
+        let quoted: Vec<String> = commands.iter().map(|c| format!("“{c}”")).collect();
+        parts.push(format!("lets Claude in Echo run its commands {} without asking", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())));
+    }
     if parts.is_empty() {
-        bail!("“sessions” adds nothing (skills, read, hints)");
+        bail!("“sessions” adds nothing (skills, read, hints, commands)");
     }
     let mut text = parts.join("; ");
     text[..1].make_ascii_uppercase();
     Ok(text)
 }
 
-pub(super) fn describe_folders(v: &Value) -> Result<String> {
-    if v["write"].as_bool() == Some(true) {
-        bail!("“folders” is read-only (Echo doesn't let plugins write to your folders)");
+/// `uses.files.read`: other apps' own files the plugin reads, each named in full (`~/…`, `%APPDATA%/…`,
+/// `%LOCALAPPDATA%/…`) — a list of apps' settings, never a folder, a pattern or a secret's place.
+pub(super) fn describe_files(v: &Value) -> Result<String> {
+    let files = strings(v, "read")?;
+    if files.is_empty() || files.len() > 5 {
+        bail!("“files” reads 1 to 5 files of other apps (e.g. ~/Library/Application Support/obsidian/obsidian.json)");
     }
+    for f in &files {
+        crate::plugins::app_file_rel(f)?;
+    }
+    let quoted: Vec<String> = files.iter().map(|f| format!("“{f}”")).collect();
+    Ok(format!("Reads these files of other apps on this computer: {}", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())))
+}
+
+pub(super) fn describe_folders(v: &Value) -> Result<String> {
     let what = v["what"].as_str().unwrap_or("folders").trim();
     if what.is_empty() || what.chars().count() > 60 {
         bail!("“folders” what: a few words, e.g. “Obsidian vaults”");
     }
-    Ok(format!("Reads the {what} you pick, on this computer — only those"))
+    Ok(if v["write"].as_bool() == Some(true) {
+        format!("Reads and changes the {what} you pick, on this computer — only those: it may write, move and delete files in them")
+    } else {
+        format!("Reads the {what} you pick, on this computer — only those")
+    })
 }
 
 /// What `uses.echo.read` may name, with how the sheet says it.

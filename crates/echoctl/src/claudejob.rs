@@ -188,6 +188,10 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let mut settings_file = None;
     // What plugins add to Echo's sessions: their skills, and folders to read (also for a read-only run).
     let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
+    // The commands plugins let Echo's sessions run, by the CLI their skills name too.
+    let session_commands = crate::plugins::session_commands();
+    let mut clis = clis;
+    clis.extend(crate::grants::session_clis(&session_plugins));
     if spec.tools != Tools::None {
         for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
@@ -223,6 +227,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
                 a.push("Skill".into());
             }
             a.extend(clis.iter().flat_map(|cli| guard::ROUTINE_COMMANDS.iter().map(move |c| format!("Bash({cli} {}:*)", c.split(" *").next().unwrap_or(c)))));
+            a.extend(clis.iter().flat_map(|cli| session_commands.iter().map(move |(id, c)| format!("Bash({cli} plugin call {id} {c}:*)"))));
             a.push("mcp__echo".into());
             settings_file = Some(f);
         }
@@ -250,6 +255,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));
             c.env(guard::RUN_READ, session_read.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n"));
             c.env(guard::RUN_SKILLS, crate::grants::skill_names(&session_plugins).join("\n"));
+            c.env(guard::RUN_PLUGIN_COMMANDS, session_commands.iter().map(|(id, c)| format!("{id} {c}")).collect::<Vec<_>>().join("\n"));
         }
         Ok(c.spawn()?)
     }));

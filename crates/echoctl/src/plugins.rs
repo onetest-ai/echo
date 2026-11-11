@@ -171,6 +171,40 @@ pub fn enabled_manifests() -> Vec<(String, Manifest)> {
     enabled().into_iter().filter_map(|p| read_manifest(&plugin_dir(&p)).ok().map(|m| (p.id.clone(), m))).collect()
 }
 
+/// An entry of `uses.files.read`: its base (`~`, `%APPDATA%`, `%LOCALAPPDATA%`) and the plain relative path after it —
+/// no `..`, no pattern, not a place that holds secrets.
+pub fn app_file_rel(entry: &str) -> Result<(&'static str, &str)> {
+    let (base, rel) = [("~/", "~"), ("%APPDATA%/", "%APPDATA%"), ("%LOCALAPPDATA%/", "%LOCALAPPDATA%")]
+        .iter()
+        .find_map(|(p, b)| entry.strip_prefix(p).map(|r| (*b, r)))
+        .ok_or_else(|| anyhow!("“{entry}”: a file of another app starts with ~/, %APPDATA%/ or %LOCALAPPDATA%/"))?;
+    let parts: Vec<&str> = rel.split('/').collect();
+    if rel.is_empty() || entry.len() > 200 || parts.iter().any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['*', '?', '\\', ':'])) {
+        bail!("“{entry}”: one file by its plain path");
+    }
+    const SECRETS: [&str; 6] = [".ssh", ".gnupg", ".aws", "keychains", ".kube", ".docker"];
+    if parts.iter().any(|p| SECRETS.contains(&p.to_ascii_lowercase().as_str())) {
+        bail!("“{entry}”: not a place that holds secrets");
+    }
+    Ok((base, rel))
+}
+
+/// Where an entry of `uses.files.read` is on this computer (its base from the environment), if its base exists here.
+pub fn app_file(entry: &str, var: impl Fn(&str) -> Option<PathBuf>) -> Result<Option<PathBuf>> {
+    let (base, rel) = app_file_rel(entry)?;
+    let root = match base {
+        "~" => var("HOME").or_else(|| var("USERPROFILE")),
+        "%APPDATA%" => var("APPDATA"),
+        _ => var("LOCALAPPDATA"),
+    };
+    Ok(root.map(|r| r.join(rel)))
+}
+
+/// The commands enabled plugins let Echo's sessions run (`uses.sessions.commands`): `(plugin, command)`.
+pub fn session_commands() -> Vec<(String, String)> {
+    enabled_manifests().into_iter().flat_map(|(id, m)| m.uses.get("sessions").and_then(|s| s["commands"].as_array()).into_iter().flatten().filter_map(|c| c.as_str().map(|c| (id.clone(), c.to_string()))).collect::<Vec<_>>()).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingDef {
     pub key: String,
@@ -1567,6 +1601,26 @@ mod tests {
         assert!(ask("tts", &format!("http://10.0.0.1,{}", " ".repeat(2001))).is_ok(), "spaces trimmed");
         assert!(ask("tts", &"http://10.0.0.1,".repeat(200)).unwrap_err().to_string().contains("2000"));
         assert!(ask("tts", "http://10.0.*.*:*").unwrap().is_some(), "a wider one asks again");
+    }
+
+    #[test]
+    fn a_plugin_reads_only_the_other_apps_files_it_named() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"files": {"read": ["~/Library/Application Support/obsidian/obsidian.json", "%APPDATA%/obsidian/obsidian.json"]}}))).unwrap(),
+            vec!["Reads these files of other apps on this computer: “~/Library/Application Support/obsidian/obsidian.json” and “%APPDATA%/obsidian/obsidian.json”"]
+        );
+        for bad in [json!([]), json!(["/etc/passwd"]), json!(["~/../x"]), json!(["~/.ssh/id_rsa"]), json!(["~/Library/Keychains/login.keychain-db"]), json!(["~/notes/*.md"]), json!(["~/"]), json!(["~/a//b"])] {
+            assert!(describe(&uses(json!({"files": {"read": bad.clone()}}))).is_err(), "{bad}");
+        }
+        let env = |k: &str| match k {
+            "HOME" => Some(PathBuf::from("/Users/sam")),
+            "APPDATA" => Some(PathBuf::from("C:/Users/sam/AppData/Roaming")),
+            _ => None,
+        };
+        assert_eq!(app_file("~/Library/Application Support/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("/Users/sam/Library/Application Support/obsidian/obsidian.json")));
+        assert_eq!(app_file("%APPDATA%/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("C:/Users/sam/AppData/Roaming/obsidian/obsidian.json")));
+        assert_eq!(app_file("%LOCALAPPDATA%/x/y.json", env).unwrap(), None, "not on this computer");
     }
 
     #[test]

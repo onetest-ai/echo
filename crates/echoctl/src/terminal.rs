@@ -579,8 +579,20 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     }
     // What plugins add to Echo's sessions (never the user's own Claude Code): their Claude Code plugin
     // (skills) and the folders the user gave them to read (an Obsidian vault…).
-    for d in crate::grants::session_plugins() {
+    let session_plugins = crate::grants::session_plugins();
+    for d in &session_plugins {
         args.extend(["--plugin-dir".into(), d.display().to_string()]);
+    }
+    // The commands plugins let Echo's sessions run (`uses.sessions.commands`): no prompt for them here either.
+    let mut clis = crate::grants::session_clis(&session_plugins);
+    if let Some(d) = crate::notes::plugin_dir() {
+        clis.extend(crate::notes::run_clis(&d));
+    }
+    let commands = crate::plugins::session_commands();
+    for cli in &clis {
+        for (id, c) in &commands {
+            args.extend(["--allowedTools".into(), format!("Bash({cli} plugin call {id} {c}:*)")]);
+        }
     }
     // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
     // context until one is used; Send to Claude on a task names one.

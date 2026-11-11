@@ -92,6 +92,32 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     inside(&root, rel)
 }
 
+/// A path plugin `id` may write in one of its granted folders (`uses.folders.write`): the checks of `resolve`, and
+/// never a link itself — the deepest folder of it that exists already is, once links are followed, inside the root.
+/// The path as joined (not resolved): written by renaming a file into it, which replaces a file, never follows one.
+pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
+    let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
+    if !folders(id).contains(&root) {
+        bail!("{} isn't one of the folders you gave this plugin", root.display());
+    }
+    inside(&root, rel)?;
+    let full = root.join(rel.trim_start_matches("./"));
+    if full == root {
+        bail!("not the folder itself");
+    }
+    if std::fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_symlink()) {
+        bail!("“{rel}” is a link: a plugin changes files, not links");
+    }
+    let mut existing = full.parent();
+    while let Some(a) = existing.filter(|a| !a.exists()) {
+        existing = a.parent();
+    }
+    match existing.map(dunce::canonicalize) {
+        Some(Ok(real)) if real.starts_with(&root) => Ok(full),
+        _ => bail!("“{rel}” leads outside {}", root.display()),
+    }
+}
+
 /// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
 /// followed.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
@@ -162,9 +188,17 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     }
     let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
     files.push((dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?));
+    // The Echo CLI for its skills, as Echo's own skills reach it: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`.
+    files.push((dir.join("scripts").join("echoctl"), include_str!("../../../plugin/scripts/echoctl").to_string()));
+    files.push((dir.join("scripts").join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").to_string()));
     for (f, text) in files {
         std::fs::create_dir_all(f.parent().expect("a parent"))?;
         paths::write_atomic(&f, text.as_bytes())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("scripts").join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
     }
     SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
     Ok(())
@@ -199,6 +233,13 @@ pub fn drop_plugin(id: &str) {
 pub fn session_plugins() -> Vec<PathBuf> {
     let on = enabled_ids();
     SESSION_PLUGINS.lock().map(|m| m.iter().filter(|(id, d)| on.contains(id) && d.is_dir()).map(|(_, d)| d.clone()).collect()).unwrap_or_default()
+}
+
+/// The Echo CLI as the skills of these plugin folders name it (`<dir>/scripts/echoctl`, both slash forms).
+pub fn session_clis(dirs: &[PathBuf]) -> Vec<String> {
+    let mut out: Vec<String> = dirs.iter().flat_map(|d| crate::notes::run_clis(d)).filter(|c| c != "echoctl").collect();
+    out.dedup();
+    out
 }
 
 /// The skills in these Claude Code plugin folders, as Claude Code names them: `<plugin name>:<skill>`.

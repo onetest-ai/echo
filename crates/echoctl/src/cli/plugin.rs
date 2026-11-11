@@ -116,7 +116,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             let args: serde_json::Value = serde_json::from_str(args.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the arguments aren't JSON: {e}"))?;
             // A terminal's host runs commands, never the plugins' timers: those are the app's.
             jshost::no_timers();
-            jshost::sync();
+            // `call_within` loads this plugin only.
             print_json(&jshost::call_within(&id, &command, &args, std::time::Duration::from_secs(3600))?);
         }
         #[cfg(not(feature = "js"))]

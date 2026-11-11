@@ -49,6 +49,9 @@ pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
 /// More folders a read-only routine may read (one per line): the ones plugins gave Echo's sessions (an
 /// Obsidian vault the user picked).
 pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
+/// A read-only routine may run these plugin commands (`echoctl plugin call <id> <command> …`), one `<id> <command>`
+/// per line: those the enabled plugins name in `uses.sessions.commands` (the user agreed on their sheets).
+pub const RUN_PLUGIN_COMMANDS: &str = "ECHOCTL_RUN_PLUGIN_COMMANDS";
 /// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
 pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
 /// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
@@ -92,6 +95,8 @@ pub struct Scope {
     extra: Vec<PathBuf>,
     /// …and load these skills (`RUN_SKILLS`).
     skills: Vec<String>,
+    /// …and run these plugin commands, `(plugin, command)` (`RUN_PLUGIN_COMMANDS`).
+    plugin_commands: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -204,7 +209,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![] });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![] });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -218,7 +223,8 @@ impl Scope {
             }
             let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
             let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills });
+            let plugin_commands = var(RUN_PLUGIN_COMMANDS).map(|v| v.to_string_lossy().lines().filter_map(|l| l.split_once(' ').map(|(p, c)| (p.to_string(), c.to_string()))).collect()).unwrap_or_default();
+            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, plugin_commands });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -231,7 +237,7 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![] })
+        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![] })
     }
 
     /// Allowed, or why not.
@@ -427,7 +433,7 @@ impl Scope {
         let allowed = commands.iter().any(|c| {
             let c: Vec<&str> = c.split(' ').collect();
             rest.len() >= c.len() && rest.iter().zip(&c).all(|(w, c)| *c == "*" || w.as_str() == *c)
-        });
+        }) || (self.routine && matches!(rest, [p, c, id, cmd, ..] if p == "plugin" && c == "call" && self.plugin_commands.iter().any(|(i, k)| i == id && k == cmd)));
         if allowed {
             Ok(())
         } else {
@@ -569,6 +575,7 @@ mod tests {
             routine: false,
             extra: vec![],
             skills: vec![],
+            plugin_commands: vec![],
         }
     }
 
@@ -767,6 +774,7 @@ mod tests {
         let vars = move |k: &str| match k {
             RUN_READ => Some(v2.clone().into_os_string()),
             RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
+            RUN_PLUGIN_COMMANDS => Some("obsidian search\nobsidian backlinks".into()),
             o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
         };
         let s = Scope::from_vars(vars).unwrap();
@@ -782,6 +790,12 @@ mod tests {
         ok("Grep", json!({"pattern": "budget", "path": path(&home.join("calls"))})).unwrap();
         ok("Bash", json!({"command": "echoctl project tasks"})).unwrap();
         ok("Bash", json!({"command": "echoctl project ledger acme tree"})).unwrap();
+        // The commands a plugin named for Echo's sessions (its sheet said so), and only those.
+        ok("Bash", json!({"command": r#"echoctl plugin call obsidian search '{"q":"Dana"}'"#})).unwrap();
+        ok("Bash", json!({"command": "echoctl plugin call obsidian backlinks"})).unwrap();
+        for no in ["echoctl plugin call obsidian rename_plan", "echoctl plugin call other search", "echoctl plugin call obsidian", "echoctl plugin install obsidian"] {
+            assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
+        }
         ok("mcp__echo__search_sources", json!({"query": "budget"})).unwrap();
         ok("Glob", json!({"pattern": "projects/*/ledger/*.jsonl"})).unwrap();
         // The session's own saved output (a long command answer), named by Claude Code's hook input.
@@ -823,7 +837,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![] };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![] };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),
