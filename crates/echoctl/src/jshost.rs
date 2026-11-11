@@ -1117,6 +1117,7 @@ mod tests {
         assert!(widget_last("ci", "builds").is_none());
         let first = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
         assert_eq!(first["empty"], true, "nothing yet: drawn once the provider answers");
+        assert_eq!(first["pending"], true, "never answered: Today holds its place");
         let got = (0..100).find_map(|_| widget_last("ci", "builds").or_else(|| {
             std::thread::sleep(Duration::from_millis(50));
             None
@@ -1124,6 +1125,10 @@ mod tests {
         assert_eq!(got.unwrap()["data"]["items"][0]["title"], "main #41 passed");
         let v = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
         assert_eq!((v["kind"].as_str(), v["label"].as_str(), v["empty"].as_bool()), (Some("list"), Some("Builds"), Some(false)));
+        assert_eq!(v["pending"], false);
+        // Answered with nothing (cleared): no place, not a wait.
+        let off = crate::widgets::data("plugin:ci:health", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!((off["empty"].as_bool(), off["pending"].as_bool()), (Some(true), Some(false)));
         // Today takes it like Echo's own.
         crate::today_layout::add("plugin:ci:builds", Some("L"), None).unwrap();
         assert!(crate::today_layout::load().iter().any(|i| i.widget == "plugin:ci:builds" && i.size == "L"));

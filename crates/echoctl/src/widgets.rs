@@ -163,7 +163,8 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
         crate::jshost::widget_ask(plugin, widget);
     }
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
-    json!({"kind": w.kind, "label": w.label, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null()})
+    // Never answered yet (being asked now): Today holds its place until the answer comes.
+    json!({"kind": w.kind, "label": w.label, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or

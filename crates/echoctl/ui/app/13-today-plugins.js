@@ -83,6 +83,11 @@ function pluginWidgetHtml(kind, data, size) {
 function pluginWidgetView(id, w, size) {
   // A question about an outside link lapses after 30 s (left for another view and back, it isn't still armed).
   if (S.pwOpen && Date.now() - (S.pwOpenAt || 0) > 30000) S.pwOpen = null
+  // Not answered yet, or its page's window half still loading: its place held, a placeholder in it (nothing jumps
+  // when it comes). Answered with nothing: no place.
+  const plugin = id.split(':')[1]
+  const waiting = w && (w.pending || (w.kind === 'page' && !w.empty && !Plugins.widgetDraw[id] && !Plugins.applied[plugin] && !Plugins.errors[plugin]))
+  if (waiting) return `<section class="td-sec pw-sec" aria-label="${esc(w.label)}" aria-busy="true" data-pw="${esc(id)}"><h2>${esc(w.label)}</h2><div class="skeleton pw-wait k-${esc(w.kind)} s-${esc(size)}"><i></i><i></i><i></i></div></section>`
   if (!w || w.empty) return ''
   let body
   try {
