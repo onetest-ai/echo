@@ -103,6 +103,9 @@ function renderNow() {
   // The live transcript follows the call while it is scrolled to the end.
   const lt = $('#live-transcript')
   const ltStick = !lt || lt.scrollTop + lt.clientHeight >= lt.scrollHeight - 40, ltTop = lt ? lt.scrollTop : 0
+  // My notes' list keeps its place when the panel is drawn again (a live update, the clock in the note box's hint).
+  const nl = $('#nt-list')
+  const nlWas = nl && { call: nl.closest('[data-notes-call]').dataset.notesCall, top: nl.scrollTop, height: nl.scrollHeight, client: nl.clientHeight }
   const termFocus = focusedTerm()
   const app = $('#app')
   // The workbench: fixed areas, each replaced only when its HTML changed (`patch`).
@@ -245,6 +248,11 @@ function renderNow() {
   }
   const lt2 = $('#live-transcript')
   if (lt2 && !jumped) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
+  const nl2 = $('#nt-list')
+  if (nl2 && nl2 !== nl) {
+    const top = notesScroll(nlWas, { call: nl2.closest('[data-notes-call]').dataset.notesCall, height: nl2.scrollHeight })
+    if (top != null) nl2.scrollTop = top
+  }
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
   placeColMenu()

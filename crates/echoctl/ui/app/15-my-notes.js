@@ -50,6 +50,16 @@ function within(p, ms, timer = setTimeout) {
   return Promise.race([p, new Promise((done) => timer(() => done(undefined), ms))])
 }
 // end of the note time block
+
+// ── notes scroll: where My notes' list is after a redraw (no DOM: `notes-scroll.test.mjs`) ──────────────────────
+/** The list's scrollTop after a redraw replaced it: `was` the old list `{ call, top, height, client }`, `now` the new
+ *  `{ call, height }`. Another call's list: null (it opens at its top). At its end (or not scrolling) it follows the
+ *  end, as new entries come; else it stays where the user scrolled. */
+function notesScroll(was, now) {
+  if (!was || !now || was.call !== now.call) return null
+  return was.top + was.client >= was.height - 24 ? now.height : was.top
+}
+// end of the notes scroll block
 /** The note box's call time is asked about at its first key, the moment it is taken for; typing never waits for the
  *  answer (`S.noteAtOk.ok`, undefined until it comes), and Add waits for it at most 500 ms. */
 function confirmNoteAt(call) {
