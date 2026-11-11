@@ -19,8 +19,9 @@ export class TodayWidgetsPage extends TodayPage {
     this.widgetList = this.rightPanel.getByRole('list', { name: 'Widgets', exact: true })
     this.pickSizes = this.rightPanel.getByRole('group', { name: 'Size', exact: true })
     this.panelDone = this.rightPanel.getByRole('button', { name: 'Done', exact: true })
-    // The Meeting card on the right (a click on a line or a block) and Calendar's menu (⋯ or a right-click).
-    this.meetingTab = this.rightPanel.getByRole('tab', { name: 'Meeting', exact: true })
+    // The right panel's tab "Meeting", gone since a meeting's card opens beside it (a click on a line or a block), and
+    // Calendar's menu (⋯ or a right-click).
+    this.meetingTab = this.rightPanel.getByRole('tab', { name: this.w.day.meetingTab, exact: true })
     this.menu = page.getByRole('menu')
   }
 
@@ -181,9 +182,24 @@ export class TodayWidgetsPage extends TodayPage {
     return this.yourDay.getByRole('button', { name, exact: true })
   }
 
-  /** The Meeting card on the right, by its subject; a button of it. */
+  /** A meeting's card, Calendar's, as a popover in Today's view, by its subject. */
   meetingCard(subject) {
-    return this.rightPanel.getByRole('complementary', { name: subject, exact: true })
+    return this.main.getByRole('complementary', { name: subject, exact: true })
+  }
+
+  /** Where a meeting's card is, as Calendar's beside its block: inside Today's view, beside what opened it (right or
+   *  left of it, apart), level with it as far as the view lets it (12 px from its edges). */
+  async meetingCardPlace(subject, anchor) {
+    const card = await this.meetingCard(subject).boundingBox()
+    const at = await anchor.boundingBox()
+    const g = await this.main.boundingBox()
+    const bottom = Math.min(g.y + g.height, this.page.viewportSize().height)
+    const level = Math.min(Math.max(g.y + 12, at.y), Math.max(g.y + 12, bottom - card.height - 12))
+    return {
+      inside: card.x >= g.x && card.y >= g.y && card.x + card.width <= g.x + g.width && card.y + card.height <= bottom,
+      beside: card.x >= at.x + at.width || card.x + card.width <= at.x,
+      level: Math.abs(card.y - level) <= 1,
+    }
   }
 
   /** The open menu's items, as they read. */
@@ -578,7 +594,7 @@ export class TodayWidgetsPage extends TodayPage {
     return this.yourDay.getByRole('button', { name: new RegExp(this.w.day.showSkipped) })
   }
 
-  /** The Meeting card on the right: its heading, a text starting so, a select, a button. */
+  /** A meeting's card: its heading, a text starting so, a select, a button. */
   meetingCardHeading(subject) {
     return this.meetingCard(subject).getByRole('heading', { name: subject, exact: true })
   }

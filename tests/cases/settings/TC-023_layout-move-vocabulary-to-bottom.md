@@ -26,7 +26,7 @@ auto: [tests/auto/specs/S-13.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/layout` | The heading "Layout" shows; the card "Panel views" lists 13 rows in this order: "My notes", "Also discussed", "Inbox", "Claude", "What moved", "Meeting", "Vocabulary", "Details", "Asks", "Person", "Source", "Topic", "Add a widget" (every registered view is listed, whatever is on screen; "Also discussed", "Source" and "Topic" only open in a panel with Recall on, "What moved" only for a call in a thread (#157), "Person" only on a People tab, "Add a widget" only while Today is being edited); "Vocabulary" has "Right" pressed, "Claude" has "Bottom" pressed |
+| 1 | Navigate to `{{base_url}}/#settings/layout` | The heading "Layout" shows; the card "Panel views" lists 12 rows in this order: "My notes", "Also discussed", "Inbox", "Claude", "What moved", "Vocabulary", "Details", "Asks", "Person", "Source", "Topic", "Add a widget" (every registered view is listed, whatever is on screen; "Also discussed", "Source" and "Topic" only open in a panel with Recall on, "What moved" only for a call in a thread (#157), "Person" only on a People tab, "Add a widget" only while Today is being edited); "Vocabulary" has "Right" pressed, "Claude" has "Bottom" pressed |
 | 2 | Click "Bottom" in the row "Vocabulary" | "Bottom" is pressed in that row; the bottom panel opens (`Bottom panel`) with a tab "Vocabulary" selected |
 | 3 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | The file has `"views"` with `"vocabulary": {"area": "bottom"}` |
 

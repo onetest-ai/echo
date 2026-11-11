@@ -524,15 +524,28 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     expect(await today.menuItems()).toEqual(s.menu)
     await page.keyboard.press(data.text.shell.keys.escape)
     await expect(today.menu).toHaveCount(0)
-    // A click on the line: the meeting's card on the right, as in Calendar; Close closes it.
+    // A click on the line: Calendar's card as a popover beside it, as in Calendar (no right panel); the line clicked
+    // again closes it.
     await today.line(s.choice).click({ position: { x: 200, y: 8 } })
-    await expect(today.panelTab(today.rightPanel, x.meetingTab)).toHaveAttribute('aria-selected', 'true')
     const card = today.meetingCard(s.choice)
+    await expect(today.meetingCardHeading(s.choice)).toBeVisible()
+    await expect(today.meetingTab).toHaveCount(0)
+    await expect.poll(() => today.meetingCardPlace(s.choice, today.line(s.choice))).toEqual({ inside: true, beside: true, level: true })
+    await today.line(s.choice).click({ position: { x: 200, y: 8 } })
+    await expect(card).toHaveCount(0)
+    // Opened again, all of it shows; Close closes it.
+    await today.line(s.choice).click({ position: { x: 200, y: 8 } })
     await expect(today.meetingCardHeading(s.choice)).toBeVisible()
     await expect(today.meetingCardMatch(s.choice, new RegExp(`^${literal(x.when)}`))).toBeVisible()
     await expect(today.meetingCardSelect(s.choice, s.card.kind)).toBeVisible()
     for (const b of s.card.buttons) await expect(today.meetingCardButton(s.choice, b)).toBeVisible()
     await expect(today.meetingCardMatch(s.choice, new RegExp(`^${x.people}\\b`))).toBeVisible()
+    await today.meetingCardButton(s.choice, x.close).click()
+    await expect(card).toHaveCount(0)
+    // The menu's Show details: the same card beside the line; Close closes it.
+    await today.dayMenuItem(s.choice, x.showDetails)
+    await expect(today.meetingCardHeading(s.choice)).toBeVisible()
+    await expect.poll(() => today.meetingCardPlace(s.choice, today.line(s.choice))).toEqual({ inside: true, beside: true, level: true })
     await today.meetingCardButton(s.choice, x.close).click()
     await expect(card).toHaveCount(0)
     // A past meeting's new minutes: violet in its reason, a click opens them.
@@ -591,11 +604,16 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(await today.blockLook(n.yourDay, s.maybe)).toMatchObject({ border: 'dashed', colour: await today.themeColour(w.day.colours.maybe) })
       expect(await today.opacityOf(today.block(n.yourDay, s.going).first())).toBeLessThan(1)
       expect(await today.calendarNowInView()).toBe(true)
-      // A block clicked: its card on the right; right-clicked (calendar or strip): Calendar's menu for it.
-      await today.block(n.yourDay, s.choice).last().click({ position: { x: 6, y: 4 } })
-      await expect(today.panelTab(today.rightPanel, w.day.meetingTab)).toHaveAttribute('aria-selected', 'true')
-      await expect(today.meetingCard(s.choice)).toBeVisible()
-      await today.meetingCardButton(s.choice, w.day.close).click()
+      // A block clicked (calendar, then strip): its card as a popover beside it; right-clicked (calendar or strip):
+      // Calendar's menu for it.
+      for (const [block, at] of [[today.block(n.yourDay, s.choice).last(), { position: { x: 6, y: 4 } }], [today.block(n.strip, s.choice).last(), {}]]) {
+        await block.click(at)
+        await expect(today.meetingCard(s.choice)).toBeVisible()
+        await expect(today.meetingTab).toHaveCount(0)
+        await expect.poll(() => today.meetingCardPlace(s.choice, block)).toEqual({ inside: true, beside: true, level: true })
+        await today.meetingCardButton(s.choice, w.day.close).click()
+        await expect(today.meetingCard(s.choice)).toHaveCount(0)
+      }
       await today.block(n.yourDay, s.choice).last().click({ button: 'right', position: { x: 6, y: 4 } })
       expect(await today.menuItems()).toEqual(s.menu)
       await page.keyboard.press(data.text.shell.keys.escape)
@@ -813,11 +831,18 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(layout()).toEqual(before.layout)
       expect(data.status().agenda).toEqual(before.agenda)
       expect(data.exists(data.env.ECHOCTL_CONFIG_DIR, data.text.m365.token)).toBe(false)
-      // A meeting's name on a line: its card on the right.
+      // A meeting's name on a line, then an invite's line: its card as a popover beside what was clicked.
       await today.choiceMeeting(first, s.first.meeting).click()
-      await expect(today.panelTab(today.rightPanel, w.day.meetingTab)).toHaveAttribute('aria-selected', 'true')
       await expect(today.meetingCard(s.first.meeting)).toBeVisible()
+      await expect(today.meetingTab).toHaveCount(0)
+      await expect.poll(() => today.meetingCardPlace(s.first.meeting, today.choiceMeeting(first, s.first.meeting))).toEqual({ inside: true, beside: true, level: true })
       await today.meetingCardButton(s.first.meeting, w.day.close).click()
+      await expect(today.meetingCard(s.first.meeting)).toHaveCount(0)
+      await today.choice(freeLine).click({ position: { x: 100, y: 10 } })
+      await expect(today.meetingCard(s.free.subject)).toBeVisible()
+      await expect.poll(() => today.meetingCardPlace(s.free.subject, today.choice(freeLine))).toEqual({ inside: true, beside: true, level: true })
+      await today.meetingCardButton(s.free.subject, w.day.close).click()
+      await expect(today.meetingCard(s.free.subject)).toHaveCount(0)
       // Taken off, gone; reset, back (it is in the default).
       expect(data.cli('today', 'remove', w.id.choices).code).toBe(0)
       await today.reloadToday()
