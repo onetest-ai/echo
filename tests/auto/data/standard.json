@@ -5349,6 +5349,102 @@
       "noneToCome": "Initech team lunch",
       "nonePast": "Acme design review",
       "prepId": "^#upcoming/[0-9a-f]+$"
+    },
+    "widgets": {
+      "_about": "Today's widgets on the standard day (stages 41–52): Your day's lines, the calendar's and strip's blocks",
+      "day": {
+        "going": "Globex steering",
+        "maybe": "Umbrella intro call",
+        "noReply": "Partner planning",
+        "choice": "Initech architecture board",
+        "folded": [
+          "Steering prep",
+          "Globex sponsor update"
+        ],
+        "menu": [
+          "Don't record",
+          "Prepare",
+          "Add to a thread…",
+          "Copy the Teams link",
+          "Show details"
+        ],
+        "minutes": {
+          "subject": "Globex steering",
+          "link": "new minutes · 1 decision"
+        },
+        "card": {
+          "kind": "Kind of meeting",
+          "buttons": [
+            "Don't record",
+            "Prepare"
+          ]
+        }
+      },
+      "choices": {
+        "count": 5,
+        "order": [
+          "At once: Globex office hours or Vendor demo (1) or Initech architecture board or Vendor demo (2)",
+          "Invite: Acme training dry run",
+          "Invite: Design system walkthrough",
+          "At once: Acme renewal follow-up or Globex weekly or Steering prep or Initech architecture board or Initech team lunch or Globex sponsor update or Acme help desk sync",
+          "Invite: Partner planning"
+        ],
+        "first": {
+          "members": [
+            "Globex office hours",
+            "Vendor demo (1)",
+            "Initech architecture board",
+            "Vendor demo (2)"
+          ],
+          "pick": "Initech architecture board",
+          "why": "you organise it",
+          "keep": "Vendor demo (1)",
+          "declined": [
+            "Globex office hours",
+            "Vendor demo (2)"
+          ],
+          "yours": [
+            "Initech architecture board"
+          ],
+          "meeting": "Globex office hours"
+        },
+        "busy": {
+          "subject": "Acme training dry run",
+          "how": "Decline",
+          "why": "you go to Initech architecture board then"
+        },
+        "free": {
+          "subject": "Design system walkthrough",
+          "how": "Accept",
+          "why": "your day is free then"
+        }
+      },
+      "glance": {
+        "threads": 12,
+        "first": "Acme rollout",
+        "last": [
+          "Cyberdyne audit",
+          "Cyberdyne data room",
+          "Cyberdyne training",
+          "Wonka factory tour",
+          "Wonka loyalty app",
+          "Wonka packaging",
+          "Wonka shop fit"
+        ],
+        "atL": [
+          "Acme rollout",
+          "Acme renewal",
+          "Initech hiring",
+          "Umbrella proposal",
+          "Globex pilot",
+          "Cyberdyne audit",
+          "Cyberdyne data room",
+          "Cyberdyne training",
+          "Wonka factory tour",
+          "Wonka loyalty app"
+        ],
+        "more": 2
+      }
     }
   }
 }

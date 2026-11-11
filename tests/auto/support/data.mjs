@@ -30,6 +30,8 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
       throw new Error(`the test data couldn't be built: ${(r.stderr || r.stdout).trim().split('\n').at(-1)}`)
     }
     data.base = /base_url=(\S+)/.exec(r.stdout)[1]
+    // When the data was built: what a stage reading the data's clock checks it still runs within (`Date.now() - data.built`).
+    data.built = Date.now()
     data.env = readEnv(path.join(data.dir, 'env'))
     // Never the user's own folders: data, settings and Claude Code's config all inside this run's folder.
     for (const k of ['ECHOCTL_HOME', 'ECHOCTL_CONFIG_DIR', 'CLAUDE_CONFIG_DIR']) {

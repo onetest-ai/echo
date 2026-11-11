@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, routines]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-030: Each routine's card is a widget of its own

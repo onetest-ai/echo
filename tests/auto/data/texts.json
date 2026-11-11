@@ -1782,5 +1782,658 @@
     "homeVar": "ECHOCTL_HOME",
     "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
     "armedPrefix": "armed"
+  },
+  "widgets": {
+    "_about": "Today's widgets (S-24 stages 41–52): the catalog `echoctl widget list` gives, Today as it comes (`echoctl today`), the widgets' names on the page, edit mode and Add a widget, and the CLI's refusals",
+    "catalog": [
+      {
+        "about": "where you'll be, a reason on each line",
+        "height": "fill",
+        "id": "core:calendar.agenda",
+        "kind": "day",
+        "label": "Your day · agenda",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "by the hour, overlaps side by side",
+        "height": "fill",
+        "id": "core:calendar.calendar",
+        "kind": "day",
+        "label": "Your day · calendar",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the whole day in one bar",
+        "height": "hug",
+        "id": "core:calendar.strip",
+        "kind": "day",
+        "label": "Your day · strip",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "meetings at once and invites to answer, with what Echo suggests",
+        "height": "hug",
+        "id": "core:calendar.choices",
+        "kind": "choices",
+        "label": "The day's choices",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what to walk in knowing, who's coming",
+        "height": "hug",
+        "id": "core:calendar.next",
+        "kind": "next",
+        "label": "Next meeting",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "a bar a thread: done this week, to do, waiting",
+        "height": "hug",
+        "id": "core:tasks.glance",
+        "kind": "glance",
+        "label": "Threads at a glance",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
+        "part": "Tasks",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "how many tasks were done since Monday, and which",
+        "height": "hug",
+        "id": "core:tasks.done",
+        "kind": "glance",
+        "label": "Done this week",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "calls recorded since Monday, their time, how many have minutes",
+        "height": "hug",
+        "id": "core:calls.week",
+        "kind": "calls",
+        "label": "Recorded this week",
+        "params": [],
+        "part": "Calls",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "late first, then by date; whose each one is",
+        "height": "fill",
+        "id": "core:tasks.mine",
+        "kind": "work",
+        "label": "My work · this week",
+        "params": [],
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the last 24 hours, where you watch",
+        "height": "hug",
+        "id": "core:needs.now",
+        "kind": "needs",
+        "label": "Needs you now",
+        "params": [],
+        "part": "Needs you",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what your routines delivered to Today, until read",
+        "height": "hug",
+        "id": "core:routines.cards",
+        "kind": "cards",
+        "label": "Routine cards",
+        "params": [],
+        "part": "Routines",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      }
+    ],
+    "default": [
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.agenda"
+      },
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.next"
+      },
+      {
+        "size": "M",
+        "widget": "core:needs.now"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:calendar.choices"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:routines.cards"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:tasks.mine"
+      }
+    ],
+    "id": {
+      "agenda": "core:calendar.agenda",
+      "calendar": "core:calendar.calendar",
+      "strip": "core:calendar.strip",
+      "choices": "core:calendar.choices",
+      "next": "core:calendar.next",
+      "glance": "core:tasks.glance",
+      "done": "core:tasks.done",
+      "week": "core:calls.week",
+      "mine": "core:tasks.mine",
+      "needs": "core:needs.now",
+      "cards": "core:routines.cards",
+      "nope": "core:nope"
+    },
+    "name": {
+      "yourDay": "Your day",
+      "strip": "Your day, the strip",
+      "next": "Next meeting",
+      "needs": "Needs you now",
+      "choices": "The day's choices",
+      "work": "My work · this week",
+      "glance": "Threads at a glance",
+      "done": "Done this week",
+      "week": "Recorded this week",
+      "cards": "Routine cards"
+    },
+    "unknown": "Error: no widget \"{id}\": `echoctl widget list` names them",
+    "takesNot": "Error: {id} takes {sizes}, not {size}",
+    "layoutFile": "today-layout.json",
+    "sizes": {
+      "wide": {
+        "width": 1440,
+        "height": 1000
+      },
+      "short": {
+        "width": 1440,
+        "height": 900
+      },
+      "narrow": {
+        "width": 700,
+        "height": 1000
+      },
+      "tall": {
+        "width": 1440,
+        "height": 1700
+      }
+    },
+    "next": {
+      "since": "Now · since {time}",
+      "comingIn": "^Next · {time} · in \\d+ min$",
+      "person": "{n} person",
+      "people": "{n} people",
+      "sep": " · ",
+      "records": "records when it starts",
+      "walkIn": "Walk in knowing",
+      "youOwe": "You owe: {title}",
+      "waitsFor": "{from} waits for: {title}",
+      "openPrep": "Open prep",
+      "showPrep": "Show prep",
+      "join": "Join & record",
+      "ask": "Ask Claude about it",
+      "coming": "Who's coming",
+      "askThem": "Ask them",
+      "newcomer": "{name}, {role}, is new to this thread.",
+      "answered": "{name}, {answer}",
+      "recording": "● Recording starts with the call",
+      "expected": "Expected from you: {list}",
+      "listSep": "; ",
+      "prepRoute": "#upcoming/{id}",
+      "claudeTab": "Claude",
+      "notStarted": "Claude didn't start — send it again once the panel shows Claude.",
+      "teams": "teams",
+      "declined": "declined",
+      "reply": "reply",
+      "show": 3,
+      "askShown": 2
+    },
+    "day": {
+      "now": "now",
+      "next": "next",
+      "maybe": "maybe",
+      "skipped": "skipped",
+      "showSkipped": "^Show \\d+ skipped$",
+      "hideSkipped": "Hide the skipped",
+      "atOnce": "^\\d+ others at once$",
+      "workPrefix": "Your work: ",
+      "meetingTab": "Meeting",
+      "close": "Close",
+      "people": "People",
+      "when": "Today · ",
+      "colours": {
+        "next": "--accent",
+        "choice": "--warn",
+        "going": "--me",
+        "maybe": "--accent",
+        "noReply": "--text-3",
+        "newMinutes": "--accent"
+      },
+      "minutesRoute": "^#call/[^/]+/minutes$",
+      "nowPrefix": "Now "
+    },
+    "calendar": {
+      "stripHeading": "Your day {n} meetings",
+      "from": 9,
+      "to": 18,
+      "tick": 2,
+      "calendarSize": "M",
+      "stripSize": "L"
+    },
+    "api": {
+      "meeting": "meeting",
+      "noReply": "notResponded",
+      "maybe": "tentativelyAccepted",
+      "organizer": "organizer"
+    },
+    "edit": {
+      "parts": [
+        "All",
+        "Calendar",
+        "Tasks",
+        "Calls",
+        "Needs you",
+        "Routines"
+      ],
+      "onlyWhile": " — shows only while it has something",
+      "moves": {
+        "up": "to a row above",
+        "down": "to a row below",
+        "left": "before the one beside it",
+        "right": "after the one beside it"
+      },
+      "tab": "Add a widget",
+      "search": "calen",
+      "showPrep": "Show prep",
+      "preview": "Preview of "
+    },
+    "choices": {
+      "heading": "The day's choices {n}",
+      "atOnce": "At once: {names}",
+      "or": " or ",
+      "invite": "Invite: {subject}",
+      "accepted": "You accepted {n} at once. Echo suggests {pick} — {why}",
+      "keep": "Keep {name}",
+      "notAnswered": "{subject} not answered",
+      "suggests": "Echo suggests: {how} — {why}",
+      "answers": [
+        "Accept",
+        "Maybe",
+        "Decline"
+      ],
+      "sending": "Sending…",
+      "confirm": "Decline {names}? The organisers are told.",
+      "yours": "Yours — {names} — stays: cancel it in Outlook.",
+      "namesSep": ", ",
+      "declineThem": "Decline them",
+      "cancel": "Cancel",
+      "refused": "not signed in to Microsoft 365 — echoctl calendar login",
+      "command": "echoctl calendar login",
+      "within": 15
+    },
+    "glance": {
+      "line": "{name}: {done} done this week, {todo} to do, {waiting} waiting",
+      "segments": [
+        [
+          "done",
+          "{n} done this week",
+          "--me"
+        ],
+        [
+          "todo",
+          "{n} to do",
+          "--warn"
+        ],
+        [
+          "waiting",
+          "{n} waiting",
+          "--danger"
+        ]
+      ],
+      "key": [
+        "done this week",
+        "to do",
+        "waiting"
+      ],
+      "atM": 5,
+      "atL": 10,
+      "more": "{n} more in Threads",
+      "threadsRoute": "#projects",
+      "workRoute": "#project/{id}/work",
+      "doneCount": "task{s} since Monday",
+      "doneShown": 4,
+      "glanceSize": "M",
+      "doneSize": "M",
+      "large": "L",
+      "small": "S"
+    },
+    "week": {
+      "fields": [
+        "since",
+        "today",
+        "calls",
+        "memos",
+        "recorded_min",
+        "with_minutes",
+        "days"
+      ],
+      "calls": "calls, {n} of them memos",
+      "hours": "hours recorded",
+      "minutes": "minutes recorded",
+      "withMinutes": "with minutes",
+      "callsButton": "Calls",
+      "day": "^{weekday}: {n} calls?{today}$",
+      "todayMark": " \\(today\\)",
+      "callsRoute": "^#call(s$|/)",
+      "memo": "memo",
+      "meta": "meta.json",
+      "notes": "notes.md",
+      "S": "S",
+      "M": "M"
+    },
+    "plugin": {
+      "folder": "tests/fixtures/plugins",
+      "market": "test-plugins",
+      "id": "widget-demo",
+      "name": "Widget demo",
+      "version": "0.4.0",
+      "sheet": [
+        "Runs its own code in Echo and in the Echo window, with your rights",
+        "Adds 8 widgets you can put on Today"
+      ],
+      "installed": "Installed Widget demo 0.4.0",
+      "prefix": "plugin:widget-demo:",
+      "widgets": {
+        "open": "Open tickets",
+        "sprint": "Sprint",
+        "trend": "Calls a day",
+        "builds": "Last builds",
+        "ci": "CI",
+        "note": "Note",
+        "broken": "Broken",
+        "board": "Sprint board"
+      },
+      "order": [
+        "open",
+        "sprint",
+        "trend",
+        "builds",
+        "ci",
+        "note",
+        "broken",
+        "board"
+      ],
+      "warn": "{\"state\":\"warn\"}",
+      "bad": "{\"state\":\"bad\"}",
+      "ciCmd": "ci",
+      "noteCmd": "note",
+      "clearNote": "clear-note",
+      "open": {
+        "value": "12",
+        "label": "open tickets"
+      },
+      "ci": {
+        "title": "CI",
+        "failed": "main #42 failed",
+        "green": "main is green",
+        "openLink": "Open",
+        "rerun": "Re-run",
+        "ask": "Open ci.example in the browser? Click Open again · Cancel",
+        "cancel": "Cancel",
+        "askStart": "Open ci.example in the browser?"
+      },
+      "broken": "Couldn't draw this — a stat needs value",
+      "sprint": [
+        [
+          "21",
+          "done",
+          "--me"
+        ],
+        [
+          "8",
+          "to do",
+          null
+        ],
+        [
+          "2",
+          "blocked",
+          "--danger"
+        ]
+      ],
+      "builds": [
+        [
+          "Branch main",
+          null
+        ],
+        [
+          "main #41 passed",
+          "2 min ago"
+        ],
+        [
+          "Open the task",
+          null
+        ],
+        [
+          "<img src=x onerror=alert(1)> kept as text",
+          null
+        ]
+      ],
+      "taskRoute": "#project/acme-rollout/work",
+      "taskTitle": "Send the SSO checklist",
+      "taskLink": "echo://task/acme-rollout/T001",
+      "note": {
+        "title": "Release notes",
+        "text": "Ship Friday.\nTell support."
+      },
+      "listKind": "list",
+      "trend": {
+        "bars": 5,
+        "first": "Mon",
+        "last": "Fri · 4 calls",
+        "note": "Busiest on Tuesday.",
+        "hover": "Tue: 7 calls",
+        "kind": "chart",
+        "type": "bar"
+      },
+      "badColour": "--danger",
+      "progress": "12 of 20",
+      "ids": {
+        "open": "plugin:widget-demo:open",
+        "sprint": "plugin:widget-demo:sprint",
+        "trend": "plugin:widget-demo:trend",
+        "builds": "plugin:widget-demo:builds",
+        "ci": "plugin:widget-demo:ci",
+        "note": "plugin:widget-demo:note",
+        "broken": "plugin:widget-demo:broken",
+        "board": "plugin:widget-demo:board"
+      },
+      "place": [
+        [
+          "open",
+          "S",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:open"
+        ],
+        [
+          "broken",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ],
+        [
+          "sprint",
+          "M",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "builds",
+          "M",
+          "--after",
+          "plugin:widget-demo:sprint"
+        ],
+        [
+          "note",
+          "M"
+        ]
+      ],
+      "drawn": [
+        "open",
+        "ci",
+        "broken",
+        "sprint",
+        "builds",
+        "note"
+      ],
+      "notPlaced": [
+        "trend",
+        "board"
+      ],
+      "chartPlace": [
+        [
+          "trend",
+          "M",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:trend"
+        ],
+        [
+          "open",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ]
+      ]
+    },
+    "routines": {
+      "cards": [
+        {
+          "title": "Morning brief",
+          "about": "Routine · Morning brief",
+          "text": "# Brief\n\n- The day's first thing\n",
+          "id": "^core:routines\\.card\\.routine-morning-brief-[0-9a-f]+$"
+        },
+        {
+          "title": "Friday review",
+          "about": "Routine · Friday review",
+          "text": "Review the week.\n",
+          "id": "^core:routines\\.card\\.routine-friday-review-[0-9a-f]+$"
+        }
+      ],
+      "sent": "Sent",
+      "part": "Routines",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "gotIt": "Got it",
+      "size": "M"
+    },
+    "size": {
+      "S": "S",
+      "M": "M",
+      "L": "L"
+    },
+    "side": {
+      "above": "above",
+      "below": "below",
+      "before": "before",
+      "after": "after"
+    }
   }
 }

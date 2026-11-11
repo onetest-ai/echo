@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, next-meeting, prep]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-022: Next meeting on Today at S, M and L
@@ -23,12 +24,12 @@ tags: [today, widgets, next-meeting, prep]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl today add core:calendar.next --size L --above core:needs.now`; open `{{base_url}}/#today` | On top, across: "Next · <time> · in N min" (or "Now · since <time>" for one under way), its thread's chip, its subject; "N people · records when it starts" (when it is set to record); **Walk in knowing**: the prep's In short (a bullet like the rest) and up to 3 things expected from you ("You owe: …", "<name> waits for: …", late in red); Open prep, Join & record with the language beside it (only when the next is a Teams meeting with its link — on standard data the next may have none: then no Join & record), Ask Claude about it; on the right **Who's coming** (initials; a hover says the name and the answer; a declined one struck through; a newcomer named), **Ask them** (up to 2 open questions), "● Recording starts with the call" (when set to record) |
+| 1 | `target/debug/echoctl today size core:calendar.next L`, `today move core:calendar.next --above core:needs.now` (it is on Today by default, at S); open `{{base_url}}/#today` | On top, across: "Next · <time> · in N min" (or "Now · since <time>" for one under way), its thread's chip, its subject; "N people · records when it starts" (when it is set to record); **Walk in knowing**: the prep's In short (a bullet like the rest) and up to 3 things expected from you ("You owe: …", "<name> waits for: …", late in red); Open prep, Join & record with the language beside it (only when the next is a Teams meeting with its link — on standard data the next may have none: then no Join & record), Ask Claude about it; on the right **Who's coming** (initials; a hover says the name and the answer; a declined one struck through; a newcomer named), **Ask them** (up to 2 open questions), "● Recording starts with the call" (when set to record) |
 | 2 | Click Open prep | The prep opens (as Show prep in Your day) |
 | 3 | Back on Today, click Ask Claude about it | The Claude panel opens to type "Help me get ready for my next meeting: read its prep with `echoctl read echo://prep/<id>` …" — as My work's Work on it does; with the test data's fake Claude Code it says "Claude didn't start — send it again once the panel shows Claude." |
 | 4 | `target/debug/echoctl today size core:calendar.next M`; reload | A card: the time line, the subject, "Expected from you: …" (the same things, on one line), Show prep (and Join & record) — no Who's coming, no Ask them |
 | 5 | `… size core:calendar.next S`; reload | The time line, the subject and its buttons only |
-| 6 | `target/debug/echoctl today reset` | Next meeting gone from Today (it isn't in the default yet) |
+| 6 | `target/debug/echoctl today reset` | Next meeting back at S beside Needs you now (as Today comes) |
 
 ## Notes
 - None left today → no widget and no gap: test data always has meetings after now, so the Rust test `widgets::next_is_the_first_meeting_not_over_and_none_once_the_day_is_done` and the node test `today-layout.test.mjs` (an empty widget takes no space) hold it.

@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, calendar, invites, m365]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-026: The day's choices
