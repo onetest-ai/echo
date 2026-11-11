@@ -26,32 +26,45 @@ pub struct Widget {
     #[serde(skip)]
     #[cfg_attr(not(feature = "js"), allow(dead_code))]
     pub refresh: u64,
+    /// What the user may set on it (`today_layout::set_param`), given to its provider.
+    pub params: Vec<crate::plugins::ParamDef>,
 }
 
 // One line a widget in the catalog below: its fields in the struct's order.
 #[allow(clippy::too_many_arguments)]
-const fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static str, kind: &'static str, sizes: &'static [&'static str], height: &'static str, temporal: bool) -> Widget {
-    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal, refresh: 0 }
+fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static str, kind: &'static str, sizes: &'static [&'static str], height: &'static str, temporal: bool) -> Widget {
+    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal, refresh: 0, params: vec![] }
 }
 
-/// Echo's own widgets, for what Today shows now. The rest of the agreed set comes with their phases.
-pub const CORE: &[Widget] = &[
+/// The period Threads at a glance and Done this week count: this week (from Monday) or this month.
+fn period() -> crate::plugins::ParamDef {
+    crate::plugins::ParamDef { key: "period".into(), label: "Period".into(), kind: "choice".into(), options: vec!["week".into(), "month".into()], default: Some(json!("week")) }
+}
+
+/// Echo's own widgets.
+pub fn core() -> Vec<Widget> {
+    let with = |mut w: Widget, p: Vec<crate::plugins::ParamDef>| {
+        w.params = p;
+        w
+    };
+    vec![
     w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false),
     w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false),
     w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
     w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true),
     w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true),
-    w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false),
-    w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false),
+    with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period()]),
+    with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period()]),
     w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false),
     w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false),
     w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true),
     w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true),
-];
+    ]
+}
 
 /// The catalog: Echo's widgets, then each enabled plugin's (`plugin:<plugin>:<widget>`, under the plugin's name).
 pub fn catalog() -> Vec<Widget> {
-    let mut all = CORE.to_vec();
+    let mut all = core();
     // Each routine (or other source) that sends Today a card: its card as a widget of its own (`Routine cards` shows
     // the rest).
     for (slug, key) in crate::today::card_sources() {
@@ -65,6 +78,7 @@ pub fn catalog() -> Vec<Widget> {
             height: Cow::Borrowed("hug"),
             temporal: true,
             refresh: 0,
+            params: vec![],
         });
     }
     for (p, m) in crate::plugins::enabled_manifests() {
@@ -80,6 +94,7 @@ pub fn catalog() -> Vec<Widget> {
                 // A plugin's widget is on Today while its plugin has given it something to show.
                 temporal: true,
                 refresh: d.refresh.unwrap_or(60).max(60),
+                params: d.params,
             });
         }
     }
@@ -90,7 +105,7 @@ pub fn catalog() -> Vec<Widget> {
 pub const CARD: &str = "core:routines.card.";
 
 pub fn find(id: &str) -> Result<Widget> {
-    let hit = if id.starts_with("plugin:") || id.starts_with(CARD) { catalog().into_iter().find(|w| w.id == id) } else { CORE.iter().find(|w| w.id == id).cloned() };
+    let hit = if id.starts_with("plugin:") || id.starts_with(CARD) { catalog().into_iter().find(|w| w.id == id) } else { core().into_iter().find(|w| w.id == id) };
     hit.ok_or_else(|| anyhow!("no widget {id:?}: `echoctl widget list` names them"))
 }
 
@@ -114,7 +129,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
         "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
-        "glance" => crate::glance::today(),
+        "glance" => crate::glance::today(crate::today_layout::params_of(id).get("period").and_then(Value::as_str).unwrap_or("week")),
         "calls" => crate::calls_week::today(),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
@@ -215,9 +230,10 @@ mod tests {
 
     #[test]
     fn the_catalog_has_one_widget_per_id_each_with_sizes_it_can_take() {
-        let ids: std::collections::BTreeSet<_> = CORE.iter().map(|w| w.id.as_ref()).collect();
-        assert_eq!(ids.len(), CORE.len(), "ids are unique");
-        for w in CORE {
+        let core = core();
+        let ids: std::collections::BTreeSet<_> = core.iter().map(|w| w.id.as_ref()).collect();
+        assert_eq!(ids.len(), core.len(), "ids are unique");
+        for w in &core {
             assert!(w.id.starts_with("core:") && !w.label.is_empty() && !w.about.is_empty(), "{w:?}");
             assert!(!w.sizes.is_empty() && w.sizes.iter().all(|s| ["S", "M", "L"].contains(s)), "{w:?}");
             assert!(["hug", "fill"].contains(&w.height.as_ref()), "{w:?}");
@@ -273,7 +289,7 @@ mod tests {
     fn each_widget_answers_on_an_empty_data_folder_and_the_temporal_ones_say_empty() {
         let (_env, _) = crate::paths::testenv::folders("widgets-data");
         let tasks = json!({"piles": {}, "asks": [], "projects": []});
-        for w in CORE {
+        for w in core() {
             let v = data(&w.id, &Inputs { tasks: &tasks }).unwrap_or_else(|e| panic!("{}: {e:#}", w.id));
             assert_eq!(v["empty"].as_bool(), w.temporal.then_some(true), "{}: {v}", w.id);
         }

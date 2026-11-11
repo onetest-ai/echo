@@ -28,10 +28,11 @@ fn week_start(today: NaiveDate) -> NaiveDate {
     today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()))
 }
 
-/// Each open thread with tasks: done this week, to do, waiting (on someone, or blocked), the total; busiest first. And
-/// the tasks done this week across them (`done`: their titles, newest first, with their thread).
-pub fn view(today: NaiveDate) -> Value {
-    let from = week_start(today);
+/// Each open thread with tasks: done in the period (this week from Monday, or `month`: from the 1st), to do, waiting
+/// (on someone, or blocked), the total; busiest first. And the tasks done in the period across them (`done`: their
+/// titles, newest first, with their thread).
+pub fn view(today: NaiveDate, period: &str) -> Value {
+    let from = if period == "month" { today.with_day(1).unwrap_or(today) } else { week_start(today) };
     let mut threads = vec![];
     let mut done: Vec<(NaiveDate, Value)> = vec![];
     for p in projects::list().iter().filter(|p| !p.stage.closed()) {
@@ -59,21 +60,22 @@ pub fn view(today: NaiveDate) -> Value {
     }
     threads.sort_by_key(|t| std::cmp::Reverse(t["total"].as_u64().unwrap_or(0)));
     done.sort_by_key(|d| std::cmp::Reverse(d.0));
-    json!({"since": from.to_string(), "threads": threads, "done": done.into_iter().map(|(_, v)| v).collect::<Vec<_>>()})
+    json!({"since": from.to_string(), "period": if period == "month" { "month" } else { "week" }, "threads": threads, "done": done.into_iter().map(|(_, v)| v).collect::<Vec<_>>()})
 }
 
-/// Today's view (`view` for the local date), read again at most every 30 s: Today asks for it on each refresh, and each
-/// thread's work is folded for it.
-pub fn today() -> Value {
+/// Today's view for a period (`view` for the local date), read again at most every 30 s a period: Today asks for it on
+/// each refresh, and each thread's work is folded for it.
+pub fn today(period: &str) -> Value {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
-    static LAST: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
+    static LAST: Mutex<Vec<(String, Instant, Value)>> = Mutex::new(Vec::new());
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, v)) = last.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(30)) {
+    if let Some((_, _, v)) = last.iter().find(|(p, at, _)| p == period && at.elapsed() < Duration::from_secs(30)) {
         return v.clone();
     }
-    let v = view(Local::now().date_naive());
-    *last = Some((Instant::now(), v.clone()));
+    let v = view(Local::now().date_naive(), period);
+    last.retain(|(p, _, _)| p != period);
+    last.push((period.to_string(), Instant::now(), v.clone()));
     v
 }
 
@@ -97,7 +99,7 @@ mod tests {
         ledger::human_event(&id, &json!({"op": "edit", "node": b, "set": {"state": "blocked"}})).unwrap();
         ledger::human_event(&id, &json!({"op": "edit", "node": c, "set": {"waiting_for": {"who": "Dana", "what": "the list"}}})).unwrap();
         let today = Local::now().date_naive();
-        let v = view(today);
+        let v = view(today, "week");
         let t = &v["threads"][0];
         assert_eq!((t["done"].as_u64(), t["todo"].as_u64(), t["waiting"].as_u64(), t["total"].as_u64()), (Some(1), Some(1), Some(2), Some(4)), "{v}");
         assert_eq!(v["done"][0]["title"], "Book the room");
@@ -106,8 +108,12 @@ mod tests {
         held.state = "done".into();
         held.history = vec![json!({"effect": "held", "date": today.to_string(), "applied": true})];
         assert_eq!(done_on(&held), Some(today));
+        // This month counts from the 1st: today's done is in it.
+        let m = view(today, "month");
+        assert_eq!((m["period"].as_str(), m["done"].as_array().map(Vec::len)), (Some("month"), Some(1)));
+        assert_eq!(m["since"].as_str().unwrap().get(8..), Some("01"));
         // Next week, that one was done last week: not counted, not listed.
-        let v = view(today + chrono::Duration::days(7));
+        let v = view(today + chrono::Duration::days(7), "week");
         assert_eq!((v["threads"][0]["done"].as_u64(), v["done"].as_array().map(Vec::len)), (Some(0), Some(0)), "{v}");
     }
 }

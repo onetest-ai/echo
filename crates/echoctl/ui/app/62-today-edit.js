@@ -21,8 +21,21 @@ function todayEditCell(id, html, size) {
   const can = { up: r > 0, down: r >= 0 && r < rows.length - 1, left: i > 0, right: i >= 0 && i < (rows[r] || []).length - 1 }
   const MV = { left: ['←', 'before the one beside it'], up: ['↑', 'to a row above'], down: ['↓', 'to a row below'], right: ['→', 'after the one beside it'] }
   const moves = Object.entries(MV).filter(([k]) => can[k]).map(([k, [a, say]]) => `<button type="button" data-tw-move="${k}" data-tw-id="${esc(id)}" aria-label="Move ${esc(w.label)} ${say}" title="Move ${say}">${a}</button>`).join('')
+  // Its settings (⚙): a select a choice, thread or client, a box a yes/no; changed, Today's layout says it.
+  const item = ((S.today && S.today.layout) || []).find((i) => i.widget === id) || {}
+  const now = (p) => (item.params && item.params[p.key] !== undefined ? item.params[p.key] : p.default)
+  const pick = (p) => {
+    const opts = p.type === 'choice' ? p.options.map((o) => [o, o])
+      : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => !(t.stage && /closed|done/.test(t.stage))).map((t) => [t.id, t.name])
+      : p.type === 'client' ? ((S.pj.data && S.pj.data.clients) || []).map((c) => [c.id, c.name]) : []
+    if (p.type === 'bool') return `<label class="tw-param"><input type="checkbox" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}" ${now(p) ? 'checked' : ''}> ${esc(p.label)}</label>`
+    return `<label class="tw-param">${esc(p.label)} <select data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}">${now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  }
+  const params = (w.params || []).length
+  const gear = params ? `<button type="button" class="icon-btn tw-gear${S.tdParams === id ? ' on' : ''}" data-tw-gear="${esc(id)}" aria-expanded="${S.tdParams === id}" aria-label="${esc(w.label)}: settings" title="Settings">${ICON('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')}</button>` : ''
+  const form = params && S.tdParams === id ? `<div class="tw-params" role="group" aria-label="${esc(w.label)}: settings">${w.params.map(pick).join('')}</div>` : ''
   const body = html || `<div class="tw-empty set-sub">${esc(w.about || '')}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span><button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div><div class="tw-in" inert>${body}</div></section>`
+  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span>${gear}<button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>${form}<div class="tw-in" inert>${body}</div></section>`
 }
 
 /** The zone after the last widget: a widget dropped there goes last, on a row of its own. */
@@ -152,9 +165,10 @@ PANEL_VIEWS.push({
 
 document.addEventListener('click', (e) => {
   if (S.view !== 'today' || !e.target.closest) return
-  const t = e.target.closest('[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
+  const t = e.target.closest('[data-tw-gear],[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
   if (!t) return
   const d = t.dataset
+  if (d.twGear) { S.tdParams = S.tdParams === d.twGear ? null : d.twGear; return render() }
   if (d.twEdit) return todayEditOpen()
   if (d.twPanel) return todayEditPanel()
   if (d.twMove) return todayEditMove(d.twId, d.twMove)
@@ -218,4 +232,13 @@ document.addEventListener('dragend', () => {
   twDrag = null
   twClear()
   document.querySelectorAll('.tw.dragging').forEach((x) => x.classList.remove('dragging'))
+})
+
+// A widget's setting changed in its ⚙ form: Today's layout keeps it (the widget then shows what it says).
+document.addEventListener('change', (e) => {
+  const el = e.target
+  if (S.view !== 'today' || !el.dataset || !el.dataset.twParam) return
+  const value = el.type === 'checkbox' ? el.checked : el.value
+  if (value === '') return
+  todayLayoutDo({ op: 'params', widget: el.dataset.twId, key: el.dataset.twParam, value })
 })

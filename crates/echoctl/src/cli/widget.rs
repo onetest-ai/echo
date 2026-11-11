@@ -79,6 +79,8 @@ pub enum TodayCmd {
     },
     /// Change a widget's size on Today: S, M or L (1, 2, 3 columns), of those it takes
     Size { widget: String, size: String },
+    /// Set one of a widget's settings: `echoctl today set core:tasks.glance period month`
+    Set { widget: String, key: String, value: String },
     /// Take a widget off Today
     Remove { widget: String },
     /// Today as it comes: Needs you now, the routines' cards, Your day beside My work
@@ -91,6 +93,7 @@ pub fn today(cmd: Option<TodayCmd>) -> Result<()> {
         TodayCmd::Add { widget, size, target } => layout::add(&widget, size.as_deref(), target.get())?,
         TodayCmd::Move { widget, target } => layout::move_to(&widget, target.get())?,
         TodayCmd::Size { widget, size } => layout::resize(&widget, &size)?,
+        TodayCmd::Set { widget, key, value } => layout::set_param(&widget, &key, &value)?,
         TodayCmd::Remove { widget } => layout::remove(&widget)?,
         TodayCmd::Reset => layout::reset()?,
     };

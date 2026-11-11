@@ -57,6 +57,7 @@ cases:
   - tests/cases/today/TC-029_a-plugins-widgets-on-today.md
   - tests/cases/today/TC-030_each-routines-card-is-a-widget-of-its-own.md
   - tests/cases/today/TC-031_a-plugin-widgets-chart-link-and-actions.md
+  - tests/cases/today/TC-032_a-widgets-settings.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -134,6 +135,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 51 | `today/TC-029_a-plugins-widgets-on-today.md` | — | — |
 | 52 | `today/TC-030_each-routines-card-is-a-widget-of-its-own.md` | — | — |
 | 53 | `today/TC-031_a-plugin-widgets-chart-link-and-actions.md` | — | — |
+| 54 | `today/TC-032_a-widgets-settings.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.
