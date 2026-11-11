@@ -667,7 +667,8 @@ document.addEventListener('drop', (e) => {
 function saveDescription() {
   const de = S.pj.descEdit
   if (!de) return
-  const text = de.text.trim(), x = S.pj.work && S.pj.work.nodes && S.pj.work.nodes[de.node]
+  const nodes = S.pj.work && S.pj.work.nodes
+  const text = de.text.trim(), x = nodes && Object.hasOwn(nodes, de.node) ? nodes[de.node] : null
   S.pj.descEdit = null
   if (x && (x.description || '') !== text) {
     x.description = text || null; x.description_html = null
