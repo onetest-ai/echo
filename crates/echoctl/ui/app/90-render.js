@@ -149,20 +149,11 @@ function renderNow() {
     try { html = pact.render() } catch (e) { html = `<p class="error">${esc(pact.label)}: ${esc(String((e && e.message) || e))}</p>` }
     patch(primary, `<main class="main plug-act">${html}</main>`)
     try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
-  } else if (S.view === 'settings') {
-    drawSettings(primary)
-  } else if (S.view === 'brain') {
-    drawBrain(primary)
-  } else if (S.view === 'today') {
-    drawToday(primary)
-  } else if (S.view === 'tasks') {
-    drawTasks(primary)
-  } else if (S.view === 'projects') {
-    drawProjects(primary)
-  } else if (S.view === 'calendar') {
-    drawCalendar(primary)
   } else {
-    drawCalls()
+    // Echo's own views draw themselves (their activity's `draw`); Calls, and a view no activity draws, is the list beside the call.
+    const act = ACTIVITIES.find((a) => a.id === S.view && a.draw)
+    if (act) act.draw(primary)
+    else drawCalls()
   }
   fillTranscripts()
   tickClocks()
