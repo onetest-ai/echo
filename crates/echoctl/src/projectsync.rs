@@ -74,7 +74,7 @@ pub fn run(id: &str) -> Result<Value> {
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
     let pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).take(MAX_ITEMS).collect();
-    let claims = ledger::verify_prep(id, false)?.len();
+    let claims = ledger::verify_count(id)?;
     // The people pass reads calls the work sync already read (threads synced before it existed too).
     let people_read = read_people(id);
     let for_people: Vec<String> = pending
@@ -140,7 +140,7 @@ pub fn run(id: &str) -> Result<Value> {
             };
         }
         let _ = fs::remove_file(&settings);
-        let left = ledger::pending(id)?.len();
+        let left = ledger::pending_count(id)?;
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
                   "processed": before.saturating_sub(left), "left": left, "message": format!("{extract_report}\n{verify_report}\n{people_report}").trim().to_string()}))
     })();

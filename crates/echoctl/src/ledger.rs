@@ -1179,7 +1179,7 @@ pub fn context(project: &str) -> Result<Value> {
         "project": p.name, "stage": p.stage.id(), "client": client.map(|c| &c.name),
         "client_domains": client.map(|c| &c.domains), "notes": p.notes,
         // What the thread is about, for an item it shares with other threads: its brief (cut) and its terms.
-        "brief": crate::projects::brief(&p.id).ok().filter(|b| !b.trim().is_empty()).map(|b| if b.chars().count() > 1500 { format!("{}…", b.chars().take(1500).collect::<String>()) } else { b }),
+        "brief": brief_cut(&p.id),
         "terms": p.terms.iter().map(|t| t.term.as_str()).collect::<Vec<_>>(),
         // About me (the user's `me.md`): who "Me" is and how they work — defaults the words can override.
         "me_profile": crate::calls::me_profile(),
@@ -1188,6 +1188,17 @@ pub fn context(project: &str) -> Result<Value> {
         "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e)).collect::<Vec<_>>(),
         "epics_without_work": epics.iter().filter(|e| e.children.is_empty()).map(|e| format!("{} {}", e.id, e.title)).collect::<Vec<_>>(),
     }))
+}
+
+/// A thread's brief for its sync, cut at 1500 characters (none when empty).
+fn brief_cut(id: &str) -> Option<String> {
+    crate::projects::brief(id).ok().filter(|b| !b.trim().is_empty()).map(|b| if b.chars().count() > 1500 { format!("{}…", b.chars().take(1500).collect::<String>()) } else { b })
+}
+
+/// What a thread is about, for its verifier: its name, notes, brief and terms.
+pub fn thread_scope(id: &str) -> Option<Value> {
+    let p = crate::projects::load(id).ok()?;
+    Some(json!({"thread": p.name, "notes": p.notes, "brief": brief_cut(id), "terms": p.terms.iter().map(|t| t.term.as_str()).collect::<Vec<_>>()}))
 }
 
 /// A record as the extractor reads it: its id and title, then what it holds — a question's answer, a
@@ -1306,7 +1317,12 @@ mod tests {
         })
         .unwrap();
         fs::write(crate::paths::home().join("projects").join(&id).join("brief.md"), "Aurora: the Berlin pilot's sign-on.").unwrap();
-        // The same call in two other threads: one on this thread's AI profile, one pinned to another.
+        // The same mail in two other threads' ledgers: one on this thread's AI profile, one pinned to another. (A call's
+        // threads come from the threads' rules instead: work/TC-031.)
+        let f = l.dir.join(format!("evidence/{ev}.json"));
+        let mut item: Value = serde_json::from_slice(&fs::read(&f).unwrap()).unwrap();
+        item["source"] = json!("mail");
+        fs::write(&f, serde_json::to_vec(&item).unwrap()).unwrap();
         let same = crate::projects::create("Borealis", None, None).unwrap();
         let other = crate::projects::create("Cygnus", None, None).unwrap();
         crate::projects::update(&other.id, |p| {
@@ -1326,6 +1342,7 @@ mod tests {
         apply(&id, ev, &[json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works", "Review passed"], "quote": "Then SSO has to land first"}),
                          json!({"op": "status", "node": "s1", "effect": "due", "due_text": "24th of November", "quote": "the pilot moves to the 24th of November"})]).unwrap();
         let packets = super::apply::verify_prep(&id, false).unwrap();
+        assert_eq!(super::apply::verify_count(&id).unwrap(), packets.len(), "the count the sync reports, without the packets");
         assert!(!packets.is_empty() && packets.iter().all(|k| k["thread"] == "Aurora" && k["also_in"]["threads"] == json!(["Borealis"])), "{packets:?}");
         // An item in this thread only: nothing about others.
         fs::remove_file(Ledger::of(&same.id).unwrap().dir.join(format!("evidence/{ev}.json"))).unwrap();
