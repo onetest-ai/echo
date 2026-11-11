@@ -87,7 +87,7 @@
   },
   {
    "id": "F-NOTES-10",
-   "feature": "While recording, a note is timed from its first key, the time kept once the app confirms it records the call (a note typed in the seconds after hang-up gets none; the box never waits, Add at most 500 ms); Time inserts the call's time; Flag marks the moment; notes from the tray or `echoctl note` join them",
+   "feature": "While recording, a note is timed from its first key, the time kept once the app confirms it records the call (a note typed in the seconds after hang-up gets none; the box never waits, Add at most 500 ms); Time inserts the call's time, likewise once the app confirms it records the call (else it says the call has ended, or that it couldn't confirm it); Flag marks the moment; notes from the tray or `echoctl note` join them",
    "priority": "high",
    "check": "agent",
    "axes": [
