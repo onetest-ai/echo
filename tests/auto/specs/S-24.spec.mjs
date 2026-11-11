@@ -1,11 +1,10 @@
 // S-24 The calendar, preps and the Inbox on a busy day — its stages with fixed checks (standard data): a series' rule on
 // its meetings' cards (stage 5), the cards' preps (8), Zoom and Google Meet invites shown and never armed (9–10), the
 // prep's header (13–14), a series set to Record and kept (17), Import Teams transcript without Microsoft 365 (29), Won't
-// do's comment (36), Today's widgets (41–53), and two tests beside the stages.
+// do's comment (36), Today's widgets (41–55), and two tests beside the stages.
 // Not here (for now): the other stages, among them stages 9–10's Your day steps, 37–40 (Needs you now's Won't do through
 // ⌘K is new, #297), prep/TC-012 step 5's people line (the header's answers are new, #286), and of Today's widgets: the
-// small set's work line (today/TC-023 step 6, another data set), "instead of" (step 3: the standard day has none) and
-// stages 54–55 (a widget's settings and a plugin's own page, today/TC-032 and TC-033: too new, #384, #386).
+// small set's work line (today/TC-023 step 6, another data set) and "instead of" (step 3: the standard day has none).
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
@@ -1170,6 +1169,139 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     expect(layout()).toEqual(w.default)
     expect(data.cli('widget', 'list').json().filter((e) => e.id.startsWith(x.prefix))).toEqual([])
     expect(data.cli('plugin', 'list').out).not.toContain(x.market)
+  })
+
+  test("54 · A widget's settings: Done this week counts this week or this month, a plugin's Last builds gets its branch; set with ⚙ or `echoctl today set`, refused when not one it takes, kept on Today", covers('today/TC-032', 'F-TODAY-23'), async ({ page }) => {
+    const w = data.text.widgets
+    const { name: n, id } = w
+    const x = w.settings
+    const builds = w.plugin.widgets.builds
+    const buildsId = w.plugin.ids.builds
+    const done = catalogOf(id.done).label
+    const { period: per, branch: br } = x
+    const today = new TodayWidgetsPage(page, data)
+    const paramsOf = (i) => layout().find((e) => e.widget === i).params
+    const s = (k) => (k === 1 ? '' : 's')
+    const firstBuild = () => today.widgetItems(builds).first()
+    try {
+      installDemo()
+      for (const [i, size, ...where] of x.place) {
+        const r = data.cli('today', 'add', i, '--size', size, ...where)
+        expect(r.code, r.err).toBe(0)
+      }
+      const week = shown(id.done)
+      expect(week.period).toBe(per.week)
+      await page.setViewportSize(w.sizes.short)
+      await today.openToday()
+      // Done this week since Monday; Last builds' first line its default branch (reloaded until the plugin answers).
+      await expect(async () => {
+        await today.reloadToday()
+        await expect(firstBuild()).toHaveText(fill(br.line, { branch: br.main }), { timeout: 1_000 })
+      }).toPass({ timeout: 20_000 })
+      await expect(today.widgetHeading(n.done, x.heading.week, 2)).toBeVisible()
+      await expect(today.widgetSays(n.done, String(week.done.length))).toBeVisible()
+      await expect(today.widgetSays(n.done, fill(x.count.week, { s: s(week.done.length) }))).toBeVisible()
+      // Refused: a value it doesn't take, a setting it doesn't have (Echo's widget and the plugin's); nothing changed.
+      const before = layout()
+      for (const [i, key, value, says] of x.refusals) {
+        const r = data.cli('today', 'set', i, key, value)
+        expect(r.code).toBe(1)
+        expect(r.err.trim()).toBe(says)
+      }
+      expect(layout()).toEqual(before)
+      // Edit Today, ⚙ on Done this week: Period under its header, week chosen; month: Done this month.
+      await today.editToday.click()
+      await today.settingsButton(done).click()
+      await expect(today.settingsOf(done)).toBeVisible()
+      await expect(today.setting(done, per.label)).toHaveValue(per.week)
+      await today.setting(done, per.label).selectOption(per.month)
+      await expect.poll(() => paramsOf(id.done)).toEqual({ [per.key]: per.month })
+      const month = shown(id.done)
+      expect(month.period).toBe(per.month)
+      expect(month.done.length).toBeGreaterThanOrEqual(week.done.length)
+      await expect(today.frameSays(done, x.heading.month)).toBeVisible()
+      await expect(today.frameSays(done, String(month.done.length))).toBeVisible()
+      await expect(today.frameSays(done, fill(x.count.month, { s: s(month.done.length) }))).toBeVisible()
+      // ⚙ on Last builds, Branch release; Done: the plugin asked again with it. `echoctl today` keeps both.
+      await today.settingsButton(builds).click()
+      await expect(today.setting(builds, br.label)).toHaveValue(br.main)
+      await today.setting(builds, br.label).selectOption(br.release)
+      await expect.poll(() => paramsOf(buildsId)).toEqual({ [br.key]: br.release })
+      await today.done.click()
+      await expect(firstBuild()).toHaveText(fill(br.line, { branch: br.release }), { timeout: 15_000 })
+      expect(paramsOf(id.done)).toEqual({ [per.key]: per.month })
+      // Kept after a reload.
+      await today.reloadToday()
+      await expect(today.widgetHeading(n.done, x.heading.month, 2)).toBeVisible()
+      await expect(firstBuild()).toHaveText(fill(br.line, { branch: br.release }), { timeout: 15_000 })
+      // `echoctl today set` back to week: Done this week again.
+      const back = data.cli('today', 'set', id.done, per.key, per.week)
+      expect(back.code, back.err).toBe(0)
+      await today.reloadToday()
+      await expect(today.widgetHeading(n.done, x.heading.week, 2)).toBeVisible()
+      await expect(today.widgetSays(n.done, fill(x.count.week, { s: s(week.done.length) }))).toBeVisible()
+    } finally {
+      data.cli('today', 'reset')
+      removeDemo()
+    }
+    expect(layout()).toEqual(w.default)
+    expect(data.cli('widget', 'list').json().filter((e) => e.id.startsWith(w.plugin.prefix))).toEqual([])
+    expect(data.cli('plugin', 'list').out).not.toContain(w.plugin.market)
+  })
+
+  test("55 · A plugin's own page as a widget: drawn by its window half in Echo's frame from its host half's data, with the widget's size and theme, its text escaped; off with the plugin, its place kept", covers('today/TC-033', 'F-TODAY-24'), async ({ page }) => {
+    const w = data.text.widgets
+    const p = w.plugin
+    const x = p.board
+    const board = p.widgets.board
+    const today = new TodayWidgetsPage(page, data)
+    const dialogs = []
+    page.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss() })
+    const drawn = async () => {
+      await expect(async () => {
+        await today.reloadToday()
+        await expect(today.widget(board)).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 20_000 })
+    }
+    try {
+      installDemo()
+      const add = data.cli('today', 'add', p.ids.board, '--size', ...x.place)
+      expect(add.code, add.err).toBe(0)
+      await page.emulateMedia({ colorScheme: x.theme })
+      await page.setViewportSize(w.sizes.short)
+      await today.openToday()
+      await drawn()
+      // In Echo's frame, its label on top: three boxes, the <i> shown as text, nothing italic; its box the size and theme.
+      await expect(today.widgetHeading(board, x.heading, 2)).toBeVisible()
+      expect(await today.pageWidget(board)).toEqual({ size: w.size.M, theme: x.theme, boxes: x.boxes, italic: false })
+      // At L: drawn again at L.
+      const big = data.cli('today', 'size', p.ids.board, x.large)
+      expect(big.code, big.err).toBe(0)
+      await today.reloadToday()
+      await expect.poll(async () => (await today.pageWidget(board))?.size).toBe(x.large)
+      // Its plugin off: not drawn (Today itself is; the window gets no data for it), still on Today's layout.
+      const fed = async () => !!((await today.api('today')).plugins || {})[p.ids.board]
+      expect(await fed()).toBe(true)
+      const off = data.cli('plugin', 'disable', p.id)
+      expect(off.code, off.err).toBe(0)
+      await today.reloadToday()
+      await expect(today.widget(w.name.yourDay)).toBeVisible()
+      expect(await fed()).toBe(false)
+      await expect(today.widget(board)).toHaveCount(0)
+      expect(layout().map((e) => e.widget)).toContain(p.ids.board)
+      // On again: back, at L.
+      const on = data.cli('plugin', 'enable', p.id)
+      expect(on.code, on.err).toBe(0)
+      await drawn()
+      expect(await today.pageWidget(board)).toEqual({ size: x.large, theme: x.theme, boxes: x.boxes, italic: false })
+      expect(dialogs).toEqual([])
+    } finally {
+      data.cli('today', 'reset')
+      removeDemo()
+    }
+    expect(layout()).toEqual(w.default)
+    expect(data.cli('widget', 'list').json().filter((e) => e.id.startsWith(p.prefix))).toEqual([])
+    expect(data.cli('plugin', 'list').out).not.toContain(p.market)
   })
 
   // Not a stage of the manual S-24 (it takes an item its Won't do stages need); here it runs last, after them.

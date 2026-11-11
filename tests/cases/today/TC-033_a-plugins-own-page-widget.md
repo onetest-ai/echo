@@ -9,6 +9,7 @@ run: agent
 platform: any
 data: standard
 tags: [today, widgets, plugins, untrusted-text]
+auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
 # TC-033: A plugin's own page as a widget

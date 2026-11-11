@@ -2398,7 +2398,22 @@
           "--after",
           "plugin:widget-demo:ci"
         ]
-      ]
+      ],
+      "board": {
+        "place": [
+          "M",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        "heading": "Sprint board",
+        "boxes": [
+          "5 To do",
+          "2 Doing",
+          "9 <i>Done</i>"
+        ],
+        "theme": "light",
+        "large": "L"
+      }
     },
     "routines": {
       "cards": [
@@ -2434,6 +2449,71 @@
       "below": "below",
       "before": "before",
       "after": "after"
+    },
+    "settings": {
+      "_about": "A widget's settings (S-24 stage 54, today/TC-032): Done this week's period, Last builds' branch (the test plugin's)",
+      "place": [
+        [
+          "core:tasks.done",
+          "S",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "M",
+          "--after",
+          "core:tasks.done"
+        ]
+      ],
+      "refusals": [
+        [
+          "core:tasks.done",
+          "period",
+          "year",
+          "Error: core:tasks.done's period doesn't take \"year\" (week, month)"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "branch",
+          "dev",
+          "Error: plugin:widget-demo:builds's branch doesn't take \"dev\" (main, release)"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "color",
+          "red",
+          "Error: plugin:widget-demo:builds has no setting \"color\" (it has branch)"
+        ],
+        [
+          "core:tasks.mine",
+          "period",
+          "month",
+          "Error: core:tasks.mine has no setting \"period\""
+        ]
+      ],
+      "gear": "{label}: settings",
+      "period": {
+        "key": "period",
+        "label": "Period",
+        "week": "week",
+        "month": "month"
+      },
+      "branch": {
+        "key": "branch",
+        "label": "Branch",
+        "main": "main",
+        "release": "release",
+        "line": "Branch {branch}"
+      },
+      "heading": {
+        "week": "Done this week",
+        "month": "Done this month"
+      },
+      "count": {
+        "week": "task{s} since Monday",
+        "month": "task{s} this month"
+      }
     }
   }
 }
