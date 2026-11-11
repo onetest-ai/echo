@@ -101,6 +101,25 @@
    "axes": [
     "plugin.installed"
    ]
+  },
+  {
+   "id": "F-PLUG-11",
+   "feature": "A plugin may reach the address the user enters in a setting its manifest lists in `network.hosts_from`, and only that origin: the sheet says so, https works for any host, plain http only inside the user's own network, and an address that isn't allowed is refused where it is saved",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses",
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-12",
+   "feature": "A plugin's `ctx.http.fetch` with `save` keeps a download in its store byte for byte (a failed one leaves no file), and the window serves that audio or picture from `/plugin/<id>/store/…` and nothing else of the store",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
   }
  ]
 }
