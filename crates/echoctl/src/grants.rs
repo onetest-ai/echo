@@ -140,7 +140,11 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     // (`OBSIDI~1`, `GIT~1`), is checked as what it reaches; what is there already by its own name, not an alias of it
     // (never a link itself: refused above).
     let real = match dunce::canonicalize(&full) {
-        Ok(f) if f.starts_with(&root) => f,
+        // Its name as typed when it differs only in case: a rename to `Note.md` from `note.md` renames.
+        Ok(f) if f.starts_with(&root) => match (f.file_name(), full.file_name()) {
+            (Some(a), Some(b)) if a != b && a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()) => f.with_file_name(b),
+            _ => f,
+        },
         _ => real_dir.join(full.strip_prefix(at).unwrap_or(Path::new(""))),
     };
     if real.strip_prefix(&root).is_ok_and(|r| r.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))) {

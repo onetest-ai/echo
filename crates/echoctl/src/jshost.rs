@@ -1746,7 +1746,11 @@ mod tests {
                 let o = std::process::Command::new("cmd").arg("/c").raw_arg(format!("for %I in (\"{}\") do @echo %~snxI", p.display())).output().ok()?;
                 Some(String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty() && !s.starts_with('.'))
             };
-            if let Some(s) = short(&vault.join(".obsidian")) {
+            let hidden_short = short(&vault.join(".obsidian"));
+            if hidden_short.is_none() {
+                eprintln!("note: this volume makes no 8.3 names: the short-name checks are skipped");
+            }
+            if let Some(s) = hidden_short {
                 assert!(run("writer", "write", json!({"path": format!("{s}/x.json"), "text": "x"})).unwrap_err().contains("is hidden"), "{s}");
                 assert!(run("writer", "remove", json!({"path": format!("{s}/app.json")})).unwrap_err().contains("is hidden"));
                 assert!(run("writer", "move", json!({"from": format!("{s}/app.json"), "to": "Stolen.json"})).unwrap_err().contains("is hidden"));
@@ -1764,6 +1768,10 @@ mod tests {
             assert!(!vault.join("People/.X.md").exists() && !vault.join("People/X.md").exists());
         }
         assert_eq!(std::fs::read_to_string(vault.join(".obsidian/app.json")).unwrap(), "{}");
+        // A rename that changes only the case renames (NTFS and APFS take both as one name).
+        std::fs::write(vault.join("note.md"), "n").unwrap();
+        run("writer", "move", json!({"from": "note.md", "to": "Note.md"})).unwrap();
+        assert!(std::fs::read_dir(&vault).unwrap().flatten().any(|e| e.file_name() == "Note.md"), "renamed to Note.md");
         assert!(crate::grants::grant("writer", &paths::config_dir()).unwrap_err().to_string().contains("Echo's own files"));
         assert!(crate::grants::grant("writer", &paths::home()).unwrap_err().to_string().contains("Echo's own files"), "a folder holding the data folder's .echo");
         // A plugin that only reads can't.
