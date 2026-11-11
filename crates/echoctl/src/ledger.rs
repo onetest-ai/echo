@@ -1563,6 +1563,17 @@ mod tests {
         assert_eq!(about_thread(&found, &src(&[]), &none), [true; 5], "no subjects: every mail of its people");
     }
 
+    #[test]
+    fn new_subjects_read_the_sources_window_again() {
+        let (_env, _l, id) = setup("ledger-mail-again");
+        let f = mails_file(&id);
+        fs::write(&f, json!({"person:jane@acme.example": {"read_at": "2026-11-10T09:00:00+00:00", "checked_at": "2026-11-10T09:00:00+00:00", "found": 3}, "domain:acme.example": {"read_at": "x"}}).to_string()).unwrap();
+        read_mail_again(&id, "person:jane@acme.example").unwrap();
+        let st = mail_state(&id);
+        assert!(st["person:jane@acme.example"]["read_at"].is_null() && st["person:jane@acme.example"]["checked_at"].is_null(), "{st}");
+        assert_eq!(st["domain:acme.example"]["read_at"], "x", "the other sources as they were");
+    }
+
     #[cfg(feature = "brain")]
     #[test]
     fn mail_waits_while_nobody_can_be_told_a_colleague() {

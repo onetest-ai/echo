@@ -538,7 +538,7 @@ fn norm_domains(ds: &[String]) -> Vec<String> {
 }
 
 /// Words of a subject, for "contains" (lowercase, letters and digits).
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
 

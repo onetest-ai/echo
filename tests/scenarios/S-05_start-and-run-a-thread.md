@@ -21,6 +21,7 @@ cases:
   - tests/cases/threads/TC-010_stage-closes-the-thread.md
   - tests/cases/threads/TC-011_profile-client-change-and-new-client.md
   - tests/cases/threads/TC-005_delete-thread-keeps-calls.md
+  - tests/cases/threads/TC-028_mail-source-limited-to-subjects.md
 auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
@@ -61,6 +62,7 @@ auto: [tests/auto/specs/S-05.spec.mjs]
 | 15 | `threads/TC-010_stage-closes-the-thread.md` | — | On stage 14's view (Globex pilot's Profile): skip the navigation of step 1; check its result on the snapshot |
 | 16 | `threads/TC-011_profile-client-change-and-new-client.md` | — | On stage 15's view (Globex pilot's Profile, Active again after its teardown): skip the navigation of step 1; check its result on the snapshot |
 | 17 | `threads/TC-005_delete-thread-keeps-calls.md` | — | Reload `{{base_url}}/` (stage 16 changed a client and removed one with the CLI) |
+| 18 | `threads/TC-028_mail-source-limited-to-subjects.md` | — | — |
 
 ## Notes
 - No stage depends on another: each leaves the data as it found it (its teardown), so a failed stage never blocks the next.

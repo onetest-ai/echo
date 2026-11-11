@@ -215,6 +215,21 @@ pub fn reread_sources(client: &str) -> Result<()> {
     Ok(())
 }
 
+/// A mail source whose subjects changed: the thread reads its first window again at the next sync, by the new words
+/// (Recall too: `brain::sources::read_again`). Items already in the thread stay.
+pub fn read_mail_again(project: &str, rule: &str) -> Result<()> {
+    let f = mails_file(project);
+    let mut st = calls::read_json(&f);
+    if let Some(o) = st.as_object_mut().and_then(|o| o.get_mut(rule)).and_then(Value::as_object_mut) {
+        o.remove("read_at");
+        o.remove("checked_at");
+        crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
+    }
+    #[cfg(feature = "brain")]
+    crate::brain::sources::read_again("mail", rule)?;
+    Ok(())
+}
+
 /// Without the Brain built in there is no senders list to trust anyone by: mail isn't read.
 #[cfg(not(feature = "brain"))]
 pub fn mail_sync(_project: &str) -> Result<Vec<String>> {

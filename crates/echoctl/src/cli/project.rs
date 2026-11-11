@@ -416,6 +416,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                 }
                 _ => None,
             };
+            let mut changed: Option<String> = None;
             let p = projects::update(&id, |p| {
                 if let Some(r) = &remove {
                     let before = p.sources.len();
@@ -430,8 +431,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                             if !exclude.is_empty() {
                                 s.exclude = exclude.clone();
                             }
-                            if let Some(w) = &subject {
+                            if let Some(w) = subject.as_ref().filter(|w| **w != s.subject) {
                                 s.subject = w.clone();
+                                changed = Some(s.id.clone());
                             }
                         }
                         None => p.sources.push(projects::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), exclude: exclude.clone(), subject: subject.clone().unwrap_or_default() }),
@@ -439,6 +441,10 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                 }
                 Ok(())
             })?;
+            // New words: the source reads its window again by them.
+            if let Some(rule) = changed {
+                ledger::read_mail_again(&id, &rule)?;
+            }
             print_json(&serde_json::json!(p.sources));
         }
         ProjectCmd::Rule { id, series, people, chat, subject, remove } => {

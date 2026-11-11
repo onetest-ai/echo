@@ -593,7 +593,9 @@ document.addEventListener('keydown', (e) => {
     if (what === 'mail') {
       // The address field and the subject field: Enter in either adds the source with both.
       const who = (($('#pj-add-mail') || {}).value || '').trim(), subject = (($('#pj-add-mail-subject') || {}).value || '').trim()
-      if (who) { projectSend('source_add', { kind: 'mail', source: who, subject }); setTimeout(() => loadSourceState(true), 1500) }
+      // No address yet (Enter in the subject field first): the form stays, the words kept.
+      if (!who) { S.pj.adding = 'mail'; return }
+      projectSend('source_add', { kind: 'mail', source: who, subject }); setTimeout(() => loadSourceState(true), 1500)
     }
     if (what === 'exclude') { projectSend('source_exclude', { source: el.dataset.root, exclude: v.split(',').map((g) => g.trim()).filter(Boolean) }); setTimeout(() => loadSourceState(true), 1500) }
     if (what === 'rule') {

@@ -155,12 +155,22 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
             let name = opt("name");
             // A mail source's subjects ("Acme Platform, APX"); mail from anyone needs them (`projects::check`).
             let subject = if kind == "mail" { pj::subject_words(&s("subject").unwrap_or_default()) } else { vec![] };
+            let mut changed = false;
             pj::update(&id, |p| {
-                if !p.sources.iter().any(|x| x.kind == kind && x.id == sid) {
-                    p.sources.push(pj::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), subject: subject.clone(), ..Default::default() });
+                match p.sources.iter_mut().find(|x| x.kind == kind && x.id == sid) {
+                    // The same mail source again with other words: they replace its words, and it reads by them.
+                    Some(x) if kind == "mail" && !subject.is_empty() && x.subject != subject => {
+                        x.subject = subject.clone();
+                        changed = true;
+                    }
+                    Some(_) => {}
+                    None => p.sources.push(pj::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), subject: subject.clone(), ..Default::default() }),
                 }
                 Ok(())
             })?;
+            if changed {
+                crate::ledger::read_mail_again(&id, &sid)?;
+            }
             #[cfg(feature = "brain")]
             brain_sync_now();
         }

@@ -52,6 +52,17 @@ pub fn state() -> Value {
     std::fs::read(state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}))
 }
 
+/// Read a source again from the start at the next sync (its subjects changed): what it holds is judged anew.
+pub fn read_again(kind: &str, id: &str) -> Result<()> {
+    let mut st = state();
+    if let Some(o) = st.as_object_mut() {
+        if o.remove(&format!("{kind}:{id}")).is_some() {
+            save_state(&st)?;
+        }
+    }
+    Ok(())
+}
+
 fn save_state(v: &Value) -> Result<()> {
     paths::write_atomic(&state_path(), serde_json::to_string_pretty(v)?.as_bytes())?;
     Ok(())
@@ -85,11 +96,20 @@ impl MailRule {
 
     /// Graph's search (fuzzy: what it returns is checked with `matches` and the source's subjects). Mail from
     /// anyone is searched by its subjects; an address's or a domain's by its people only, so a reply that changed
-    /// the subject still comes with its conversation.
+    /// the subject still comes with its conversation. A subject is searched as its words, all of them (no quotes:
+    /// `graph::mail` quotes the whole query), the subjects grouped so the received date holds for each.
     pub fn kql(&self, subject: &[String]) -> String {
         match self {
             MailRule::Domain(v) | MailRule::Person(v) => format!("from:{v} OR to:{v}"),
-            MailRule::Any => subject.iter().map(|w| format!("subject:\"{}\"", w.replace(['"', '\\'], " "))).collect::<Vec<_>>().join(" OR "),
+            MailRule::Any => {
+                let groups: Vec<String> = subject
+                    .iter()
+                    .map(|w| projects::words(w).iter().map(|x| format!("subject:{x}")).collect::<Vec<_>>().join(" "))
+                    .filter(|g| !g.is_empty())
+                    .map(|g| format!("({g})"))
+                    .collect();
+                format!("({})", groups.join(" OR "))
+            }
         }
     }
 
@@ -150,10 +170,14 @@ fn threads_for(refs: &Value, watched: &[(projects::Project, projects::Source)]) 
     let mut out: Vec<Value> = vec![];
     let mut seen = BTreeSet::new();
     let people: Vec<String> = refs["people"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_lowercase)).collect();
+    // A conversation's subjects, as the thread's own reading takes them (`ledger::mail::about_thread`): any of its
+    // mails'. A document read before subjects were kept has none: it stays where it was until it is read again.
+    let subjects: Option<Vec<&str>> = refs["subjects"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect());
     for (p, s) in watched {
+        let about = || subjects.as_ref().is_none_or(|all| all.iter().any(|x| s.about(x)) || s.subject.is_empty());
         let hit = match (refs["kind"].as_str(), s.kind.as_str()) {
             (Some("channel"), "teams_channel") => refs["channel"].as_str() == Some(s.id.as_str()),
-            (Some("mail"), "mail") => MailRule::parse(&s.id).is_some_and(|r| r.matches(&people)) && s.about(refs["subject"].as_str().unwrap_or("")),
+            (Some("mail"), "mail") => MailRule::parse(&s.id).is_some_and(|r| r.matches(&people)) && about(),
             _ => false,
         };
         if hit && seen.insert(p.id.clone()) {
@@ -474,7 +498,13 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             continue;
         }
         let subject = first["subject"].as_str().unwrap_or("(no subject)");
-        let refs = json!({"kind": "mail", "conversation": c, "people": people, "url": first["url"], "subject": subject});
+        let mut subjects: Vec<&str> = vec![];
+        for x in msgs.iter().filter_map(|m| m["subject"].as_str()) {
+            if !subjects.contains(&x) {
+                subjects.push(x);
+            }
+        }
+        let refs = json!({"kind": "mail", "conversation": c, "people": people, "url": first["url"], "subjects": subjects});
         let threads = threads_for(&refs, &w);
         if threads.is_empty() {
             continue;
@@ -651,17 +681,26 @@ mod tests {
         let any = MailRule::parse("any:*").unwrap();
         assert_eq!(any, MailRule::Any);
         assert!(any.matches(&["x@anyone.example".into()]));
-        assert_eq!(any.kql(&["Acme Platform".into(), "APX".into()]), "subject:\"Acme Platform\" OR subject:\"APX\"");
+        assert_eq!(any.kql(&["Acme Platform".into(), "APX".into(), "O'Brien".into()]), "((subject:acme subject:platform) OR (subject:apx) OR (subject:o subject:brien))", "words, no quotes (`graph::mail` quotes the query)");
         let id = projects::create("Acme Platform", None, None).unwrap().id;
         projects::update(&id, |p| {
             p.sources.push(projects::Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: vec!["Acme Platform".into()], ..Default::default() });
             Ok(())
         })
         .unwrap();
-        let conv = |subject: &str| json!({"kind": "mail", "people": ["jane@acme.example"], "subject": subject});
-        assert_eq!(threads_for(&conv("Acme Platform status"), &watched()).len(), 1);
-        assert!(threads_for(&conv("Lunch on Friday"), &watched()).is_empty(), "the same person's other mail isn't the thread's");
-        assert!(threads_for(&json!({"kind": "mail", "people": ["jane@acme.example"]}), &watched()).is_empty(), "no subject known: not read as the thread's");
+        let conv = |subjects: &[&str]| json!({"kind": "mail", "people": ["jane@acme.example"], "subjects": subjects});
+        assert_eq!(threads_for(&conv(&["Acme Platform status"]), &watched()).len(), 1);
+        assert_eq!(threads_for(&conv(&["Quick question", "RE: Acme Platform status"]), &watched()).len(), 1, "any mail of the conversation, as the thread's own reading");
+        assert!(threads_for(&conv(&["Lunch on Friday"]), &watched()).is_empty(), "the same person's other mail isn't the thread's");
+        let before = json!({"kind": "mail", "people": ["jane@acme.example"]});
+        assert_eq!(threads_for(&before, &watched()).len(), 1, "read before subjects were kept: it stays until read again");
+        // New words: the source reads its window again by them (its state forgotten).
+        std::fs::create_dir_all(crate::brain::dir()).unwrap();
+        let mut st = state();
+        st["mail:person:jane@acme.example"] = json!({"since": "2026-11-01T00:00:00Z"});
+        save_state(&st).unwrap();
+        read_again("mail", "person:jane@acme.example").unwrap();
+        assert!(state()["mail:person:jane@acme.example"].is_null());
     }
 
     #[test]
