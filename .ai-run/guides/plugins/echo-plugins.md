@@ -18,12 +18,15 @@
 - R11. Never let a channel's env set a `CLAUDE*` or `ANTHROPIC*` key. Evidence: `jshost::service`
 - R12. Deliver only to the user and the addresses the user set on a routine, never to an address a model picked; anything a model wrote carries `ai_notice`. Evidence: `deliver::send`
 - R13. Add a kind of plugin widget in three places: `plugins::WIDGET_KINDS`, its drawing in `pluginWidgetHtml` (the window script: every text through `esc`, a link only to `echo://`, data it can't draw throws with what is wrong), and its cases in `today-plugin-widgets.test.mjs`; a plugin's widget data is read from its last answer, never by waiting on the plugin while Today draws. Evidence: `widgets::plugin_data`
+- R14. A plugin's store is the plugin's to clean; Echo removes only what lay in its `cache/` over 7 days and downloads left half-written (`.part`) over an hour, when its host half starts. Evidence: `jshost::sweep_store`
 
 ### Constraints
 | Do not | Do instead | Evidence |
 |---|---|---|
 | Put a link or special file in a plugin or marketplace tree | Ship plain files within 400 files / 20 MB a plugin, 5000 / 64 MB a marketplace | `plugins::check_tree` |
-| Fetch from a host the manifest doesn't name, or over http | `ctx.http.fetch` to `https://` hosts listed in `uses.network.hosts` | `jshost::fetch` |
+| Fetch from a host the manifest doesn't name, or over plain http outside the user's own network | `ctx.http.fetch` to `https://` hosts listed in `uses.network.hosts`, or to what the addresses the user listed in a setting named by `uses.network.hosts_from` match (plain http only inside their own network) | `jshost::fetch`, `plugins::addresses` |
+| Let a plugin set the addresses it may reach (`ctx.settings.set`, its `settings.json`, a manifest `default`) | Only the user enters them, in the window or the CLI | `jshost::writable_store_path` |
+| Serve a plugin's store to the window beyond audio and pictures | `/plugin/<id>/store/<file>`, media kinds only, kept inside the store | `window::plugins::store_file` |
 | Give Echo's sessions a skill with frontmatter, hooks or `!` commands | Pass `[{name, description, body}]` to `ctx.sessions.skills`; Echo writes the plugin around them | `grants::set_session_skills` |
 
 ### Read first

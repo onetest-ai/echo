@@ -8,7 +8,7 @@
 - R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`, `widgets`. Evidence: `plugins::valid_id`
 - R2. Point `main` and `client` at a `.js`/`.mjs` inside the plugin folder; read any other file it ships with `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - R3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
-- R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts`, `channel.plugin`, `sessions`, `folders.what` read-only, `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
+- R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts` or `network.hosts_from` (string settings without a default), `channel.plugin`, `sessions`, `folders.what` read-only, `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
 - R5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
 - R6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, height?, refresh?, params?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `chart`, `list`, `status`, `card` or `page` (a page needs a `client`), `sizes` of `S` `M` `L` each once (default `["M"]`), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 12, and only with a `main` to give their data; its settings in `params` as `{key, label, type, options?, default?}` — `type` `choice` (1–12 `options`), `bool`, `thread` or `client`, 6 at most. Evidence: `plugins::check_params`
 
@@ -33,11 +33,12 @@
 - R16. Shape a widget's data by its kind — `stat` `{value, unit?, label?, tone?, note?, progress?: {used, of}}`, `stats` `{items: [{label, value, tone?}]}`, `chart` `{type: bar|bars|line, points: [{label, value}], unit?, note?}` (values numbers), `list` `{items: [{title, sub?, link?}], empty?}`, `status` `{state: ok|warn|bad, title, text?}`, `card` `{title?, text?, link?}`; `tone` `good`, `warn` or `bad`; text is plain (Echo escapes it), a `link` only to `echo://`; check it with `echoctl widget show plugin:<id>:<widget>`. Evidence: `pluginWidgetHtml` (window script)
 - R18. Read a widget's settings from the `params` your provider gets (`ctx.widgets.provide(id, ({params}) => …)`: its defaults, then what the user set in Today's edit mode or with `echoctl today set`); Echo asks again when one changes, and never gives a value the setting doesn't take. Evidence: `today_layout::params_of`
 - R17. Give any widget `open` (an `echo://` place, or an `https://` page Echo opens only after the user confirms it) and up to 3 `actions: [{label, command, args}]` — each runs your host half's `ctx.command(command)` with `args` on the user's click, then Today reads your widgets again; answer by `ctx.widgets.set` what changed. Evidence: `pluginWidgetHtml` (window script)
+- R19. Save audio or a picture with `ctx.http.fetch(url, {save: "<store path>"})` and show it from `/plugin/<id>/store/<path>`; put what you can lose under `cache/` (Echo removes it after 7 days) and remove the rest yourself with `ctx.store.remove`. Evidence: `jshost::sweep_store`
 
 ### Constraints
 | Do not | Do instead | Evidence |
 |---|---|---|
-| Write `settings.json`, `inbox.json` or `widgets.json` with `ctx.store.write` | Use `ctx.settings.set`, `ctx.inbox.set` / `clear` and `ctx.widgets.set` / `clear` | `jshost::inbox_file`, `jshost::widgets_file` |
+| Write `settings.json`, `inbox.json` or `widgets.json` with `ctx.store.write` (Echo refuses `settings.json`) | Use `ctx.settings.set`, `ctx.inbox.set` / `clear` and `ctx.widgets.set` / `clear` | `jshost::inbox_file`, `jshost::widgets_file` |
 
 ### Read first
 | When you are | Exemplar | Tests |
