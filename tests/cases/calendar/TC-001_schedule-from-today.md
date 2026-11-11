@@ -18,6 +18,7 @@ auto: [tests/auto/specs/S-02.spec.mjs]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
+- Built after about 21:50 the meetings to come start sooner (#364: at 22:50 Globex design review starts 8 minutes after the build, tests/fixtures/README.md): run the steps that need it still to come at once after the build, or build earlier
 
 ## Test Data
 

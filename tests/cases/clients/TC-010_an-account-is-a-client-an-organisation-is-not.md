@@ -33,9 +33,9 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `echoctl client list` | Six entries: initech, acme, globex, umbrella, tyrell, duff; none of vandelay, northwind-analysts, stark-advisory |
+| 1 | Run `echoctl client list` | Eight entries: initech, acme, globex, umbrella, tyrell, duff, wonka, cyberdyne; none of vandelay, northwind-analysts, stark-advisory |
 | 2 | Run `echoctl org list` | Nine entries: the six above and vandelay, northwind-analysts and stark-advisory, the last three with `"account": false`; stark-advisory has `"domains": []` |
-| 3 | Navigate to `{{base_url}}/#projects` and read the groups | Groups Acme, Globex, Umbrella, Tyrell, Duff, "Initech · your company", "No client"; no group named Vandelay, Northwind Analysts or Stark Advisory |
+| 3 | Navigate to `{{base_url}}/#projects` and read the groups | Groups Acme, Globex, Umbrella, Tyrell, Duff, Wonka, Cyberdyne, "Initech · your company", "No client"; no group named Vandelay, Northwind Analysts or Stark Advisory |
 | 4 | Navigate to `{{base_url}}/#client/acme/overview` | The heading "Acme" with the tag "client" and the line "3 threads · acme.example" |
 | 5 | Navigate to `{{base_url}}/#client/vandelay/overview` | The page says "This client is gone" with the link "Back to the threads"; the same for `#client/stark-advisory/overview` |
 | 6 | Navigate to `{{base_url}}/#project/globex-pilot/profile` and read the row "Organisations" | The token "Vandelay" (a counterpart) is there although it has no client page |

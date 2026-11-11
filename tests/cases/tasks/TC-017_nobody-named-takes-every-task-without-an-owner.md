@@ -33,20 +33,27 @@ auto: [tests/auto/specs/S-25.spec.mjs]
 | Acme renewal | T006 | Share the architecture diagram (kept) | open | no one named | no date | Day-to-day work |
 | Acme rollout | T005 | Hold the help desk training session | open | handed over by Me | no date | SSO for the Berlin pilot |
 | Acme rollout | T021 | Agree the acceptance criteria (kept) | open | no one named | no date | Day-to-day work |
+| Cyberdyne audit | T001 | Send the audit questionnaire | open | no one named | no date | Audit scope |
+| Cyberdyne data room | T001 | Name the data room owners | open | no one named | no date | Data room setup |
+| Cyberdyne training | T001 | Draft the course outline | open | no one named | no date | Training plan |
 | Globex pilot | T014 | Review the access matrix (2) (kept) | open | no one named | no date | Day-to-day work |
+| Wonka factory tour | T001 | Agree the tour route | open | no one named | no date | Visit day |
+| Wonka loyalty app | T001 | List the reward tiers | open | no one named | no date | Loyalty points |
+| Wonka packaging | T001 | Collect the wrapper samples | open | no one named | no date | New wrappers |
+| Wonka shop fit | T001 | Measure the shop floor | open | no one named | no date | Shop layout |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "Nobody named" | The heading reads "Nobody named 11" |
-| 2 | Click the button "+ 5" at the foot of the "Nobody named" column | The column holds 11 cards and the button reads "Show fewer" |
+| 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "Nobody named" | The heading reads "Nobody named 18" |
+| 2 | Click the button "+ 12" at the foot of the "Nobody named" column | The column holds 18 cards and the button reads "Show fewer" |
 | 3 | For each row of the table find the card `[data-tk="open"][data-project=<thread id>][data-node=<Id>]` in the column | Every row exists once with its title, thread name, line under the title (only the story, never "blocked", never an owner) and due chip |
 | 4 | Read the cards of Globex pilot T004 "Check the firewall rules" and T006 "Schedule the steering call" | Both are there although one is in state blocked and the other waits for an item; the first has a red due chip (tooltip "Overdue"), the second a due chip for today that is not red |
-| 5 | Run `echoctl project tasks` and read `piles.nobody` | 11 entries, each with `owner` null; `delegated_by` is "Me" for Acme rollout T005 and T011, "Priya Nair" for Globex pilot T004 and T006, and null for the others |
+| 5 | Run `echoctl project tasks` and read `piles.nobody` | 18 entries, each with `owner` null; `delegated_by` is "Me" for Acme rollout T005 and T011, "Priya Nair" for Globex pilot T004 and T006, and null for the others |
 
 ## Expected Final State
-Nobody named holds the 11 tasks of the table, unfolded.
+Nobody named holds the 18 tasks of the table, unfolded.
 
 ## Teardown
 - None: the case only reads

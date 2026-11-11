@@ -25,8 +25,8 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 | Meeting (id) | When | Link in its body | App label |
 |---|---|---|---|
-| Umbrella pricing review (`ev-zoom-pricing`) | about 1 h 45 min after the build, 30 min, Zoe Martin | `https://zoom.us/j/85550100123?pwd=TestOnly` | Zoom |
-| Globex roadmap chat (`ev-meet-roadmap`) | about 2 h 30 min after the build, 30 min, Kim Park | `meet.google.com/tst-wxyz-abc` | Google Meet |
+| Umbrella pricing review (`ev-zoom-pricing`) | about 1 h 45 min after the build, 30 min (built after about 21:05, squeezed shorter before 23:50), Zoe Martin | `https://zoom.us/j/85550100123?pwd=TestOnly` | Zoom |
+| Globex roadmap chat (`ev-meet-roadmap`) | about 2 h 30 min after the build, 30 min (built after about 20:20, squeezed shorter before 23:50), Kim Park | `meet.google.com/tst-wxyz-abc` | Google Meet |
 | Acme help desk sync (`ev-m29`, to come, a Teams link) | 37 minutes after the build | — | none |
 
 ## Steps

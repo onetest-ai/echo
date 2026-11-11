@@ -41,7 +41,7 @@ The other 8 cards of I owe have no mode (no icon); a card outside I owe never sh
 | 3 | Select "Claude can do" in `[aria-label="Who does it"]` | The chip reads "Claude can do ▾"; "I owe 3" with Acme renewal T003, Umbrella proposal T005 and T009; "Owed to me 0", "Waiting for others 0", "Nobody named 0"; the button "Others" is gone |
 | 4 | Select "By hand" | "I owe 3" with Acme rollout T016, Globex pilot T001 and Initech hiring T010; the other piles show "Nothing here" |
 | 5 | Select "Claude can do", then select the thread "Umbrella proposal · 10" in `[aria-label="Thread"]` | "I owe 2" with Umbrella proposal T005 and T009: the two filters narrow together |
-| 6 | Select "Anyone" and "All threads" | "I owe 14", "Owed to me 5", "Waiting for others 5", "Nobody named 11" and "Others · 24" again |
+| 6 | Select "Anyone" and "All threads" | "I owe 14", "Owed to me 5", "Waiting for others 5", "Nobody named 18" and "Others · 24" again |
 
 ## Expected Final State
 Both filters are back on Anyone and All threads.

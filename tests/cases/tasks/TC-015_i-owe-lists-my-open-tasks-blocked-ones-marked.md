@@ -44,7 +44,7 @@ The due chip shows the date itself, as the browser's locale writes it: with a sh
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | The headings read "I owe 14", "Owed to me 5", "Waiting for others 5", "Nobody named 11" and the folded button "Others · 24"; the Thread chip reads "All threads ▾" and the header says "across 7 active projects" |
+| 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | The headings read "I owe 14", "Owed to me 5", "Waiting for others 5", "Nobody named 18" and the folded button "Others · 24"; the Thread chip reads "All threads ▾" and the header says "across 14 active projects" |
 | 2 | Click the button "+ 8" at the foot of the "I owe" column | The button now reads "Show fewer"; the column holds 14 cards |
 | 3 | For each row of the table find the card `[data-tk="open"][data-project=<thread id>][data-node=<Id>]` in the "I owe" column (thread ids: acme-rollout, acme-renewal, globex-pilot, initech-hiring, umbrella-proposal) and read it | Every card exists in the column and shows the title, the thread name, the line under the title, the due chip of its row's date and the mode icon of its row (its `aria-label` starts with the row's words); no card of the column is missing from the table |
 | 4 | Count the cards of the column whose line under the title holds the red word "blocked" | 7 cards (the rows whose line says "blocked"); the other 7 show only the story "Day-to-day work" |

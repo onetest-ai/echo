@@ -44,7 +44,7 @@ The wait card of Umbrella proposal T012 ("an answer on draft the status report (
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", unfold every pile ("+ 8", "+ 5", "Others · 24") | All piles are unfolded |
+| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", unfold every pile ("+ 8", "+ 12", "Others · 24") | All piles are unfolded |
 | 2 | For each row of the table find the card and read the mark `.tk-quiet` (text and `title`) | The mark matches the last column; its tooltip reads "No word about it in 5 days" where there is one |
 | 3 | Count the `.tk-quiet` marks on the page | 9: the eight undated Umbrella proposal cards of the table and the wait card of Umbrella proposal T012; no card of another thread has one (their last word is 4, 3 or 0 days old) |
 

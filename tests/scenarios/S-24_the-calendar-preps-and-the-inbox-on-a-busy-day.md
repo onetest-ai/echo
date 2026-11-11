@@ -62,7 +62,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 # S-24: The calendar, preps and the Inbox on a busy day
 
-**Story:** Sam looks at a day of 39 meetings: the blocks of every state, overlapping meetings, the six answers to an invite, the cards' actions, a recurring meeting's rule, a recorded meeting's card, Day and Week, and the prep a card offers; a Zoom and a Google Meet meeting with their app and no Record; then Coming up today with its preps (every section, more than ten people, the Prep tab of recorded calls) and the CLI; the week; then the series, kind and thread choices on the cards; then the Inbox with 25 items: the badge, chips, groups, folds and buttons, the Done list, the CLI and where Open goes; and finally the decisions that work without a network or Claude Code.
+**Story:** Sam looks at a day of 40 meetings: the blocks of every state, overlapping meetings, the six answers to an invite, the cards' actions, a recurring meeting's rule, a recorded meeting's card, Day and Week, and the prep a card offers; a Zoom and a Google Meet meeting with their app and no Record; then Coming up today with its preps (every section, more than ten people, the Prep tab of recorded calls) and the CLI; the week; then the series, kind and thread choices on the cards; then the Inbox with 25 items: the badge, chips, groups, folds and buttons, the Done list, the CLI and where Open goes; and finally the decisions that work without a network or Claude Code.
 
 ## Assets
 
@@ -139,6 +139,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.
 - Data: `standard`, built right before the run.
 - Stages 1 to 15 read the clock: the meetings "live" at the build end 20 minutes after it and the ones "to come" start 37 minutes after it. Run these stages within 15 minutes of the build; if more than 20 minutes have passed, rebuild the data and start again from stage 1. `--now` does not help: the window places the meetings against the real clock, and `--now` only shifts the data.
+- Stage 48 (`today/TC-026`) reads the clock too: its invite at a free time, Design system walkthrough, runs from 22 to about 36 minutes after the build and is a choice only until it ends. Its first line, the meetings under way at once, is a choice only until they end 20 minutes after the build: rebuild the data (`serve.sh down`, then `up`) right before stage 48 and run its steps 1–3 within 15 minutes; it and the stages after it need nothing from the earlier ones.
 - Stages 1 to 8 stay on the Day view: each opens its own cards, and a card is closed only where a step checks it (stages 6 and 7).
 - Stages 17 to 19 change the calendar's own files (a series rule, a meeting's type, a pinned thread); stage 17 puts Globex weekly's rule back to ask in its teardown (stage 40 reads it), stage 19 takes its own pin out again.
 - Inbox stages 20 to 27 read first (badge, chips, groups, folds, buttons, Done rows, the CLI, Open): none of them takes a decision, so Done still holds the data's two rows. The panel opens once (stage 21) and stays open across views until the end. The decisions come last (28 to 35), one item each.

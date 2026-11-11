@@ -36,9 +36,9 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#projects` and click "Found for you" (`[data-pj="found"]`) | The route ends with `#found`; the heading "Found for you" and the six cards of the table, each with the buttons "Accept" and "Reject"; the badge on the button was 6 |
 | 2 | Read each card: the name box, the why line, the organisation line, the Client select and the calls | They are those of the table; the Client select of "Acme calls" shows "Acme" and of "Duff calls" "Duff", the others "No client"; the card "Initrode calls" lists "New client: Initrode (initrode.example)" among its options and the card "Northwind Analysts calls" says it is with a known organisation |
-| 3 | Open the select "Add to a thread…" of one card | It lists the seven open threads (Acme renewal, Acme rollout, Globex pilot, Initech hiring, Internal tooling, Umbrella lead, Umbrella proposal), not the three closed ones |
+| 3 | Open the select "Add to a thread…" of one card | It lists the fourteen open threads (Acme renewal, Acme rollout, Cyberdyne audit, Cyberdyne data room, Cyberdyne training, Globex pilot, Initech hiring, Umbrella lead, Umbrella proposal, Wonka factory tour, Wonka loyalty app, Wonka packaging, Wonka shop fit, Internal tooling), not the three closed ones |
 | 4 | Read the top of the page | A row with the box "New thread name", the select "Client" and the button "Create" (none pressed) |
-| 5 | Run `echoctl project list` and count the threads | Ten: neither Accept nor Reject was pressed |
+| 5 | Run `echoctl project list` and count the threads | Seventeen: neither Accept nor Reject was pressed |
 
 ## Expected Final State
 The six cards are shown and nothing was accepted or rejected.

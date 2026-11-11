@@ -29,6 +29,7 @@ auto: [tests/auto/specs/S-25.spec.mjs]
 | Initech hiring · 9 | 2 | 1 | 1 | 2 | 3 | 9 |
 | Umbrella lead · 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | Umbrella proposal · 10 | 4 | 1 | 1 | 2 | 3 | 11 |
+| Cyberdyne audit · 1, Cyberdyne data room · 1, Cyberdyne training · 1, Wonka factory tour · 1, Wonka loyalty app · 1, Wonka packaging · 1, Wonka shop fit · 1 (each) | 0 | 0 | 0 | 1 | 0 | 1 |
 | Internal tooling · 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 Not in the filter: Tyrell bid, Legacy migration and Acme hackathon (closed threads).
@@ -37,12 +38,12 @@ Not in the filter: Tyrell bid, Legacy migration and Acme hackathon (closed threa
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe" and read the options of `[aria-label="Thread"]` | "All threads", then in this order "Acme renewal · 11", "Acme rollout · 17", "Globex pilot · 10", "Initech hiring · 9", "Umbrella lead · 0", "Umbrella proposal · 10", "Internal tooling · 0"; no closed thread is offered |
+| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe" and read the options of `[aria-label="Thread"]` | "All threads", then in this order "Acme renewal · 11", "Acme rollout · 17", "Cyberdyne audit · 1", "Cyberdyne data room · 1", "Cyberdyne training · 1", "Globex pilot · 10", "Initech hiring · 9", "Umbrella lead · 0", "Umbrella proposal · 10", "Wonka factory tour · 1", "Wonka loyalty app · 1", "Wonka packaging · 1", "Wonka shop fit · 1", "Internal tooling · 0"; no closed thread is offered |
 | 2 | Select "Acme renewal · 11" | The chip reads "Acme renewal ▾"; the piles hold 3, 1, 2, 1 and 5 cards (Others · 5): 12 cards, one more than the 11 in the option, because the person waited on (Rita Gomez) gets a card that is not a task |
 | 3 | Select "Globex pilot · 10" | The piles hold 2, 2, 1, 3 and 2 cards (Others · 2): 10 cards, the same as the option |
 | 4 | Select "Umbrella lead · 0" | Every pile heading shows 0 and "Nothing here"; the button "Others" is gone; the page does not show "No open tasks" (other threads have tasks) |
 | 5 | Select "Internal tooling · 0" | The same: four empty piles |
-| 6 | Select "All threads" | The five piles are back with 14, 5, 5, 11 and 24 cards |
+| 6 | Select "All threads" | The five piles are back with 14, 5, 5, 18 and 24 cards |
 
 ## Expected Final State
 The filter is on All threads.
@@ -51,5 +52,5 @@ The filter is on All threads.
 - None: the case only reads
 
 ## Notes
-- Extends `TC-003` (two threads) to seven; threads with no task are still listed with 0.
+- Extends `TC-003` (two threads) to fourteen; threads with no task are still listed with 0.
 - The count of an option is the number of open tasks; the wait cards of Waiting for others are not tasks, so Acme renewal shows 12 cards for 11 tasks.
