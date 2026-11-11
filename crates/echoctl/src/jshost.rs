@@ -66,6 +66,8 @@ const PRELUDE: &str = r#"
   }
   globalThis.__ctx = {
     id: call('id'),
+    /** True in a terminal (`echoctl plugin call`): a command runs and the process ends — skip start-up work there. */
+    terminal: call('terminal'),
     log: (...a) => call('log', ['info', a.map(String).join(' ')]),
     command: (name, fn) => { commands[name] = fn },
     every: (seconds, fn) => { timers.push({ every: Math.max(10, seconds) * 1000, next: 0, fn }) },
@@ -141,9 +143,17 @@ const PRELUDE: &str = r#"
       readMany: (root, paths, max) => later('fs.read_many', [String(root), (paths || []).map(String), max || 0]),
       /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime}] up to `max`. */
       walk: (root, opts) => later('fs.walk', [String(root), opts || {}]),
+      /** With `uses.folders.write`: write a file (atomically), move one (never over another), delete one or an empty
+       *  folder — inside the folders the user gave it, never through a link. */
+      write: (root, path, text) => call('fs.write', [String(root), String(path), String(text)]),
+      move: (root, from, to) => call('fs.move', [String(root), String(from), String(to)]),
+      remove: (root, path) => call('fs.remove', [String(root), String(path)]),
     },
     system: {
       which: (name) => call('system.which', name),
+      /** Another app's file its manifest names in `uses.files.read` (that very entry, e.g. "~/…/obsidian.json"):
+       *  its text (1 MB at most), or null when it isn't on this computer. */
+      readFile: (entry) => call('files.read', String(entry)),
       /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
     },
@@ -244,6 +254,9 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
 fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     use std::io::Write as _;
     use crate::app::NoWindow;
+    if opts["save"].as_str().is_some_and(|s| !s.is_empty()) || opts["method"].as_str().is_some_and(|m| !m.eq_ignore_ascii_case("GET")) {
+        read_only_here("a request other than GET")?;
+    }
     let m = plugins::read_manifest(&package_dir(id)?)?;
     let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
     // What the user listed, each checked again as when it was saved (the file may have been edited since).
@@ -344,8 +357,19 @@ fn host() -> &'static Host {
 
 /// Load every enabled plugin's host half (the app at start, and after an install or a switch).
 pub fn sync() {
+    sync_some(None)
+}
+
+/// Load (or reload) plugin `id` only, leaving the others as they are: a terminal's `echoctl plugin call` runs no other
+/// plugin's start-up code.
+pub fn sync_only(id: &str) {
+    sync_some(Some(id))
+}
+
+fn sync_some(only: Option<&str>) {
     let want: BTreeMap<String, PathBuf> = plugins::enabled()
         .into_iter()
+        .filter(|p| only.is_none_or(|o| o == p.id))
         .filter_map(|p| {
             let dir = plugins::plugin_dir(&p);
             let m = plugins::read_manifest(&dir).ok()?;
@@ -354,7 +378,7 @@ pub fn sync() {
         .collect();
     let h = host();
     let have: Vec<String> = h.loaded.lock().map(|l| l.keys().cloned().collect()).unwrap_or_default();
-    for id in have.iter().filter(|id| !want.contains_key(*id)) {
+    for id in have.iter().filter(|id| only.is_none() && !want.contains_key(*id)) {
         let _ = h.tx.send(Msg::Unload(id.clone()));
     }
     for (id, dir) in want {
@@ -377,7 +401,7 @@ pub fn call(plugin: &str, command: &str, args: &Value) -> Result<Value> {
 pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration) -> Result<Value> {
     let h = host();
     if !h.loaded.lock().map(|l| l.contains_key(plugin)).unwrap_or(false) {
-        sync();
+        sync_only(plugin);
     }
     let (tx, rx) = channel();
     h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
@@ -630,6 +654,15 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
     m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
 }
 
+/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
+/// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
+fn read_only_here(what: &str) -> Result<()> {
+    if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
+        bail!("{what} isn't allowed in a read-only routine");
+    }
+    Ok(())
+}
+
 /// …and, within it, `flag` set (the install sheet named that part).
 fn uses_flag(id: &str, cap: &str, flag: &str) -> Result<()> {
     if uses(id, cap)?[flag].as_bool() != Some(true) {
@@ -695,6 +728,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
     let s = |v: &Value| v.as_str().unwrap_or("").to_string();
     Ok(match op {
         "id" => json!(id),
+        "terminal" => json!(!TIMERS.load(Ordering::Relaxed)),
         "log" => {
             eprintln!("plugin {id}: [{}] {}", s(&arg[0]), s(&arg[1]));
             Value::Null
@@ -797,6 +831,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "settings.set" => {
+            read_only_here("changing files or settings")?;
             let m = plugins::read_manifest(&package_dir(id)?)?;
             if plugins::address_settings(&m.uses).contains(&s(&arg[0])) {
                 bail!("only you set the addresses {id} may reach (its setting “{}”)", s(&arg[0]));
@@ -864,6 +899,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
         }
         "echo.dictionary.add" => {
+            read_only_here("changing files or settings")?;
             if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == "dictionary")) {
                 bail!("{id} didn't ask to add to your dictionary when it was installed");
             }
@@ -899,6 +935,61 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             std::fs::File::open(&f)?.take(max as u64).read_to_end(&mut buf)?;
             json!(String::from_utf8_lossy(&buf))
         }
+        "fs.write" => {
+            read_only_here("changing files or settings")?;
+            uses_flag(id, "folders", "write")?;
+            let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
+            if f.is_dir() {
+                bail!("“{}” is a folder", s(&arg[1]));
+            }
+            std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
+            paths::write_atomic(&f, s(&arg[2]).as_bytes())?;
+            Value::Null
+        }
+        "fs.move" => {
+            read_only_here("changing files or settings")?;
+            uses_flag(id, "folders", "write")?;
+            let from = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
+            let to = crate::grants::writable(id, &s(&arg[0]), &s(&arg[2]))?;
+            if !from.exists() {
+                bail!("“{}” isn't there", s(&arg[1]));
+            }
+            // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
+            let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
+            if to.exists() && !same {
+                bail!("“{}” is there already", s(&arg[2]));
+            }
+            std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
+            std::fs::rename(&from, &to)?;
+            Value::Null
+        }
+        "fs.remove" => {
+            read_only_here("changing files or settings")?;
+            uses_flag(id, "folders", "write")?;
+            let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
+            if f.is_dir() {
+                std::fs::remove_dir(&f).map_err(|_| anyhow!("“{}” is a folder with files in it", s(&arg[1])))?;
+            } else {
+                std::fs::remove_file(&f)?;
+            }
+            Value::Null
+        }
+        "files.read" => {
+            let entry = s(arg);
+            if !uses(id, "files")?["read"].as_array().is_some_and(|a| a.iter().any(|f| f.as_str() == Some(entry.as_str()))) {
+                bail!("{id} didn't name “{entry}” in uses.files.read when it was installed");
+            }
+            match plugins::app_file(&entry, |k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from))? {
+                // The file itself, not a link to another: it is what the sheet named.
+                Some(f) if std::fs::symlink_metadata(&f).is_ok_and(|m| m.is_file()) => {
+                    use std::io::Read;
+                    let mut buf = vec![];
+                    std::fs::File::open(&f)?.take(1 << 20).read_to_end(&mut buf)?;
+                    json!(String::from_utf8_lossy(&buf))
+                }
+                _ => Value::Null,
+            }
+        }
         "system.which" => {
             let name = s(arg);
             if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
@@ -915,6 +1006,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
         // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
         "claude.run" => {
+            read_only_here("a Claude run")?;
             // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
             plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
@@ -1016,6 +1108,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(Value::Null)
         }
         "deliver.send" => {
+            read_only_here("sending")?;
             let kind = arg[0].as_str().unwrap_or("");
             // Only the ways its install sheet named, or its own.
             plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;
@@ -1552,6 +1645,103 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_changes_files_only_in_folders_it_was_given_and_only_if_it_asked() {
+        let (_env, root) = paths::testenv::folders("jshost-fs-write");
+        let vault = root.join("vault");
+        std::fs::create_dir_all(vault.join("People")).unwrap();
+        std::fs::write(vault.join("People/Dana.md"), "# Dana").unwrap();
+        std::fs::write(vault.join("Old.md"), "old").unwrap();
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.md"), "no").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, vault.join("out")).unwrap();
+            std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("Secret.md")).unwrap();
+        }
+        let mk = root.join("market");
+        let main = r#"
+            export function apply(ctx) {
+              const r = () => ctx.fs.folders()[0]
+              ctx.command('write', (a) => ctx.fs.write(r(), a.path, a.text))
+              ctx.command('move', (a) => ctx.fs.move(r(), a.from, a.to))
+              ctx.command('remove', (a) => ctx.fs.remove(r(), a.path))
+            }
+        "#;
+        for (id, folders) in [("writer", json!({"what": "vaults", "write": true})), ("reader", json!({"what": "vaults"}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"folders": folders}}).to_string()).unwrap();
+            std::fs::write(d.join("main.js"), main).unwrap();
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "writer", "source": "./plugins/writer"}, {"id": "reader", "source": "./plugins/reader"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("writer", Some(&name)).unwrap().uses;
+        assert!(sheet.iter().any(|l| l.contains("Reads and changes the vaults you pick") && l.contains("write, move and delete")), "{sheet:?}");
+        for id in ["writer", "reader"] {
+            let agreed = plugins::review(id, Some(&name)).unwrap().uses;
+            plugins::install(id, Some(&name), &agreed).unwrap();
+            crate::grants::grant(id, &vault).unwrap();
+        }
+        sync();
+        let run = |id: &str, cmd: &str, a: Value| {
+            for _ in 0..50 {
+                match call(id, cmd, &a) {
+                    Err(e) if e.to_string().contains("no command") => std::thread::sleep(Duration::from_millis(50)),
+                    r => return r.map_err(|e| e.to_string()),
+                }
+            }
+            Err("never loaded".to_string())
+        };
+        // Write (a new folder too), overwrite, move, delete — inside the vault.
+        run("writer", "write", json!({"path": "Notes/New.md", "text": "# New"})).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join("Notes/New.md")).unwrap(), "# New");
+        run("writer", "write", json!({"path": "People/Dana.md", "text": "# Dana Lee"})).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join("People/Dana.md")).unwrap(), "# Dana Lee");
+        run("writer", "move", json!({"from": "Old.md", "to": "Archive/Old.md"})).unwrap();
+        assert!(!vault.join("Old.md").exists() && vault.join("Archive/Old.md").is_file());
+        assert!(run("writer", "move", json!({"from": "Notes/New.md", "to": "People/Dana.md"})).unwrap_err().contains("there already"), "never over another file");
+        run("writer", "remove", json!({"path": "Archive/Old.md"})).unwrap();
+        run("writer", "remove", json!({"path": "Archive"})).unwrap();
+        assert!(!vault.join("Archive").exists());
+        assert!(run("writer", "remove", json!({"path": "People"})).unwrap_err().contains("files in it"));
+        // Never out of the vault: `..`, a link to a folder outside, a link to a file outside, the vault itself.
+        assert!(run("writer", "write", json!({"path": "../outside/x.md", "text": "x"})).is_err());
+        assert!(run("writer", "remove", json!({"path": ""})).is_err());
+        #[cfg(unix)]
+        {
+            assert!(run("writer", "write", json!({"path": "out/x.md", "text": "x"})).unwrap_err().contains("leads outside"));
+            assert!(run("writer", "write", json!({"path": "out/deeper/x.md", "text": "x"})).unwrap_err().contains("leads outside"));
+            let e = run("writer", "write", json!({"path": "Secret.md", "text": "x"})).unwrap_err();
+            assert!(e.contains("is a link") || e.contains("leads outside"), "{e}");
+            let e = run("writer", "remove", json!({"path": "Secret.md"})).unwrap_err();
+            assert!(e.contains("is a link") || e.contains("leads outside"), "{e}");
+            let e = run("writer", "move", json!({"from": "Secret.md", "to": "Mine.md"})).unwrap_err();
+            assert!(e.contains("is a link") || e.contains("leads outside"), "{e}");
+            // A link to a file inside the vault isn't changed through either.
+            std::os::unix::fs::symlink(vault.join("People/Dana.md"), vault.join("Alias.md")).unwrap();
+            assert!(run("writer", "write", json!({"path": "Alias.md", "text": "x"})).unwrap_err().contains("is a link"));
+            assert_eq!(std::fs::read_to_string(outside.join("secret.md")).unwrap(), "no");
+            assert!(!outside.join("x.md").exists() && !outside.join("deeper").exists());
+        }
+        // Hidden files (other programs' settings and code) and Echo's own folders are never written.
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        assert!(run("writer", "write", json!({"path": ".obsidian/plugins/x/main.js", "text": "x"})).unwrap_err().contains("is hidden"));
+        assert!(run("writer", "write", json!({"path": "Notes/.git/hooks/pre-commit", "text": "x"})).unwrap_err().contains("is hidden"));
+        assert!(run("writer", "write", json!({"path": "Notes...", "text": "x"})).is_err(), "a name ending in a dot");
+        assert!(crate::grants::grant("writer", &paths::config_dir()).unwrap_err().to_string().contains("Echo's own files"));
+        assert!(crate::grants::grant("writer", &paths::home()).unwrap_err().to_string().contains("Echo's own files"), "a folder holding the data folder's .echo");
+        // A plugin that only reads can't.
+        assert!(run("reader", "write", json!({"path": "Notes/R.md", "text": "x"})).unwrap_err().contains("folders.write"));
+        assert!(!vault.join("Notes/R.md").exists());
+        for id in ["writer", "reader"] {
+            plugins::remove(id, false).unwrap();
+        }
+        sync();
+    }
+
+    #[test]
     fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
         let (_env, root) = paths::testenv::folders("jshost-sessions");
         let vault = root.join("vault");
@@ -1561,7 +1751,7 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/vaults");
         std::fs::create_dir_all(&d).unwrap();
-        let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true}, "echo": {"read": ["clients"]}});
+        let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true, "commands": ["search", "backlinks"]}, "echo": {"read": ["clients"]}});
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
@@ -1587,7 +1777,9 @@ mod tests {
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         let agreed = plugins::review("vaults", Some(&name)).unwrap().uses;
+        assert!(agreed.iter().any(|l| l.contains("lets Claude in Echo run its commands “search” and “backlinks” without asking")), "{agreed:?}");
         plugins::install("vaults", Some(&name), &agreed).unwrap();
+        assert_eq!(plugins::session_commands(), vec![("vaults".to_string(), "search".to_string()), ("vaults".to_string(), "backlinks".to_string())]);
         sync();
         std::env::set_var("ECHOCTL_PICK_FOLDER", &vault);
         let mut last = String::new();
@@ -1612,8 +1804,17 @@ mod tests {
         assert_eq!(crate::grants::skill_names(&sp), vec!["echo-vaults:vaults".to_string()]);
         let skill = std::fs::read_to_string(sp[0].join("skills/vaults/SKILL.md")).unwrap();
         assert!(skill.starts_with("---\nname: vaults\ndescription: \"Your vaults.\"\n---\n"), "{skill}");
-        let files: Vec<_> = std::fs::read_dir(&sp[0]).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
-        assert_eq!(files.len(), 2, "only .claude-plugin and skills: {files:?}");
+        let mut files: Vec<_> = std::fs::read_dir(&sp[0]).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        files.sort();
+        assert_eq!(files, [".claude-plugin", "scripts", "skills"], "only its manifest, Echo's CLI launcher and the skills");
+        // Its skills reach the Echo CLI as Echo's own do: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`, Echo's launcher.
+        assert_eq!(std::fs::read_to_string(sp[0].join("scripts/echoctl")).unwrap(), include_str!("../../../plugin/scripts/echoctl"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(sp[0].join("scripts/echoctl")).unwrap().permissions().mode() & 0o111, 0o111);
+        }
+        assert!(crate::grants::session_clis(&sp).iter().any(|c| c.ends_with("/scripts/echoctl") && c.starts_with(&sp[0].display().to_string())));
         assert!(call("vaults", "sneaky", &json!({})).unwrap_err().to_string().contains("text only"));
         assert!(call("vaults", "people", &json!({})).unwrap_err().to_string().contains("didn't ask"), "threads weren't asked for");
         assert_eq!(crate::grants::hints_for(Some("acme"), None), vec!["the vault".to_string()]);

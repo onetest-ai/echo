@@ -65,12 +65,22 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
     if !dir.is_dir() {
         bail!("{} isn't a folder", dir.display());
     }
+    if holds_echo(&dir) {
+        bail!("{} holds Echo's own files (its settings, grants and secrets): pick a folder inside it, apart from those", dir.display());
+    }
     let mut list = folders(id);
     if !list.contains(&dir) {
         list.push(dir.clone());
         save_folders(id, &list)?;
     }
     Ok(dir)
+}
+
+/// Whether `dir` is, or holds, Echo's settings folder or the data folder's own `.echo`.
+fn holds_echo(dir: &Path) -> bool {
+    // Each by its real path, also before it exists (its parent's real path and its name).
+    let real = |d: PathBuf| dunce::canonicalize(&d).ok().or_else(|| Some(dunce::canonicalize(d.parent()?).ok()?.join(d.file_name()?)));
+    [crate::paths::config_dir(), crate::paths::home().join(".echo")].into_iter().filter_map(real).any(|d| dir.starts_with(&d) || d.starts_with(dir))
 }
 
 /// Take a folder back from plugin `id`.
@@ -92,12 +102,47 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     inside(&root, rel)
 }
 
+/// A path plugin `id` may write in one of its granted folders (`uses.folders.write`): the checks of `resolve`, and
+/// never a link itself — the deepest folder of it that exists already is, once links are followed, inside the root.
+/// The path as joined (not resolved): written by renaming a file into it, which replaces a file, never follows one.
+pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
+    let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
+    if !folders(id).contains(&root) {
+        bail!("{} isn't one of the folders you gave this plugin", root.display());
+    }
+    inside(&root, rel)?;
+    let full = root.join(rel.trim_start_matches("./"));
+    if full == root {
+        bail!("not the folder itself");
+    }
+    // Hidden files and folders (`.git`, `.obsidian/plugins`…) hold other programs' code and settings: never written.
+    if Path::new(rel).components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
+        bail!("“{rel}” is hidden: a plugin changes notes, not other programs' files");
+    }
+    // Never Echo's own folders (a grant from before they were refused).
+    if holds_echo(&root) {
+        bail!("{} holds Echo's own files: a plugin doesn't change them", root.display());
+    }
+    if std::fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_symlink()) {
+        bail!("“{rel}” is a link: a plugin changes files, not links");
+    }
+    let mut existing = full.parent();
+    while let Some(a) = existing.filter(|a| !a.exists()) {
+        existing = a.parent();
+    }
+    match existing.map(dunce::canonicalize) {
+        Some(Ok(real)) if real.starts_with(&root) => Ok(full),
+        _ => bail!("“{rel}” leads outside {}", root.display()),
+    }
+}
+
 /// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
 /// followed.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim_start_matches("./");
     let p = Path::new(rel);
-    if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
+    // A name ending in a dot or a space is another name on Windows (`...` is the folder itself, `CON .txt` a device).
+    if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(n) if !n.to_string_lossy().ends_with(['.', ' ']))) {
         bail!("“{rel}” isn't a path inside {}", root.display());
     }
     // Windows' device names (CON, NUL, COM1…) open a device, not a file, in any folder.
@@ -162,9 +207,17 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     }
     let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
     files.push((dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?));
+    // The Echo CLI for its skills, as Echo's own skills reach it: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`.
+    files.push((dir.join("scripts").join("echoctl"), include_str!("../../../plugin/scripts/echoctl").to_string()));
+    files.push((dir.join("scripts").join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").to_string()));
     for (f, text) in files {
         std::fs::create_dir_all(f.parent().expect("a parent"))?;
         paths::write_atomic(&f, text.as_bytes())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("scripts").join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
     }
     SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
     Ok(())
@@ -199,6 +252,13 @@ pub fn drop_plugin(id: &str) {
 pub fn session_plugins() -> Vec<PathBuf> {
     let on = enabled_ids();
     SESSION_PLUGINS.lock().map(|m| m.iter().filter(|(id, d)| on.contains(id) && d.is_dir()).map(|(_, d)| d.clone()).collect()).unwrap_or_default()
+}
+
+/// The Echo CLI as the skills of these plugin folders name it (`<dir>/scripts/echoctl`, both slash forms).
+pub fn session_clis(dirs: &[PathBuf]) -> Vec<String> {
+    let mut out: Vec<String> = dirs.iter().flat_map(|d| crate::notes::run_clis(d)).filter(|c| c != "echoctl").collect();
+    out.dedup();
+    out
 }
 
 /// The skills in these Claude Code plugin folders, as Claude Code names them: `<plugin name>:<skill>`.

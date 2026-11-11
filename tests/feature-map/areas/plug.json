@@ -139,6 +139,42 @@
     "plugin.setting",
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-15",
+   "feature": "A plugin may name commands of its own in `uses.sessions.commands`; the sheet says 'lets Claude in Echo run its commands … without asking', and Echo's sessions that get plugins' skills (a read-only routine, the folder session) may run `echoctl plugin call <id> <command>` for exactly those, without a prompt — any other plugin command stays refused; its skills reach the CLI at `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; a command a read-only routine runs this way changes nothing (no folder writes, Claude runs, sends or requests but GET)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-16",
+   "feature": "`echoctl plugin call <id> …` loads only that plugin (no other plugin's start-up code runs in the terminal), and the plugin sees `ctx.terminal` true there (false in the app)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
+   "id": "F-PLUG-17",
+   "feature": "With `uses.folders.write` (the sheet: 'Reads and changes the … you pick … it may write, move and delete files in them') a plugin may `ctx.fs.write` (atomic), `ctx.fs.move` (never over another file) and `ctx.fs.remove` (a file or an empty folder) inside the folders the user gave it — never through a link, never outside, never a hidden file or folder, never in a read-only routine; without it, it only reads. No plugin is given a folder that is or holds Echo's own (its settings, the data folder's .echo)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-18",
+   "feature": "With `uses.files.read` a plugin reads other apps' own files it names in full (`~/Library/Application Support/<app>/…`, `~/.config/<app>/…`, `%APPDATA%/<app>/…`, `%LOCALAPPDATA%/<app>/…`; 1–5, never a pattern or `..`, never Echo's, never a file or app that holds credentials), each listed on the sheet, with `ctx.system.readFile(entry)` — the file itself (not a link), 1 MB at most, null when it isn't there; any other file refused",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }
