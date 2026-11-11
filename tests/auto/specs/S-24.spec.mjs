@@ -1,10 +1,11 @@
 // S-24 The calendar, preps and the Inbox on a busy day — its stages with fixed checks (standard data): a series' rule on
 // its meetings' cards (stage 5), the cards' preps (8), Zoom and Google Meet invites shown and never armed (9–10), the
 // prep's header (13–14), a series set to Record and kept (17), Import Teams transcript without Microsoft 365 (29), Won't
-// do's comment (36), Today's widgets (41–52), and two tests beside the stages.
+// do's comment (36), Today's widgets (41–53), and two tests beside the stages.
 // Not here (for now): the other stages, among them stages 9–10's Your day steps, 37–40 (Needs you now's Won't do through
 // ⌘K is new, #297), prep/TC-012 step 5's people line (the header's answers are new, #286), and of Today's widgets: the
-// small set's work line (today/TC-023 step 6, another data set) and "instead of" (step 3: the standard day has none).
+// small set's work line (today/TC-023 step 6, another data set), "instead of" (step 3: the standard day has none) and
+// stages 54–55 (a widget's settings and a plugin's own page, today/TC-032 and TC-033: too new, #384, #386).
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
@@ -1100,6 +1101,66 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     }
     expect(layout()).toEqual(w.default)
     for (const card of x.cards) await expect(today.widget(card.title)).toHaveCount(0)
+  })
+
+  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link asked before it leaves Echo, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
+    const w = data.text.widgets
+    const x = w.plugin
+    const t = x.trend
+    const pid = (k) => `${x.prefix}${k}`
+    const today = new TodayWidgetsPage(page, data)
+    const before = opened()
+    try {
+      installDemo()
+      expect(data.cli('today', 'add', pid('trend'), '--size', 'M', '--above', w.id.agenda).code).toBe(0)
+      expect(data.cli('today', 'add', pid('ci'), '--size', 'S', '--after', pid('trend')).code).toBe(0)
+      expect(data.cli('today', 'add', pid('open'), '--size', 'S', '--after', pid('ci')).code).toBe(0)
+      expect(data.cli('plugin', 'call', x.id, x.ciCmd, x.bad).code).toBe(0)
+      await page.setViewportSize(w.sizes.wide)
+      await today.openToday()
+      await expect(async () => {
+        await today.reloadToday()
+        await expect(today.chart(x.widgets.trend)).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 20_000 })
+      // Open tickets: "12 open tickets" and a bar, 12 of 20.
+      await expect(today.widgetSays(x.widgets.open, x.open.value)).toBeVisible()
+      await expect(today.widgetSays(x.widgets.open, x.open.label)).toBeVisible()
+      await expect(today.widgetImages(x.widgets.open)).toHaveAccessibleName(x.progress)
+      // Calls a day: five bars, the last one stronger; "Mon" and "Fri · 4 calls" under them, the note; a hover on each
+      // says its point.
+      const marks = await today.chartMarks(x.widgets.trend)
+      expect(marks).toHaveLength(t.bars)
+      expect(marks.map((m) => m.says)).toContain(t.hover)
+      const rest = marks.slice(0, -1)
+      for (const m of rest) expect(m.fill === marks.at(-1).fill && m.opacity === marks.at(-1).opacity).toBe(false)
+      for (const m of rest.slice(1)) expect([m.fill, m.opacity]).toEqual([rest[0].fill, rest[0].opacity])
+      for (const text of [t.first, t.last, t.note]) await expect(today.widgetSays(x.widgets.trend, text)).toBeVisible()
+      // CI failed: a red dot, its text, Open and Re-run.
+      expect(await today.dotColour(x.widgets.ci)).toBe(await today.themeColour(w.plugin.badColour))
+      await expect(today.widgetSays(x.widgets.ci, x.ci.failed)).toBeVisible()
+      await expect(today.widgetButton(x.widgets.ci, x.ci.rerun)).toBeVisible()
+      // Open: nothing leaves Echo, the question under it; Cancel takes it away.
+      await today.widgetButton(x.widgets.ci, x.ci.openLink).click()
+      await expect(today.widget(x.widgets.ci).getByText(x.ci.askStart)).toBeVisible()
+      await expect(today.widget(x.widgets.ci)).toContainText(x.ci.ask)
+      expect(opened()).toBe(before)
+      await today.widgetButton(x.widgets.ci, x.ci.cancel).click()
+      await expect(today.widget(x.widgets.ci).getByText(x.ci.askStart)).toHaveCount(0)
+      expect(opened()).toBe(before)
+      // Re-run: the plugin's command runs, CI is green, no Re-run.
+      await today.widgetButton(x.widgets.ci, x.ci.rerun).click()
+      await expect(today.widgetSays(x.widgets.ci, x.ci.green)).toBeVisible()
+      await expect(today.widgetButton(x.widgets.ci, x.ci.rerun)).toHaveCount(0)
+      expect(await today.dotColour(x.widgets.ci)).toBe(await today.themeColour(w.day.colours.going))
+      const trend = shown(pid('trend'))
+      expect(trend).toMatchObject({ kind: t.kind, data: { type: t.type } })
+      expect(trend.data.points).toHaveLength(t.bars)
+    } finally {
+      data.cli('today', 'reset')
+      removeDemo()
+    }
+    expect(layout()).toEqual(w.default)
+    expect(data.cli('widget', 'list').json().filter((e) => e.id.startsWith(x.prefix))).toEqual([])
   })
 
   // Not a stage of the manual S-24 (it takes an item its Won't do stages need); here it runs last, after them.
