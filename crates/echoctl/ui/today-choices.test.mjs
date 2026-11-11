@@ -65,6 +65,11 @@ test('a chain of overlaps is one choice; a call is where you are, not a choice',
   assert.equal(show(dayChoices([call, mt('A', 10, 10, 11, 0), mt('B', 10, 30, 11, 0)], day(9, 0))), 'A or B → your call')
 })
 
+test("an invite at the time of a choice not made says you accepted others then, naming none of them", () => {
+  const cs = dayChoices([mt('Short one', 11, 0, 11, 30), mt('Long one', 11, 0, 12, 0), mt('Intro', 11, 0, 11, 30, 'notResponded')], day(9, 0))
+  assert.equal(show(cs), 'Long one or Short one → your call | Intro? decline (you accepted 2 others then)')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

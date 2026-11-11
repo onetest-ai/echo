@@ -51,9 +51,15 @@ function dayChoices(day, now, ctx = {}) {
     if (x.kind !== 'meeting' || x.response !== 'notResponded' || !x.start || t(x.end || x.start) <= now) continue
     const at = going.filter((g) => t(g.start) < t(x.end || x.start) && t(x.start) < t(g.end || g.start)).sort((a, b) => t(a.start) - t(b.start))
     // Where you go then: the one Echo suggests keeping, when it is among them, else the first.
-    const picks = out.filter((c) => c.kind === 'overlap' && c.pick).map((c) => c.pick)
-    const clash = at.find((g) => picks.includes(g)) || at[0]
-    out.push({ kind: 'invite', item: x, suggest: clash ? 'decline' : 'accept', why: clash ? `you go to ${clash.subject || 'another meeting'} then` : 'your day is free then', at: t(x.start) })
+    const overlaps = out.filter((c) => c.kind === 'overlap')
+    const picked = at.find((g) => overlaps.some((c) => c.pick === g))
+    // At a time you go elsewhere: that meeting — the one Echo suggests keeping, or your only one; a choice not made
+    // yet says only that you accepted others then.
+    const open = !picked && at.find((g) => overlaps.some((c) => !c.pick && c.members.includes(g)))
+    const why = picked ? `you go to ${picked.subject || 'another meeting'} then`
+      : open ? `you accepted ${overlaps.find((c) => c.members.includes(open)).members.length} others then`
+      : at.length ? `you go to ${at[0].subject || 'another meeting'} then` : 'your day is free then'
+    out.push({ kind: 'invite', item: x, suggest: at.length ? 'decline' : 'accept', why, at: t(x.start) })
   }
   return out.sort((a, b) => a.at - b.at)
 }

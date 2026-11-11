@@ -112,7 +112,7 @@
   },
   {
    "id": "F-TODAY-16",
-   "feature": "The day's choices (core:calendar.choices, temporal, put on with echoctl today): meetings you accepted at once (not over) with the one Echo suggests and why — only for a reason that sets exactly one apart (you organise it, a promise of yours in its thread is due, a client's), else 'your call' and none suggested and Keep buttons — Keep declines the others after a second click naming them; invites still to answer with Echo's suggestion (decline when you go elsewhere then, naming the one it suggests keeping; accept when free) and Accept / Maybe / Decline; an answer goes to the organiser through Echo's Microsoft 365 sign-in only on the click (m365::event_respond, refused in runs), the agenda takes it at once; a failure says why",
+   "feature": "The day's choices (core:calendar.choices, temporal, put on with echoctl today): meetings you accepted at once (not over) with the one Echo suggests and why — only for a reason that sets exactly one apart (you organise it, a promise of yours in its thread is due, a client's), else 'your call' and none suggested; Keep buttons — Keep declines the others after a second click naming them; invites still to answer with Echo's suggestion (decline when you go elsewhere then, naming the one it suggests keeping; accept when free) and Accept / Maybe / Decline; an answer goes to the organiser through Echo's Microsoft 365 sign-in only on the click (m365::event_respond, refused in runs), the agenda takes it at once; a failure says why",
    "priority": "high",
    "check": "agent",
    "axes": []
