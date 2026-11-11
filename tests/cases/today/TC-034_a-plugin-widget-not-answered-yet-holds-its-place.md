@@ -41,5 +41,5 @@ A widget waiting for its plugin's first answer, or for its window half, keeps it
 
 ## Notes
 - The same holds for the other kinds of the test plugin (`sprint` stats, `trend` chart): each fills in a few seconds and Needs you now stays within 2 px.
-- A plugin that never answers (step 7): the frame stays with why, the user's decision (2026-11-11); it goes as soon as the plugin answers.
+- A plugin that never answers (step 7): the frame stays with why, the user's decision (2026-11-11); it goes once its plugin answers: Echo asks again after the widget's refresh (60 s at least), and Today draws the answer at its next read.
 - A widget whose plugin answered "nothing to show" still takes no place (F-TODAY-19); only one never answered holds it.
