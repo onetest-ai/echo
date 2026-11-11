@@ -219,9 +219,14 @@ pub(crate) fn day() -> Vec<Value> {
         }
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         // Its call: the one of its id recorded at its time (a call of it at another time is a line of its own).
-        let hit = time(m.start.as_deref()).and_then(|s| {
-            let calls = calls_today.iter().map(|(_, meta, cm)| (cm.as_ref().and_then(|c| c.id.as_deref()), time(meta["started_at"].as_str())));
-            crate::calendar::call_of_meeting(&event, s, time(m.end.as_deref()), calls)
+        let hit = crate::calendar::when(m.start.as_deref()).and_then(|s| {
+            let calls = calls_today.iter().map(|(d, meta, cm)| crate::calendar::CallOf {
+                id: cm.as_ref().and_then(|c| c.id.as_deref()),
+                meeting_start: cm.as_ref().and_then(|c| crate::calendar::when(c.start.as_deref())),
+                started: time(meta["started_at"].as_str()),
+                recording: recording.as_deref() == Some(d.as_path()),
+            });
+            crate::calendar::call_of_meeting(&event, s, crate::calendar::when(m.end.as_deref()), calls)
         });
         // Every meeting but those the user declined (unless they recorded it, or set it to record): Your day says which
         // they go to, which they haven't answered and which are a maybe (`response`).
@@ -829,17 +834,19 @@ mod tests {
         let ev: MeetingContext = serde_json::from_value(json!({"id": "ev-sync", "subject": "Acme weekly sync", "start": start.to_rfc3339(),
             "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap();
         crate::watch::write_agenda(std::slice::from_ref(&ev)).unwrap();
-        let call = |at: DateTime<Local>, ended: bool| {
+        // A call started `at`, of the meeting as it was then (starting `held`): its meeting.json saves that start.
+        let call = |at: DateTime<Local>, held: DateTime<Local>, ended: bool| {
             let dir = paths::calls_dir().join(format!("{}-acme-weekly-sync", at.format("%Y-%m-%d_%H%M%S")));
             fs::create_dir_all(&dir).unwrap();
             let end = ended.then(|| (at + chrono::Duration::minutes(20)).to_rfc3339());
             fs::write(dir.join("meta.json"), json!({"title": "Acme weekly sync", "started_at": at.to_rfc3339(), "ended_at": end}).to_string()).unwrap();
-            ev.save(&dir).unwrap();
+            MeetingContext { start: Some(held.to_rfc3339()), ..ev.clone() }.save(&dir).unwrap();
             dir
         };
-        let earlier = call(start - chrono::Duration::hours(4), true);
+        let old = start - chrono::Duration::hours(4);
+        let earlier = call(old, old, true);
         fs::write(earlier.join("notes.md"), "# Acme weekly sync\n\n## Decisions\n- Pilot in Berlin\n").unwrap();
-        let live = call(start + chrono::Duration::minutes(2), false);
+        let live = call(start + chrono::Duration::minutes(2), start, false);
         fs::create_dir_all(paths::state_dir()).unwrap();
         fs::write(paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": Utc::now().to_rfc3339(), "app": "teams",
             "in_call": true, "armed": false, "recording": live.display().to_string()}).to_string()).unwrap();
@@ -861,5 +868,9 @@ mod tests {
         let meeting = d.iter().find(|x| x["kind"] == "meeting").unwrap();
         assert!(meeting["call"].is_null() && meeting["minutes"].is_null(), "{d:#?}");
         assert_eq!(d.iter().filter(|x| x["kind"] == "call").map(|x| x["call"].clone()).collect::<Vec<_>>(), [json!(name(&earlier))]);
+        // Joined 20 min early by its arm (Join & record): its meeting.json saved this start, so it is this meeting's call.
+        let early = call(start - chrono::Duration::minutes(20), start, true);
+        let d = day();
+        assert_eq!(d.iter().find(|x| x["kind"] == "meeting").unwrap()["call"], name(&early), "{d:#?}");
     }
 }

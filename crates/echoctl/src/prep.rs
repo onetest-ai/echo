@@ -56,11 +56,11 @@ pub fn upcoming() -> Value {
     let now = Utc::now();
     // A meeting already a call today (being recorded, or recorded) is in the calls list, not still to come: left out
     // here, and named in `recorded` (its prep id → its call) for a view of it left open to move to the call.
-    let recorded = calls_today_by_meeting();
     let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
     // In time order (the agenda is in the calendar's order, which isn't by start).
     let mut agenda = crate::watch::agenda();
     agenda.sort_by_key(|m| time(m.start.as_deref()));
+    let recorded = calls_today_by_meeting(&agenda);
     let list: Vec<Value> = agenda
         .into_iter()
         .filter(|m| !m.id.as_ref().is_some_and(|i| recorded.iter().any(|(e, _)| e == i)))
@@ -94,15 +94,28 @@ pub fn upcoming() -> Value {
     json!({ "meetings": list, "recorded": recorded })
 }
 
-/// Today's calls that are a meeting of the calendar: (its event id, the call's folder name).
-fn calls_today_by_meeting() -> Vec<(String, String)> {
+/// The meetings of `agenda` already a call today: (its event id, the call's folder name) — its call as Your day and
+/// Calendar link it (`calendar::call_of_meeting`: a call of it at another time isn't this one's).
+fn calls_today_by_meeting(agenda: &[MeetingContext]) -> Vec<(String, String)> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    calls::all_calls()
+    let calls: Vec<(std::path::PathBuf, Option<MeetingContext>, Value)> = calls::all_calls()
         .into_iter()
         .filter(|d| calls::stamp_of(d).starts_with(&today))
-        .filter_map(|d| {
-            let id = MeetingContext::load(&d).ok().flatten()?.id.filter(|i| !i.is_empty())?;
-            Some((id, d.file_name()?.to_string_lossy().into_owned()))
+        .map(|d| (d.clone(), MeetingContext::load(&d).ok().flatten(), calls::read_json(&d.join("meta.json"))))
+        .collect();
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(std::path::PathBuf::from);
+    agenda
+        .iter()
+        .filter_map(|m| {
+            let id = m.id.as_deref().filter(|i| !i.is_empty())?;
+            let of = calls.iter().map(|(d, cm, meta)| crate::calendar::CallOf {
+                id: cm.as_ref().and_then(|c| c.id.as_deref()),
+                meeting_start: cm.as_ref().and_then(|c| crate::calendar::when(c.start.as_deref())),
+                started: time(meta["started_at"].as_str()),
+                recording: recording.as_deref() == Some(d.as_path()),
+            });
+            let i = crate::calendar::call_of_meeting(id, crate::calendar::when(m.start.as_deref())?, crate::calendar::when(m.end.as_deref()), of)?;
+            Some((id.to_owned(), calls[i].0.file_name()?.to_string_lossy().into_owned()))
         })
         .collect()
 }
@@ -649,7 +662,8 @@ mod tests {
     #[test]
     fn a_meeting_already_a_call_today_leaves_coming_up_and_names_its_call() {
         let (_env, _) = crate::paths::testenv::folders("prep-upcoming-recorded");
-        let at = |h: i64| (Utc::now() + chrono::Duration::hours(h)).to_rfc3339();
+        let now = Utc::now();
+        let at = |h: i64| (now + chrono::Duration::hours(h)).to_rfc3339();
         let m = |id: &str, subject: &str| -> MeetingContext {
             serde_json::from_value(json!({"id": id, "subject": subject, "start": at(-1), "end": at(1), "response": "accepted"})).unwrap()
         };
@@ -669,6 +683,32 @@ mod tests {
         let subjects: Vec<String> = upcoming()["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str().map(str::to_owned)).collect();
         assert_eq!(subjects, ["Still to come", "Sooner", "Later"]);
         assert_eq!(v["recorded"][id_of("ev-rec")], json!(call));
+    }
+
+    #[test]
+    fn a_meeting_moved_to_later_is_still_coming_up_though_held_at_its_old_time() {
+        // A meeting moved to later the same day keeps its id: the call held at its old time made it "already a call" —
+        // left out of Coming up today, its prep pointing at that call.
+        let (_env, _) = crate::paths::testenv::folders("prep-upcoming-moved");
+        let noon = Local::now().date_naive().and_hms_opt(12, 0, 0).unwrap().and_local_timezone(Local).unwrap();
+        let m = |start: chrono::DateTime<Local>| -> MeetingContext {
+            serde_json::from_value(json!({"id": "ev-sync", "subject": "Acme weekly sync", "start": start.to_rfc3339(),
+                "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap()
+        };
+        // Held at 08:00, then moved to noon (or a minute from now once noon is past: still to come).
+        let later = (Local::now() + chrono::Duration::minutes(1)).max(noon);
+        let earlier = noon - chrono::Duration::hours(4);
+        crate::watch::write_agenda(&[m(later)]).unwrap();
+        let dir = crate::paths::calls_dir().join(format!("{}-acme-weekly-sync", earlier.format("%Y-%m-%d_%H%M%S")));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), json!({"started_at": earlier.to_rfc3339(), "ended_at": (earlier + chrono::Duration::minutes(30)).to_rfc3339()}).to_string()).unwrap();
+        m(earlier).save(&dir).unwrap();
+        let v = upcoming();
+        assert!(v["recorded"].as_object().unwrap().is_empty(), "{v:#}");
+        if later.date_naive() == noon.date_naive() {
+            let subjects: Vec<&str> = v["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str()).collect();
+            assert_eq!(subjects, ["Acme weekly sync"]);
+        }
     }
 
     #[test]

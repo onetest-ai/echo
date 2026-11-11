@@ -162,7 +162,12 @@ pub(super) fn calendar(q: &str) -> Value {
         // Its call: the one of its id recorded at its time (`calendar::call_of_meeting`: a meeting moved or held again
         // keeps its id, and a call of it at another time isn't this one's) …
         let by_id = e["id"].as_str().zip(es).and_then(|(id, s)| {
-            let ids = calls.iter().enumerate().map(|(i, (_, meta, meeting))| (meeting["id"].as_str().filter(|_| !used[i]), rfc(&meta["started_at"])));
+            let ids = calls.iter().enumerate().map(|(i, (name, meta, meeting))| crate::calendar::CallOf {
+                id: meeting["id"].as_str().filter(|_| !used[i]),
+                meeting_start: crate::calendar::when(meeting["start"].as_str()),
+                started: rfc(&meta["started_at"]),
+                recording: recording.as_deref().is_some_and(|r| Path::new(r).ends_with(name)),
+            });
             crate::calendar::call_of_meeting(id, s, ee, ids)
         });
         // … else one of the same title near it.
@@ -281,17 +286,19 @@ mod tests {
         let ev: crate::meeting::MeetingContext = serde_json::from_value(json!({"id": "ev-sync", "subject": "Acme weekly sync", "start": start.to_rfc3339(),
             "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap();
         watch::write_agenda(std::slice::from_ref(&ev)).unwrap();
-        let call = |at: chrono::DateTime<Local>, ended: bool| {
+        // A call started `at`, of the meeting as it was then (starting `held`): its meeting.json saves that start.
+        let call = |at: chrono::DateTime<Local>, held: chrono::DateTime<Local>, ended: bool| {
             let dir = paths::calls_dir().join(format!("{}-acme-weekly-sync", at.format("%Y-%m-%d_%H%M%S")));
             fs::create_dir_all(&dir).unwrap();
             let end = ended.then(|| (at + chrono::Duration::minutes(31)).to_rfc3339());
             fs::write(dir.join("meta.json"), json!({"title": "Acme weekly sync", "started_at": at.to_rfc3339(), "ended_at": end}).to_string()).unwrap();
-            ev.save(&dir).unwrap();
+            crate::meeting::MeetingContext { start: Some(held.to_rfc3339()), ..ev.clone() }.save(&dir).unwrap();
             dir
         };
-        let earlier = call(start - chrono::Duration::hours(4), true);
+        let old = start - chrono::Duration::hours(4);
+        let earlier = call(old, old, true);
         fs::write(earlier.join("notes.md"), "# Acme weekly sync\n").unwrap();
-        let live = call(start + chrono::Duration::minutes(2), false);
+        let live = call(start + chrono::Duration::minutes(2), start, false);
         fs::create_dir_all(paths::state_dir()).unwrap();
         fs::write(paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now().to_rfc3339(), "app": "teams",
             "in_call": true, "armed": false, "recording": live.display().to_string()}).to_string()).unwrap();
@@ -307,5 +314,11 @@ mod tests {
         let calls = v["calls"].as_array().unwrap();
         assert_eq!(calls.iter().map(|c| c["name"].clone()).collect::<Vec<_>>(), [json!(name(&earlier))]);
         assert_eq!(calls[0]["status"], "notes");
+        // Not held yet at its new time: not recorded (the earlier call stays its own); joined 20 min early by its arm
+        // (its meeting.json saved this start): recorded as that call — as Your day says.
+        fs::remove_dir_all(&live).unwrap();
+        assert!(calendar(&format!("start={day}&days=1"))["events"][0]["recorded"].is_null());
+        let early = call(start - chrono::Duration::minutes(20), start, true);
+        assert_eq!(calendar(&format!("start={day}&days=1"))["events"][0]["recorded"]["name"], name(&early));
     }
 }
