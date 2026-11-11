@@ -579,7 +579,7 @@ document.addEventListener('click', (e) => {
       const name = S.selected
       S.confirmDelete = false; S.selected = null; S.call = null
       // A note being typed or edited for it goes with it.
-      if (sameCall(S.noteDraftCall, name)) { S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null }
+      if (sameCall(S.noteDraftCall, name)) { S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null }
       if (S.noteEdit && sameCall(S.noteEdit.call, name)) S.noteEdit = null
       S.calls = (S.calls || []).filter((c) => c.name !== name)
       send({ cmd: 'delete', call: name })

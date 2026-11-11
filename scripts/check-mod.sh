@@ -18,6 +18,8 @@ node crates/echoctl/ui/calendar-dates.test.mjs
 node crates/echoctl/ui/workbench.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
+# Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
+node crates/echoctl/ui/note-time.test.mjs
 # The ⌘K palette's ranking (Palette).
 node crates/echoctl/ui/palette.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).

@@ -118,9 +118,9 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'note-edit' && S.noteEdit) { S.noteEdit.text = e.target.value; showNotesState(); return }
   if (e.target.id === 'note-input') {
     S.noteDraft = e.target.value
-    if (!S.noteDraft) { S.noteAt = null; S.noteDraftCall = null } else {
+    if (!S.noteDraft) { S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null } else {
       if (S.noteDraftCall == null) S.noteDraftCall = S.call && S.call.name
-      if (S.noteAt == null) S.noteAt = callNow(S.call)
+      if (S.noteAt == null) { S.noteAt = callNow(S.call); if (S.noteAt != null) confirmNoteAt(S.noteDraftCall) }
     }
     showNotesState()
   }
@@ -191,7 +191,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.liveMenu) { e.preventDefault(); S.liveMenu = false; return render() }
   if (e.target.id === 'note-input') {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); return addNote() }
-    if (e.key === 'Escape') { S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null; e.target.value = ''; showNotesState(); return }
+    if (e.key === 'Escape') { S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null; e.target.value = ''; showNotesState(); return }
     return
   }
   if (e.target.id === 'note-edit') {

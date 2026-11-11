@@ -28,6 +28,36 @@ function notesPanel() {
   return notesTimeline(c)
 }
 
+// ── note time: whether a note keeps its call time (no DOM: `note-time.test.mjs`) ─────────────────────────────────
+/** Whether the app's state says it records `call`: its recording's folder has the call's stamp (a retitle keeps it). */
+function recordsCall(state, call) {
+  const r = state && state.recording
+  return !!r && !!call && String(r).split(/[\\/]/).pop().slice(0, 17) === String(call).slice(0, 17)
+}
+/** A note's call time: `at` (taken while the window showed the call recording) only when the app confirmed it records
+ *  the call (true); after hang-up the window's view of it may lag, so `false`, or no answer in time (`undefined`),
+ *  gives none: never a time that isn't confirmed (#358). */
+function noteTime(at, confirmed) {
+  return at != null && confirmed === true ? at : null
+}
+/** Ask the app, by `get` of its state (the one the window polls, read again now), whether it records `call`:
+ *  `{ state, ok }`, `ok` undefined when the ask fails. */
+function askRecording(get, call) {
+  return get('api/state').then((state) => ({ state, ok: recordsCall(state, call) }), () => ({ ok: undefined }))
+}
+/** `p`'s answer if it comes within `ms`, else undefined (no answer: unsure). */
+function within(p, ms, timer = setTimeout) {
+  return Promise.race([p, new Promise((done) => timer(() => done(undefined), ms))])
+}
+// end of the note time block
+/** The note box's call time is asked about at its first key, the moment it is taken for; typing never waits for the
+ *  answer (`S.noteAtOk.ok`, undefined until it comes), and Add waits for it at most 500 ms. */
+function confirmNoteAt(call) {
+  const ask = { ok: undefined }
+  ask.done = askRecording(get, call).then((r) => { if (r.state) S.state = r.state; ask.ok = r.ok; return r.ok })
+  S.noteAtOk = ask
+}
+
 /** Where the call is now, in seconds from its start (only while it records). */
 function callNow(c) {
   const t0 = c && c.status === 'recording' && since(c.started_at)
@@ -107,16 +137,29 @@ function saveNoteEdit() {
   render()
 }
 
-/** Add what is typed in the note box (or a flag) at its moment. */
-function addNote(kindOverride) {
+/** Add what is typed in the note box (or a flag) at its moment: its call time only once the app confirmed it records
+ *  the call (a flag asks now; the box asked at its first key, waited for here if it hasn't answered yet). */
+async function addNote(kindOverride) {
   const c = S.call
   if (!c) return
   if (S.closing) return
   if (kindOverride) {
-    const t = callNow(c)
-    editNotes((text) => NoteDoc.add(text, { kind: kindOverride, t: t == null ? null : Math.floor(t), text: '' }))
+    // A flag goes to the call it was raised on, whatever opens meanwhile.
+    const name = c.name, at = callNow(c)
+    const flag = held((ok) => {
+      const t = noteTime(at, ok), call = ownCall(name)
+      NotesSync.edit(call, NoteDoc.add(NotesSync.view(call).draft, { kind: kindOverride, t: t == null ? null : Math.floor(t), text: '' }))
+      if (!S.closing) saveNotesSoon(call)
+      return call
+    })
+    flag(at == null ? false : await within(askRecording(get, name).then((r) => r.ok), 500))
+    if (!S.closing) render()
   } else {
-    commitNoteDraft()
+    // The box as it is now: what is typed while its answer is awaited starts the next note.
+    const note = takeNoteDraft()
+    if (!note) return
+    const add = held((ok) => addTypedNote(note, ok))
+    add(note.ask && note.ask.ok === undefined ? await within(note.ask.done, 500) : note.ask && note.ask.ok)
     render()
   }
   const el = $('#note-input'); if (el) el.focus()
@@ -140,21 +183,43 @@ function pendingNote(call) {
 /** Add the note box's text to its own call's notes, as Enter does; the box is emptied once they hold it.
  *  The call whose notes changed, else null. */
 function commitNoteDraft() {
+  const note = takeNoteDraft()
+  // At close, another call's opening or Write minutes: no waiting, so a time not confirmed yet is none.
+  return note ? addTypedNote(note, note.ask && note.ask.ok) : null
+}
+/** A note or flag taken while Add waits for the app's answer: `add(ok)` adds it once — after the wait, or untimed by
+ *  `commitPendingNotes` when the window closes or quits meanwhile (nothing typed is lost). */
+function held(add) {
+  const it = { done: false }
+  it.add = (ok) => { if (it.done) return null; it.done = true; S.notesHeld = S.notesHeld.filter((x) => x !== it); return add(ok) }
+  S.notesHeld = [...S.notesHeld, it]
+  return it.add
+}
+/** The note box's note (its text, kind, call, time taken and the app's answer for it), and the box emptied; null when
+ *  it holds nothing. */
+function takeNoteDraft() {
   const own = S.noteDraftCall || (S.call && S.call.name)
   if (!own || !S.noteDraft.trim()) return null
-  const call = ownCall(own)
-  const at = S.noteAt != null ? S.noteAt : S.call && sameCall(S.call.name, call) ? callNow(S.call) : null
-  const next = NoteDoc.addTyped(NotesSync.view(call).draft, { text: S.noteDraft, kind: S.noteKind, at })
+  const note = { text: S.noteDraft, kind: S.noteKind, call: own, at: S.noteAt, ask: S.noteAtOk }
+  S.noteDraft = ''; S.noteAt = null; S.noteAtOk = null; S.noteDraftCall = null
+  const el = $('#note-input'); if (el) el.value = ''
+  return note
+}
+/** Add a taken note to its call's notes: its time kept only as the app confirmed (`ok` true). The call, or null. */
+function addTypedNote(note, ok) {
+  const call = ownCall(note.call)
+  const next = NoteDoc.addTyped(NotesSync.view(call).draft, { text: note.text, kind: note.kind, at: noteTime(note.at, ok) })
   if (next == null) return null
   NotesSync.edit(call, next)
-  S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null
   if (!S.closing) saveNotesSoon(call)
   return call
 }
 /** Everything typed and not added yet, added to its own call's notes and saved now (no waiting for the
  *  1 s timer): before the window closes or Echo quits, before Write minutes, when another call opens. */
 function commitPendingNotes() {
-  const changed = new Set([commitPendingEdit(), commitNoteDraft()].filter(Boolean))
+  // A note or flag still waiting for the app's answer is added untimed (unsure), not lost.
+  const held = S.notesHeld.slice().map((it) => it.add(undefined))
+  const changed = new Set([commitPendingEdit(), commitNoteDraft(), ...held].filter(Boolean))
   for (const call of changed) NotesSync.save(call)
   return changed.size > 0
 }
