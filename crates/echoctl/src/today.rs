@@ -167,8 +167,10 @@ fn minutes(dir: &std::path::Path) -> Value {
     if let Some(r) = run.as_ref().filter(|r| r.state == "failed" || r.state == "needs_login") {
         return json!({"state": "failed", "why": r.message});
     }
-    // Its transcription failed (no speech model, …): said with why, not "transcribing" for good (#421).
-    if !dir.join("transcript.md").exists() {
+    // Its transcription failed (no speech model, …): said with why, not "transcribing" for good (#421) — once the call
+    // ended, and not while it is transcribed again (the call's own status reads the same way).
+    let ended = calls::read_json(&dir.join("meta.json"))["ended_at"].is_string();
+    if ended && !dir.join("transcript.md").exists() && !dir.join(crate::transcribe_marker()).exists() {
         if let Ok(why) = std::fs::read_to_string(dir.join("transcribe.error")) {
             return json!({"state": "transcribe_failed", "why": why.trim()});
         }
@@ -695,6 +697,13 @@ mod tests {
         let m = minutes(&dir);
         assert_eq!(m["state"], "transcribe_failed", "{m}");
         assert_eq!(m["why"], "no transcription model yet — choose one in Settings → Transcription");
+        // Transcribed again: transcribing, as the call's own status says, until it lands or fails again.
+        fs::write(dir.join(crate::transcribe_marker()), "").unwrap();
+        assert_eq!(minutes(&dir)["state"], "transcribing");
+        fs::remove_file(dir.join(crate::transcribe_marker())).unwrap();
+        // Still recording (no end yet): not said failed.
+        fs::write(dir.join("meta.json"), "{}").unwrap();
+        assert_ne!(minutes(&dir)["state"], "transcribe_failed");
     }
 
     #[cfg(feature = "js")]
