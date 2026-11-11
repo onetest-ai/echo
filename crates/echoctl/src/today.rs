@@ -218,18 +218,10 @@ pub(crate) fn day() -> Vec<Value> {
             continue;
         }
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
-        // Its call: one that carries its id and started from shortly before it to its end, the nearest its start. A
-        // meeting moved to later keeps its id: a call held at its old time is a call of its own, never this one's.
+        // Its call: the one of its id recorded at its time (a call of it at another time is a line of its own).
         let hit = time(m.start.as_deref()).and_then(|s| {
-            let to = time(m.end.as_deref()).unwrap_or(s + chrono::Duration::hours(1));
-            let from = s - chrono::Duration::minutes(crate::calendar::MATCH_EARLY_MIN);
-            calls_today
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, _, cm))| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()))
-                .filter_map(|(i, (_, meta, _))| time(meta["started_at"].as_str()).filter(|t| (from..=to).contains(t)).map(|t| (i, (t - s).num_seconds().abs())))
-                .min_by_key(|(_, gap)| *gap)
-                .map(|(i, _)| i)
+            let calls = calls_today.iter().map(|(_, meta, cm)| (cm.as_ref().and_then(|c| c.id.as_deref()), time(meta["started_at"].as_str())));
+            crate::calendar::call_of_meeting(&event, s, time(m.end.as_deref()), calls)
         });
         // Every meeting but those the user declined (unless they recorded it, or set it to record): Your day says which
         // they go to, which they haven't answered and which are a maybe (`response`).

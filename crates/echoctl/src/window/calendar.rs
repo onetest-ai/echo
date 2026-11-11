@@ -159,18 +159,22 @@ pub(super) fn calendar(q: &str) -> Value {
     for mut e in events {
         let (es, ee) = (rfc(&e["start"]), rfc(&e["end"]));
         let subject = e["subject"].as_str().unwrap_or("").to_lowercase();
-        let hit = calls.iter().enumerate().find(|(i, (_, meta, meeting))| {
+        // Its call: the one of its id recorded at its time (`calendar::call_of_meeting`: a meeting moved or held again
+        // keeps its id, and a call of it at another time isn't this one's) …
+        let by_id = e["id"].as_str().zip(es).and_then(|(id, s)| {
+            let ids = calls.iter().enumerate().map(|(i, (_, meta, meeting))| (meeting["id"].as_str().filter(|_| !used[i]), rfc(&meta["started_at"])));
+            crate::calendar::call_of_meeting(id, s, ee, ids)
+        });
+        // … else one of the same title near it.
+        let hit = by_id.map(|i| (i, &calls[i])).or_else(|| calls.iter().enumerate().find(|(i, (_, meta, meeting))| {
             if used[*i] {
                 return false;
-            }
-            if meeting["id"].is_string() && meeting["id"] == e["id"] {
-                return true;
             }
             let Some(cs) = rfc(&meta["started_at"]) else { return false };
             let near = es.zip(ee).is_some_and(|(s, en)| cs >= s - chrono::Duration::minutes(15) && cs <= en);
             let same_title = meeting["subject"].as_str().or(meta["title"].as_str()).is_some_and(|t| t.to_lowercase() == subject);
             near && same_title
-        });
+        }));
         if let Some((i, (name, meta, _))) = hit {
             used[i] = true;
             let dir = paths::calls_dir().join(name);
@@ -260,4 +264,48 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Local, TimeZone};
+
+    #[test]
+    fn a_meeting_held_again_is_the_recording_of_its_time_in_the_calendar() {
+        // A meeting moved to later the same day keeps its id: the Calendar said "recorded" with the length and minutes of
+        // the call held at its old time, not the recording of it now.
+        let (_env, _root) = crate::paths::testenv::folders("window-calendar-held-again");
+        let day = Local::now().date_naive();
+        let start = Local.from_local_datetime(&day.and_hms_opt(12, 0, 0).unwrap()).unwrap();
+        let ev: crate::meeting::MeetingContext = serde_json::from_value(json!({"id": "ev-sync", "subject": "Acme weekly sync", "start": start.to_rfc3339(),
+            "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap();
+        watch::write_agenda(std::slice::from_ref(&ev)).unwrap();
+        let call = |at: chrono::DateTime<Local>, ended: bool| {
+            let dir = paths::calls_dir().join(format!("{}-acme-weekly-sync", at.format("%Y-%m-%d_%H%M%S")));
+            fs::create_dir_all(&dir).unwrap();
+            let end = ended.then(|| (at + chrono::Duration::minutes(31)).to_rfc3339());
+            fs::write(dir.join("meta.json"), json!({"title": "Acme weekly sync", "started_at": at.to_rfc3339(), "ended_at": end}).to_string()).unwrap();
+            ev.save(&dir).unwrap();
+            dir
+        };
+        let earlier = call(start - chrono::Duration::hours(4), true);
+        fs::write(earlier.join("notes.md"), "# Acme weekly sync\n").unwrap();
+        let live = call(start + chrono::Duration::minutes(2), false);
+        fs::create_dir_all(paths::state_dir()).unwrap();
+        fs::write(paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now().to_rfc3339(), "app": "teams",
+            "in_call": true, "armed": false, "recording": live.display().to_string()}).to_string()).unwrap();
+        let name = |d: &Path| d.file_name().unwrap().to_string_lossy().into_owned();
+
+        let v = calendar(&format!("start={day}&days=1"));
+        let events = v["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1, "{v:#}");
+        assert_eq!(events[0]["recorded"]["name"], name(&live), "{v:#}");
+        assert_eq!(events[0]["recorded"]["status"], "recording");
+        assert!(events[0]["recorded"]["minutes"].is_null(), "no length of the earlier call: {v:#}");
+        // The earlier call is a recording of its own on the day, with its minutes.
+        let calls = v["calls"].as_array().unwrap();
+        assert_eq!(calls.iter().map(|c| c["name"].clone()).collect::<Vec<_>>(), [json!(name(&earlier))]);
+        assert_eq!(calls[0]["status"], "notes");
+    }
 }

@@ -22,7 +22,7 @@ use crate::watch;
 /// Offer window, as in the watcher: a meeting stays relevant until 4 min after its start.
 const STILL_RELEVANT_AFTER_START: i64 = 4;
 /// A recording matches a meeting from 10 min before its start until its end.
-pub(crate) const MATCH_EARLY_MIN: i64 = 10;
+const MATCH_EARLY_MIN: i64 = 10;
 /// …or until this long after its start (later only for meetings under 2 h).
 const MATCH_LATE_MIN: i64 = 30;
 
@@ -322,9 +322,42 @@ pub fn meeting_now(now: DateTime<Utc>) -> Option<MeetingContext> {
     hits.into_iter().next().map(|(_, m)| m)
 }
 
+/// Which of `calls` (each: the event id it carries, when it started) is the call of the meeting `id` at `start`..`end`:
+/// one carrying its id that started from `MATCH_EARLY_MIN` before it to its end (at least `MATCH_LATE_MIN` after its
+/// start, as `meeting_now` attaches it), the nearest its start. A meeting moved or held again keeps its id: a call of it
+/// at another time is a call of its own, never this one's. The index in `calls`.
+pub fn call_of_meeting<'a>(id: &str, start: DateTime<Utc>, end: Option<DateTime<Utc>>, calls: impl IntoIterator<Item = (Option<&'a str>, Option<DateTime<Utc>>)>) -> Option<usize> {
+    let from = start - Duration::minutes(MATCH_EARLY_MIN);
+    let to = end.unwrap_or(start).max(start + Duration::minutes(MATCH_LATE_MIN));
+    calls
+        .into_iter()
+        .enumerate()
+        .filter(|(_, (cid, _))| *cid == Some(id))
+        .filter_map(|(i, (_, at))| at.filter(|t| (from..=to).contains(t)).map(|t| (i, (t - start).num_seconds().abs())))
+        .min_by_key(|(_, gap)| *gap)
+        .map(|(i, _)| i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meetings_call_is_the_one_of_its_id_recorded_at_its_time() {
+        let start = DateTime::parse_from_rfc3339("2026-11-11T19:30:00Z").unwrap().with_timezone(&Utc);
+        let at = |m: i64| Some(start + Duration::minutes(m));
+        let end = at(30);
+        // Held at 15:31 and 15:32 (the meeting since moved to 19:30, same id), recorded again at 19:32; another event at 19:31.
+        let calls = [(Some("ev"), at(-239)), (Some("ev"), at(-238)), (Some("other"), at(1)), (Some("ev"), at(2))];
+        assert_eq!(call_of_meeting("ev", start, end, calls), Some(3));
+        // Not held yet at its new time: none, never the earlier calls.
+        assert_eq!(call_of_meeting("ev", start, end, calls[..3].iter().copied()), None);
+        // From 10 min early; the nearest its start wins; a short meeting's call up to 30 min after its start.
+        assert_eq!(call_of_meeting("ev", start, end, [(Some("ev"), at(-10)), (Some("ev"), at(-11))]), Some(0));
+        assert_eq!(call_of_meeting("ev", start, end, [(Some("ev"), at(20)), (Some("ev"), at(-3))]), Some(1));
+        assert_eq!(call_of_meeting("ev", start, at(15), [(Some("ev"), at(25))]), Some(0));
+        assert_eq!(call_of_meeting("ev", start, end, [(Some("ev"), at(31)), (None, at(0))]), None);
+    }
 
     /// #242: test data sets `calendar_command: []`, and its calendar stays off even where the user has the msgraph
     /// skill installed — the sync never reads their real meetings into it.
