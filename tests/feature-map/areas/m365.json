@@ -35,7 +35,7 @@
   },
   {
    "id": "F-M365-04",
-   "feature": "Send a test, `deliver send` and routines send only to the user's own Teams chat and mailbox (or a plugin's way)",
+   "feature": "Send a test and `deliver send` go only to the user's own Teams chat and mailbox (or a plugin's way), with no address to name; a routine also mails the addresses the user set on it",
    "priority": "high",
    "check": "person",
    "axes": [
