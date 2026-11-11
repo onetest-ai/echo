@@ -7,10 +7,19 @@ const src = appSource()
 const from = '// ── tray words', to = '// end of the tray-words block'
 const start = src.indexOf(from), end = src.indexOf(to, start)
 assert.ok(start >= 0 && end > start, 'tray-words block not found in app.js')
-const { trayWords } = new Function(`${src.slice(start, end)}\nreturn { trayWords }`)()
+// The block run as a window with this user agent would run it.
+const block = (userAgent) => new Function('navigator', `${src.slice(start, end)}\nreturn { trayWords, TRAY }`)({ userAgent })
+const { trayWords } = block('')
+const WEBVIEW2 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0'
+const WKWEBVIEW = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)'
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
+
+test('the window picks the words by its platform: WebView2 on Windows, WKWebView on macOS', () => {
+  assert.equal(block(WEBVIEW2).TRAY.octopus, 'the octopus in the notification area')
+  assert.equal(block(WKWEBVIEW).TRAY.octopus, 'the menu-bar octopus')
+})
 
 test('macOS keeps its words', () => {
   const w = trayWords(false)

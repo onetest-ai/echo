@@ -80,8 +80,8 @@ const MOD = MAC ? '⌘' : 'Ctrl+'
 const trayWords = (windows) => windows
   ? { octopus: 'the octopus in the notification area', startAtLogin: 'Echo runs in the notification area from when you sign in.' }
   : { octopus: 'the menu-bar octopus', startAtLogin: 'Echo runs in the menu bar from when you log in.' }
-// end of the tray-words block
 const TRAY = trayWords(/Windows/.test(navigator.userAgent))
+// end of the tray-words block
 
 /** A calendar meeting about to start (3 min before … 4 min after), not recorded or armed yet; not a Zoom or Google Meet
  *  one (Echo can't record it yet). */

@@ -21,7 +21,6 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=../../packaging/windows/echo.rc");
         println!("cargo:rerun-if-changed=../../packaging/windows/echo.ico");
-        println!("cargo:rerun-if-changed=../../Cargo.toml");
         // The numeric version ("0.9.0-beta" → 0, 9, 0) for the resource's FILEVERSION.
         let version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
         let mut n = version.split('-').next().unwrap_or_default().split('.').map(|p| p.parse::<u16>().unwrap_or(0));
