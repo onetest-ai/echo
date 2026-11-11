@@ -76,10 +76,17 @@ function pluginWidgetHtml(kind, data, size) {
   }
   throw new Error(`Echo doesn't draw the kind ${kind}`)
 }
+
+/** A widget its plugin never answered and whose ask failed (no data yet, not being asked): why, in its frame — it
+ *  goes once the plugin answers. Else '' (answered with nothing, or cleared: no place). */
+function pluginWidgetFailed(w) {
+  return w && w.empty && w.error && !w.at && !w.pending ? `<p class="set-sub warn">Couldn't get its data — ${esc(w.error)}</p>` : ''
+}
 // end of the plugin widget block
 
 /** A plugin's widget on Today: its label, then its kind drawn from its data; nothing yet (or cleared): nothing drawn;
- *  data Echo can't draw: "Couldn't draw this" with why; when its provider failed, its last data, dated. */
+ *  data Echo can't draw: "Couldn't draw this" with why; when its provider failed, its last data, dated — or, never
+ *  answered, "Couldn't get its data" with why. */
 function pluginWidgetView(id, w, size) {
   // A question about an outside link lapses after 30 s (left for another view and back, it isn't still armed).
   if (S.pwOpen && Date.now() - (S.pwOpenAt || 0) > 30000) S.pwOpen = null
@@ -88,6 +95,9 @@ function pluginWidgetView(id, w, size) {
   const plugin = id.split(':')[1]
   const waiting = w && (w.pending || (w.kind === 'page' && !w.empty && !Plugins.widgetDraw[id] && !Plugins.applied[plugin] && !Plugins.errors[plugin]))
   if (waiting) return `<section class="td-sec pw-sec" aria-label="${esc(w.label)}" aria-busy="true" data-pw="${esc(id)}"><h2>${esc(w.label)}</h2><div class="skeleton pw-wait k-${esc(w.kind)} s-${esc(size)}"><i></i><i></i><i></i></div></section>`
+  // Never answered and its ask failed: its frame and label, and why (#413's follow-up, the user's decision).
+  const failed = pluginWidgetFailed(w)
+  if (failed) return `<section class="td-sec pw-sec" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}</h2>${failed}</section>`
   if (!w || w.empty) return ''
   let body
   try {

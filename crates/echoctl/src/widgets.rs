@@ -229,6 +229,27 @@ fn brief(p: &Value) -> Value {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_widget_never_answered_whose_ask_failed_says_why_not_pending_and_one_answered_with_nothing_doesnt() {
+        // Today draws the first as its frame with "Couldn't get its data — <why>" and takes no place for the second.
+        let (_env, _) = crate::paths::testenv::folders("widgets-failed-first-ask");
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let dir = crate::plugins::data_dir("mix-demo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("widgets.json"), json!({
+            "hang": {"asked": now, "data": null, "error": "mix-demo didn't answer __widget:hang within 5 s"},
+            "none": {"asked": now, "at": now, "data": null},
+        }).to_string()).unwrap();
+        let mut wd = w("plugin:mix-demo:hang", "plugins", "Never answers", "x", "stat", &["S", "M"], "hug", false);
+        wd.refresh = 3600;
+        let v = plugin_data("mix-demo", "hang", &wd);
+        assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["at"].as_str()), (Some(true), Some(false), None), "{v}");
+        assert_eq!(v["error"], "mix-demo didn't answer __widget:hang within 5 s");
+        let v = plugin_data("mix-demo", "none", &wd);
+        assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["error"].is_null()), (Some(true), Some(false), true), "{v}");
+    }
+
     #[test]
     fn the_catalog_has_one_widget_per_id_each_with_sizes_it_can_take() {
         let core = core();
