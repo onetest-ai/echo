@@ -130,6 +130,13 @@
    "axes": [
     "node.state"
    ]
+  },
+  {
+   "id": "F-TASK-14",
+   "feature": "A task's mail shows on it (\"Mail sent <date> to …, no reply yet\" / \"· replied <date>\") and, unanswered for 3 days, waits in Waiting for others as \"a reply to “<subject>”\"",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }

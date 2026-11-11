@@ -46,8 +46,8 @@ without `--yes`, only answers what it would send (`"sent": false, "would": …`)
 Text you wrote or edited: add `--ai <your model name>` to the send — the message then says a model wrote it.
 
 ```sh
-m365 mail send --to a@x.example --to b@y.example [--cc …] --subject "…" --file msg.md [--ai <model>] [--yes]
-m365 mail reply <mail id> [--all] --file msg.md [--ai <model>] [--yes]      # above the quoted mail
+m365 mail send --to a@x.example --to b@y.example [--cc …] --subject "…" --file msg.md [--ai <model>] [--task <thread>/<item>] [--yes]
+m365 mail reply <mail id> [--all] --file msg.md [--ai <model>] [--task <thread>/<item>] [--yes]      # above the quoted mail
 m365 mail draft --to … --subject "…" --file msg.md          # into Drafts, nothing sent: its Outlook link
 m365 teams send --to person@x.example --file msg.md [--ai <model>] [--yes] # their 1:1 chat (made if there is none)
 m365 teams send --chat <chat id> --file msg.md [--ai <model>] [--yes]      # a group or meeting chat; 48:notes = the user's own
@@ -58,6 +58,8 @@ m365 teams post <team id> <channel id> [--subject "…"] --file msg.md [--ai <mo
   without asking.
 - No address yet? `m365 people "<name>"` — confirm which one when several come back.
 - When the user wants to edit before sending, use `mail draft` and give them its link.
+- Sent for a thread's item (a task asks for it, or the user says which): add `--task <thread>/<item>`. The item
+  follows the conversation — replies come back to it, and it waits in Tasks → Waiting if none comes in 3 days.
 
 ## Teams, people, files
 

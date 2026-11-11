@@ -157,26 +157,66 @@ fn markdown_file(file: &Path) -> Result<(String, String)> {
 }
 
 /// A new mail from the user's account (kept in Sent): `to`, `cc`, `subject`, the Markdown `file` as its body.
-pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
+pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>, task: Option<&str>, yes: bool) -> Result<Value> {
     let (to, cc) = (recipients(to)?, recipients(cc)?);
     if to.is_empty() {
         bail!("no recipient (--to)");
     }
+    // From an item (`--task <thread>/<item>`, #92): checked before anything is sent.
+    let task = task.map(crate::ledger::task_ref).transpose()?;
     let (md, html) = markdown_file(file)?;
     let html = with_notice(html, ai);
-    let would = json!({"to": to, "cc": cc, "subject": subject, "text": md});
+    let mut would = json!({"to": to, "cc": cc, "subject": subject, "text": md});
+    if let Some((p, n)) = &task {
+        would["task"] = json!(format!("{p}/{n}"));
+    }
     if !yes {
         return Ok(not_sent(would));
     }
     not_in_run()?;
-    graph::request("POST", "/me/sendMail", Body::Json(&json!({"message": {"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": to, "ccRecipients": cc}, "saveToSentItems": true})), None, &[])?;
-    Ok(json!({"sent": true, "to": would["to"], "subject": subject}))
+    let message = json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": to, "ccRecipients": cc});
+    let Some((p, n)) = task else {
+        graph::request("POST", "/me/sendMail", Body::Json(&json!({"message": message, "saveToSentItems": true})), None, &[])?;
+        return Ok(json!({"sent": true, "to": would["to"], "subject": subject}));
+    };
+    // From an item: a draft first, so its conversation is known, then sent; the item follows that conversation.
+    let draft = graph::request("POST", "/me/messages", Body::Json(&message), None, &[])?;
+    let id = draft["id"].as_str().ok_or_else(|| anyhow!("Microsoft 365 made no draft"))?;
+    graph::request("POST", &format!("/me/messages/{}/send", enc(id)), Body::None, None, &["Content-Length: 0"])?;
+    let addresses: Vec<String> = to.iter().filter_map(|r| r["emailAddress"]["address"].as_str().map(str::to_owned)).collect();
+    Ok(followed(json!({"sent": true, "to": would["to"], "subject": subject}), &p, &n, draft["conversationId"].as_str().unwrap_or(""), subject, &addresses))
+}
+
+/// A mail sent from an item: the item follows its conversation (`ledger::mail_sent`). The mail is gone either way; if
+/// it can't be followed, the answer says so.
+fn followed(mut out: Value, project: &str, node: &str, conversation: &str, subject: &str, to: &[String]) -> Value {
+    out["task"] = json!(format!("{project}/{node}"));
+    match crate::ledger::mail_sent(project, node, conversation, subject, to) {
+        Ok(()) => out["followed"] = json!(true),
+        Err(e) => {
+            out["followed"] = json!(false);
+            out["error"] = json!(format!("sent, but {node} won't hear its replies: {e:#}"));
+        }
+    }
+    out
 }
 
 /// A reply to mail `id` (`all`: to everyone on it), the Markdown `file` above the quoted mail.
-pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
+pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, task: Option<&str>, yes: bool) -> Result<Value> {
+    let task = task.map(crate::ledger::task_ref).transpose()?;
     let (md, _) = markdown_file(file)?;
-    mail_reply_text(id, all, &md, ai, yes)
+    let mut out = mail_reply_text(id, all, &md, ai, yes)?;
+    // From an item (#92): the reply is in the mail's conversation, which the item now follows.
+    if let Some((p, n)) = task {
+        if out["sent"] == true {
+            let m = graph::message(id)?;
+            let to: Vec<String> = m["from"]["email"].as_str().map(str::to_owned).into_iter().collect();
+            out = followed(out, &p, &n, m["conversation"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or(""), &to);
+        } else {
+            out["would"]["task"] = json!(format!("{p}/{n}"));
+        }
+    }
+    Ok(out)
 }
 
 /// A reply in the user's own words (Today's Read and reply: their click on Reply is the yes).
@@ -521,10 +561,10 @@ mod tests {
         let f = std::env::temp_dir().join(format!("echo-test-m365-{}.md", std::process::id()));
         std::fs::write(&f, "Hi **Bob**").unwrap();
         // No sign-in is touched: the preview comes first.
-        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, Some("sonnet"), false).unwrap();
+        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, Some("sonnet"), None, false).unwrap();
         assert_eq!(v["sent"], false);
         assert_eq!(v["would"]["to"][0]["emailAddress"]["address"], "bob@acme.example");
-        assert!(mail_send(&["not an address".into()], &[], "x", &f, None, false).is_err());
+        assert!(mail_send(&["not an address".into()], &[], "x", &f, None, None, false).is_err());
         assert!(with_notice("<p>x</p>".into(), Some("sonnet")).contains("sonnet"), "a model's text says so");
         assert_eq!(with_notice("<p>x</p>".into(), None), "<p>x</p>");
         let u = drive_upload(&f, "Documents/x.md", false).unwrap();

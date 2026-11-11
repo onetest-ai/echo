@@ -71,6 +71,9 @@ pub enum M365Mail {
         /// A model wrote or edited the text (its name): the message says so
         #[arg(long)]
         ai: Option<String>,
+        /// Sent from a thread's item (<thread>/<item>, e.g. acme-rollout/T003): the item follows its replies
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -84,6 +87,9 @@ pub enum M365Mail {
         /// A model wrote or edited the text (its name): the message says so
         #[arg(long)]
         ai: Option<String>,
+        /// Sent from a thread's item (<thread>/<item>): the item follows the conversation's replies
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -209,8 +215,8 @@ pub fn run(cmd: M365Cmd) -> Result<()> {
         }
         M365Cmd::Mail { cmd } => match cmd {
             M365Mail::Read { id, thread } => m365::mail_read(&id, thread)?,
-            M365Mail::Send { to, cc, subject, file, ai, yes } => m365::mail_send(&to, &cc, &subject, &file, ai.as_deref(), yes)?,
-            M365Mail::Reply { id, all, file, ai, yes } => m365::mail_reply(&id, all, &file, ai.as_deref(), yes)?,
+            M365Mail::Send { to, cc, subject, file, ai, task, yes } => m365::mail_send(&to, &cc, &subject, &file, ai.as_deref(), task.as_deref(), yes)?,
+            M365Mail::Reply { id, all, file, ai, task, yes } => m365::mail_reply(&id, all, &file, ai.as_deref(), task.as_deref(), yes)?,
             M365Mail::Draft { to, cc, subject, file, ai } => m365::mail_draft(&to, &cc, &subject, &file, ai.as_deref())?,
         },
         M365Cmd::Teams { cmd } => match cmd {
