@@ -10,7 +10,7 @@
 - R3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
 - R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts`, `channel.plugin`, `sessions`, `folders.what` read-only, `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
 - R5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
-- R6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, height?, refresh?, params?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `chart`, `list`, `status` or `card`, `sizes` of `S` `M` `L` each once (default `["M"]`), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 12, and only with a `main` to give their data; its settings in `params` as `{key, label, type, options?, default?}` — `type` `choice` (1–12 `options`), `bool`, `thread` or `client`, 6 at most. Evidence: `plugins::check_params`
+- R6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, height?, refresh?, params?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `chart`, `list`, `status`, `card` or `page` (a page needs a `client`), `sizes` of `S` `M` `L` each once (default `["M"]`), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 12, and only with a `main` to give their data; its settings in `params` as `{key, label, type, options?, default?}` — `type` `choice` (1–12 `options`), `bool`, `thread` or `client`, 6 at most. Evidence: `plugins::check_params`
 
 ## Host half
 
@@ -51,6 +51,7 @@
 ### Rules
 - R1. Export `apply(ctx)` from the client half and add to the window only through `ctx` (`call`, `slots.add` on a known slot, `panels`, `activities`, `settings`, `palette`, `listen`, `ui`, `go`, `render`). Evidence: `loadPluginClients` (window script)
 - R2. Escape every text you put in HTML with `ctx.ui.esc` and render Markdown with `ctx.markdown`. Evidence: `slotItems` (window script)
+- R3. Draw a `page` widget with `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` from `data` only (its host half gives it by `provide` / `set`): the same data must give the same HTML, and the draw neither calls `ctx.render` nor keeps state in the page. Evidence: `pluginWidgetView` (window script)
 
 ## Publishing
 
