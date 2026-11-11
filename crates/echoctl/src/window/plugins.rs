@@ -9,6 +9,9 @@ pub(super) static PLUGINS_UPDATING: std::sync::atomic::AtomicBool = std::sync::a
 pub(super) fn plugin_file(rest: &str) -> Response<Cow<'static, [u8]>> {
     let Some((id, path)) = rest.split_once('/') else { return reply(404, "text/plain", b"no such file".to_vec()) };
     let Some(p) = crate::plugins::enabled().into_iter().find(|p| p.id == id) else { return reply(404, "text/plain", b"no such plugin".to_vec()) };
+    if let Some(file) = path.strip_prefix("store/") {
+        return store_file(id, file);
+    }
     match crate::plugins::inside_plugin(&crate::plugins::plugin_dir(&p), path).and_then(|f| Ok(std::fs::read(f)?)) {
         Ok(bytes) => {
             let kind = match path.rsplit('.').next().unwrap_or("") {
@@ -22,6 +25,34 @@ pub(super) fn plugin_file(rest: &str) -> Response<Cow<'static, [u8]>> {
             };
             reply(200, kind, bytes)
         }
+        Err(_) => reply(404, "text/plain", b"no such file".to_vec()),
+    }
+}
+
+/// `/plugin/<id>/store/<file>`: audio or an image the plugin's host half saved in its own store (`ctx.http.fetch` with
+/// `save`), for an `<audio>` or `<img>` of its window half. Only these kinds go out, so the store's settings and notes
+/// stay inside; the path is kept inside the store once links are followed.
+fn store_file(id: &str, rel: &str) -> Response<Cow<'static, [u8]>> {
+    let kind = match rel.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        "m4a" => "audio/mp4",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return reply(404, "text/plain", b"no such file".to_vec()),
+    };
+    let read = || -> anyhow::Result<Vec<u8>> {
+        let root = dunce::canonicalize(crate::plugins::data_dir(id))?;
+        let file = crate::grants::inside(&root, rel)?;
+        anyhow::ensure!(file.is_file(), "no such file");
+        Ok(std::fs::read(file)?)
+    };
+    match read() {
+        Ok(bytes) => reply(200, kind, bytes),
         Err(_) => reply(404, "text/plain", b"no such file".to_vec()),
     }
 }
@@ -164,4 +195,43 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_gets_media_from_a_plugins_store_and_nothing_else() {
+        let (_env, _root) = crate::paths::testenv::folders("window-store");
+        let store = crate::plugins::data_dir("hello");
+        std::fs::create_dir_all(store.join("audio")).unwrap();
+        std::fs::write(store.join("audio/a.mp3"), [0xff, 0xfb, 0x90]).unwrap();
+        std::fs::write(store.join("pic.JPG"), [0xff, 0xd8]).unwrap();
+        std::fs::write(store.join("settings.json"), "{}").unwrap();
+        std::fs::write(store.join("notes.txt"), "x").unwrap();
+        std::fs::write(store.join("page.svg"), "<svg/>").unwrap();
+        let got = |rel: &str| {
+            let r = store_file("hello", rel);
+            (r.status().as_u16(), r.headers().get(CONTENT_TYPE).map(|v| v.to_str().unwrap().to_string()).unwrap_or_default(), r.body().to_vec())
+        };
+        assert_eq!(got("audio/a.mp3"), (200, "audio/mpeg".to_string(), vec![0xff, 0xfb, 0x90]));
+        assert_eq!(got("pic.JPG"), (200, "image/jpeg".to_string(), vec![0xff, 0xd8]), "the kind is read from the name in any case");
+        // Only audio and pictures: the store's settings, notes and a page that could carry script stay in.
+        for kept in ["settings.json", "notes.txt", "page.svg"] {
+            assert_eq!(got(kept).0, 404, "{kept}");
+        }
+        // Not there, outside the store, or a Windows device name.
+        for no in ["audio/none.mp3", "audio", "../x.mp3", "audio/../../x.png", "/etc/x.mp3", "NUL.mp3", "audio/CON.mp3"] {
+            assert_eq!(got(no).0, 404, "{no}");
+        }
+        // A link inside the store that leads out of it isn't followed.
+        #[cfg(unix)]
+        {
+            let out = store.parent().unwrap().join("outside.mp3");
+            std::fs::write(&out, "secret").unwrap();
+            std::os::unix::fs::symlink(&out, store.join("audio/link.mp3")).unwrap();
+            assert_eq!(got("audio/link.mp3").0, 404);
+        }
+    }
 }
