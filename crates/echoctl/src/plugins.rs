@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use crate::app::NoWindow;
 use crate::paths;
 
+pub mod addresses;
 mod capabilities;
 pub use capabilities::*;
 
@@ -232,6 +233,14 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
+        let k = k.as_str().unwrap_or("");
+        match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
+            None => bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin"),
+            Some(s) if s.default.is_some() => bail!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter"),
+            Some(_) => {}
+        }
+    }
     let mut ids = std::collections::HashSet::new();
     if m.widgets.len() > 12 {
         bail!("it declares more than 12 widgets");
@@ -1078,6 +1087,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));
+        let _ = fs::remove_file(addresses_file(id));
     }
     Ok(())
 }
@@ -1100,6 +1110,18 @@ fn secrets_file(id: &str) -> PathBuf {
     plugins_dir().join("secrets").join(format!("{id}.json"))
 }
 
+/// The addresses the user listed (`uses.network.hosts_from`), outside the plugin's store: nothing the plugin writes
+/// can reach this file, whatever name it uses.
+fn addresses_file(id: &str) -> PathBuf {
+    plugins_dir().join("addresses").join(format!("{id}.json"))
+}
+
+/// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
+    read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
+}
+
 fn read_map(path: &Path) -> serde_json::Map<String, Value> {
     fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
@@ -1112,7 +1134,10 @@ fn installed_manifest(id: &str) -> Result<Manifest> {
 /// The settings as the page shows them: each definition with its value (a secret only as set / not).
 pub fn settings_view(id: &str) -> Result<Vec<Value>> {
     let m = installed_manifest(id)?;
-    let vals = read_map(&data_dir(id).join("settings.json"));
+    let mut vals = read_map(&data_dir(id).join("settings.json"));
+    let listed = address_settings(&m.uses);
+    vals.retain(|k, _| !listed.contains(k));
+    vals.extend(read_map(&addresses_file(id)));
     let secrets = read_map(&secrets_file(id));
     Ok(m.settings
         .iter()
@@ -1131,7 +1156,12 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
 /// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&secrets_file(id)).remove(key).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+}
+
+/// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
+pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
+    uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
 }
 
 /// Save one setting, checked against its definition; an empty secret forgets it.
@@ -1147,8 +1177,18 @@ pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
     if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
         bail!("{} isn't a folder", value.as_str().unwrap_or(""));
     }
+    let is_address = address_settings(&m.uses).iter().any(|k| k == key);
+    if is_address {
+        addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
+    }
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    if def.kind == "secret" {
+    if is_address {
+        let f = addresses_file(id);
+        fs::create_dir_all(f.parent().unwrap())?;
+        let mut all = read_map(&f);
+        all.insert(key.into(), value);
+        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
+    } else if def.kind == "secret" {
         let f = secrets_file(id);
         fs::create_dir_all(f.parent().unwrap())?;
         let mut all = read_map(&f);
@@ -1425,6 +1465,48 @@ mod tests {
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
+    }
+
+    #[test]
+    fn the_sheet_says_a_plugin_reaches_the_addresses_the_user_lists() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"network": {"hosts_from": ["tts"]}}))).unwrap(),
+            vec!["Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network)"]
+        );
+        assert_eq!(
+            describe(&uses(json!({"network": {"hosts": ["api.acme.example"], "hosts_from": ["a", "b"]}}))).unwrap(),
+            vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed; plain http only inside your own network)"]
+        );
+        assert!(describe(&uses(json!({"network": {}}))).is_err(), "neither a host nor a setting");
+    }
+
+    #[test]
+    fn hosts_from_names_a_string_setting_of_the_plugin() {
+        let (_env, root) = paths::testenv::folders("plugins-hosts-from");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let manifest = |hosts_from: Value| {
+            fs::write(
+                d.join(MANIFEST),
+                json!({"id": "p", "name": "P", "version": "0.1.0", "uses": {"network": {"hosts_from": hosts_from}},
+                       "settings": [{"key": "tts", "label": "TTS", "type": "string"}, {"key": "on", "label": "On", "type": "bool"}]})
+                .to_string(),
+            )
+            .unwrap();
+            read_manifest(&d)
+        };
+        assert!(manifest(json!(["tts"])).is_ok());
+        assert!(manifest(json!(["nope"])).unwrap_err().to_string().contains("isn't a string setting"), "no such setting");
+        assert!(manifest(json!(["on"])).unwrap_err().to_string().contains("isn't a string setting"), "not a string");
+        fs::write(
+            d.join(MANIFEST),
+            json!({"id": "p", "name": "P", "version": "0.1.0", "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS", "type": "string", "default": "https://tts.acme.example"}]})
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_manifest(&d).unwrap_err().to_string().contains("has a default"), "the author doesn't choose the address");
     }
 
     #[test]

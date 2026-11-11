@@ -171,10 +171,20 @@ pub(super) fn describe_deliver_provider(v: &Value) -> Result<String> {
 
 pub(super) fn describe_network(v: &Value) -> Result<String> {
     let hosts = strings(v, "hosts")?;
-    if hosts.is_empty() || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
-        bail!("“network” names hosts (e.g. api.example.com)");
+    let from = strings(v, "hosts_from")?;
+    if (hosts.is_empty() && from.is_empty()) || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
+        bail!("“network” names hosts (e.g. api.example.com) or settings that hold an address (hosts_from)");
     }
-    Ok(format!("Talks to {} over HTTPS", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())))
+    let mut parts = vec![];
+    if !hosts.is_empty() {
+        parts.push(format!("{} over HTTPS", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())));
+    }
+    if !from.is_empty() {
+        let quoted: Vec<String> = from.iter().map(|k| format!("“{k}”")).collect();
+        let s = if from.len() == 1 { "setting" } else { "settings" };
+        parts.push(format!("the addresses you list in its {s} {} (wildcards allowed; plain http only inside your own network)", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())));
+    }
+    Ok(format!("Talks to {}", parts.join(" and to ")))
 }
 
 pub(super) fn describe_channel(v: &Value) -> Result<String> {

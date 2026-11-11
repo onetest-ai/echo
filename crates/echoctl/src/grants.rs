@@ -89,6 +89,12 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     if !folders(id).contains(&root) {
         bail!("{} isn't one of the folders you gave this plugin", root.display());
     }
+    inside(&root, rel)
+}
+
+/// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
+/// followed.
+pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim_start_matches("./");
     let p = Path::new(rel);
     if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
@@ -106,7 +112,7 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     // A link inside may point anywhere: what it resolves to must stay inside too — and that resolved path is
     // what is used, so a link swapped in afterwards isn't followed again.
     match dunce::canonicalize(&full) {
-        Ok(real) if real.starts_with(&root) => Ok(real),
+        Ok(real) if real.starts_with(root) => Ok(real),
         Ok(_) => bail!("“{rel}” leads outside {}", root.display()),
         Err(_) => Ok(full),
     }
