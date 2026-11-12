@@ -28,8 +28,14 @@ function profileLabel(p) {
   if (s.state === 'signed_out') return `${p.name} — not signed in`
   return p.account ? `${p.name} — ${p.account}` : p.name
 }
-function profileOptions(cur) {
-  return ai().profiles.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? ' selected' : ''}>${esc(profileLabel(p))}</option>`).join('')
+/** A profile's line under its name in Echo's menu: its model and where it runs (`note`: what this place adds). */
+function profileSub(p, note) {
+  // The account is in its name already (profileLabel): here what it is.
+  const kind = p.kind === 'local' ? profileWhere(p) : p.kind === 'claude' ? 'its own Claude sign-in' : 'as Claude Code is set up'
+  return [p.notes_model_label || p.model || '', kind, note].filter(Boolean).join(' · ')
+}
+function profileOptions(cur, note = () => '') {
+  return ai().profiles.map((p) => `<option value="${esc(p.id)}" data-sub="${esc(profileSub(p, note(p)))}"${p.id === cur ? ' selected' : ''}>${esc(profileLabel(p))}</option>`).join('')
 }
 
 /** A Claude profile's sign-in and what can be done about it (`signin.rs` → `p.signin`); '' when
