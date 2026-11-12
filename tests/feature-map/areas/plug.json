@@ -185,6 +185,15 @@
     "plugin.enabled",
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-21",
+   "feature": "With `uses.signin.hosts` (1–4 plain host names, each once, no addresses; the sheet: 'Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to') a plugin's host half gets the password or token saved for a named host with `ctx.signin.get(host)`: the GitHub CLI's token (`gh auth token`) first, else what git's credential helper keeps (`git credential fill`; for a self-hosted git maybe the user's own password), `{token, from, user?}`, or null when neither has one — Echo asks nobody for a password (the system's keychain may ask once to allow it), each program runs from an empty folder without Echo's git / GitHub CLI environment, 10 s at most with what it started stopped, one lookup per host at a time kept a minute then dropped from memory (`ctx.signin.get(host, {fresh: true})` asks again and keeps that answer); never in a read-only routine, any other host refused; `ctx.signin.sources(host)` says which of the two programs are here without reading one. It grants no network: the plugin names its API host in `network.hosts`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }
