@@ -429,6 +429,7 @@ impl Ui {
             "claude_path" => Action::ClaudePath,
             "notes_choose" => Action::NotesChoose,
             "notes_anywhere" => Action::NotesAnywhere,
+            "onedrive_choose" => Action::OnedriveChoose,
             "check_updates" => Action::CheckUpdates,
             "update" => Action::Update,
             "calendar_login" => Action::CalendarLogin,
@@ -520,6 +521,20 @@ impl Ui {
                 let Ok(mut cfg) = Config::load() else { return };
                 cfg.notes_in = None;
                 let _ = cfg.save();
+            }
+            Action::OnedriveChoose => {
+                std::thread::spawn(|| {
+                    if let Some(dir) = app::choose_folder("The folder OneDrive keeps on this computer") {
+                        let Ok(mut cfg) = Config::load() else { return };
+                        match crate::onedrive::setting(&dir.to_string_lossy()) {
+                            Ok(v) => {
+                                cfg.onedrive = v;
+                                let _ = cfg.save();
+                            }
+                            Err(e) => app::notify("OneDrive folder", &format!("{e:#}")),
+                        }
+                    }
+                });
             }
             Action::NotesChoose => {
                 std::thread::spawn(|| {

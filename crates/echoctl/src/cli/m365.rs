@@ -177,6 +177,9 @@ pub enum M365Drive {
         #[arg(long, default_value = ".")]
         out: std::path::PathBuf,
     },
+    /// Whether a local path is in your OneDrive (Settings → Calendar & chat), its path online, whether it is here and
+    /// online, and what to do — before making a folder there. Reads only
+    Where { path: std::path::PathBuf },
     /// A local file into OneDrive at a path. Without --yes: what would be uploaded
     Upload {
         file: std::path::PathBuf,
@@ -232,6 +235,7 @@ pub fn run(cmd: M365Cmd) -> Result<()> {
             M365Drive::List { path } => m365::drive_list(path.as_deref())?,
             M365Drive::Download { item, out } => m365::drive_download(&item, &out)?,
             M365Drive::Upload { file, path, yes } => m365::drive_upload(&file, &path, yes)?,
+            M365Drive::Where { path } => crate::onedrive::where_is(&path)?,
         },
         M365Cmd::Get { path } => m365::get(&path)?,
     };

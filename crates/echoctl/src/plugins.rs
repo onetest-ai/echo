@@ -31,6 +31,7 @@ use crate::paths;
 
 pub mod addresses;
 mod appfiles;
+#[cfg_attr(not(feature = "js"), allow(unused_imports))]
 pub use appfiles::{app_file_real, app_file_rel};
 #[cfg(test)]
 use appfiles::app_file;

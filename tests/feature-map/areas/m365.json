@@ -77,6 +77,13 @@
    "axes": [
     "m365.signin"
    ]
+  },
+  {
+   "id": "F-M365-09",
+   "feature": "`echoctl m365 drive where <path>`: whether a path is in the user's OneDrive on this computer, its path online, whether it is here and online, what to do (a synced folder: work with it here; online only: sync it, don't make it here; here only: not uploaded), and for a folder in both places how many names are only here, only online and in both, with the first 20 of each — compared by Echo, reads only",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

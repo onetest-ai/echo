@@ -343,6 +343,10 @@ const SETTINGS_BODY = {
       setRow('Account', st.calendar ? `Signed in as ${esc(st.calendar)}` : 'Not connected: the calendar shows only what your tray knows about today.', st.calendar ? actBtn('calendar_sync', 'Sync now') + actBtn('calendar_logout', 'Sign out') : actBtn('calendar_login', 'Sign in…', '', true), '', 'Account'),
       setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat'), '', 'Meeting chat'),
       setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…'), '', 'App registration'),
+      setRow('OneDrive on this computer', st.onedrive === 'none' ? 'Off: Echo treats no folder here as OneDrive.'
+        : st.onedrive_now ? `<code>${esc(st.onedrive_now)}</code>${st.onedrive ? '' : ' (found by Echo)'}. Claude in Echo doesn't make a folder there that OneDrive keeps online but doesn't sync to this computer.`
+        : 'Not found on this computer.',
+        actBtn('onedrive_choose', 'Choose…') + (st.onedrive ? `<button class="btn" data-set="onedrive" data-val='"auto"'>Find it</button>` : '') + (st.onedrive !== 'none' ? `<button class="btn" data-set="onedrive" data-val='"none"'>Off</button>` : ''), '', 'OneDrive on this computer'),
     ])
   },
   deliver() {

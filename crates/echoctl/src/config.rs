@@ -84,6 +84,9 @@ pub struct Config {
     /// Drafts when signed in, else the default mail app (#135).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drafts: Option<String>,
+    /// The folder OneDrive keeps on this computer (`onedrive::root`): unset finds it, `none` turns it off (#469).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onedrive: Option<String>,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

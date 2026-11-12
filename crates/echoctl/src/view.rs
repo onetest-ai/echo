@@ -407,9 +407,28 @@ pub fn hook_settings(exe: &Path) -> Value {
     json!({"UserPromptSubmit": [{"hooks": h}], "SessionStart": [{"matcher": "startup|resume|compact|clear", "hooks": h}]})
 }
 
+/// The folder session's hook before a write: never a folder here that OneDrive keeps online but doesn't sync to this
+/// computer (#469). Only there — a session with Echo's guard keeps the guard's own `PreToolUse`.
+pub fn onedrive_hook(exe: &Path) -> Value {
+    let p = exe.display().to_string();
+    let command = if cfg!(windows) { format!("\"{}\" onedrive-hook", p.replace('\\', "/")) } else { format!("'{}' onedrive-hook", p.replace('\'', r"'\''")) };
+    json!([{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": command, "timeout": 15}]}])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_hooks_never_take_the_guards_place() {
+        // A call's session merges these over Echo's guard: no `PreToolUse` among them, or the guard would be replaced.
+        let h = hook_settings(Path::new("/Apps/Echo.app/echoctl"));
+        assert!(h.get("PreToolUse").is_none(), "{h}");
+        // The folder session's own write hook asks OneDrive about writes and Bash.
+        let od = onedrive_hook(Path::new("/Apps/Echo.app/echoctl"));
+        assert_eq!(od[0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash");
+        assert!(od[0]["hooks"][0]["command"].as_str().unwrap().ends_with("onedrive-hook"));
+    }
 
     #[test]
     fn another_calls_view_stays_out() {

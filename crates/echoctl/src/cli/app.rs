@@ -305,15 +305,23 @@ pub struct ConfigArgs {
     /// default mail app), app:<app> (macOS: its name; Windows: its program's full path), or default
     #[arg(long)]
     pub drafts: Option<String>,
+    /// The folder OneDrive keeps on this computer, so a path there is known as the cloud's too: a folder, auto (found
+    /// by itself), or none
+    #[arg(long)]
+    pub onedrive: Option<String>,
 }
 
 pub fn config(args: ConfigArgs) -> Result<()> {
-    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model, drafts } = args;
+    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model, drafts, onedrive } = args;
     let mut cfg = config::Config::load()?;
     if let Some(d) = drafts {
         // The app named here is run with each draft: never chosen by a run Echo started.
         anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: where drafts go is the user's to choose");
         cfg.drafts = crate::drafts::setting(&d)?;
+    }
+    if let Some(o) = onedrive {
+        anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: where OneDrive is is the user's to say");
+        cfg.onedrive = crate::onedrive::setting(&o)?;
     }
     if let Some(m) = live_model {
         cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");

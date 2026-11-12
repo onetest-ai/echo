@@ -45,6 +45,7 @@ pub fn app_file(entry: &str, var: impl Fn(&str) -> Option<PathBuf>) -> Result<Op
 /// The file an entry of `uses.files.read` names, when it is there as named: no link anywhere below its base (a folder
 /// above it that is a link or junction would lead elsewhere, e.g. to Echo's own settings) — its real path is its
 /// base's real path joined with the named parts.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn app_file_real(entry: &str, var: impl Fn(&str) -> Option<PathBuf>) -> Result<Option<PathBuf>> {
     let (_, rel) = app_file_rel(entry)?;
     let Some(f) = app_file(entry, var)? else { return Ok(None) };

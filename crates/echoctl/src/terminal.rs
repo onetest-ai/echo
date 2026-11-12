@@ -616,7 +616,10 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     let folder = paths::config_dir().join("minutes-run");
     std::fs::create_dir_all(&folder)?;
     let settings = folder.join("session-folder.json");
-    std::fs::write(&settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": crate::view::hook_settings(&std::env::current_exe()?)}))?)?;
+    let exe = std::env::current_exe()?;
+    let mut hooks = crate::view::hook_settings(&exe);
+    hooks["PreToolUse"] = crate::view::onedrive_hook(&exe);
+    std::fs::write(&settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": hooks}))?)?;
     args.splice(0..0, ["--settings".to_string(), settings.display().to_string()]);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "brain")]

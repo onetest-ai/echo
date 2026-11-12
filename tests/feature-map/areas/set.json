@@ -184,6 +184,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-SET-21",
+   "feature": "Settings → Calendar & chat → \"OneDrive on this computer\": the folder OneDrive keeps here — found by Echo (macOS: the one ~/Library/CloudStorage/OneDrive-<org>, not shared libraries; Windows: OneDriveCommercial / OneDrive), chosen, or off (`echoctl config --onedrive <folder|auto|none>`, refused inside a run). In the Echo folder session a write (Write, Edit, mkdir/touch/cp/mv) that would make here a folder OneDrive has online but doesn't sync to this computer is refused, with the reason and the fix (OneDrive → Choose folders); writes into folders that are here go on at once",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
