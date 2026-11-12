@@ -242,14 +242,26 @@ function todayCols(width, prev) {
   return Math.max(prev, Math.min(base, up))
 }
 /** The layout's rows ([[{id, span, height, fill, empty}]]) as lines of `cols` columns: empty widgets and rows take none;
- *  a row too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one.
+ *  the widgets after an empty one move up into its place while they fit at their size (never a fill widget, never into a
+ *  fill line, never beside a two-rows-high one); a row too wide narrows its widest first (L → M → S), then wraps; nothing reorders. A line is `fill` when it holds one.
  *  A widget two rows high (height 2) first or last in its row takes its row and the next: a `tall` line — on the left
  *  when first, on the right when last, so nothing reorders — with the rest of its row and the next row laid beside it
  *  in the columns left (`lines`). In the middle of its row, with no column left beside it, or with nothing to put
  *  there, it is one row high; so is one in the rows a tall one takes. `todayTallIds` says which are drawn tall. */
 function todayLines(rows, cols) {
   const lines = []
-  const live = rows.map((row) => row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))).filter((r) => r.length)
+  const live = []
+  let room = false // the last line lost a widget (empty now, or moved up): the next ones move up into it while they fit
+  for (const row of rows) {
+    const items = row.filter((w) => !w.empty).map((w) => ({ ...w, span: Math.min(w.span, cols) }))
+    const last = live[live.length - 1], plain = (w) => !w.fill && w.height !== 2
+    // Never beside a two-rows-high widget: not into a row one takes (its own or the next), not from one's row.
+    const tallNear = [live[live.length - 2], items].some((r) => r && r.some((w) => w.height === 2))
+    if (room && last && last.every(plain) && !tallNear) {
+      while (items.length && plain(items[0]) && last.reduce((a, w) => a + w.span, 0) + items[0].span <= cols) last.push(items.shift())
+    }
+    if (items.length) { live.push(items); room = items.length < row.length }
+  }
   for (let r = 0; r < live.length; r++) {
     const items = live[r]
     const t = items[0].height === 2 ? 0 : items[items.length - 1].height === 2 ? items.length - 1 : -1
