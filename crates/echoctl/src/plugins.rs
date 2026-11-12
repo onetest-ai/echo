@@ -36,6 +36,7 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod signin;
 

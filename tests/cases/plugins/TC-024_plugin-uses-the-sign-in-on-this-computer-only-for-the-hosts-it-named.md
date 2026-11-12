@@ -1,9 +1,9 @@
 ---
-id: TC-023
+id: TC-024
 title: A plugin that names github.com in uses.signin gets the sign-in from the GitHub CLI, else from git, else null — the sheet says so, nothing prompts, any other host is refused and no network comes with it
 priority: high
 type: functional
-requirements: [F-PLUG-19]
+requirements: [F-PLUG-21]
 module: plugins
 run: agent
 platform: macos
@@ -11,7 +11,7 @@ data: standard
 tags: [plugins, host-half, permissions, signin, made-up-tokens]
 ---
 
-# TC-023: A plugin uses the sign-in on this computer, only for the hosts it named
+# TC-024: A plugin uses the sign-in on this computer, only for the hosts it named
 
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 
@@ -66,5 +66,5 @@ Acme hub is installed; it was handed the made-up CLI token, then git's made-up c
 - `tests/fixtures/serve.sh down <dir>`; close the test tab; remove `$(dirname <dir>)` when the run is over
 
 ## Notes
-- Written from the feature's text (F-PLUG-19). A real token on screen or in any file of the run is a FAIL: every program asked here is a made-up one first on `PATH`.
+- Written from the feature's text (F-PLUG-21). A real token on screen or in any file of the run is a FAIL: every program asked here is a made-up one first on `PATH`.
 - A read-only routine refusing `ctx.signin.get` and a program that hangs past 10 s are covered by Rust tests (`jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine`, `plugins::signin::a_program_that_hangs_is_given_up_on`).
