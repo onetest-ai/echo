@@ -33,17 +33,20 @@ tags: [plugins, threads, client-half, slots, host-half, events]
 | 5 | Navigate to `{{base_url}}/#project/beta/profile` | Its "Repositories" row reads "None yet" (Alpha's value isn't Beta's) |
 | 6 | `echoctl plugin call thread-demo set '{"thread":"nope","repos":["x"]}' 2>&1 \|\| true` | It fails with "there is no thread “nope”" |
 | 7 | In the window, Alpha's Profile → ⋯ → "Delete…" → "Move to trash" | Alpha is gone from the list |
-| 8 | `echoctl plugin call thread-demo heard`; `echoctl plugin call thread-demo list` | `heard` includes `{"thread": "alpha", "change": "deleted"}`; `list` is `[]` |
+| 8 | `echoctl plugin call thread-demo heard`; `echoctl plugin call thread-demo list` | `heard` includes `{"thread": "alpha", "change": "deleted", "values": {"repos": ["acme-test/api"]}}` (the plugin's own values for it); `list` is `[]` |
+| 8a | `echoctl plugin call thread-demo set '{"thread":"beta","repos":["acme-test/web"]}'`; in a terminal, `echoctl project set beta --name "Beta Two"`; then `echoctl project delete beta`; wait 3 s; `echoctl plugin call thread-demo heard` | `heard` also includes `{"thread": "beta", "change": "renamed", "name": "Beta Two", "from": "Beta"}` and `{"thread": "beta", "change": "deleted", "values": {"repos": ["acme-test/web"]}}` — the running app's plugin heard the terminal's changes |
+| 8b | `echoctl project create "Beta"` (the id `beta` again); navigate to `{{base_url}}/#project/beta/profile` | Its "Repositories" row reads "None yet": a new thread under a used id inherits nothing |
 | 9 | `echoctl project create "Boom"`; reload, navigate to `{{base_url}}/#project/boom/profile` | The Profile draws (Stage, Client, … Sources, Notes for Claude, Look, AI) without a "Repositories" row |
 | 10 | Navigate to `{{base_url}}/#settings/plugins`, switch "Thread demo on" off; navigate to `{{base_url}}/#project/beta/profile` | No "Repositories" row |
 
 ## Expected Final State
-Thread demo is installed and off; Alpha is in the trash with no value of the plugin's left; Beta and Boom have none.
+Thread demo is installed and off; Alpha and the first Beta are in the trash with no value of the plugin's left; the new Beta and Boom have none.
 
 ## Teardown
 - `echoctl plugin remove thread-demo --delete-data`; `echoctl plugin marketplace remove test-plugins`; `echoctl project delete beta`; `echoctl project delete boom`
 - `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- Step 8's `heard` is what the plugin heard while the app ran (the window's delete runs in the app, where host halves run); a delete from the CLI drops the values the same way but the app's plugins don't hear it.
+- Step 8's `heard` is what the plugin heard while the app ran (the window's delete runs in the app, where host halves run). A rename or delete from a terminal (step 8a) waits in `<data>/.echo/plugin-events.jsonl` and the running app's plugins hear it within about a second; with the app not running, they hear it when it next starts.
+- Step 2's row: `after(box, thread)` runs once per box drawn afresh — a plugin that fetches in `after` and calls `ctx.render()` doesn't draw forever (`node crates/echoctl/ui/thread-slot.test.mjs`).
 - Echo has no thread-into-thread merge yet: `merged` is covered by the Rust test `plugins::thread_values::a_plugins_values_per_thread_are_kept_listed_and_follow_the_thread`.
