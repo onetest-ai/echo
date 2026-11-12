@@ -194,7 +194,7 @@ const PRELUDE: &str = r#"
     signin: {
       get: (host, opts) => later('signin.get', [String(host), !!(opts && opts.fresh)]),
       sources: (host) => call('signin.sources', String(host)),
-      keep: (host, token) => call('signin.keep', [String(host), String(token)]),
+      keep: (host, token) => call('signin.keep', [String(host), token]),
       forget: (host) => call('signin.forget', String(host)),
     },
     deliver: {
@@ -1188,7 +1188,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             if op == "signin.keep" {
                 read_only_here("keeping a sign-in")?;
-                plugins::signin::keep(id, &host, arg[1].as_str().unwrap_or(""))?;
+                let token = arg[1].as_str().ok_or_else(|| anyhow!("a sign-in is one line of text, 8 KB at most"))?;
+                plugins::signin::keep(id, &host, token)?;
                 Value::Bool(true)
             } else {
                 read_only_here("forgetting a sign-in")?;
@@ -1916,11 +1917,12 @@ mod tests {
         let main = r#"
             export function apply(ctx) {
               ctx.command('keep', (a) => ctx.signin.keep(a.host, a.token))
+              ctx.command('keepNothing', (a) => ctx.signin.keep(a.host))
               ctx.command('forget', (a) => ctx.signin.forget(a.host))
               ctx.command('get', async (a) => await ctx.signin.get(a.host))
             }
             "#;
-        let keeps = json!({"hosts": ["keep-jshost.example"], "keep": true});
+        let keeps = json!({"hosts": ["keep-jshost.example", "con.example"], "keep": true});
         for (id, signin) in [("keeper", keeps.clone()), ("other-keeper", keeps), ("reader", json!({"hosts": ["keep-jshost.example"]}))] {
             let d = mk.join("plugins").join(id);
             std::fs::create_dir_all(&d).unwrap();
@@ -1974,6 +1976,15 @@ mod tests {
         assert!(e.contains("didn't ask to use your sign-in"), "{e}");
         let e = call("keeper", "keep", &json!({"host": "keep-jshost.example", "token": "a\nb"})).unwrap_err().to_string();
         assert!(e.contains("one line of text"), "{e}");
+        // No sign-in given (undefined, null, a number): refused — never kept as "undefined".
+        for args in [json!({"host": "keep-jshost.example"}), json!({"host": "keep-jshost.example", "token": null}), json!({"host": "keep-jshost.example", "token": 42})] {
+            let e = call("keeper", if args.get("token").is_some() { "keep" } else { "keepNothing" }, &args).unwrap_err().to_string();
+            assert!(e.contains("one line of text"), "{args}: {e}");
+        }
+        assert_eq!(call("keeper", "get", &host).unwrap()["token"], "madeup-any-service-token");
+        // A host whose file would be a Windows device (con.example.json): refused.
+        let e = call("keeper", "keep", &json!({"host": "con.example", "token": "x"})).unwrap_err().to_string();
+        assert!(e.contains("can't be a file's name on Windows"), "{e}");
         // A read-only routine keeps and forgets nothing.
         {
             struct RunMode;
@@ -1989,6 +2000,35 @@ mod tests {
                 assert!(e.contains("isn't allowed in a read-only routine"), "{command}: {e}");
             }
         }
+        // Installed again from its marketplace: its sign-in stays. A version that no longer says `keep`, or the same id
+        // from another marketplace: it starts without one.
+        let reinstall = |market: &str| {
+            let review = plugins::review("keeper", Some(market)).unwrap();
+            plugins::install("keeper", Some(market), &review.uses).unwrap();
+            sync();
+        };
+        reinstall(&name);
+        assert!(f.exists(), "the same plugin from the same marketplace keeps it");
+        let d = mk.join("plugins/keeper");
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "keeper", "name": "keeper", "version": "0.2.0", "main": "main.js", "uses": {"signin": {"hosts": ["keep-jshost.example"]}}}).to_string()).unwrap();
+        plugins::refresh(&name).unwrap();
+        reinstall(&name);
+        assert!(!f.exists(), "a version without keep starts without it");
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "keeper", "name": "keeper", "version": "0.3.0", "main": "main.js", "uses": {"signin": {"hosts": ["keep-jshost.example"], "keep": true}}}).to_string()).unwrap();
+        plugins::refresh(&name).unwrap();
+        reinstall(&name);
+        assert_eq!(call("keeper", "keep", &token).unwrap(), json!(true));
+        let mk2 = root.join("market2");
+        std::fs::create_dir_all(mk2.join("plugins/keeper")).unwrap();
+        std::fs::write(mk2.join("plugins/keeper/echo-plugin.json"), json!({"id": "keeper", "name": "keeper", "version": "0.3.0", "main": "main.js", "uses": {"signin": {"hosts": ["keep-jshost.example"], "keep": true}}}).to_string()).unwrap();
+        std::fs::write(mk2.join("plugins/keeper/main.js"), main).unwrap();
+        std::fs::write(mk2.join("echo-marketplace.json"), json!({"name": "t2", "plugins": [{"id": "keeper", "source": "./plugins/keeper"}]}).to_string()).unwrap();
+        let name2 = plugins::market_add(mk2.to_str().unwrap(), Some("t2")).unwrap();
+        plugins::refresh(&name2).unwrap();
+        reinstall(&name2);
+        assert!(!f.exists(), "the same id from another marketplace never gets it");
+        assert_eq!(call("keeper", "get", &host).unwrap(), Value::Null);
+        assert_eq!(call("keeper", "keep", &token).unwrap(), json!(true));
         assert_eq!(call("keeper", "forget", &host).unwrap(), json!(true));
         assert!(!f.exists());
         assert_eq!(call("keeper", "get", &host).unwrap(), Value::Null);

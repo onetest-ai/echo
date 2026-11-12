@@ -1064,6 +1064,12 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
+    // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
+    // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
+    let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
+    if !keeps || before.as_ref().is_some_and(|b| b.market != rec.market) {
+        signin::forget_plugin(id);
+    }
     // Older versions' files go.
     if let Ok(rd) = fs::read_dir(installed_dir(id)) {
         for e in rd.flatten() {

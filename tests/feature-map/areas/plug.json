@@ -216,7 +216,7 @@
   },
   {
    "id": "F-PLUG-23",
-   "feature": "A plugin's client half puts text on the clipboard with `ctx.ui.copy(text)` (10,000 characters at most; e.g. a code to paste on a sign-in page) only while the user's click or key is going on — called from a timer it throws 'the clipboard is filled only on your click'; the host half has no clipboard. With test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) Echo logs `copied: <text>` and never touches the computer's clipboard",
+   "feature": "A plugin's client half puts text on the clipboard with `ctx.ui.copy(text)` (10,000 characters at most; e.g. a code to paste on a sign-in page) on the user's click or key: without the page's user activation — or where the engine can't tell — it throws 'the clipboard is filled only on your click' (a guard against accidental copies, not a security boundary: a client half shares the page); the host half has no clipboard. With test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) Echo logs `copied: <text>` and never touches the computer's clipboard",
    "priority": "medium",
    "check": "agent",
    "axes": [

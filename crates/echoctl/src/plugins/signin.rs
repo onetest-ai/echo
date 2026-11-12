@@ -67,6 +67,8 @@ pub fn kept(plugin: &str, host: &str) -> Option<Value> {
 /// Keep `plugin`'s sign-in to `host` (readable by the user only), replacing its one before.
 pub fn keep(plugin: &str, host: &str, token: &str) -> anyhow::Result<()> {
     anyhow::ensure!(plain(token) && token.len() <= 8192, "a sign-in is one line of text, 8 KB at most");
+    // Its file's name: never one Windows opens as a device (`con.example.json`).
+    anyhow::ensure!(!crate::grants::device_name(host), "“{host}” can't be a file's name on Windows");
     let f = kept_file(plugin, host);
     std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
     super::write_private(&f, json!({"token": token, "at": chrono::Utc::now().to_rfc3339()}).to_string().as_bytes())
