@@ -83,7 +83,7 @@
   },
   {
    "id": "F-WORK-08",
-   "feature": "\"To review\" lists suggested merges and moves (Yes / No) and weak \"done\"s (\"Is X done?\")",
+   "feature": "\"To review\" is one panel (its head \"To review N\" folds it) listing suggested merges and moves (Yes / No) and weak \"done\"s (\"Is X done?\"), each on one line, its words cut with … and whole in the tooltip",
    "priority": "high",
    "check": "agent",
    "axes": [

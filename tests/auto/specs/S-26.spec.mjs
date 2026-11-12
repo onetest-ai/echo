@@ -43,10 +43,13 @@ async function listLines(clients, open) {
   const last = Object.fromEntries(cli('project', 'list').projects.map((p) => [p.id, p.last_call]))
   const row = async ([name, calls, stage, id]) => clients.rowName({ name, calls, day: last[id] && await clients.dayLabel(last[id]), stage, logo: l.logo.includes(name) })
   const lines = [t.threads, t.newThread, fill(t.foundCount, { n: l.found })]
-  for (const g of l.groups) {
+  // A client with no open thread (not your own company) waits in the fold at the end, before Closed.
+  const idle = l.groups.filter((g) => !l.rows[g].length && !g.endsWith(data.text.clients.yourCompany))
+  for (const g of l.groups.filter((x) => !idle.includes(x))) {
     lines.push(g)
     for (const r of l.rows[g]) lines.push(await row(r))
   }
+  if (idle.length) lines.push(fill(t.idleClients, { n: idle.length }))
   lines.push(fill(t.closed, { n: l.closed }))
   if (open) for (const r of l.closedRows) lines.push(await row(r))
   return lines
@@ -103,6 +106,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     await clients.fold(l.fold.group).click()
     await expect(clients.threadRow(l.fold.row)).toBeVisible()
 
+    await clients.idleFold.click() // its client has no open thread: in the fold at the end
     await clients.group(l.client.group).click()
     await expect.poll(() => clients.hash()).toBe(clientRoute(l.client.id, t.tabs.overview))
   })
@@ -462,6 +466,7 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     const clients = new ClientsPage(page, data)
     await clients.goto(data.text.threads.routes.projects)
     await expect(clients.listHeading(data.text.threads.threads)).toBeVisible()
+    await clients.idleFold.click() // clients with no open thread wait in the fold at the end
     for (const g of data.set.s26.list.groups) await expect(clients.clientGroup(g)).toBeVisible()
     for (const id of a.orgs) await expect(clients.clientGroup(all.find((x) => x.id === id).name)).toHaveCount(0)
     await clients.openClient(a.acme.id, c.tabIds.overview)
@@ -536,6 +541,8 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     const t = data.text.threads
     const clients = new ClientsPage(page, data)
     await clients.goto(t.routes.projects)
+    await expect(clients.clientGroup(x.name)).toHaveCount(0)
+    await clients.idleFold.click()
     await expect(clients.clientGroup(x.name)).toBeVisible()
     await expect(clients.fold(x.name)).toHaveCount(0)
     await expect(clients.threadRow(x.thread)).toHaveCount(0)
@@ -576,6 +583,8 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     const t = data.text.threads
     const clients = new ClientsPage(page, data)
     await clients.goto(t.routes.projects)
+    await expect(clients.clientGroup(x.name)).toHaveCount(0)
+    await clients.idleFold.click()
     await expect(clients.clientGroup(x.name)).toBeVisible()
     await expect(clients.fold(x.name)).toHaveCount(0)
     await clients.group(x.name).click()

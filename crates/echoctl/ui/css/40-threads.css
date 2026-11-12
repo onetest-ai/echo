@@ -20,6 +20,11 @@
 .pj-stage.pursuit { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
 .pj-stage.delivery { background: color-mix(in srgb, var(--me) 14%, transparent); color: var(--me); }
 .pj-stage.closed { color: var(--text-3); }
+/* A thread's stage at the end of its row's second line: a dot and the word, in the stage's colour. */
+.pj-st { margin-left: 4px; font-weight: 600; color: var(--text-2); }
+.pj-st::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.pj-st.pursuit { color: var(--warn); }
+.pj-st.delivery { color: var(--me); }
 .pj-ic { flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 22%; background: color-mix(in srgb, var(--pj) 18%, transparent); color: var(--pj); overflow: hidden; vertical-align: middle; object-fit: cover; box-sizing: border-box; }
 .pj-ic svg { width: 76%; height: 76%; }
 img.pj-ic { background: #fff; }
@@ -57,6 +62,8 @@ img.pj-ic { background: #fff; }
 .pj-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .pj-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px 0 4px; border-radius: 11px; border: 0; background: var(--line); color: var(--text); font: inherit; font-size: 12px; cursor: default; }
 .pj-chip:hover { background: var(--line-strong); }
+/* A chip whose link holds the icon and the name: the gap between them is the link's own. */
+.pj-chip > .link-btn, .pj-chip > a { display: inline-flex; align-items: center; gap: 5px; }
 .pj-chip.add { padding: 0 9px; background: none; border: 1px dashed var(--line-strong); color: var(--text-3); }
 .pj-add-wrap { position: relative; }
 .pj-menu { position: absolute; top: 26px; left: 0; z-index: 20; min-width: 240px; }

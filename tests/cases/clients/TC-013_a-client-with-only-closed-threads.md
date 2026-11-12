@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#projects` and read the group "Tyrell" | The name "Tyrell" has no thread row under it and no fold arrow; its thread "Tyrell bid" is in the fold "Closed · 3" |
+| 1 | Navigate to `{{base_url}}/#projects`; open the fold "Without threads · N" at the end of the list; read the group "Tyrell" | "Tyrell" is not among the clients until the fold is opened (a client with no open thread waits there); then the name "Tyrell" has no thread row under it and no fold arrow; its thread "Tyrell bid" is in the fold "Closed · 3" |
 | 2 | Click the name "Tyrell" | The route is `#client/tyrell/overview`; the head says "Tyrell", the tag "client" and "1 thread · tyrell.example" |
 | 3 | Read the tabs | "Overview", "Calls" with the number 1, "Tasks" with no number, "People", "Profile" |
 | 4 | Read the section "Threads" of the Overview | One card, closed (class `closed`): "Tyrell bid" with the tag "Lost", "1 call · last …", the text "No open tasks" and nothing about decisions, risks or questions; no "N of M stories done" |

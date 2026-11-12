@@ -119,14 +119,16 @@ function calendarView() {
       const y = top(x.y0), h = Math.max(22, top(x.y1) - y - 2)
       const w = 100 / x.lanes, left = x.lane * w
       const style = `top:${y}px;height:${h}px;left:calc(${left}% + 2px);width:calc(${w}% - 4px)`
+      // Four or more side by side: each block too narrow for its time — its name as far as it goes, the rest in its tooltip.
+      const narrow = x.lanes >= 4 ? ' narrow' : ''
       if (x.kind === 'call') {
-        return `<button class="ev call" style="${style}" data-call="${esc(x.c.name)}"><b>${esc(x.c.title)}</b><small>${esc(hm(new Date(x.s)))}</small></button>`
+        return `<button class="ev call${narrow}" style="${style}" data-call="${esc(x.c.name)}" title="${esc(`${x.c.title} · ${hm(new Date(x.s))}`)}"><b>${esc(x.c.title)}</b><small>${esc(hm(new Date(x.s)))}</small></button>`
       }
       const { ev: e, st } = x
-      const cls = ['ev', e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
+      const cls = ['ev', narrow.trim(), e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
       // Green already says recorded: only what the colour doesn't.
       const tag = [appTag(e), e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''].filter(Boolean).join(' ')
-      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
+      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}" title="${esc([e.subject, hm(st.s), otherApp(e) ? meetingApp(e).name : '', e.recorded ? '' : e.transcript ? 'Transcript' : e.scheduled ? 'Will record' : e.no_notetakers ? 'No notetakers' : ''].filter(Boolean).join(' · '))}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" role="group" aria-label="${esc(`${day.toLocaleDateString([], { weekday: 'short' })} ${day.getDate()}`)}"${sameDay(day, now) ? ' aria-current="date"' : ''} style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
   }).join('')

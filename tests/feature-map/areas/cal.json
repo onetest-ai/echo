@@ -23,7 +23,7 @@
   },
   {
    "id": "F-CAL-03",
-   "feature": "Today's column has the line \"now\"; hours are sized to fit the working day; overlapping meetings sit side by side",
+   "feature": "Today's column has the line \"now\"; hours are sized to fit the working day; overlapping meetings sit side by side, as many as there are; four or more side by side show their names from the first letter, with name and time in the tooltip",
    "priority": "medium",
    "check": "agent",
    "axes": [

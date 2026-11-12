@@ -86,7 +86,7 @@
 /* Room for three digits, so 11 or 128 never wraps and the button doesn't change width as the count grows. */
 .mv-n { flex: none; min-width: 3ch; text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 11px; font-weight: 600; color: var(--accent-ink); }
 /* The panel is narrow: what happened and when on one line, the task under it, a mark under that. */
-.mv .cc-row { grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 9px 2px; }
+.mv .cc-row { grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 9px 12px; }
 .mv .cc-what { grid-column: 1; grid-row: 1; }
 .mv .cc-row > :last-child { grid-column: 2; grid-row: 1; }
 .mv .cc-main { grid-column: 1 / -1; grid-row: 2; }

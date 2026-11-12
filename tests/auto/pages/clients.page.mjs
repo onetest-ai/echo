@@ -140,6 +140,11 @@ export class ClientsPage extends AppPage {
     return this.list.getByRole('button', { name: /^Found for you\b/ })
   }
 
+  /** The fold of clients with no open thread, at the end of the list ("Without threads · 2"). */
+  get idleFold() {
+    return this.list.getByRole('button', { name: /^Without threads · \d+$/ })
+  }
+
   get closedFold() {
     return this.list.getByRole('button', { name: /Closed · \d+$/ })
   }

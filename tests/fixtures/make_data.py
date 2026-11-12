@@ -695,6 +695,9 @@ def build_settings(d, H):
     # whatever the hour of the build. Never run the real app on this data (it would start them); `window --serve` doesn't.
     cfg.update({"auto_minutes": True, "auto_minutes_since": iso(auto_since(d.now)), "follow_app_mute": False, "capture_ui": True,
                 "capture_chat": True, "echo_cancel": False, "project_sync": True, "folder_skip_permissions": False, "hide_dock_icon": False,
+                # OneDrive off: the computer's own OneDrive (found in the real home) never shows in made-up data; a case
+                # that needs one makes it and sets it (`echoctl config --onedrive`).
+                "onedrive": "none",
                 # `vocabulary` always with `learned` (without it the next load moves the always-on terms into learned).
                 "vocabulary": ["SAML", "Initech", "Berlin pilot"],
                 # Learned terms: with meetings, with people, only from invites, and more than six (the filter).

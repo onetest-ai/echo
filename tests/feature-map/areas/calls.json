@@ -18,7 +18,7 @@
   },
   {
    "id": "F-CALLS-02",
-   "feature": "Each row's icon shows the call's state (recording, transcribing, minutes, transcript only, failed, audio only); a memo shows a mic and \"Memo\", an imported call \"Teams transcript\"",
+   "feature": "Each row's icon shows the call's state (recording, transcribing, minutes, transcript only, failed, audio only); a memo shows a mic and \"Memo\", an imported call \"Teams transcript\"; who was there as small faces right of the title (up to three, then +N; every name in the tooltip), the minutes countdown at the right end of the second line",
    "priority": "medium",
    "check": "agent",
    "axes": [

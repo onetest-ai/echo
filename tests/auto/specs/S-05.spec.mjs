@@ -484,7 +484,9 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
       await expect(clients.rowSays(r.client, fill(t.domains, { d: n.domain }))).toBeVisible()
       await expect(clients.clientTag).toHaveText(n.name)
       await expect(clients.clientGroup(n.name)).toBeVisible()
-      const groups = [...data.set.s05.groups, n.name, t.noClientGroup]
+      // A client left with no open thread goes into the fold at the end, whose line ends the groups too: Globex once its
+      // thread moves to the new client, then the new client too once it is cleared.
+      const groups = [...data.set.s05.groups, n.name, t.noClientGroup, fill(t.idleClients, { n: 1 }), fill(t.idleClients, { n: 2 })]
       await expect.poll(async () => under(await clients.listLines(), n.name, groups).map((l) => l.startsWith(`${g.name} `))).toEqual([true])
 
       await clients.rowSelect(r.client, r.client).selectOption({ label: t.noClientOption })
