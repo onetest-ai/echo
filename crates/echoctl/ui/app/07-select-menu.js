@@ -95,6 +95,9 @@ function smOpen(sel) {
   sel.setAttribute('aria-controls', 'sm-menu')
   smPlace()
   smMark()
+  // The page drawn anew without its select (its area changed under it): closed, not left over nothing.
+  SM.watch = new MutationObserver(() => { if (SM && !SM.sel.isConnected) smClose() })
+  SM.watch.observe(document.body, { childList: true, subtree: true })
 }
 /** On its select where it is now; closed when the select is gone or left the view. */
 function smPlace() {
@@ -118,8 +121,9 @@ function smMark() {
 }
 function smClose() {
   if (!SM) return
-  const { el, sel } = SM
+  const { el, sel, watch } = SM
   SM = null
+  if (watch) watch.disconnect()
   el.remove()
   for (const a of ['aria-expanded', 'aria-controls', 'aria-activedescendant']) sel.removeAttribute(a)
 }
