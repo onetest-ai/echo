@@ -76,6 +76,10 @@ test('widgets after an empty one move up into its place when they fit, in order 
   // A fill widget never moves up beside others, and nothing moves up into a fill line.
   assert.equal(show(todayLines([[W('a', 1), W('b', 2, { empty: true })], [W('day', 2, { fill: true })]], 3)), 'a:1 / day:2 (fill)')
   assert.equal(show(todayLines([[W('day', 2, { fill: true }), W('b', 1, { empty: true })], [W('c', 1)]], 3)), 'day:2 (fill) / c:1')
+  // Never beside a two-rows-high widget: not into the row it takes next (no narrowing there), not from its row.
+  const tall = (lines) => lines.map((l) => (l.tall ? `[${l.tall.id} | ${show(l.lines)}]` : show([l]))).join(' / ')
+  assert.equal(tall(todayLines([[W('T', 1, { height: 2 }), W('y', 1)], [W('e', 1, { empty: true }), W('n', 1)], [W('m', 2)]], 3)), '[T | y:1 / n:1] / m:2')
+  assert.equal(tall(todayLines([[W('a', 1), W('e', 2, { empty: true })], [W('z', 1), W('T', 1, { height: 2 })]], 3)), 'a:1 / [T | z:1]')
 })
 
 test('a fill alone on the first row at span 1 holds the first column; the rest beside it in the others (TodayResponsive)', () => {
