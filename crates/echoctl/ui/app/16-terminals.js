@@ -238,7 +238,7 @@ function askClaudeAboutCall() {
 }
 function claudeFolderView() {
   const a = ai()
-  const pick = a.profiles.length > 1 ? `<label class="term-profile">Profile <select data-term-profile>${profileOptions(S.folderProfile || a.default)}</select></label>` : ''
+  const pick = a.profiles.length > 1 ? `<label class="term-profile">Profile <select data-term-profile aria-label="Profile">${profileOptions(S.folderProfile || a.default, (p) => (S.sessions && S.sessions.has(`${p.id}:folder`) ? 'a session to resume' : ''))}</select></label>` : ''
   const cp = S.view === 'calls' && S.call && S.call.live && S.call.live.profile
   const fp = S.folderProfile || a.default || 'system'
   const other = cp && cp !== fp && profileOf(cp) ? `<div class="term-stale"><span class="grow">The open call was recorded on ${esc(profileOf(cp).name)}; Claude here runs on ${esc((profileOf(fp) || {}).name || fp)}, so it isn't told about the call. Pick ${esc(profileOf(cp).name)} as its profile to ask about it.</span></div>` : ''
