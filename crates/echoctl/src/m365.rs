@@ -36,7 +36,7 @@ pub(crate) fn enc(s: &str) -> String {
 }
 
 /// A OneDrive path (`Documents/plan.docx`), each segment encoded, the slashes kept.
-fn enc_path(p: &str) -> String {
+pub(crate) fn enc_path(p: &str) -> String {
     p.trim_matches('/').split('/').map(enc).collect::<Vec<_>>().join("/")
 }
 

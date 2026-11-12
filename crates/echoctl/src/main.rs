@@ -39,6 +39,7 @@ mod meeting;
 #[cfg(feature = "tray")]
 mod diagrams;
 mod drafts;
+mod onedrive;
 mod minutes;
 mod notes;
 mod ollama;
@@ -437,6 +438,10 @@ enum Cmd {
     /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
     #[command(hide = true)]
     ViewHook,
+    /// (internal) Echo's Claude terminals ask it before a write: never a folder here that OneDrive keeps online but
+    /// doesn't sync to this computer (`onedrive.rs`); exit 2 refuses it
+    #[command(hide = true)]
+    OnedriveHook,
     /// (old name of `app run`)
     #[command(hide = true)]
     Watch {
@@ -665,6 +670,7 @@ fn main() -> Result<()> {
         Cmd::Config(args) => cli::app::config(args),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::ViewHook => std::process::exit(view::hook()),
+        Cmd::OnedriveHook => std::process::exit(onedrive::hook()),
         #[cfg(feature = "transcribe")]
         Cmd::GpuCheck => gpu::check(),
         #[cfg(feature = "transcribe")]

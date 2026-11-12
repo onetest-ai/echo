@@ -364,6 +364,8 @@ enum Action {
     RemoveModel(&'static str),
     NotesAnywhere,
     NotesChoose,
+    /// Settings → Calendar & chat: the folder OneDrive keeps on this computer (#469).
+    OnedriveChoose,
     ConnectClaude,
     /// Claude Code's folder on the PATH of new terminals (Settings → Health).
     ClaudePath,

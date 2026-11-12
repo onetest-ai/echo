@@ -35,6 +35,9 @@ pub(super) fn settings_snapshot() -> Value {
         "own_title_bar": on(c.map(|c| c.own_title_bar)),
         // Where mail drafts go (#135): the choice as stored (null: the default, `drafts_now` says which).
         "drafts": c.and_then(|c| c.drafts.clone()),
+        // The folder OneDrive keeps here (#469): as set (`none`: off), and the one in use (set or found).
+        "onedrive": c.and_then(|c| c.onedrive.clone()),
+        "onedrive_now": crate::onedrive::root().map(|p| p.display().to_string()),
         "drafts_now": match crate::drafts::chosen(&crate::config::Config { drafts: c.and_then(|c| c.drafts.clone()), ..Default::default() }, crate::graph::account().is_some()) {
             crate::drafts::Where::M365 => "m365",
             crate::drafts::Where::MailApp => "mail-app",
@@ -173,6 +176,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "hide_dock_icon" => cfg.hide_dock_icon = b()?,
         "own_title_bar" => cfg.own_title_bar = Some(b()?),
         "drafts" => cfg.drafts = crate::drafts::setting(value.as_str().unwrap_or(""))?,
+        "onedrive" => cfg.onedrive = crate::onedrive::setting(value.as_str().unwrap_or(""))?,
         "capture_frames" => {
             cfg.capture_frames = b()?;
             #[cfg(target_os = "macos")]
