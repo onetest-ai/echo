@@ -175,6 +175,16 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-20",
+   "feature": "With `uses.work` (sheet: 'Adds its items to Today → My work and to threads' Work') a plugin gives work rows by `ctx.work.provide(({scope, thread}) => rows)` — scope `me` (My work) or `thread` (that thread's Work tab), rows {id, title, kind, where?, url? (https), due? (YYYY-MM-DD), late?, thread?}, 200 at most, a wrong row refusing the answer — and `ctx.work.changed()` has Echo ask again. Echo asks in the background (5 s), draws from the last answer, never waits; on My work they sit among Echo's tasks by date, late first, with the plugin's manifest `icon` (an .svg ≤ 16 KB in its folder, shown only as an image) and 'From <plugin>', no Close or Claude, only `task.actions` items whose `when` accepts {kind: 'plugin', source, row}; a thread's Work tab shows its `thread` rows and the user's rows naming it, once each; ⌘K lists them (Open: <title>); the title opens its https page; never written in a ledger. One that throws or is slow: its rows left out and a quiet line on its card in Settings → Plugins; removed: its rows gone. `echoctl work show [--thread <id>]` asks now and prints rows and errors",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
   }
  ]
 }
