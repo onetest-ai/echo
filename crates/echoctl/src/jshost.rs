@@ -808,6 +808,11 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 /// its work rows, its values per thread.
 fn not_echos(rel: &str) -> Result<()> {
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    // A file system may fold a name onto another (APFS: `ſettings.json` is `settings.json`): a name at the top of the
+    // store is plain ASCII, compared as such; names further down are the plugin's own.
+    if !first.is_ascii() {
+        bail!("“{first}”: a name at the top of the plugin's store is plain ASCII (letters, digits, - _ .)");
+    }
     match first.trim_end_matches(['.', ' ']).split(':').next() {
         Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
         Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
@@ -817,10 +822,17 @@ fn not_echos(rel: &str) -> Result<()> {
 }
 
 /// A store path the plugin may write: not its `settings.json`, which holds what the user set (the addresses it may
-/// reach among them) and is changed only through `plugins::set_setting`.
+/// reach among them) and is changed only through `plugins::set_setting`; nor the Inbox items and widgets' data Echo
+/// checks as they are set (`ctx.inbox.set`, `ctx.widgets.set`) — a plugin may remove those, never write them.
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     store_path(id, rel)?;
     not_echos(rel)?;
+    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("inbox.json") => bail!("the plugin's inbox.json isn't its to write: use ctx.inbox.set"),
+        Some("widgets.json") => bail!("the plugin's widgets.json isn't its to write: use ctx.widgets.set"),
+        _ => {}
+    }
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
     std::fs::create_dir_all(&base)?;
@@ -2120,10 +2132,18 @@ mod tests {
         assert!(refused(call("fetcher", "get", &json!({"url": "https://example.com/"}))).contains("may reach only"), "a host nobody named");
         // The plugin can't widen what the user listed: not through its settings, not by writing their file.
         assert!(refused(call("fetcher", "widen", &json!({}))).contains("only you set the addresses"));
-        for to in ["settings.json", "./Settings.json", "settings.json."] {
+        for to in ["settings.json", "./Settings.json", "settings.json.", "inbox.json", "./Inbox.json", "widgets.json", "widgets.json:x"] {
             assert!(refused(call("fetcher", "scribble", &json!({"to": to}))).contains("isn't its to write"), "{to}");
             assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/text"), "to": to}))).contains("isn't its to write"), "{to}");
         }
+        // A name the file system may fold onto one of Echo's (APFS: ſ is s): at the top of the store only plain ASCII.
+        for to in ["\u{17f}ettings.json", "widget\u{17f}.json", "inbox.j\u{17f}on", "work.j\u{17f}on", "\u{17f}tate.json"] {
+            assert!(refused(call("fetcher", "scribble", &json!({"to": to}))).contains("plain ASCII"), "{to}");
+            assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/text"), "to": to}))).contains("plain ASCII"), "{to}");
+        }
+        assert!(!plugins::data_dir("fetcher").join("widgets.json").exists(), "nothing landed on widgets.json");
+        // Further down, the plugin's own names are its own.
+        call("fetcher", "scribble", &json!({"to": "notes/\u{17f}\u{43d}.json"})).unwrap();
         assert_eq!(plugins::setting("fetcher", "tts"), Some(json!(format!("http://192.168.*.*:*, http://127.0.0.*:{port}"))));
         // Nor under a name the file system folds onto `settings.json` (ſ is s on a Mac): the addresses aren't in the store.
         let _ = call("fetcher", "scribble", &json!({"to": "\u{17f}ettings.json"}));
