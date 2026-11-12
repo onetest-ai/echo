@@ -352,12 +352,15 @@ function workPanel() {
   for (let p = n.parent; p && N[p]; p = N[p].parent) path.unshift(N[p].title)
   const edit = S.pj.editField
   // A person's field (Owner, Handed over by, Decided by) suggests the thread's people as it is typed.
-  const names = [...new Set(['Me', ...((projById(S.pj.sel) || {}).people || []).map((p) => p.name)].filter(Boolean))]
-  const who = `list="wp-names"><datalist id="wp-names">${names.map((x) => `<option value="${esc(x)}">`).join('')}</datalist`
+  // Who it can be: Me, then the thread's people (a line beside each: their role, else their mail's domain), then nobody.
+  const people = [{ name: 'Me', sub: 'you' }, ...((projById(S.pj.sel) || {}).people || []).map((p) => ({ name: p.name, sub: p.role || (p.email ? p.email.split('@')[1] : '') }))]
+    .filter((p, i, all) => p.name && all.findIndex((q) => q.name === p.name) === i)
+  const who = `list="wp-names" placeholder="Find a person, or type a name"><datalist id="wp-names" data-people>${people.map((x) => `<option value="${esc(x.name)}" data-sub="${esc(x.sub || '')}">`).join('')}<option value="" label="Nobody named"></datalist`
   // A value is named by its field too ("Handed over by: Dana Lee"): the grid's label beside it isn't its name.
   const FIELD = { state: 'Status', internal_owner: 'Owner', delegated_by: 'Handed over by', decided_by: 'Decided by', due: 'Due', how: 'How', likelihood: 'Likelihood', impact: 'Impact' }
+  const PERSON = ['internal_owner', 'delegated_by', 'decided_by'] // drawn as a person: a face and the name
   const val = (field, text, empty, input) => edit === field ? input
-    : `<button class="wp-val${text ? '' : ' empty'}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || `${empty} · Set`)}">${text ? esc(text) : `${esc(empty)} · <u>Set</u>`}</button>`
+    : `<button class="wp-val${text ? '' : ' empty'}${PERSON.includes(field) && text ? ' person' : ''}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || `${empty} · Set`)}">${text ? (PERSON.includes(field) ? `${avatar(text)}<span>${esc(text)}</span>` : esc(text)) : `${esc(empty)} · <u>Set</u>`}</button>`
   const titles = (ids) => ids.map((i) => `<button class="wp-link" data-pj="node" data-node="${esc(i)}">${esc(i)} ${esc((N[i] || {}).title || '')}</button>`).join('')
   const trackable = n.kind === 'story' || n.kind === 'task' || n.kind === 'question'
   const [word, cls] = workStatus(n)

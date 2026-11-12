@@ -1,0 +1,10 @@
+/* Echo's suggestions for a text box (07-suggest.js): Echo's menu under the box; a person row a face, the name, their
+   line on the right. */
+.sg-menu { gap: 1px; }
+.sg-item { align-items: center; gap: 9px; }
+.sg-item .bd-av { width: 20px; height: 20px; font-size: 9px; }
+.sg-item .bd-av.none { color: var(--text-3); box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+.sg-sub { margin-left: auto; padding-left: 16px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+/* A person in a work item's facts: a face and the name. */
+.wp-val.person { display: inline-flex; align-items: center; gap: 7px; }
+.wp-val.person .bd-av { width: 20px; height: 20px; font-size: 9px; }
