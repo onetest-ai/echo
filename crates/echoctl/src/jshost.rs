@@ -2111,6 +2111,8 @@ mod tests {
         sync();
     }
 
+    // A release build has no ECHOCTL_PICK_FOLDER: there `pickFolder` would open the real folder picker.
+    #[cfg(debug_assertions)]
     #[test]
     fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
         let (_env, root) = paths::testenv::folders("jshost-sessions");
@@ -2151,7 +2153,7 @@ mod tests {
         plugins::install("vaults", Some(&name), &agreed).unwrap();
         assert_eq!(plugins::session_commands(), vec![("vaults".to_string(), "search".to_string()), ("vaults".to_string(), "backlinks".to_string())]);
         sync();
-        std::env::set_var("ECHOCTL_PICK_FOLDER", &vault);
+        let pick = EnvVar::set("ECHOCTL_PICK_FOLDER", vault.to_str().unwrap());
         let mut last = String::new();
         let got = (0..50).find_map(|_| match call("vaults", "add", &json!({})) {
             Ok(v) => Some(v),
@@ -2161,7 +2163,7 @@ mod tests {
                 None
             }
         });
-        std::env::remove_var("ECHOCTL_PICK_FOLDER");
+        drop(pick);
         let got = got.unwrap_or_else(|| panic!("{last}"));
         assert_eq!(got["files"], json!(["People/Dana.md"]));
         assert_eq!(got["text"], "# Dana");
