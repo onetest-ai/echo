@@ -160,7 +160,38 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
 /// for the plugin: Today draws the last answer at once.
 #[cfg(not(feature = "js"))]
 fn plugin_data(_plugin: &str, _widget: &str, w: &Widget) -> Value {
-    json!({"kind": w.kind, "label": w.label, "data": null, "empty": true})
+    json!({"kind": w.kind, "label": label_for(w), "data": null, "empty": true})
+}
+
+/// Its label on Today: one set to a thread or a client (a setting of type `thread` / `client`) names it — "GitHub at
+/// a glance · Echo" — so a widget showing one thread says which. Whatever the plugin is.
+/// [`label_on_today`] with its settings as Today has them — read only for a widget that has a thread or client setting.
+fn label_for(w: &Widget) -> String {
+    if !w.params.iter().any(|p| p.kind == "thread" || p.kind == "client") {
+        return w.label.to_string();
+    }
+    label_on_today(w, &crate::today_layout::params_of(&w.id))
+}
+
+fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
+    let named: Vec<String> = w
+        .params
+        .iter()
+        .filter_map(|p| {
+            let v = set.get(&p.key)?.as_str().filter(|s| !s.is_empty())?;
+            match p.kind.as_str() {
+                "thread" => crate::projects::load(v).ok().map(|t| t.name),
+                "client" => crate::projects::clients().ok()?.into_iter().find(|c| c.id == v).map(|c| c.name),
+                _ => None,
+            }
+        })
+        .filter(|n| !n.trim().is_empty())
+        .collect();
+    if named.is_empty() {
+        w.label.to_string()
+    } else {
+        format!("{} · {}", w.label, named.join(" · "))
+    }
 }
 
 #[cfg(feature = "js")]
@@ -175,7 +206,7 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
     }
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
-    json!({"kind": w.kind, "label": w.label, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
+    json!({"kind": w.kind, "label": label_for(w), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
@@ -239,6 +270,22 @@ fn brief(p: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_widget_set_to_a_thread_or_a_client_names_it_in_its_label() {
+        let (_env, _) = crate::paths::testenv::folders("widgets-label-names-thread");
+        let echo = crate::projects::create("Echo", None, None).unwrap();
+        let acme = crate::projects::add_client("Acme", &["@acme.example".into()], false).unwrap();
+        let param = |key: &str, kind: &str| crate::plugins::ParamDef { key: key.into(), label: key.into(), kind: kind.into(), options: vec![], default: None };
+        let mut wd = w("plugin:gh-ish:glance", "plugins", "GitHub at a glance", "x", "stats", &["M"], "hug", false);
+        wd.params = vec![param("thread", "thread"), param("ci", "bool")];
+        let set = |v: Value| v.as_object().cloned().unwrap();
+        assert_eq!(label_on_today(&wd, &set(json!({}))), "GitHub at a glance", "none set: its own label");
+        assert_eq!(label_on_today(&wd, &set(json!({"thread": echo.id, "ci": true}))), "GitHub at a glance · Echo");
+        assert_eq!(label_on_today(&wd, &set(json!({"thread": "gone-thread"}))), "GitHub at a glance", "a thread that isn't there: its own label");
+        wd.params.push(param("client", "client"));
+        assert_eq!(label_on_today(&wd, &set(json!({"thread": echo.id, "client": acme.id}))), "GitHub at a glance · Echo · Acme");
+    }
 
     #[cfg(feature = "js")]
     #[test]
