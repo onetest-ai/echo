@@ -1,6 +1,6 @@
 ---
 id: TC-040
-title: A plugin's work rows sit on My work among Echo's tasks (late or due this week, late first, its icon, no Close or Claude) without a reload, in their thread's Work tab once each in every layout, and in ⌘K; their links open only once confirmed; one that fails keeps its rows marked "not updated" with a quiet line in Settings → Plugins; removed, they go
+title: A plugin's work rows sit on My work among Echo's tasks (late or due this week, late first, its undated ones last, its icon, no Close or Claude) without a reload, in their thread's Work tab once each in every layout, and in ⌘K; their links open only once confirmed; one that fails keeps its rows marked "not updated" with a quiet line in Settings → Plugins; removed, they go
 priority: medium
 type: functional
 requirements: [F-PLUG-20]
@@ -27,14 +27,14 @@ tags: [plugins, today, my-work, threads, work, palette]
 |---|--------|----------------|
 | 1 | `echoctl plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `echoctl plugin install work-demo --yes` | The sheet lists "Adds its items to Today → My work and to threads' Work"; "Installed Work demo 0.1.0" |
 | 2 | `echoctl work show`; `echoctl work show --thread acme-rollout` | The first: `rows` "Review: fix login" (`late: true`, `source: "work-demo"`, `icon: "plugin/work-demo/icon.svg"`), "Flaky login test <b>", then "Tidy the labels" (no date, last), `errors` `{}`; the second: the rows `pr-7` and `pr-8`, each once |
-| 3 | Navigate to `{{base_url}}/#today`; wait up to 5 s, no reload (Today reads itself again while the plugin's first answer is on its way) | My work · this week lists "Review: fix login" with the late icon among the late tasks and "Flaky login test <b>" (the `<b>` as text) by its date — not "Tidy the labels" (undated, as an undated task isn't on My work); each with the plugin's icon (hint "From Work demo"), "review · acme-test/api" / "assigned · acme-test/web", a "Snooze" button, and no Close or Claude icon; the row's pointer is the default arrow, its title a link button |
-| 4 | Click the title "Review: fix login" | Nothing opens: under the row, "Open git.acme.example in the browser? Click its title again · Cancel", the keyboard on the title; Cancel takes the line away; clicking the title twice (within 30 s) opens it (the app's `open_url`; a headless run sees the line go and no error) |
+| 3 | Navigate to `{{base_url}}/#today`; wait up to 5 s, no reload (Today reads itself again while the plugin's first answer is on its way) | My work · this week lists "Review: fix login" with the late icon among the late tasks, "Flaky login test <b>" (the `<b>` as text) by its date, and "Tidy the labels" (no date) last, after every dated row — a plugin's undated item is on My work, an undated Echo task still isn't; each with the plugin's icon (hint "From Work demo"), "review · acme-test/api" / "assigned · acme-test/web", a "Snooze" button, and no Close or Claude icon; the row's pointer is the default arrow, its title a link button |
+| 4 | Click the title "Review: fix login" | Nothing opens: under the row, "Open git.acme.example in the browser? Click its title again · Cancel" (read out: `role="status"`), the keyboard on the title, and `<dir>/open.log` unchanged; Cancel takes the line away; click again, then Escape: the line goes; clicking the title twice (within 30 s) opens it (the app's `open_url`): the line goes, and with the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` the URL `https://git.acme.example/pr/7` is the last line of `<dir>/open.log` and no browser opens |
 | 5 | Open "Actions ⌘K", type `fix login` | An entry "Open: Review: fix login" with the plugin's icon (hint "Work demo · git.acme.example"); Enter closes ⌘K and the row asks "Open git.acme.example in the browser?" — nothing opened yet |
 | 6 | Navigate to `{{base_url}}/#project/acme-rollout/work`; wait up to 10 s | Under the bar: "Bump dependencies" and "Review: fix login", once each, with the plugin's icon; the board's columns don't hold them. Switch the layout to Tree: the two rows are still there; back to Board |
 | 7 | Navigate to `{{base_url}}/#project/globex-pilot/work` | No row of the plugin |
-| 8 | In the page's console: `fetch('api/plugin/work-demo/call/fail?args=%7B%7D')`; navigate to `{{base_url}}/#today`; wait up to 5 s | Today draws with the plugin's two rows still there, each marked "not updated" (hover: "Not updated: work-demo is failing on purpose") |
+| 8 | In the page's console: `fetch('api/plugin/work-demo/call/fail?args=%7B%7D')`; navigate to `{{base_url}}/#today`; wait up to 5 s | Today draws with the plugin's three rows still there, each marked "not updated" (hover: "Not updated: work-demo is failing on purpose") |
 | 9 | Navigate to `{{base_url}}/#settings/plugins`, open "Work demo" | A quiet line "Its items in My work weren't updated the last time: work-demo is failing on purpose" |
-| 10 | `fetch('api/plugin/work-demo/call/ok?args=%7B%7D')`; Today again; wait up to 5 s | Both rows, no "not updated" mark |
+| 10 | `fetch('api/plugin/work-demo/call/ok?args=%7B%7D')`; Today again; wait up to 5 s (a failed plugin's rows are kept a day after its last good answer, then dropped: not run here) | Its three rows, no "not updated" mark |
 | 11 | Click "Snooze" on "Flaky login test <b>" | Within a few seconds, no reload: the row is gone from My work, with the notice "Snoozed Flaky login test <b>" |
 | 12 | `echoctl plugin remove work-demo --delete-data`; reload Today and Acme rollout's Work | No row of the plugin anywhere; `{{base_url}}/plugin/work-demo/icon.svg` answers 404 |
 
@@ -46,5 +46,5 @@ Work demo is removed; My work and the threads' Work tabs hold only Echo's own ta
 - `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- A row's title opens its https page in the browser (the app's `open_url`) only on its second click, as a plugin widget's link (plugin-authoring R17); a headless run checks the question and the button's `data-open-url` instead.
+- A row's title opens its https page in the browser (the app's `open_url`) only on its second click, as a plugin widget's link (plugin-authoring R17); one question on the page at a time (a widget's or a row's). With the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` set (`<dir>/env`) the app never opens it, on any OS: the URL is appended to `<dir>/open.log` (`ECHOCTL_TEST_OPEN_LOG`) — the case checks that line. Never run step 4's second click without the variable set.
 - Today, open, reads itself again every minute; a thread's Work tab every 10 s.
