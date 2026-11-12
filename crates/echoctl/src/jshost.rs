@@ -110,8 +110,10 @@ const PRELUDE: &str = r#"
       clear: (id) => call('widgets.clear', String(id)),
     },
     /** Its own values per thread (no grant: its data, by thread id): `get(thread, key)` → value | null, `set(thread,
-     *  key, value)` (JSON, 16 KB at most; null removes it), `list(key)` → [{thread, value}] of the threads that have it.
-     *  They follow the thread: gone when it is deleted (hear it: `threads_changed` in uses.events.on). */
+     *  key, value)` (JSON, 16 KB at most, 64 keys a thread, 4 MB in all; null removes it), `list(key)` → [{thread,
+     *  value}] of the threads that have it. They follow the thread: gone when it is deleted (hear it: `threads_changed` in
+     *  uses.events.on — {thread, born, change: renamed, name, from} | {…merged, into, dropped: its keys that didn't fit} |
+     *  {…deleted, values: its own}; born: the thread's first stage time, another thread's if its id is used again). */
     threads: {
       get: (thread, key) => call('threads.get', [String(thread), String(key)]),
       set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
@@ -194,6 +196,8 @@ enum Msg {
     Unload(String),
     Call { plugin: String, command: String, args: String, reply: Sender<Result<Value, String>> },
     Event(String, String),
+    /// An event whose payload differs per plugin: each one's fields set on the shared part.
+    EventEach(String, Value, serde_json::Map<String, Value>),
     Settle(String, u64, String),
 }
 
@@ -367,6 +371,16 @@ pub fn no_timers() {
     TIMERS.store(false, Ordering::Relaxed);
 }
 
+/// This process is the app (`app.rs`, as it starts the plugins' host): only it hears Echo's events for the plugins
+/// and takes what other processes queued for them. Any other process that loads a host half (`echoctl plugin call`,
+/// `echoctl widget show`) is not, timers or not.
+static APP: AtomicBool = AtomicBool::new(false);
+
+/// Mark this process as the app.
+pub fn as_app() {
+    APP.store(true, Ordering::Relaxed);
+}
+
 fn host() -> &'static Host {
     HOST.get_or_init(|| {
         let (tx, rx) = channel();
@@ -438,6 +452,18 @@ pub fn event(name: &str, payload: &Value) {
     if let Some(h) = HOST.get() {
         let _ = h.tx.send(Msg::Event(name.into(), payload.to_string()));
     }
+}
+
+/// The same, each plugin with its own part (`each[plugin]`'s fields set on `payload`).
+pub fn event_each(name: &str, payload: &Value, each: &serde_json::Map<String, Value>) {
+    if let Some(h) = HOST.get() {
+        let _ = h.tx.send(Msg::EventEach(name.into(), payload.clone(), each.clone()));
+    }
+}
+
+/// This process is the app and runs the plugins' host: an event sent here reaches the plugins the user sees.
+pub fn hosts_here() -> bool {
+    HOST.get().is_some() && APP.load(Ordering::Relaxed)
 }
 
 // ── the host thread ──
@@ -541,6 +567,19 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
                 }
             }
+            Ok(Msg::EventEach(name, base, each)) => {
+                let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
+                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
+                    let mut payload = base.clone();
+                    for (k, v) in each.get(id).and_then(Value::as_object).into_iter().flatten() {
+                        payload[k] = v.clone();
+                    }
+                    let payload = payload.to_string();
+                    set_current(&current, id);
+                    let ctx = p.ctx.clone();
+                    slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
+                }
+            }
             Ok(Msg::Settle(id, token, out)) => {
                 if let Some(p) = plugins.get(&id) {
                     set_current(&current, &id);
@@ -553,6 +592,11 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         }
         if last_tick.elapsed() >= tick_every && TIMERS.load(Ordering::Relaxed) {
             last_tick = Instant::now();
+            // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
+            // it — the app's alone, never a terminal's host.
+            if APP.load(Ordering::Relaxed) {
+                plugins::thread_values::take_queued(event_each);
+            }
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
                 set_current(&current, id);
@@ -787,16 +831,21 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 /// reach among them) and is changed only through `plugins::set_setting`.
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     store_path(id, rel)?;
-    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    match first.trim_end_matches(['.', ' ']).split(':').next() {
-        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
-        Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
-        _ => {}
-    }
+    not_echos(rel)?;
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
     std::fs::create_dir_all(&base)?;
     crate::grants::inside(&dunce::canonicalize(&base)?, rel)
+}
+
+/// Not one of the store's files Echo writes (`settings.json`, `threads.json`): the plugin neither writes nor removes it.
+fn not_echos(rel: &str) -> Result<()> {
+    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
+        Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
+        _ => Ok(()),
+    }
 }
 
 /// When a host half starts: what lay in its store's `cache/` over 7 days, and downloads left half-written (`.part`,
@@ -864,6 +913,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "store.remove" => {
             let p = store_path(id, &s(arg))?;
+            // Not the store itself: Echo's files are in it (settings, thread values), and their locks aren't taken here.
+            if p == plugins::data_dir(id) {
+                bail!("ctx.store.remove needs a path inside the plugin's folder, not the folder itself");
+            }
+            not_echos(&s(arg))?;
             if p.is_dir() {
                 std::fs::remove_dir_all(&p)?;
             } else if p.exists() {
@@ -926,7 +980,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             widget_store(id, &s(arg), None, None, None)?;
             Value::Null
         }
-        "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1])),
+        "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1]))?,
         "threads.set" => {
             read_only_here("changing files or settings")?;
             plugins::thread_values::set(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
@@ -2055,6 +2109,8 @@ mod tests {
               ctx.command('get', (a) => ctx.threads.get(a.thread, 'repos'))
               ctx.command('list', () => ctx.threads.list('repos'))
               ctx.command('sneak', () => ctx.store.write('threads.json', '{}'))
+              ctx.command('wipe', () => ctx.store.remove('./threads.json'))
+              ctx.command('wipe-all', (a) => ctx.store.remove(a.path))
               ctx.command('heard', () => heard)
             }
             "#,
@@ -2076,6 +2132,37 @@ mod tests {
         assert_eq!(call("repos", "list", &json!({})).unwrap(), json!([{"thread": alpha, "value": ["acme-test/api"]}]));
         assert!(call("repos", "map", &json!({"thread": "nope", "repos": []})).unwrap_err().to_string().contains("no thread"));
         assert!(call("repos", "sneak", &json!({})).unwrap_err().to_string().contains("ctx.threads.set"), "its threads.json is Echo's to write");
+        assert!(call("repos", "wipe", &json!({})).unwrap_err().to_string().contains("ctx.threads.set"), "…and not its to remove");
+        for path in ["", "./", "././"] {
+            let err = call("repos", "wipe-all", &json!({"path": path})).unwrap_err().to_string();
+            assert!(err.contains("not the folder itself"), "{path:?}: {err}");
+        }
+        assert!(plugins::data_dir("repos").join("threads.json").is_file(), "the store and Echo's files in it kept");
+        // A read-only routine reads them, never sets them.
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = call("repos", "map", &json!({"thread": beta, "repos": ["acme-test/web"]}));
+        let read = call("repos", "get", &json!({"thread": alpha}));
+        std::env::remove_var(crate::guard::RUN_MODE);
+        assert!(refused.unwrap_err().to_string().contains("read-only routine"));
+        assert_eq!(read.unwrap(), json!(["acme-test/api"]));
+        // A host that isn't the app's (this one, until it is marked): it hears nothing and takes nothing queued.
+        let born = |id: &str| json!(crate::projects::load(id).unwrap().stages[0].at);
+        let (alpha_born, beta_born) = (born(&alpha), born(&beta));
+        assert!(!hosts_here());
+        crate::projects::update(&beta, |p| {
+            p.name = "Beta 2".into();
+            Ok(())
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(1300)); // over a tick
+        assert!(paths::state_dir().join("plugin-events.jsonl").is_file(), "left for the app");
+        assert_eq!(call("repos", "heard", &json!({})).unwrap(), json!([]));
+        as_app();
+        let heard = (0..60).find_map(|_| {
+            let v = call("repos", "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| a.len() == 1) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard.unwrap(), json!([{"thread": beta, "born": beta_born, "change": "renamed", "name": "Beta 2", "from": "Beta"}]), "the app takes it");
         // Alpha renamed, then deleted: the plugin hears both; its value for Alpha is gone.
         crate::projects::update(&alpha, |p| {
             p.name = "Alpha 2".into();
@@ -2085,11 +2172,28 @@ mod tests {
         crate::projects::delete(&alpha).unwrap();
         let heard = (0..50).find_map(|_| {
             let v = call("repos", "heard", &json!({})).unwrap();
-            if v.as_array().is_some_and(|a| a.len() == 2) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+            if v.as_array().is_some_and(|a| a.len() == 3) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
         });
-        assert_eq!(heard.unwrap(), json!([{"thread": alpha, "change": "renamed"}, {"thread": alpha, "change": "deleted"}]));
+        assert_eq!(
+            heard.unwrap().as_array().unwrap()[1..],
+            [
+                json!({"thread": alpha, "born": alpha_born, "change": "renamed", "name": "Alpha 2", "from": "Alpha"}),
+                json!({"thread": alpha, "born": alpha_born, "change": "deleted", "values": {"repos": ["acme-test/api"]}})
+            ],
+            "the deleted thread's values come with it, the plugin's own"
+        );
         assert_eq!(call("repos", "get", &json!({"thread": alpha})).unwrap(), Value::Null);
         assert_eq!(call("repos", "list", &json!({})).unwrap(), json!([]));
+        // A terminal's delete (no host there) left in the file for the app: heard within a tick, its own part only.
+        let line = json!({"event": "threads_changed", "payload": {"thread": beta, "change": "deleted", "values": {}}, "each": {"repos": {"values": {"repos": 1}}, "other": {"values": {"x": 2}}}});
+        std::fs::write(paths::state_dir().join("plugin-events.jsonl"), format!("{line}\n")).unwrap();
+        let heard = (0..60).find_map(|_| {
+            let v = call("repos", "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| a.len() == 4) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard.unwrap()[3], json!({"thread": beta, "change": "deleted", "values": {"repos": 1}}));
+        assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
+        APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
         sync();
     }
