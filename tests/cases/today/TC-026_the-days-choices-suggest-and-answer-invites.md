@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 4 | Click (or Tab to and press Enter on) a "Keep …" button that isn't the suggested one; two of the same name at once are numbered ("Vendor demo (1)", "(2)") | Nothing sent yet: "Decline <the others>? The organisers are told." with "Decline them" and Cancel; one you organise among the others is not declined: "Yours — <subject> — stays: cancel it in Outlook." |
 | 5 | Click Cancel | The Keep buttons are back; the keyboard stays in the line (after Keep on "Decline them", after Cancel on that Keep) |
 | 6 | On an invite click Accept | Its buttons disabled, the clicked one "Sending…"; a notice says it couldn't be sent and why ("not signed in to Microsoft 365 — echoctl calendar login", the command as code, no backticks); the buttons come back; the invite still not answered (`echoctl today` unchanged, agenda unchanged) |
-| 7 | Click a meeting's name on a line (or an invite's line) | Its card on the right, as from Your day |
+| 7 | Click a meeting's name on a line of meetings at once, then (after × on it) an invite's line (not its buttons) | Each time Calendar's card for that meeting as a popover beside what was clicked — the name, or the invite's line — to its right inside Today (or its left when there's no room; with room on neither side, over the right part of it, as in Calendar), its top level with it, as from Your day; the right panel doesn't open; × closes it |
 | 8 | `target/debug/echoctl today remove core:calendar.choices`; reload; then `today reset`; reload | Gone after the remove; back after the reset (it is in the default) |
 
 ## Notes

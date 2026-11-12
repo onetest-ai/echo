@@ -136,9 +136,6 @@
 .ag-more { opacity: 0; }
 .ag-row:hover .ag-more, .ag-more:focus-visible, .ag-more[aria-expanded="true"] { opacity: 1; }
 .ag-skip { margin-top: 8px; font-size: 12px; }
-.td-meeting { display: block; height: auto; }
-/* Your day's meeting card in the right panel: Calendar's card, laid in the panel rather than floating beside a block. */
-.td-meeting .detail { position: static; inset: auto; width: auto; max-width: none; max-height: none; box-shadow: none; border: 0; border-radius: 0; margin: 0; }
 
 /* Today → Your day as a calendar: the hours down, a block a meeting in its lane (solid going, dashed not sure). */
 .dc-sec { display: flex; flex-direction: column; min-height: 0; }

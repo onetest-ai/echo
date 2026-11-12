@@ -1,6 +1,6 @@
 ---
 id: TC-023
-title: Your day says where you'll be with a reason on each line — overlaps folded into the one you go to, the rest a count to show; your work in a free gap; ⋯ or right-click opens Calendar's menu, a click the meeting's card on the right
+title: Your day says where you'll be with a reason on each line — overlaps folded into the one you go to, the rest a count to show; your work in a free gap; ⋯ or right-click opens Calendar's menu, a click the meeting's card as a popover beside the line
 priority: high
 type: functional
 requirements: [F-TODAY-02]
@@ -32,8 +32,9 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 5 | Find a meeting you marked maybe and one you haven't answered — on the busy standard day most are folded: open "Show N skipped" | Their bars dashed (violet, grey) — a line of its own says "maybe" / "no reply", a folded one "skipped"; neither is ever the next |
 | 6 | On the small set (`serve.sh up <dir2> <port2>`): read Your day | A line "Send Acme the SSO checklist" with "your work · 1 h" (or "· N min"), its bar dashed green, in the first free gap of 45 minutes or more after now; a click opens the task's Details on the right |
 | 7 | Over a coming meeting's line, click ⋯ | Calendar's menu for it (Record when it starts or Don't record, Prepare / Show prep, Add to a thread…, Copy the Teams link, Show details); Escape or a click elsewhere closes it; a right-click on the line opens the same |
-| 8 | Click the line itself (not a link on it) | The meeting's card on the right ("Meeting"): its time, chips, its one action strip, People — as in Calendar; × closes it |
-| 9 | A past meeting with minutes not opened: read its reason | "new minutes · N decisions · N actions" in violet; a click opens its Minutes |
+| 8 | Click the line itself (not a link on it) | Calendar's card for the meeting (the one Calendar shows when its block is clicked) as a popover beside the line: to the line's right inside Today (or its left when there's no room; with room on neither side, over the right part of it, as in Calendar), its top level with the line; its title, "Today · HH:MM–HH:MM", chips, its one action strip, People. The right panel doesn't open (no "Meeting" tab). A click on the same line again closes it; open it again and × closes it |
+| 9 | Over the same line click ⋯, then Show details | The same popover beside that line; × closes it |
+| 10 | A past meeting with minutes not opened: read its reason | "new minutes · N decisions · N actions" in violet; a click opens its Minutes |
 
 ## Notes
 - The reason line's links (minutes, prep, import the Teams transcript, try again) act as the old buttons did; the rest is in the menu (`TC-002`, `calendar/TC-001`).

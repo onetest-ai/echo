@@ -2,7 +2,14 @@
 function drawToday(primary) {
   // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep.
   const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
+  // The page kept where it was scrolled when Today is drawn again (a meeting's card opening or closing redraws it).
+  const page = $('.td'), pageTop = page ? page.scrollTop : 0
   patch(primary, `<main class="main">${todayView()}</main>`)
+  const page2 = $('.td')
+  if (page2 && page2 !== page && pageTop) page2.scrollTop = pageTop
+  // The card goes with what it was opened beside (its line folded away, its widget taken off), as Calendar's goes with
+  // its block.
+  if (!todayAnchor() && S.tdSel) { S.tdSel = null; setTimeout(render); return }
   // Today's view height, on the element (not in the HTML, which would then change with the window and be redrawn).
   const td = $('.td')
   if (td && S.tdView) td.style.setProperty('--td-view', `${S.tdView}px`)
@@ -47,7 +54,7 @@ function todayView() {
   const cardHtml = (c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`
   const cards = (d.cards || []).filter((c) => !ownCard.has(c.slug)).map(cardHtml).join('')
   // Your day as "where you'll be" (#315, Workbench `WidgetsCalendar`): a line a place with its reason; the line "now"
-  // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card on the right.
+  // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card as Calendar's popover beside it.
   const rows = agendaView(d, now)
   // A sync failed today and none has read the calendar today (the server says): today's meetings may be missing.
   const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: today’s meetings may be missing.</span></p>' : ''
@@ -144,7 +151,7 @@ function todayView() {
     ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map((l) => lineHtml(l, cols - 1)).join('')}</div></div>`
     : plan.lines.map((l) => lineHtml(l)).join('')
   setTimeout(() => { todayMoreCue(); twRefocus() })
-  return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
+  return `<div class="td${S.tdEdit ? ' td-editing' : ''}">${head}${asks}${blocks}${S.tdEdit ? todayEditEnd() : ''}${empty}${todayDetail(now)}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}</div>`
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
@@ -336,22 +343,46 @@ function agendaView(d, now) {
   }
   return html
 }
-// Your day's meeting: ⋯ or a right-click → Calendar's menu for it; a click on the line → its card on the right. From
-// today's calendar, read for Today on each open (Calendar's own data and week are left as they are).
+// Your day's meeting: ⋯ or a right-click → Calendar's menu for it; a click on the line → Calendar's card for it, as
+// the popover Calendar opens beside a block, here beside what was clicked (`placeDetail`). From today's calendar, read
+// for Today on each open (Calendar's own data and week are left as they are).
 async function todayMeeting(id) {
   try { S.tdCal = await get(`api/calendar?start=${ymd(new Date())}&days=1`) } catch (e) { S.tdCal = null }
   return !!(S.tdCal && (S.tdCal.events || []).some((e) => e.id === id))
 }
-function todayMenu(id, x, y) {
+function todayMenu(id, x, y, at) {
+  // What the menu was opened on: its Show details opens the card beside it.
+  S.tdMenuAt = at
   // After every click handler has run (Calendar's "a click closes the menu" among them), so this one stays open.
   setTimeout(() => { S.cal.ctx = { id, x, y }; render(); const f = document.querySelector('.ev-ctx .menu-item:not([disabled])'); if (f) f.focus() })
 }
-function todayCard(id) {
-  S.tdSel = id
-  const known = panelViews()
-  if (Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) S.overlay = true
-  Layout.show('meeting', known)
-  layoutChanged()
+// ── today popover: which meeting of Your day has its card open, and beside what (no DOM: `today-popover.test.mjs`) ──
+/** The forms a meeting of Your day is drawn in: the agenda's line, the calendar's and the strip's block, a choice's
+ *  invite line and a name on a line of meetings at once. */
+const TD_FORMS = ['ag-row', 'dc-ev', 'ds-ev', 'ch-row', 'ch-m']
+/** The form of a clicked element, by its classes; null for none of them. */
+const tdFormOf = (classes) => TD_FORMS.find((c) => classes.includes(c)) || null
+/** A click on a meeting in a form: its card beside it; the same one clicked again closes it, as in Calendar.
+ *  `toggle` false (the menu's Show details): opens it whatever was open. */
+const tdPick = (sel, id, at, toggle = true) => (toggle && sel && sel.id === id && sel.at === at ? null : { id, at })
+// end of the today popover block
+/** Open (or, the same clicked again, close) a meeting's card beside the element `el` of Your day. */
+function todayCard(id, el, toggle = true) {
+  S.tdSel = tdPick(S.tdSel, id, tdFormOf([...el.classList]), toggle)
+  render()
+}
+/** The open card: Calendar's own, drawn in Today's view; placed beside its anchor after the draw. */
+function todayDetail(now) {
+  const e = S.tdSel && S.tdCal && (S.tdCal.events || []).find((x) => x.id === S.tdSel.id)
+  return e ? eventDetail(e, now) : ''
+}
+/** Mark the element the card belongs to (`aria-current`), as Calendar marks its block selected: `placeDetail` puts the
+ *  card beside it. */
+function todayAnchor() {
+  for (const x of document.querySelectorAll('[data-td-ev][aria-current]')) x.removeAttribute('aria-current')
+  const a = S.tdSel && S.tdSel.at && document.querySelector(`.${S.tdSel.at}[data-td-ev="${CSS.escape(S.tdSel.id)}"]`)
+  if (a) a.setAttribute('aria-current', 'true')
+  return a
 }
 document.addEventListener('click', async (e) => {
   if (S.view !== 'today' || !e.target.closest) return
@@ -360,19 +391,20 @@ document.addEventListener('click', async (e) => {
   const m = e.target.closest('[data-td-menu]')
   if (m) {
     const id = m.dataset.tdMenu, r = m.getBoundingClientRect()
-    if (await todayMeeting(id)) todayMenu(id, r.left, r.bottom + 4)
+    if (await todayMeeting(id)) todayMenu(id, r.left, r.bottom + 4, m.closest('[data-td-ev]'))
     return
   }
   // In the menu or the card: an action ran — read today's calendar again, so both say what it is now.
-  if (e.target.closest('.ev-ctx, .td-meeting')) setTimeout(async () => { if (S.tdSel || S.cal.ctx) { await todayMeeting(S.tdSel || ''); render() } }, 600)
-  if (e.target.closest('.td-meeting [data-calclose]')) { S.tdSel = null; return render() }
-  // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card on the right.
+  if (e.target.closest('.ev-ctx, .td .detail')) setTimeout(async () => { if (S.tdSel || S.cal.ctx) { await todayMeeting(S.tdSel ? S.tdSel.id : ''); render() } }, 600)
+  if (e.target.closest('.td .detail [data-calclose]')) { S.tdSel = null; return render() }
+  // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card beside what the
+  // menu was opened on.
   const it = e.target.closest('[data-ev-ctx]')
-  if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) return todayCard(it.dataset.id)
+  if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) return S.tdMenuAt && todayCard(it.dataset.id, S.tdMenuAt, false)
   const row = e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev], .ch-row[data-td-ev], .ch-m[data-td-ev]')
   if (row && row.dataset.tdEv && !e.target.closest('button, a, .pj-chip')) {
     const id = row.dataset.tdEv
-    if (await todayMeeting(id)) todayCard(id)
+    if (await todayMeeting(id)) todayCard(id, row)
   }
 })
 document.addEventListener('contextmenu', async (e) => {
@@ -380,14 +412,16 @@ document.addEventListener('contextmenu', async (e) => {
   if (!row || !row.dataset.tdEv) return
   e.preventDefault()
   const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
-  if (await todayMeeting(id)) todayMenu(id, x, y)
+  if (await todayMeeting(id)) todayMenu(id, x, y, row)
 })
-// A calendar's or strip's block with the keyboard: Enter opens its card.
+// Your day scrolled (its list, its calendar, the page): the card stays beside its meeting, as Calendar's on its grid.
+document.addEventListener('scroll', () => { if (S.view === 'today' && S.tdSel) placeDetail() }, { capture: true, passive: true })
+// A calendar's or strip's block with the keyboard: Enter opens its card beside it.
 document.addEventListener('keydown', async (e) => {
   const b = S.view === 'today' && e.key === 'Enter' && e.target.matches && e.target.matches('.dc-ev[data-td-ev], .ds-ev[data-td-ev]')
   if (!b || !e.target.dataset.tdEv) return
   e.preventDefault()
-  if (await todayMeeting(e.target.dataset.tdEv)) todayCard(e.target.dataset.tdEv)
+  if (await todayMeeting(e.target.dataset.tdEv)) todayCard(e.target.dataset.tdEv, e.target)
 })
 // Escape in the menu: Calendar closes it; the keyboard goes back to the line's ⋯.
 document.addEventListener('keydown', (e) => {
