@@ -820,7 +820,7 @@ pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Pr
     check(&p, &clients()?)?;
     write_json(&profile_path(id)?, &p)?;
     if p.name != name {
-        crate::plugins::thread_values::changed(id, "renamed", None);
+        crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Renamed { name: &p.name, from: &name })?;
     }
     Ok(p)
 }
@@ -932,13 +932,13 @@ pub fn delete(id: &str) -> Result<()> {
     fs::create_dir_all(&trash)?;
     let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
+    // Gone now: plugins' values for it go with it, and they hear it — before anything below may fail.
+    crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Deleted)?;
     // Its links go with it: a new thread may get its id.
     for mut o in list().into_iter().filter(|o| o.links.iter().any(|l| l.to == id)) {
         o.links.retain(|l| l.to != id);
         write_json(&profile_path(&o.id)?, &o)?;
     }
-    // Plugins' values for it go with it, and they hear it.
-    crate::plugins::thread_values::changed(id, "deleted", None);
     Ok(())
 }
 
