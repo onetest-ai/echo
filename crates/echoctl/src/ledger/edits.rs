@@ -47,8 +47,27 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
             return link_threads(project, body["node"].as_str().unwrap_or(""), body["thread"].as_str().unwrap_or(""), body["target"].as_str().unwrap_or(""), body["kind"].as_str().unwrap_or("same"), master_here);
         }
         "unxref" => return unlink_threads(project, body["node"].as_str().unwrap_or(""), body["thread"].as_str().unwrap_or(""), body["target"].as_str().unwrap_or("")),
+        // Close on a mirror's Looks done (#463, #20) closes its master — the state is the master's; the accept here
+        // remembers that edit, so its undo takes both back.
+        "accept" => {
+            let target = body["target"].as_str().unwrap_or("");
+            let evs = Ledger::of(project)?.events()?;
+            if let Some(m) = evs.iter().find(|x| x["mid"] == target && x["effect"] == "mention" && x["covers"] == true) {
+                let raw = fold(&Ledger::of(project)?)?;
+                let master = raw.nodes.get(m["node"].as_str().unwrap_or("")).and_then(|x| x.xrefs.iter().find(|r| r["kind"] == "same" && r["master"] == "there").cloned());
+                if let Some(master) = master {
+                    let th = master["thread"].as_str().unwrap_or("");
+                    let fwd = human_event_here(th, &json!({"op": "edit", "node": master["node"], "set": {"state": "done"}}))?;
+                    return human_event_here(project, &json!({"op": "accept", "target": target, "forwarded": {"thread": th, "mid": fwd["mid"]}}));
+                }
+            }
+        }
         "undo" => {
             let evs = Ledger::of(project)?.events()?;
+            // A Close that also closed the master: undone there too.
+            if let Some(f) = evs.iter().find(|e| e["mid"] == body["target"] && e["op"] == "accept").map(|e| e["forwarded"].clone()).filter(|f| f.is_object()) {
+                let _ = human_event_here(f["thread"].as_str().unwrap_or(""), &json!({"op": "undo", "target": f["mid"]}));
+            }
             if let Some(x) = evs.iter().find(|e| e["mid"] == body["target"] && e["type"] == "human" && (e["op"] == "xref" || e["op"] == "unxref")) {
                 let (node, thread, target) = (x["node"].as_str().unwrap_or(""), x["thread"].as_str().unwrap_or(""), x["target"].as_str().unwrap_or(""));
                 // The pair's latest link event: undoing an older one would undo something else.
@@ -176,6 +195,9 @@ pub(super) fn human_event_here(project: &str, body: &Value) -> Result<Value> {
             bail!("unknown event {target}");
         }
         e["target"] = json!(target);
+        if body["forwarded"].is_object() {
+            e["forwarded"] = body["forwarded"].clone();
+        }
     } else {
         let node = body["node"].as_str().filter(|x| n.contains_key(*x)).ok_or_else(|| anyhow!("unknown node {}", body["node"]))?;
         e["node"] = json!(node);
@@ -252,6 +274,7 @@ pub(super) fn fold_forwarded(project: &str) -> Result<Tree> {
                 }
             }
             x.due = x.due_history.last().and_then(|h| s(&h["due"]));
+            x.due_guessed = x.due.is_some() && x.due_history.last().is_some_and(|h| h["guessed"] == true);
         }
     }
     if moved {
@@ -280,6 +303,7 @@ pub fn fold_linked(project: &str) -> Result<Tree> {
                     o.internal_owner = mm.internal_owner;
                     o.client_owner = mm.client_owner;
                     o.due = mm.due;
+                    o.due_guessed = mm.due_guessed;
                 }
             }
             let x = t.nodes.get_mut(id).unwrap();
@@ -290,6 +314,8 @@ pub fn fold_linked(project: &str) -> Result<Tree> {
                     x.client_owner = o.client_owner.clone();
                     x.delegated_by = o.delegated_by.clone();
                     x.due = o.due.clone();
+                    // Guessed or not as the master's due is (#463).
+                    x.due_guessed = o.due_guessed;
                     x.waiting_for = o.waiting_for.clone();
                     let last: Vec<Value> = o.history.iter().rev().take(3).rev().cloned().collect();
                     // A master in a closed thread isn't on Tasks: the mirror is shown there instead.

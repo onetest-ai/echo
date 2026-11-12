@@ -47,9 +47,10 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
     let mut handles: BTreeMap<String, String> = BTreeMap::new();
     let (mut out, mut rej): (Vec<Value>, Vec<Value>) = (vec![], vec![]);
     let date = s(&item["date"]).unwrap_or_default();
-    // A due nobody said (#463): its words aren't in the item, and the date is the item's own (a mail's date taken as the
-    // due). Kept, but guessed: it never makes the task late.
-    let guessed = |text: Option<&str>, due: Option<&str>| due.is_some_and(|d| d == date.get(..10).unwrap_or("")) && text.is_none_or(|t| norm(t).is_empty() || !full.contains(&norm(t)));
+    // A due nobody said (#463): the item's own date (a mail's date taken as the due), and nothing in the item says it.
+    // Kept, but guessed: it never makes the task late.
+    let said = said_words(&item);
+    let guessed = |text: Option<&str>, due: Option<&str>| due.is_some_and(|d| d == date.get(..10).unwrap_or("")) && !due_said(&said, text);
     let turns = item["turns"].as_array().cloned().unwrap_or_default();
     let locate = |q: &str| -> (Value, Value) {
         let head: String = q.chars().take(40).collect();
@@ -228,6 +229,11 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                     continue;
                 }
                 e["effect"] = json!(eff);
+                // A mention that says the task's outcome happened or isn't needed any more (#463): checked by the verifier,
+                // then the task looks done (Close / Not yet).
+                if eff == "mention" && pr["covers"] == true {
+                    e["covers"] = json!(true);
+                }
                 e["due_text"] = pr["due_text"].clone();
                 e["due"] = if eff == "delayed" { Value::Null } else { json!(resolve_due(pr["due_text"].as_str(), &date)) };
                 if guessed(pr["due_text"].as_str(), e["due"].as_str()) {
@@ -433,6 +439,7 @@ pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
             },
             "answer" if x.is_some_and(|y| y.kind == "risk") => format!("what is done about this risk: {}", e["text"].as_str().unwrap_or("")),
             "answer" => format!("this question is answered: {}", e["text"].as_str().unwrap_or("")),
+            _ if e["effect"] == "mention" => "covers it: what this task is for happened, or it isn't needed any more (the user may close it)".into(),
             _ => e["effect"].as_str().unwrap_or("").to_string(),
         };
         let mut packet = json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
@@ -466,4 +473,39 @@ pub fn verify_apply(project: &str, verdicts: &[Value]) -> Result<Value> {
         *c.entry(s(&v["verdict"]).unwrap_or_default()).or_default() += 1;
     }
     Ok(json!({"verdicts": c, "rejected": rej}))
+}
+
+/// An item's words as said, for "was this due said?" (#463): its turns and text, without the lines a mail quotes from
+/// an earlier one ("> …", "On 10 Nov 2026, Dana wrote:", its From/Sent/Date header lines), as whole words — an
+/// apostrophe keeps a word whole ("today's" isn't "today").
+pub(super) fn said_words(item: &Value) -> Vec<String> {
+    let header = |l: &str| {
+        let t = l.trim().to_lowercase();
+        t.starts_with('>') || (t.starts_with("on ") && t.ends_with("wrote:")) || ["from:", "sent:", "date:", "від:", "надіслано:", "от:", "отправлено:", "дата:"].iter().any(|h| t.starts_with(h))
+    };
+    let mut text: Vec<&str> = item["turns"].as_array().map(|a| a.iter().filter_map(|t| t["text"].as_str()).collect()).unwrap_or_default();
+    text.extend(item["text"].as_str());
+    said_tokens(&text.iter().flat_map(|t| t.lines()).filter(|l| !header(l)).collect::<Vec<_>>().join("\n"))
+}
+
+/// Lowercase words (letters and digits of any script; an apostrophe inside keeps a word whole).
+fn said_tokens(t: &str) -> Vec<String> {
+    t.to_lowercase()
+        .replace(['’', '‘'], "'")
+        .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '-'))
+        .map(|w| w.trim_matches(|c| c == '\'' || c == '-'))
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Same-day words, in the user's languages (English, Ukrainian, Russian): a due on the item's own day is said when one
+/// of these is (the extractor writes "today" for "сьогодні", an ISO date for "today").
+const TODAY_WORDS: [&[&str]; 9] = [&["today"], &["tonight"], &["eod"], &["end", "of", "day"], &["end", "of", "the", "day"], &["сьогодні"], &["сегодня"], &["кінця", "дня"], &["конца", "дня"]];
+
+/// Whether a due on the item's own day was said in it: its words, whole and in order, or a same-day word.
+pub(super) fn due_said(said: &[String], text: Option<&str>) -> bool {
+    let has = |seq: &[String]| !seq.is_empty() && said.windows(seq.len()).any(|w| w == seq);
+    let mine = text.map(said_tokens).unwrap_or_default();
+    has(&mine) || TODAY_WORDS.iter().any(|t| has(&t.iter().map(|w| w.to_string()).collect::<Vec<_>>()))
 }

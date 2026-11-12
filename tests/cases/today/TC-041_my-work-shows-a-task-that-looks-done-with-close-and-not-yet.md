@@ -16,14 +16,14 @@ tags: [today, my-work, looks-done]
 **Module:** Today | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- As work/TC-032 steps 1–2 done (T026 looks done from "Acme security review"; its only due guessed)
+- As work/TC-032 steps 1–2a done (T026 looks done from "Acme security review", verified; its only due guessed)
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Open `{{base_url}}/#today` | My work has T026 "Send Dana the rollout summary" (not late, no date icon), its card saying "Looks done — the call Acme security review, <its day>: “Please send the summary and the action items after the call”" with "Close" and "Not yet" |
-| 2 | Click the card's "Close" | The card goes from My work (T026 done); the task's details didn't open; `target/debug/echoctl project ledger acme-rollout tree`: T026 `done`, pinned `state` |
+| 2 | Click the card's "Close" (its name: "Looks done: close “Send Dana the rollout summary”") | The card goes from My work (T026 done); the task's details didn't open; `target/debug/echoctl project ledger acme-rollout tree`: T026 `done`, pinned `state` |
 
 ## Expected Final State
 T026 done as the user's edit.
