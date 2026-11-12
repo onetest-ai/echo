@@ -38,7 +38,10 @@ tags: [select, menu, profiles, keyboard]
 | 4 | Press Space, type `e`, press Escape | Space opens the menu, `e` marks "Echo's default"; Escape closes it with nothing changed (still Microsoft 365 Drafts), the focus on the field |
 | 5 | Open the Claude panel (status bar → Claude); click its Profile field | Echo's menu on the field, inside the window (near the window's bottom it is moved up as far as it must): each profile's name with a line under it — "sonnet · as Claude Code is set up", "sonnet · its own Claude sign-in", "qwen3.8:27b-mlx · on this computer"; the panel's profile checked; click "Qwen · this computer" → the field says it, the menu closes |
 | 6 | Open a call with no minutes yet (Calls → Globex standup → Minutes); click "Model"; click outside the menu | The same menu with the same lines; a click outside closes it, nothing changed. Put Where drafts go back to "Echo's default" (step 2's way) |
-| 7 | Click the account chip in the top bar (Claude · work) | The chip unchanged; its list is Echo's menu with the profiles and their lines, the default one on the chip, inside the window |
+| 7 | Click the account chip in the top bar (Claude · work) | The chip unchanged; its list is Echo's menu with the profiles and their lines, the default one on the chip, inside the window; Escape closes it |
+| 8 | Open `{{base_url}}/#project/acme-rollout/profile`; Calls → "+ Add"; pick "Subject contains" in "Kind of rule" from Echo's menu | The add form stays open with "Subject contains" chosen (a pick in the menu is no click outside the form) |
+| 9 | `{{base_url}}/#project/acme-rollout/work` as a board: a column's ⋯ → "Cards in it are" → "waiting on someone", then back to "to do" | The column menu stays open through both picks; the select says what was picked |
+| 10 | Open a task's details; click its Status value, then the Status select; pick "in progress" | The status reads "● in progress" (the field closes after the pick, not before it); put it back to "open" the same way |
 
 ## Expected Final State
 Settings as before the run (Where drafts go: Echo's default).
