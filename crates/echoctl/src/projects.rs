@@ -811,7 +811,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
 pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Project> {
     let _l = lock()?;
     let mut p = load(id)?;
-    let stage = p.stage;
+    let (stage, name) = (p.stage, p.name.clone());
     f(&mut p)?;
     p.id = id.to_string();
     if p.stage != stage {
@@ -819,6 +819,9 @@ pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Pr
     }
     check(&p, &clients()?)?;
     write_json(&profile_path(id)?, &p)?;
+    if p.name != name {
+        crate::plugins::thread_values::changed(id, "renamed", None);
+    }
     Ok(p)
 }
 
@@ -934,6 +937,8 @@ pub fn delete(id: &str) -> Result<()> {
         o.links.retain(|l| l.to != id);
         write_json(&profile_path(&o.id)?, &o)?;
     }
+    // Plugins' values for it go with it, and they hear it.
+    crate::plugins::thread_values::changed(id, "deleted", None);
     Ok(())
 }
 

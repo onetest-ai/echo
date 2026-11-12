@@ -306,6 +306,9 @@ function projectProfile(p, data) {
   const calls = (p.rules || []).map((r, i) => tok(RULE_TOKEN(r, p.client_name), { op: 'rule-remove', index: i })).join('') + addTok('rule', "a meeting's subject (empty for the client's people)", ruleKind)
     + `<div class="pf-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'} match${pins || outs ? ` · ${[pins ? `${pins} pinned` : '', outs ? `${outs} taken out by hand` : ''].filter(Boolean).join(', ')}` : ''}</div>`
   const sources = threadSources(p, cl)
+  // The plugins' rows (`thread.profile`), under Sources; drawn again after the page is in (`drawProjects`).
+  const plugRows = threadSlotRows(Plugins.slots['thread.profile'], slotThread(p), (m) => console.warn(`thread.profile: ${m}`))
+    .map((r) => row(r.label, `<div class="pf-plug" data-thread-slot="${esc(r.key)}">${r.html}</div>`)).join('')
   const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
     : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
   // Look and AI: not on the board; the same row style.
@@ -326,6 +329,7 @@ function projectProfile(p, data) {
     ${row('Calls', calls)}
     ${row('Meetings', seriesBlock(p))}
     ${row('Sources', sources)}
+    ${plugRows}
     ${row('Notes for Claude', notes)}
     ${row('Look', look)}
     ${row('AI', aiRow)}
