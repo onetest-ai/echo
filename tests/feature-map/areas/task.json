@@ -57,7 +57,7 @@
   },
   {
    "id": "F-TASK-06",
-   "feature": "A card shows its title, who (story, blocked by, owner · client, stops T00x), mode icon, thread, also in another thread, due (late in red; a guessed one \"from the call / mail / chat of <date>\", never late) or \"no date\", \"quiet N d\"",
+   "feature": "A card shows its title, who (story, blocked by, owner · client, stops T00x), mode icon, thread, also in another thread, due (late in red; a guessed one \"from the call / mail / chat of <date>\", never late) or \"no date\" — \"quiet N d\" in its place when it has been quiet (it has no date either); the thread's name cut with … on a narrow card",
    "priority": "high",
    "check": "agent",
    "axes": [

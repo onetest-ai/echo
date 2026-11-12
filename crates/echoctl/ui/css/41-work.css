@@ -127,7 +127,7 @@
 .wp-top .btn { height: 24px; }
 .wp-top .grow { flex: 1; }
 .wp-name { margin: 0; font-size: 15.5px; font-weight: 650; line-height: 1.35; }
-.wp-facts { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; }
+.wp-facts { display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 8px 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; }
 .wp-facts > span { color: var(--text-3); }
 .wp-facts > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .wp-val { border: 0; background: none; padding: 0; color: var(--text); font: inherit; text-align: left; cursor: default; }
@@ -140,8 +140,14 @@ a.wp-link { display: block; text-decoration: none; cursor: pointer; }
 .wp-desc { margin: 2px 0 4px; padding: 6px 8px; border-radius: 8px; font-size: 13px; line-height: 1.55; cursor: text; }
 .wp-desc:hover { background: var(--line); }
 .wp-desc > :last-child { margin-bottom: 0; }
-.wp-desc-add { align-self: flex-start; margin: 2px 0 4px; }
-.wp-desc-add.warn { color: var(--warn); }
+.wp-desc-add { align-self: stretch; display: flex; align-items: baseline; gap: 4px; margin: 2px 0 6px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--text-3); text-align: left; white-space: nowrap; }
+.wp-desc-add:hover { border-color: var(--accent); color: var(--accent-ink); }
+.wp-desc-add.wp-val.empty { color: var(--text-3); }
+.wp-desc-add u { text-decoration: none; color: var(--accent-ink); }
+.wp-desc-add.warn, .wp-desc-add.warn.wp-val.empty { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+/* A work item's status in its facts: a tinted pill in the status's colour. */
+.wp-val .wk-st { display: inline-flex; align-items: center; min-width: 0; padding: 2px 9px; border-radius: 11px; font-size: 11.5px; font-weight: 600; background: color-mix(in srgb, currentColor 13%, transparent); }
+.wp-val .wk-st.open { color: var(--text-2); }
 .wp-rec-h { margin-top: 6px; }
 .wp-desc-edit { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
 .wp-desc-edit textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 110px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--surface); color: var(--text); font: 12.5px/1.55 var(--mono); }

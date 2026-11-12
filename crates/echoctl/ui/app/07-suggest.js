@@ -74,7 +74,13 @@ function sgPick(i) {
   input.value = r.empty ? '' : r.label
   input.dispatchEvent(new Event('input', { bubbles: true }))
   input.dispatchEvent(new Event('change', { bubbles: true }))
+  sgPicked = { input, at: Date.now() }
 }
+// A box typed in and then picked from would fire its own `change` too when it is left: the pick's is the one.
+let sgPicked = null
+addEventListener('change', (e) => {
+  if (e.isTrusted && sgPicked && e.target === sgPicked.input && Date.now() - sgPicked.at < 2000) { e.stopImmediatePropagation(); e.stopPropagation() }
+}, true)
 const sgBox = (t) => t && t.tagName === 'INPUT' && (t.getAttribute('list') || t.dataset.suggest)
 addEventListener('focusin', (e) => { if (sgBox(e.target)) sgOpen(e.target) }, true)
 addEventListener('focusout', (e) => { if (SG && e.target === SG.input) sgClose() }, true)
@@ -96,7 +102,7 @@ addEventListener('mousemove', (e) => {
   if (b && +b.dataset.sg !== SG.at) { SG.at = +b.dataset.sg; for (const x of SG.el.querySelectorAll('[data-sg]')) x.classList.toggle('on', x === b); SG.input.setAttribute('aria-activedescendant', b.id) }
 }, true)
 // ↑ ↓ move in the list; Enter picks the marked row (none marked: the box's own text, as before); Escape closes the list
-// first (a second Escape is the box's own).
+// and is the box's own Escape too.
 addEventListener('keydown', (e) => {
   if (!SG || e.target !== SG.input || SG.el.hidden) return
   const take = () => { e.preventDefault(); e.stopPropagation() }
@@ -107,7 +113,7 @@ addEventListener('keydown', (e) => {
     for (const x of SG.el.querySelectorAll('[data-sg]')) x.classList.toggle('on', +x.dataset.sg === SG.at)
     const on = SG.el.querySelector('.sg-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
     SG.input.setAttribute('aria-activedescendant', `sg-opt-${SG.at}`)
-  } else if (e.key === 'Enter' && SG.at >= 0) { take(); sgPick(SG.at) } else if (e.key === 'Escape') { take(); sgClose() }
+  } else if (e.key === 'Enter' && SG.at >= 0) { take(); sgPick(SG.at) } else if (e.key === 'Escape') sgClose() // and the box's own Escape
 }, true)
 addEventListener('scroll', (e) => { if (SG && !SG.el.contains(e.target)) sgDraw() }, true)
 addEventListener('resize', () => { if (SG) sgDraw() })

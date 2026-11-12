@@ -23,11 +23,12 @@ function othersPile(all, key) {
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
+  // Quiet for days says it has no date too: "no date" beside it would say it twice and squeeze the thread's name.
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
   const on = S.pj.node === c.id && S.pj.sel === c.project
   return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${on ? ' on' : ''}"${on ? ' aria-current="true"' : ''} data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
-    <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
+    <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj" title="${esc(p.name)}">${projIcon(p, 12)}<span class="tk-pjn">${esc(p.name)}</span></span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}<span class="tk-pjn">${esc(q.name)}</span></span>` }).join('')}<span class="grow"></span>${quiet || dueText(c)}</span>
   </button>`
 }
 /** Draws the Tasks view in the primary area (`renderNow`). */
@@ -472,7 +473,7 @@ function clientOverview(cd, c) {
 function clientCalls(cd) {
   const rows = cd.calls.map((c) => {
     const d = c.started_at ? new Date(c.started_at) : null
-    const chips = (c.threads || []).map((id) => projById(id)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('')
+    const chips = (c.threads || []).map((id) => projById(id)).filter(Boolean).map((p) => `<span class="tk-pj" title="${esc(p.name)}">${projIcon(p, 12)}<span class="tk-pjn">${esc(p.name)}</span></span>`).join('')
     return `<div class="set-row" role="listitem"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
   }).join('')
   return `<section class="set-sec"><div class="set-card"${rows ? ' role="list" aria-label="Calls"' : ''}>${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`

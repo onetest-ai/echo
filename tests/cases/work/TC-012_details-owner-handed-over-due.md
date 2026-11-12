@@ -32,11 +32,11 @@ auto: [tests/auto/specs/S-06.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and click the card T002 | Owner "Omar Haddad"; Handed over by "not known · Set"; Due "no date · Set" |
-| 2 | Click the Owner value, type `Dana Lee`, press Enter. Wait up to 3 s after an action for the window to redraw before reading. | Owner reads "Dana Lee"; the avatar on the card reads "DL" |
-| 3 | Click "Set" next to Handed over by; read the box's suggestions (`input[data-ledger-set="delegated_by"]`, its `list` → `#wp-names option`) | The box suggests "Me" then the thread's people, in their order: "Me", "Dana Lee", "Omar Haddad" (Owner's box suggests the same) |
-| 4 | Type `Sam Rivera`, press Enter | Handed over by reads "Sam Rivera" (a name not suggested is taken too) |
-| 5 | Click "Set" next to Due, enter the date 2026-12-18 in the field named "Due" (picked in its calendar it is saved at once; typed, on Enter or a click elsewhere) | Due reads "Fri, Dec 18"; the card shows a due chip "Dec 18" |
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and click the card T002 | Owner a face "OH" and "Omar Haddad"; Handed over by "not known · Set"; Due "no date · Set" |
+| 2 | Click the Owner value | The box takes the focus and Echo's menu opens under it (`.sg-menu`, no system list): "Me" (you), "Dana Lee", "Omar Haddad" — each a face and the name — then a line and "Nobody named" |
+| 3 | Type `dan` key by key, press ↓ then Enter. Wait up to 3 s after an action for the window to redraw before reading. | While typed the menu shows only "Dana Lee" and "Nobody named"; then Owner reads "DL Dana Lee"; the avatar on the card reads "DL"; History has one new "you set internal owner" |
+| 4 | Click "Set" next to Handed over by, type `Sam Rivera`, press Enter | The menu narrows to "Nobody named" as it is typed; Handed over by reads "Sam Rivera" with a face "SR" (a name not suggested is taken too) |
+| 5 | Click "Set" next to Due; in Echo's calendar under it (`.dp-menu`: Today, Tomorrow, the Friday, Next Monday, In a week with their dates; the month; no "No date" — it has none) click › until December 2026, then 18 | Due reads "Fri, Dec 18" at once; the card shows a due chip "Dec 18". (Typed into the box, a date is saved on Enter or when left — TC-030) |
 | 6 | Read History | Three entries "you set internal owner", "you set delegated by", "you set due", each with "undo" |
 
 ## Expected Final State

@@ -19,6 +19,8 @@
 .tk-pj { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px 0 5px; border-radius: 10px; background: var(--line); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk-m .grow { flex: 1; }
 .tk-pj .pj-ic { flex: none; }
+/* A thread's name cut with … when the card is narrow (a flex chip can't cut its own text). */
+.tk-pjn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk-who { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* "blocked" (and late) on a card's who line: red, as on a client's Overview card (#313). */
 .tk-who .late { color: var(--danger); font-weight: 600; }

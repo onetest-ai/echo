@@ -80,14 +80,13 @@ function dpPick(iso) {
   input.dispatchEvent(new Event('input', { bubbles: true }))
   input.dispatchEvent(new Event('change', { bubbles: true }))
 }
-// A press on a date box opens the calendar (the box takes the focus; typing a date still works); a press in the
+// A press on a date box opens the calendar (the box takes the focus and the caret; typing a date still works); a press in the
 // calendar keeps the focus in the box and reaches nothing else.
 addEventListener('mousedown', (e) => {
   if (DP && DP.el.contains(e.target)) { e.preventDefault(); e.stopPropagation(); return }
   if (dpBox(e.target) && e.button === 0) {
-    e.preventDefault()
+    // The press goes on to the box (it puts the caret in the part pressed); its system calendar has no button to open it.
     if (DP && DP.input === e.target) return // open already (a box opened for an edit opens with it)
-    e.target.focus({ preventScroll: true })
     return dpOpen(e.target)
   }
   if (DP) dpClose()
@@ -104,13 +103,13 @@ for (const t of ['click', 'mouseup', 'pointerdown', 'pointerup']) {
     if (p) dpPick(p.dataset.dp)
   }, true)
 }
-// Focus into a date box by the keyboard opens it too; Alt+↓ or F4 opens it; Escape closes it first; leaving the box
+// Focus into a date box by the keyboard opens it too; Alt+↓ or F4 opens it; Escape closes it; leaving the box
 // closes it. Typing goes to the box as before.
 addEventListener('focusin', (e) => { if (dpBox(e.target) && (!DP || DP.input !== e.target) && e.target.matches(':focus-visible')) dpOpen(e.target) }, true)
 addEventListener('focusout', (e) => { if (DP && e.target === DP.input) dpClose() }, true)
 addEventListener('keydown', (e) => {
   if (!DP && dpBox(e.target) && (e.key === 'F4' || (e.altKey && e.key === 'ArrowDown'))) { e.preventDefault(); return dpOpen(e.target) }
-  if (DP && e.target === DP.input && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dpClose() }
+  if (DP && e.target === DP.input && e.key === 'Escape') dpClose() // and the box's own Escape too (an edit is left at once)
 }, true)
 addEventListener('scroll', (e) => { if (DP && !DP.el.contains(e.target)) dpDraw() }, true)
 addEventListener('resize', () => { if (DP) dpDraw() })
