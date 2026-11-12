@@ -927,13 +927,14 @@ pub fn set_stage(id: &str, stage: Stage, reason: Option<&str>) -> Result<Project
 /// Remove a project's folder (its brief and profile; later its ledger) into the trash.
 pub fn delete(id: &str) -> Result<()> {
     let _l = lock()?;
-    load(id)?;
+    // Who it was: a later thread under its id is another.
+    let born = load(id)?.stages.first().map(|s| s.at.clone());
     let trash = paths::state_dir().join("trash");
     fs::create_dir_all(&trash)?;
     let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
     // Gone now: plugins' values for it go with it, and they hear it — before anything below may fail.
-    crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Deleted)?;
+    crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Deleted { born })?;
     // Its links go with it: a new thread may get its id.
     for mut o in list().into_iter().filter(|o| o.links.iter().any(|l| l.to == id)) {
         o.links.retain(|l| l.to != id);

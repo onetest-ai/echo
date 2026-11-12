@@ -112,7 +112,8 @@ const PRELUDE: &str = r#"
     /** Its own values per thread (no grant: its data, by thread id): `get(thread, key)` → value | null, `set(thread,
      *  key, value)` (JSON, 16 KB at most, 64 keys a thread, 4 MB in all; null removes it), `list(key)` → [{thread,
      *  value}] of the threads that have it. They follow the thread: gone when it is deleted (hear it: `threads_changed` in
-     *  uses.events.on — {thread, change: renamed, name, from} | {…merged, into} | {…deleted, values: its own}). */
+     *  uses.events.on — {thread, born, change: renamed, name, from} | {…merged, into, dropped: its keys that didn't fit} |
+     *  {…deleted, values: its own}; born: the thread's first stage time, another thread's if its id is used again). */
     threads: {
       get: (thread, key) => call('threads.get', [String(thread), String(key)]),
       set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
@@ -361,6 +362,16 @@ pub fn no_timers() {
     TIMERS.store(false, Ordering::Relaxed);
 }
 
+/// This process is the app (`app.rs`, as it starts the plugins' host): only it hears Echo's events for the plugins
+/// and takes what other processes queued for them. Any other process that loads a host half (`echoctl plugin call`,
+/// `echoctl widget show`) is not, timers or not.
+static APP: AtomicBool = AtomicBool::new(false);
+
+/// Mark this process as the app.
+pub fn as_app() {
+    APP.store(true, Ordering::Relaxed);
+}
+
 fn host() -> &'static Host {
     HOST.get_or_init(|| {
         let (tx, rx) = channel();
@@ -441,9 +452,9 @@ pub fn event_each(name: &str, payload: &Value, each: &serde_json::Map<String, Va
     }
 }
 
-/// This process runs the plugins as the app does (their host, with timers): an event sent here reaches them.
+/// This process is the app and runs the plugins' host: an event sent here reaches the plugins the user sees.
 pub fn hosts_here() -> bool {
-    HOST.get().is_some() && TIMERS.load(Ordering::Relaxed)
+    HOST.get().is_some() && APP.load(Ordering::Relaxed)
 }
 
 // ── the host thread ──
@@ -572,9 +583,10 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         }
         if last_tick.elapsed() >= tick_every && TIMERS.load(Ordering::Relaxed) {
             last_tick = Instant::now();
-            // What a terminal changed (a thread deleted with `echoctl project delete`): the app's plugins hear it.
-            for (name, payload, each) in plugins::thread_values::take_queued() {
-                event_each(&name, &payload, &each);
+            // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
+            // it — the app's alone, never a terminal's host.
+            if APP.load(Ordering::Relaxed) {
+                plugins::thread_values::take_queued(event_each);
             }
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
@@ -812,6 +824,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "store.remove" => {
             let p = store_path(id, &s(arg))?;
+            // Not the store itself: Echo's files are in it (settings, thread values), and their locks aren't taken here.
+            if p == plugins::data_dir(id) {
+                bail!("ctx.store.remove needs a path inside the plugin's folder, not the folder itself");
+            }
             not_echos(&s(arg))?;
             if p.is_dir() {
                 std::fs::remove_dir_all(&p)?;
@@ -1754,6 +1770,7 @@ mod tests {
               ctx.command('list', () => ctx.threads.list('repos'))
               ctx.command('sneak', () => ctx.store.write('threads.json', '{}'))
               ctx.command('wipe', () => ctx.store.remove('./threads.json'))
+              ctx.command('wipe-all', (a) => ctx.store.remove(a.path))
               ctx.command('heard', () => heard)
             }
             "#,
@@ -1776,6 +1793,11 @@ mod tests {
         assert!(call("repos", "map", &json!({"thread": "nope", "repos": []})).unwrap_err().to_string().contains("no thread"));
         assert!(call("repos", "sneak", &json!({})).unwrap_err().to_string().contains("ctx.threads.set"), "its threads.json is Echo's to write");
         assert!(call("repos", "wipe", &json!({})).unwrap_err().to_string().contains("ctx.threads.set"), "…and not its to remove");
+        for path in ["", "./", "././"] {
+            let err = call("repos", "wipe-all", &json!({"path": path})).unwrap_err().to_string();
+            assert!(err.contains("not the folder itself"), "{path:?}: {err}");
+        }
+        assert!(plugins::data_dir("repos").join("threads.json").is_file(), "the store and Echo's files in it kept");
         // A read-only routine reads them, never sets them.
         std::env::set_var(crate::guard::RUN_MODE, "routine");
         let refused = call("repos", "map", &json!({"thread": beta, "repos": ["acme-test/web"]}));
@@ -1783,6 +1805,24 @@ mod tests {
         std::env::remove_var(crate::guard::RUN_MODE);
         assert!(refused.unwrap_err().to_string().contains("read-only routine"));
         assert_eq!(read.unwrap(), json!(["acme-test/api"]));
+        // A host that isn't the app's (this one, until it is marked): it hears nothing and takes nothing queued.
+        let born = |id: &str| json!(crate::projects::load(id).unwrap().stages[0].at);
+        let (alpha_born, beta_born) = (born(&alpha), born(&beta));
+        assert!(!hosts_here());
+        crate::projects::update(&beta, |p| {
+            p.name = "Beta 2".into();
+            Ok(())
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(1300)); // over a tick
+        assert!(paths::state_dir().join("plugin-events.jsonl").is_file(), "left for the app");
+        assert_eq!(call("repos", "heard", &json!({})).unwrap(), json!([]));
+        as_app();
+        let heard = (0..60).find_map(|_| {
+            let v = call("repos", "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| a.len() == 1) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard.unwrap(), json!([{"thread": beta, "born": beta_born, "change": "renamed", "name": "Beta 2", "from": "Beta"}]), "the app takes it");
         // Alpha renamed, then deleted: the plugin hears both; its value for Alpha is gone.
         crate::projects::update(&alpha, |p| {
             p.name = "Alpha 2".into();
@@ -1792,11 +1832,14 @@ mod tests {
         crate::projects::delete(&alpha).unwrap();
         let heard = (0..50).find_map(|_| {
             let v = call("repos", "heard", &json!({})).unwrap();
-            if v.as_array().is_some_and(|a| a.len() == 2) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+            if v.as_array().is_some_and(|a| a.len() == 3) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
         });
         assert_eq!(
-            heard.unwrap(),
-            json!([{"thread": alpha, "change": "renamed", "name": "Alpha 2", "from": "Alpha"}, {"thread": alpha, "change": "deleted", "values": {"repos": ["acme-test/api"]}}]),
+            heard.unwrap().as_array().unwrap()[1..],
+            [
+                json!({"thread": alpha, "born": alpha_born, "change": "renamed", "name": "Alpha 2", "from": "Alpha"}),
+                json!({"thread": alpha, "born": alpha_born, "change": "deleted", "values": {"repos": ["acme-test/api"]}})
+            ],
             "the deleted thread's values come with it, the plugin's own"
         );
         assert_eq!(call("repos", "get", &json!({"thread": alpha})).unwrap(), Value::Null);
@@ -1806,10 +1849,11 @@ mod tests {
         std::fs::write(paths::state_dir().join("plugin-events.jsonl"), format!("{line}\n")).unwrap();
         let heard = (0..60).find_map(|_| {
             let v = call("repos", "heard", &json!({})).unwrap();
-            if v.as_array().is_some_and(|a| a.len() == 3) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+            if v.as_array().is_some_and(|a| a.len() == 4) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
         });
-        assert_eq!(heard.unwrap()[2], json!({"thread": beta, "change": "deleted", "values": {"repos": 1}}));
+        assert_eq!(heard.unwrap()[3], json!({"thread": beta, "change": "deleted", "values": {"repos": 1}}));
         assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
+        APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
         sync();
     }

@@ -443,13 +443,18 @@ impl Registry {
 
 /// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's). Echo's shared JSON files use it too.
 pub(crate) fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
+    wait_lock_for(path, "plugins", std::time::Duration::from_secs(30))
+}
+
+/// The same for one lock: `what` it guards, named when it stays busy longer than `wait`.
+pub(crate) fn wait_lock_for(path: &Path, what: &str, wait: std::time::Duration) -> Result<crate::app::FileLock> {
     let t = std::time::Instant::now();
     loop {
         if let Some(l) = crate::app::FileLock::try_take(path)? {
             return Ok(l);
         }
-        if t.elapsed() > std::time::Duration::from_secs(30) {
-            bail!("another Echo is changing plugins — try again in a moment");
+        if t.elapsed() > wait {
+            bail!("another Echo is changing {what} — try again in a moment");
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -1107,6 +1112,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));
         let _ = fs::remove_file(addresses_file(id));
+        thread_values::forget(id);
     }
     Ok(())
 }
