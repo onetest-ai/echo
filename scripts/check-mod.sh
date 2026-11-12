@@ -54,6 +54,8 @@ node crates/echoctl/ui/minutes-needs.test.mjs
 node crates/echoctl/ui/fingerprint.test.mjs
 # A plugin's work row on My work and in a thread's Work tab: its icon as an image, text escaped, https only (#85).
 node crates/echoctl/ui/plugin-work-rows.test.mjs
+# The plugins' rows of a thread's Profile: each drawn on its own, one that throws left out (threadSlotRows, #464).
+node crates/echoctl/ui/thread-slot.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs
 # Settings search: sections by their names and their settings' own labels (SettingsSearch).

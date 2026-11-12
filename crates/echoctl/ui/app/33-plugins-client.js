@@ -26,7 +26,24 @@ const Plugins = {
 // `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
 // `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
 // `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings']
+// `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
+// `thread` = {id, name, client}.
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile']
+// ── thread slot: the plugins' rows of a thread's Profile, each drawn on its own — one that throws is left out (and
+// logged), the Profile draws without it.
+function threadSlotRows(items, thread, log) {
+  const out = []
+  for (const x of items || []) {
+    try {
+      const html = x.render(thread)
+      out.push({ key: `${x.plugin}:${x.id}`, label: String(x.label || x.id), html: html == null ? '' : String(html), after: x.after })
+    } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) }
+  }
+  return out
+}
+// end of the thread slot block
+/** The thread a `thread.profile` row is drawn for. */
+const slotThread = (p) => ({ id: p.id, name: p.name, client: p.client || null })
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }

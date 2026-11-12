@@ -36,6 +36,7 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+pub mod thread_values;
 
 /// Our public marketplace, always listed (it can be hidden, not removed).
 pub const BUILT_IN: &str = "onetest-ai/echo-plugins";

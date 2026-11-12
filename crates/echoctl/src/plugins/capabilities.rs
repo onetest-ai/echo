@@ -52,6 +52,7 @@ pub const EVENTS: &[(&str, &str)] = &[
     ("minutes_written", "a call's minutes are written (the call's title)"),
     ("thread_synced", "a thread's work is updated from its calls and mail"),
     ("sources_changed", "Echo's sources (calls, mail, channels) change"),
+    ("threads_changed", "a thread is renamed, merged or deleted"),
 ];
 
 pub(super) fn describe_events(v: &Value) -> Result<String> {
