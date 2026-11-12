@@ -1552,16 +1552,16 @@ mod tests {
         let uses = |v: Value| v.as_object().unwrap().clone();
         assert_eq!(
             describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap(),
-            vec!["Uses your sign-in to github.com on this computer (GitHub CLI or git) — it can do there what you can"]
+            vec!["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to"]
         );
         assert_eq!(
             describe(&uses(json!({"signin": {"hosts": ["github.com", "ghe.acme.example"]}}))).unwrap(),
-            vec!["Uses your sign-in to github.com and ghe.acme.example on this computer (GitHub CLI or git) — it can do there what you can"]
+            vec!["Gets the sign-in saved on this computer for github.com and ghe.acme.example (GitHub CLI or git): it can act as you there and send it to the places it talks to"]
         );
-        for bad in [json!({}), json!({"hosts": []}), json!({"hosts": ["a.com", "b.com", "c.com", "d.com", "e.com"]}), json!({"hosts": "github.com"})] {
+        for bad in [json!({}), json!({"hosts": []}), json!({"hosts": ["a.com", "b.com", "c.com", "d.com", "e.com"]}), json!({"hosts": "github.com"}), json!({"hosts": ["github.com", "github.com"]})] {
             assert!(describe(&uses(json!({"signin": bad}))).is_err(), "{bad}");
         }
-        for bad in ["https://github.com", "GitHub.com", "github", "github.com:443", "-x.com", "a..com", "user@github.com", "github.com/x", "git hub.com", "github.com\nhost=evil.com"] {
+        for bad in ["https://github.com", "GitHub.com", "github", "github.com:443", "-x.com", "a..com", "user@github.com", "github.com/x", "git hub.com", "github.com\nhost=evil.com", "10.0.0.1", "192.168.1.20"] {
             assert!(describe(&uses(json!({"signin": {"hosts": [bad]}}))).is_err(), "{bad}");
         }
         // It grants no network of its own.

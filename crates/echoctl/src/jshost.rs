@@ -1521,12 +1521,26 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine() {
+        use std::os::unix::fs::PermissionsExt;
         let (_env, root) = paths::testenv::folders("jshost-signin");
+        // Made-up `gh` and `git` (Echo's tests never look for the computer's own: `signin::FAKE_PROGRAMS`), each
+        // logging that it was asked.
+        let bin = root.join("fakebin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = |name: &str, body: &str| {
+            let p = bin.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\necho asked >> '{}.log'\n{body}\n", p.display())).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        *plugins::signin::FAKE_PROGRAMS.lock().unwrap() = vec![("gh", fake("gh", "echo gho_madeup777")), ("git", fake("git", "exit 1"))];
+        let asked = |name: &str| bin.join(format!("{name}.log")).exists();
         let mk = root.join("market");
         let d = mk.join("plugins/gh-ish");
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "gh-ish", "name": "Acme hub", "version": "0.1.0", "main": "main.js", "uses": {"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "gh-ish", "name": "Acme hub", "version": "0.1.0", "main": "main.js", "uses": {"signin": {"hosts": ["signin-jshost.example"]}, "network": {"hosts": ["api.github.com"]}}}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"
@@ -1543,23 +1557,43 @@ mod tests {
         let review = plugins::review("gh-ish", Some(&name)).unwrap();
         plugins::install("gh-ish", Some(&name), &review.uses).unwrap();
         sync();
-        let sources = (0..50).find_map(|_| call("gh-ish", "sources", &json!({"host": "github.com"})).ok().or_else(|| {
+        let sources = (0..50).find_map(|_| call("gh-ish", "sources", &json!({"host": "signin-jshost.example"})).ok().or_else(|| {
             std::thread::sleep(Duration::from_millis(50));
             None
         }));
         // Which programs are here, no sign-in read.
-        let sources = sources.unwrap();
-        assert!(sources["gh"].is_boolean() && sources["git"].is_boolean(), "{sources}");
-        assert_eq!(sources.as_object().unwrap().len(), 2);
+        assert_eq!(sources.unwrap(), json!({"gh": true, "git": true}));
+        assert!(!asked("gh") && !asked("git"));
+        // Any other host is refused before a program is asked. (A refusal is matched, never an answer printed.)
         for host in ["gitlab.com", "api.github.com"] {
-            assert!(call("gh-ish", "get", &json!({"host": host})).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{host}");
-            assert!(call("gh-ish", "sources", &json!({"host": host})).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{host}");
+            for command in ["get", "sources"] {
+                match call("gh-ish", command, &json!({"host": host})) {
+                    Err(e) => assert!(e.to_string().contains("didn't ask to use your sign-in"), "{host} {command}: {e}"),
+                    Ok(_) => panic!("{command} answered for {host}"),
+                }
+            }
         }
+        assert!(!asked("gh") && !asked("git"));
         // A read-only routine never reads one (refused before any program is asked).
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let refused = call("gh-ish", "get", &json!({"host": "github.com"}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("isn't allowed in a read-only routine"));
+        struct RunMode;
+        impl Drop for RunMode {
+            fn drop(&mut self) {
+                std::env::remove_var(crate::guard::RUN_MODE);
+            }
+        }
+        {
+            let _routine = RunMode;
+            std::env::set_var(crate::guard::RUN_MODE, "routine");
+            match call("gh-ish", "get", &json!({"host": "signin-jshost.example"})) {
+                Err(e) => assert!(e.to_string().contains("isn't allowed in a read-only routine"), "{e}"),
+                Ok(_) => panic!("a read-only routine was handed a sign-in"),
+            }
+        }
+        assert!(!asked("gh") && !asked("git"));
+        // The host it named: the made-up CLI's token.
+        assert_eq!(call("gh-ish", "get", &json!({"host": "signin-jshost.example"})).unwrap(), json!({"token": "gho_madeup777", "from": "gh"}));
+        assert!(asked("gh") && !asked("git"));
+        plugins::signin::FAKE_PROGRAMS.lock().unwrap().clear();
         plugins::remove("gh-ish", false).unwrap();
         sync();
     }

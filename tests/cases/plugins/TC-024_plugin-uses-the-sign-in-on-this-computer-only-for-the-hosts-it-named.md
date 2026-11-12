@@ -1,6 +1,6 @@
 ---
 id: TC-024
-title: A plugin that names github.com in uses.signin gets the sign-in from the GitHub CLI, else from git, else null — the sheet says so, nothing prompts, any other host is refused and no network comes with it
+title: A plugin that names github.com in uses.signin gets the sign-in saved on this computer from the GitHub CLI, else from git, else null — the sheet says it can act as you there, any other host is refused and no network comes with it
 priority: high
 type: functional
 requirements: [F-PLUG-21]
@@ -49,17 +49,17 @@ fake() { printf '#!/bin/sh\necho "$*" >> "%s/fakebin/%s.log"; cat >> "%s/fakebin
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `echoctl plugin install acme-hub --yes` | It prints `• Uses your sign-in to github.com on this computer (GitHub CLI or git) — it can do there what you can (new)` and no `Talks to` line; then `Installed Acme hub 0.1.0` |
+| 1 | `echoctl plugin install acme-hub --yes` | It prints `• Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to (new)` and no `Talks to` line; then `Installed Acme hub 0.1.0` |
 | 2 | `fake gh 'echo gho_madeup0000000000000000000000000000000'; fake git "printf 'protocol=https\nhost=github.com\nusername=ann\npassword=ghp_madeup11111\n'"`; `PATH="$D/fakebin:$PATH" echoctl plugin call acme-hub sources '{"host":"github.com"}'` | `{"gh": true, "git": true}`; neither log file exists yet (nothing was read) |
 | 3 | `PATH="$D/fakebin:$PATH" echoctl plugin call acme-hub who '{"host":"github.com"}'` | `{"from": "gh", "length": 41, "user": null}`; `gh.log` has `auth token --hostname github.com`; there is no `git.log` (git wasn't asked) |
 | 4 | `fake gh 'echo "not logged in" >&2; exit 1'`; run step 3's call again | `{"from": "git", "length": 15, "user": "ann"}`; `git.log` has `credential fill` and the lines `protocol=https`, `host=github.com`, and no `approve`, `reject` or `erase` |
 | 5 | `fake git 'exit 128'`; run step 3's call again | `null` |
 | 6 | `PATH="$D/fakebin:$PATH" echoctl plugin call acme-hub who '{"host":"gitlab.com"}'`, then the same with `sources` | Both fail with `it didn't ask to use your sign-in to “gitlab.com” when it was installed (uses.signin.hosts)`; no new line in either log |
 | 7 | `echoctl plugin call acme-hub fetch` | It fails with `acme-hub may reach only the hosts its manifest names` — the sign-in brought no network with it |
-| 8 | Reload `{{base_url}}/`, open `{{base_url}}/#settings/plugins`, click the row "Acme hub" | "What it can do" lists "Uses your sign-in to github.com on this computer (GitHub CLI or git) — it can do there what you can" |
+| 8 | Reload `{{base_url}}/`, open `{{base_url}}/#settings/plugins`, click the row "Acme hub" | "What it can do" lists "Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to" |
 
 ## Expected Final State
-Acme hub is installed; it was handed the made-up CLI token, then git's made-up credential, then nothing, and was refused for any other host and any network it didn't name. No window or prompt appeared at any step.
+Acme hub is installed; it was handed the made-up CLI token, then git's made-up credential, then nothing, and was refused for any other host and any network it didn't name. Echo asked for no password at any step (the made-up programs use no keychain).
 
 ## Teardown
 - `echoctl plugin remove acme-hub --delete-data`; `echoctl plugin marketplace remove acme-local`; `rm -rf "$D/fakebin"`
@@ -67,4 +67,5 @@ Acme hub is installed; it was handed the made-up CLI token, then git's made-up c
 
 ## Notes
 - Written from the feature's text (F-PLUG-21). A real token on screen or in any file of the run is a FAIL: every program asked here is a made-up one first on `PATH`.
-- A read-only routine refusing `ctx.signin.get` and a program that hangs past 10 s are covered by Rust tests (`jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine`, `plugins::signin::a_program_that_hangs_is_given_up_on`).
+- A read-only routine refusing `ctx.signin.get`, a program that hangs past 10 s (stopped with what it started), a helper planted in a repository or in an inherited `GIT_CONFIG_PARAMETERS` (never run) and one lookup per host at a time, kept a minute in the running app (each `echoctl plugin call` is a new process), are covered by Rust tests (`jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine`, `plugins::signin::tests::*`).
+- With a real GitHub CLI or git, the system's keychain may ask once to let it hand the sign-in over; Echo itself never asks for a password.

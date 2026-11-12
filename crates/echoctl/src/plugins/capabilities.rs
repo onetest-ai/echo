@@ -261,20 +261,29 @@ pub(super) fn describe_files(v: &Value) -> Result<String> {
     Ok(format!("Reads these files of other apps on this computer: {}", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())))
 }
 
-/// `uses.signin.hosts`: the hosts whose sign-in on this computer (the GitHub CLI's, or git's credential helper) the
-/// plugin's host half may be handed — 1 to 4 plain host names. It grants no network: the plugin names its API hosts in
+/// `uses.signin.hosts`: the hosts whose sign-in saved on this computer (the GitHub CLI's token, or the password or
+/// token git's credential helper keeps — for a self-hosted git maybe the user's own password) the plugin's host half
+/// may be handed — 1 to 4 plain host names, each once. It grants no network: the plugin names its API hosts in
 /// `network.hosts` itself.
 pub(super) fn describe_signin(v: &Value) -> Result<String> {
     let hosts = strings(v, "hosts")?;
-    if hosts.is_empty() || hosts.len() > 4 || hosts.iter().any(|h| !plain_host(h)) {
-        bail!("“signin” names 1 to 4 hosts by their plain names (e.g. github.com)");
+    let once = hosts.iter().collect::<std::collections::BTreeSet<_>>().len() == hosts.len();
+    if hosts.is_empty() || hosts.len() > 4 || !once || hosts.iter().any(|h| !plain_host(h)) {
+        bail!("“signin” names 1 to 4 hosts, each once, by their plain names (e.g. github.com)");
     }
-    Ok(format!("Uses your sign-in to {} on this computer (GitHub CLI or git) — it can do there what you can", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())))
+    Ok(format!(
+        "Gets the sign-in saved on this computer for {} (GitHub CLI or git): it can act as you there and send it to the places it talks to",
+        join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())
+    ))
 }
 
-/// A host's plain name: lowercase letters, digits, `-` and dots between labels, at least one dot (`github.com`).
+/// A host's plain name: lowercase letters, digits, `-` and dots between labels, at least one dot (`github.com`), and
+/// not an address (`10.0.0.1`: its last label all digits).
 fn plain_host(h: &str) -> bool {
-    h.len() <= 253 && h.contains('.') && h.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+    h.len() <= 253
+        && h.contains('.')
+        && h.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+        && !h.rsplit('.').next().is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// May a plugin with these `uses` be handed the user's sign-in to `host`? Only one its install sheet named.
