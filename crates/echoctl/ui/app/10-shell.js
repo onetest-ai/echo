@@ -321,15 +321,19 @@ function list() {
       const g = d ? dayLabel(d) : 'Undated'
       const head = g !== group ? `<div class="group">${esc(g)}</div>` : ''
       group = g
-      const meta = [d ? hm(d) : '', c.memo ? 'Memo' : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+      const meta = [d ? hm(d) : '', c.memo ? 'Memo' : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+      // Who was there: up to three faces on the right, the rest as +N; every name in the tooltip.
+      // (Their initials are drawn by the stylesheet; the names are read as words, as the line said them before.)
+      const who = c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '')
+      const faces = c.people.length ? `<span class="row-faces" title="${esc(c.people.join(', '))}"><span class="row-sr">${esc(who)}</span>${c.people.slice(0, 3).map((n) => avatar(n).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')).join('')}${c.people.length > 3 ? `<span class="row-more" aria-hidden="true">+${c.people.length - 3}</span>` : ''}</span>` : ''
       const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       const due = minutesAhead(c)
       const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
         ${c.memo && c.status !== 'recording' ? `<span class="si memo" title="Memo" aria-label="Memo">${MIC(14)}</span>` : statusIcon(c.status)}
-        <span class="t">${esc(c.title)}</span>
-        <span class="m">${clockChip}${icons}${meta}</span>
+        <span class="t">${esc(c.title)}</span>${clockChip}
+        <span class="m">${icons}${meta}</span>${faces}
       </button>`
     }).join('') + (S.callsNext ? `<div class="rows-more" data-calls-more>${S.callsMore ? 'Loading…' : `${calls.length} of ${S.callsTotal}`}</div>` : '')
   }

@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#projects` and read the group "Duff" | The name "Duff" has no thread row and no fold arrow |
+| 1 | Navigate to `{{base_url}}/#projects`; open the fold "Without threads · N" at the end of the list; read the group "Duff" | "Duff" is not among the clients until the fold is opened (a client with no open thread waits there); then the name "Duff" has no thread row and no fold arrow |
 | 2 | Click the name "Duff" | The route is `#client/duff/overview`; the head says "Duff", the tag "client" and "0 threads · duff.example" |
 | 3 | Read the Overview | The block "About Duff" says "Nothing yet — who they are, what you do for them, who matters."; the section "Threads" says "No threads for this client yet — add one on Profile." |
 | 4 | Click the tab "Calls" | "No calls in this client's threads yet." (the tab has no number, as Tasks has none: #173) |

@@ -220,7 +220,8 @@ function chatSources(p) {
 }
 function threadSources(p, cl) {
   if (!brainOn()) {
-    const kept = (p.sources || []).filter((x) => x.kind !== 'teams_chat').map((x) => tok(`${{ teams_channel: '#', mail: '✉', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || x.id)}`, null)).join('')
+    // A folder by its name (its whole path in the tooltip), as when Recall is on.
+    const kept = (p.sources || []).filter((x) => x.kind !== 'teams_chat').map((x) => tok(`${{ teams_channel: '#', mail: '✉', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || (x.kind === 'folder' ? x.id.split(/[\\/]/).pop() : x.id))}`, null, x.kind === 'folder' ? x.id : undefined)).join('')
     return chatSources(p) + kept + `<div class="pf-sub">Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Knowledge. Meeting chats, and mail already added here, are read into the work either way.</div>`
   }
   loadSourceState()

@@ -1264,6 +1264,7 @@
     "colour": "Colour {c}",
     "stageSince": "{stage} since {day}",
     "closed": "Closed · {n}",
+    "idleClients": "Without threads · {n}",
     "noClient": "No client — internal work, or not set",
     "noClientOption": "No client",
     "noClientGroup": "No client",
@@ -2525,7 +2526,7 @@
           "plugin:widget-demo:builds",
           "color",
           "red",
-          "Error: plugin:widget-demo:builds has no setting \"color\" (it has branch)"
+          "Error: plugin:widget-demo:builds has no setting \"color\" (it has branch, thread)"
         ],
         [
           "core:tasks.mine",

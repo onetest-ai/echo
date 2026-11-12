@@ -111,8 +111,11 @@
 .wk-st.waiting { color: var(--warn); }
 .wk-empty { padding: 30px 6px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; max-width: 520px; }
 .wk-empty p { margin: 0; color: var(--text-3); font-size: 13px; }
-.wk-review { display: flex; flex-direction: column; gap: 6px; }
-.wk-rv { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 8%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); font-size: 12.5px; }
+.wk-review { display: flex; flex-direction: column; border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--warn) 5%, transparent); }
+.wk-rv-h { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--text-2); text-align: left; cursor: default; }
+.wk-rv-n { font-weight: 600; color: var(--warn); }
+.wk-rv { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-top: 1px solid color-mix(in srgb, var(--warn) 16%, transparent); font-size: 12.5px; min-width: 0; }
+.wk-rv-q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-rv .btn { height: 24px; }
 .wk-board { display: grid; grid-template-columns: repeat(5, minmax(170px, 1fr)); gap: 10px; align-items: start; overflow-x: auto; }
 .wk-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

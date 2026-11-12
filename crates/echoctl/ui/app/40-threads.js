@@ -90,7 +90,9 @@ function projectList(data) {
   const clients = data.clients || []
   const row = (p) => {
     const last = p.last_call ? dayLabel(new Date(p.last_call)) : ''
-    return `<button class="pj-row${p.id === S.pj.sel ? ' on' : ''}" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 20)}<span class="pj-row-t"><b>${esc(p.name)}</b><span class="pj-row-m">${p.call_count} call${p.call_count === 1 ? '' : 's'}${last ? ` · ${esc(last)}` : ''}</span></span>${p.group !== 'closed' ? stageTag(p.stage) : ''}</button>`
+    // The stage ends the second line, a dot and its word in its colour: the name has the row's whole width.
+    const st = p.group !== 'closed' ? ProjectArt.stage(p.stage) : null
+    return `<button class="pj-row${p.id === S.pj.sel ? ' on' : ''}" data-pj="open" data-id="${esc(p.id)}" title="${esc(p.name)}">${projIcon(p, 20)}<span class="pj-row-t"><b>${esc(p.name)}</b><span class="pj-row-m">${p.call_count} call${p.call_count === 1 ? '' : 's'}${last ? ` · ${esc(last)}` : ''}${st ? ` <span class="pj-st ${esc(st.gid)}">${esc(st.label)}</span>` : ''}</span></span></button>`
   }
   const open = ps.filter((p) => p.group !== 'closed'), closed = ps.filter((p) => p.group === 'closed')
   const groups = []
@@ -101,20 +103,26 @@ function projectList(data) {
     const chev = !xs.length ? '<span class="pj-chev" aria-hidden="true"></span>' : `<button class="pj-chev" data-pj="fold" data-id="${esc(id)}" aria-expanded="${!folded}" title="${folded ? 'Show' : 'Hide'} its threads" aria-label="${folded ? 'Show' : 'Hide'} its threads">${ICON(folded ? '<path d="M9 6l6 6-6 6"/>' : '<path d="M6 9l6 6 6-6"/>')}</button>`
     return `<div class="pj-ghead${folded ? ' folded' : ''}" role="group" aria-label="${esc(label)}">${chev}${name}${folded && xs.length ? `<span class="pj-gn">${xs.length}</span>` : ''}</div>${shown.map(row).join('')}`
   }
+  const clientHead = (c) => `<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}<span class="pj-cn">${esc(c.internal ? `${c.name} · your company` : c.name)}</span></button>`
+  // Clients with no open thread wait folded at the end ("Without threads · 2"), not as bare heads among the rest
+  // (your own company stays in place, open threads or not).
+  const idle = []
   for (const c of [...clients.filter((c) => !c.internal), ...clients.filter((c) => c.internal)]) {
     const xs = open.filter((p) => p.client === c.id)
-    groups.push(fold(c.id, xs, `<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}<span class="pj-cn">${esc(c.internal ? `${c.name} · your company` : c.name)}</span></button>`, c.internal ? `${c.name} · your company` : c.name))
+    if (!xs.length && !c.internal && S.pj.client !== c.id) { idle.push(c); continue } // your own company stays in place
+    groups.push(fold(c.id, xs, clientHead(c), c.internal ? `${c.name} · your company` : c.name))
   }
   // Folds of clients that are gone are forgotten.
   if (clients.length && !data.error) for (const k of [...pjFolded]) if (k !== '-' && !clients.some((c) => c.id === k)) pjFold(k)
   const none = open.filter((p) => !p.client || !clients.some((c) => c.id === p.client))
   if (none.length) groups.push(clients.length ? fold('-', none, '<div class="pj-group">No client</div>', 'No client') : `<div class="pj-group">Threads</div>${none.map(row).join('')}`)
+  const idleRows = idle.length ? `<button class="pj-group pj-fold" data-pj="toggle-idle-clients" aria-expanded="${!!S.pj.showIdle}">${CHEV(!!S.pj.showIdle)} Without threads · ${idle.length}</button>${S.pj.showIdle ? idle.map((c) => fold(c.id, [], clientHead(c), c.internal ? `${c.name} · your company` : c.name)).join('') : ''}` : ''
   const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${CHEV(S.pj.showClosed)} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
   const err = data.error ? `<p class="error" style="padding:10px">${esc(data.error)}</p>` : ''
   const fc = data.found_count || 0
   const found = `<button class="pj-row pj-found${S.pj.found ? ' on' : ''}${fc ? '' : ' quiet'}" data-pj="found"><span class="pj-spark" aria-hidden="true">✦</span><b class="grow">Found for you</b>${fc ? `<span class="pj-badge">${fc}</span>` : ''}</button>`
   return `<div class="pj-side-head"><h1>Threads</h1><button class="icon-btn" data-pj="new" title="New thread" aria-label="New thread">${ICON('<path d="M12 5v14M5 12h14"/>')}</button></div>${found}
-    ${err}<div class="pj-rows">${groups.join('')}${closedRows}</div>`
+    ${err}<div class="pj-rows">${groups.join('')}${idleRows}${closedRows}</div>`
 }
 
 function projectMain(data) {

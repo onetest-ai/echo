@@ -43,6 +43,19 @@
 .row .m { grid-column: 2; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 10px; }
 .row .m span { flex: none; }
 .row .m span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A call's row: the title, and who was there as small faces on its right (up to three, then +N); under it the when and the kind (cut with … when
+   narrow), and the minutes' countdown on the right — nothing pushes anything out. */
+.row { grid-template-columns: 16px minmax(0, 1fr) auto; }
+.row .t { grid-row: 1; }
+.row .m { grid-row: 2; grid-column: 2 / 4; }
+.row:has(> .mn-clock) .m { grid-column: 2; } /* the countdown takes the line's right end */
+.row-faces { grid-column: 3; grid-row: 1; align-self: center; display: inline-flex; align-items: center; gap: 3px; }
+.row-faces .bd-av { width: 18px; height: 18px; font-size: 8px; letter-spacing: 0; }
+.row-faces .bd-av[data-ini]::before { content: attr(data-ini); }
+.row-faces .row-more { margin-left: 1px; font-size: 11px; color: var(--text-3); }
+.row-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.row > .mn-clock { grid-column: 3; grid-row: 2; align-self: center; justify-self: end; margin-right: 0; }
+.row { position: relative; }
 .si { grid-column: 1; grid-row: 1; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--text-3); }
 .si.notes { color: var(--me); }
 .si.transcribing { color: var(--warn); }

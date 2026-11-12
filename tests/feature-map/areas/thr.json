@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-THR-01",
-   "feature": "The Threads list groups open threads by client (outside clients first, then the user's company, then No client); each client folds (remembered) and its name opens the client; closed threads sit under \"Closed · N\"",
+   "feature": "The Threads list groups open threads by client (outside clients first, then the user's company, then No client); each client folds (remembered) and its name opens the client; a row's stage ends its second line (a dot and the word, in its colour); outside clients with no open thread wait in the fold \"Without threads · N\" at the end; closed threads sit under \"Closed · N\"",
    "priority": "high",
    "check": "agent",
    "axes": [

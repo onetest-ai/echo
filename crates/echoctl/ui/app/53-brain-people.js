@@ -477,6 +477,8 @@ document.addEventListener('click', (e) => {
     case 'goto-node': { S.pj.node = d.node; S.pj.wantNode = d.node; S.pj.inline = null; S.pj.tab = 'work'; go(`project/${d.id}/work`); Layout.show('work-item', panelViews()); return layoutChanged() }
     case 'tab': return go(`project/${S.pj.sel}/${d.tabId}`)
     case 'toggle-closed': S.pj.showClosed = !S.pj.showClosed; return render()
+    case 'toggle-idle-clients': S.pj.showIdle = !S.pj.showIdle; return render()
+    case 'review-fold': S.pj.reviewFolded = !S.pj.reviewFolded; return render()
     case 'fold': {
       pjFold(d.id); render()
       // The sidebar was drawn again: the keyboard stays on this chevron.

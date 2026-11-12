@@ -314,9 +314,17 @@ function projectWork(p) {
   if (!all.length) {
     return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
   }
-  const reviewList = review.length ? `<div class="wk-review">${review.map((r) => r.s
-    ? `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-warn">To review</span><span class="grow">${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(r.n.title)} — ${r.s.quote ? `“${esc(r.s.quote)}”` : esc(r.s.note || '')}</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button><button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button></div>`
-    : `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-warn">To review</span><span class="grow">Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">“${esc(r.weak.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button><button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button></div>`).join('')}</div>` : ''
+  // To review: one quiet panel — its head once ("To review · 3", folds it), a row each on one line: the question and the
+  // words it came from cut with … (whole in the tooltip), its two buttons.
+  const rv = (html, whole, yes, no) => `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-rv-q" title="${esc(whole)}">${html}</span>${yes}${no}</div>`
+  const reviewList = review.length ? `<div class="wk-review${S.pj.reviewFolded ? ' folded' : ''}"><button class="wk-rv-h" data-pj="review-fold" aria-expanded="${!S.pj.reviewFolded}">${CHEV(!S.pj.reviewFolded)} <span class="wk-warn">To review</span> <span class="wk-rv-n">${review.length}</span></button>${S.pj.reviewFolded ? '' : review.map((r) => {
+    if (r.s) {
+      const q = `${r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under'} ${(N[r.s.to] || {}).title || r.s.to}?`, w = `${r.n.title} — ${r.s.quote ? `“${r.s.quote}”` : r.s.note || ''}`
+      return rv(`${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(w)}</span>`, `${q} ${w}`, `<button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button>`, `<button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button>`)
+    }
+    const w = `“${r.weak.quote || ''}”`
+    return rv(`Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">${esc(w)}</span>`, `Is ${r.n.title} done? ${w}`, `<button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button>`, `<button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button>`)
+  }).join('')}</div>` : ''
   if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, board)}`
   const rows = []
   const walk = (id, level) => {
