@@ -30,7 +30,8 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 4 | `target/debug/echoctl today size core:calendar.agenda M`; reload | Your day at M no longer holds a column: it is a row of its own two columns wide (its size: the third column stays empty), then Next and Needs you now, the choices, My work; `today size core:calendar.agenda S` puts it back |
 | 5 | Resize the browser window to 700 × 1000 | Today one column: Your day as the strip (the day in one bar) on top, then Next meeting, Needs you now, the choices, My work, each across, in that order |
 | 6 | Back to 1440 × 1000 at 900 px high; `target/debug/echoctl today move core:tasks.mine --before core:needs.now`, `today size core:tasks.mine M`; reload | My work in Next meeting's row, beside it (Needs you now wraps to the next line). When its list is longer than its card (it depends on the data and the height), a fade at its bottom shows there is more and goes when scrolled to the end; when it fits, there is no fade |
-| 7 | `target/debug/echoctl today reset`; reload | As in step 1 |
+| 7 | `target/debug/echoctl today reset`, `today remove core:calendar.agenda`, `today move core:routines.cards --after core:calendar.next` (the routines' cards have nothing in the test data: empty), `today move core:needs.now --below core:calendar.choices`; reload | The day's choices moved up beside Next meeting, into the empty cards' place (one line: Next meeting a third, the choices two thirds), then Needs you now, then My work — none of them beside an empty gap; in edit mode (the pencil) the layout as set: Next meeting and the cards' frame, the choices on a row of their own |
+| 8 | `target/debug/echoctl today reset`; reload | As in step 1 |
 
 ## Expected Final State
 Today as it comes.

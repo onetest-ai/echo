@@ -63,6 +63,21 @@ test('an empty row takes no line; an empty widget leaves its row to the others',
   assert.deepEqual(todayLines([], 3), [])
 })
 
+test('widgets after an empty one move up into its place when they fit, in order and at their size', () => {
+  // Next meeting S beside an empty Needs you now; the choices empty beside GitHub M; routine cards empty (the report).
+  const rows = [[W('next', 1), W('needs', 2, { empty: true })], [W('choices', 2, { empty: true }), W('github', 2)], [W('cards', 3, { empty: true })], [W('mine', 3, { fill: true })]]
+  assert.equal(show(todayLines(rows, 3)), 'next:1 github:2 / mine:3 (fill)')
+  // One that doesn't fit stays on its line, and so do the ones after it.
+  assert.equal(show(todayLines([[W('a', 2), W('b', 1, { empty: true })], [W('c', 2), W('d', 1)]], 3)), 'a:2 / c:2 d:1')
+  // The line it left has room for the next ones in turn.
+  assert.equal(show(todayLines([[W('a', 1), W('b', 2, { empty: true })], [W('c', 1), W('d', 2)], [W('e', 1)]], 3)), 'a:1 c:1 / d:2 e:1')
+  // Nothing empty: the rows as laid out.
+  assert.equal(show(todayLines([[W('a', 1)], [W('b', 1)]], 3)), 'a:1 / b:1')
+  // A fill widget never moves up beside others, and nothing moves up into a fill line.
+  assert.equal(show(todayLines([[W('a', 1), W('b', 2, { empty: true })], [W('day', 2, { fill: true })]], 3)), 'a:1 / day:2 (fill)')
+  assert.equal(show(todayLines([[W('day', 2, { fill: true }), W('b', 1, { empty: true })], [W('c', 1)]], 3)), 'day:2 (fill) / c:1')
+})
+
 test('a fill alone on the first row at span 1 holds the first column; the rest beside it in the others (TodayResponsive)', () => {
   const W = (id, span, fill = false, empty = false) => ({ id, span, fill, empty })
   const rows = [[W('day', 1, true)], [W('next', 1), W('needs', 1)], [W('choices', 2)], [W('mine', 2, true)]]

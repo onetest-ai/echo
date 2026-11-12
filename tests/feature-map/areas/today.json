@@ -84,7 +84,7 @@
   },
   {
    "id": "F-TODAY-12",
-   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space; re-laid when the menu, the right panel or the window changes it; nothing reorders; a line keeps its widgets' spans, a fill one too (a lone S is a third of three columns, Your day at M two thirds) — only a page of one line takes the whole width",
+   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space and the widgets after it moving up into its place while they fit at their size (not a fill or two-rows-high one, not into a fill line; edit mode shows the layout as set); re-laid when the menu, the right panel or the window changes it; nothing reorders; a line keeps its widgets' spans, a fill one too (a lone S is a third of three columns, Your day at M two thirds) — only a page of one line takes the whole width",
    "priority": "high",
    "check": "agent",
    "axes": []
