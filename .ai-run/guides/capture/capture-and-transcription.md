@@ -6,13 +6,14 @@
 
 ### Rules
 - R1. Write, cancel, expire or take an arm only under `watch::arm_lock`, and start a recording only after `take_arm(id)` returned true. Evidence: `watch::take_arm`
-- R2. An arm is single-use: taken before `Recording::start`, used up even when the start fails, expired after `ARM_EXPIRES`; a scheduled meeting leaves the schedule once its recording starts, and stopping never re-arms it. Evidence: `watch::run_loop`
+- R2. An arm is single-use: taken before `Recording::start`, used up even when the start fails, expired after `ARM_EXPIRES` (an arm waiting for its meeting's call, R9, not before the meeting ends); a scheduled meeting leaves the schedule once its recording starts, and stopping never re-arms it. Evidence: `watch::run_loop`
 - R3. A user Stop during a call ends only the recording: the call's pending arm is held (`held_arm`) and no scheduled meeting is armed (`stopped_in_call`) until the call ends; a memo never takes this path. Evidence: `watch::run_loop`
 - R4. One recording at a time: a memo is refused while anything records, records only the default mic, ends only on `stop.request`, and a call during it is not recorded (`call_during_memo`). Evidence: `recorder::Recording::start_memo`
 - R5. A recording ends only through `Recording::finish` (every track halted before any is finished, each finished even when another failed, the end written under `calls::lock_meta`); what was saved is transcribed even when it returns an error. Evidence: `recorder::Recording::finish`
 - R6. Never reuse a call folder. Evidence: `recorder::call_dir`
 - R7. Pruned frames move to `.echo/trash/<call>.frames/` with their index lines, never deleted. Evidence: `calls::prune_frames`
 - R8. A memo's threads change only through `memo::set_threads`, under the threads' lock; the user's pins are never taken back. Evidence: `memo::set_threads`
+- R9. An arm for a meeting starts only on that meeting's call when the call window can be read: the window naming the meeting, or a call begun from `MATCH_EARLY_MIN` before it, is its call; a call begun before that whose window doesn't name the meeting (another name, a channel's, none) makes it wait (`arm_waits_other_call`) until the user is on its call; a name alone never does, a window it can't read at all starts it on the call going on, and Record on a call already going on arms no meeting. Evidence: `watch::meetings_call`
 
 ### Constraints
 | Do not | Do instead | Evidence |
