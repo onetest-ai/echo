@@ -193,7 +193,9 @@ const PRELUDE: &str = r#"
 enum Msg {
     Load(String, PathBuf),
     Unload(String),
-    Call { plugin: String, command: String, args: String, reply: Sender<Result<Value, String>> },
+    Call { plugin: String, command: String, args: String, n: u64, reply: Sender<Result<Value, String>> },
+    /// A call's caller stopped waiting (its timeout): its reply is dropped, never kept for a plugin that doesn't settle.
+    Forget(String, u64),
     Event(String, String),
     Settle(String, u64, String),
 }
@@ -425,11 +427,15 @@ pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration)
         sync_only(plugin);
     }
     let (tx, rx) = channel();
-    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
     match rx.recv_timeout(timeout) {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => bail!("{e}"),
-        Err(_) => bail!("{plugin} didn't answer {command} within {} s", timeout.as_secs()),
+        Err(_) => {
+            let _ = h.tx.send(Msg::Forget(plugin.into(), n));
+            bail!("{plugin} didn't answer {command} within {} s", timeout.as_secs())
+        }
     }
 }
 
@@ -513,13 +519,12 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     l.remove(&id);
                 }
             }
-            Ok(Msg::Call { plugin, command, args, reply }) => {
+            Ok(Msg::Call { plugin, command, args, n, reply }) => {
                 let Some(p) = plugins.get_mut(&plugin) else {
                     let why = status().get(&plugin).and_then(|r| r.clone().err()).unwrap_or_else(|| "it isn't installed and on".into());
                     let _ = reply.send(Err(format!("{plugin} isn't loaded: {why}")));
                     continue;
                 };
-                let n = NEXT.fetch_add(1, Ordering::Relaxed);
                 p.calls.insert(n, reply);
                 set_current(&current, &plugin);
                 let ctx = p.ctx.clone();
@@ -532,6 +537,11 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                         }
                     })
                 });
+            }
+            Ok(Msg::Forget(plugin, n)) => {
+                if let Some(p) = plugins.get_mut(&plugin) {
+                    p.calls.remove(&n);
+                }
             }
             Ok(Msg::Event(name, payload)) => {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -568,6 +578,10 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     let _ = tx.send(r.clone());
                 }
             }
+        }
+        #[cfg(test)]
+        if let Ok(mut w) = tests::WAITING.lock() {
+            *w = plugins.iter().map(|(id, p)| (id.clone(), p.calls.len())).collect();
         }
     }
 }
@@ -1335,6 +1349,9 @@ pub fn inbox_items() -> Vec<(String, String, Value)> {
 mod tests {
     use super::*;
 
+    /// The calls each loaded plugin still owes a reply (the host thread's, after each message).
+    pub(super) static WAITING: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
     fn got_size(plugin: &str, widget: &str) -> String {
         widget_last(plugin, widget).and_then(|l| l["data"]["items"][0]["sub"].as_str().map(str::to_owned)).unwrap_or_default()
     }
@@ -1738,6 +1755,7 @@ mod tests {
               })
               ctx.command('break', () => { broken = true; ctx.work.changed(); return 1 })
               ctx.command('sneak', () => ctx.store.write('work.json', '{}'))
+              ctx.command('hang', () => new Promise(() => {}))
             }
             "#,
         )
@@ -1757,21 +1775,34 @@ mod tests {
         sync();
         assert!((0..50).any(|_| call("quiet", "try", &json!({})).is_err_and(|e| e.to_string().contains("didn't ask for “work”")) || { std::thread::sleep(Duration::from_millis(50)); false }), "only with uses.work");
         assert!(call("gh", "sneak", &json!({})).unwrap_err().to_string().contains("work.json"), "its work.json is Echo's to write");
-        // Never waited for: the first read asks in the background; the answer is drawn from then on.
-        let first = work::rows(None);
-        assert!(first.is_empty(), "{first:?}");
-        let me = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::rows(None) }).find(|r| r.len() == 2).expect("answered");
+        // Never waited for: the first read asks in the background — waited for (`pending`) until it answers.
+        let (first, pending) = work::view(None);
+        assert!(first.is_empty() && pending, "{first:?}");
+        let me = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::view(None) }).find(|(r, p)| r.len() == 2 && !p).expect("answered").0;
         assert_eq!((me[0]["id"].as_str(), me[1]["id"].as_str()), (Some("is-3"), Some("pr-7")), "by date, no date last");
         assert_eq!((me[0]["source"].as_str(), me[0]["source_name"].as_str(), me[0]["icon"].as_str()), (Some("gh"), Some("GitHub"), Some("plugin/gh/icon.svg")));
         // Alpha's Work: its own rows and the user's that name it, each once.
         let _ = work::of_thread(&alpha);
-        let th = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::of_thread(&alpha) }).find(|r| r.len() == 2).expect("answered");
+        let th = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::thread_view(&alpha) }).find(|(r, p)| r.len() == 2 && !p).expect("answered").0;
         assert_eq!(th.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["pr-8", "pr-7"]);
-        // It fails: its rows are left out, with why.
+        // It fails: its last rows kept, marked not updated, with why — and where (My work's, not a thread's).
         call("gh", "break", &json!({})).unwrap();
+        assert!(work::view(None).1, "changed: waited for again");
         let gone = (0..100).find(|_| { std::thread::sleep(Duration::from_millis(50)); work::error("gh").is_some() });
-        assert!(gone.is_some() && work::rows(None).is_empty(), "{:?}", work::error("gh"));
-        assert!(work::error("gh").unwrap().contains("GitHub is down"));
+        assert!(gone.is_some(), "{:?}", work::error("gh"));
+        let (place, why) = work::error("gh").unwrap();
+        assert!(place == "My work" && why.contains("GitHub is down"), "{place}: {why}");
+        let stale = work::rows(None);
+        assert_eq!(stale.len(), 2, "kept");
+        assert!(stale.iter().all(|r| r["stale"].as_str().is_some_and(|e| e.contains("GitHub is down"))), "{stale:?}");
+        // Alpha deleted: its scope goes from the plugin's work.json.
+        assert!(std::fs::read_to_string(plugins::data_dir("gh").join(work::FILE)).unwrap().contains(&format!("thread:{alpha}")));
+        crate::projects::delete(&alpha).unwrap();
+        assert!(!std::fs::read_to_string(plugins::data_dir("gh").join(work::FILE)).unwrap().contains(&format!("thread:{alpha}")));
+        // A command that never settles: its caller stops waiting and the host keeps nothing for it.
+        assert!(call_within("gh", "hang", &json!({}), Duration::from_millis(200)).unwrap_err().to_string().contains("didn't answer"));
+        let left = (0..50).map(|_| { std::thread::sleep(Duration::from_millis(50)); WAITING.lock().unwrap().get("gh").copied() }).find(|w| *w == Some(0));
+        assert_eq!(left, Some(Some(0)), "its reply dropped");
         // Removed: its rows go.
         plugins::remove("gh", true).unwrap();
         assert!(work::rows(None).is_empty() && work::of_thread(&alpha).is_empty());

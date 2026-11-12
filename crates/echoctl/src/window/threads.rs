@@ -432,7 +432,9 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                         // The plugins' items of this thread (`ctx.work.provide`): never in its ledger.
                         #[cfg(feature = "js")]
                         {
-                            t["plugin_rows"] = json!(crate::jshost::work::of_thread(id));
+                            let (rows, pending) = crate::jshost::work::thread_view(id);
+                            t["plugin_rows"] = json!(rows);
+                            t["plugin_rows_pending"] = json!(pending);
                         }
                         t
                     }

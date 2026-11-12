@@ -296,9 +296,13 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
         check_params(&w.id, &w.params)?;
     }
+    // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
+    // only, ending `.svg` — what the window serves as an image.
     if let Some(i) = &m.icon {
-        let f = inside_plugin(dir, i)?;
-        if f.extension().is_none_or(|e| !e.eq_ignore_ascii_case("svg")) || fs::metadata(&f)?.len() > 16 * 1024 {
+        if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
+            bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
+        }
+        if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
             bail!("its icon {i} must be an .svg of 16 KB at most");
         }
     }
@@ -1768,7 +1772,9 @@ mod tests {
         let m = with("icon.svg").unwrap();
         assert_eq!(m.icon.as_deref(), Some("icon.svg"));
         assert_eq!(sheet(&m).unwrap(), ["Adds its items to Today → My work and to threads' Work"]);
-        for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg"] {
+        fs::write(d.join("Icon.SVG"), "<svg/>").unwrap();
+        fs::write(d.join("a b.svg"), "<svg/>").unwrap();
+        for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg", "Icon.SVG", "a b.svg", "x\"y.svg", "/icon.svg"] {
             assert!(with(bad).is_err(), "{bad}");
         }
     }

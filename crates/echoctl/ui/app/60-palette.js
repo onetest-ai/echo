@@ -83,9 +83,9 @@ function paletteItems(target) {
       add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
       add('My work', `Claude: ${t.title}`, () => press({ claudeTask: t.id, today: '1', ...attrs }), { keywords: 'ask send change move due later work on it skill follow-up mail session' })
     }
-    // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does.
+    // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does — asked first on its row.
     for (const r of (w.plugins || []).filter((r) => /^https:\/\//.test(r.url || ''))) {
-      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: r.source_name || '' })
+      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: [r.source_name, linkHost(r.url)].filter(Boolean).join(' · '), icon: workRowIcon(r) })
     }
   }
   // Echo's own
@@ -142,7 +142,7 @@ function paletteDraw() {
   $('#pal-list').innerHTML = PAL.items.map((it, i) => {
     const head = it.group !== group ? `${group === null ? '' : '</div>'}<div role="group" aria-label="${esc(it.group)}"><div class="pal-group">${esc(it.group)}</div>` : ''
     group = it.group
-    return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
+    return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${it.icon || ''}${esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
   }).join('') + (group === null ? '' : '</div>') || '<div class="pal-empty">Nothing matches.</div>'
   const on = $('#pal-list .pal-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
 }

@@ -261,8 +261,9 @@ CLICKS.push(
   { sel: '[data-signin-accept]', area: 'settings', when: (t) => t.dataset.signinAccept, run: (t) => { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') } },
   { sel: '[data-signin-check]', area: 'settings', when: (t) => t.dataset.signinCheck, run: (t) => { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') } },
   { sel: 'a[data-ext]', area: 'page', when: (t) => t.dataset.ext !== undefined, run: (t, e) => { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return } },
-  // A plugin's work row's page (https only), in the browser.
-  { sel: '[data-open-url]', area: 'page', when: (t) => /^https:\/\//.test(t.dataset.openUrl || ''), run: (t, e) => { e.preventDefault(); send({ cmd: 'open_url', url: t.dataset.openUrl }); return } },
+  // A plugin's work row's page (https only), in the browser once the user confirms it (its host asked first).
+  { sel: '[data-open-url]', area: 'page', when: (t) => /^https:\/\//.test(t.dataset.openUrl || ''), run: (t, e) => { e.preventDefault(); return workRowOpen(t.dataset.openUrl) } },
+  { sel: '[data-open-url-no]', area: 'page', when: (t) => t.dataset.openUrlNo !== undefined, run: (t, e) => { e.preventDefault(); S.wrOpen = null; return render() } },
   // Settings
   { sel: '[data-me-edit]', area: 'settings', when: (t) => t.dataset.meEdit !== undefined, run: (t) => { S.meEdit = (S.settings && S.settings.me_profile && S.settings.me_profile.text) || ''; render(); const ta = $('#me-profile'); if (ta) ta.focus(); return } },
   { sel: '[data-me-cancel]', area: 'settings', when: (t) => t.dataset.meCancel !== undefined, run: (t) => { S.meEdit = null; return render() } },

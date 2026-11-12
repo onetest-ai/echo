@@ -77,11 +77,12 @@ async function loadToday() {
   try { S.today = await get('api/today') } catch { /* app restarting */ }
   todayWaitForPlugins()
 }
-/** A plugin's widget not answered yet (`pending`) holds its place (#410); its answer comes in the background, so Today
- *  is read again while one waits — soon, then less often (0.5, 1, 2, 4, then every 8 s, a minute in all): an answer,
- *  or the plugin's failed ask, ends the wait either way. */
+/** A plugin's widget not answered yet (`pending`) holds its place (#410), and My work's plugin rows may wait for an
+ *  answer (`work.plugins_pending`: not asked yet, or asked again after the plugin said they changed); the answer comes
+ *  in the background, so Today is read again while one waits — soon, then less often (0.5, 1, 2, 4, then every 8 s, a
+ *  minute in all): an answer, or the plugin's failed ask, ends the wait either way. */
 function todayWaitForPlugins() {
-  const waiting = Object.values((S.today && S.today.plugins) || {}).some((w) => w && w.pending)
+  const waiting = Object.values((S.today && S.today.plugins) || {}).some((w) => w && w.pending) || !!(S.today && S.today.work && S.today.work.plugins_pending)
   clearTimeout(S.todayWaitTimer)
   if (!waiting) { S.todayWaitTry = 0; return }
   const n = S.todayWaitTry = (S.todayWaitTry || 0) + 1

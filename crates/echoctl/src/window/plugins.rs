@@ -14,7 +14,7 @@ pub(super) fn plugin_file(rest: &str) -> Response<Cow<'static, [u8]>> {
     }
     match crate::plugins::inside_plugin(&crate::plugins::plugin_dir(&p), path).and_then(|f| Ok(std::fs::read(f)?)) {
         Ok(bytes) => {
-            let kind = match path.rsplit('.').next().unwrap_or("") {
+            let kind = match path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
                 "js" | "mjs" => "text/javascript; charset=utf-8",
                 "css" => "text/css; charset=utf-8",
                 "json" => "application/json",
@@ -128,8 +128,8 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             // Why a plugin's work rows were left out (its provider failed or was slow): a quiet line on its card.
             #[cfg(feature = "js")]
             for x in v["installed"].as_array_mut().into_iter().flatten() {
-                if let Some(e) = x["id"].as_str().and_then(crate::jshost::work::error) {
-                    x["work_error"] = json!(e);
+                if let Some((place, e)) = x["id"].as_str().and_then(crate::jshost::work::error) {
+                    x["work_error"] = json!({"place": place, "error": e});
                 }
             }
             json_reply(v)

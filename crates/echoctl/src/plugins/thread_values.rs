@@ -101,6 +101,10 @@ pub fn changed(thread: &str, change: &str, into: Option<&str>) {
     }
     #[cfg(feature = "js")]
     {
+        // The plugins' work rows asked for it (`ctx.work.provide`, its Work tab) go with it.
+        if change != "renamed" {
+            crate::jshost::work::forget_thread(thread);
+        }
         let mut payload = json!({"thread": thread, "change": change});
         if let Some(i) = into {
             payload["into"] = json!(i);
