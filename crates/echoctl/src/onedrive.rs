@@ -136,7 +136,7 @@ pub fn where_is(path: &Path) -> Result<Value> {
         Some((_, up)) if *up != rel => online_exists(up).ok(),
         _ => None,
     };
-    let online: Result<bool> = if rel.is_empty() { Ok(true) } else if ancestor_online == Some(true) { Ok(true) } else { online_exists(&rel) };
+    let online: Result<bool> = if rel.is_empty() || ancestor_online == Some(true) { Ok(true) } else { online_exists(&rel) };
     let (online, why) = match online {
         Ok(o) => (Some(o), None),
         Err(e) => (None, Some(format!("{e:#}"))),
