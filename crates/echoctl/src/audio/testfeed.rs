@@ -85,19 +85,21 @@ impl Source for FileSource {
     fn open(&mut self, epoch: u32, tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
         let (samples, rate) = read_wav(&self.path)?;
         let call = call_started();
-        let start = call.unwrap_or(*self.first_open.get_or_insert_with(SystemTime::now));
+        // One reading of the clock for the start and for where it is now: a first open without a call starts at the
+        // file's first sample.
+        let now = SystemTime::now();
+        let start = call.unwrap_or(*self.first_open.get_or_insert(now));
         let stop = Arc::new(AtomicBool::new(false));
-        feed(samples, rate, start, epoch, tx, stop.clone());
+        feed(samples, rate, now.duration_since(start).unwrap_or_default(), epoch, tx, stop.clone());
         Ok(Box::new(FileStream { label: format!("test audio {} @ {rate} Hz", self.path.display()), stop, call }))
     }
 }
 
-/// Send `samples` as the clock started at `start` reaches them, from where it is now: what was "said" before the
-/// open is skipped, as a device would have missed it.
-fn feed(samples: Vec<f32>, rate: u32, start: SystemTime, epoch: u32, tx: Sender<Chunk>, stop: Arc<AtomicBool>) {
+/// Send `samples` as the call's clock reaches them, from `offset` (how far it is at the open): what was "said" before
+/// the open is skipped, as a device would have missed it.
+fn feed(samples: Vec<f32>, rate: u32, offset: Duration, epoch: u32, tx: Sender<Chunk>, stop: Arc<AtomicBool>) {
     let len = samples.len();
     let at = move |offset: Duration| ((offset.as_secs_f64() * rate as f64) as usize).min(len);
-    let offset = SystemTime::now().duration_since(start).unwrap_or_default();
     let opened = Instant::now();
     std::thread::spawn(move || {
         let mut sent = at(offset);
@@ -204,7 +206,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let (tx, rx) = std::sync::mpsc::channel();
         // The call started 0.25 s ago: the first 2000 samples are gone.
-        feed(samples, rate, SystemTime::now() - Duration::from_millis(250), 7, tx, Arc::new(AtomicBool::new(false)));
+        feed(samples, rate, Duration::from_millis(250), 7, tx, Arc::new(AtomicBool::new(false)));
         let got = collect(rx);
         assert!((1900..=2000).contains(&(4000 - got.len())), "skipped {}", 4000 - got.len());
         assert_eq!(*got.last().unwrap(), 3999.0 / 32768.0);
