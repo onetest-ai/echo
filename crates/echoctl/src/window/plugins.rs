@@ -123,7 +123,16 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         // Settings → Plugins; marketplaces not read for 30 min, or by another Echo version, are fetched again in the background.
         "/api/plugins" => {
             refresh_plugin_markets();
-            json_reply(crate::plugins::snapshot())
+            #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+            let mut v = crate::plugins::snapshot();
+            // Why a plugin's work rows were left out (its provider failed or was slow): a quiet line on its card.
+            #[cfg(feature = "js")]
+            for x in v["installed"].as_array_mut().into_iter().flatten() {
+                if let Some(e) = x["id"].as_str().and_then(crate::jshost::work::error) {
+                    x["work_error"] = json!(e);
+                }
+            }
+            json_reply(v)
         }
         // Where Echo can send to the user (the plugins that deliver).
         "/api/deliver" => json_reply(crate::deliver::status()),

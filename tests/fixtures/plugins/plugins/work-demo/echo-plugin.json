@@ -1,0 +1,10 @@
+{
+  "id": "work-demo",
+  "name": "Work demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: items on Today → My work and in a thread's Work tab, with its icon (tests/cases/today/TC-040).",
+  "main": "main.js",
+  "client": "client.js",
+  "icon": "icon.svg",
+  "uses": { "work": {} }
+}

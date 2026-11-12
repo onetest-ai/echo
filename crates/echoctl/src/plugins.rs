@@ -83,6 +83,10 @@ pub struct Manifest {
     /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widgets: Vec<WidgetDef>,
+    /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
+    /// work rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `list`, `status`, `card`) at the sizes it takes.
@@ -290,6 +294,12 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
             bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
         }
         check_params(&w.id, &w.params)?;
+    }
+    if let Some(i) = &m.icon {
+        let f = inside_plugin(dir, i)?;
+        if f.extension().is_none_or(|e| !e.eq_ignore_ascii_case("svg")) || fs::metadata(&f)?.len() > 16 * 1024 {
+            bail!("its icon {i} must be an .svg of 16 KB at most");
+        }
     }
     for f in [&m.main, &m.client].into_iter().flatten() {
         let p = inside_plugin(dir, f)?;
@@ -1538,7 +1548,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1740,5 +1750,25 @@ mod tests {
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
         market_remove("acme").unwrap();
         assert!(market_remove(BUILT_IN_NAME).is_err());
+    }
+
+    #[test]
+    fn a_plugins_icon_is_an_svg_of_its_own_16_kb_at_most() {
+        let (_env, root) = paths::testenv::folders("plugins-icon");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let with = |icon: &str| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "icon": icon, "uses": {"work": {}}}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        fs::write(d.join("icon.svg"), "<svg/>").unwrap();
+        fs::write(d.join("icon.png"), "png").unwrap();
+        fs::write(d.join("big.svg"), "x".repeat(17 * 1024)).unwrap();
+        let m = with("icon.svg").unwrap();
+        assert_eq!(m.icon.as_deref(), Some("icon.svg"));
+        assert_eq!(sheet(&m).unwrap(), ["Adds its items to Today → My work and to threads' Work"]);
+        for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg"] {
+            assert!(with(bad).is_err(), "{bad}");
+        }
     }
 }

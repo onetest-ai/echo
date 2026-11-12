@@ -52,6 +52,8 @@ node crates/echoctl/ui/transcript-jump.test.mjs
 node crates/echoctl/ui/minutes-needs.test.mjs
 # What the poll redraws for: the Inbox's list too (fingerprint, #115, #121).
 node crates/echoctl/ui/fingerprint.test.mjs
+# A plugin's work row on My work and in a thread's Work tab: its icon as an image, text escaped, https only (#85).
+node crates/echoctl/ui/plugin-work-rows.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs
 # Settings search: sections by their names and their settings' own labels (SettingsSearch).

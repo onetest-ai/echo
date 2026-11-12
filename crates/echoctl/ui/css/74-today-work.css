@@ -1,0 +1,7 @@
+/* A plugin's work row (`ctx.work.provide`) on My work and in a thread's Work tab: its plugin's icon, no Echo actions. */
+.td-plug { cursor: default; }
+.wr-ic { width: 12px; height: 12px; flex: none; border-radius: 3px; }
+.wr-letter { display: inline-grid; place-items: center; font: 600 9px var(--sans, inherit); color: var(--bg); background: var(--text-3); }
+.wr-late { color: var(--danger); font-size: 12px; }
+.wk-plug { margin: 0 0 12px; }
+.wk-plug .td-tasks { overflow: visible; }

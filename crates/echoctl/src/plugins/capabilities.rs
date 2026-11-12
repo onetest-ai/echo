@@ -27,7 +27,16 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "echo", ready: true, describe: describe_echo },
     Capability { id: "events", ready: true, describe: describe_events },
     Capability { id: "files", ready: true, describe: describe_files },
+    Capability { id: "work", ready: true, describe: describe_work },
 ];
+
+/// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.
+pub(super) fn describe_work(v: &Value) -> Result<String> {
+    if !v.is_object() {
+        bail!("“work” is {{}}");
+    }
+    Ok("Adds its items to Today → My work and to threads' Work".into())
+}
 
 /// What happens in Echo that a plugin may hear (`uses.events.on`, `ctx.on`), with the sheet's words. Payloads carry
 /// ids and what a plugin can act on — a call's folder name and title, a meeting's id and subject, a thread's id —

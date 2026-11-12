@@ -22,6 +22,8 @@ use serde_json::{json, Value};
 
 use crate::{paths, plugins};
 
+pub mod work;
+
 /// How long one command may take before its caller is told so (the work may go on).
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// JavaScript running without a break longer than this is stopped.
@@ -108,6 +110,13 @@ const PRELUDE: &str = r#"
       provide: (id, fn) => { commands['__widget:' + id] = (a) => fn(a || {}) },
       set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
       clear: (id) => call('widgets.clear', String(id)),
+    },
+    /** Its items on Today → My work and in threads' Work (uses.work): `provide(({scope, thread}) => rows)` answers
+     *  Echo's ask — scope "me" (My work) or "thread" (that thread's Work tab) — with [{id, title, kind, where?, url?,
+     *  due?, late?, thread?}] (200 at most); `changed()` has Echo ask again. */
+    work: {
+      provide: (fn) => { call('work.provide'); commands.__work = (a) => fn(a || {}) },
+      changed: () => call('work.changed'),
     },
     profiles: () => call('profiles'),
     claude: {
@@ -691,8 +700,10 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     store_path(id, rel)?;
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if first.trim_end_matches(['.', ' ']).split(':').next() == Some("settings.json") {
-        bail!("the plugin's settings.json isn't its to write: use ctx.settings.set");
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
+        Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
+        _ => {}
     }
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
@@ -825,6 +836,15 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "widgets.clear" => {
             widget_store(id, &s(arg), None, None, None)?;
+            Value::Null
+        }
+        "work.provide" => {
+            uses(id, "work")?;
+            Value::Null
+        }
+        "work.changed" => {
+            uses(id, "work")?;
+            work::changed(id);
             Value::Null
         }
         "inbox.clear" => {
@@ -1676,6 +1696,70 @@ mod tests {
         for id in ["hears", "deaf"] {
             plugins::remove(id, false).unwrap();
         }
+        sync();
+    }
+
+    #[test]
+    fn a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it() {
+        let (_env, root) = paths::testenv::folders("jshost-work");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let mk = root.join("market");
+        let d = mk.join("plugins/gh");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "gh", "name": "GitHub", "version": "0.1.0", "main": "main.js", "icon": "icon.svg", "uses": {"work": {}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              let broken = false
+              ctx.work.provide(({ scope, thread }) => {
+                if (broken) throw new Error('GitHub is down')
+                const review = { id: 'pr-7', title: 'Review: fix login', kind: 'review', where: 'acme-test/api', url: 'https://git.acme.example/pr/7', thread: 'alpha' }
+                return scope === 'me'
+                  ? [{ id: 'is-3', title: 'Flaky test', kind: 'assigned', due: '2099-01-01' }, review]
+                  : [{ id: 'pr-8', title: 'Bump deps', kind: 'PR', where: 'acme-test/api' }, review]
+              })
+              ctx.command('break', () => { broken = true; ctx.work.changed(); return 1 })
+              ctx.command('sneak', () => ctx.store.write('work.json', '{}'))
+            }
+            "#,
+        )
+        .unwrap();
+        let q = mk.join("plugins/quiet");
+        std::fs::create_dir_all(&q).unwrap();
+        std::fs::write(q.join("echo-plugin.json"), json!({"id": "quiet", "name": "Quiet", "version": "0.1.0", "main": "main.js"}).to_string()).unwrap();
+        std::fs::write(q.join("main.js"), "export function apply(ctx) { ctx.command('try', () => ctx.work.provide(() => [])) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "gh", "source": "./plugins/gh"}, {"id": "quiet", "source": "./plugins/quiet"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        for id in ["gh", "quiet"] {
+            let review = plugins::review(id, Some(&name)).unwrap();
+            plugins::install(id, Some(&name), &review.uses).unwrap();
+        }
+        assert!(plugins::review("gh", Some(&name)).unwrap().uses.iter().any(|l| l == "Adds its items to Today → My work and to threads' Work"));
+        sync();
+        assert!((0..50).any(|_| call("quiet", "try", &json!({})).is_err_and(|e| e.to_string().contains("didn't ask for “work”")) || { std::thread::sleep(Duration::from_millis(50)); false }), "only with uses.work");
+        assert!(call("gh", "sneak", &json!({})).unwrap_err().to_string().contains("work.json"), "its work.json is Echo's to write");
+        // Never waited for: the first read asks in the background; the answer is drawn from then on.
+        let first = work::rows(None);
+        assert!(first.is_empty(), "{first:?}");
+        let me = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::rows(None) }).find(|r| r.len() == 2).expect("answered");
+        assert_eq!((me[0]["id"].as_str(), me[1]["id"].as_str()), (Some("is-3"), Some("pr-7")), "by date, no date last");
+        assert_eq!((me[0]["source"].as_str(), me[0]["source_name"].as_str(), me[0]["icon"].as_str()), (Some("gh"), Some("GitHub"), Some("plugin/gh/icon.svg")));
+        // Alpha's Work: its own rows and the user's that name it, each once.
+        let _ = work::of_thread(&alpha);
+        let th = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::of_thread(&alpha) }).find(|r| r.len() == 2).expect("answered");
+        assert_eq!(th.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["pr-8", "pr-7"]);
+        // It fails: its rows are left out, with why.
+        call("gh", "break", &json!({})).unwrap();
+        let gone = (0..100).find(|_| { std::thread::sleep(Duration::from_millis(50)); work::error("gh").is_some() });
+        assert!(gone.is_some() && work::rows(None).is_empty(), "{:?}", work::error("gh"));
+        assert!(work::error("gh").unwrap().contains("GitHub is down"));
+        // Removed: its rows go.
+        plugins::remove("gh", true).unwrap();
+        assert!(work::rows(None).is_empty() && work::of_thread(&alpha).is_empty());
+        plugins::remove("quiet", false).unwrap();
         sync();
     }
 

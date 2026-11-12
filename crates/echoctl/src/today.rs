@@ -284,7 +284,14 @@ pub(crate) fn work(tasks: &Value) -> Value {
             .collect();
         json!({"items": items, "total": items.len()})
     };
-    json!({"mine": pile("mine"), "owed": pile("owed"), "waiting": pile("waiting"), "week_end": week_end.to_string()})
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+    let mut v = json!({"mine": pile("mine"), "owed": pile("owed"), "waiting": pile("waiting"), "week_end": week_end.to_string()});
+    // The plugins' items for the user (`ctx.work.provide`, scope "me"): their last answer, beside these, not in a ledger.
+    #[cfg(feature = "js")]
+    {
+        v["plugins"] = json!(crate::jshost::work::rows(None));
+    }
+    v
 }
 
 // ── Yolo: a task done by Claude on its own (My work's Claude dialog) ──

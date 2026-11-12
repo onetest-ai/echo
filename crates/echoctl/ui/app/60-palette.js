@@ -83,6 +83,10 @@ function paletteItems(target) {
       add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
       add('My work', `Claude: ${t.title}`, () => press({ claudeTask: t.id, today: '1', ...attrs }), { keywords: 'ask send change move due later work on it skill follow-up mail session' })
     }
+    // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does.
+    for (const r of (w.plugins || []).filter((r) => /^https:\/\//.test(r.url || ''))) {
+      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: r.source_name || '' })
+    }
   }
   // Echo's own
   if (st.recording && st.recording_memo) add('Echo', 'Stop the memo', () => press({ cmd: 'stop' }), { keywords: 'end memo', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })

@@ -82,8 +82,10 @@ function todayView() {
   const tasks = [...((w.mine && w.mine.items) || []).map((t) => [t, 'I owe', '']),
     ...((w.owed && w.owed.items) || []).map((t) => [t, 'owed to me', t.owner]),
     ...((w.waiting && w.waiting.items) || []).map((t) => [t, 'waiting for', t.waiting_for && t.waiting_for.who])]
+  // The plugins' items for you (`ctx.work.provide`) among them, by the same date order; each with its plugin's icon.
+  for (const r of w.plugins || []) tasks.push([r, 'plugin', ''])
   tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
-  const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
+  const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t)) : card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side

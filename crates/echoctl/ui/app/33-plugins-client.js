@@ -25,6 +25,7 @@ const Plugins = {
 }
 // `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
 // `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
+// `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings']
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
@@ -123,20 +124,25 @@ function unloadPlugin(id) {
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
 }
-/** A slot's buttons for `target`: `menu` (menu items) or `buttons`. */
-function slotItems(slot, target, style = 'buttons') {
-  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
+/** A slot's items for `target`: those whose `when` says yes — a plugin's work row (`kind: 'plugin'`) only to the items
+ *  that ask for it (a `when` true for it), never to one written for Echo's tasks. */
+const slotFor = (slot, target) => (Plugins.slots[slot] || []).filter((x) => { try { return x.when ? x.when(target) : !(target && target.kind === 'plugin') } catch { return false } })
+/** A slot's buttons for `target`: `menu` (menu items) or `buttons`; `key` when the slot is drawn for several targets at
+ *  once (each row its own). */
+function slotItems(slot, target, style = 'buttons', key = '') {
+  const items = slotFor(slot, target)
   if (!items.length) return ''
-  Plugins.targets[slot] = target
+  Plugins.targets[slot + (key ? `#${key}` : '')] = target
+  const k = key ? ` data-plug-key="${esc(key)}"` : ''
   return items.map((x, i) => style === 'menu'
-    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}">${x.icon || ''}${esc(x.label)}</button>`
-    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}" title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
+    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}"${k}>${x.icon || ''}${esc(x.label)}</button>`
+    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}"${k} title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
 }
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-plug-slot]')
   if (!t) return
-  const slot = t.dataset.plugSlot, target = Plugins.targets[slot]
-  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
+  const slot = t.dataset.plugSlot, target = Plugins.targets[slot + (t.dataset.plugKey ? `#${t.dataset.plugKey}` : '')]
+  const items = slotFor(slot, target)
   const item = items[+t.dataset.plugI]
   S.menuOpen = false
   if (item) Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
