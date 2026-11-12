@@ -634,6 +634,8 @@ function setSetting(key, val) {
   if (key === 'live_notes' && S.state && S.state.ai) S.state.ai.live_notes = val
   if (key === 'default_profile' && S.state && S.state.ai) S.state.ai.default = val
   if (key === 'own_title_bar' && S.state) S.state.own_title_bar = !!val
+  // OneDrive's folder in use is the app's to find again (#469): read Settings back once it is saved.
+  if (key === 'onedrive') setTimeout(() => loadSettings().then(render), 400)
   if (key === 'brain_enabled') {
     if (S.state) S.state.brain = !!val
     if (S.settings && S.settings.brain) S.settings.brain.enabled = !!val

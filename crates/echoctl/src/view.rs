@@ -407,6 +407,7 @@ pub fn hook_settings(exe: &Path) -> Value {
     json!({"UserPromptSubmit": [{"hooks": h}], "SessionStart": [{"matcher": "startup|resume|compact|clear", "hooks": h}]})
 }
 
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 /// The folder session's hook before a write: never a folder here that OneDrive keeps online but doesn't sync to this
 /// computer (#469). Only there — a session with Echo's guard keeps the guard's own `PreToolUse`.
 pub fn onedrive_hook(exe: &Path) -> Value {

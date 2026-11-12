@@ -33,7 +33,8 @@ pub fn root() -> Option<PathBuf> {
 
 pub fn detect(home: &Path, var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     if cfg!(windows) {
-        return var("OneDriveCommercial").or_else(|| var("OneDrive")).filter(|p| p.is_dir());
+        // The work OneDrive only: `OneDrive` alone may be a personal one, not the account Echo signs in to.
+        return var("OneDriveCommercial").filter(|p| p.is_dir());
     }
     let found: Vec<PathBuf> = std::fs::read_dir(home.join("Library/CloudStorage"))
         .into_iter()
@@ -41,7 +42,8 @@ pub fn detect(home: &Path, var: impl Fn(&str) -> Option<PathBuf>) -> Option<Path
         .flatten()
         .filter(|e| {
             let n = e.file_name().to_string_lossy().into_owned();
-            n.starts_with("OneDrive-") && !n.starts_with("OneDrive-SharedLibraries") && e.path().is_dir()
+            // An organisation's own: not its shared libraries, not a personal OneDrive beside it.
+            n.starts_with("OneDrive-") && !n.starts_with("OneDrive-SharedLibraries") && n != "OneDrive-Personal" && e.path().is_dir()
         })
         .map(|e| e.path())
         .collect();
@@ -172,26 +174,30 @@ fn online_names(rel: &str) -> Result<(Vec<String>, bool)> {
         names.extend(v["value"].as_array().into_iter().flatten().filter_map(|i| i["name"].as_str().map(str::to_owned)));
         match v["@odata.nextLink"].as_str() {
             Some(next) if names.len() < MAX_ONLINE => url = next.to_string(),
-            Some(_) => return Ok((names, true)),
+            Some(_) => {
+                names.truncate(MAX_ONLINE);
+                return Ok((names, true));
+            }
             None => return Ok((names, false)),
         }
     }
 }
 
-/// The paths a tool call is about to write, as far as they can be read: a file Write/Edit names; `mkdir`/`touch` (every
-/// name) and `cp`/`mv`/`ditto` (the last) in a plain Bash command. Anything else (variables, pipes) is left to Claude.
-pub fn targets(call: &Value) -> Vec<PathBuf> {
+/// The paths a tool call is about to write, each with whether it is a folder: a file Write/Edit names; in a plain Bash
+/// command, every name `mkdir` (folders) or `touch` takes, and `cp`/`mv`/`ditto`'s last — sub-command by sub-command.
+/// Anything else (variables, substitutions) is left alone.
+pub fn targets(call: &Value) -> Vec<(PathBuf, bool)> {
     let input = &call["tool_input"];
     match call["tool_name"].as_str().unwrap_or("") {
-        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => input["file_path"].as_str().or(input["notebook_path"].as_str()).map(PathBuf::from).into_iter().collect(),
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => input["file_path"].as_str().or(input["notebook_path"].as_str()).map(|p| (PathBuf::from(p), false)).into_iter().collect(),
         "Bash" => {
             let mut out = vec![];
-            for part in input["command"].as_str().unwrap_or("").split(['\n', ';', '&', '|']) {
-                let words: Vec<String> = split_words(part.trim());
+            for words in commands(input["command"].as_str().unwrap_or("")) {
                 let args: Vec<&String> = words.iter().skip(1).filter(|w| !w.starts_with('-')).collect();
                 match words.first().map(String::as_str) {
-                    Some("mkdir" | "touch") => out.extend(args.iter().map(|a| PathBuf::from(a.as_str()))),
-                    Some("cp" | "mv" | "ditto") if args.len() >= 2 => out.push(PathBuf::from(args[args.len() - 1].as_str())),
+                    Some("mkdir") => out.extend(args.iter().map(|a| (PathBuf::from(a.as_str()), true))),
+                    Some("touch") => out.extend(args.iter().map(|a| (PathBuf::from(a.as_str()), false))),
+                    Some("cp" | "mv" | "ditto") if args.len() >= 2 => out.push((PathBuf::from(args[args.len() - 1].as_str()), false)),
                     _ => {}
                 }
             }
@@ -201,20 +207,38 @@ pub fn targets(call: &Value) -> Vec<PathBuf> {
     }
 }
 
-/// Words of a plain command: spaces split, '…' and "…" quote, `~/` is the home folder.
-fn split_words(s: &str) -> Vec<String> {
-    let (mut out, mut w, mut q, mut started) = (vec![], String::new(), None::<char>, false);
-    for c in s.chars() {
+/// A command line's sub-commands, each as its words: spaces split words, `'…'` and `"…"` quote (a `;`, `&` or `|`
+/// inside quotes stays in the word), `\` escapes the next character, an unquoted `;`, `&`, `|` or line break ends a
+/// sub-command, and a word starting with `~/` is under the home folder.
+fn commands(s: &str) -> Vec<Vec<String>> {
+    let (mut all, mut words, mut w) = (vec![], vec![], String::new());
+    let (mut q, mut started) = (None::<char>, false);
+    let mut chars = s.chars();
+    let end_word = |w: &mut String, words: &mut Vec<String>, started: &mut bool| {
+        if *started {
+            let word = std::mem::take(w);
+            words.push(word.strip_prefix("~/").map(|r| crate::paths::user_home().join(r).to_string_lossy().into_owned()).unwrap_or(word));
+            *started = false;
+        }
+    };
+    while let Some(c) = chars.next() {
         match (q, c) {
-            (None, ' ' | '\t') => {
-                if started {
-                    out.push(std::mem::take(&mut w));
-                    started = false;
+            (None, ' ' | '\t') => end_word(&mut w, &mut words, &mut started),
+            (None, ';' | '&' | '|' | '\n') => {
+                end_word(&mut w, &mut words, &mut started);
+                if !words.is_empty() {
+                    all.push(std::mem::take(&mut words));
                 }
             }
             (None, '\'' | '"') => {
                 q = Some(c);
                 started = true;
+            }
+            (None, '\\') | (Some('"'), '\\') => {
+                if let Some(n) = chars.next() {
+                    w.push(n);
+                    started = true;
+                }
             }
             (Some(x), c) if c == x => q = None,
             _ => {
@@ -223,10 +247,11 @@ fn split_words(s: &str) -> Vec<String> {
             }
         }
     }
-    if started {
-        out.push(w);
+    end_word(&mut w, &mut words, &mut started);
+    if !words.is_empty() {
+        all.push(words);
     }
-    out.into_iter().map(|w| w.strip_prefix("~/").map(|r| crate::paths::user_home().join(r).to_string_lossy().into_owned()).unwrap_or(w)).collect()
+    all
 }
 
 /// For a path about to be written in OneDrive: the first of its folders that isn't on this computer (from OneDrive's
@@ -259,11 +284,16 @@ pub fn hook() -> i32 {
     let Ok(call) = serde_json::from_str::<Value>(&raw) else { return 0 };
     let Some(root) = root() else { return 0 };
     let cwd = call["cwd"].as_str().map(PathBuf::from).or_else(|| std::env::current_dir().ok()).unwrap_or_default();
-    let is_folder = call["tool_name"] == "Bash" && call["tool_input"]["command"].as_str().is_some_and(|c| c.trim_start().starts_with("mkdir"));
-    for t in targets(&call) {
+    for (t, is_folder) in targets(&call) {
         let t = if t.is_absolute() { t } else { cwd.join(t) };
         let Some((folder, online)) = missing_folder(&root, &t, is_folder) else { continue };
-        if online_exists(&online).unwrap_or(false) {
+        // At most 10 s for OneDrive's answer: a slow network lets the write go on rather than hold it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ask = online.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(online_exists(&ask).unwrap_or(false));
+        });
+        if rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(false) {
             eprintln!(
                 "Not here: “{}” is in the user's OneDrive online but OneDrive doesn't sync it to this computer — a folder made here would stay on this computer and conflict online. Ask the user to choose it in OneDrive → Settings → Account → Choose folders (then work with it here), or work with it online (echoctl m365 drive).",
                 folder.display()
@@ -287,7 +317,8 @@ mod tests {
         std::fs::create_dir_all(cs.join("OneDrive-SharedLibraries-Acme")).unwrap();
         let none = |_: &str| None;
         if !cfg!(windows) {
-            assert_eq!(detect(&home, none), Some(cs.join("OneDrive-Acme")), "its own, not the shared libraries");
+            std::fs::create_dir_all(cs.join("OneDrive-Personal")).unwrap();
+            assert_eq!(detect(&home, none), Some(cs.join("OneDrive-Acme")), "its own, not the shared libraries or a personal one");
             std::fs::create_dir_all(cs.join("OneDrive-Globex")).unwrap();
             assert_eq!(detect(&home, none), None, "two accounts: the user says which");
         }
@@ -307,8 +338,11 @@ mod tests {
         std::fs::create_dir_all(od.join("Synced")).unwrap();
         let call = |tool: &str, input: Value| json!({"tool_name": tool, "tool_input": input});
         let t = targets(&call("Bash", json!({"command": format!("mkdir -p '{0}/Projects/Acme' && cp notes.md \"{0}/Synced/n.md\"; echo hi", od.display())})));
-        assert_eq!(t, vec![od.join("Projects/Acme"), od.join("Synced/n.md")]);
-        assert_eq!(targets(&call("Write", json!({"file_path": "/x/a.md", "content": "x"}))), vec![PathBuf::from("/x/a.md")]);
+        assert_eq!(t, vec![(od.join("Projects/Acme"), true), (od.join("Synced/n.md"), false)]);
+        // A folder made after another command is still a folder; quotes keep `&` in a name; `\ ` escapes a space.
+        let t = targets(&call("Bash", json!({"command": format!("cd /tmp && mkdir \"{0}/Sales & Marketing\" ; mkdir {1}/My\\ Folder", od.display(), od.display())})));
+        assert_eq!(t, vec![(od.join("Sales & Marketing"), true), (od.join("My Folder"), true)]);
+        assert_eq!(targets(&call("Write", json!({"file_path": "/x/a.md", "content": "x"}))), vec![(PathBuf::from("/x/a.md"), false)]);
         assert!(targets(&call("Read", json!({"file_path": "/x/a.md"}))).is_empty());
         // The first folder missing here, from OneDrive's own down; none for a write into a folder that is here.
         assert_eq!(missing_folder(&od, &od.join("Projects/Acme/Rollout"), true).map(|(_, o)| o).as_deref(), Some("Projects"));
