@@ -54,6 +54,11 @@
             "release"
           ],
           "default": "main"
+        },
+        {
+          "key": "thread",
+          "label": "Thread",
+          "type": "thread"
         }
       ]
     },

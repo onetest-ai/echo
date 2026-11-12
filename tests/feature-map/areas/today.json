@@ -164,7 +164,7 @@
   },
   {
    "id": "F-TODAY-23",
-   "feature": "A widget's settings: Echo's (Threads at a glance and Done this week: period week or month) and a plugin's (declared in its manifest's widget `params`: choice, bool, thread, client), set in edit mode (⚙ on the frame) or with echoctl today set <widget> <key> <value> — refused when it isn't one the widget takes — kept on Today's layout, defaults filled in; a plugin's provider gets them as params and is asked again when one changes",
+   "feature": "A widget's settings: Echo's (Threads at a glance and Done this week: period week or month) and a plugin's (declared in its manifest's widget `params`: choice, bool, thread, client), set in edit mode (⚙ on the frame) or with echoctl today set <widget> <key> <value> — refused when it isn't one the widget takes — kept on Today's layout, defaults filled in; a plugin's provider gets them as params and is asked again when one changes; a widget set to a thread or a client (a setting of that type) names it in its header — \"Last builds · Acme rollout\" — whatever the plugin",
    "priority": "medium",
    "check": "agent",
    "axes": []
