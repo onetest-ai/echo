@@ -285,6 +285,9 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     test.setTimeout(2 * 60_000)
     const s = set().terminal
     expect(hangUp()).toBe(r().noCall)
+    // No call on, as Echo sees it: a call just hung up (stage 4's, when 5–6 are skipped) counts as on until its mic has
+    // been released for 2 s (the watcher's debounce), and an arm then says the call is in progress (#479).
+    await expect.poll(() => watcher().in_call, { timeout: 10_000 }).not.toBe(true)
     stage7.from = data.events().length
     const before = calls()
     const arm = data.cli('arm', '--title', s.title)
@@ -311,6 +314,9 @@ scenario(test, 'S-18', 'Recording off the happy path: cancels, expiry, opt-in, C
     expect(seen).toEqual([ev().callStarted, ev().recordingStarted, ev().recordingStopped])
     expect(data.cli('stop').out.trim()).toBe(a().nothingToStop)
     stage7.recording = recording
+    // The call goes on for stage 8, which hangs it up; without the test's models stage 8 is skipped: hung up here, so
+    // the stages after it start with no call on (#479).
+    if (!models()) hangUp()
   })
 
   test('8 · After `echoctl stop` the call runs on unrecorded to its end; its transcript ends at the stop, closed as "user"', covers('recording/TC-015', 'F-REC-05'), async () => {
