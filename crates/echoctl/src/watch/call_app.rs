@@ -1,5 +1,7 @@
 //! Which call app is in a call: Teams, or Google Meet in Chrome (#230).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -9,8 +11,8 @@ use crate::apps::{MeetingApp, TargetApp};
 /// How often Chrome's windows and the calendar are looked at while Chrome holds the mic and no Meet call is known.
 const MEET_LOOK_EVERY: Duration = Duration::from_secs(3);
 
-/// Whether a call is going on, and in which app. `on`: the app of the call going on (it stays that app while it holds
-/// the mic). Otherwise Teams holding the mic is a call; Chrome holding it is one only with a Meet sign (`meet_sign`,
+/// Whether a call is going on, and in which app. `on`: the app of the call going on, or of the recording still open
+/// (it stays that app's call while that app holds the mic; another app's is no call until then). Otherwise Teams holding the mic is a call; Chrome holding it is one only with a Meet sign (`meet_sign`,
 /// asked only then): Chrome on the mic for anything else is no call. None: this platform can't tell.
 pub(super) fn which_call(on: Option<TargetApp>, teams: Option<bool>, chrome: Option<bool>, meet_sign: impl FnOnce() -> bool) -> (Option<bool>, Option<TargetApp>) {
     let holds = |app| match app {
@@ -32,22 +34,28 @@ pub(super) fn which_call(on: Option<TargetApp>, teams: Option<bool>, chrome: Opt
 }
 
 /// A sign that the user is on a Google Meet call: a Chrome window titled as one, or a calendar meeting with a Meet link
-/// from 10 min before it to its end (an arm for a Meet meeting is the watcher's own sign). Looked at once every few
-/// seconds at most.
+/// from 10 min before it to its end (an arm for a Meet meeting is the watcher's own sign). Looked at off the watcher's
+/// thread, once every few seconds at most: Chrome answers Accessibility itself and may be slow or hung, and the loop
+/// must never wait for it; until a look has answered, there is no sign.
 #[derive(Default)]
 pub(super) struct MeetSign {
-    last: Option<(Instant, bool)>,
+    last: Arc<Mutex<Option<(Instant, bool)>>>,
+    busy: Arc<AtomicBool>,
 }
 
 impl MeetSign {
-    pub(super) fn get(&mut self) -> bool {
-        if let Some((_, seen)) = self.last.filter(|(at, _)| at.elapsed() < MEET_LOOK_EVERY) {
-            return seen;
+    pub(super) fn get(&self) -> bool {
+        let last = *self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_none_or(|(at, _)| at.elapsed() >= MEET_LOOK_EVERY) && !self.busy.swap(true, Ordering::SeqCst) {
+            let (out, busy) = (self.last.clone(), self.busy.clone());
+            std::thread::spawn(move || {
+                let seen = crate::audio::meet_window_open() == Some(true)
+                    || crate::calendar::meeting_now(Utc::now(), TargetApp::Meet).is_some_and(|m| m.app() == Some(MeetingApp::Meet));
+                *out.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), seen));
+                busy.store(false, Ordering::SeqCst);
+            });
         }
-        let seen = crate::audio::meet_window_open() == Some(true)
-            || crate::calendar::meeting_now(Utc::now(), TargetApp::Meet).is_some_and(|m| m.app() == Some(MeetingApp::Meet));
-        self.last = Some((Instant::now(), seen));
-        seen
+        last.is_some_and(|(_, seen)| seen)
     }
 }
 

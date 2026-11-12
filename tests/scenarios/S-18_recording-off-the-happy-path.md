@@ -41,6 +41,7 @@ cases:
   - tests/cases/recording/TC-032_a-google-meet-call-in-chrome-is-recorded-as-two-tracks.md
   - tests/cases/recording/TC-033_a-google-meet-meeting-set-to-record-records-its-chrome-call.md
   - tests/cases/recording/TC-034_live-google-meet-call-in-chrome.md
+  - tests/cases/recording/TC-035_a-meet-call-right-after-a-recorded-teams-call-is-a-new-recording.md
 auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
@@ -133,6 +134,7 @@ prelude" in every case below).
 | 33 | `recording/TC-032_a-google-meet-call-in-chrome-is-recorded-as-two-tracks.md` | 32 | On stage 32's app and arm. **Skip its teardown**: the app goes on |
 | 34 | `recording/TC-033_a-google-meet-meeting-set-to-record-records-its-chrome-call.md` | 33 | On stage 32's app; its teardown quits it |
 | 35 | `recording/TC-034_live-google-meet-call-in-chrome.md` | — | **person** — a live Meet call in Chrome |
+| 36 | `recording/TC-035_a-meet-call-right-after-a-recorded-teams-call-is-a-new-recording.md` | — | After stage 34's teardown quit its app: step 1 starts its own |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again

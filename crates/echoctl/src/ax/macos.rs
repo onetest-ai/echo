@@ -201,8 +201,13 @@ pub fn meet_window_open() -> Option<bool> {
     if !unsafe { AXIsProcessTrusted() } {
         return None;
     }
-    let chrome = Element::application(app_pid(CHROME_EXECUTABLE)?)?;
-    Some(chrome.children("AXWindows").iter().filter_map(|w| w.string("AXTitle")).any(|t| crate::apps::is_meet_title(&t)))
+    // Every Chrome running, not the first found: another one (a test browser started from the same app) may run beside
+    // the user's.
+    let out = Command::new("pgrep").args(["-f", CHROME_EXECUTABLE]).output().ok()?;
+    let pids: Vec<i32> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse().ok()).collect();
+    Some(pids.into_iter().filter_map(Element::application).any(|chrome| {
+        chrome.children("AXWindows").iter().filter_map(|w| w.string("AXTitle")).any(|t| crate::apps::is_meet_title(&t))
+    }))
 }
 
 /// `echoctl ax-dump`: snapshot Teams' window tree every second for `seconds` seconds.

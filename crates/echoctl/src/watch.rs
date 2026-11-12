@@ -294,7 +294,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
     // A reading that says "another call", waiting to be confirmed by a later one (`judge`).
     let mut candidate: Option<Candidate> = None;
     let looker = CallLook::default();
-    let mut meet_sign = call_app::MeetSign::default();
+    let meet_sign = call_app::MeetSign::default();
     // A meeting's arm waiting while the user is on another call (#483): its id, once said.
     let mut waits_other: Option<String> = None;
     let mut unread_once = false;
@@ -400,7 +400,10 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         let (teams, chrome) = (audio::app_in_call(TargetApp::Teams), audio::app_in_call(TargetApp::Meet));
         // An arm for a Google Meet meeting is a sign too: the user asked to record that meeting.
         let meet_armed = armed.as_ref().and_then(|a| a.meeting.as_ref()).is_some_and(|m| m.app() == Some(crate::apps::MeetingApp::Meet));
-        let (detected, on_app) = call_app::which_call(in_call.then_some(app), teams, chrome, || meet_armed || meet_sign.get());
+        // While a call's recording is open (its grace after a hang-up too), only its app's call is that call: another app
+        // taking the mic then is a new call, found once the recording has ended.
+        let on = rec.as_ref().filter(|r| !r.memo).map(|r| r.app()).or(in_call.then_some(app));
+        let (detected, on_app) = call_app::which_call(on, teams, chrome, || meet_armed || meet_sign.get());
         app = on_app.unwrap_or(app);
         match detected {
             Some(true) => {
@@ -603,6 +606,10 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                         "dir": r.dir.display().to_string(),
                         "title": a.title.clone().or_else(|| meeting.as_ref().and_then(|m| m.subject.clone())),
                     }));
+                    // However it was started (Record, a schedule, Join, the CLI): what a Meet call's remote track holds.
+                    if app == TargetApp::Meet {
+                        crate::app::notify("Recording the Google Meet call", "Everything Chrome plays is recorded, from every tab.");
+                    }
                     rec = Some(r);
                 }
                 Err(e) => {

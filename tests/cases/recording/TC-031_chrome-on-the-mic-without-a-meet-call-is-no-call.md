@@ -18,7 +18,7 @@ tags: [recording, google-meet, chrome, watcher, privacy]
 ## Preconditions
 - Test data: `tests/fixtures/serve.sh up <dir> <port> --set small --ai fake`; calls fed from files (app_profile.md → "Recording with file-fed calls"). `call.py start <conversation> --meet` makes the call Chrome's instead of Teams'; `--title <text>` is the title of Chrome's window (none here: no window shows a Meet call); no meeting with a Meet link is in the small data's agenda
 - Every Bash call starts with the prelude of `recording/TC-001`
-- **Needs a second app instance** (as recording/TC-002): BLOCKED, not failed, if `$D/app.out` says "already running". In S-18 the app is the one stage 25's case left running: skip step 1
+- **Needs a second app instance** (as recording/TC-002): BLOCKED, not failed, if `$D/app.out` says "already running". Step 1 starts it, in S-18 too (the earlier stages' apps have quit)
 
 ## Steps
 

@@ -58,11 +58,10 @@ impl TargetApp {
 }
 
 /// A browser window's title that says it shows a Google Meet call: Meet's own tab title ("Meet – abc-defg-hij",
-/// "Meet - Weekly sync"), with or without the browser's suffix, or a title naming a Meet code.
+/// "Meet - Weekly sync"), with or without the browser's suffix. A Meet-code-shaped word elsewhere ("fix-mute-bug") is
+/// not one.
 pub fn is_meet_title(title: &str) -> bool {
-    let t = title.trim();
-    let meet_tab = t.strip_prefix("Meet").is_some_and(|r| ["-", "–", "—"].iter().any(|d| r.trim_start().starts_with(d)) && r.starts_with(' '));
-    meet_tab || t.split(|c: char| c.is_whitespace() || "()[]|,".contains(c)).any(is_meet_code)
+    title.trim().strip_prefix("Meet ").is_some_and(|r| ["-", "–", "—"].iter().any(|d| r.trim_start().starts_with(d)))
 }
 
 /// Functional tests only, in a debug build: `ECHOCTL_CALL_APP_BUNDLE=<bundle id>` makes that app the call app
@@ -259,11 +258,11 @@ mod tests {
     }
 
     #[test]
-    fn a_browser_window_shows_a_meet_call_by_meets_own_title_or_code() {
-        for t in ["Meet – abc-defg-hij - Google Chrome", "Meet - Weekly sync", "Meet — abc-defg-hij", "abc-defg-hij (Presenting) - Google Chrome"] {
+    fn a_browser_window_shows_a_meet_call_only_by_meets_own_tab_title() {
+        for t in ["Meet – abc-defg-hij - Google Chrome", "Meet - Weekly sync", "Meet — abc-defg-hij", "  Meet - abc-defg-hij"] {
             assert!(is_meet_title(t), "{t}");
         }
-        for t in ["Meeting notes - Google Docs", "Meetup – Berlin Rust", "Google Meet", "Inbox (3) - kim@acme.example - Gmail", "Meet", "Meetings-room-abc - Google Chrome", "ABC-DEFG-HIJ"] {
+        for t in ["Meeting notes - Google Docs", "Meetup – Berlin Rust", "Google Meet", "Inbox (3) - kim@acme.example - Gmail", "Meet", "Meet-up - x", "Meetings-room-abc - Google Chrome", "fix-mute-bug · Pull Request #12 · acme/app", "abc-defg-hij - Google Chrome"] {
             assert!(!is_meet_title(t), "{t}");
         }
     }

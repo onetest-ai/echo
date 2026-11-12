@@ -574,8 +574,9 @@ pub fn app_in_call(app: TargetApp) -> Option<bool> {
     }
     #[cfg(target_os = "macos")]
     return Some(macos::app_processes(app).map(|ps| ps.iter().any(|p| p.running_input)).unwrap_or(false));
+    // An app with nothing to look for here (Meet on Windows, #227): no call, and no process snapshot asked for it.
     #[cfg(windows)]
-    return Some(windows::app_in_call(app));
+    return Some(!app.windows_exe_names().is_empty() && windows::app_in_call(app));
     #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = app;

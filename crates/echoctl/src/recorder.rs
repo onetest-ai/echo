@@ -85,6 +85,11 @@ pub struct Recording {
 }
 
 impl Recording {
+    /// The call app it records.
+    pub fn app(&self) -> TargetApp {
+        self.meta.app
+    }
+
     pub fn start(
         app: TargetApp,
         title: Option<&str>,
