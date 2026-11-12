@@ -5,10 +5,10 @@
 ## Manifest
 
 ### Rules
-- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`, `widgets`. Evidence: `plugins::valid_id`
+- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`, `widgets`, `icon` (an `.svg` in the plugin folder, ≤ 16 KB, shown only as an image beside its work rows). Evidence: `plugins::valid_id`
 - R2. Point `main` and `client` at a `.js`/`.mjs` inside the plugin folder; read any other file it ships with `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - R3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
-- R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts` or `network.hosts_from` (string settings without a default), `channel.plugin`, `sessions`, `folders.what` (read-only, or `folders.write` to change them), `files.read` (other apps' files, each named in full), `sessions.commands` (its commands Claude in Echo may run), `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
+- R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts` or `network.hosts_from` (string settings without a default), `channel.plugin`, `sessions`, `folders.what` (read-only, or `folders.write` to change them), `files.read` (other apps' files, each named in full), `sessions.commands` (its commands Claude in Echo may run), `echo.read`/`write`, `work` (`{}`: its items on My work and in threads' Work)); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
 - R5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
 - R6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, heights?, height?, refresh?, params?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `chart`, `list`, `status`, `card` or `page` (a page needs a `client`), `sizes` of `S` `M` `L` each once (default `["M"]`), `heights` of `1` `2` each once, with `1` (default `[1]`: the rows of Today's grid it may take), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 12, and only with a `main` to give their data; its settings in `params` as `{key, label, type, options?, default?}` — `type` `choice` (1–12 `options`), `bool`, `thread` or `client`, 6 at most. Evidence: `plugins::check_params`
 
@@ -35,11 +35,12 @@
 - R17. Give any widget `open` (an `echo://` place, or an `https://` page Echo opens only after the user confirms it) and up to 3 `actions: [{label, command, args}]` — each runs your host half's `ctx.command(command)` with `args` on the user's click, then Today reads your widgets again; answer by `ctx.widgets.set` what changed. Evidence: `pluginWidgetHtml` (window script)
 - R19. Save audio or a picture with `ctx.http.fetch(url, {save: "<store path>"})` and show it from `/plugin/<id>/store/<path>`; put what you can lose under `cache/` (Echo removes it after 7 days) and remove the rest yourself with `ctx.store.remove`. Evidence: `jshost::sweep_store`
 - R20. Name a skill's Echo CLI `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`, and list in `uses.sessions.commands` the commands of yours it runs (`plugin call <id> <command>`); in a terminal (`ctx.terminal`) only your plugin is loaded, so skip start-up work there. Evidence: `plugins::session_commands`
+- R22. Give the user's items tracked outside Echo (a review asked of them, an issue assigned) with `ctx.work.provide(({scope, thread}) => rows)` under `uses.work`: `scope` `"me"` (Today → My work) or `"thread"` (that thread's Work tab, `thread` its id), rows `[{id, title, kind, where?, url?, due?, late?, thread?}]` — `id` unique, `kind` short text ("review", "assigned", "PR"), `url` https only, `due` `YYYY-MM-DD` (past: late), `thread` on a "me" row also puts it in that thread's Work, 200 at most, text plain (Echo escapes it); one wrong row refuses the answer. Echo asks in the background (5 s, again after a minute) and draws the last answer; call `ctx.work.changed()` when yours change. A provider that throws or is slow has its rows left out (a line in Settings → Plugins); check it with `echoctl work show [--thread <id>]`. Rows are never in a ledger: Echo's Close and Claude stay off them. Evidence: `jshost::work::check_rows`
 
 ### Constraints
 | Do not | Do instead | Evidence |
 |---|---|---|
-| Write `settings.json`, `inbox.json` or `widgets.json` with `ctx.store.write` (Echo refuses `settings.json`) | Use `ctx.settings.set`, `ctx.inbox.set` / `clear` and `ctx.widgets.set` / `clear` | `jshost::inbox_file`, `jshost::widgets_file` |
+| Write `settings.json`, `inbox.json`, `widgets.json` or `work.json` with `ctx.store.write` (Echo refuses `settings.json` and `work.json`) | Use `ctx.settings.set`, `ctx.inbox.set` / `clear` and `ctx.widgets.set` / `clear` | `jshost::inbox_file`, `jshost::widgets_file` |
 
 ### Read first
 | When you are | Exemplar | Tests |
@@ -54,6 +55,7 @@
 - R1. Export `apply(ctx)` from the client half and add to the window only through `ctx` (`call`, `slots.add` on a known slot, `panels`, `activities`, `settings`, `palette`, `listen`, `ui`, `go`, `render`). Evidence: `loadPluginClients` (window script)
 - R2. Escape every text you put in HTML with `ctx.ui.esc` and render Markdown with `ctx.markdown`. Evidence: `slotItems` (window script)
 - R3. Draw a `page` widget with `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` from `data` only (its host half gives it by `provide` / `set`): the same data must give the same HTML, and the draw neither calls `ctx.render` nor keeps state in the page. Evidence: `pluginWidgetView` (window script)
+- R5. Act on your work rows with `ctx.slots.add('task.actions', {…, when: (t) => t.kind === 'plugin' && t.source === ctx.id, run(t)})`: `t.row` is the row; an item without `when` stays on Echo's tasks. Evidence: `slotFor` (window script)
 
 ## Publishing
 
