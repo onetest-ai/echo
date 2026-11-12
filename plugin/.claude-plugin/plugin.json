@@ -1,6 +1,6 @@
 {
   "name": "echo",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Record Teams calls you're in (your mic + the app's audio) and turn them into local AI transcripts — no Teams recording needed.",
   "author": {
     "name": "Artyom Rozumenko"
