@@ -20,7 +20,9 @@ Verdicts
   `claimed` puts it, near enough); a risk's response = the words say this is being done about this
   risk (a plan agreed, a fallback, someone owning it — a wish is not a response); a dependency = the
   waiting work can't finish or start until the named thing happens; waiting on a person = held up
-  by that person's action.
+  by that person's action; "covers it" (a `mention` with `covers`) = the words say this task's outcome
+  happened, or that it isn't needed any more — not that it is still to do, planned or only talked about
+  ("we still need to send X" is `wrong`).
 - **Presupposition counts.** When the context treats an event as having happened ("how was the
   billing session?", findings reported from it), that supports `held` / `done`.
 - **A recording is proof.** When the item is itself the session (its transcript is that meeting),

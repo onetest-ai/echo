@@ -62,6 +62,10 @@ something bigger. For every story or task this item touches:
   you can name in `note`; a promise — "I'll send it" — is NOT progress), `blocked`, `cancelled`
   (someone decided), `reopen`, `due` (a date set or moved; the spoken words in `due_text`), `delayed`
   (slipped with no new date), `reassign` (+ owner fields), `mention` (referred to, no change).
+  A `mention` of an open **task** whose words say its outcome happened or it isn't needed any more — but not
+  plainly enough for `done` ("our takeaway is to come back with a demo on these three areas" for "Reply to the
+  demo mail") — adds `"covers": true`: the verifier checks it, and the user is asked "Looks done — close?". Never
+  for words that only refer to it or keep it open ("we still need to send X" is a plain `mention`).
   "Scheduled for tomorrow" is `due`, never `done`. A decision that re-dates or cancels other work:
   create the decision, then one `status` per affected node with the same quote.
 - `revise` — the work itself changed: a new `title`, and/or `ac_add` (a new criterion), and/or a
@@ -126,7 +130,7 @@ words differ).
  "decided_by": "name (decisions)", "likelihood": "low|med|high (risks)", "impact": "low|med|high (risks)",
  "quote": "exact contiguous words from ONE turn or passage (8–40 words)", "note": "≤ 20 words"}
 {"op": "status", "node": "T012", "effect": "held|done|progress|blocked|cancelled|reopen|due|delayed|reassign|mention",
- "due_text": "…", "internal_owner": "…", "client_owner": "…", "delegated_by": "…", "quote": "…", "note": "…"}
+ "covers": "true (a mention only, see above)", "due_text": "…", "internal_owner": "…", "client_owner": "…", "delegated_by": "…", "quote": "…", "note": "…"}
 {"op": "revise", "node": "S004", "title": "…", "ac_add": ["…"], "description": "…", "quote": "…", "note": "what changed"}
 {"op": "answer", "node": "Q002|R001|q1", "text": "Dana presents; Ravi joins for the demo.", "internal_owner": "risks only",
  "likelihood": "risks only", "impact": "risks only", "quote": "…"}

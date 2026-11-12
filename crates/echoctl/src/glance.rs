@@ -17,8 +17,9 @@ pub(crate) fn done_on(n: &Node) -> Option<NaiveDate> {
         .iter()
         .rev()
         .filter(|h| h["applied"] != false)
-        // A call's status (done, or held: "the workshop happened") or the user's edit to done.
-        .find(|h| h["effect"] == "done" || h["effect"] == "held" || h["set"]["state"] == "done" || h["op"] == "done")
+        // A call's status (done, or held: "the workshop happened"), the user's edit to done, or their Close on a task that
+        // looked done (#463: dated when they closed it).
+        .find(|h| h["effect"] == "done" || h["effect"] == "held" || h["set"]["state"] == "done" || h["op"] == "done" || (h["effect"] == "mention" && h["status"] == "accept"))
         .and_then(|h| ["at", "ts", "date"].iter().find_map(|k| h[*k].as_str().filter(|s| s.len() >= 10)))
         .and_then(|s| NaiveDate::parse_from_str(&s[..10], "%Y-%m-%d").ok())
 }

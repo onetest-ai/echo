@@ -67,6 +67,8 @@ function todayView() {
   const dueChip = (t) => {
     const d = t.due ? new Date(t.due + 'T12:00') : null
     const when = d ? d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' }) : ''
+    // A guessed due (#463) is no date here: it never puts a task on My work.
+    if (t.due_guessed) return ''
     if (t.late) return `<span class="td-due late" title="Late${when ? ` — was due ${esc(when)}` : ''}" aria-label="Late">${ICON('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>')}</span>`
     if (!d) return ''
     const today = d.toDateString() === today0.toDateString()
@@ -82,7 +84,9 @@ function todayView() {
     const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1"${modeData(t)} ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON(CLAUDE_SPARK)}</button>`
     // The date's icon before the title's words.
     // The card opens the task's details in the right panel, Today staying put (its icons do their own thing).
-    return `<div class="td-task${S.pj.inline === 'today' && S.pj.node === t.id && S.pj.sel === t.project ? ' on' : ''}" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}" role="button" tabindex="0" title="Open its details"><span class="td-task-t">${dueChip(t)}<span class="td-task-title">${esc(t.title)}</span></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}<span class="td-task-w" title="${where}">${where}</span><span class="td-icos">${kind === 'I owe' ? modeIcon(t.mode) : ''}${work}${close}</span></span></div>`
+    // A later call, mail or chat only mentioned it (#463): Close (done, as yours) or Not yet, on the card.
+    const looks = t.looks_done && t.looks_done.mid ? `<span class="td-looks"><span class="td-looks-t">${esc(looksDone(t.looks_done))}</span><button class="btn sm primary" data-pj="ledger" data-project="${esc(t.project)}" data-body='${esc(JSON.stringify({ op: 'accept', target: t.looks_done.mid }))}' aria-label="Looks done: close “${esc(t.title)}”">Close</button><button class="btn sm ghost" data-pj="ledger" data-project="${esc(t.project)}" data-body='${esc(JSON.stringify({ op: 'reject', target: t.looks_done.mid }))}' aria-label="Looks done: not yet “${esc(t.title)}”">Not yet</button></span>` : ''
+    return `<div class="td-task${S.pj.inline === 'today' && S.pj.node === t.id && S.pj.sel === t.project ? ' on' : ''}" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}" role="button" tabindex="0" title="Open its details"><span class="td-task-t">${dueChip(t)}<span class="td-task-title">${esc(t.title)}</span></span>${looks}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}<span class="td-task-w" title="${where}">${where}</span><span class="td-icos">${kind === 'I owe' ? modeIcon(t.mode) : ''}${work}${close}</span></span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -300,7 +304,7 @@ function todayTallIds(lines) {
 /** Your day's lines (see `agendaRows`): time (violet the next, amber a choice), a bar (solid: going; dashed: no reply,
  *  maybe; green: your work), the place with its threads and the reason, its minutes and prep as links; ⋯ its menu. */
 function agendaView(d, now) {
-  const tasks = (((d.work || {}).mine || {}).items || []).filter((t) => t.late || (t.due && new Date(t.due + 'T12:00').toDateString() === now.toDateString()))
+  const tasks = (((d.work || {}).mine || {}).items || []).filter((t) => t.late || (t.due && !t.due_guessed && new Date(t.due + 'T12:00').toDateString() === now.toDateString()))
   const { rows, skipped } = agendaRows(d.day, now, tasks)
   const chipsOf = (x) => (x.threads || []).map((p) => `<span class="pj-chip"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${projIcon(p, 14)}${esc(p.name)}</button></span>`).join('')
   // Its minutes and prep, as links in the reason line: what to do with it, not buttons.

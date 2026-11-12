@@ -161,7 +161,7 @@ fn open_with(thread_ids: &[String], names: &[String], series: &Series) -> Vec<Va
             if !keep {
                 continue;
             }
-            let late = n["due"].as_str().is_some_and(|d| d < today.as_str());
+            let late = n["due_guessed"] != true && n["due"].as_str().is_some_and(|d| d < today.as_str());
             let said = said_in(n, nodes);
             let from = said.iter().find_map(|st| series.titles.get(st)).cloned();
             let same = said.iter().any(|st| series.stamps.contains(st));

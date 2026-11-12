@@ -13,8 +13,8 @@ const end = src.indexOf('// end of the work-status block', start)
 assert.ok(start >= 0 && end > start, 'the work-status block not found in app.js')
 const ymd = src.match(/^const ymd = .*$/m)
 assert.ok(ymd, '`const ymd` not found in app.js')
-const { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay } =
-  new Function(`${ymd[0]}\n${src.slice(start, end)}\nreturn { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay }`)()
+const { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone } =
+  new Function(`${ymd[0]}\n${src.slice(start, end)}\nreturn { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -45,6 +45,7 @@ test('late and today are judged by the local date, not the UTC one (#123)', () =
   assert.equal(cardLate({ due: '2026-11-05', state: 'open' }, evening), true)
   assert.equal(cardLate({ due: '2026-11-05', state: 'done' }, evening), false)
   assert.equal(cardLate({ state: 'open' }, evening), false)
+  assert.equal(cardLate({ due: '2026-11-05', due_guessed: true, state: 'open' }, evening), false, 'a guessed due is never late (#463)')
   assert.equal(relDay('2026-11-06', evening), 'today')
   assert.equal(relDay('2026-11-05', evening), 'yesterday')
   // A timestamp counts on its local day, not the UTC day its first 10 characters name.
@@ -96,6 +97,18 @@ test('Done on the board follows the Owner and Kind filters; only Open only leave
   // Open only: the tree drops done items, the board keeps them in Done; cancelled ones are dropped by both.
   assert.deepEqual(ids(workFilter(V(), me).pass), ['T002', 'T010', 'T011'])
   assert.deepEqual(ids(workFilter(V(), me).board), ['T001', 'T002', 'T010', 'T009', 'T011', 'Q001'])
+})
+
+test('a guessed due says where it came from; a task a later item only mentioned says it looks done (#463)', () => {
+  const day = (d) => new Date(d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' })
+  assert.equal(dueFrom({ kind: 'mail', date: '2026-11-10' }), `from the mail of ${day('2026-11-10')}`)
+  assert.equal(dueFrom({ kind: 'meeting', date: '2026-11-05T10:00:00+01:00' }), `from the call of ${day('2026-11-05')}`, 'a meeting is a call')
+  assert.equal(dueFrom({ kind: 'chat', date: '2026-11-09' }), `from the chat of ${day('2026-11-09')}`)
+  assert.equal(dueFrom(null), '')
+  const l = { mid: 'm1', kind: 'meeting', title: 'Acme security review', date: '2026-11-11', quote: 'Please send the summary' }
+  assert.equal(looksDone(l), `Looks done — the call Acme security review, ${day('2026-11-11')}: “Please send the summary”`)
+  assert.equal(looksDone({ ...l, kind: 'mail', title: 'Re: demo' }), `Looks done — the mail Re: demo, ${day('2026-11-11')}: “Please send the summary”`)
+  assert.equal(looksDone(null), '')
 })
 
 let failed = 0

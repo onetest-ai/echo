@@ -636,7 +636,7 @@ fn work_of(projects: &[&Project], today: chrono::NaiveDate) -> Vec<(String, usiz
             for o in [&n.internal_owner, &n.client_owner].into_iter().flatten() {
                 let e = out.entry(norm(o)).or_default();
                 e.0 += 1;
-                if n.due.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d < today) {
+                if !n.due_guessed && n.due.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d < today) {
                     e.1 += 1;
                 }
             }

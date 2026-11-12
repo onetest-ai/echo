@@ -491,6 +491,13 @@ pub struct Node {
     /// `reply_at` is the first reply's time once the thread holds one (its mail evidence in that conversation).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sent: Vec<Value>,
+    /// Its due is guessed (#463): not said in the item it came from, that item's own date. It never makes it late.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub due_guessed: bool,
+    /// A later call, mail or chat that only mentioned it, while it is open (#463): `{mid, evidence, kind, title, date,
+    /// quote}`. The user closes it (`accept` on `mid`) or not yet (`reject`); the sync never does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looks_done: Option<Value>,
 }
 
 /// The valid links of a value (an older or hand-written event may hold anything).
@@ -581,12 +588,16 @@ fn node_of(e: &Value) -> Node {
         mirror_of: None,
         also_in: vec![],
         xwaits: vec![],
+        due_guessed: false,
+        looks_done: None,
         sent: vec![],
     }
 }
 
 fn needs_verdict(e: &Value) -> bool {
-    e["type"] == "agent" && (VERIFIED_OPS.contains(&e["op"].as_str().unwrap_or("")) || (e["op"] == "status" && STATUS.contains(&e["effect"].as_str().unwrap_or(""))))
+    e["type"] == "agent"
+        && (VERIFIED_OPS.contains(&e["op"].as_str().unwrap_or(""))
+            || (e["op"] == "status" && (STATUS.contains(&e["effect"].as_str().unwrap_or("")) || (e["effect"] == "mention" && e["covers"] == true))))
 }
 
 fn chase(n: &BTreeMap<String, Node>, id: &str) -> String {
@@ -683,6 +694,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         .filter(|e| e["type"] == "human" && (e["op"] == "accept" || e["op"] == "reject") && !undone.contains(e["mid"].as_str().unwrap_or("")))
         .filter_map(|e| Some((s(&e["target"])?, s(&e["op"])?)))
         .collect();
+    // Looks done (#463): each covering mention's task and day, by its mid; and per task, the day of the latest item the
+    // user said Not yet to (only a later item may suggest again).
+    let mut mention_of: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut not_before: BTreeMap<String, String> = BTreeMap::new();
     let mut n: BTreeMap<String, Node> = BTreeMap::new();
     let mut notes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let hist = |node: &mut Node, e: &Value, applied: bool, extra: Value| {
@@ -714,7 +729,7 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             "create" => {
                 let mut x = node_of(e);
                 if let Some(d) = s(&e["fields"]["due"]) {
-                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"]}));
+                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"], "guessed": e["fields"]["due_guessed"] == true}));
                 }
                 if human {
                     x.pinned = vec!["title".into()];
@@ -738,6 +753,20 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 let op = e["op"].as_str().unwrap_or("");
                 let mut ok = !needs_verdict(e) || e["mid"].as_str().and_then(|m| verdict.get(m)).map(String::as_str) == Some("supports");
                 match op {
+                    // A later item that says a task's outcome happened (#463: a covering mention, verified): it looks done
+                    // until the user closes it or says not yet — at their own place in the log.
+                    "status" if e["effect"] == "mention" && e["covers"] == true && e["quote"].is_string() => {
+                        let x = n.get_mut(&id).unwrap();
+                        let day = s(&e["date"]).unwrap_or_default();
+                        let later = x.kind == "task" && e["evidence"].is_string() && s(&e["evidence"]) != x.created_in && not_before.get(&id).is_none_or(|d| day > *d);
+                        if ok && later && ["open", "in_progress", "blocked"].contains(&x.state.as_str()) {
+                            let item = e["evidence"].as_str().and_then(|i| ev.get(i));
+                            x.looks_done = Some(json!({"mid": e["mid"], "evidence": e["evidence"], "date": e["date"], "quote": e["quote"],
+                                "kind": item.map(|i| i["kind"].clone()), "title": item.map(|i| i["title"].clone())}));
+                            mention_of.insert(s(&e["mid"]).unwrap_or_default(), (id.clone(), day));
+                        }
+                        hist(x, e, false, json!({}));
+                    }
                     "status" => {
                         let x = n.get_mut(&id).unwrap();
                         if ok && !["merged", "deleted"].contains(&x.state.as_str()) {
@@ -819,6 +848,27 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             }
             "human" => {
                 let op = e["op"].as_str().unwrap_or("");
+                // Close (accept) or Not yet (reject) on a task that looks done (#463), here in the log: Close makes it done
+                // as the user's edit; Not yet hides it and every earlier suggestion.
+                if let Some((id, day)) = e["target"].as_str().and_then(|t| mention_of.get(t)).filter(|_| op == "accept" || op == "reject").cloned() {
+                    if let Some(x) = n.get_mut(&id) {
+                        if op == "accept" && !["merged", "deleted"].contains(&x.state.as_str()) {
+                            x.state = "done".into();
+                            settable(x, "state", true);
+                        }
+                        x.looks_done = None;
+                        if op == "reject" {
+                            not_before.insert(id.clone(), day);
+                        }
+                        if let Some(h) = x.history.iter_mut().rev().find(|h| h["mid"] == e["target"]) {
+                            h["status"] = json!(op);
+                            h["decided"] = e["mid"].clone();
+                            h["applied"] = json!(op == "accept");
+                            h["at"] = e["at"].clone();
+                        }
+                    }
+                    continue;
+                }
                 if ["undo", "accept", "reject"].contains(&op) {
                     continue;
                 }
@@ -853,6 +903,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                                     set_field(x, k, v, true);
                                 }
                             }
+                        }
+                        // Closed by the user's own edit: its Looks done goes, and doesn't come back with a reopen (#463).
+                        if let Some(x) = n.get_mut(&id).filter(|x| closed(&x.state)) {
+                            x.looks_done = None;
                         }
                     }
                     "ac_add" => n.get_mut(&id).unwrap().ac.push(Ac { text: s(&e["text"]).unwrap_or_default(), met: false, met_by: None, source: Some("human".into()), human: false, dropped: false }),
@@ -927,6 +981,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         x.depends_on = uniq;
         x.ac.retain(|a| !a.dropped);
         x.due = x.due_history.last().and_then(|h| s(&h["due"]));
+        x.due_guessed = x.due.is_some() && x.due_history.last().is_some_and(|h| h["guessed"] == true);
+        if !["open", "in_progress", "blocked"].contains(&x.state.as_str()) {
+            x.looks_done = None;
+        }
     }
     derive(&mut n);
     let lim_n = (lim + 1).max(0) as usize;
@@ -934,6 +992,15 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
 }
 
 fn apply_status(x: &mut Node, e: &Value) -> bool {
+    let ok = apply_status_here(x, e);
+    // Closed by anything: an old Looks done never comes back with a reopen (#463).
+    if closed(&x.state) {
+        x.looks_done = None;
+    }
+    ok
+}
+
+fn apply_status_here(x: &mut Node, e: &Value) -> bool {
     let eff = e["effect"].as_str().unwrap_or("");
     if eff == "mention" {
         return false;
@@ -974,8 +1041,12 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
         if pinned(x, "due") {
             return eff != "due";
         }
+        // The same date said now: no longer guessed (#463).
+        if let Some(h) = x.due_history.last_mut().filter(|h| h["due"] == e["due"] && h["guessed"] == true && e["due_guessed"] != true) {
+            h["guessed"] = json!(false);
+        }
         if x.due_history.last().map(|h| &h["due"]) != Some(&e["due"]) {
-            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"]}));
+            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"], "guessed": e["due_guessed"] == true}));
         }
     }
     true
@@ -1396,6 +1467,128 @@ mod tests {
         assert_eq!(ch[0]["node"]["id"], "S001", "in the order said");
         assert_eq!(ch[1]["node"]["due"], "2026-10-30");
 
+    }
+
+    /// A covering mention (#463) of `node` from item `ev`, with the verifier's `verdict`: its mid.
+    fn covering(id: &str, ev: &str, node: &str, quote: &str, verdict: Option<&str>) -> String {
+        apply(id, ev, &[json!({"op": "status", "node": node, "effect": "mention", "covers": true, "quote": quote})]).unwrap();
+        let mid = Ledger::of(id).unwrap().events().unwrap().iter().rev().find(|e| e["effect"] == "mention" && e["evidence"] == ev).unwrap()["mid"].as_str().unwrap().to_string();
+        if let Some(v) = verdict {
+            verify_apply(id, &[json!({"mid": mid, "verdict": v})]).unwrap();
+        }
+        mid
+    }
+
+    fn later_item(l: &Ledger, eid: &str, kind: &str, text: &str) {
+        let item = json!({"id": eid, "kind": kind, "date": &eid[..10], "title": format!("About SAML ({kind} {eid})"), "turns": [{"speaker": "Dana Kowal", "text": text}], "text": ""});
+        fs::write(l.dir.join(format!("evidence/{eid}.json")), serde_json::to_vec(&item).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_same_day_due_is_said_in_the_users_languages_but_not_inside_a_word_or_a_quoted_header() {
+        let said = |text: &str, due_text: &str| apply::due_said(&apply::said_words(&json!({"turns": [{"text": text}]})), Some(due_text));
+        // The extractor's "today" for words said in Ukrainian, Russian or as EOD; an ISO date for "today".
+        for (text, due) in [("Зробимо це сьогодні, обіцяю.", "today"), ("Сделаем это сегодня.", "today"), ("I'll have it by EOD", "today"),
+                            ("I'll send it today.", "2026-11-10"), ("до кінця дня надішлю", "today"), ("by end of day", "2026-11-10"), ("by Friday", "Friday")] {
+            assert!(said(text, due), "{text:?} says {due:?}");
+        }
+        // Not inside another word, and not in a mail's quoted reply or its header.
+        assert!(!said("Thanks for today's call, see the notes.", "today"));
+        assert!(!said("Sure.\nOn 10 Nov 2026, Dana Kowal wrote:\n> please send it 10 Nov", "10 Nov"));
+        assert!(!said("Thanks!\nSent: 10 Nov 2026 09:00", "10 Nov"));
+        assert!(said("Can you send it by 10 Nov?", "10 Nov"));
+    }
+
+    #[test]
+    fn a_verified_covering_mention_looks_done_and_the_users_close_or_not_yet_counts_where_they_made_it() {
+        let (_env, l, id) = setup("ledger-looks-done");
+        let ev = "2026-10-28_110000";
+        later_item(&l, "2026-10-30_090000", "mail", "Thanks, the SAML config arrived and the pilot users can log in now.");
+        later_item(&l, "2026-10-31_090000", "chat", "We still need to send the SAML config to the Berlin team.");
+        later_item(&l, "2026-11-02_100000", "chat", "Quick note: the SAML config works for the Berlin users as well.");
+        later_item(&l, "2026-11-03_100000", "mail", "All good: the SAML config is live and nobody needs anything more.");
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            // "today" is nowhere in the call: the call's own date taken as the due — guessed.
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Data-flow diagram", "type": "action", "internal_owner": "Me", "due_text": "this week", "quote": "can you send it this week"}),
+        ]).unwrap();
+        let node = |n: &str| fold(&l).unwrap().nodes[n].clone();
+        assert_eq!((node("T001").due.as_deref(), node("T001").due_guessed), (Some("2026-10-28"), true));
+        assert!(!node("T002").due_guessed, "said");
+        // The same date said later: no longer guessed.
+        later_item(&l, "2026-10-29_100000", "chat", "Yes, the SAML config is due on the 28th of October, as agreed.");
+        apply(&id, "2026-10-29_100000", &[json!({"op": "status", "node": "T001", "effect": "due", "due_text": "28th of October", "quote": "the SAML config is due on the 28th of October"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &p.iter().map(|x| json!({"mid": x["mid"], "verdict": "supports"})).collect::<Vec<_>>()).unwrap();
+        assert_eq!((node("T001").due.as_deref(), node("T001").due_guessed), (Some("2026-10-28"), false));
+        // A plain mention, and a covering one the verifier didn't support, are no "looks done".
+        apply(&id, "2026-10-31_090000", &[json!({"op": "status", "node": "T001", "effect": "mention", "quote": "We still need to send the SAML config"})]).unwrap();
+        covering(&id, "2026-10-31_090000", "T001", "still need to send the SAML config to the Berlin team", Some("wrong"));
+        assert!(node("T001").looks_done.is_none());
+        // A verified covering mail: it looks done; nothing changes by itself.
+        let m1 = covering(&id, "2026-10-30_090000", "T001", "the SAML config arrived and the pilot users can log in", Some("supports"));
+        assert_eq!((node("T001").state.as_str(), node("T001").looks_done.as_ref().map(|l| l["kind"].clone())), ("open", Some(json!("mail"))));
+        // A later chat: the latest shows. Not yet on it hides it and the earlier mail's (#2 of the review)…
+        let m2 = covering(&id, "2026-11-02_100000", "T001", "the SAML config works for the Berlin users", Some("supports"));
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m2.as_str());
+        let not_yet = human_event(&id, &json!({"op": "reject", "target": m2})).unwrap();
+        assert!(node("T001").looks_done.is_none(), "not the older one back");
+        human_event(&id, &json!({"op": "undo", "target": not_yet["mid"]})).unwrap();
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m2.as_str(), "undone: shown again");
+        human_event(&id, &json!({"op": "reject", "target": m2})).unwrap();
+        // …a later mail suggests again.
+        let m3 = covering(&id, "2026-11-03_100000", "T001", "the SAML config is live and nobody needs anything more", Some("supports"));
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m3.as_str());
+        // The user set In progress after the mention; Close still closes it — where it was made (#1 of the review).
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "in_progress"}})).unwrap();
+        let close = human_event(&id, &json!({"op": "accept", "target": m3})).unwrap();
+        let t = node("T001");
+        assert_eq!((t.state.as_str(), t.pinned.contains(&"state".to_string()), t.looks_done.is_none()), ("done", true, true));
+        let h = t.history.iter().find(|h| h["mid"] == m3.as_str()).unwrap();
+        assert_eq!((h["applied"].as_bool(), h["status"].as_str(), h["decided"].as_str()), (Some(true), Some("accept"), close["mid"].as_str()));
+        // Done this week counts it, on the day it was closed.
+        assert_eq!(crate::glance::done_on(&t), Some(chrono::Local::now().date_naive()));
+        // Reopened by the user: the old suggestion doesn't come back (#8 of the review).
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "open"}})).unwrap();
+        assert!(node("T001").looks_done.is_none());
+        // Undo of the Close: open (as it was set before) with its Looks done back.
+        human_event(&id, &json!({"op": "undo", "target": close["mid"]})).unwrap();
+        let t = node("T001");
+        assert_eq!((t.state.as_str(), t.looks_done.map(|l| l["mid"].clone())), ("open", Some(json!(m3))));
+        assert_ne!(m1, m3);
+    }
+
+    #[test]
+    fn close_on_a_mirror_closes_its_master_and_its_guessed_due_follows_the_masters() {
+        let (_env, l, id) = setup("ledger-looks-done-mirror");
+        let ev = "2026-10-28_110000";
+        later_item(&l, "2026-10-30_090000", "mail", "Thanks, the SAML config arrived and the pilot users can log in now.");
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        let other = crate::projects::create("Identity programme", None, None).unwrap().id;
+        let ol = Ledger::of(&other).unwrap();
+        fs::create_dir_all(ol.dir.join("evidence")).unwrap();
+        fs::write(ol.dir.join("evidence/2026-10-28_110000.json"), fs::read(l.dir.join("evidence/2026-10-28_110000.json")).unwrap()).unwrap();
+        ensure_first_epic(&ol).unwrap();
+        apply(&other, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "Single sign-on", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML configuration", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "xref", "node": "T001", "thread": other, "target": "T001", "kind": "same", "master": "there"})).unwrap();
+        // The mirror shows the master's due — guessed, as the master's is.
+        let mirror = &fold_linked(&id).unwrap().nodes["T001"];
+        assert_eq!((mirror.due.as_deref(), mirror.due_guessed), (Some("2026-10-28"), true));
+        // Close on the mirror's Looks done closes the master; its undo reopens both.
+        let m = covering(&id, "2026-10-30_090000", "T001", "the SAML config arrived and the pilot users can log in", Some("supports"));
+        let close = human_event(&id, &json!({"op": "accept", "target": m})).unwrap();
+        assert_eq!(fold_linked(&other).unwrap().nodes["T001"].state, "done");
+        assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
+        human_event(&id, &json!({"op": "undo", "target": close["mid"]})).unwrap();
+        assert_eq!(fold_linked(&other).unwrap().nodes["T001"].state, "open");
+        assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "open");
     }
 
     #[test]

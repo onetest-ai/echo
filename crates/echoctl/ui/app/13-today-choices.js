@@ -69,7 +69,7 @@ function dayChoices(day, now, ctx = {}) {
 /** The widget: a line a choice; nothing to decide, nothing drawn (temporal). */
 function dayChoicesView(d, now) {
   // Its reasons: the threads where a promise of yours is due today or late (My work), and the clients' names.
-  const mine = (((d.work || {}).mine || {}).items || []).filter((t) => t.late || (t.due && new Date(t.due + 'T12:00').toDateString() === now.toDateString()))
+  const mine = (((d.work || {}).mine || {}).items || []).filter((t) => t.late || (t.due && !t.due_guessed && new Date(t.due + 'T12:00').toDateString() === now.toDateString()))
   const clients = Object.fromEntries(((S.pj.data && S.pj.data.clients) || []).filter((c) => c.account !== false).map((c) => [c.id, c.name]))
   const cs = dayChoices(d.day, now, { due: new Set(mine.map((t) => t.project)), clients })
   if (!cs.length) return ''

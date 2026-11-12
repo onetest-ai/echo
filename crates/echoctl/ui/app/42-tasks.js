@@ -4,7 +4,8 @@ const TASK_PILES = [['mine', 'I owe'], ['owed', 'Owed to me'], ['waiting', 'Wait
 const TASK_SORTS = [['due', 'Due'], ['quiet', 'Quiet longest'], ['project', 'Thread']]
 const TASK_SHOWN = 6
 const projById = (id) => ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === id)
-const dueText = (c) => c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
+const dueText = (c) => c.due && c.due_guessed ? `<span class="tk-due guessed" title="Nobody said this date: never late">${esc(fmtDay(c.due))} · ${esc(dueFrom(c.due_from))}</span>`
+  : c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
 /** Who a card is about (the user's rules, 2026-11-02): what you owe — its story, and what blocks
  *  it; owed — who does it (· client); waiting — who, and which of yours it stops; others — who. */
 function taskWho(c, pile) {

@@ -361,3 +361,6 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .wv-add { height: 30px; padding: 0 10px; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: default; }
 .wv-add:hover { color: var(--text); }
 
+/* Looks done (#463): the line on its own row, Close and Not yet under it. */
+.wk-looks { flex-wrap: wrap; }
+.wk-looks > .grow { flex-basis: 100%; }

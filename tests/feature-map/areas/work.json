@@ -173,6 +173,20 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-WORK-18",
+   "feature": "Looks done: an open task that a later call, mail or chat says is covered — the sync's `mention` with `covers` (its outcome happened or it isn't needed any more), which the verifier supports — shows in Details \"Looks done — <the call / mail / chat> <title>, <date>: “<quote>”\" with Close and Not yet; a plain mention, or one not supported, shows nothing; Close makes it done as the user's edit where they made it (status pinned, counted in Done this week, undo in History; on a mirror it closes the master), Not yet hides it and every earlier one (only a later item may suggest again); a task closed by anything loses it; the sync never closes it",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-WORK-19",
+   "feature": "A guessed due — the date the item's own (e.g. a mail's date taken as the due) and nothing in it saying it (its words not there as whole words, outside a mail's quoted reply; no same-day word — today, tonight, EOD, end of day, сьогодні, сегодня, до кінця/конца дня) — never makes the task late (Work, Tasks, Today, prep, linked threads, people), shows as \"from the <call / mail / chat> of <date>\", follows the master's on a mirror; a due said in words (also later, the same date), or set by the user, is a due as before",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

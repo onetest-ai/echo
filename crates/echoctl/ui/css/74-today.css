@@ -263,3 +263,6 @@
 /* Whatever the widget draws (.td-sec, .td-card, a plugin's, an edit frame) scrolls inside, never over the next line. */
 .td-tall > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .td-tall > .tw > .tw-in { flex: 1 1 auto; max-height: none; }
+/* A task that looks done (#463): the line and Close / Not yet, under its title. */
+.td-looks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.td-looks-t { flex: 1 1 100%; }

@@ -268,9 +268,12 @@ fn week_end(today: chrono::NaiveDate) -> chrono::NaiveDate {
     today + chrono::Duration::days(6 - i64::from(chrono::Datelike::weekday(&today).num_days_from_monday()))
 }
 
-/// On My work: late, or due by the week's end (an Echo task with no date isn't: it stays in Tasks).
+/// On My work: late, or due by the week's end (an Echo task with no date isn't: it stays in Tasks; nor one whose only
+/// due is guessed, #463), or one that looks done (a later item mentioned it: Close or Not yet there).
 fn this_week(t: &Value, week_end: chrono::NaiveDate) -> bool {
-    t["late"] == true || t["due"].as_str().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d <= week_end)
+    t["late"] == true
+        || t["due_guessed"] != true && t["due"].as_str().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d <= week_end)
+        || t["looks_done"].is_object()
 }
 
 /// A plugin's row on My work: late or due this week as a task is, and also one with no date (a review asked of you, an
@@ -294,6 +297,7 @@ pub(crate) fn work(tasks: &Value) -> Value {
             .map(|t| {
                 json!({
                     "id": t["id"], "title": t["title"], "due": t["due"], "late": t["late"], "owner": t["owner"], "project": t["project"],
+                    "due_guessed": t["due_guessed"], "due_from": t["due_from"], "looks_done": t["looks_done"],
                     "waiting_for": t["waiting_for"], "story": t["story"]["title"], "mode": t["mode"],
                     "link": format!("echo://task/{}/{}", t["project"].as_str().unwrap_or(""), t["id"].as_str().unwrap_or("")),
                 })
@@ -678,6 +682,9 @@ mod tests {
         ];
         let tasks: Vec<&str> = rows.iter().filter(|r| this_week(r, end)).map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(tasks, ["late", "past", "sunday"], "Echo's own tasks: no undated one");
+        // A guessed due (#463) puts nothing on My work; a task that looks done is there (Close / Not yet).
+        assert!(!this_week(&json!({"id": "guessed", "due": "2026-11-12", "due_guessed": true, "late": false}), end));
+        assert!(this_week(&json!({"id": "looks", "late": false, "looks_done": {"mid": "m"}}), end));
         let plugin: Vec<&str> = rows.iter().filter(|r| plugin_row_shown(r, end)).map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(plugin, ["late", "past", "sunday", "undated"], "a plugin's: the undated one too, never next week's");
     }
