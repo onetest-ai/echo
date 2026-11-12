@@ -761,7 +761,9 @@ pub fn offer_call(app: TargetApp) {
     std::thread::spawn(move || {
         let answer = ask(&format!("A {app:?} call started.\n\nRecord and transcribe it?"), &["Not now", "Record"], "Record");
         if answer.as_deref() == Some("Record") {
-            let _ = watch::arm(None, crate::calendar::meeting_now(Utc::now()), None, None);
+            // The call going on is the one to record: no meeting given (the start attaches the one it overlaps), so it
+            // never waits for that meeting's own call (#483).
+            let _ = watch::arm(None, None, None, None);
         }
         ASKING.store(false, Ordering::SeqCst);
     });
