@@ -804,6 +804,11 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 /// its work rows, its values per thread.
 fn not_echos(rel: &str) -> Result<()> {
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    // A file system may fold a name onto another (APFS: `ſettings.json` is `settings.json`): a name at the top of the
+    // store is plain ASCII, compared as such; names further down are the plugin's own.
+    if !first.is_ascii() {
+        bail!("“{first}”: a name at the top of the plugin's store is plain ASCII (letters, digits, - _ .)");
+    }
     match first.trim_end_matches(['.', ' ']).split(':').next() {
         Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
         Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
@@ -1975,6 +1980,14 @@ mod tests {
             assert!(refused(call("fetcher", "scribble", &json!({"to": to}))).contains("isn't its to write"), "{to}");
             assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/text"), "to": to}))).contains("isn't its to write"), "{to}");
         }
+        // A name the file system may fold onto one of Echo's (APFS: ſ is s): at the top of the store only plain ASCII.
+        for to in ["\u{17f}ettings.json", "widget\u{17f}.json", "inbox.j\u{17f}on", "work.j\u{17f}on", "\u{17f}tate.json"] {
+            assert!(refused(call("fetcher", "scribble", &json!({"to": to}))).contains("plain ASCII"), "{to}");
+            assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/text"), "to": to}))).contains("plain ASCII"), "{to}");
+        }
+        assert!(!plugins::data_dir("fetcher").join("widgets.json").exists(), "nothing landed on widgets.json");
+        // Further down, the plugin's own names are its own.
+        call("fetcher", "scribble", &json!({"to": "notes/\u{17f}\u{43d}.json"})).unwrap();
         assert_eq!(plugins::setting("fetcher", "tts"), Some(json!(format!("http://192.168.*.*:*, http://127.0.0.*:{port}"))));
         // Nor under a name the file system folds onto `settings.json` (ſ is s on a Mac): the addresses aren't in the store.
         let _ = call("fetcher", "scribble", &json!({"to": "\u{17f}ettings.json"}));
