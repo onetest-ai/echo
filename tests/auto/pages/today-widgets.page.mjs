@@ -3,6 +3,25 @@
 import { TodayPage } from './today.page.mjs'
 import { literal } from '../support/data.mjs'
 
+/** In the page: Today's named regions (the main landmark's `section`s with a label and `role="region"`s, not under
+ *  aria-hidden), the first of each of these names, by name; `frames`: only edit mode's frames (holding a Size group).
+ *  A source text, so `onWidget` and `boxes` can find and read in one evaluation. */
+const REGIONS = `(names, frames = false) => {
+  const main = document.querySelector('main, [role="main"]'), out = {}
+  if (!main) return out
+  const nameOf = (el) => {
+    const by = el.getAttribute('aria-labelledby')
+    return (el.getAttribute('aria-label') ?? (by ? by.split(/\\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ') : '')).trim()
+  }
+  for (const el of main.querySelectorAll('section[aria-label], section[aria-labelledby], [role="region"]')) {
+    if (el.closest('[aria-hidden="true"]')) continue
+    if (frames && !el.querySelector('[role="group"][aria-label="Size"]')) continue
+    const name = nameOf(el)
+    if (names.includes(name) && !(name in out)) out[name] = el
+  }
+  return out
+}`
+
 export class TodayWidgetsPage extends TodayPage {
   constructor(page, data) {
     super(page, data)
@@ -48,16 +67,29 @@ export class TodayWidgetsPage extends TodayPage {
     return this.main.getByRole('region', { name, exact: true }).first()
   }
 
+  /** Run `fn(el, arg)` in the page on the widget of this name (as `widget` finds it, once it is drawn), finding it in
+   *  the same step: Today may be drawn again at any moment, and a widget found in one step and read in the next could be
+   *  gone in between, read as empty or not drawn (#476). `fn` runs in the page: only what it is given. */
+  async onWidget(name, fn, arg = null) {
+    await this.widget(name).waitFor()
+    return this.page.evaluate(`(() => { const el = (${REGIONS})(${JSON.stringify([name])})[${JSON.stringify(name)}]; return el ? (${fn})(el, ${JSON.stringify(arg)}) : null })()`)
+  }
+
+  /** The boxes of Today's widgets of these names, by name (the first of each name, as `widget` finds it; one not drawn
+   *  or not visible is left out). Found and measured in one step in the page, by their roles (the main landmark, its
+   *  named regions): Today may be drawn again at any moment (a second load of its data lands), and a widget found in
+   *  one step and measured in the next could be gone in between, read as not drawn (#476).
+   *  `frames`: edit mode's frames (a region holding a Size group), as `frame` finds them. */
+  async boxes(names, { frames = false } = {}) {
+    const at = (r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })
+    return this.page.evaluate(`(() => { const out = {}; for (const [name, el] of Object.entries((${REGIONS})(${JSON.stringify(names)}, ${frames}))) { const r = el.getBoundingClientRect(); if (r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden') out[name] = (${at})(r) } return out })()`)
+  }
+
   /** Where the widgets of these names are: rows top to bottom (a row: those starting level, left to right), each a
    *  name; a widget not drawn is left out. */
   async rows(names) {
-    const boxes = []
-    for (const name of names) {
-      const l = this.widget(name)
-      if (!(await l.count())) continue
-      const b = await l.boundingBox()
-      if (b) boxes.push({ name, ...b })
-    }
+    const at = await this.boxes(names)
+    const boxes = names.filter((name) => at[name]).map((name) => ({ name, ...at[name] }))
     boxes.sort((a, b) => a.y - b.y || a.x - b.x)
     const rows = []
     for (const b of boxes) {
@@ -68,15 +100,16 @@ export class TodayWidgetsPage extends TodayPage {
     return rows.map((r) => r.items.sort((a, b) => a.x - b.x).map((b) => b.name))
   }
 
-  /** A widget's box (x, y, width, height). */
+  /** A widget's box (x, y, width, height), once it is drawn; read as `boxes` reads it. */
   async box(name) {
-    return this.widget(name).boundingBox()
+    await this.widget(name).waitFor()
+    return (await this.boxes([name]))[name] ?? null
   }
 
   /** Your day as it holds the first column (#367/#372): `held` (it sits sticky in a column of its own), its column's
    *  width and height and those of what is beside it, its own height, the view's height. */
   async hold(name = this.w.name.yourDay) {
-    return this.widget(name).evaluate((el) => {
+    return this.onWidget(name, (el) => {
       const col = el.parentElement, beside = col.nextElementSibling
       const r = (x) => (x ? x.getBoundingClientRect() : { width: 0, height: 0 })
       return {
@@ -95,7 +128,7 @@ export class TodayWidgetsPage extends TodayPage {
   /** The part of a widget that scrolls inside it (Your day's list, My work's cards): how far it is scrolled, whether it
    *  holds more than it shows, and whether the fade at its bottom ("there is more") is drawn. */
   async inner(name) {
-    return this.widget(name).evaluate((el) => {
+    return this.onWidget(name, (el) => {
       const all = [el, ...el.querySelectorAll('*')]
       const s = all.find((x) => ['auto', 'scroll'].includes(getComputedStyle(x).overflowY) && x.scrollHeight > x.clientHeight + 1)
         || all.find((x) => ['auto', 'scroll'].includes(getComputedStyle(x).overflowY))
@@ -121,14 +154,20 @@ export class TodayWidgetsPage extends TodayPage {
 
   /** Whether the line now of Your day's list is in view inside the list (it opens on now). */
   async nowInView() {
-    const line = await this.nowLine.boundingBox()
-    const list = await this.yourDay.getByRole('list', { name: "Where you'll be", exact: true }).boundingBox()
-    return !!line && !!list && line.y >= list.y - 1 && line.y + line.height <= list.y + list.height + 1
+    // The line and the list read in one step (`onWidget`), never from two drawings of Your day.
+    await this.nowLine.waitFor()
+    return this.onWidget(this.w.name.yourDay, (el) => {
+      const list = el.querySelector('[role="list"][aria-label="Where you\'ll be"]')
+      const line = list && [...el.querySelectorAll('[role="separator"]')].find((x) => /^Now /.test(x.getAttribute('aria-label') || ''))
+      if (!list || !line) return false
+      const [a, b] = [line.getBoundingClientRect(), list.getBoundingClientRect()]
+      return a.height > 0 && b.height > 0 && a.y >= b.y - 1 && a.y + a.height <= b.y + b.height + 1
+    })
   }
 
   /** Whether anything inside a widget is drawn past its frame or cut (a text wider than its box). */
   async overflows(name) {
-    return this.widget(name).evaluate((el) => {
+    return this.onWidget(name, (el) => {
       const f = el.getBoundingClientRect()
       return [...el.querySelectorAll('*')].filter((x) => {
         const b = x.getBoundingClientRect()
@@ -281,12 +320,8 @@ export class TodayWidgetsPage extends TodayPage {
   /** The frames in edit mode, top to bottom and left to right, by their labels. */
   async frameRows(labels) {
     const rows = []
-    const boxes = []
-    for (const label of labels) {
-      const f = this.frame(label)
-      if (!(await f.count())) continue
-      boxes.push({ label, ...(await f.boundingBox()) })
-    }
+    const at = await this.boxes(labels, { frames: true })
+    const boxes = labels.filter((label) => at[label]).map((label) => ({ label, ...at[label] }))
     boxes.sort((a, b) => a.y - b.y || a.x - b.x)
     for (const b of boxes) {
       const row = rows.find((r) => Math.abs(r.y - b.y) <= 4)
@@ -298,8 +333,8 @@ export class TodayWidgetsPage extends TodayPage {
 
   /** Every frame ends inside its row: none reaches under the top of a frame below it in the same column. */
   async framesInRows(labels) {
-    const boxes = []
-    for (const label of labels) if (await this.frame(label).count()) boxes.push({ label, ...(await this.frame(label).boundingBox()) })
+    const at = await this.boxes(labels, { frames: true })
+    const boxes = labels.filter((label) => at[label]).map((label) => ({ label, ...at[label] }))
     const under = (a, b) => b.y > a.y + 4 && b.x < a.x + a.width - 1 && a.x < b.x + b.width - 1
     return boxes.every((a) => boxes.filter((b) => under(a, b)).every((b) => a.y + a.height <= b.y + 1))
   }
@@ -448,10 +483,17 @@ export class TodayWidgetsPage extends TodayPage {
     return this.glanceLine(thread).getByTitle(title, { exact: true })
   }
 
-  /** A segment's width and colour. */
+  /** A segment's width and colour, once it is drawn; both read in one step in the page, by the glance's region, the
+   *  thread's line (its list item) and the segment's title, as `segment` finds it: never from a segment drawn over in
+   *  between (#476). */
   async segmentLook(thread, title) {
-    const s = this.segment(thread, title)
-    return { width: (await s.boundingBox()).width, colour: await s.evaluate((el) => getComputedStyle(el).backgroundColor) }
+    await this.segment(thread, title).waitFor()
+    return this.page.evaluate(([glance, thread, title]) => {
+      const region = [...document.querySelectorAll('main section[aria-label], main [role="region"]')].find((el) => el.getAttribute('aria-label') === glance)
+      const line = region && [...region.querySelectorAll('[role="listitem"]')].find((el) => (el.getAttribute('aria-label') || '').startsWith(`${thread}: `))
+      const seg = line && [...line.querySelectorAll('[title]')].find((el) => el.getAttribute('title') === title)
+      return seg ? { width: seg.getBoundingClientRect().width, colour: getComputedStyle(seg).backgroundColor } : null
+    }, [this.w.name.glance, thread, title])
   }
 
   /** The total at a line's end. */
@@ -488,7 +530,7 @@ export class TodayWidgetsPage extends TodayPage {
 
   /** A plugin's status widget's dot: its colour (the dot is drawn, not read: it has no text of its own). */
   async dotColour(name) {
-    return this.widget(name).evaluate((el) => {
+    return this.onWidget(name, (el) => {
       const dot = [...el.querySelectorAll('*')].find((x) => !x.children.length && !x.textContent.trim() && x.getBoundingClientRect().width > 0 && x.getBoundingClientRect().width <= 16)
       return dot ? getComputedStyle(dot).backgroundColor : null
     })
@@ -688,7 +730,7 @@ export class TodayWidgetsPage extends TodayPage {
   /** A plugin's own page (kind page) as its window half drew it: its boxes' texts, the size and theme Echo gave it (what
    *  its box says), and whether any text of the widget is italic (its text escaped: none). */
   async pageWidget(name) {
-    return this.widget(name).evaluate((el) => {
+    return this.onWidget(name, (el) => {
       const box = el.querySelector('[data-size]')
       return box && {
         size: box.dataset.size,
