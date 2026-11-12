@@ -85,7 +85,7 @@ function paletteItems(target) {
     }
     // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does — asked first on its row.
     for (const r of (w.plugins || []).filter((r) => /^https:\/\//.test(r.url || ''))) {
-      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: [r.source_name, linkHost(r.url)].filter(Boolean).join(' · '), icon: workRowIcon(r) })
+      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url, openWhere: workRowWhere(r) }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: [r.source_name, linkHost(r.url)].filter(Boolean).join(' · '), icon: workRowIcon(r) })
     }
   }
   // Echo's own

@@ -11,7 +11,7 @@ const src = appSource()
 const a = src.indexOf('// ── plugin work rows:'), b = src.indexOf('// end of the plugin work rows block', a)
 assert.ok(a >= 0 && b > a, 'the plugin work rows block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const { workRowHtml: row, linkAskStep, linkAsked } = new Function('esc', `${src.slice(a, b)}\nreturn { workRowHtml, linkAskStep, linkAsked }`)(esc)
+const { workRowHtml: row, linkAskStep, linkAsked, linkAskLine } = new Function('esc', `${src.slice(a, b)}\nreturn { workRowHtml, linkAskStep, linkAsked, linkAskLine }`)(esc)
 
 const r = { id: 'pr-7', title: 'Review: fix login', kind: 'review', where: 'acme-test/api', url: 'https://git.acme.example/pr/7', source: 'gh', source_name: 'GitHub', icon: 'plugin/gh/icon.svg' }
 const h = row(r, '<i>due</i>', '')
@@ -31,39 +31,63 @@ assert.match(row(r, '', '<button>Act</button>'), /<span class="td-icos"><button>
 
 // Its link: the first click asks (its host named), a second within 30 s opens; later, or another link, asks again.
 const st = {}
-assert.equal(linkAskStep(st, 'wrOpen', r.url, 1000), false, 'first click: asked')
+const here = 'row:gh:pr-7'
+assert.equal(linkAskStep(st, 'wrOpen', r.url, 1000, here), false, 'first click: asked')
 const asked = row(r, '', '', linkAsked(st, 'wrOpen', 2000))
 assert.match(asked, /Open git\.acme\.example in the browser\? Click its title again · <button type="button" class="link-btn" data-open-url-no="1">Cancel<\/button>/)
-assert.ok(!row({ ...r, id: 'x', url: 'https://other.example/x' }, '', '', st.wrOpen).includes('pw-ask'), 'only its own row asks')
-assert.equal(linkAskStep(st, 'wrOpen', r.url, 5000), true, 'second click: opened')
+assert.match(asked, /<div class="pw-ask set-sub" role="status" aria-live="polite">/, 'read out when it appears')
+assert.ok(!row({ ...r, id: 'x', url: 'https://other.example/x' }, '', '', linkAsked(st, 'wrOpen', 2000)).includes('pw-ask'), 'only its own row asks')
+assert.ok(!row({ ...r, id: 'pr-9' }, '', '', linkAsked(st, 'wrOpen', 2000)).includes('pw-ask'), 'another row with the same link does not ask too')
+assert.equal(linkAskStep(st, 'wrOpen', r.url, 3000, 'pw:plugin:gh:ci'), false, 'the same link in a widget asks for itself…')
+assert.equal(linkAsked(st, 'wrOpen', 3000).where, 'pw:plugin:gh:ci', '…and the row\'s question goes: one at a time')
+assert.ok(!row(r, '', '', linkAsked(st, 'wrOpen', 3000)).includes('pw-ask'))
+linkAskStep(st, 'wrOpen', r.url, 4000, here)
+assert.equal(linkAskStep(st, 'wrOpen', r.url, 5000, here), true, 'second click: opened')
 assert.equal(st.wrOpen, null, 'and the question goes')
-linkAskStep(st, 'wrOpen', r.url, 0)
-assert.equal(linkAskStep(st, 'wrOpen', r.url, 31000), false, 'after 30 s it asks again')
-assert.equal(linkAskStep(st, 'wrOpen', 'https://other.example/x', 32000), false, 'another link asks for itself')
-assert.equal(linkAsked({ wrOpen: r.url, wrOpenAt: 0 }, 'wrOpen', 30001), null, 'a lapsed question is not drawn')
+linkAskStep(st, 'wrOpen', r.url, 0, here)
+assert.equal(linkAskStep(st, 'wrOpen', r.url, 31000, here), false, 'after 30 s it asks again')
+assert.equal(linkAskStep(st, 'wrOpen', 'https://other.example/x', 32000, here), false, 'another link asks for itself')
+const lapsed = { wrOpen: r.url, wrOpenAt: 0 }
+assert.equal(linkAsked(lapsed, 'wrOpen', 30001), null, 'a lapsed question is not drawn')
+assert.equal(lapsed.wrOpen, r.url, 'and drawing changes nothing')
+assert.match(linkAskLine('https://ci.example/run/1', 'Click Open again', 'data-pw-open-no="1"'), /Open ci\.example in the browser\? Click Open again · /, "a widget's question is the same line")
+
+// The widget's question (13-today-plugins.js) is the same one: no state of its own, nothing changed while drawing.
+const widgets = readFileSync(new URL('./app/13-today-plugins.js', import.meta.url), 'utf8')
+assert.ok(!widgets.includes('S.pwOpen') && widgets.includes("linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${sec.dataset.pw}`)") && widgets.includes("linkAsked(S, 'wrOpen', Date.now())"), "a widget's link asks through linkAskStep / linkAsked")
 
 // The window's half around it (13-today-work.js): a title's click and its ⌘K entry ask, then open — never at once.
 const part = readFileSync(new URL('./app/13-today-work.js', import.meta.url), 'utf8')
 const sent = [], S = { view: 'today' }
-let focused = null
-const doc = { querySelector: (q) => ({ focus: () => { focused = q } }) }
-const win = new Function('esc', 'S', 'send', 'render', 'document', 'CSS', 'setTimeout', 'slotItems', 'shortDay', `${part}\nreturn { workRowOpen, threadWorkRows }`)(
-  esc, S, (m) => sent.push(m), () => {}, doc, { escape: (x) => x }, (f) => f(), () => '', (d) => d.slice(0, 10))
-win.workRowOpen(r.url)
+let focused = null, draws = 0
+const listeners = {}
+// Only the title drawn for that row is there to focus (nothing else matches).
+const doc = { querySelector: (q) => q === `[data-open-url="${r.url}"][data-open-where="${here}"]` ? { focus: () => { focused = q } } : null, addEventListener: (k, f) => { listeners[k] = f } }
+const win = new Function('esc', 'S', 'send', 'render', 'document', 'CSS', 'setTimeout', 'slotItems', 'shortDay', 'PAL', `${part}\nreturn { workRowOpen, threadWorkRows }`)(
+  esc, S, (m) => sent.push(m), () => { draws++ }, doc, { escape: (x) => x }, (f) => f(), () => '', (d) => d.slice(0, 10), { open: false })
+win.workRowOpen(r.url, here)
 assert.deepEqual(sent, [], 'not opened on the first click')
 assert.match(win.threadWorkRows({ plugin_rows: [r] }), /Open git\.acme\.example in the browser\?/, "the thread's Work row asks too")
-assert.ok(focused && focused.includes(r.url), 'the keyboard stays on its title')
-win.workRowOpen(r.url)
+assert.equal(focused, `[data-open-url="${r.url}"][data-open-where="${here}"]`, 'the keyboard stays on its title')
+// Escape takes the question back.
+const esc0 = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true } }
+listeners.keydown(esc0)
+assert.ok(esc0.defaultPrevented && S.wrOpen === null && !win.threadWorkRows({ plugin_rows: [r] }).includes('pw-ask'), 'Escape: no question')
+const none = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true } }
+listeners.keydown(none)
+assert.ok(!none.defaultPrevented, 'nothing asked: Escape left to the rest')
+win.workRowOpen(r.url, here)
+win.workRowOpen(r.url, here)
 assert.deepEqual(sent, [{ cmd: 'open_url', url: r.url }], 'opened on the second')
 const click = src.split('\n').find((l) => l.includes("sel: '[data-open-url]'"))
-assert.ok(click && click.includes('workRowOpen(t.dataset.openUrl)'), "the title's click goes through the question")
-assert.ok(src.includes("press({ openUrl: r.url })"), "⌘K's Open runs as the title's click (asked first)")
+assert.ok(click && click.includes("workRowOpen(t.dataset.openUrl, t.dataset.openWhere || '')"), "the title's click goes through the question")
+assert.ok(src.includes("press({ openUrl: r.url, openWhere: workRowWhere(r) })"), "⌘K's Open runs as the title's click (asked first)")
 
 // The plugin slot targets: an item without `when` stays on Echo's tasks; keyed targets route a click to its own row.
 const c = src.indexOf('// ── plugin slot targets:'), d = src.indexOf('// end of the plugin slot targets block', c)
 assert.ok(c >= 0 && d > c, 'the plugin slot targets block not found in app.js')
 const Plugins = { slots: {}, targets: {} }
-const slot = new Function('Plugins', 'esc', `${src.slice(c, d)}\nreturn { slotFor, slotItems, slotTarget, slotForget }`)(Plugins, esc)
+const slot = new Function('Plugins', 'esc', `${src.slice(c, d)}\nreturn { slotFor, slotItems, slotTarget, slotForget, slotClick }`)(Plugins, esc)
 const ran = []
 Plugins.slots['task.actions'] = [
   { plugin: 'other', label: 'Echo only', run: () => ran.push('echo') },
@@ -84,8 +108,11 @@ for (const [html, want] of [[b8, 'pr-8'], [b7, 'pr-7']]) {
 }
 Plugins.targets['task.actions'] = { kind: 'task' }
 Plugins.targets['task.actions#jira:1'] = row8
+assert.equal(slot.slotClick('task.actions', 'gh:pr-8', '0').target, row8, 'a row button runs for its row')
 slot.slotForget(Plugins.targets, 'gh')
 assert.deepEqual(Object.keys(Plugins.targets).sort(), ['task.actions', 'task.actions#jira:1'], "a plugin unloaded: only its rows' targets go")
+assert.equal(slot.slotClick('task.actions', 'gh:pr-8', '0'), null, "its row's button, still on the page: runs nothing (not Echo's task items)")
+assert.equal(slot.slotClick('task.actions', '', '0').item.label, 'Echo only', "Echo's task button still runs")
 
 // A thread's Work tab: the plugins' rows in every layout — no work yet, Board and Tree.
 const pw = src.indexOf('function projectWork(p) {'), pwEnd = src.indexOf('\n}\n', pw)

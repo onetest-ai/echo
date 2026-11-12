@@ -165,15 +165,22 @@ const slotTarget = (slot, key) => Plugins.targets[slot + (key ? `#${key}` : '')]
 function slotForget(targets, plugin) {
   for (const k of Object.keys(targets)) if (k.includes('#') && k.slice(k.indexOf('#') + 1).startsWith(`${plugin}:`)) delete targets[k]
 }
+/** What a slot button's click runs — `{item, target}` — or null: a row's button whose target went (its plugin was
+ *  switched off or removed, `slotForget`) runs nothing, never an item meant for Echo's tasks. */
+function slotClick(slot, key, i) {
+  const target = slotTarget(slot, key)
+  if (key && !target) return null
+  const item = slotFor(slot, target)[+i]
+  return item ? { item, target } : null
+}
 // end of the plugin slot targets block
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-plug-slot]')
   if (!t) return
-  const slot = t.dataset.plugSlot, target = slotTarget(slot, t.dataset.plugKey)
-  const items = slotFor(slot, target)
-  const item = items[+t.dataset.plugI]
+  const hit = slotClick(t.dataset.plugSlot, t.dataset.plugKey, t.dataset.plugI)
   S.menuOpen = false
-  if (!item) return
+  if (!hit) return
+  const { item, target } = hit
   Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
     // On a plugin's work row: what it shows is read again (its plugin's answer may have changed it), Today or the
     // thread's Work tab.

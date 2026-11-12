@@ -12,29 +12,36 @@ function workRowIcon(r) {
 const linkHost = (url) => { try { return new URL(url).host } catch { return 'the link' } }
 /** How long a question about an outside link stays armed (ms). */
 const LINK_ASK_MS = 30000
-/** The outside link armed in `st[key]` (`st[key + 'At']` when), or null once it lapsed. */
+/** The outside link armed in `st[key]` — `{url, where}` (`where`: the place that asked, a work row or a widget: only it
+ *  shows the question) — or null when none is, or it lapsed. Reads only: drawing never changes it. */
 function linkAsked(st, key, now) {
-  if (st[key] && now - (st[key + 'At'] || 0) > LINK_ASK_MS) st[key] = null
-  return st[key] || null
+  if (!st[key] || now - (st[key + 'At'] || 0) > LINK_ASK_MS) return null
+  return { url: st[key], where: st[key + 'Where'] || '' }
 }
-/** A click on an outside link: the first arms it (the page asks "Open <host>?"), a second on the same link within
- *  30 s says to open it now (true) and disarms it. */
-function linkAskStep(st, key, url, now) {
-  if (linkAsked(st, key, now) === url) { st[key] = null; return true }
+/** A click on an outside link in a place (`where`): the first arms it (that place asks "Open <host>?"; one question
+ *  at a time, any other goes), a second on the same link in the same place within 30 s says to open it now (true)
+ *  and disarms it. */
+function linkAskStep(st, key, url, now, where = '') {
+  const armed = linkAsked(st, key, now)
+  if (armed && armed.url === url && armed.where === where) { st[key] = null; return true }
   st[key] = url
   st[key + 'At'] = now
+  st[key + 'Where'] = where
   return false
 }
-/** The question under an armed link: its host, and how to go on or not. */
-const linkAskLine = (url, again, no) => `<div class="pw-ask set-sub">Open ${esc(linkHost(url))} in the browser? ${again} · <button type="button" class="link-btn" ${no}>Cancel</button></div>`
-/** A plugin's work row; `ask`: the outside link armed now (its row says so). */
+/** The question under an armed link: its host, and how to go on or not (Escape too); read out when it appears. */
+const linkAskLine = (url, again, no) => `<div class="pw-ask set-sub" role="status" aria-live="polite">Open ${esc(linkHost(url))} in the browser? ${again} · <button type="button" class="link-btn" ${no}>Cancel</button></div>`
+/** Where a work row's question shows: that row. */
+const workRowWhere = (r) => `row:${r.source}:${r.id}`
+/** A plugin's work row; `ask`: the outside link armed now, `linkAsked`'s (its row says so when it is this row's). */
 function workRowHtml(r, due, acts, ask) {
   const url = /^https:\/\/[^\s"<>\\]+$/.test(r.url || '') ? r.url : ''
-  const title = url ? `<button type="button" class="link-btn td-task-title" data-open-url="${esc(url)}" title="Open it in the browser (${esc(linkHost(url))})">${esc(r.title)}</button>` : `<span class="td-task-title">${esc(r.title)}</span>`
-  const where = [r.kind, r.where].filter(Boolean).map(esc).join(' · ')
+  const where = workRowWhere(r)
+  const title = url ? `<button type="button" class="link-btn td-task-title" data-open-url="${esc(url)}" data-open-where="${esc(where)}" title="Open it in the browser (${esc(linkHost(url))})">${esc(r.title)}</button>` : `<span class="td-task-title">${esc(r.title)}</span>`
+  const what = [r.kind, r.where].filter(Boolean).map(esc).join(' · ')
   const stale = r.stale ? `<span class="wr-stale" title="${esc(`Not updated: ${r.stale}`)}">not updated</span>` : ''
-  const asked = url && ask === url ? linkAskLine(url, 'Click its title again', 'data-open-url-no="1"') : ''
-  return `<div class="td-task td-plug" role="group" aria-label="${esc(`From ${r.source_name || r.source}: ${r.title}`)}"><span class="td-task-t">${due || ''}${title}</span><span class="td-task-m">${workRowIcon(r)}<span class="td-task-w" title="${where}">${where}</span>${stale}${acts ? `<span class="td-icos">${acts}</span>` : ''}</span>${asked}</div>`
+  const asked = url && ask && ask.url === url && ask.where === where ? linkAskLine(url, 'Click its title again', 'data-open-url-no="1"') : ''
+  return `<div class="td-task td-plug" role="group" aria-label="${esc(`From ${r.source_name || r.source}: ${r.title}`)}"><span class="td-task-t">${due || ''}${title}</span><span class="td-task-m">${workRowIcon(r)}<span class="td-task-w" title="${what}">${what}</span>${stale}${acts ? `<span class="td-icos">${acts}</span>` : ''}</span>${asked}</div>`
 }
 // end of the plugin work rows block
 /** A row's `task.actions` (only the plugins' items that say they act on it: `when` true for `{kind: 'plugin', source,
@@ -50,8 +57,15 @@ function threadWorkRows(w) {
 }
 /** A click on a work row's title (or its ⌘K entry, `press`): asked first, opened on the second; the keyboard stays on
  *  that title (the row redrawn). */
-function workRowOpen(url) {
-  if (linkAskStep(S, 'wrOpen', url, Date.now())) send({ cmd: 'open_url', url })
+function workRowOpen(url, where = '') {
+  if (linkAskStep(S, 'wrOpen', url, Date.now(), where)) send({ cmd: 'open_url', url })
   render()
-  setTimeout(() => { const b = document.querySelector(`[data-open-url="${CSS.escape(url)}"]`); if (b) b.focus() })
+  setTimeout(() => { const b = document.querySelector(`[data-open-url="${CSS.escape(url)}"][data-open-where="${CSS.escape(where)}"]`); if (b) b.focus() })
 }
+// Escape takes the question back (a work row's or a widget's), the keyboard left where it was.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented || (typeof PAL !== 'undefined' && PAL.open) || !linkAsked(S, 'wrOpen', Date.now())) return
+  e.preventDefault()
+  S.wrOpen = null
+  render()
+})

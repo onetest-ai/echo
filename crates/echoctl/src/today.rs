@@ -268,10 +268,16 @@ fn week_end(today: chrono::NaiveDate) -> chrono::NaiveDate {
     today + chrono::Duration::days(6 - i64::from(chrono::Datelike::weekday(&today).num_days_from_monday()))
 }
 
-/// On My work: late, or due by the week's end — an Echo task or a plugin's row alike; one with no date isn't (it stays
-/// in Tasks, or in its thread's Work tab).
+/// On My work: late, or due by the week's end (an Echo task with no date isn't: it stays in Tasks).
 fn this_week(t: &Value, week_end: chrono::NaiveDate) -> bool {
     t["late"] == true || t["due"].as_str().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d <= week_end)
+}
+
+/// A plugin's row on My work: late or due this week as a task is, and also one with no date (a review asked of you, an
+/// issue assigned: nothing else would show it) — after the dated ones. One due after this week waits for its week.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn plugin_row_shown(r: &Value, week_end: chrono::NaiveDate) -> bool {
+    this_week(r, week_end) || r["due"].as_str().is_none()
 }
 
 /// Your work, from Tasks' piles — only what is due by the end of this week or late (the rest stays in Tasks): what you
@@ -298,12 +304,13 @@ pub(crate) fn work(tasks: &Value) -> Value {
     #[cfg_attr(not(feature = "js"), allow(unused_mut))]
     let mut v = json!({"mine": pile("mine"), "owed": pile("owed"), "waiting": pile("waiting"), "week_end": week_end.to_string()});
     // The plugins' items for the user (`ctx.work.provide`, scope "me"): their last answer, beside these, not in a ledger
-    // — by the same rule, late or due by the week's end (an undated one stays off My work, as an undated task does);
-    // `plugins_pending`: one not answered yet, or asked again after it changed (the page reads Today again soon).
+    // — late or due by the week's end, and the undated ones after them (`plugin_row_shown`; late first, then by date,
+    // then undated: `work::view`'s order); `plugins_pending`: one not answered yet, or asked again after it changed
+    // (the page reads Today again soon).
     #[cfg(feature = "js")]
     {
         let (rows, pending) = crate::jshost::work::view(None);
-        v["plugins"] = json!(rows.into_iter().filter(|r| this_week(r)).collect::<Vec<_>>());
+        v["plugins"] = json!(rows.into_iter().filter(|r| plugin_row_shown(r, week_end)).collect::<Vec<_>>());
         v["plugins_pending"] = json!(pending);
     }
     v
@@ -657,7 +664,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn my_work_takes_a_plugins_rows_as_its_own_tasks_late_or_due_this_week_never_undated() {
+    fn my_work_takes_a_plugins_rows_late_or_due_this_week_and_undated_but_echos_undated_tasks_stay_off() {
         let thursday = chrono::NaiveDate::from_ymd_opt(2026, 11, 12).unwrap();
         let end = week_end(thursday);
         assert_eq!(end.to_string(), "2026-11-15", "the Sunday of its week");
@@ -669,8 +676,10 @@ mod tests {
             json!({"id": "monday", "due": "2026-11-16", "late": false}),
             json!({"id": "undated", "late": false}),
         ];
-        let shown: Vec<&str> = rows.iter().filter(|r| this_week(r, end)).map(|r| r["id"].as_str().unwrap()).collect();
-        assert_eq!(shown, ["late", "past", "sunday"]);
+        let tasks: Vec<&str> = rows.iter().filter(|r| this_week(r, end)).map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(tasks, ["late", "past", "sunday"], "Echo's own tasks: no undated one");
+        let plugin: Vec<&str> = rows.iter().filter(|r| plugin_row_shown(r, end)).map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(plugin, ["late", "past", "sunday", "undated"], "a plugin's: the undated one too, never next week's");
     }
 
     #[test]

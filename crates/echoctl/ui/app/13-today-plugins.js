@@ -88,8 +88,6 @@ function pluginWidgetFailed(w) {
  *  data Echo can't draw: "Couldn't draw this" with why; when its provider failed, its last data, dated — or, never
  *  answered, "Couldn't get its data" with why. */
 function pluginWidgetView(id, w, size) {
-  // A question about an outside link lapses after 30 s (left for another view and back, it isn't still armed).
-  if (S.pwOpen && Date.now() - (S.pwOpenAt || 0) > 30000) S.pwOpen = null
   // Not answered yet, or its page's window half still loading: its place held, a placeholder in it (nothing jumps
   // when it comes). Answered with nothing: no place.
   const plugin = id.split(':')[1]
@@ -111,8 +109,10 @@ function pluginWidgetView(id, w, size) {
     } else body = pluginWidgetHtml(w.kind, w.data, size)
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   const stale = w.error ? `<span class="set-sub" title="${esc(w.error)}">· from ${esc(hm(new Date(w.at)))}</span>` : ''
-  // An outside link asked for: its host said before it opens (a second click on Open).
-  const ask = S.pwOpen && body.includes(`data-pw-open="${esc(S.pwOpen)}"`) ? `<div class="pw-ask set-sub">Open ${esc((() => { try { return new URL(S.pwOpen).host } catch { return 'the link' } })())} in the browser? Click Open again · <button type="button" class="link-btn" data-pw-open-no="1">Cancel</button></div>` : ''
+  // An outside link asked for here: its host said before it opens (a second click on Open) — the one question on the
+  // page, a work row's or a widget's (`linkAsked`; it lapses after 30 s).
+  const armed = linkAsked(S, 'wrOpen', Date.now())
+  const ask = armed && armed.where === `pw:${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, 'Click Open again', 'data-pw-open-no="1"') : ''
   return `<section class="td-sec pw-sec" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)} ${stale}</h2>${body}${ask}</section>`
 }
 
@@ -127,7 +127,7 @@ document.addEventListener('click', async (e) => {
   if (act) {
     e.preventDefault()
     act.disabled = true
-    S.pwOpen = null
+    S.wrOpen = null
     let args = {}
     try { args = JSON.parse(act.dataset.pwArgs || '{}') } catch { /* none */ }
     // The call answers {value} or {error}: a refused or failing command says so.
@@ -143,14 +143,12 @@ document.addEventListener('click', async (e) => {
     const url = open.dataset.pwOpen
     // The keyboard stays on this widget's Open (the line redrawn).
     const back = () => setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
-    if (S.pwOpen === url && Date.now() - (S.pwOpenAt || 0) <= 30000) { S.pwOpen = null; send({ cmd: 'open_url', url }); render(); return back() }
-    S.pwOpen = url
-    S.pwOpenAt = Date.now()
+    if (linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${sec.dataset.pw}`)) send({ cmd: 'open_url', url })
     render()
     return back()
   }
   if (e.target.closest('[data-pw-open-no]')) {
-    S.pwOpen = null
+    S.wrOpen = null
     render()
     setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
   }

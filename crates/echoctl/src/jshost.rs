@@ -458,6 +458,9 @@ struct Plugin {
 struct Current {
     id: String,
     replies: Vec<(u64, Result<Value, String>)>,
+    /// Its work provider runs now (Echo's `__work` ask, until that slice ends): a `ctx.work.changed()` from it is not
+    /// heard — the answer it is giving is the change (heard, every ask would ask again).
+    providing: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -527,6 +530,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 };
                 p.calls.insert(n, reply);
                 set_current(&current, &plugin);
+                current.lock().unwrap().providing = command == "__work";
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -537,6 +541,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                         }
                     })
                 });
+                current.lock().unwrap().providing = false;
             }
             Ok(Msg::Forget(plugin, n)) => {
                 if let Some(p) = plugins.get_mut(&plugin) {
@@ -653,6 +658,9 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
         }
         return json!({"value": null}).to_string();
     }
+    if op == "work.changed" && current.lock().is_ok_and(|c| c.providing) {
+        return json!({"value": null}).to_string();
+    }
     match service(&id, op, &arg) {
         Ok(v) => json!({ "value": v }).to_string(),
         Err(e) => json!({ "error": format!("{e:#}") }).to_string(),
@@ -717,17 +725,23 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
     Ok(base.join(p))
 }
 
-/// A store path the plugin may write: not its `settings.json`, which holds what the user set (the addresses it may
-/// reach among them) and is changed only through `plugins::set_setting`.
-fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
-    store_path(id, rel)?;
+/// Not one of Echo's files in the plugin's store (written or removed only by Echo, under their locks): its settings,
+/// its work rows, its values per thread.
+fn not_echos(rel: &str) -> Result<()> {
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match first.trim_end_matches(['.', ' ']).split(':').next() {
         Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
         Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
         Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
-        _ => {}
+        _ => Ok(()),
     }
+}
+
+/// A store path the plugin may write: not its `settings.json`, which holds what the user set (the addresses it may
+/// reach among them) and is changed only through `plugins::set_setting`.
+fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
+    store_path(id, rel)?;
+    not_echos(rel)?;
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
     std::fs::create_dir_all(&base)?;
@@ -799,6 +813,12 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "store.remove" => {
             let p = store_path(id, &s(arg))?;
+            // Not the store itself, nor Echo's files in it (its work rows, settings, thread values: their locks aren't
+            // taken here).
+            if p == plugins::data_dir(id) {
+                bail!("ctx.store.remove needs a path inside the plugin's folder, not the folder itself");
+            }
+            not_echos(&s(arg))?;
             if p.is_dir() {
                 std::fs::remove_dir_all(&p)?;
             } else if p.exists() {
@@ -1755,6 +1775,8 @@ mod tests {
               })
               ctx.command('break', () => { broken = true; ctx.work.changed(); return 1 })
               ctx.command('sneak', () => ctx.store.write('work.json', '{}'))
+              ctx.command('unsneak', () => ctx.store.remove('./work.json'))
+              ctx.command('wipe', () => ctx.store.remove(''))
               ctx.command('hang', () => new Promise(() => {}))
             }
             "#,
@@ -1775,6 +1797,8 @@ mod tests {
         sync();
         assert!((0..50).any(|_| call("quiet", "try", &json!({})).is_err_and(|e| e.to_string().contains("didn't ask for “work”")) || { std::thread::sleep(Duration::from_millis(50)); false }), "only with uses.work");
         assert!(call("gh", "sneak", &json!({})).unwrap_err().to_string().contains("work.json"), "its work.json is Echo's to write");
+        assert!(call("gh", "unsneak", &json!({})).unwrap_err().to_string().contains("work.json"), "and to remove");
+        assert!(call("gh", "wipe", &json!({})).unwrap_err().to_string().contains("not the folder itself"), "the store with it");
         // Never waited for: the first read asks in the background — waited for (`pending`) until it answers.
         let (first, pending) = work::view(None);
         assert!(first.is_empty() && pending, "{first:?}");
@@ -1807,6 +1831,52 @@ mod tests {
         plugins::remove("gh", true).unwrap();
         assert!(work::rows(None).is_empty() && work::of_thread(&alpha).is_empty());
         plugins::remove("quiet", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_that_says_its_rows_changed_all_the_time_is_asked_once_a_turn() {
+        let (_env, root) = paths::testenv::folders("jshost-work-gap");
+        let mk = root.join("market");
+        let d = mk.join("plugins/chatty");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "chatty", "name": "Chatty", "version": "0.1.0", "main": "main.js", "uses": {"work": {}}}).to_string()).unwrap();
+        // Its provider says changed() itself (not heard), and a command says it twenty times at once.
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              const asks = []
+              ctx.work.provide(() => { asks.push(Date.now()); ctx.work.changed(); return [{ id: 'a', title: 'A', kind: 'PR' }] })
+              ctx.command('asks', () => asks)
+              ctx.command('poke', () => { for (let i = 0; i < 20; i++) ctx.work.changed(); return 1 })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "chatty", "source": "./plugins/chatty"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("chatty", Some(&name)).unwrap();
+        plugins::install("chatty", Some(&name), &review.uses).unwrap();
+        sync();
+        let asks = || call("chatty", "asks", &json!({})).unwrap().as_array().unwrap().iter().map(|t| t.as_f64().unwrap()).collect::<Vec<_>>();
+        let _ = work::view(None);
+        assert!((0..100).any(|_| { std::thread::sleep(Duration::from_millis(50)); !work::view(None).1 }), "answered, and no longer waited for");
+        // Its own changed() inside the provider: not heard — no ask after the first.
+        std::thread::sleep(Duration::from_millis(2500));
+        assert_eq!(asks().len(), 1, "a provider's own changed() asks nothing more");
+        assert!(!work::view(None).1, "and Today's wait ends");
+        // Twenty changes at once: asked now, and once more in its next turn (a second on, in tests) for any said after
+        // that ask began — never back to back, then quiet.
+        call("chatty", "poke", &json!({})).unwrap();
+        std::thread::sleep(Duration::from_millis(3000));
+        let t = asks();
+        assert!((2..=3).contains(&t.len()), "{t:?}");
+        assert!(t.windows(2).all(|w| w[1] - w[0] >= 950.0), "a turn between asks: {t:?}");
+        std::thread::sleep(Duration::from_millis(2000));
+        assert_eq!(asks().len(), t.len(), "then quiet");
+        plugins::remove("chatty", true).unwrap();
         sync();
     }
 
