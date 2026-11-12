@@ -55,7 +55,7 @@ node crates/echoctl/ui/fingerprint.test.mjs
 # A plugin's work row on My work and in a thread's Work tab (every layout): its icon as an image, text escaped, https
 # only and asked first, its task.actions on its own row (#85).
 node crates/echoctl/ui/plugin-work-rows.test.mjs
-# The plugins' rows of a thread's Profile: each drawn on its own, one that throws left out (threadSlotRows, #464).
+# The plugins' rows of a thread's Profile: each drawn on its own, one that throws or repeats left out, after once per box drawn afresh, gone with its plugin (threadSlotRows, threadSlotAfter, #464).
 node crates/echoctl/ui/thread-slot.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs

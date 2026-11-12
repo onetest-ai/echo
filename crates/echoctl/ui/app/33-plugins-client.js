@@ -30,16 +30,36 @@ const Plugins = {
 // `thread` = {id, name, client}.
 const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile']
 // ── thread slot: the plugins' rows of a thread's Profile, each drawn on its own — one that throws is left out (and
-// logged), the Profile draws without it.
+// logged), the Profile draws without it; a second row with the same plugin and id is left out too (logged).
+// `render` runs as a widget's draw does: a `ctx.render()` asked for in it is ignored (no loop).
 function threadSlotRows(items, thread, log) {
-  const out = []
+  const out = [], seen = new Set()
   for (const x of items || []) {
+    const key = `${x.plugin}:${x.id}`
+    if (seen.has(key)) { log(`${x.plugin}: ${x.label || x.id}: a second row with the id “${x.id}” — left out`); continue }
+    seen.add(key)
+    Plugins.drawing = true
     try {
       const html = x.render(thread)
-      out.push({ key: `${x.plugin}:${x.id}`, label: String(x.label || x.id), html: html == null ? '' : String(html), after: x.after })
-    } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) }
+      out.push({ key, label: String(x.label || x.id), html: html == null ? '' : String(html), after: x.after })
+    } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) } finally { Plugins.drawing = false }
   }
   return out
+}
+/** Each row's `after(box, thread)`, once per box drawn afresh (a redraw that left the page as it was keeps the boxes,
+ *  marked): `after` may fetch and `ctx.render()` without drawing itself again forever. */
+function threadSlotAfter(root, items, thread, log) {
+  const boxes = [...root.querySelectorAll('[data-thread-slot]')]
+  const seen = new Set()
+  for (const x of items || []) {
+    const key = `${x.plugin}:${x.id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const box = x.after && boxes.find((b) => b.dataset.threadSlot === key)
+    if (!box || box._afterFor === thread.id) continue
+    box._afterFor = thread.id
+    try { x.after(box, thread) } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) }
+  }
 }
 // end of the thread slot block
 /** The thread a `thread.profile` row is drawn for. */

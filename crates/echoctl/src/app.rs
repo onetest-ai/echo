@@ -104,7 +104,11 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::needs::start_scheduler();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
-    crate::jshost::sync();
+    {
+        // This process is the app: the plugins hear Echo's events here, and what other processes queued for them.
+        crate::jshost::as_app();
+        crate::jshost::sync();
+    }
     #[cfg(feature = "brain")]
     crate::brain::start_scheduler();
     // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
