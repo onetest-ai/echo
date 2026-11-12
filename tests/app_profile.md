@@ -437,6 +437,33 @@ S-15 and S-16 test the release as a new user meets it, on a Mac where Echo has n
 - **Processes:** the run signals only the server it started (its saved pid), never anything matched by a pattern.
 - **After S-15** Echo stays installed. S-16 starts from a reset, and only when the user says so.
 
+## Plugins against fake services
+
+A plugin's case runs against made-up services on this computer, never the real ones. The hosts mapping below is read
+only by a development (debug) build — a release build ignores it and reaches the real hosts; the made-up `gh` / `git`
+on `PATH` work in any build.
+
+- **Its network:** `ECHOCTL_TEST_HOSTS="api.github.com=http://127.0.0.1:47990,api.acme.example=http://127.0.0.1:47991"`
+  sends the plugin's `ctx.http.fetch("https://api.github.com/<path>")` to `http://127.0.0.1:47990/<path>` (same method,
+  headers, body; `save:` downloads too), never through a proxy. Only for a host the plugin's manifest names in
+  `network.hosts` (checked first, on the real host: any other is still refused); an address the user listed for
+  `network.hosts_from` is reached as it is. Each entry is `<host>=http://127.0.0.1:<port>` or
+  `<host>=http://localhost:<port>` (an optional path after the port; spaces around `,` and `=` are fine).
+- **It fails closed:** while the variable is set, a request fails — rather than reach the real host — when any entry is
+  malformed or isn't a local address (`ECHOCTL_TEST_HOSTS: … isn't a local address`: `https://`, `[::1]`, `0.0.0.0`,
+  another name, no port), or when the plugin asks for a manifest host the variable doesn't map (`… isn't mapped in
+  ECHOCTL_TEST_HOSTS: a test never reaches the real …`). Map every host the plugin names.
+- **One fake per port:** curl sends the fake `Host: 127.0.0.1:<port>`, not the real host's name, so a fake that must tell
+  two hosts apart serves them on different ports.
+- **Every process of the run** needs it: export it before `tests/fixtures/serve.sh up` (the window's server inherits
+  it) and append `export ECHOCTL_TEST_HOSTS=…` to `<dir>/env` for the CLI and the app. The fake service is the case's
+  own (a `python3 -m http.server` folder of made-up JSON, or a few lines of `http.server`), started on its port first.
+- **The user's sign-in** (`ctx.signin.get`, #466): `gh` and `git` are found on `PATH` first, and `<dir>/bin` is first on
+  every process's `PATH` (`<dir>/env`), so made-up `gh` / `git` scripts written there (any time: they are looked up on
+  each call) answer instead with made-up tokens. Write both — a failing one stands for "not signed in" — or the
+  computer's own `/opt/homebrew/bin/gh` is found next. On Windows a script there is found only as `gh.cmd` / `git.cmd`
+  (a `.cmd` wrapper that runs it), not under its bare name.
+
 ## Out of Scope / Manual Setup Required
 
 Cases that need these are `run: person` or only check the button and its dialog, never the result (except the

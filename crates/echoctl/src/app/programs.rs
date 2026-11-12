@@ -11,8 +11,19 @@ pub(super) fn user_home() -> PathBuf {
 /// A program by name: PATH first, then the usual install locations — the app started at login
 /// gets a minimal PATH without Homebrew's, nvm's or Claude Code's directories.
 pub fn find_program(name: &str) -> String {
+    let names: Vec<String> = program_names(name);
+    program_candidates(name).into_iter().find(|p| p.is_file()).map(|p| p.display().to_string()).unwrap_or_else(|| names[0].clone())
+}
+
+/// The file names a program goes by here: `gh`, or `gh.exe` / `gh.cmd` on Windows.
+fn program_names(name: &str) -> Vec<String> {
+    if cfg!(windows) { vec![format!("{name}.exe"), format!("{name}.cmd")] } else { vec![name.to_string()] }
+}
+
+/// Every place [`find_program`] looks for `name`, in its order (existing or not).
+pub fn program_candidates(name: &str) -> Vec<PathBuf> {
     let home = user_home();
-    let names: Vec<String> = if cfg!(windows) { vec![format!("{name}.exe"), format!("{name}.cmd")] } else { vec![name.to_string()] };
+    let names = program_names(name);
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     dirs.extend([home.join(".local/bin"), home.join(".claude/local"), home.join(".npm-global/bin")]);
     dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
@@ -28,11 +39,7 @@ pub fn find_program(name: &str) -> String {
         .unwrap_or_default();
     versions.sort();
     dirs.extend(versions.into_iter().rev());
-    dirs.iter()
-        .flat_map(|d| names.iter().map(move |n| d.join(n)))
-        .find(|p| p.is_file())
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| names[0].clone())
+    dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).collect()
 }
 
 /// Where the plugin's marketplace comes from (`ECHOCTL_MARKETPLACE` overrides, e.g. a local
