@@ -2,8 +2,14 @@
 function drawToday(primary) {
   // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep.
   const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
+  // The page kept where it was scrolled when Today is drawn again (a meeting's card opening or closing redraws it).
+  const page = $('.td'), pageTop = page ? page.scrollTop : 0
   patch(primary, `<main class="main">${todayView()}</main>`)
-  todayAnchor()
+  const page2 = $('.td')
+  if (page2 && page2 !== page && pageTop) page2.scrollTop = pageTop
+  // The card goes with what it was opened beside (its line folded away, its widget taken off), as Calendar's goes with
+  // its block.
+  if (!todayAnchor() && S.tdSel) { S.tdSel = null; setTimeout(render); return }
   // Today's view height, on the element (not in the HTML, which would then change with the window and be redrawn).
   const td = $('.td')
   if (td && S.tdView) td.style.setProperty('--td-view', `${S.tdView}px`)
@@ -48,7 +54,7 @@ function todayView() {
   const cardHtml = (c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`
   const cards = (d.cards || []).filter((c) => !ownCard.has(c.slug)).map(cardHtml).join('')
   // Your day as "where you'll be" (#315, Workbench `WidgetsCalendar`): a line a place with its reason; the line "now"
-  // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card on the right.
+  // between past and to come; a meeting's actions in Calendar's menu (⋯ or right-click), its card as Calendar's popover beside it.
   const rows = agendaView(d, now)
   // A sync failed today and none has read the calendar today (the server says): today's meetings may be missing.
   const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: today’s meetings may be missing.</span></p>' : ''
@@ -376,6 +382,7 @@ function todayAnchor() {
   for (const x of document.querySelectorAll('[data-td-ev][aria-current]')) x.removeAttribute('aria-current')
   const a = S.tdSel && S.tdSel.at && document.querySelector(`.${S.tdSel.at}[data-td-ev="${CSS.escape(S.tdSel.id)}"]`)
   if (a) a.setAttribute('aria-current', 'true')
+  return a
 }
 document.addEventListener('click', async (e) => {
   if (S.view !== 'today' || !e.target.closest) return
