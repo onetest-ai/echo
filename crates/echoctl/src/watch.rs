@@ -296,6 +296,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // A meeting's arm waiting while the user is on another call (#483): its id, once said.
     let mut waits_other: Option<String> = None;
     let mut unread_once = false;
+    let mut waits_on: Option<String> = None;
     let mut last_arm_look: Option<Instant> = None;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
@@ -427,6 +428,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     held_arm = None;
                     stopped_in_call = false;
                     last_arm_look = None;
+                    unread_once = false;
                     emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
                 }
             }
@@ -527,6 +529,11 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                 Some(seen) if last_arm_look.is_some() => match meetings_call(m, &seen) {
                     // Waiting already, and this look reads nothing: one such look isn't enough to start (a window
                     // missed during a switch); the next one decides.
+                    // The call that made it wait, still named in its window (its timer not read this time): still that call.
+                    None if waits_other.as_deref() == Some(id.as_str()) && seen.name.is_some() && seen.name == waits_on => {
+                        last_arm_look = Some(Instant::now());
+                        false
+                    }
                     None if waits_other.as_deref() == Some(id.as_str()) && !unread_once => {
                         unread_once = true;
                         last_arm_look = Some(Instant::now());
@@ -534,6 +541,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     }
                     Some(false) => {
                         unread_once = false;
+                        waits_on = seen.name.clone();
                         if waits_other.as_deref() != Some(id.as_str()) {
                             waits_other = Some(id.clone());
                             let subject = m.subject.clone().unwrap_or_else(|| "the meeting".into());
@@ -583,7 +591,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     last_call_look = Instant::now() - CALL_LOOK_EVERY;
                     emit("recording_started", json!({
                         "dir": r.dir.display().to_string(),
-                        "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
+                        "title": a.title.clone().or_else(|| meeting.as_ref().and_then(|m| m.subject.clone())),
                     }));
                     rec = Some(r);
                 }
@@ -755,8 +763,10 @@ fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
     let norm = |s: &str| s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
     let named = seen.name.as_deref().filter(|_| !seen.channel).map(norm).filter(|n| !n.is_empty());
     let subject = meeting.subject.as_deref().map(norm).filter(|s| !s.is_empty());
+    // The meeting's name in the window's, as whole words (a chat "Acme" isn't "Acme design review"); or the window's a
+    // cut form of it (three words or more, the start of the meeting's name).
     let same_name = match (&named, &subject) {
-        (Some(n), Some(s)) => Some(n.contains(s.as_str()) || s.contains(n.as_str())),
+        (Some(n), Some(s)) => Some(format!(" {n} ").contains(&format!(" {s} ")) || (n.split(' ').count() >= 3 && s.starts_with(n.as_str()))),
         _ => None,
     };
     if same_name == Some(true) {
@@ -767,8 +777,9 @@ fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
     if began >= start - chrono::Duration::minutes(crate::calendar::MATCH_EARLY_MIN) {
         return Some(true);
     }
-    // Began before the meeting could: another call when its name says so; with no name to tell, not known.
-    same_name.map(|_| false)
+    // Began before the meeting could, and its window doesn't name the meeting: another call (#483) — named otherwise,
+    // or with no name to tell (a channel's, none).
+    Some(false)
 }
 
 /// A reading that says "another call", waiting for a later one to confirm it.
@@ -1463,10 +1474,16 @@ mod tests {
         assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T17:24:00Z"), None)), Some(true), "joined a few minutes early");
         // A name alone never says "another call"; an early call with no name to tell isn't known either.
         assert_eq!(meetings_call(&m, &seen(None, Some("Call with Dana Lee"))), None);
-        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), None)), None);
+        // Begun an hour before with no name to tell (a channel's, none): another call — the call the user is still on.
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), None)), Some(false));
+        // A name that only shares words with it isn't its name; a cut form of its name (three words or more) is.
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), Some("Acme"))), Some(false), "a chat named Acme");
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), Some("Acme design rev…"))), Some(true), "Teams cut the title");
         // A channel meeting's window names the channel, not the meeting: no name.
-        let channel = CallSeen { began: Some(t("2026-11-12T16:30:00Z")), name: Some("General".into()), channel: true };
-        assert_eq!(meetings_call(&m, &channel), None);
+        let channel = CallSeen { began: Some(t("2026-11-12T17:31:00Z")), name: Some("General".into()), channel: true };
+        assert_eq!(meetings_call(&m, &channel), Some(true), "a channel meeting begun for it");
+        let early_channel = CallSeen { began: Some(t("2026-11-12T16:30:00Z")), ..channel };
+        assert_eq!(meetings_call(&m, &early_channel), Some(false), "another channel's call begun an hour before");
         assert!(seen_of(Some(5), Some("Meeting in “General” | Microsoft Teams")).channel && !seen_of(Some(5), Some("Acme design review | Microsoft Teams")).channel);
         assert_eq!(meetings_call(&m, &seen(None, None)), None, "nothing read");
         // The arm waiting for its call is kept until the meeting ends, not past it; another arm isn't.
