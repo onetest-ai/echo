@@ -175,6 +175,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-19",
+   "feature": "With `uses.signin.hosts` (1–4 plain host names; the sheet: 'Uses your sign-in to github.com on this computer (GitHub CLI or git) — it can do there what you can') a plugin's host half gets the user's own sign-in to a named host with `ctx.signin.get(host)`: the GitHub CLI's token (`gh auth token`) first, else git's credential helper (`git credential fill`), `{token, from, user?}`, or null when neither has one — nothing prompts or opens a window, each asked 10 s at most, never in a read-only routine, any other host refused; `ctx.signin.sources(host)` says which of the two programs are here without reading one. It grants no network: the plugin names its API host in `network.hosts`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

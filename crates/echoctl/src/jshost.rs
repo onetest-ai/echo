@@ -161,6 +161,13 @@ const PRELUDE: &str = r#"
       /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
     },
+    /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`, from the GitHub CLI or git on this
+     *  computer: `get` resolves {token, from: 'gh' | 'git', user?} or null when there is none; `sources` says which of
+     *  the two programs are here ({gh, git}), reading no sign-in. */
+    signin: {
+      get: (host) => later('signin.get', String(host)),
+      sources: (host) => call('signin.sources', String(host)),
+    },
     deliver: {
       status: () => call('deliver.status'),
       send: (kind, msg) => later('deliver.send', [kind, msg]),
@@ -1025,6 +1032,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let p = crate::app::find_program(&name);
             if Path::new(&p).is_file() { json!(p) } else { Value::Null }
         }
+        "signin.sources" => {
+            plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, &s(arg))?;
+            plugins::signin::sources()
+        }
         o => bail!("Echo has no service “{o}”"),
     })
 }
@@ -1039,6 +1050,13 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             Ok(json!({"answer": answer, "model": model, "usage": usage}))
+        }
+        // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
+        "signin.get" => {
+            let host = arg.as_str().unwrap_or("");
+            plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
+            read_only_here("reading your sign-in")?;
+            Ok(plugins::signin::get(host).unwrap_or(Value::Null))
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "system.pick_folder" => {
@@ -1482,6 +1500,50 @@ mod tests {
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine() {
+        let (_env, root) = paths::testenv::folders("jshost-signin");
+        let mk = root.join("market");
+        let d = mk.join("plugins/gh-ish");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "gh-ish", "name": "Acme hub", "version": "0.1.0", "main": "main.js", "uses": {"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('get', async (a) => await ctx.signin.get(a.host))
+              ctx.command('sources', (a) => ctx.signin.sources(a.host))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "gh-ish", "source": "./plugins/gh-ish"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("gh-ish", Some(&name)).unwrap();
+        plugins::install("gh-ish", Some(&name), &review.uses).unwrap();
+        sync();
+        let sources = (0..50).find_map(|_| call("gh-ish", "sources", &json!({"host": "github.com"})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        // Which programs are here, no sign-in read.
+        let sources = sources.unwrap();
+        assert!(sources["gh"].is_boolean() && sources["git"].is_boolean(), "{sources}");
+        assert_eq!(sources.as_object().unwrap().len(), 2);
+        for host in ["gitlab.com", "api.github.com"] {
+            assert!(call("gh-ish", "get", &json!({"host": host})).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{host}");
+            assert!(call("gh-ish", "sources", &json!({"host": host})).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{host}");
+        }
+        // A read-only routine never reads one (refused before any program is asked).
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = call("gh-ish", "get", &json!({"host": "github.com"}));
+        std::env::remove_var(crate::guard::RUN_MODE);
+        assert!(refused.unwrap_err().to_string().contains("isn't allowed in a read-only routine"));
+        plugins::remove("gh-ish", false).unwrap();
         sync();
     }
 

@@ -36,6 +36,8 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub mod signin;
 
 /// Our public marketplace, always listed (it can be hidden, not removed).
 pub const BUILT_IN: &str = "onetest-ai/echo-plugins";
@@ -1542,6 +1544,33 @@ mod tests {
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
+    }
+
+    #[test]
+    fn the_sheet_says_whose_sign_in_a_plugin_uses_and_only_those_hosts_are_handed_over() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap(),
+            vec!["Uses your sign-in to github.com on this computer (GitHub CLI or git) — it can do there what you can"]
+        );
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com", "ghe.acme.example"]}}))).unwrap(),
+            vec!["Uses your sign-in to github.com and ghe.acme.example on this computer (GitHub CLI or git) — it can do there what you can"]
+        );
+        for bad in [json!({}), json!({"hosts": []}), json!({"hosts": ["a.com", "b.com", "c.com", "d.com", "e.com"]}), json!({"hosts": "github.com"})] {
+            assert!(describe(&uses(json!({"signin": bad}))).is_err(), "{bad}");
+        }
+        for bad in ["https://github.com", "GitHub.com", "github", "github.com:443", "-x.com", "a..com", "user@github.com", "github.com/x", "git hub.com", "github.com\nhost=evil.com"] {
+            assert!(describe(&uses(json!({"signin": {"hosts": [bad]}}))).is_err(), "{bad}");
+        }
+        // It grants no network of its own.
+        assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap().iter().all(|l| !l.contains("Talks to")));
+        let granted = uses(json!({"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}));
+        assert!(may_use_signin(&granted, "github.com").is_ok());
+        for other in ["gitlab.com", "api.github.com", "GITHUB.COM", ""] {
+            assert!(may_use_signin(&granted, other).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{other}");
+        }
+        assert!(may_use_signin(&uses(json!({"network": {"hosts": ["api.github.com"]}})), "github.com").is_err());
     }
 
     #[test]

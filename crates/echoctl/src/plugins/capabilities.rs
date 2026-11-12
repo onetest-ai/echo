@@ -27,6 +27,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "echo", ready: true, describe: describe_echo },
     Capability { id: "events", ready: true, describe: describe_events },
     Capability { id: "files", ready: true, describe: describe_files },
+    Capability { id: "signin", ready: true, describe: describe_signin },
 ];
 
 /// What happens in Echo that a plugin may hear (`uses.events.on`, `ctx.on`), with the sheet's words. Payloads carry
@@ -257,6 +258,32 @@ pub(super) fn describe_files(v: &Value) -> Result<String> {
     }
     let quoted: Vec<String> = files.iter().map(|f| format!("“{f}”")).collect();
     Ok(format!("Reads these files of other apps on this computer: {}", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())))
+}
+
+/// `uses.signin.hosts`: the hosts whose sign-in on this computer (the GitHub CLI's, or git's credential helper) the
+/// plugin's host half may be handed — 1 to 4 plain host names. It grants no network: the plugin names its API hosts in
+/// `network.hosts` itself.
+pub(super) fn describe_signin(v: &Value) -> Result<String> {
+    let hosts = strings(v, "hosts")?;
+    if hosts.is_empty() || hosts.len() > 4 || hosts.iter().any(|h| !plain_host(h)) {
+        bail!("“signin” names 1 to 4 hosts by their plain names (e.g. github.com)");
+    }
+    Ok(format!("Uses your sign-in to {} on this computer (GitHub CLI or git) — it can do there what you can", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())))
+}
+
+/// A host's plain name: lowercase letters, digits, `-` and dots between labels, at least one dot (`github.com`).
+fn plain_host(h: &str) -> bool {
+    h.len() <= 253 && h.contains('.') && h.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+}
+
+/// May a plugin with these `uses` be handed the user's sign-in to `host`? Only one its install sheet named.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn may_use_signin(uses: &serde_json::Map<String, Value>, host: &str) -> Result<()> {
+    if uses.get("signin").and_then(|v| v["hosts"].as_array()).is_some_and(|a| a.iter().any(|h| h.as_str() == Some(host))) {
+        Ok(())
+    } else {
+        bail!("it didn't ask to use your sign-in to “{host}” when it was installed (uses.signin.hosts)")
+    }
 }
 
 pub(super) fn describe_folders(v: &Value) -> Result<String> {
