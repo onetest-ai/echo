@@ -13,7 +13,7 @@
 - R6. Never reuse a call folder. Evidence: `recorder::call_dir`
 - R7. Pruned frames move to `.echo/trash/<call>.frames/` with their index lines, never deleted. Evidence: `calls::prune_frames`
 - R8. A memo's threads change only through `memo::set_threads`, under the threads' lock; the user's pins are never taken back. Evidence: `memo::set_threads`
-- R9. An arm for a meeting starts only on that meeting's call when the call window can be read: the window naming the meeting, or a call begun from `MATCH_EARLY_MIN` before it, is its call; a call begun before that whose window names something else makes it wait (`arm_waits_other_call`) until the user is on its call; a name alone never does, a window it can't read starts it on the call going on, and Record on a call already going on arms no meeting. Evidence: `watch::meetings_call`
+- R9. An arm for a meeting starts only on that meeting's call when the call window can be read: the window naming the meeting, or a call begun from `MATCH_EARLY_MIN` before it, is its call; a call begun before that whose window doesn't name the meeting (another name, a channel's, none) makes it wait (`arm_waits_other_call`) until the user is on its call; a name alone never does, a window it can't read at all starts it on the call going on, and Record on a call already going on arms no meeting. Evidence: `watch::meetings_call`
 
 ### Constraints
 | Do not | Do instead | Evidence |
