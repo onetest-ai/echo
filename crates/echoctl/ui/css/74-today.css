@@ -121,6 +121,7 @@
 .ag-row.folded { opacity: 0.5; }
 .ag-t { padding-top: 1px; color: var(--text-3); white-space: nowrap; }
 .ag-t.next { color: var(--accent); font-weight: 650; }
+.ag-next { background: var(--accent-soft); color: var(--accent-ink); }
 .ag-t.choice { color: var(--warn); }
 .ag-bar { align-self: stretch; border-radius: 2px; min-height: 18px; box-sizing: border-box; }
 .ag-bar.yes { background: var(--me); }
