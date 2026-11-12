@@ -566,7 +566,19 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
     let token: String = if ipc { (0..32).map(|_| format!("{:x}", rand_nibble())).collect() } else { String::new() };
     // Cookies belong to the host, not the port: each server its own name, so two served windows don't log each other out.
     let name = format!("echo_serve_{}", listener.local_addr()?.port());
-    println!("{origin}/{}", if ipc { "  (IPC on)" } else { "" });
+    // With IPC on and no app running on this data folder, the served window stands in for the app: its plugins load
+    // as the app's do and hear what other processes queued for them (`echoctl project delete` → `threads_changed`).
+    // While the app runs, the app keeps them.
+    #[cfg(feature = "js")]
+    let app = ipc && crate::watch::running_watcher().is_none();
+    #[cfg(not(feature = "js"))]
+    let app = false;
+    #[cfg(feature = "js")]
+    if app {
+        crate::jshost::as_app();
+        crate::jshost::sync();
+    }
+    println!("{origin}/{}{}", if ipc { "  (IPC on)" } else { "" }, if app { "  (as the app: plugins' events here)" } else { "" });
     for conn in listener.incoming().flatten() {
         let (origin, token, name) = (origin.clone(), token.clone(), name.clone());
         std::thread::spawn(move || {
