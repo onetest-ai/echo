@@ -8,3 +8,4 @@
 /* A person in a work item's facts: a face and the name. */
 .wp-val.person { display: inline-flex; align-items: center; gap: 7px; }
 .wp-val.person .bd-av { width: 20px; height: 20px; font-size: 9px; }
+.wp-val.person .bd-av[data-ini]::before { content: attr(data-ini); }

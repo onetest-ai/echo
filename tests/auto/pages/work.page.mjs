@@ -157,10 +157,10 @@ export class WorkPage extends AppPage {
   /** The names a field's box suggests as it is typed in: its list's options (hidden until the browser draws its own
    *  popup, so found with hidden ones; an option of a suggestion list is named only by its value). */
   async suggestions() {
-    const options = this.details.getByRole('listbox', { includeHidden: true }).getByRole('option', { includeHidden: true })
-    const names = []
-    for (const o of await options.all()) names.push(await o.getAttribute('value'))
-    return names
+    // Echo's menu under the focused box: the people it offers, a face each (not "Nobody named", which clears the box).
+    const menu = this.page.locator('#sg-menu')
+    await menu.waitFor()
+    return menu.locator('[role="option"]:not(:has(.bd-av.none)) .sm-label').allTextContents()
   }
 
   /** A link to another item in the details ("T001 Send Acme the SSO checklist"), or any button there, by its name. */

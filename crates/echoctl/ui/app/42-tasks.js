@@ -23,12 +23,11 @@ function othersPile(all, key) {
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
-  // Quiet for days says it has no date too: "no date" beside it would say it twice and squeeze the thread's name.
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
   const on = S.pj.node === c.id && S.pj.sel === c.project
   return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${on ? ' on' : ''}"${on ? ' aria-current="true"' : ''} data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
-    <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj" title="${esc(p.name)}">${projIcon(p, 12)}<span class="tk-pjn">${esc(p.name)}</span></span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}<span class="tk-pjn">${esc(q.name)}</span></span>` }).join('')}<span class="grow"></span>${quiet || dueText(c)}</span>
+    <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj" title="${esc(p.name)}">${projIcon(p, 12)}<span class="tk-pjn">${esc(p.name)}</span></span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}<span class="tk-pjn">${esc(q.name)}</span></span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
 }
 /** Draws the Tasks view in the primary area (`renderNow`). */

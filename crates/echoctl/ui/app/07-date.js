@@ -57,6 +57,7 @@ function dpOpen(input) {
   document.body.appendChild(el)
   const at = input.value ? dpDate(input.value) : new Date()
   DP = { input, el, y: at.getFullYear(), m: at.getMonth() }
+  input.setAttribute('aria-haspopup', 'dialog')
   input.setAttribute('aria-expanded', 'true')
   dpDraw()
   DP.watch = new MutationObserver(() => { if (DP && !DP.input.isConnected) dpClose() })
@@ -91,6 +92,8 @@ addEventListener('mousedown', (e) => {
   }
   if (DP) dpClose()
 }, true)
+// A click on a date box would open the system's calendar (WebKit opens it on the click): Echo's is open instead.
+addEventListener('click', (e) => { if (dpBox(e.target)) e.preventDefault() }, true)
 for (const t of ['click', 'mouseup', 'pointerdown', 'pointerup']) {
   addEventListener(t, (e) => {
     if (!DP || !DP.el.contains(e.target)) return
@@ -108,7 +111,8 @@ for (const t of ['click', 'mouseup', 'pointerdown', 'pointerup']) {
 addEventListener('focusin', (e) => { if (dpBox(e.target) && (!DP || DP.input !== e.target) && e.target.matches(':focus-visible')) dpOpen(e.target) }, true)
 addEventListener('focusout', (e) => { if (DP && e.target === DP.input) dpClose() }, true)
 addEventListener('keydown', (e) => {
-  if (!DP && dpBox(e.target) && (e.key === 'F4' || (e.altKey && e.key === 'ArrowDown'))) { e.preventDefault(); return dpOpen(e.target) }
+  // The keys that open the system's calendar open Echo's (open or not, the system's never shows).
+  if (dpBox(e.target) && (e.key === 'F4' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')))) { e.preventDefault(); if (!DP || DP.input !== e.target) dpOpen(e.target); return }
   if (DP && e.target === DP.input && e.key === 'Escape') dpClose() // and the box's own Escape too (an edit is left at once)
 }, true)
 addEventListener('scroll', (e) => { if (DP && !DP.el.contains(e.target)) dpDraw() }, true)

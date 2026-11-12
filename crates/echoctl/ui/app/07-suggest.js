@@ -66,6 +66,7 @@ function sgClose() {
   el.remove()
   input.setAttribute('aria-expanded', 'false')
   input.removeAttribute('aria-activedescendant')
+  input.removeAttribute('aria-controls')
 }
 function sgPick(i) {
   if (!SG || !SG.rows[i]) return
@@ -99,9 +100,10 @@ for (const t of ['click', 'mouseup', 'pointerdown', 'pointerup']) {
 }
 addEventListener('mousemove', (e) => {
   const b = SG && e.target.closest && e.target.closest('.sg-menu [data-sg]')
-  if (b && +b.dataset.sg !== SG.at) { SG.at = +b.dataset.sg; for (const x of SG.el.querySelectorAll('[data-sg]')) x.classList.toggle('on', x === b); SG.input.setAttribute('aria-activedescendant', b.id) }
+  if (b && +b.dataset.sg !== SG.at) { SG.at = +b.dataset.sg; SG.kbd = false; for (const x of SG.el.querySelectorAll('[data-sg]')) x.classList.toggle('on', x === b); SG.input.setAttribute('aria-activedescendant', b.id) }
 }, true)
-// ↑ ↓ move in the list; Enter picks the marked row (none marked: the box's own text, as before); Escape closes the list
+// ↑ ↓ move in the list; Enter picks the row the keys marked (none, or only one under the mouse: the box's own text, as
+// before); Escape closes the list
 // and is the box's own Escape too.
 addEventListener('keydown', (e) => {
   if (!SG || e.target !== SG.input || SG.el.hidden) return
@@ -110,10 +112,11 @@ addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     take()
     SG.at = e.key === 'ArrowDown' ? (SG.at + 1) % n : (SG.at <= 0 ? n - 1 : SG.at - 1)
+    SG.kbd = true
     for (const x of SG.el.querySelectorAll('[data-sg]')) x.classList.toggle('on', +x.dataset.sg === SG.at)
     const on = SG.el.querySelector('.sg-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
     SG.input.setAttribute('aria-activedescendant', `sg-opt-${SG.at}`)
-  } else if (e.key === 'Enter' && SG.at >= 0) { take(); sgPick(SG.at) } else if (e.key === 'Escape') sgClose() // and the box's own Escape
+  } else if (e.key === 'Enter' && SG.at >= 0 && SG.kbd) { take(); sgPick(SG.at) } else if (e.key === 'Escape') sgClose() // and the box's own Escape
 }, true)
 addEventListener('scroll', (e) => { if (SG && !SG.el.contains(e.target)) sgDraw() }, true)
 addEventListener('resize', () => { if (SG) sgDraw() })
