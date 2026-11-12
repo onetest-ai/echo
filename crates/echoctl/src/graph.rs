@@ -191,6 +191,9 @@ fn graph_get(token: &str, url: &str) -> Result<Value> {
 // ── sign-in ─────────────────────────────────────────────────────────────────────────────────
 
 fn open_browser(url: &str) {
+    if crate::app::open_log_only(url) {
+        return;
+    }
     #[cfg(target_os = "macos")]
     let _ = Command::new("open").arg(url).status();
     #[cfg(windows)]

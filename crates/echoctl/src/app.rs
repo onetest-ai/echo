@@ -407,6 +407,26 @@ fn run_args(no_tray: bool) -> Vec<&'static str> {
     a
 }
 
+/// Test data's switch (`ECHOCTL_TEST_OPEN_LOG_ONLY`, set by `tests/fixtures/make_data.py`'s `<dir>/env`): nothing
+/// leaves Echo for the browser or another app — what would open is appended to `ECHOCTL_TEST_OPEN_LOG` (the test data's
+/// `<dir>/open.log`, the line its `open` stand-in writes), and `true` says it was kept. Any build: a run on test data
+/// never brings up a browser tab, whichever `open` (or `rundll32`) is on PATH or the OS has; unset, nothing changes.
+pub fn open_log_only(what: &str) -> bool {
+    if std::env::var_os("ECHOCTL_TEST_OPEN_LOG_ONLY").is_none_or(|v| v.is_empty()) {
+        return false;
+    }
+    if let Some(f) = std::env::var_os("ECHOCTL_TEST_OPEN_LOG").filter(|f| !f.is_empty()) {
+        use std::io::Write;
+        let logged = fs::OpenOptions::new().create(true).append(true).open(&f).and_then(|mut l| writeln!(l, "{what}"));
+        if let Err(e) = logged {
+            eprintln!("test data: not opened, and not logged ({}): {e}", Path::new(&f).display());
+        }
+    } else {
+        eprintln!("test data: not opened: {what}");
+    }
+    true
+}
+
 /// Show a folder in Finder / Explorer.
 pub fn reveal(dir: &Path) {
     #[cfg(target_os = "macos")]

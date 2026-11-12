@@ -62,6 +62,9 @@ fn request_all() -> Result<()> {
 }
 
 pub fn open_settings(url: &str) -> Result<()> {
+    if crate::app::open_log_only(url) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(url).status()?;
     #[cfg(windows)]
