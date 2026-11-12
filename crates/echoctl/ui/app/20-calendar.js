@@ -128,7 +128,7 @@ function calendarView() {
       const cls = ['ev', narrow.trim(), e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
       // Green already says recorded: only what the colour doesn't.
       const tag = [appTag(e), e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''].filter(Boolean).join(' ')
-      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}" title="${esc(`${e.subject} · ${hm(st.s)}`)}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
+      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}" title="${esc([e.subject, hm(st.s), otherApp(e) ? meetingApp(e).name : '', e.recorded ? '' : e.transcript ? 'Transcript' : e.scheduled ? 'Will record' : e.no_notetakers ? 'No notetakers' : ''].filter(Boolean).join(' · '))}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" role="group" aria-label="${esc(`${day.toLocaleDateString([], { weekday: 'short' })} ${day.getDate()}`)}"${sameDay(day, now) ? ' aria-current="date"' : ''} style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
   }).join('')
