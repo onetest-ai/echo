@@ -58,6 +58,11 @@ export class TodayPage extends AppPage {
     return this.page.getByRole('button', { name: `Claude: “${title}”…`, exact: true })
   }
 
+  /** A line of the last Yolo's outcome: what the run says, then a line for each mail draft it wrote. */
+  askSays(text) {
+    return this.askBar.getByText(text)
+  }
+
   /** A task of My work's Close button: there while the task is listed. */
   closeFor(title) {
     return this.page.getByRole('button', { name: `Close “${title}”…`, exact: true })
