@@ -168,6 +168,8 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .pf-row:last-child { border-bottom: 0; }
 .pf-l { color: var(--text-2); font-size: 12.5px; padding-top: 3px; }
 .pf-v { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; font-size: 13px; }
+/* A plugin's Profile row (`thread.profile`): its own HTML, the row's whole width. */
+.pf-plug { flex: 1 1 100%; min-width: 0; }
 .pf-sub { flex-basis: 100%; font-size: 12px; color: var(--text-3); }
 .pf-v > .pf-sub:not(:first-child) { margin-top: 0; }
 .pf-stages { display: flex; flex-wrap: wrap; gap: 10px; flex-basis: 100%; }

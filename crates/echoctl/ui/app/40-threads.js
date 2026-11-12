@@ -67,6 +67,13 @@ const projClient = (id) => ((S.pj.data && S.pj.data.clients) || []).find((c) => 
 function drawProjects(primary) {
   patch(primary, `<main class="main">${projectsView()}</main>`)
   drawOrgLinks()
+  // A plugin's Profile row draws into its box once it is in (`thread.profile`'s after).
+  const p = S.pj.detail
+  if (!p || p.error || S.pj.tab !== 'profile') return
+  for (const x of Plugins.slots['thread.profile'] || []) {
+    const box = x.after && primary.querySelector(`[data-thread-slot="${CSS.escape(`${x.plugin}:${x.id}`)}"]`)
+    try { if (box) x.after(box, slotThread(p)) } catch (e) { console.warn(`thread.profile: ${x.plugin}: ${(e && e.message) || e}`) }
+  }
 }
 function projectsView() {
   const data = S.pj.data

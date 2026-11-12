@@ -109,6 +109,14 @@ const PRELUDE: &str = r#"
       set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
       clear: (id) => call('widgets.clear', String(id)),
     },
+    /** Its own values per thread (no grant: its data, by thread id): `get(thread, key)` → value | null, `set(thread,
+     *  key, value)` (JSON, 16 KB at most; null removes it), `list(key)` → [{thread, value}] of the threads that have it.
+     *  They follow the thread: gone when it is deleted (hear it: `threads_changed` in uses.events.on). */
+    threads: {
+      get: (thread, key) => call('threads.get', [String(thread), String(key)]),
+      set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
+      list: (key) => call('threads.list', String(key)),
+    },
     profiles: () => call('profiles'),
     claude: {
       run: (opts) => later('claude.run', opts),
@@ -721,8 +729,10 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     store_path(id, rel)?;
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if first.trim_end_matches(['.', ' ']).split(':').next() == Some("settings.json") {
-        bail!("the plugin's settings.json isn't its to write: use ctx.settings.set");
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
+        Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
+        _ => {}
     }
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
@@ -857,6 +867,13 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             widget_store(id, &s(arg), None, None, None)?;
             Value::Null
         }
+        "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1])),
+        "threads.set" => {
+            read_only_here("changing files or settings")?;
+            plugins::thread_values::set(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
+            Value::Null
+        }
+        "threads.list" => plugins::thread_values::list(id, &s(arg))?,
         "inbox.clear" => {
             inbox_set(id, &s(arg), None)?;
             Value::Null
@@ -1748,6 +1765,64 @@ mod tests {
         for id in ["hears", "deaf"] {
             plugins::remove(id, false).unwrap();
         }
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes() {
+        let (_env, root) = paths::testenv::folders("jshost-threads");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let beta = crate::projects::create("Beta", None, None).unwrap().id;
+        let mk = root.join("market");
+        let d = mk.join("plugins/repos");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "repos", "name": "Repos", "version": "0.1.0", "main": "main.js", "uses": {"events": {"on": ["threads_changed"]}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              const heard = []
+              ctx.on('threads_changed', (p) => { heard.push(p) })
+              ctx.command('map', (a) => { ctx.threads.set(a.thread, 'repos', a.repos); return ctx.threads.get(a.thread, 'repos') })
+              ctx.command('get', (a) => ctx.threads.get(a.thread, 'repos'))
+              ctx.command('list', () => ctx.threads.list('repos'))
+              ctx.command('sneak', () => ctx.store.write('threads.json', '{}'))
+              ctx.command('heard', () => heard)
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "repos", "source": "./plugins/repos"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("repos", Some(&name)).unwrap();
+        assert!(review.uses.iter().any(|l| l.contains("Knows when a thread is renamed, merged or deleted")), "the sheet says it: {:?}", review.uses);
+        plugins::install("repos", Some(&name), &review.uses).unwrap();
+        sync();
+        let mapped = (0..50).find_map(|_| call("repos", "map", &json!({"thread": alpha, "repos": ["acme-test/api"]})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(mapped.unwrap(), json!(["acme-test/api"]));
+        assert_eq!(call("repos", "get", &json!({"thread": beta})).unwrap(), Value::Null, "Alpha's only");
+        assert_eq!(call("repos", "list", &json!({})).unwrap(), json!([{"thread": alpha, "value": ["acme-test/api"]}]));
+        assert!(call("repos", "map", &json!({"thread": "nope", "repos": []})).unwrap_err().to_string().contains("no thread"));
+        assert!(call("repos", "sneak", &json!({})).unwrap_err().to_string().contains("ctx.threads.set"), "its threads.json is Echo's to write");
+        // Alpha renamed, then deleted: the plugin hears both; its value for Alpha is gone.
+        crate::projects::update(&alpha, |p| {
+            p.name = "Alpha 2".into();
+            Ok(())
+        })
+        .unwrap();
+        crate::projects::delete(&alpha).unwrap();
+        let heard = (0..50).find_map(|_| {
+            let v = call("repos", "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| a.len() == 2) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard.unwrap(), json!([{"thread": alpha, "change": "renamed"}, {"thread": alpha, "change": "deleted"}]));
+        assert_eq!(call("repos", "get", &json!({"thread": alpha})).unwrap(), Value::Null);
+        assert_eq!(call("repos", "list", &json!({})).unwrap(), json!([]));
+        plugins::remove("repos", false).unwrap();
         sync();
     }
 

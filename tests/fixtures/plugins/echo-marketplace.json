@@ -8,6 +8,10 @@
     {
       "id": "hang-demo",
       "source": "./plugins/hang-demo"
+    },
+    {
+      "id": "thread-demo",
+      "source": "./plugins/thread-demo"
     }
   ]
 }

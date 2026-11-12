@@ -1,0 +1,49 @@
+---
+id: TC-023
+title: A plugin adds a row to each thread's Profile and keeps a value per thread; the value shows on its thread only, goes with a deleted thread (the plugin hears it), and a row that throws leaves the Profile drawn
+priority: medium
+type: functional
+requirements: [F-PLUG-19]
+module: plugins
+run: agent
+platform: any
+data: standard
+tags: [plugins, threads, client-half, slots, host-half, events]
+---
+
+# TC-023: A plugin's row in a thread's Profile, and its values per thread
+
+**Module:** Plugins | **Priority:** Medium | **Type:** Functional
+
+## Preconditions
+- Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first; CLI steps run in Bash after `. <dir>/env`; `echoctl` is `target/debug/echoctl`
+- The test plugin `tests/fixtures/plugins` (marketplace "test-plugins", plugin "thread-demo": a "Repositories" row in each thread's Profile, the repositories kept per thread; it throws on a thread named "Boom")
+- Two made-up threads: `echoctl project create "Alpha"`, `echoctl project create "Beta"` (ids `alpha`, `beta`)
+
+**Changes:** `<config dir>/plugins/` (the marketplace, the installed plugin), `<data>/.echo/plugins/thread-demo/`, the threads Alpha, Beta and Boom
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | `echoctl plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `echoctl plugin install thread-demo --yes` | The sheet lists "Runs its own code in Echo and in the Echo window, with your rights" and "Knows when a thread is renamed, merged or deleted"; "Installed Thread demo 0.1.0" |
+| 2 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#project/alpha/profile` | The Profile card has a row "Repositories", right under "Sources", reading "None yet" with a box and "Save" |
+| 3 | Type `acme-test/api` in the box "Repositories", click "Save" | The row shows the chip "⎇ acme-test/api" |
+| 4 | `echoctl plugin call thread-demo get '{"thread":"alpha"}'`; then the same for `beta`; then `echoctl plugin call thread-demo list` | `["acme-test/api"]`; `null`; `[{"thread": "alpha", "value": ["acme-test/api"]}]` |
+| 5 | Navigate to `{{base_url}}/#project/beta/profile` | Its "Repositories" row reads "None yet" (Alpha's value isn't Beta's) |
+| 6 | `echoctl plugin call thread-demo set '{"thread":"nope","repos":["x"]}' 2>&1 \|\| true` | It fails with "there is no thread “nope”" |
+| 7 | In the window, Alpha's Profile → ⋯ → "Delete…" → "Move to trash" | Alpha is gone from the list |
+| 8 | `echoctl plugin call thread-demo heard`; `echoctl plugin call thread-demo list` | `heard` includes `{"thread": "alpha", "change": "deleted"}`; `list` is `[]` |
+| 9 | `echoctl project create "Boom"`; reload, navigate to `{{base_url}}/#project/boom/profile` | The Profile draws (Stage, Client, … Sources, Notes for Claude, Look, AI) without a "Repositories" row |
+| 10 | Navigate to `{{base_url}}/#settings/plugins`, switch "Thread demo on" off; navigate to `{{base_url}}/#project/beta/profile` | No "Repositories" row |
+
+## Expected Final State
+Thread demo is installed and off; Alpha is in the trash with no value of the plugin's left; Beta and Boom have none.
+
+## Teardown
+- `echoctl plugin remove thread-demo --delete-data`; `echoctl plugin marketplace remove test-plugins`; `echoctl project delete beta`; `echoctl project delete boom`
+- `tests/fixtures/serve.sh down <dir>`
+
+## Notes
+- Step 8's `heard` is what the plugin heard while the app ran (the window's delete runs in the app, where host halves run); a delete from the CLI drops the values the same way but the app's plugins don't hear it.
+- Echo has no thread-into-thread merge yet: `merged` is covered by the Rust test `plugins::thread_values::a_plugins_values_per_thread_are_kept_listed_and_follow_the_thread`.
