@@ -82,8 +82,16 @@ function workFilter(V, me) {
   return { pass: (n) => open(n) && match(n), board: (n) => match(n) && (open(n) || n.state === 'done') }
 }
 /** A board card's due is late (by the local date), and it shows whom it waits on (not once done). */
-const cardLate = (n, now = new Date()) => !!n.due && n.due < ymd(now) && n.state !== 'done'
+const cardLate = (n, now = new Date()) => !!n.due && !n.due_guessed && n.due < ymd(now) && n.state !== 'done'
 const cardWaits = (n) => !!n.waiting_for && n.state !== 'done'
+/** What an evidence item is to a person (#463): a meeting's is "the call". */
+const SOURCE_WORD = { meeting: 'call', mail: 'mail', chat: 'chat', memo: 'memo' }
+const shortDate = (d) => new Date(String(d).slice(0, 10) + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' })
+/** Where a guessed due came from (#463), `{kind, date}` of its item: "from the mail of 10 Nov". */
+const dueFrom = (from) => (from && from.date ? `from the ${SOURCE_WORD[from.kind] || 'item'} of ${shortDate(from.date)}` : '')
+/** A task a later call, mail or chat only mentioned (#463), as text: "Looks done — the call Acme security review, 11 Nov:
+ *  “…”". Plain text: the caller escapes it. */
+const looksDone = (l) => (l ? `Looks done — the ${SOURCE_WORD[l.kind] || 'item'}${l.title ? ` ${l.title}` : ''}, ${shortDate(l.date)}: “${l.quote}”` : '')
 // end of the work-status block
 /** Where a record came from: its day and the call ("today · weekly 12:05"). */
 function workOrigin(w, n) {
@@ -362,7 +370,7 @@ function workPanel() {
     n.kind === 'task' || n.kind === 'story' || n.kind === 'risk' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus ${who}>`)] : null,
     n.kind === 'task' ? ['Handed over by', val('delegated_by', n.delegated_by, n.creator ? `${n.creator} (said it)` : 'not known', `<input class="wp-in" data-ledger-set="delegated_by" value="${esc(n.delegated_by || '')}" placeholder="Me, or a name" aria-label="Handed over by" autofocus ${who}>`)] : null,
     n.client_owner ? ['Client owes', esc(n.client_owner)] : null,
-    n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
+    n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + (n.due_guessed ? ` <span class="set-sub" title="Nobody said this date: never late">· ${esc(dueFrom(ev[((n.due_history || []).slice(-1)[0] || {}).evidence]))}</span>` : '') + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
     ...(n.kind === 'task' ? modeRows(S.pj.sel, n, val) : []),
     n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
     (n.sent || []).length ? ['Mail', n.sent.map((m) => esc(sentMailLine(m, (t) => new Date(t).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })))).join('<br>')] : null,
@@ -389,8 +397,11 @@ function workPanel() {
     : `${head}<button class="wp-val empty wp-desc-add${n.kind === 'risk' && !CLOSED_STATES.includes(n.state) ? ' warn' : ''}" data-pj="desc-edit">${esc(rt.empty)} · <u>Add</u></button>`
   const met = n.ac.filter((a) => a.met).length
   const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
-  const hist = (n.history || []).slice().reverse().map((h) => {
-    const what = h.by === 'human' && (h.op === 'xref' || h.op === 'unxref') ? `${h.op === 'xref' ? 'you linked it to' : 'you unlinked'} ${(projById(h.thread) || {}).name || h.thread} · ${h.target}${h.op === 'xref' ? (h.kind === 'same' ? (h.master === 'here' ? ' (the same work, done here)' : ' (the same work, done there)') : h.kind === 'depends_on' ? ' (waits on it)' : ' (it waits on this)') : ''}`
+  const hist = (n.history || []).slice().reverse().map((h0) => {
+    let h = h0
+    // A "Looks done" the user decided (#463): closed, or not yet — undone here.
+    if (h.effect === 'mention' && h.decided) h = { ...h, by: 'human', mid: h.decided, op: 'looks', what: h.status === 'accept' ? 'looks done · closed by you' : 'looks done · not yet' }
+    const what = h.op === 'looks' ? h.what : h.by === 'human' && (h.op === 'xref' || h.op === 'unxref') ? `${h.op === 'xref' ? 'you linked it to' : 'you unlinked'} ${(projById(h.thread) || {}).name || h.thread} · ${h.target}${h.op === 'xref' ? (h.kind === 'same' ? (h.master === 'here' ? ' (the same work, done here)' : ' (the same work, done there)') : h.kind === 'depends_on' ? ' (waits on it)' : ' (it waits on this)') : ''}`
       : h.from ? `${h.effect || h.op} · heard in ${(projById(h.from.thread) || {}).name || h.from.thread}`
       : h.by === 'human' ? humanHistory(h, rt && rt.word, (id) => (N[id] && N[id].title) || '')
       : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
@@ -412,6 +423,7 @@ function workPanel() {
     <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span>${['task', 'story', 'question'].includes(n.kind) ? `<button class="btn ghost" data-claude-task="${esc(n.id)}" data-project="${esc(S.pj.sel)}" data-title="${esc(n.title)}"${modeData({ mode: n.who_does })} title="Send to Claude — work on it in the Claude panel, with a skill" aria-label="Send to Claude">Send to <span class="md-ico claude">${ICON(CLAUDE_MARK)}</span></button>` : ''}<button class="btn" data-pj="edit-title">Edit</button></div>
     ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
     ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
+    ${looksDoneBar(n, S.pj.sel)}
     ${description}
     ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div${XLINK_ROWS.includes(k) ? ` role="group" aria-label="${esc(k)}"` : ''}>${v}</div>`).join('')}</div>` : ''}
     ${criteria}
@@ -420,6 +432,13 @@ function workPanel() {
     ${mentionsBlock(n)}
     <div class="wp-h">History</div><div class="wp-hist" role="list" aria-label="History">${hist}</div>
   </div>`
+}
+/** A task a later call, mail or chat only mentioned (#463): the line, Close (done, as yours) and Not yet. */
+function looksDoneBar(n, project) {
+  const l = n.looks_done
+  if (!l || !l.mid) return ''
+  const btn = (op, label, cls) => `<button class="btn ${cls}" data-pj="ledger" data-project="${esc(project)}" data-body='${esc(JSON.stringify({ op, target: l.mid }))}'>${label}</button>`
+  return `<div class="wk-rv wk-looks" role="group" aria-label="Looks done"><span class="grow">${esc(looksDone(l))}</span>${btn('accept', 'Close', 'primary')}${btn('reject', 'Not yet', 'ghost')}</div>`
 }
 /** An item of another thread, as a link that opens it there (#20). */
 function xItem(thread, node, title) {

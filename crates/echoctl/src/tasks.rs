@@ -102,14 +102,17 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
     } else {
         "others"
     };
-    let late = n.due.as_deref().and_then(|d| days(d, today)).is_some_and(|d| d > 0);
+    // A guessed due (#463) is never late; where it came from says why it is there.
+    let late = !n.due_guessed && n.due.as_deref().and_then(|d| days(d, today)).is_some_and(|d| d > 0);
+    let due_from = n.due_guessed.then(|| n.due_history.last().and_then(|h| h["evidence"].as_str()).and_then(|i| ev.get(i)).map(|e| json!({"kind": e["kind"], "date": e["date"]}))).flatten();
     (
         pile.into(),
         json!({
             "project": p.id, "id": n.id, "title": n.title, "type": n.task_type, "state": n.state,
             "story": story.map(|s| json!({"id": s.id, "title": s.title})),
             "owner": owner, "mine": owner.as_deref().is_some_and(|o| me.is(o)), "client": client, "delegated_by": delegated,
-            "due": n.due, "late": late, "waiting_for": n.waiting_for, "after": after, "blocked": blocked,
+            "due": n.due, "late": late, "due_guessed": n.due_guessed, "due_from": due_from, "looks_done": n.looks_done,
+            "waiting_for": n.waiting_for, "after": after, "blocked": blocked,
             "quiet": quiet, "last": last_call.map(|e| json!({"date": e["date"], "call": e["call"], "title": e["title"]})),
             // One piece of work raised in several threads (#20): this card stands for all of them.
             "also_in": n.also_in,
@@ -255,7 +258,7 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
         let count = tasks.len();
         for (pile, c) in cards.into_values().chain(owed_blockers.into_iter().map(|c| ("waiting".to_string(), c))).chain(waits.into_iter().map(|c| ("waiting".to_string(), c))) {
             // Something to ask: what they owe me that is late, due soon or quiet; what my work waits on them for.
-            let due_in = c["due"].as_str().and_then(|d| days(d, today)).map(|d| -d);
+            let due_in = c["due"].as_str().filter(|_| c["due_guessed"] != true).and_then(|d| days(d, today)).map(|d| -d);
             let ask = match pile.as_str() {
                 "owed" => {
                     let why = if c["late"] == true {

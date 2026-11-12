@@ -173,6 +173,20 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-WORK-18",
+   "feature": "Looks done: an open task that a later call, mail or chat only mentioned (the sync's `mention`, with its quote) shows in Details \"Looks done — <the call / mail / chat> <title>, <date>: “<quote>”\" with Close and Not yet; Close makes it done as the user's edit (its status pinned, that item's words in History, undo brings it back), Not yet hides that suggestion (a later item may suggest again); the sync never closes it; the latest such mention is the one shown",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-WORK-19",
+   "feature": "A guessed due — its words not in the call, mail or chat it came from, and the date the item's own (e.g. a mail's date taken as the due) — never makes the task late (Work, Tasks, Today, prep, linked threads, people) and shows as \"from the <call / mail / chat> of <date>\"; a due said in words, or set by the user, is a due as before",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

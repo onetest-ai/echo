@@ -185,6 +185,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-26",
+   "feature": "My work shows a task that looks done (F-WORK-18) with its \"Looks done — …” line and Close / Not yet on its card, also when it isn't due this week; a guessed due (F-WORK-19) neither puts a task in My work nor makes it late there",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

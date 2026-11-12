@@ -47,6 +47,9 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
     let mut handles: BTreeMap<String, String> = BTreeMap::new();
     let (mut out, mut rej): (Vec<Value>, Vec<Value>) = (vec![], vec![]);
     let date = s(&item["date"]).unwrap_or_default();
+    // A due nobody said (#463): its words aren't in the item, and the date is the item's own (a mail's date taken as the
+    // due). Kept, but guessed: it never makes the task late.
+    let guessed = |text: Option<&str>, due: Option<&str>| due.is_some_and(|d| d == date.get(..10).unwrap_or("")) && text.is_none_or(|t| norm(t).is_empty() || !full.contains(&norm(t)));
     let turns = item["turns"].as_array().cloned().unwrap_or_default();
     let locate = |q: &str| -> (Value, Value) {
         let head: String = q.chars().take(40).collect();
@@ -142,6 +145,7 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 "delegated_by": canonical(&p, pr["delegated_by"].as_str()),
                 "client_owed": pr["client_owed"] == true, "ac": ac,
                 "due": resolve_due(pr["due_text"].as_str(), &date), "due_text": pr["due_text"],
+                "due_guessed": guessed(pr["due_text"].as_str(), resolve_due(pr["due_text"].as_str(), &date).as_deref()),
                 "description": pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty()),
                 "decided_by": if k == "decision" { canonical(&p, pr["decided_by"].as_str()) } else { None },
                 "likelihood": pr["likelihood"], "impact": pr["impact"],
@@ -226,6 +230,9 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 e["effect"] = json!(eff);
                 e["due_text"] = pr["due_text"].clone();
                 e["due"] = if eff == "delayed" { Value::Null } else { json!(resolve_due(pr["due_text"].as_str(), &date)) };
+                if guessed(pr["due_text"].as_str(), e["due"].as_str()) {
+                    e["due_guessed"] = json!(true);
+                }
                 e["internal_owner"] = json!(canonical(&p, pr["internal_owner"].as_str()));
                 e["client_owner"] = json!(canonical(&p, pr["client_owner"].as_str()));
                 e["delegated_by"] = json!(canonical(&p, pr["delegated_by"].as_str()));

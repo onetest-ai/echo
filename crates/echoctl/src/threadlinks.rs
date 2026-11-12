@@ -131,7 +131,7 @@ pub fn digest(id: &str, n_open: usize, n_dec: usize) -> Value {
     let today = chrono::Local::now().date_naive().to_string();
     let item = |n: &Value| {
         let owner = n["internal_owner"].as_str().or(n["client_owner"].as_str());
-        json!({"kind": n["kind"], "title": n["title"], "owner": owner, "due": n["due"], "late": n["due"].as_str().is_some_and(|d| d < today.as_str()),
+        json!({"kind": n["kind"], "title": n["title"], "owner": owner, "due": n["due"], "late": n["due_guessed"] != true && n["due"].as_str().is_some_and(|d| d < today.as_str()),
             "date": n["created"], "link": format!("echo://task/{id}/{}", n["id"].as_str().unwrap_or(""))})
     };
     let nodes: Vec<&Value> = tree["nodes"].as_object().map(|m| m.values().collect()).unwrap_or_default();

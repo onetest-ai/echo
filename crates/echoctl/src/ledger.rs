@@ -491,6 +491,13 @@ pub struct Node {
     /// `reply_at` is the first reply's time once the thread holds one (its mail evidence in that conversation).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sent: Vec<Value>,
+    /// Its due is guessed (#463): not said in the item it came from, that item's own date. It never makes it late.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub due_guessed: bool,
+    /// A later call, mail or chat that only mentioned it, while it is open (#463): `{mid, evidence, kind, title, date,
+    /// quote}`. The user closes it (`accept` on `mid`) or not yet (`reject`); the sync never does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looks_done: Option<Value>,
 }
 
 /// The valid links of a value (an older or hand-written event may hold anything).
@@ -581,6 +588,8 @@ fn node_of(e: &Value) -> Node {
         mirror_of: None,
         also_in: vec![],
         xwaits: vec![],
+        due_guessed: false,
+        looks_done: None,
         sent: vec![],
     }
 }
@@ -683,6 +692,12 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         .filter(|e| e["type"] == "human" && (e["op"] == "accept" || e["op"] == "reject") && !undone.contains(e["mid"].as_str().unwrap_or("")))
         .filter_map(|e| Some((s(&e["target"])?, s(&e["op"])?)))
         .collect();
+    // The user's decision on each suggestion, by its target: its own mid (what History's undo takes back, #463).
+    let decision: BTreeMap<String, String> = evs
+        .iter()
+        .filter(|e| e["type"] == "human" && (e["op"] == "accept" || e["op"] == "reject") && !undone.contains(e["mid"].as_str().unwrap_or("")))
+        .filter_map(|e| Some((s(&e["target"])?, s(&e["mid"])?)))
+        .collect();
     let mut n: BTreeMap<String, Node> = BTreeMap::new();
     let mut notes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let hist = |node: &mut Node, e: &Value, applied: bool, extra: Value| {
@@ -714,7 +729,7 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             "create" => {
                 let mut x = node_of(e);
                 if let Some(d) = s(&e["fields"]["due"]) {
-                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"]}));
+                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"], "guessed": e["fields"]["due_guessed"] == true}));
                 }
                 if human {
                     x.pinned = vec!["title".into()];
@@ -738,6 +753,25 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 let op = e["op"].as_str().unwrap_or("");
                 let mut ok = !needs_verdict(e) || e["mid"].as_str().and_then(|m| verdict.get(m)).map(String::as_str) == Some("supports");
                 match op {
+                    // A later item that only mentioned a task (#463): it looks done until the user closes it or says not yet.
+                    "status" if e["effect"] == "mention" && e["quote"].is_string() => {
+                        let x = n.get_mut(&id).unwrap();
+                        let later = x.kind == "task" && e["evidence"].is_string() && s(&e["evidence"]) != x.created_in;
+                        let st = e["mid"].as_str().and_then(|m| decided.get(m)).map(String::as_str).filter(|_| later).unwrap_or("pending");
+                        if st == "accept" && !["merged", "deleted"].contains(&x.state.as_str()) {
+                            x.state = "done".into();
+                            settable(x, "state", true);
+                        }
+                        if later && st == "pending" {
+                            let item = e["evidence"].as_str().and_then(|i| ev.get(i));
+                            x.looks_done = Some(json!({"mid": e["mid"], "evidence": e["evidence"], "date": e["date"], "quote": e["quote"],
+                                "kind": item.map(|i| i["kind"].clone()), "title": item.map(|i| i["title"].clone())}));
+                        } else if x.looks_done.as_ref().is_some_and(|l| l["mid"] == e["mid"]) {
+                            x.looks_done = None;
+                        }
+                        let by = e["mid"].as_str().and_then(|m| decision.get(m)).filter(|_| later);
+                        hist(x, e, st == "accept", if later { json!({"status": st, "decided": by}) } else { json!({}) });
+                    }
                     "status" => {
                         let x = n.get_mut(&id).unwrap();
                         if ok && !["merged", "deleted"].contains(&x.state.as_str()) {
@@ -927,6 +961,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         x.depends_on = uniq;
         x.ac.retain(|a| !a.dropped);
         x.due = x.due_history.last().and_then(|h| s(&h["due"]));
+        x.due_guessed = x.due.is_some() && x.due_history.last().is_some_and(|h| h["guessed"] == true);
+        if !["open", "in_progress", "blocked"].contains(&x.state.as_str()) {
+            x.looks_done = None;
+        }
     }
     derive(&mut n);
     let lim_n = (lim + 1).max(0) as usize;
@@ -975,7 +1013,7 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
             return eff != "due";
         }
         if x.due_history.last().map(|h| &h["due"]) != Some(&e["due"]) {
-            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"]}));
+            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"], "guessed": e["due_guessed"] == true}));
         }
     }
     true
@@ -1396,6 +1434,56 @@ mod tests {
         assert_eq!(ch[0]["node"]["id"], "S001", "in the order said");
         assert_eq!(ch[1]["node"]["due"], "2026-10-30");
 
+    }
+
+    #[test]
+    fn a_due_nobody_said_is_guessed_and_a_later_mention_looks_done_until_the_user_decides() {
+        let (_env, l, id) = setup("ledger-looks-done");
+        let ev = "2026-10-28_110000";
+        // A later mail and a later chat that only mention the work (#463).
+        for (eid, kind, date, text) in [("2026-10-30_090000", "mail", "2026-10-30", "Thanks, the SAML config arrived and the pilot users can log in now."),
+                                         ("2026-11-02_100000", "chat", "2026-11-02", "Quick note: the SAML config works for the Berlin users as well.")] {
+            let item = json!({"id": eid, "kind": kind, "date": date, "title": format!("About SAML ({kind})"), "turns": [{"speaker": "Dana Kowal", "text": text}], "text": ""});
+            fs::write(l.dir.join(format!("evidence/{eid}.json")), serde_json::to_vec(&item).unwrap()).unwrap();
+        }
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            // "today" is nowhere in the call: the call's own date taken as the due — guessed.
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "I can have the SAML config ready by Friday"}),
+            // "this week" is said: a due.
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Data-flow diagram", "type": "action", "internal_owner": "Me", "due_text": "this week", "quote": "can you send it this week"}),
+            // A mention from the item that made the task is no "looks done".
+            json!({"op": "status", "node": "T001", "effect": "mention", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        let node = |n: &str| fold(&l).unwrap().nodes[n].clone();
+        let t = node("T001");
+        assert_eq!((t.due.as_deref(), t.due_guessed), (Some("2026-10-28"), true));
+        assert!(t.looks_done.is_none(), "not from the item that made it");
+        assert_eq!((node("T002").due.as_deref(), node("T002").due_guessed), (Some("2026-10-30"), false));
+        // The mail only mentions it: it looks done, nothing changes by itself.
+        apply(&id, "2026-10-30_090000", &[json!({"op": "status", "node": "T001", "effect": "mention", "quote": "the SAML config arrived and the pilot users can log in"})]).unwrap();
+        let t = node("T001");
+        assert_eq!(t.state, "open");
+        let ld = t.looks_done.clone().expect("looks done");
+        assert_eq!((ld["kind"].as_str(), ld["title"].as_str(), ld["date"].as_str()), (Some("mail"), Some("About SAML (mail)"), Some("2026-10-30")));
+        let mid = ld["mid"].as_str().unwrap().to_string();
+        // Not yet: hidden; a later chat suggests again.
+        human_event(&id, &json!({"op": "reject", "target": mid})).unwrap();
+        assert!(node("T001").looks_done.is_none());
+        apply(&id, "2026-11-02_100000", &[json!({"op": "status", "node": "T001", "effect": "mention", "quote": "the SAML config works for the Berlin users"})]).unwrap();
+        let ld2 = node("T001").looks_done.expect("suggested again");
+        assert_eq!(ld2["kind"], "chat");
+        // Close: done as the user's edit (pinned), with that chat's words in History; undo takes it back.
+        let close = human_event(&id, &json!({"op": "accept", "target": ld2["mid"]})).unwrap();
+        let t = node("T001");
+        assert_eq!((t.state.as_str(), t.pinned.contains(&"state".to_string()), t.looks_done.is_none()), ("done", true, true));
+        let h = t.history.iter().find(|h| h["mid"] == ld2["mid"]).unwrap();
+        assert_eq!((h["applied"].as_bool(), h["status"].as_str(), h["decided"].as_str()), (Some(true), Some("accept"), close["mid"].as_str()));
+        human_event(&id, &json!({"op": "undo", "target": close["mid"]})).unwrap();
+        assert_eq!((node("T001").state.as_str(), node("T001").looks_done.is_some()), ("open", true));
+        // A due the user sets is a due.
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "2026-10-29"}})).unwrap();
+        assert!(!node("T001").due_guessed);
     }
 
     #[test]

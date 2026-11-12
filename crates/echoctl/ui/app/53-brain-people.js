@@ -440,7 +440,7 @@ document.addEventListener('click', (e) => {
     case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) i.focus() } return
     case 'edit-title': S.pj.editField = 'title'; render(); { const i = document.querySelector('.wp-title'); if (i) { i.focus(); i.select() } } return
     case 'sync': send({ cmd: 'project', op: 'sync', id: S.pj.sel }); if (S.pj.work) S.pj.work.sync = { state: 'running', message: 'reading calls' }; return render()
-    case 'ledger': return ledgerEdit(JSON.parse(d.body))
+    case 'ledger': return ledgerEdit(JSON.parse(d.body), d.project || S.pj.sel)
     case 'ledger-state': return S.pj.node && ledgerEdit({ op: 'edit', node: S.pj.node, set: { state: d.state } })
     case 'found': return go('found')
     case 'fields-menu': S.pj.fieldsMenu = !S.pj.fieldsMenu; return render()
