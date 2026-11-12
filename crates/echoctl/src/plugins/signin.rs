@@ -2,11 +2,13 @@
 //! `uses.signin.hosts` (`plugins::may_use_signin`). A plugin can't run programs, and the GitHub CLI keeps its token in
 //! the system's keychain, so Echo asks for it: the GitHub CLI first (`gh auth token`), then git's credential helper
 //! (`git credential fill`: the keychain, Git Credential Manager; for a self-hosted git this may be the user's password).
-//! Echo asks nobody for a password (the system's keychain may ask once to allow it), each program at most 10 s, in its
-//! own process group stopped whole on time-out, from an empty folder with the git and GitHub CLI settings of Echo's
-//! own environment removed — a repository's `.git/config` or an inherited `GIT_CONFIG_*` / `GH_TOKEN` never chooses
-//! the helper or the account. One lookup per host at a time, kept a minute. The token is never written or logged by
-//! Echo; it goes to the host half only.
+//! Echo asks nobody for a password (the system's keychain may ask once to allow it), each program at most 10 s, with
+//! all it starts stopped on time-out (on Unix its own process group, on Windows a job object closed when it is done),
+//! from an empty folder with the git and GitHub CLI settings of Echo's own environment removed — a repository's
+//! `.git/config` or an inherited `GIT_CONFIG_*` / `GH_TOKEN` never chooses the helper or the account. One lookup per
+//! host at a time, kept a minute (none found: 10 s) and then dropped from memory; `ctx.signin.get(host, {fresh: true})`
+//! asks the programs again and replaces what was kept (a plugin whose token was refused). The token is never written
+//! or logged by Echo; it goes to the host half only.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -29,8 +31,9 @@ const KEEP_NONE: Duration = Duration::from_secs(10);
 const MAX_OUT: usize = 64 * 1024;
 
 /// The user's sign-in to `host`: `{token, from: "gh" | "git", user?}`, or `None` when neither program has one.
-pub fn get(host: &str) -> Option<Value> {
-    cached(host, || get_with(host, program("gh").as_deref(), program("git").as_deref(), &|_| {}))
+/// `fresh`: ask the programs again instead of what was kept, and keep their answer.
+pub fn get(host: &str, fresh: bool) -> Option<Value> {
+    cached(host, fresh, (KEEP, KEEP_NONE), || get_with(host, program("gh").as_deref(), program("git").as_deref(), &|_| {}))
 }
 
 /// Which of the programs that could hold a sign-in are on this computer (no sign-in read): `{gh, git}`.
@@ -40,25 +43,55 @@ pub fn sources() -> Value {
 
 type Slot = Arc<Mutex<Option<(Instant, Option<Value>)>>>;
 
-/// `look` for `host` once at a time, its answer kept [`KEEP`] (none: [`KEEP_NONE`]) — a widget's refresh doesn't
-/// start the programs each time.
-fn cached(host: &str, look: impl FnOnce() -> Option<Value>) -> Option<Value> {
+/// The answers kept, by host.
+fn slots() -> &'static Mutex<HashMap<String, Slot>> {
     static SLOTS: OnceLock<Mutex<HashMap<String, Slot>>> = OnceLock::new();
-    let slot = SLOTS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).entry(host.to_string()).or_default().clone();
+    SLOTS.get_or_init(Default::default)
+}
+
+/// `look` for `host` once at a time, its answer kept `keep.0` (none: `keep.1`) — a widget's refresh doesn't start the
+/// programs each time — then dropped (the token isn't held in memory longer); `fresh` looks again whatever is kept.
+fn cached(host: &str, fresh: bool, keep: (Duration, Duration), look: impl FnOnce() -> Option<Value>) -> Option<Value> {
+    let slot = slots().lock().unwrap_or_else(|e| e.into_inner()).entry(host.to_string()).or_default().clone();
     let mut kept = slot.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, v)) = &*kept {
-        if at.elapsed() < if v.is_some() { KEEP } else { KEEP_NONE } {
+        if !fresh && at.elapsed() < if v.is_some() { keep.0 } else { keep.1 } {
             return v.clone();
         }
     }
     let v = look();
-    *kept = Some((Instant::now(), v.clone()));
+    let at = Instant::now();
+    *kept = Some((at, v.clone()));
+    drop(kept);
+    let (host, ttl) = (host.to_string(), if v.is_some() { keep.0 } else { keep.1 });
+    std::thread::spawn(move || {
+        std::thread::sleep(ttl);
+        forget(&host, &slot, at);
+    });
     v
+}
+
+/// Drop `host`'s answer kept since `at` (not a newer one), and its slot when nobody else is using it.
+fn forget(host: &str, slot: &Slot, at: Instant) {
+    {
+        let mut kept = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.as_ref().is_some_and(|(t, _)| *t == at) {
+            *kept = None;
+        }
+    }
+    let mut all = slots().lock().unwrap_or_else(|e| e.into_inner());
+    // Only the map's and this one's: no lookup has it, and (unlocked) nothing new is kept in it.
+    if all.get(host).is_some_and(|s| Arc::ptr_eq(s, slot) && Arc::strong_count(s) == 2 && s.try_lock().is_ok_and(|k| k.is_none())) {
+        all.remove(host);
+    }
 }
 
 /// [`get`] with the programs given (tests: made-up ones), uncached; `inherit` sets up what Echo's own environment
 /// would hand the programs (tests: a planted repository, `GIT_CONFIG_PARAMETERS`) before Echo clears it.
 pub(crate) fn get_with(host: &str, gh: Option<&Path>, git: Option<&Path>, inherit: &dyn Fn(&mut Command)) -> Option<Value> {
+    if gh.is_none() && git.is_none() {
+        return None;
+    }
     let empty = EmptyDir::new()?;
     if let Some(gh) = gh {
         let mut c = Command::new(gh).no_window();
@@ -75,7 +108,8 @@ pub(crate) fn get_with(host: &str, gh: Option<&Path>, git: Option<&Path>, inheri
     let git = git?;
     let mut c = Command::new(git).no_window();
     inherit(&mut c);
-    c.args(["credential", "fill"]);
+    // `credential.interactive` (git 2.46+; an older git ignores a setting it doesn't know): helpers mustn't prompt.
+    c.args(["-c", "credential.interactive=false", "credential", "fill"]);
     clean(&mut c, &empty.0);
     // Nobody is asked: no terminal prompt, no askpass program (one that can't start), no Credential Manager window.
     c.env("GIT_TERMINAL_PROMPT", "0")
@@ -120,7 +154,7 @@ fn clean(c: &mut Command, dir: &Path) {
     }
 }
 
-/// A new empty folder of Echo's for the programs to run from, removed after.
+/// A new empty folder of Echo's for the programs to run from, removed after with whatever they left in it.
 struct EmptyDir(PathBuf);
 
 impl EmptyDir {
@@ -136,7 +170,7 @@ impl EmptyDir {
 
 impl Drop for EmptyDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir(&self.0);
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -179,20 +213,18 @@ fn usable(p: &Path) -> bool {
 }
 
 /// Run `c` with `input` on its stdin: (exited 0, its stdout), or `None` when it can't start or takes over [`LIMIT`].
-/// It runs in a group of its own: on time-out the group is stopped (a helper it started, `security`, a `sleep`), and
-/// when it ends with something it started still holding its output, that is stopped after 2 s. Its stderr is
-/// dropped: nothing it says is logged.
+/// It runs with all it starts in a [`Tree`]: on time-out that is stopped (a helper it started, `security`, a `sleep`),
+/// and when it ends with something it started still holding its output, that is stopped after 2 s and what it wrote
+/// kept. Its stderr is dropped: nothing it says is logged.
 fn run(mut c: Command, input: Option<&str>) -> Option<(bool, String)> {
-    crate::ai::detach(&mut c);
     c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = c.spawn().ok()?;
-    let pid = child.id();
+    let (mut child, tree) = Tree::spawn(c)?;
     if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
         let _ = stdin.write_all(text.as_bytes());
     }
     let t = Instant::now();
     let Some(stdout) = child.stdout.take() else {
-        crate::ai::stop_child(&mut child);
+        tree.stop(&mut child);
         return None;
     };
     let (tx, rx) = std::sync::mpsc::channel();
@@ -204,7 +236,7 @@ fn run(mut c: Command, input: Option<&str>) -> Option<(bool, String)> {
             Ok(Some(s)) => break s,
             Ok(None) if t.elapsed() < LIMIT => std::thread::sleep(Duration::from_millis(20)),
             _ => {
-                crate::ai::stop_child(&mut child);
+                tree.stop(&mut child);
                 return None;
             }
         }
@@ -212,16 +244,132 @@ fn run(mut c: Command, input: Option<&str>) -> Option<(bool, String)> {
     let out = match rx.recv_timeout(LIMIT.saturating_sub(t.elapsed()).min(Duration::from_secs(2)).max(Duration::from_millis(200))) {
         Ok(out) => out,
         Err(_) => {
-            // What it started still holds its output: stopped, which closes it.
-            crate::ai::stop_group(pid);
+            // What it started still holds its output: stopped, which closes it (the reader then ends with what it read).
+            tree.stop_rest();
             rx.recv_timeout(Duration::from_secs(2)).ok().flatten()
         }
     }?;
     Some((status.success(), out))
 }
 
-/// Read `r` to its end, at most [`MAX_OUT`]; `None` past `deadline` — the reader never waits forever (on Unix the
-/// pipe is read without blocking; on Windows the whole tree is stopped, which closes it).
+/// A program and everything it starts, stopped together: on Unix its own process group (`ai::detach`); on Windows a
+/// job object it is started in (suspended until it is in), which ends them all when terminated or closed — even what
+/// outlives the program, which `taskkill /T` on an ended program can't reach.
+struct Tree {
+    #[cfg(unix)]
+    pid: u32,
+    #[cfg(windows)]
+    job: windows::Win32::Foundation::HANDLE,
+}
+
+#[cfg(unix)]
+impl Tree {
+    fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
+        crate::ai::detach(&mut c);
+        let child = c.spawn().ok()?;
+        let pid = child.id();
+        Some((child, Tree { pid }))
+    }
+
+    /// The program and all it started, the program reaped.
+    fn stop(&self, child: &mut std::process::Child) {
+        crate::ai::stop_child(child);
+    }
+
+    /// What it started, once it has ended.
+    fn stop_rest(&self) {
+        crate::ai::stop_group(self.pid);
+    }
+}
+
+#[cfg(windows)]
+impl Tree {
+    fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
+        use windows::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        use windows::Win32::System::Threading::{OpenThread, ResumeThread, CREATE_SUSPENDED, THREAD_SUSPEND_RESUME};
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // SAFETY: a job of our own, limits set from a struct that lives through the call.
+        let tree = unsafe {
+            let job = CreateJobObjectW(None, windows::core::PCWSTR::null()).ok()?;
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+            if SetInformationJobObject(job, JobObjectExtendedLimitInformation, (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(), size).is_err() {
+                let _ = CloseHandle(job);
+                return None;
+            }
+            Tree { job }
+        };
+        // Started suspended (windowless, as `no_window` would — this replaces its flags), so it starts nothing
+        // before it is in the job.
+        let no_console = unsafe { windows::Win32::System::Console::GetConsoleWindow() }.is_invalid();
+        c.creation_flags(CREATE_SUSPENDED.0 | if no_console { CREATE_NO_WINDOW } else { 0 });
+        let mut child = c.spawn().ok()?;
+        let pid = child.id();
+        // SAFETY: our child's handle, the snapshot and thread handles closed after use.
+        let resumed = unsafe {
+            AssignProcessToJobObject(tree.job, HANDLE(child.as_raw_handle())).is_ok() && {
+                let mut n = 0;
+                if let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) {
+                    let mut e = THREADENTRY32 { dwSize: std::mem::size_of::<THREADENTRY32>() as u32, ..Default::default() };
+                    let mut more = Thread32First(snap, &mut e).is_ok();
+                    while more {
+                        if e.th32OwnerProcessID == pid {
+                            if let Ok(th) = OpenThread(THREAD_SUSPEND_RESUME, false, e.th32ThreadID) {
+                                if ResumeThread(th) != u32::MAX {
+                                    n += 1;
+                                }
+                                let _ = CloseHandle(th);
+                            }
+                        }
+                        more = Thread32Next(snap, &mut e).is_ok();
+                    }
+                    let _ = CloseHandle(snap);
+                }
+                n > 0
+            }
+        };
+        if !resumed {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        Some((child, tree))
+    }
+
+    /// The program and all it started, the program reaped.
+    fn stop(&self, child: &mut std::process::Child) {
+        self.stop_rest();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// Everything in the job (its pipe ends with them).
+    fn stop_rest(&self) {
+        // SAFETY: our own job's handle, open until drop.
+        let _ = unsafe { windows::Win32::System::JobObjects::TerminateJobObject(self.job, 1) };
+    }
+}
+
+/// On Windows the job is closed: anything of it still running is ended (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`).
+#[cfg(windows)]
+impl Drop for Tree {
+    fn drop(&mut self) {
+        // SAFETY: our own job's handle, closed once.
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.job) };
+    }
+}
+
+/// Read `r` to its end, at most [`MAX_OUT`]; `None` past `deadline` (on Unix the pipe is read without blocking). It
+/// never waits forever: on time-out or when something the program started holds the pipe, the [`Tree`] is stopped,
+/// which closes it (on Windows a read then ends as at the end, with what was read).
 fn read_until(mut r: std::process::ChildStdout, deadline: Instant) -> Option<String> {
     #[cfg(unix)]
     {
@@ -300,7 +448,7 @@ mod tests {
         let gh = fake(&d, "gh", "echo 'no oauth token' >&2; exit 1");
         assert_eq!(get_with("github.com", Some(&gh), Some(&git), &nothing), Some(json!({"token": "ghp_fromgit", "from": "git", "user": "ann"})));
         let asked = std::fs::read_to_string(d.join("git.log")).unwrap();
-        assert!(asked.contains("args=credential fill prompt=0 gcm=never askpass=echo-asks-nobody"), "{asked}");
+        assert!(asked.contains("args=-c credential.interactive=false credential fill prompt=0 gcm=never askpass=echo-asks-nobody"), "{asked}");
         assert!(asked.contains("protocol=https\nhost=github.com\n"), "{asked}");
         assert!(!asked.contains("approve") && !asked.contains("erase") && !asked.contains("reject"));
         // No CLI at all: git alone.
@@ -344,20 +492,23 @@ mod tests {
                 .env("GITHUB_TOKEN", "ghp_planted");
         };
         let gh = fake(&d, "gh", "env > \"$(dirname \"$0\")/gh.env\"; exit 1");
-        let git = fake(&d, "git", "env > \"$(dirname \"$0\")/git.env\"; printf 'password=ghp_fromgit\\n'");
+        // It leaves a file behind in the folder it ran from.
+        let git = fake(&d, "git", "env > \"$(dirname \"$0\")/git.env\"; touch left-behind; printf 'password=ghp_fromgit\\n'");
         assert_eq!(get_with("github.com", Some(&gh), Some(&git), &inherit).unwrap()["from"], "git");
         for name in ["gh", "git"] {
             let env = std::fs::read_to_string(d.join(format!("{name}.env"))).unwrap();
             for planted in ["GIT_DIR=", "GIT_WORK_TREE=", "GIT_CONFIG_PARAMETERS=", "GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_0=", "GIT_CONFIG_VALUE_0=", "GH_TOKEN=", "GH_HOST=", "GH_CONFIG_DIR=", "GITHUB_TOKEN="] {
                 assert!(!env.lines().any(|l| l.starts_with(planted)), "{name} got {planted}");
             }
+            // A folder of Echo's own, right in the temporary folder (not the repository, nor this test's folder).
             let log = std::fs::read_to_string(d.join(format!("{name}.log"))).unwrap();
-            assert!(!log.contains(&format!("pwd={}", repo.display())) && log.contains("pwd=") && log.contains("echo-signin-"), "{name} ran from {log}");
+            let ran_in = Path::new(log.split("pwd=").nth(1).unwrap().split(' ').next().unwrap());
+            assert_eq!(ran_in.parent(), Some(std::env::temp_dir().canonicalize().unwrap().as_path()), "{name} ran from {log}");
+            let folder = ran_in.file_name().unwrap().to_string_lossy();
+            assert!(folder.starts_with(&format!("echo-signin-{}-", std::process::id())) && !folder.starts_with("echo-signin-test-"), "{name} ran from {log}");
+            // It is gone after, with what was left in it.
+            assert!(!ran_in.exists(), "{}", ran_in.display());
         }
-        // The folder it ran from is gone after.
-        let git_log = std::fs::read_to_string(d.join("git.log")).unwrap();
-        let ran_in = git_log.split("pwd=").nth(1).unwrap().split(' ').next().unwrap();
-        assert!(!Path::new(ran_in).exists(), "{ran_in}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -383,21 +534,28 @@ mod tests {
         let repo = d.join("repo");
         assert!(Command::new(&git).args(["init", "-q"]).arg(&repo).stdout(Stdio::null()).status().unwrap().success());
         let marker = d.join("planted-ran");
-        let helper = format!("!f() {{ touch '{}'; echo password=planted; }}; f", marker.display());
+        // A whole answer (a username too): git asks no askpass for the rest.
+        let helper = format!("!f() {{ touch '{}'; echo username=x; echo password=planted; }}; f", marker.display());
         assert!(Command::new(&git).arg("-C").arg(&repo).args(["config", "credential.helper", &helper]).status().unwrap().success());
-        let env_helper = format!("'credential.helper'='!f() {{ touch {}; echo password=planted; }}; f'", marker.display());
+        let env_helper = format!("'credential.helper'='!f() {{ touch {}; echo username=x; echo password=planted; }}; f'", marker.display());
         let inherit = |c: &mut Command| {
             c.current_dir(&repo).env("GIT_CONFIG_PARAMETERS", &env_helper).env("GIT_CONFIG_COUNT", "1").env("GIT_CONFIG_KEY_0", "credential.helper").env("GIT_CONFIG_VALUE_0", &helper);
         };
         let got = get_with("signin-test.invalid", None, Some(&git), &inherit);
         assert!(!marker.exists(), "a planted helper ran");
         assert!(got.is_none(), "a sign-in was handed over");
-        // The same planted repository chooses the helper when Echo doesn't clear it (the test can tell).
+        // The same planted repository chooses the helper when Echo doesn't clear it (the test can tell) — still asking
+        // nobody (no askpass of the terminal the tests run in, no prompt) and given up on after 10 s.
         let mut c = Command::new(&git);
-        c.arg("-C").arg(&repo).args(["credential", "fill"]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).env("GIT_TERMINAL_PROMPT", "0");
-        let mut child = c.spawn().unwrap();
-        child.stdin.take().unwrap().write_all(b"protocol=https\nhost=signin-test.invalid\n\n").unwrap();
-        let _ = child.wait();
+        c.arg("-C").arg(&repo).args(["credential", "fill"]);
+        for (k, _) in std::env::vars_os() {
+            let up = k.to_string_lossy().to_ascii_uppercase();
+            if up.starts_with("GIT_") || up.starts_with("GCM_") || up == "SSH_ASKPASS" {
+                c.env_remove(&k);
+            }
+        }
+        c.env("GIT_TERMINAL_PROMPT", "0").env("GIT_ASKPASS", "echo-asks-nobody").env("SSH_ASKPASS", "echo-asks-nobody").env("GCM_INTERACTIVE", "never");
+        let _ = run(c, Some("protocol=https\nhost=signin-test.invalid\n\n"));
         assert!(marker.exists());
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -433,13 +591,37 @@ mod tests {
         };
         std::thread::scope(|s| {
             for _ in 0..4 {
-                s.spawn(|| assert_eq!(cached("cache-test.example", look).unwrap()["token"], "gho_madeup"));
+                s.spawn(|| assert_eq!(cached("cache-test.example", false, (KEEP, KEEP_NONE), look).unwrap()["token"], "gho_madeup"));
             }
         });
         assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 1);
         // Another host is its own.
-        assert!(cached("cache-test-2.example", || None).is_none());
-        assert_eq!(cached("cache-test-2.example", || Some(json!(1))), None);
+        assert!(cached("cache-test-2.example", false, (KEEP, KEEP_NONE), || None).is_none());
+        assert_eq!(cached("cache-test-2.example", false, (KEEP, KEEP_NONE), || Some(json!(1))), None);
+        // `fresh` asks again whatever is kept, and its answer is the one kept after.
+        assert_eq!(cached("cache-test.example", true, (KEEP, KEEP_NONE), || Some(json!({"token": "gho_new"}))).unwrap()["token"], "gho_new");
+        assert_eq!(cached("cache-test.example", false, (KEEP, KEEP_NONE), || panic!("asked again")).unwrap()["token"], "gho_new");
+        assert_eq!(cached("cache-test-2.example", true, (KEEP, KEEP_NONE), || Some(json!(2))), Some(json!(2)));
+    }
+
+    #[test]
+    fn a_sign_in_kept_is_dropped_from_memory_when_its_time_is_up() {
+        let short = (Duration::from_millis(150), Duration::from_millis(150));
+        let held = |host: &str| slots().lock().unwrap().get(host).map(|s| s.lock().unwrap().clone());
+        assert_eq!(cached("cache-drop.example", false, short, || Some(json!({"token": "gho_madeup"}))).unwrap()["token"], "gho_madeup");
+        assert!(held("cache-drop.example").flatten().is_some_and(|(_, v)| v.is_some()));
+        // A newer answer isn't dropped by the older one's time.
+        std::thread::sleep(Duration::from_millis(100));
+        cached("cache-drop.example", true, short, || Some(json!({"token": "gho_newer"})));
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(held("cache-drop.example").flatten().and_then(|(_, v)| v).unwrap()["token"], "gho_newer");
+        // Its own time up: nothing of it is held.
+        let t = Instant::now();
+        while held("cache-drop.example").is_some() && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(held("cache-drop.example").is_none(), "still held");
+        assert_eq!(cached("cache-drop.example", false, short, || None), None);
     }
 
     #[test]
