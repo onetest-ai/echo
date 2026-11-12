@@ -1064,6 +1064,12 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
+    // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
+    // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
+    let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
+    if !keeps || before.as_ref().is_some_and(|b| b.market != rec.market) {
+        signin::forget_plugin(id);
+    }
     // Older versions' files go.
     if let Ok(rd) = fs::read_dir(installed_dir(id)) {
         for e in rd.flatten() {
@@ -1125,6 +1131,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     let _ = fs::remove_dir_all(installed_dir(id));
     crate::grants::remove_plugin(id);
+    // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
+    signin::forget_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));
@@ -1587,6 +1595,13 @@ mod tests {
         }
         // It grants no network of its own.
         assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap().iter().all(|l| !l.contains("Talks to")));
+        // `keep`: the plugin signs in itself and Echo keeps that sign-in for it.
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": true}}))).unwrap(),
+            ["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to; it may sign you in to github.com itself and have Echo keep that sign-in for it"]
+        );
+        assert_eq!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": false}}))).unwrap(), describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap());
+        assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": "yes"}}))).is_err());
         let granted = uses(json!({"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}));
         assert!(may_use_signin(&granted, "github.com").is_ok());
         for other in ["gitlab.com", "api.github.com", "GITHUB.COM", ""] {

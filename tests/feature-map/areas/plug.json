@@ -204,6 +204,24 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-22",
+   "feature": "With `uses.signin.keep: true` (the sheet adds 'it may sign you in to github.com itself and have Echo keep that sign-in for it') a plugin that made a sign-in itself — whatever the service and however it got it; Echo doesn't look inside — has Echo keep it: `ctx.signin.keep(host, token)` (a host of its `signin.hosts`; one line, 8 KB at most) writes `<config dir>/signin/<plugin>/<host>.json` (0600), outside every plugin's store — that plugin's own: `ctx.signin.get(host)` hands it back first as `{token, from: 'echo'}` to that plugin only (its sheet said `keep`), no other plugin reads, replaces or forgets it, and it is deleted when the plugin is removed (its data kept or not); `ctx.signin.forget(host)` deletes it (true: there was one); keeping and forgetting refused without `keep` and in a read-only routine",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-23",
+   "feature": "A plugin's client half puts text on the clipboard with `ctx.ui.copy(text)` (10,000 characters at most; e.g. a code to paste on a sign-in page) on the user's click or key: without the page's user activation — or where the engine can't tell — it throws 'the clipboard is filled only on your click' (a guard against accidental copies, not a security boundary: a client half shares the page); the host half has no clipboard. With test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) Echo logs `copied: <text>` and never touches the computer's clipboard",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

@@ -149,6 +149,14 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     Ok(real)
 }
 
+/// A name Windows opens as a device, not a file, in any folder: CON, PRN, AUX, NUL, COM1–9, LPT1–9 — with any
+/// extension (`con.example.json`).
+pub fn device_name(name: &str) -> bool {
+    let n = name.to_ascii_uppercase();
+    let stem = n.split('.').next().unwrap_or("").trim_end();
+    matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit())
+}
+
 /// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
 /// followed.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
@@ -159,11 +167,7 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
         bail!("“{rel}” isn't a path inside {}", root.display());
     }
     // Windows' device names (CON, NUL, COM1…) open a device, not a file, in any folder.
-    if p.components().any(|c| {
-        let n = c.as_os_str().to_string_lossy().to_ascii_uppercase();
-        let stem = n.split('.').next().unwrap_or("");
-        matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit())
-    }) {
+    if p.components().any(|c| device_name(&c.as_os_str().to_string_lossy())) {
         bail!("“{rel}” is a device name, not a file");
     }
     // Windows: `:` names a file's data stream (`a.md:x` makes an empty `a.md`), and `<>"|?*` aren't in names at all.

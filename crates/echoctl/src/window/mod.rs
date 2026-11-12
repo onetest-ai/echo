@@ -800,6 +800,12 @@ mod tests {
         open_external_with("obsidian://open?vault=v&file=f", |u| opened.push(u.to_string()));
         assert!(opened.is_empty(), "nothing opened: {opened:?}");
         assert_eq!(fs::read_to_string(&log).unwrap(), "https://git.acme.example/pr/7\nobsidian://open?vault=v&file=f\n", "each logged as the stand-in logs it");
+        // A copy (the window's, a plugin's `ctx.ui.copy`): logged on one line, the computer's clipboard untouched.
+        let mut copied = vec![];
+        super::terminals::copy_to_clipboard_with("WDJB-MJHT", |t| copied.push(t.to_string()));
+        super::terminals::copy_to_clipboard_with("two\nlines", |t| copied.push(t.to_string()));
+        assert!(copied.is_empty(), "nothing copied: {copied:?}");
+        assert!(fs::read_to_string(&log).unwrap().ends_with("copied: WDJB-MJHT\ncopied: two lines\n"));
     }
 
     #[test]

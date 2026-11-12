@@ -280,10 +280,14 @@ pub(super) fn describe_signin(v: &Value) -> Result<String> {
     if hosts.is_empty() || hosts.len() > 4 || !once || hosts.iter().any(|h| !plain_host(h)) {
         bail!("“signin” names 1 to 4 hosts, each once, by their plain names (e.g. github.com)");
     }
-    Ok(format!(
-        "Gets the sign-in saved on this computer for {} (GitHub CLI or git): it can act as you there and send it to the places it talks to",
-        join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())
-    ))
+    let named = join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut line = format!("Gets the sign-in saved on this computer for {named} (GitHub CLI or git): it can act as you there and send it to the places it talks to");
+    match v.get("keep") {
+        None | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => line.push_str(&format!("; it may sign you in to {named} itself and have Echo keep that sign-in for it")),
+        Some(_) => bail!("“signin” keep is true or false"),
+    }
+    Ok(line)
 }
 
 /// A host's plain name: lowercase letters, digits, `-` and dots between labels, at least one dot (`github.com`), and
@@ -293,6 +297,12 @@ fn plain_host(h: &str) -> bool {
         && h.contains('.')
         && h.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
         && !h.rsplit('.').next().is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Did its sheet say Echo keeps a sign-in it makes (`uses.signin.keep`)?
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn may_keep_signin(uses: &serde_json::Map<String, Value>) -> bool {
+    uses.get("signin").is_some_and(|v| v["keep"] == Value::Bool(true))
 }
 
 /// May a plugin with these `uses` be handed the user's sign-in to `host`? Only one its install sheet named.

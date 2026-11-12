@@ -16,6 +16,10 @@
     {
       "id": "work-demo",
       "source": "./plugins/work-demo"
+    },
+    {
+      "id": "signin-demo",
+      "source": "./plugins/signin-demo"
     }
   ]
 }
