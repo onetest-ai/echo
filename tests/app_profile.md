@@ -437,6 +437,23 @@ S-15 and S-16 test the release as a new user meets it, on a Mac where Echo has n
 - **Processes:** the run signals only the server it started (its saved pid), never anything matched by a pattern.
 - **After S-15** Echo stays installed. S-16 starts from a reset, and only when the user says so.
 
+## Plugins against fake services
+
+A plugin's case runs against made-up services on this computer, never the real ones (debug builds only; a release
+build reads none of this):
+
+- **Its network:** `ECHOCTL_TEST_HOSTS="api.github.com=http://127.0.0.1:47990,api.acme.example=http://127.0.0.1:47991"`
+  sends the plugin's `ctx.http.fetch("https://api.github.com/<path>")` to `http://127.0.0.1:47990/<path>` (same method,
+  headers, body). Only for a host the plugin's manifest names in `network.hosts` (checked first, on the real host: any
+  other is still refused); a base only `http://127.0.0.1:<port>` or `http://localhost:<port>`. Every process of the run
+  needs it: export it before `tests/fixtures/serve.sh up` (the window's server inherits it) and append
+  `export ECHOCTL_TEST_HOSTS=…` to `<dir>/env` for the CLI and the app. The fake service is the case's own (a
+  `python3 -m http.server` folder of made-up JSON, or a few lines of `http.server`), started on its port first.
+- **The user's sign-in** (`ctx.signin.get`): `gh` and `git` are found on `PATH` first, and `<dir>/bin` is first on
+  every process's `PATH` (`<dir>/env`), so made-up `gh` / `git` scripts written there (any time: they are looked up on
+  each call) answer instead with made-up tokens. Write both — a failing one stands for "not signed in" — or the
+  computer's own `/opt/homebrew/bin/gh` is found next.
+
 ## Out of Scope / Manual Setup Required
 
 Cases that need these are `run: person` or only check the button and its dialog, never the result (except the

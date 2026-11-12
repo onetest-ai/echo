@@ -35,6 +35,7 @@
 - R17. Give any widget `open` (an `echo://` place, or an `https://` page Echo opens only after the user confirms it) and up to 3 `actions: [{label, command, args}]` — each runs your host half's `ctx.command(command)` with `args` on the user's click, then Today reads your widgets again; answer by `ctx.widgets.set` what changed. Evidence: `pluginWidgetHtml` (window script)
 - R19. Save audio or a picture with `ctx.http.fetch(url, {save: "<store path>"})` and show it from `/plugin/<id>/store/<path>`; put what you can lose under `cache/` (Echo removes it after 7 days) and remove the rest yourself with `ctx.store.remove`. Evidence: `jshost::sweep_store`
 - R20. Name a skill's Echo CLI `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`, and list in `uses.sessions.commands` the commands of yours it runs (`plugin call <id> <command>`); in a terminal (`ctx.terminal`) only your plugin is loaded, so skip start-up work there. Evidence: `plugins::session_commands`
+- R22. Test your plugin against made-up services, never the real ones: in a development build `ECHOCTL_TEST_HOSTS="<host>=http://127.0.0.1:<port>,…"` sends `ctx.http.fetch("https://<host>/<path>")` for a host your manifest names to `<base>/<path>` on this computer (127.0.0.1 or localhost only; a release build ignores it); made-up `gh` / `git` first on `PATH` answer `ctx.signin.get` (`tests/app_profile.md` → Plugins against fake services). Evidence: `jshost::test_host`
 
 ### Constraints
 | Do not | Do instead | Evidence |

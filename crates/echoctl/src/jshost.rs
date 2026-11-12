@@ -275,6 +275,8 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
             return Err(refuse());
         }
     }
+    // Checked on the real host above; a development build may send it to a fake service instead.
+    let url = &test_host(url, &hosts).unwrap_or_else(|| url.to_string());
     /// The half-written download: its own name per fetch, gone however the fetch ends unless renamed into place.
     struct Part(PathBuf);
     impl Drop for Part {
@@ -641,6 +643,34 @@ fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String) -> u64 {
         let _ = tx.send(Msg::Settle(id, token, out.to_string()));
     });
     token
+}
+
+/// Development builds and tests: `ECHOCTL_TEST_HOSTS=api.github.com=http://127.0.0.1:47990,…` sends a request to
+/// `https://<host>/<path>` — a host the manifest names, already checked — to `<base>/<path>`, a fake service on this
+/// computer (plain http to 127.0.0.1 or localhost only). Never in a release build.
+fn test_host(url: &str, hosts: &[String]) -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        test_host_in(&std::env::var("ECHOCTL_TEST_HOSTS").ok()?, url, hosts)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (url, hosts);
+        None
+    }
+}
+
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn test_host_in(map: &str, url: &str, hosts: &[String]) -> Option<String> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.find(['/', '?', '#']).map_or((rest, ""), |i| rest.split_at(i));
+    if !hosts.iter().any(|h| h == host) {
+        return None;
+    }
+    let base = map.split(',').filter_map(|e| e.trim().split_once('=')).find(|(h, _)| *h == host)?.1.trim_end_matches('/');
+    let authority = base.strip_prefix("http://")?.split('/').next()?;
+    let name = authority.rsplit_once(':').filter(|(_, port)| port.bytes().all(|b| b.is_ascii_digit())).map_or(authority, |(n, _)| n);
+    (matches!(name, "127.0.0.1" | "localhost") && !base.contains(['@', '?', '#', ' '])).then(|| format!("{base}{path}"))
 }
 
 /// Where the plugin is installed.
@@ -1482,6 +1512,48 @@ mod tests {
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_development_build_sends_a_named_host_to_a_fake_service_and_nothing_else() {
+        let hosts = vec!["api.github.com".to_string()];
+        let map = "api.github.com=http://127.0.0.1:47990, other.example=http://127.0.0.1:47991";
+        assert_eq!(test_host_in(map, "https://api.github.com/user/repos?per_page=5", &hosts).as_deref(), Some("http://127.0.0.1:47990/user/repos?per_page=5"));
+        assert_eq!(test_host_in(map, "https://api.github.com", &hosts).as_deref(), Some("http://127.0.0.1:47990"));
+        assert_eq!(test_host_in(map, "https://other.example/x", &hosts), None, "a host the manifest doesn't name");
+        assert_eq!(test_host_in(map, "http://api.github.com/x", &hosts), None, "only what was https");
+        for base in ["http://example.com:1", "https://127.0.0.1:1", "http://127.0.0.1:1@evil.example", "http://127.0.0.1.evil.example", "http://localhost:x"] {
+            assert_eq!(test_host_in(&format!("api.github.com={base}"), "https://api.github.com/x", &hosts), None, "{base}");
+        }
+        assert_eq!(test_host_in("api.github.com=http://localhost:8080/api/", "https://api.github.com/x", &hosts).as_deref(), Some("http://localhost:8080/api/x"));
+    }
+
+    #[test]
+    fn a_plugins_named_host_reaches_the_fake_service_set_for_tests() {
+        let port = serve_clips();
+        let (_env, root) = paths::testenv::folders("jshost-test-hosts");
+        let mk = root.join("market");
+        let d = mk.join("plugins/hub");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "hub", "name": "Hub", "version": "0.1.0", "main": "main.js", "uses": {"network": {"hosts": ["api.acme.example"]}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('get', async (a) => await ctx.http.fetch(a.url)) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "hub", "source": "./plugins/hub"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        plugins::install("hub", Some(&name), &plugins::review("hub", Some(&name)).unwrap().uses).unwrap();
+        sync();
+        std::env::set_var("ECHOCTL_TEST_HOSTS", format!("api.acme.example=http://127.0.0.1:{port},other.example=http://127.0.0.1:{port}"));
+        let get = |url: &str| call("hub", "get", &json!({"url": url}));
+        let first = (0..50).find_map(|_| get("https://api.acme.example/text").ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        let other = get("https://other.example/text");
+        std::env::remove_var("ECHOCTL_TEST_HOSTS");
+        assert_eq!(first.unwrap(), json!({"status": 200, "body": "hello"}));
+        assert!(other.unwrap_err().to_string().contains("may reach only the hosts its manifest names"), "the grant is checked first, on the real host");
+        plugins::remove("hub", false).unwrap();
         sync();
     }
 
