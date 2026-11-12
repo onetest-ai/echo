@@ -52,8 +52,8 @@ pub const RUN_SKILL: &str = "ECHOCTL_RUN_SKILL";
 pub const RUN_HOME: &str = "ECHOCTL_RUN_HOME";
 /// The skills a read-only routine may load (one per line): those of the plugins Echo gave the run.
 pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
-/// More folders a read-only routine may read (one per line): the ones plugins gave Echo's sessions (an
-/// Obsidian vault the user picked).
+/// More read paths (one per line): a routine's plugin-granted folders; a vault conversation's installed skill
+/// folders or exact command files. Ingest and lint ignore this key.
 pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
@@ -116,6 +116,8 @@ pub struct VaultScope {
     mode: VaultMode,
     /// The skills the run may load, exactly as Echo named them (`RUN_SKILLS`).
     skills: Vec<String>,
+    /// A conversation's installed user skills and the generated vault plugin: instruction files only (`RUN_READ`).
+    skill_paths: Vec<PathBuf>,
     /// The sources folder, relative to the root (`RUN_SOURCES`): read, never written.
     sources: Option<PathBuf>,
     /// Windows' rule: names bind reads too (there `.git.` is `.git` and `aux.md` a device). `cfg!(windows)`, a field
@@ -569,7 +571,13 @@ impl VaultScope {
                 if sources.is_none() {
                     return Err("the conversation names no sources folder".into());
                 }
-                Ok(VaultScope { root: folder(RUN_VAULT, "vault")?, mode: VaultMode::Chat(chat), skills, sources, windows: cfg!(windows) })
+                let mut skill_paths = vec![];
+                for path in var(RUN_READ).unwrap_or_default().to_string_lossy().lines().filter(|l| !l.is_empty()) {
+                    let p = native(path);
+                    if !p.is_absolute() { return Err("a skill's read path must be absolute".into()); }
+                    if let Ok(p) = dunce::canonicalize(p) { skill_paths.push(p); }
+                }
+                Ok(VaultScope { root: folder(RUN_VAULT, "vault")?, mode: VaultMode::Chat(chat), skills, skill_paths, sources, windows: cfg!(windows) })
             }
             "ingest" => {
                 let copy = folder(RUN_DIR, "scratch copy")?;
@@ -585,7 +593,7 @@ impl VaultScope {
                 if skills.len() != 1 {
                     return Err("an ingest run loads one skill, the vault's ingest skill".into());
                 }
-                Ok(VaultScope { root: copy, mode: VaultMode::Ingest, skills, sources, windows: cfg!(windows) })
+                Ok(VaultScope { root: copy, mode: VaultMode::Ingest, skills, skill_paths: vec![], sources, windows: cfg!(windows) })
             }
             "lint" => {
                 let root = folder(RUN_VAULT, "vault")?;
@@ -593,7 +601,7 @@ impl VaultScope {
                 if run.starts_with(&root) {
                     return Err(format!("the AI check's folder {} is inside the vault", run.display()));
                 }
-                Ok(VaultScope { root, mode: VaultMode::Lint { findings: run.join("findings.json") }, skills: vec![], sources: None, windows: cfg!(windows) })
+                Ok(VaultScope { root, mode: VaultMode::Lint { findings: run.join("findings.json") }, skills: vec![], skill_paths: vec![], sources: None, windows: cfg!(windows) })
             }
             other => Err(format!("{other} isn't a run in a vault")),
         }
@@ -723,7 +731,17 @@ impl VaultScope {
         if results.is_some_and(|r| p.starts_with(r)) {
             return Ok(());
         }
-        let rel = if self.windows { self.plain_rel(p)? } else { self.rel(p)? };
+        let rel = if p.starts_with(&self.root) {
+            if self.windows { self.plain_rel(p)? } else { self.rel(p)? }
+        } else if let Some(root) = self.skill_paths.iter().find(|r| p == r.as_path() || (r.is_dir() && p.starts_with(r))) {
+            let rel = p.strip_prefix(root).map_err(|e| e.to_string())?;
+            if self.windows && rel.components().any(|c| !plain(&c.as_os_str().to_string_lossy())) {
+                return Err("a skill's file name isn't plain".into());
+            }
+            rel
+        } else {
+            return self.rel(p).map(|_| ());
+        };
         if rel.components().any(|c| lower(c) == ".git") {
             return Err(format!("{} is git's folder, not the vault's", p.display()));
         }
@@ -2387,6 +2405,38 @@ mod tests {
         assert_eq!(managed.decide(&tool("Skill", json!({"skill": "v1:process-inbox"}))), Decision::Allow);
         assert!(denied(managed.decide(&tool("Skill", json!({"skill": "process-inbox"})))));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn personal_skill_reads_are_scoped_canonical_and_never_writable() {
+        let (_env, root) = crate::paths::testenv::folders("guard-personal-skills");
+        let v = root.join("vault");
+        let skill = root.join("user/skills/review");
+        let command = root.join("user/commands/twin.md");
+        for d in [&v, &skill, command.parent().unwrap()] { fs::create_dir_all(d).unwrap(); }
+        fs::write(skill.join("SKILL.md"), "Read references.md.").unwrap();
+        fs::write(skill.join("references.md"), "Made-up guidance.").unwrap();
+        fs::write(&command, "Read the vault.").unwrap();
+        fs::write(root.join("user/credentials.json"), "made-up secret").unwrap();
+        let read = format!("{}\n{}", skill.display(), command.display());
+        let vars = vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.as_os_str().to_owned()), (RUN_CHAT, "curate".into()), (RUN_SKILLS, "review\ntwin".into()), (RUN_SOURCES, "raw_inbox".into()), (RUN_READ, read.clone().into())];
+        let s = Scope::from_vars(vars_of(vars)).unwrap();
+        for p in [skill.join("SKILL.md"), skill.join("references.md"), command.clone()] {
+            assert_eq!(s.decide(&tool("Read", json!({"file_path":p}))), Decision::Allow);
+            for t in ["Write", "Edit"] { assert!(denied(s.decide(&tool(t, json!({"file_path":p,"content":"x","old_string":"x","new_string":"y"}))))); }
+        }
+        assert_eq!(s.decide(&tool("Grep", json!({"path":skill,"pattern":"guidance","glob":"*.md"}))), Decision::Allow);
+        assert!(denied(s.decide(&tool("Read", json!({"file_path":root.join("user/credentials.json")})))));
+        assert!(denied(s.decide(&tool("Glob", json!({"path":root.join("user"),"pattern":"*.json"})))));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("user/credentials.json"), skill.join("linked.md")).unwrap();
+            assert!(denied(s.decide(&tool("Read", json!({"file_path":skill.join("linked.md")})))), "a symlink cannot turn a skill read into a credential read");
+        }
+        let run = root.join("lint/run");
+        fs::create_dir_all(&run).unwrap();
+        let lint = Scope::from_vars(vars_of(vec![(RUN_MODE, "lint".into()), (RUN_VAULT, v.into_os_string()), (RUN_DIR, run.into_os_string()), (RUN_READ, read.into())])).unwrap();
+        assert!(denied(lint.decide(&tool("Read", json!({"file_path":command})))), "AI checks cannot inherit a conversation's extra reads");
     }
 
     #[test]

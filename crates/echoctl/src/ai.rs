@@ -739,7 +739,7 @@ pub fn hooks_conflict(p: &Profile, cwd: &Path) -> Result<Vec<PathBuf>, String> {
 /// `~/.claude` — all are checked, since Echo can't tell which one the run will use. The shell is
 /// asked in the run's own folder (`cwd`), as the run starts there. Err when it can't say (it fails,
 /// hangs or prints no bounded answer): the check can't be made.
-fn system_config_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn system_config_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
     let mut v = vec![];
     if use_shell() && fake_claude().is_none() {
         let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());

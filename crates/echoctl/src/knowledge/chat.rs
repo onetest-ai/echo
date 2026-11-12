@@ -28,6 +28,7 @@ use crate::{ai, guard, paths, terminal};
 
 mod attach;
 mod permits;
+mod skills;
 
 pub use attach::{attach_call, Mismatch};
 
@@ -129,7 +130,7 @@ pub struct ChatChunk {
 /// §5.4's command line for a conversation of `v` on profile `p` (`settings`: its own settings file). Never
 /// `--dangerously-skip-permissions`, whatever the folder session's switch says (D24); a managed profile gets the vault's
 /// skills as a plugin and its rules (`terminal::vault_args`), and `--setting-sources user` from `ai::prepare_claude`.
-pub fn args(v: &Vault, p: &ai::Profile, mode: Mode, session: &Session, settings: &Path) -> Result<Vec<String>> {
+fn args(v: &Vault, p: &ai::Profile, mode: Mode, session: &Session, settings: &Path, skills: &skills::Catalog) -> Result<Vec<String>> {
     let mut a: Vec<String> = [
         "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--permission-mode", "default", "--permission-prompts", "host",
@@ -153,22 +154,30 @@ pub fn args(v: &Vault, p: &ai::Profile, mode: Mode, session: &Session, settings:
         a.extend(["--model".into(), m]);
     }
     a.extend(terminal::vault_args(v, p)?);
+    let names = serde_json::to_string(&skills.names())?;
+    let prompt = format!("You are in an Echo Knowledge conversation. Available Skill tool names from this AI profile's user skills and this vault: {names}. User-level skills and commands are supported directly from their installed locations. Use these exact names. A message starting with /name requests that skill with the remaining text as its arguments. If no skill fits, search the vault with Read, Grep and Glob. The conversation's tools and permissions also apply inside skills and sub-agents; loading a skill does not grant shell access, access to other data or extra write permissions.");
+    if let Some(at) = a.iter().position(|x| x == "--append-system-prompt") {
+        a[at + 1].push_str(&format!(" {prompt}"));
+    } else {
+        a.extend(["--append-system-prompt".into(), prompt]);
+    }
     Ok(a)
 }
 
-/// The skills the guard lets a conversation load (`ECHOCTL_RUN_SKILLS`), as Claude Code names them: by their own names
-/// on Claude Code as configured, under the generated plugin's (`<vault id>:`) on a managed profile.
-fn skill_names(v: &Vault, p: &ai::Profile) -> Vec<String> {
-    v.detected.skills.iter().filter(|s| s.kind != "agents").map(|s| if p.kind.managed() { format!("{}:{}", v.id, s.name) } else { s.name.clone() }).collect()
+/// The same catalog the process and guard use, without host paths or instruction bodies.
+pub fn skills_value(v: &Vault) -> Result<Value> {
+    let p = ai::Settings::load()?.get(&v.profile)?;
+    Ok(json!({"skills": skills::Catalog::load(v, &p)?.0}))
 }
 
 /// The guard's scope for a conversation (spec §5.4, ruling R11): every key always set.
-fn scope(v: &Vault, p: &ai::Profile, mode: Mode) -> Vec<(String, String)> {
+fn scope(v: &Vault, mode: Mode, skills: &skills::Catalog) -> Vec<(String, String)> {
     vec![
         (guard::RUN_MODE.into(), "vault".into()),
         (guard::RUN_VAULT.into(), v.root.display().to_string()),
         (guard::RUN_CHAT.into(), mode.name().into()),
-        (guard::RUN_SKILLS.into(), skill_names(v, p).join("\n")),
+        (guard::RUN_SKILLS.into(), skills.names().join("\n")),
+        (guard::RUN_READ.into(), skills.read_paths().join("\n")),
         (guard::RUN_SOURCES.into(), v.path("sources").filter(|s| !s.is_empty()).unwrap_or_else(|| "raw_inbox".into())),
     ]
 }
@@ -234,6 +243,7 @@ struct Proc {
     pid: u32,
     mode: Mode,
     profile: String,
+    skills: skills::Catalog,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// Echo ended it: its exit isn't a crash.
     stopped: Arc<AtomicBool>,
@@ -404,6 +414,8 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
     if mode == Mode::Research && !v.ask.research {
         bail!("Research is off for this vault (its Settings → Ask)");
     }
+    let skills = skills::Catalog::load(&v, &ai::Settings::load()?.get(&v.profile)?)?;
+    skills.validate(text)?;
     let (mut pages, mut calls) = (vec![], vec![]);
     for x in context {
         match x {
@@ -427,7 +439,7 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
         bail!("Wait for this answer, or stop it");
     }
     open_history(&c, &v, None);
-    if let Err(e) = running(&c, &v, mode, text) {
+    if let Err(e) = running(&c, &v, mode, text, &skills) {
         let Some(s) = e.downcast_ref::<ai::SignInNeeded>() else {
             if conversation.is_none() {
                 lock(&CHATS).remove(&c.id); // a new one that never started is no conversation
@@ -460,10 +472,10 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
 }
 
 /// A process for `c` in `mode`: the one it has, or a new one once one in another mode has ended (D25).
-fn running(c: &Arc<Conv>, v: &Vault, mode: Mode, first: &str) -> Result<()> {
+fn running(c: &Arc<Conv>, v: &Vault, mode: Mode, first: &str, skills: &skills::Catalog) -> Result<()> {
     let mut st = lock(&c.state);
     match st.running() {
-        Some(p) if p.mode == mode => return Ok(()),
+        Some(p) if p.mode == mode && p.skills == *skills => return Ok(()),
         Some(_) => {
             end(&mut st);
             c.changed.notify_all();
@@ -476,19 +488,30 @@ fn running(c: &Arc<Conv>, v: &Vault, mode: Mode, first: &str) -> Result<()> {
     }
     let resume = st.started;
     drop(st);
-    start(c, v, mode, resume, first)
+    start(c, v, mode, resume, first, skills)
 }
 
 /// Start `c`'s process.
-fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str) -> Result<()> {
+fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str, skills: &skills::Catalog) -> Result<()> {
+    // Skills can change since the vault was connected. The prompt, plugin and guard use this same snapshot.
+    let mut v = v.clone();
+    v.detected.skills = super::detect::skills(&v.root);
     let ready = ai::ready(&v.profile)?;
     let p = ready.profile().clone();
     let settings = super::cache_dir(&v.id).join("chat").join(&c.id).join("settings.json");
     std::fs::create_dir_all(settings.parent().expect("its folder"))?;
-    let scope = scope(v, &p, mode);
-    paths::write_atomic(&settings, &serde_json::to_vec_pretty(&guard::settings_for(&scope, &std::env::current_exe()?))?)?;
     let session = if resume { Session::Resume(c.id.clone()) } else { Session::New { id: c.id.clone(), first: first.into() } };
-    let mut cmd = ai::prepare_claude(&p, &args(v, &p, mode, &session, &settings)?, &v.root, true)?;
+    let args = args(&v, &p, mode, &session, &settings, skills)?;
+    let mut scope = scope(&v, mode, skills);
+    // A managed profile's generated vault plugin also has supporting files outside the vault.
+    if let Some(at) = args.iter().position(|a| a == "--plugin-dir") {
+        if let Some((_, read)) = scope.iter_mut().find(|(key, _)| key == guard::RUN_READ) {
+            if !read.is_empty() { read.push('\n'); }
+            read.push_str(&args[at + 1]);
+        }
+    }
+    paths::write_atomic(&settings, &serde_json::to_vec_pretty(&guard::settings_for(&scope, &std::env::current_exe()?))?)?;
+    let mut cmd = ai::prepare_claude(&p, &args, &v.root, true)?;
     cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
     let _one = lock(&STARTING);
     make_room(&c.id)?;
@@ -497,16 +520,16 @@ fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str) -> Res
     let stopped = Arc::new(AtomicBool::new(false));
     {
         let mut st = lock(&c.state);
-        st.proc = Some(Proc { gen, pid: child.id(), mode, profile: p.id.clone(), stdin: Arc::new(Mutex::new(child.stdin.take())), stopped: stopped.clone(), ending: false });
+        st.proc = Some(Proc { gen, pid: child.id(), mode, profile: p.id.clone(), skills: skills.clone(), stdin: Arc::new(Mutex::new(child.stdin.take())), stopped: stopped.clone(), ending: false });
         // A new process numbers its blocks from b1 again.
         st.renders.clear();
         st.touch();
     }
     if !resume {
         // Listed with the vault's conversations — never made the panel's current one (D44).
-        terminal::remember(&terminal::vault_store_key(v), &c.id);
+        terminal::remember(&terminal::vault_store_key(&v), &c.id);
     }
-    watch(c.clone(), v.clone(), gen, child, stopped, terminal::hold(p.id.clone(), Box::new(ready)));
+    watch(c.clone(), v, gen, child, stopped, terminal::hold(p.id.clone(), Box::new(ready)));
     sweeper();
     Ok(())
 }
@@ -1105,6 +1128,13 @@ pub(crate) fn turn(text: &str) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    fn args(v: &Vault, p: &ai::Profile, mode: Mode, session: &Session, settings: &Path) -> Result<Vec<String>> {
+        super::args(v, p, mode, session, settings, &skills::Catalog::load(v, p)?)
+    }
+
+    fn scope(v: &Vault, p: &ai::Profile, mode: Mode) -> Vec<(String, String)> {
+        super::scope(v, mode, &skills::Catalog::load(v, p).unwrap())
+    }
     use crate::ai::fake;
     use crate::knowledge::{fixture, AddOpts};
     use std::path::PathBuf;
@@ -1231,8 +1261,8 @@ mod tests {
         assert_eq!(e[guard::RUN_VAULT], v.root.to_str().unwrap());
         assert_eq!(e[guard::RUN_CHAT], "curate");
         assert_eq!(e[guard::RUN_SOURCES], "raw_inbox");
-        assert_eq!(e[guard::RUN_SKILLS], "twin:s\ntwin:c", "a managed profile's skills come from the vault's plugin");
-        assert_eq!(env(&profile("system", "system"), Mode::Ask, &v)[guard::RUN_SKILLS], "s\nc", "as configured, by their own names");
+        assert_eq!(e[guard::RUN_SKILLS], "twin:c\ntwin:s", "a managed profile's skills come from the vault's plugin");
+        assert_eq!(env(&profile("system", "system"), Mode::Ask, &v)[guard::RUN_SKILLS], "c\ns", "as configured, by their own names");
         // The vault's own sources folder, or raw_inbox when it has none (ruling R11).
         let other = root.join("notes");
         fixture::write(&other, "inbox/call.md", "# A call\n");
@@ -1246,6 +1276,111 @@ mod tests {
         assert_eq!(e[guard::RUN_SOURCES], "raw_inbox");
         assert_eq!(e[guard::RUN_SKILLS], "");
         assert_eq!(e[guard::RUN_CHAT], "ask");
+    }
+
+    #[test]
+    fn conversations_explain_which_skills_the_guard_allows() {
+        let (_env, root) = crate::paths::testenv::folders("chat-skill-prompt");
+        let v = vault(&root, "system");
+        for p in [profile("system", "system"), profile("work", "claude")] {
+            for mode in [Mode::Ask, Mode::Curate, Mode::Research] {
+                let a = args(&v, &p, mode, &Session::Resume(ID.into()), &root.join("settings.json")).unwrap();
+                assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1);
+                let prompt = value_of(&a, "--append-system-prompt").expect("the conversation's skill limits");
+                let names = serde_json::to_string(&skills::Catalog::load(&v, &p).unwrap().names()).unwrap();
+                assert!(prompt.contains(&names), "{prompt}");
+                assert!(prompt.contains("User-level skills and commands are supported directly"), "{prompt}");
+                assert!(prompt.contains("Read, Grep and Glob"), "a question needs no skill: {prompt}");
+                if p.kind.managed() {
+                    assert!(prompt.contains("AGENTS.md"), "keep the managed profile's vault rules: {prompt}");
+                }
+            }
+        }
+        std::fs::remove_file(v.root.join(".claude/skills/s/SKILL.md")).unwrap();
+        std::fs::remove_file(v.root.join(".claude/commands/c.md")).unwrap();
+        let a = args(&v, &profile("system", "system"), Mode::Ask, &Session::Resume(ID.into()), &root.join("settings.json")).unwrap();
+        assert!(value_of(&a, "--append-system-prompt").unwrap().contains("user skills and this vault: []"));
+    }
+
+    #[test]
+    fn a_new_process_uses_current_vault_skills_for_its_prompt_plugin_and_guard() {
+        let (_env, root) = crate::paths::testenv::folders("chat-current-skills");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        // The registry still has s and c: change the vault without asking Echo to detect it again.
+        std::fs::remove_file(v.root.join(".claude/skills/s/SKILL.md")).unwrap();
+        fixture::write(&v.root, ".claude/skills/twin/SKILL.md", "---\nname: twin\ndescription: Answer from this vault.\n---\nRead knowledge/CATALOG.md.\n");
+        script(&p, "chat.jsonl", &turn("From the vault."));
+        let id = send(&v.id, None, "What do I know about the flywheel?", Mode::Ask, &[]).unwrap();
+        turn_events(&v.id, &id);
+        let a = argv(&p);
+        let settings: Value = serde_json::from_slice(&std::fs::read(value_of(&a, "--settings").unwrap()).unwrap()).unwrap();
+        let env = settings["env"].as_object().unwrap();
+        assert_eq!(env[guard::RUN_SKILLS], "twin:c\ntwin:twin");
+        let prompt = value_of(&a, "--append-system-prompt").unwrap();
+        assert!(prompt.contains(r#"["twin:c","twin:twin"]"#), "{prompt}");
+        let plugin = Path::new(value_of(&a, "--plugin-dir").unwrap());
+        assert!(plugin.join("skills/twin/SKILL.md").is_file());
+        assert!(!plugin.join("skills/s/SKILL.md").exists());
+        let guard = guard::Scope::from_vars(|k| env.get(k).and_then(Value::as_str).map(Into::into)).unwrap();
+        let skill = |s: &str| json!({"tool_name": "Skill", "tool_input": {"skill": s}});
+        assert!(guard.judge(&skill("twin:twin")).is_ok());
+        for s in ["twin:s", "personal-twin", "twin"] {
+            assert!(guard.judge(&skill(s)).is_err(), "{s}");
+        }
+        assert!(guard.judge(&json!({"tool_name": "Read", "tool_input": {"file_path": v.root.join("knowledge/CATALOG.md")}})).is_ok());
+        assert!(guard.judge(&json!({"tool_name": "Bash", "tool_input": {"command": "pwd"}})).is_err());
+    }
+
+    #[test]
+    fn personal_skills_work_without_copying_and_keep_the_conversations_boundaries() {
+        let (_env, root) = crate::paths::testenv::folders("chat-personal-skill");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        let user = p.config_folder();
+        fixture::write(&user, "commands/personal-twin.md", "Read the vault's catalog to answer $ARGUMENTS.");
+        fixture::write(&user, "commands/other.md", "Another installed command.");
+        fixture::write(&user, "skills/review/SKILL.md", "---\nname: review\n---\nRead references.md.");
+        fixture::write(&user, "skills/review/references.md", "Use evidence from the vault.");
+        fixture::write(&user, "credentials.json", "made-up token");
+        fixture::write(&v.root, ".claude/commands/tools/review.md", "---\nname: ignored\n---\nReview a page.");
+        let before = fixture::snapshot(&v.root);
+        script(&p, "chat.jsonl", &turn("The flywheel is described in the catalog."));
+        let id = send(&v.id, None, "/personal-twin explain the flywheel", Mode::Ask, &[]).unwrap();
+        turn_events(&v.id, &id);
+        let a = argv(&p);
+        let settings: Value = serde_json::from_slice(&std::fs::read(value_of(&a, "--settings").unwrap()).unwrap()).unwrap();
+        let env = settings["env"].as_object().unwrap();
+        let plugin = Path::new(value_of(&a, "--plugin-dir").unwrap());
+        assert!(plugin.join("commands/tools/review.md").is_file(), "nested command names match the generated plugin");
+        let g = guard::Scope::from_vars(|k| env.get(k).and_then(Value::as_str).map(Into::into)).unwrap();
+        let tool = |name: &str, input: Value| json!({"tool_name":name,"tool_input":input});
+        assert!(g.judge(&tool("Skill", json!({"skill":"personal-twin"}))).is_ok());
+        assert!(g.judge(&tool("Skill", json!({"skill":"twin:tools:review"}))).is_ok());
+        for f in ["commands/personal-twin.md", "skills/review/references.md"] {
+            assert!(g.judge(&tool("Read", json!({"file_path":user.join(f)}))).is_ok(), "{f}");
+        }
+        for f in [user.join("credentials.json"), root.join("outside.md")] {
+            assert!(g.judge(&tool("Read", json!({"file_path":f}))).is_err(), "{}", f.display());
+        }
+        assert!(g.judge(&tool("Grep", json!({"path":user,"pattern":"token"}))).is_err(), "the config folder isn't a skill");
+        assert!(g.judge(&tool("Write", json!({"file_path":user.join("skills/review/new.md"),"content":"x"}))).is_err());
+        assert!(g.judge(&tool("Bash", json!({"command":"pwd"}))).is_err());
+        assert!(g.judge(&tool("Write", json!({"file_path":v.root.join("knowledge/new.md"),"content":"x"}))).is_err(), "Ask stays read only");
+        let sent: Value = serde_json::from_str(file(&p, "chat.in.jsonl").lines().next().unwrap()).unwrap();
+        assert_eq!(sent["message"]["content"][0]["text"], "/personal-twin explain the flywheel");
+        assert_eq!(fixture::snapshot(&v.root), before, "no skill was copied into the vault");
+        assert!(send(&v.id, Some(&id), "/unknown hello", Mode::Ask, &[]).is_err());
+        // A newly installed user command becomes usable in this conversation: restart with the same session id.
+        fixture::write(&user, "commands/new-skill.md", "Answer from the vault.");
+        assert_eq!(send(&v.id, Some(&id), "/new-skill hello", Mode::Ask, &[]).unwrap(), id);
+        events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "result").len() == 2);
+        assert_eq!(file(&p, "pids").lines().count(), 2);
+        assert_eq!(value_of(&argv(&p), "--resume"), Some(id.as_str()));
     }
 
     #[test]
@@ -1277,7 +1412,7 @@ mod tests {
         assert_eq!(file(&p, "cwd").trim(), v.root.to_str().unwrap());
         // The scope in the process's environment and in its own settings file (D40).
         let env = file(&p, "env");
-        for want in ["ECHOCTL_RUN_MODE=vault".to_string(), "ECHOCTL_RUN_CHAT=ask".into(), format!("ECHOCTL_RUN_VAULT={}", v.root.display()), "ECHOCTL_RUN_SOURCES=raw_inbox".into(), "ECHOCTL_RUN_SKILLS=twin:s".into()] {
+        for want in ["ECHOCTL_RUN_MODE=vault".to_string(), "ECHOCTL_RUN_CHAT=ask".into(), format!("ECHOCTL_RUN_VAULT={}", v.root.display()), "ECHOCTL_RUN_SOURCES=raw_inbox".into(), "ECHOCTL_RUN_SKILLS=twin:c".into()] {
             assert!(env.lines().any(|l| l == want), "{want} in {env}");
         }
         let settings: PathBuf = value_of(&a, "--settings").unwrap().into();

@@ -127,7 +127,7 @@ pub fn skills(root: &Path) -> Vec<Skill> {
         let text = std::fs::read_to_string(file).unwrap_or_default();
         let props = crate::knowledge::fm::split(&text).0.map(crate::knowledge::fm::parse).unwrap_or_default();
         let get = |k: &str| crate::knowledge::fm::get(&props, k).map(|p| p.text()).filter(|s| !s.is_empty());
-        out.push(Skill { name: get("name").unwrap_or(fallback), description: get("description").unwrap_or_default(), path: rel, kind: kind.into() });
+        out.push(Skill { name: if kind == "command" { fallback } else { get("name").unwrap_or(fallback) }, description: get("description").unwrap_or_default(), path: rel, kind: kind.into() });
     };
     for (dir, kind) in [(".claude/skills", "skill"), (".agents/skills", "agents")] {
         let base = crate::knowledge::join(root, dir);
@@ -138,10 +138,10 @@ pub fn skills(root: &Path) -> Vec<Skill> {
         }
         if kind == "skill" {
             let cmds = root.join(".claude").join("commands");
-            let mut files: Vec<String> = std::fs::read_dir(&cmds).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|f| is_md(f)).collect()).unwrap_or_default();
+            let mut files = walk(&cmds, &[], is_md);
             files.sort();
             for f in files {
-                let stem = f.trim_end_matches(".md").to_string();
+                let stem = f.trim_end_matches(".md").replace('/', ":");
                 add(&cmds.join(&f), format!(".claude/commands/{f}"), "command", stem);
             }
         }

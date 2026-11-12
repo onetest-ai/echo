@@ -234,7 +234,7 @@ pub(crate) fn skill_files(root: &Path, s: &Skill, max: u64) -> Result<(Vec<File>
     let mut left = LeftOut::default();
     let mut todo: Vec<(String, std::path::PathBuf)> = vec![];
     if s.kind == "command" {
-        todo.push((format!("commands/{}", src.file_name().unwrap_or_default().to_string_lossy()), src));
+        todo.push((format!("commands/{}", s.path.strip_prefix(".claude/commands/").unwrap_or_else(|| src.file_name().unwrap_or_default().to_str().unwrap_or(""))), src));
     } else {
         let folder = src.parent().ok_or_else(|| anyhow::anyhow!("{}: not a skill's file", s.path))?;
         let name = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();

@@ -125,6 +125,8 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
         // Ask's conversations in the vault.
         #[cfg(feature = "tray")]
         "chats" => super::chat::list_value(&v),
+        #[cfg(feature = "tray")]
+        "skills" => super::chat::skills_value(&v)?,
         "page" => page::read(&v, &rel_param(query)?)?,
         "find" => {
             let ix = scan::index(&v)?;

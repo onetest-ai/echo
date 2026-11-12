@@ -39,6 +39,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `chat.rs` (`tray`) | Ask's conversations: a Claude Code process per conversation (`send`, `read`, `permit`, `stop`, `close_profile`, `live`, `sweep`) |
 | `chat/permits.rs` | A permission card's diff (`card`), an allowed edit's activity line (`record`), a turn's commit (`commit`) |
 | `chat/attach.rs` | A call's minutes attached to a message (`attach_call`: the profile check, the framing) |
+| `chat/skills.rs` | Ask's shared catalog of the selected profile's personal skills and commands plus vault skills: metadata for the slash picker, exact names for the guard, and narrow read paths for supporting files |
 | `sources.rs` | Ingest's sources (spec-2 K14): the ledger (`ingest.json`: `ledger`, `baseline`, `skip`), the queue (`queue`, `offer`, `value`), adds (`add_files`, `add_call`, `add_mail` / `add_thread`, `add_chat` / `add_chat_messages`, `add_web`), `call_source` (the source a call already is), the sheet's lists (`calls`, `m365_search`) |
 | `extract.rs` | A web page's main text as Markdown by Echo's own HTML reader (`main_text`), and its fetch with `curl` (`fetch`) |
 | `ingest.rs` | Ingest runs (spec-2 K15): the skill (`skill`), the copy (`copy_vault`), the run (`start`, `again`, `stop`, `wait`, `status`, `close_profile`, `close_all`), the Ingest view's `value`, *Prepare again* (`requeue`), what Needs you reads (`going`, `waiting`); and a run's life, shared with AI checks: `Life` (what a kind of run does at each point), `go_live` (made live, its lease counted), `run_thread` (the wait for a call, the start, its pid, the end — its lock, lease and `live` entry let go by a drop guard, a panic too), `gone`, and the pieces under them (`headless_args`, `take_lock`, `new_dir`, `wait_for_calls`, `spawn`, `drive`, `Log`, `wait_in`, `stop_in`, `events_after`) |
@@ -659,6 +660,28 @@ id). Its process runs spec §5.4's command (`chat::args`) through `ai::prepare_c
 guard's scope (`ECHOCTL_RUN_MODE=vault`, `_VAULT`, `_CHAT`, `_SKILLS`, `_SOURCES`, all always set) in the process's
 environment and in the conversation's own `--settings` file. It holds the profile's lease (`ai::ready`) until it has
 exited; `terminal::holds_profile` counts it, so a sign-in closes it (`signin.rs`) as it does the panel's sessions.
+Ask supports personal skills and legacy commands directly from the selected profile's Claude settings folder; nothing
+is copied or installed into the vault. The system profile resolves that folder from the login shell's
+`CLAUDE_CONFIG_DIR`, Echo's environment, then `~/.claude`; a managed profile uses its own config folder. The catalog
+(`chat/skills.rs`) reads `skills/*/SKILL.md` and `commands/**/*.md` plus the vault's equivalents. It follows Claude's
+[skill naming and precedence](https://code.claude.com/docs/en/skills): personal names precede project names, a skill
+precedes a command in its scope, a command uses its filename (nested folders become `:`), and a managed profile's vault
+skills keep their generated plugin namespace. Frontmatter supplies descriptions, argument hints and
+`user-invocable`; `skillOverrides` hides disabled skills. The API `/api/kn/<id>/skills` returns metadata only, without
+instruction bodies or host file paths.
+The catalog is read again before each message. A change to it restarts the process with the same session id, so the
+picker, guard and prompt agree and newly installed personal skills can be used in an existing conversation. The
+guard's `RUN_SKILLS` lists exact names; `RUN_READ` adds only installed skill folders, individual command files and the
+managed profile's generated vault plugin. Their references can be read, never edited. Canonical path checks still
+refuse links out, credentials beside a skill, `.git` and `.obsidian/plugins`; ingest and AI checks ignore these extra
+reads. Loading a skill grants no extra tool permissions: Ask stays read only, Curate's edits still wait for cards,
+and Bash stays unavailable.
+The composer's `/` menu uses this catalog, filters names and descriptions, labels Personal and This vault, and works
+with clicks, arrows, Enter, Tab and Esc. A selected or completed `/name` becomes a removable highlighted chip;
+arguments stay in the textarea, and send reconstructs `/name arguments`. Unknown commands are explained before send;
+background skills stay out of the picker. Mentions and call attachments remain independent. Skill chips and arguments
+survive mode changes and failed sends; sent messages highlight the command too. The skill catalog can be refreshed
+from the picker, and a new conversation reloads it. Home's Ask box uses the same composer.
 Three threads per process: stdout's lines into a channel; the parser reading them (a `Parser::tick` after 100 ms
 without a line, so text right before a pause shows), which numbers events into the conversation's ring (the last
 5 000; a streaming block's superseded render keeps its number but not its HTML, so only the latest holds the block)

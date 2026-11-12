@@ -26,6 +26,7 @@ const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWa
 const { knChatOpen, knPollKeep, knChatTake, knSentWhere } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake', 'knSentWhere'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
+const { knSlash, knSkillMatches, knSkillCommand, knSkillPick, knSkillError } = load(['kn-skills'], ['knSlash', 'knSkillMatches', 'knSkillCommand', 'knSkillPick', 'knSkillError'])
 const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState, knLintNotice, knLintState, knVersus, KN_HEALTH_KINDS } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState', 'knLintNotice', 'knLintState', 'knVersus', 'KN_HEALTH_KINDS'])
 const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen, knSourceState, knTakesDrops, knDropNote } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen', 'knSourceState', 'knTakesDrops', 'knDropNote'])
 const { knRunOpen, knRunMayLoad, knRunTake } = load(['kn-ingest-poll'], ['knRunOpen', 'knRunMayLoad', 'knRunTake'])
@@ -33,6 +34,38 @@ const { knWhen, knHomeCards, knHomeNews, knHomeLine, knHomeAsk, knHomeRecord } =
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
+
+test('slash skills open at the start of the message and preserve URLs, paths and page mentions', () => {
+  assert.deepEqual(knSlash('/', 1), { query: '', start: 0 })
+  assert.deepEqual(knSlash(' /personal-tw', 13), { query: 'personal-tw', start: 1 })
+  assert.deepEqual(knSlash('/vault:review', 13), { query: 'vault:review', start: 0 })
+  for (const text of ['Look at /review', 'https://example.com/a', '/folder/file', '@Catalog', '/review arguments']) assert.equal(knSlash(text, text.length), null, text)
+  assert.deepEqual(knSkillCommand('/personal-twin explain the flywheel'), { name: 'personal-twin', args: 'explain the flywheel', complete: true })
+  assert.deepEqual(knSkillCommand('/review'), { name: 'review', args: '', complete: false })
+})
+
+test('slash search ranks names first, searches descriptions and hides background skills', () => {
+  const skills = [{ name: 'z-review', description: 'Look at documents', source: 'user' }, { name: 'review', description: 'Review pages', source: 'vault' }, { name: 'hidden', description: 'review', user_invocable: false }, { name: 'notes', description: 'Review meeting notes' }]
+  assert.deepEqual(knSkillMatches(skills, 'REVIEW').map((s) => s.name), ['review', 'z-review', 'notes'])
+  assert.deepEqual(knSkillMatches(skills, '').map((s) => s.name), ['notes', 'review', 'z-review'])
+  assert.deepEqual(knSkillMatches(skills, 'missing'), [])
+  assert.deepEqual(knSkillMatches(null, ''), [])
+})
+
+test('a selected skill is a chip, arguments keep their caret, and send uses the exact slash name', () => {
+  assert.deepEqual(knSkillPick('/personal-tw explain the flywheel', 12), { text: 'explain the flywheel', caret: 0 })
+  assert.deepEqual(knSkillPick('/review explain this', 20), { text: 'explain this', caret: 12 })
+  assert.deepEqual(knSkillPick('Keep my draft', 5), { text: 'Keep my draft', caret: 5 }, 'the toolbar keeps existing words')
+  assert.deepEqual(knSkillPick('/folder/file', 12), { text: '/folder/file', caret: 12 }, 'the toolbar preserves a path')
+  const skill = { name: 'personal-twin', source: 'user' }
+  assert.deepEqual(knChatMessage(' explain the flywheel ', [{ page: 'knowledge/catalog.md' }], skill), { text: '/personal-twin explain the flywheel', context: [{ page: 'knowledge/catalog.md' }] })
+  assert.equal(knChatMessage('', [], skill).text, '/personal-twin', 'skills with no arguments can run')
+  assert.equal(knSkillError([skill], '/personal-twin hello'), null)
+  assert.match(knSkillError([skill], '/unknown hello'), /isn't available/)
+  assert.match(knSkillError(null, '/personal-twin hello'), /still loading/)
+  assert.match(knSkillError([], '/'), /Choose a skill/)
+  assert.equal(knSkillError(null, 'An ordinary question'), null, 'ordinary chat does not depend on the picker')
+})
 
 test('settings: the new-calls rule offers Off, Add to the inbox, Add and prepare changes, one checked', () => {
   const labels = knCallsRule('add').map((o) => o.label)

@@ -561,6 +561,38 @@ function knToolRows(items, { ended = false } = {}) {
 }
 // end of the kn-tools block
 
+// ── kn-skills: slash commands in Ask — search, recognise and select a profile's personal or vault skill ──
+/** Only the first word of a message opens the skill menu; URLs, paths and slashes in prose do not. */
+function knSlash(text, caret) {
+  const before = String(text).slice(0, caret), m = /^\s*\/([^\s/]*)$/.exec(before)
+  return m ? { query: m[1], start: before.indexOf('/') } : null
+}
+function knSkillMatches(skills, query) {
+  const q = String(query || '').toLowerCase().trim()
+  return (skills || []).filter((s) => s.user_invocable !== false).map((s) => {
+    const name = s.name.toLowerCase(), desc = (s.description || '').toLowerCase()
+    const rank = !q ? 1 : name === q ? 5 : name.startsWith(q) ? 4 : name.includes(q) ? 3 : desc.includes(q) ? 2 : 0
+    return { skill: s, rank }
+  }).filter((s) => s.rank).sort((a, b) => b.rank - a.rank || a.skill.name.localeCompare(b.skill.name)).map((s) => s.skill)
+}
+/** A typed command, including its arguments. Used to validate a paste, recognise a completed name, and highlight history. */
+function knSkillCommand(text) {
+  const m = /^\s*\/([^\s/]+)(\s[\s\S]*)?$/.exec(String(text))
+  return m ? { name: m[1], args: (m[2] || '').trimStart(), complete: !!m[2] } : null
+}
+/** A picked skill becomes a chip; only its typed command is removed, preserving the arguments and their caret. */
+function knSkillPick(text, caret) {
+  const t = String(text), m = /^\s*\/[^\s/]*(?:\s+|$)/.exec(t), n = m ? m[0].length : 0
+  return { text: t.slice(n), caret: Math.max(0, caret - n) }
+}
+function knSkillError(skills, text) {
+  if (text === '/') return 'Choose a skill from the / menu first.'
+  const cmd = knSkillCommand(text)
+  if (cmd && (!skills || !skills.some((s) => s.name === cmd.name && s.user_invocable !== false))) return skills ? `/${cmd.name} isn't available. Choose a skill from the / menu.` : 'Your skills are still loading. Try again in a moment.'
+  return null
+}
+// end of the kn-skills block
+
 // ── kn-mention: `@` in Ask's composer — a page picked from Echo's index goes in as a chip, its title in the words ──
 /** The mention typed up to `caret`: `{ query, start }` (`start`: its `@`), or null. An `@` starts one only at the start
  *  or after a space (never in an address); a space ends it. */
@@ -576,8 +608,8 @@ function knMentionPick(text, m, caret, words) {
 }
 /** What `kn_chat_send` takes from the composer: the words, and its chips as pages and calls — a call by its name, never
  *  a path, with `anyway` only on the one the user said *Attach anyway* to. */
-function knChatMessage(text, chips) {
-  return { text: String(text).trim(), context: (chips || []).map((c) => c.page ? { page: c.page } : c.anyway ? { call: c.call, anyway: true } : { call: c.call }) }
+function knChatMessage(text, chips, skill) {
+  return { text: [skill ? `/${skill.name}` : '', String(text).trim()].filter(Boolean).join(' '), context: (chips || []).map((c) => c.page ? { page: c.page } : c.anyway ? { call: c.call, anyway: true } : { call: c.call }) }
 }
 // end of the kn-mention block
 
@@ -1073,6 +1105,7 @@ const Kn = (() => {
     edit: I('<path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="M13.5 6.5l4 4"/>'),
     search: I('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>'),
     bolt: I('<path d="M13 3.5L5.5 13.5H12l-1 7 7.5-10H12z"/>'),
+    sync: I('<path d="M20 11a8 8 0 0 0-14-5L3.5 8.5M3.5 4.5v4h4M4 13a8 8 0 0 0 14 5l2.5-2.5M20.5 19.5v-4h-4"/>'),
     files: I('<path d="M8.5 3.5h6l4 4V17a.5.5 0 0 1-.5.5H8.5A.5.5 0 0 1 8 17V4a.5.5 0 0 1 .5-.5z"/><path d="M14.5 3.5V8h4M5 7v13a.5.5 0 0 0 .5.5H14"/>'),
     agent: I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'),
     term: I('<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7.5 10l3 2.5-3 2.5M12.5 15.5h4"/>'),
@@ -3111,8 +3144,8 @@ const Kn = (() => {
     const s = st()
     if (s.tab === 'graph') drawGraph()
     if (s.tab === 'pages' && s.rail === 'links') drawMini()
-    if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat() }
-    if (s.tab === 'home' && vault()) fitQ()
+    if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat(); loadSkills() }
+    if (s.tab === 'home' && vault()) { fitQ(); loadSkills() }
     if (s.tab === 'ingest' && vault()) { pollRun(); tickRunning() }
     if (s.tab === 'health' && vault()) { pollLint(); tickRunning() }
     if (s.scrollTo) { const el = document.getElementById(s.scrollTo); if (el) el.scrollIntoView({ block: 'start' }); s.scrollTo = null }
@@ -3322,7 +3355,7 @@ const Kn = (() => {
   const patchEl = (id, html) => { const el = document.getElementById(id); if (el) patch(el, html) }
   /** The conversations list: as the user left it, else open when the window is wide enough. */
   const listOpen = () => { const o = chat().listOpen; return o === null ? window.innerWidth >= 860 : o }
-  const newChat = (vault) => ({ vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, pending: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null, gen: 0 })
+  const newChat = (vault) => ({ vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], skill: null, skills: null, skillsLoading: false, skillsError: null, picker: null, error: null, sending: false, pending: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null, gen: 0 })
   /** Ask's own conversation in the open vault (D44: not the panel's current one) and everything the view keeps of it. */
   function askChat() {
     const s = st()
@@ -3341,7 +3374,7 @@ const Kn = (() => {
   function openChat(id, c = chat()) {
     if (c.id === (id || '')) return
     knChatOpen(c, id)
-    Object.assign(c, { gone: null, error: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null })
+    Object.assign(c, { gone: null, error: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null, skills: null, skillsError: null })
   }
   async function loadChats() {
     const c = chat(), v = vault()
@@ -3374,12 +3407,13 @@ const Kn = (() => {
     const landed = knSentLanded(c.pending, got.events)
     if (landed === 'landed') {
       const q = document.getElementById('kn-chat-q')
-      if (q && q.value.trim() === c.pending.text) { q.value = ''; c.draft = ''; fitQ() }
+      if (knChatMessage(c.draft, [], c.skill).text === c.pending.text) { if (q) q.value = ''; c.draft = ''; c.skill = null; fitQ() }
       c.chips = []
       // A message from Home's box: Ask's own unsent draft comes back to its composer.
       if (c.keep) {
         if (!c.draft.trim()) { c.draft = c.keep.draft; if (q) { q.value = c.draft; fitQ() } }
         c.chips = c.keep.chips
+        c.skill = c.keep.skill || null
         c.keep = null
       }
     }
@@ -3415,10 +3449,12 @@ const Kn = (() => {
     patchEl('kn-convs-l', convItems())
     refreshComposer()
     syncThread(event, before, c)
+    loadSkills()
   }
   /** The composer's parts drawn again where they are (its text and caret stay). */
   function refreshComposer() {
     patchEl('kn-cmp-chips', chipsHtml())
+    patchEl('kn-cmp-skill', skillHtml())
     patchEl('kn-cmp-note', composerNote())
     patchEl('kn-cmp-f', composerFoot())
     drawPicker()
@@ -3509,8 +3545,9 @@ const Kn = (() => {
     const mode = researchOn() || c.mode !== 'research' ? c.mode : 'ask'
     const modeName = (MODES.find((m) => m[0] === mode) || MODES[0])[1]
     const al = (k, t) => `<div class="kn-al ${k}">${k === 'y' ? IC.check : k === 'q' ? IC.asks : IC.no}<span>${t}</span></div>`
-    const skills = (((v.detected || {}).skills) || []).filter((x) => x.kind !== 'agents').map((x) => `<code>${esc(x.name)}</code>`)
-    const sk = skills.length ? al('y', `Its skills: ${skills.join(', ')}`) : ''
+    const skills = c.skills || []
+    const personal = skills.filter((x) => x.source === 'user').length, local = skills.filter((x) => x.source === 'vault').length
+    const sk = skills.length ? al('y', `<button class="kn-lnk" data-kn="skills">${personal} personal · ${local} vault skills</button>`) : ''
     const cards = turns.flatMap((t) => t.blocks.filter((b) => b.kind === 'permission' && b.answer && b.answer.allow && b.answer.always))
     const edits = cards.some((b) => b.tool !== 'WebFetch')
     const domains = [...new Set(cards.filter((b) => b.tool === 'WebFetch' && b.domain).map((b) => b.domain))]
@@ -3539,13 +3576,14 @@ const Kn = (() => {
   }
   const placeholder = () => {
     const c = chat(), name = (vault() || {}).name || 'the vault'
+    if (c.skill) return c.skill.argument_hint || `What should /${c.skill.name} do?`
     if (homeShown()) return knHomeAsk(homeSt().data || {}, name).placeholder
-    return firstWaiting(c) ? 'Waiting for your answer above' : c.busy ? 'Claude is answering — Esc stops it' : `Ask ${name} — @ to mention a page`
+    return firstWaiting(c) ? 'Waiting for your answer above' : c.busy ? 'Claude is answering — Esc stops it' : `Ask ${name} — / for skills, @ for pages`
   }
   function composerHtml() {
     const c = chat()
-    return `<div class="kn-cmp-wrap"><button class="btn sm kn-jump" id="kn-jump" data-kn="jump"${c.jump ? '' : ' hidden'}>Jump to the latest ↓</button><div class="kn-cmp" id="kn-cmp"><div id="kn-picker" class="kn-picker-slot">${pickerHtml()}</div><div id="kn-cmp-note">${composerNote()}</div><div class="kn-cmp-chips" id="kn-cmp-chips">${chipsHtml()}</div>
-      <textarea id="kn-chat-q" rows="1" placeholder="${esc(placeholder())}" aria-label="Your message" spellcheck="true">${esc(c.draft)}</textarea><div id="kn-cmp-f">${composerFoot()}</div></div></div>`
+    return `<div class="kn-cmp-wrap"><button class="btn sm kn-jump" id="kn-jump" data-kn="jump"${c.jump ? '' : ' hidden'}>Jump to the latest ↓</button><div class="kn-cmp" id="kn-cmp"><div id="kn-picker" class="kn-picker-slot">${pickerHtml()}</div><div id="kn-cmp-note">${composerNote()}</div><div id="kn-cmp-skill" aria-live="polite">${skillHtml()}</div><div class="kn-cmp-chips" id="kn-cmp-chips">${chipsHtml()}</div>
+      <textarea id="kn-chat-q" rows="1" placeholder="${esc(placeholder())}" aria-label="Your message" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" spellcheck="true">${esc(c.draft)}</textarea><div id="kn-cmp-f">${composerFoot()}</div></div></div>`
   }
   function composerNote() { const c = chat(); return c.error ? `<div class="kn-cmp-err" role="alert">${IC.warn}<span class="grow">${esc(c.error)}</span><button class="icon-btn" data-kn="chat-err-x" aria-label="Dismiss">${IC.close}</button></div>` : '' }
   function composerFoot() {
@@ -3558,7 +3596,15 @@ const Kn = (() => {
     const go = c.busy ? `<button class="kn-send stop" data-kn="chat-stop" title="Stop (Esc)" aria-label="Stop">${IC.stop}</button>`
       : `<span class="kn-kbd">${MOD_KEY}</span><button class="kn-send" data-kn="chat-send" title="Send (${MOD_KEY})" aria-label="Send"${c.sending ? ' disabled' : ''}>${c.sending ? SPIN : IC.up}</button>`
     const [icon, line] = MODE_LINE[mode]
-    return `<div class="kn-cmp-f"><button class="kn-iconish" data-kn="mention" title="Mention a page" aria-label="Mention a page">${IC.at}</button><button class="kn-iconish" data-kn="attach" title="Attach a call or memo" aria-label="Attach a call or memo">${IC.clip}</button>${seg}<span class="grow"></span><button class="kn-prof" data-kn="tab" data-kn-tab="settings" title="This vault's AI profile — in its Settings"><i>C</i>${esc(profName(v.profile))}${model ? ` · ${esc(model)}` : ''}</button>${go}</div><div class="kn-cmp-line${mode === 'research' ? ' warn' : ''}">${icon}<span>${line}</span></div>`
+    return `<div class="kn-cmp-f"><button class="kn-iconish kn-slash-btn" data-kn="skills" title="Choose a skill (/)" aria-label="Choose a skill">/</button><button class="kn-iconish" data-kn="mention" title="Mention a page" aria-label="Mention a page">${IC.at}</button><button class="kn-iconish" data-kn="attach" title="Attach a call or memo" aria-label="Attach a call or memo">${IC.clip}</button>${seg}<span class="grow"></span><button class="kn-prof" data-kn="tab" data-kn-tab="settings" title="This vault's AI profile — in its Settings"><i>C</i>${esc(profName(v.profile))}${model ? ` · ${esc(model)}` : ''}</button>${go}</div><div class="kn-cmp-line${mode === 'research' ? ' warn' : ''}">${icon}<span>${line}</span></div>`
+  }
+  const skillSource = (s) => s.source === 'user' ? 'Personal' : 'This vault'
+  function skillHtml() {
+    const c = chat(), s = c.skill
+    if (s) return `<div class="kn-skill-selected"><span class="kn-ctx kn-skill-chip${s.unavailable ? ' warn' : ''}" title="${esc(s.unavailable ? 'This skill is no longer available. Remove it or choose another.' : s.description || '')}">${IC.bolt}<b>/${esc(s.name)}</b><span>${s.unavailable ? 'Unavailable' : skillSource(s)}</span><button class="kn-ctx-x" data-kn="skill-x" aria-label="Remove skill">${IC.close}</button></span>${s.description ? `<span class="kn-skill-summary">${esc(s.description)}</span>` : ''}</div>`
+    const cmd = knSkillCommand(c.draft)
+    if (cmd && cmd.complete && c.skills && !c.skills.some((s) => s.name === cmd.name && s.user_invocable !== false)) return `<div class="kn-skill-unknown">${IC.info}<span>Unknown skill <code>/${esc(cmd.name)}</code>.</span><button data-kn="skills">Choose a skill</button></div>`
+    return ''
   }
   function chipsHtml() {
     return chat().chips.map((x, i) => {
@@ -3571,6 +3617,12 @@ const Kn = (() => {
   function pickerHtml() {
     const p = chat().picker
     if (!p) return ''
+    if (p.kind === 'skills') {
+      const c = chat(), hits = p.hits || []
+      const rows = hits.map((s, i) => `<button id="kn-skill-option-${i}" class="kn-pk kn-skill-option${i === p.sel ? ' on' : ''}" data-kn="pick-skill" data-kn-chip="${i}" role="option" aria-selected="${i === p.sel}" tabindex="-1">${IC.bolt}<div><b>/${esc(s.name)}</b><small>${esc(s.description || s.argument_hint || 'Run this skill')}</small></div><span class="kn-skill-source">${skillSource(s)}</span></button>`).join('')
+      const none = c.skillsLoading ? 'Loading your skills…' : c.skillsError ? c.skillsError : p.query ? `No skill matches “${p.query}”.` : 'No personal or vault skills found on this profile.'
+      return `<div class="kn-picker kn-skill-picker"><div class="kn-skill-head"><b>Skills</b><span>${p.query ? esc(p.query) : 'Personal + this vault'}</span><button class="icon-btn" data-kn="skills-refresh" aria-label="Refresh skills" title="Refresh skills">${IC.sync}</button></div><div id="kn-skill-list" class="kn-skill-list" role="listbox" aria-label="Skills">${rows || `<div class="kn-pk-none">${esc(none)}</div>`}</div><div class="kn-skill-keys"><span>↑↓ navigate</span><span>↵ select</span><span>esc close</span></div></div>`
+    }
     if (p.kind === 'pages') {
       const hits = (p.hits || []).slice(0, 8)
       const rows = hits.map((h, i) => `<button class="kn-pk${i === p.sel ? ' on' : ''}" data-kn="pick-page" data-kn-chip="${i}" role="option" aria-selected="${i === p.sel}">${IC.file}<b>${esc(h.title || h.path.split('/').pop())}</b><span>${esc(h.path)}</span></button>`).join('')
@@ -3589,6 +3641,14 @@ const Kn = (() => {
     const p = chat().picker, list = document.getElementById('kn-pk-list')
     if (p && p.kind === 'calls' && list) return patch(list, callRows())
     patchEl('kn-picker', pickerHtml())
+    const q = document.getElementById('kn-chat-q'), skills = p && p.kind === 'skills'
+    if (q) {
+      q.setAttribute('aria-expanded', skills ? 'true' : 'false')
+      if (skills) q.setAttribute('aria-controls', 'kn-skill-list'); else q.removeAttribute('aria-controls')
+      if (skills && p.hits && p.hits.length) q.setAttribute('aria-activedescendant', `kn-skill-option-${p.sel}`); else q.removeAttribute('aria-activedescendant')
+    }
+    const on = document.querySelector('.kn-skill-option.on')
+    if (on) on.scrollIntoView({ block: 'nearest' })
   }
   function heroHtml() {
     const c = chat(), v = vault()
@@ -3615,7 +3675,8 @@ const Kn = (() => {
   }
   function msgHtml(u) {
     const ctx = (u.context || []).map((x) => x.page ? `<button class="kn-ctx" data-kn="open" data-path="${esc(x.page)}" title="${esc(x.page)}">${IC.at}${esc(x.page.split('/').pop())}</button>` : `<span class="kn-ctx call" title="${esc(x.date || '')}">${IC.call}${esc(x.title || x.call || 'A call')}</span>`).join('')
-    return `<div class="kn-msg-u"><div class="kn-msg-t selectable">${esc(u.text)}</div>${ctx ? `<div class="kn-msg-meta">${ctx}</div>` : ''}</div>`
+    const cmd = knSkillCommand(u.text), text = cmd ? `<span class="kn-inline-skill">/${esc(cmd.name)}</span>${cmd.args ? ` ${esc(cmd.args)}` : ''}` : esc(u.text)
+    return `<div class="kn-msg-u"><div class="kn-msg-t selectable">${text}</div>${ctx ? `<div class="kn-msg-meta">${ctx}</div>` : ''}</div>`
   }
   function blockHtml(b, key, o) {
     const c = chat()
@@ -3706,11 +3767,14 @@ const Kn = (() => {
     const s = st(), c = chat(), v = vault()
     const q = document.getElementById('kn-chat-q')
     if (q) c.draft = q.value
-    if (!v || !knChatMessage(c.draft, c.chips).text) return
+    const m = knChatMessage(c.draft, c.chips, c.skill)
+    if (!v || !m.text) return
+    const error = knSkillError(c.skills, m.text)
+    if (error) { c.error = error; refreshComposer(); return }
     // The box's conversation becomes Ask's; the tab is Ask's at once (the route follows), so the send is Ask's own. What
     // was typed in Ask's composer and not sent comes back to it once this message lands (M8).
     const was = s.chat && s.chat.vault === v.id ? s.chat : null
-    if (was && (was.draft.trim() || was.chips.length)) c.keep = { draft: was.draft, chips: was.chips }
+    if (was && (was.draft.trim() || was.chips.length || was.skill)) c.keep = { draft: was.draft, chips: was.chips, skill: was.skill }
     s.homeChat = null
     s.chat = c
     s.askConv = ''
@@ -3724,7 +3788,9 @@ const Kn = (() => {
     const s = st(), c = chat(), v = vault()
     const q = document.getElementById('kn-chat-q')
     if (q) c.draft = q.value
-    const m = knChatMessage(c.draft, c.chips)
+    const m = knChatMessage(c.draft, c.chips, c.skill)
+    const error = knSkillError(c.skills, m.text)
+    if (error) { c.error = error; refreshComposer(); return }
     // One message at a time: the one just sent hasn't come back yet.
     if (!m.text || c.sending || !v || (c.pending && Date.now() - c.pending.at < 30000)) return
     if (c.busy) { c.error = 'Wait for this answer, or stop it.'; return refreshChat() }
@@ -3817,14 +3883,66 @@ const Kn = (() => {
   }
   function onChatInput(t) {
     const c = chat()
+    const cmd = knSkillCommand(t.value), known = cmd && cmd.complete && (c.skills || []).find((s) => s.name === cmd.name && s.user_invocable !== false)
+    if (known) {
+      const out = knSkillPick(t.value, t.selectionStart)
+      c.skill = known
+      t.value = out.text
+      t.setSelectionRange(out.caret, out.caret)
+    }
     c.draft = t.value
     fitQ()
-    const m = knMention(t.value, t.selectionStart)
-    if (m) {
+    const slash = knSlash(t.value, t.selectionStart), m = knMention(t.value, t.selectionStart)
+    if (slash) {
+      const was = c.picker && c.picker.kind === 'skills' ? c.picker : null
+      c.picker = { kind: 'skills', query: slash.query, sel: was && was.query === slash.query ? was.sel : 0, hits: knSkillMatches(c.skills, slash.query).slice(0, 8) }
+      loadSkills()
+    } else if (m) {
       const was = c.picker && c.picker.kind === 'pages' ? c.picker : null
       if (!was || was.query !== m.query) { c.picker = { kind: 'pages', query: m.query, start: m.start, sel: 0, hits: was ? was.hits : null }; findPages(m.query) } else was.start = m.start
-    } else if (c.picker && c.picker.kind === 'pages') c.picker = null
-    patchEl('kn-picker', pickerHtml())
+    } else if (c.picker && c.picker.kind !== 'calls') c.picker = null
+    patchEl('kn-cmp-skill', skillHtml())
+    drawPicker()
+    t.placeholder = placeholder()
+  }
+  async function loadSkills(force = false) {
+    const c = chat(), v = vault()
+    if (!v || c.skillsLoading || (!force && (c.skills || c.skillsError))) return
+    c.skillsLoading = true; c.skillsError = null
+    if (force) c.skills = null
+    try {
+      const r = await get(`api/kn/${enc(v.id)}/skills`)
+      if (r.error) throw new Error(r.error)
+      c.skills = r.skills || []
+      if (c.skill) c.skill = c.skills.find((s) => s.name === c.skill.name && s.user_invocable !== false) || { ...c.skill, unavailable: true }
+    } catch (e) { c.skillsError = `Couldn't load skills: ${String(e.message || e)}` }
+    finally { c.skillsLoading = false }
+    if (chat() !== c || !vault() || vault().id !== v.id || (!askShown() && !homeShown())) return
+    const q = document.getElementById('kn-chat-q')
+    // A response for another composer cannot change this draft or its picker.
+    if (q && (knSlash(q.value, q.selectionStart) || knSkillCommand(q.value))) onChatInput(q)
+    else if (c.picker && c.picker.kind === 'skills') { c.picker.hits = knSkillMatches(c.skills, c.picker.query).slice(0, 8); c.picker.sel = 0; drawPicker() }
+    refreshComposer()
+    if (askShown()) patchEl('kn-crail', railBody())
+  }
+  function openSkills() {
+    const c = chat(), q = document.getElementById('kn-chat-q')
+    if (!q) return
+    c.picker = { kind: 'skills', query: '', sel: 0, hits: knSkillMatches(c.skills, '').slice(0, 8) }
+    drawPicker()
+    q.focus()
+    loadSkills()
+  }
+  function pickSkill(i) {
+    const c = chat(), p = c.picker, s = p && p.kind === 'skills' && p.hits && p.hits[i], q = document.getElementById('kn-chat-q')
+    if (!s || !q) return
+    const out = knSkillPick(q.value, q.selectionStart)
+    c.skill = s; c.draft = out.text; c.picker = null
+    q.value = out.text
+    q.focus()
+    q.setSelectionRange(out.caret, out.caret)
+    refreshComposer()
+    fitQ()
   }
   let findTimer = null
   function findPages(q) {
@@ -3901,12 +4019,13 @@ const Kn = (() => {
     if (p && (id === 'kn-chat-q' || id === 'kn-attach-q')) {
       const n = (p.hits || []).slice(0, p.kind === 'pages' ? 8 : 10).length + (p.kind === 'pages' ? 1 : 0)
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) { e.preventDefault(); p.sel = (p.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; drawPicker(); return true }
-      if ((e.key === 'Enter' && !mod && !e.shiftKey) || (e.key === 'Tab' && n)) {
+      if ((e.key === 'Enter' && !mod && !e.shiftKey) || (e.key === 'Tab' && !e.shiftKey && n)) {
         e.preventDefault()
-        if (p.kind === 'pages') { if (p.sel < (p.hits || []).slice(0, 8).length) pickPage(p.sel); else openAttach() } else pickCall(p.sel)
+        if (p.kind === 'skills') pickSkill(p.sel)
+        else if (p.kind === 'pages') { if (p.sel < (p.hits || []).slice(0, 8).length) pickPage(p.sel); else openAttach() } else pickCall(p.sel)
         return true
       }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); c.picker = null; patchEl('kn-picker', ''); if (id === 'kn-attach-q') { const q = document.getElementById('kn-chat-q'); if (q) q.focus() } return true }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); c.picker = null; drawPicker(); if (id === 'kn-attach-q') { const q = document.getElementById('kn-chat-q'); if (q) q.focus() } return true }
     }
     if (id === 'kn-why') {
       if (mod && e.key === 'Enter') { e.preventDefault(); permitChat(c.whyOpen, 'deny'); return true }
@@ -3914,7 +4033,8 @@ const Kn = (() => {
       return false
     }
     const card = firstWaiting(c), q = document.getElementById('kn-chat-q')
-    const typed = !!((q && q.value.trim()) || c.chips.length)
+    if (id === 'kn-chat-q' && e.key === 'Backspace' && !e.target.value && c.skill) { e.preventDefault(); c.skill = null; refreshComposer(); return true }
+    const typed = !!((q && q.value.trim()) || c.chips.length || c.skill)
     const act = knChatKey({ key: e.key, mod, card: !!card, inComposer: id === 'kn-chat-q', typed, busy: c.busy })
     if (!act) return false
     e.preventDefault()
@@ -4150,6 +4270,10 @@ const Kn = (() => {
         q.setSelectionRange(at + ins.length, at + ins.length)
         return onChatInput(q)
       }
+      case 'skills': return openSkills()
+      case 'skills-refresh': return loadSkills(true)
+      case 'pick-skill': return pickSkill(Number(d.knChip))
+      case 'skill-x': chat().skill = null; refreshComposer(); document.getElementById('kn-chat-q')?.focus(); return
       case 'attach': return openAttach()
       case 'pick-page': return pickPage(Number(d.knChip))
       case 'pick-call': return pickCall(Number(d.knChip))
