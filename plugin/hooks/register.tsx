@@ -61,7 +61,7 @@ export const register: Register = on => {
     const status = b.recording
       ? `● Recording${b.title ? ` · ${b.title}` : ''}${b.startedAt ? ` · ${minutesSince(b.startedAt, Date.now())} min` : ''}${b.muted ? ' · 🔇 muted — your mic is not transcribed' : ''}`
       : b.armed
-        ? '◌ Armed — recording starts with the next Teams call'
+        ? '◌ Armed — recording starts with the next call'
         : `Echo${b.next ? ` · next: ${b.next}` : ' · watching'}`
     return (
       <Box gap={1}>

@@ -163,7 +163,7 @@
   },
   {
    "id": "F-CAL-18",
-   "feature": "Echo records Teams meetings only: a Zoom or Google Meet meeting is never armed — its card and Today row say \"Recording isn't available for Zoom (Google Meet) meetings yet.\" instead of Record, `echoctl arm` / `echoctl join` with one fail with that message and arm nothing, and Record when it starts, a series set to Record, the \"Record?\" offer at its start and the tray's Upcoming leave it out; no Teams transcript is offered for it",
+   "feature": "Echo records Teams meetings, and Google Meet ones on a Mac (in Chrome, F-REC-21): a Zoom meeting (or a Google Meet one off a Mac) is never armed — its card and Today row say \"Recording isn't available for Zoom (Google Meet) meetings yet.\" instead of Record, `echoctl arm` / `echoctl join` with one fail with that message and arm nothing, and Record when it starts, a series set to Record, the \"Record?\" offer at its start and the tray's Upcoming leave it out; no Teams transcript is offered for a Zoom or Google Meet meeting; `echoctl join` opens a Google Meet meeting in Chrome",
    "priority": "high",
    "check": "agent",
    "axes": [

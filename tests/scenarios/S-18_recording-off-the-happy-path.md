@@ -1,6 +1,6 @@
 ---
 id: S-18
-title: Recording off the happy path: cancels, expiry, opt-in, Ctrl-C, a crash, mid-call starts, stops, ask mode, a drop, silence, two voices
+title: Recording off the happy path: cancels, expiry, opt-in, Ctrl-C, a crash, mid-call starts, stops, ask mode, a drop, silence, two voices, Google Meet in Chrome
 run: agent
 platform: macos
 data: small
@@ -37,6 +37,10 @@ cases:
   - tests/cases/privacy/TC-008_deliver-send-never-goes-to-an-address-a-model-picked-or-to-anyone-before-the-sign-in.md
   - tests/cases/recording/TC-028_a-meeting-about-to-start-shows-in-the-pill-with-its-time-and-record-it.md
   - tests/cases/recording/TC-029_a-memo-records-the-mic-alone-stop-ends-it-at-once-and-its-threads-follow-what-was-said.md
+  - tests/cases/recording/TC-031_chrome-on-the-mic-without-a-meet-call-is-no-call.md
+  - tests/cases/recording/TC-032_a-google-meet-call-in-chrome-is-recorded-as-two-tracks.md
+  - tests/cases/recording/TC-033_a-google-meet-meeting-set-to-record-records-its-chrome-call.md
+  - tests/cases/recording/TC-034_live-google-meet-call-in-chrome.md
 auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
@@ -125,6 +129,10 @@ prelude" in every case below).
 | 28 | `privacy/TC-008_deliver-send-never-goes-to-an-address-a-model-picked-or-to-anyone-before-the-sign-in.md` | — | — |
 | 30 | `recording/TC-028_a-meeting-about-to-start-shows-in-the-pill-with-its-time-and-record-it.md` | — | — |
 | 31 | `recording/TC-029_a-memo-records-the-mic-alone-stop-ends-it-at-once-and-its-threads-follow-what-was-said.md` | — | — |
+| 32 | `recording/TC-031_chrome-on-the-mic-without-a-meet-call-is-no-call.md` | — | Step 1 starts its own app (the earlier stages' apps quit); **skip its teardown**: the app and the arm go on |
+| 33 | `recording/TC-032_a-google-meet-call-in-chrome-is-recorded-as-two-tracks.md` | 32 | On stage 32's app and arm. **Skip its teardown**: the app goes on |
+| 34 | `recording/TC-033_a-google-meet-meeting-set-to-record-records-its-chrome-call.md` | 33 | On stage 32's app; its teardown quits it |
+| 35 | `recording/TC-034_live-google-meet-call-in-chrome.md` | — | **person** — a live Meet call in Chrome |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again

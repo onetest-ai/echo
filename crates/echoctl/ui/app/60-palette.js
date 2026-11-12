@@ -92,7 +92,7 @@ function paletteItems(target) {
   if (st.recording && st.recording_memo) add('Echo', 'Stop the memo', () => press({ cmd: 'stop' }), { keywords: 'end memo', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
   else if (st.recording) add('Echo', 'Stop recording…', () => press({ cmd: 'stop-ask' }), { keywords: 'end', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
-  else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
+  else add('Echo', st.in_call ? 'Record this call' : 'Record the next call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Record a memo', () => press({ cmd: 'record-memo' }), { keywords: 'memo dictate voice note myself idea', disabled: st.recording ? 'not while a recording is on' : null })
   add('Echo', 'Claude', () => claudePanel('claude-folder'), { keywords: 'terminal session ask echo folder' })
   claudeSessionActions(add)

@@ -569,7 +569,7 @@ pub fn mic_source(app: Option<TargetApp>) -> Box<dyn Source> {
 /// Is the app in a call right now (holding the mic)? None = this platform can't tell yet.
 pub fn app_in_call(app: TargetApp) -> Option<bool> {
     #[cfg(debug_assertions)]
-    if let Some(on) = testfeed::in_call() {
+    if let Some(on) = testfeed::in_call(app) {
         return Some(on);
     }
     #[cfg(target_os = "macos")]
@@ -581,6 +581,20 @@ pub fn app_in_call(app: TargetApp) -> Option<bool> {
         let _ = app;
         None
     }
+}
+
+/// Does a browser window show a Google Meet call? None: it can't be told (no Accessibility, another platform), or the
+/// user turned off reading the call app's window.
+pub fn meet_window_open() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    if let Some(on) = testfeed::meet_window_open() {
+        return Some(on);
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    if crate::config::reads_call_window() {
+        return crate::ax::meet_window_open();
+    }
+    None
 }
 
 /// The input device the call app is recording from, as (cpal device id, name). Following it

@@ -106,7 +106,7 @@ mod tests {
     /// #228: a Zoom or Google Meet meeting can't be set to record when it starts, and one in the list (written by
     /// hand, or before #228) is never armed.
     #[test]
-    fn a_zoom_or_google_meet_meeting_is_never_scheduled() {
+    fn a_zoom_meeting_is_never_scheduled_and_a_google_meet_one_only_on_a_mac() {
         let (_env, home) = crate::paths::testenv::folders("sched-other-app");
         let now = Utc::now();
         let zoom = MeetingContext { join_url: Some("https://zoom.us/j/81234567890".into()), ..meeting("zoom", now + Duration::seconds(30), 30) };
@@ -114,6 +114,8 @@ mod tests {
         assert!(!is_scheduled("zoom"));
         save(&[zoom]).unwrap();
         assert!(due(now).is_none(), "skipped by the scheduler");
+        let meet = MeetingContext { join_url: Some("https://meet.google.com/abc-defg-hij".into()), ..meeting("meet", now + Duration::seconds(30), 30) };
+        assert_eq!(add(meet).is_ok(), cfg!(target_os = "macos"), "recorded in Chrome on a Mac (#230)");
         let _ = fs::remove_dir_all(&home);
     }
 

@@ -414,6 +414,7 @@ mod tests {
             "start": {"dateTime": ended, "timeZone": "UTC"}, "end": {"dateTime": ended, "timeZone": "UTC"}});
         let zoom = ev("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
         assert_eq!(known(&zoom, &Default::default()), (None, false), "nothing to ask Teams");
+        assert_eq!(known(&ev("https://meet.google.com/abc-defg-hij"), &Default::default()), (None, false), "a Meet one, recorded or not: nothing to ask Teams");
         assert!(import(&zoom).unwrap_err().to_string().contains("isn't a Teams meeting"));
         assert_eq!(known(&ev("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), &Default::default()), (None, true), "a Teams one is asked about");
     }

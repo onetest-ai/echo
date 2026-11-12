@@ -193,6 +193,17 @@ pub fn app_pid(executable_suffix: &str) -> Option<i32> {
 }
 
 pub const TEAMS_EXECUTABLE: &str = "Microsoft Teams.app/Contents/MacOS/MSTeams";
+pub const CHROME_EXECUTABLE: &str = "Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/// Does a Chrome window show a Google Meet call (`apps::is_meet_title`)? Only the windows' titles are read, never a
+/// page. None: Accessibility isn't granted or Chrome can't be read.
+pub fn meet_window_open() -> Option<bool> {
+    if !unsafe { AXIsProcessTrusted() } {
+        return None;
+    }
+    let chrome = Element::application(app_pid(CHROME_EXECUTABLE)?)?;
+    Some(chrome.children("AXWindows").iter().filter_map(|w| w.string("AXTitle")).any(|t| crate::apps::is_meet_title(&t)))
+}
 
 /// `echoctl ax-dump`: snapshot Teams' window tree every second for `seconds` seconds.
 pub fn dump(seconds: u64) -> Result<()> {

@@ -119,7 +119,7 @@ fn menu_open() -> bool {
 
 fn status_text(state: &UiState) -> String {
     match state {
-        UiState::Idle { in_call: Some(true) } => "Teams call in progress — not recording".into(),
+        UiState::Idle { in_call: Some(true) } => "Call in progress — not recording".into(),
         UiState::Idle { .. } => "Not recording".into(),
         UiState::Armed => "Armed — recording starts with the next call".into(),
         UiState::Recording { since, memo: true, .. } => format!("● Recording a memo · since {}", since.format("%H:%M")),

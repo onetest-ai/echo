@@ -31,11 +31,11 @@ tags: [claude, status-line, plugin, second-instance]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | In shell B start the session, wait for the prompt | A line above the prompt: a button "Echo" and the text "Echo · next: HH:MM Globex design review" (the time of that meeting today, as `target/debug/echoctl calendar events` lists it) |
-| 2 | In shell A: `target/debug/echoctl arm --title "STATUS-001"; $W 10 armed` | The line reads "◌ Armed — recording starts with the next Teams call" |
+| 2 | In shell A: `target/debug/echoctl arm --title "STATUS-001"; $W 10 armed` | The line reads "◌ Armed — recording starts with the next call" |
 | 3 | In shell A: `$C start very-short --hold; $W 30 recording` | The line reads "● Recording · STATUS-001 · 0 min" (the minutes grow by one a minute) and the button "Echo" is the primary (filled) one |
 | 4 | In shell A: `$C end; target/debug/echoctl stop; $W 30 not-recording` (no speech model is linked into this test config, so the transcription cannot work) | The line goes back to "Echo · next: HH:MM Globex design review" (the recording text is gone); within about a minute a toast says that the transcription failed and why: that there is no speech model (it says "transcription failed" and names the missing model) |
 | 5 | In shell A: link the speech model, `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"; target/debug/echoctl model use large-v3-turbo-q5_0`; then `target/debug/echoctl arm --title "STATUS-002"; $W 10 armed; $C start very-short; $W 30 recording; $W 120 event transcribed` (the call hangs up by itself) | The recording is transcribed; no toast appears in the session for it and the line goes back to "Echo · next: HH:MM Globex design review" (a transcription that worked is not toasted) |
-| 6 | In shell A: `target/debug/echoctl arm --title "STATUS-003"; $W 10 armed`; start no call and wait 16 minutes | The line reads "◌ Armed — recording starts with the next Teams call" at first; after the 15 minutes a toast says the arm expired because no call started within 15 minutes; the line goes back to "Echo · next: HH:MM Globex design review" |
+| 6 | In shell A: `target/debug/echoctl arm --title "STATUS-003"; $W 10 armed`; start no call and wait 16 minutes | The line reads "◌ Armed — recording starts with the next call" at first; after the 15 minutes a toast says the arm expired because no call started within 15 minutes; the line goes back to "Echo · next: HH:MM Globex design review" |
 | 7 | In shell A: `target/debug/echoctl app quit`; wait 6 s | The line above the prompt disappears (the app's heartbeat is older than 5 s) |
 
 ## Expected Final State

@@ -1,34 +1,68 @@
-//! Call apps Echo knows how to capture. Phase 1: Teams desktop only.
+//! Call apps Echo knows how to capture: Teams desktop, and Google Meet in Chrome (macOS).
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, ValueEnum, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetApp {
     Teams,
+    /// Google Meet in Chrome: its audio is the browser's, every tab's.
+    Meet,
 }
 
 impl TargetApp {
-    /// macOS bundle-id prefixes. New Teams (`com.microsoft.teams2`) plays audio from helper
-    /// processes whose bundle ids share the prefix, so we match on prefix.
-    #[allow(dead_code)]
-    pub fn mac_bundle_prefixes(self) -> &'static [&'static str] {
-        if let Some(test) = test_call_app() {
-            return test;
-        }
+    /// Every call app, in the order the watcher looks: a Teams call wins over the browser.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub const ALL: [TargetApp; 2] = [TargetApp::Teams, TargetApp::Meet];
+
+    /// What the user sees it called.
+    pub fn name(self) -> &'static str {
         match self {
-            TargetApp::Teams => &["com.microsoft.teams2", "com.microsoft.teams"],
+            TargetApp::Teams => "Teams",
+            TargetApp::Meet => "Google Meet",
         }
     }
 
-    /// Windows executable names (lowercase). New Teams is `ms-teams.exe`; classic is `teams.exe`.
+    /// macOS bundle-id prefixes. New Teams (`com.microsoft.teams2`) plays audio from helper
+    /// processes whose bundle ids share the prefix, so we match on prefix; Chrome's audio and mic run in its helpers
+    /// (`com.google.Chrome.helper`). A test call app (debug builds) stands for Teams, and the real Chrome is then
+    /// never looked at.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn mac_bundle_prefixes(self) -> &'static [&'static str] {
+        match (self, test_call_app()) {
+            (TargetApp::Teams, Some(test)) => test,
+            (TargetApp::Meet, Some(_)) => &[],
+            (TargetApp::Teams, None) => &["com.microsoft.teams2", "com.microsoft.teams"],
+            (TargetApp::Meet, None) => &["com.google.Chrome"],
+        }
+    }
+
+    /// Windows executable names (lowercase). New Teams is `ms-teams.exe`; classic is `teams.exe`. Meet isn't
+    /// recorded on Windows yet: the browser's own loopback needs #227.
     #[allow(dead_code)]
     pub fn windows_exe_names(self) -> &'static [&'static str] {
         match self {
             TargetApp::Teams => &["ms-teams.exe", "teams.exe"],
+            TargetApp::Meet => &[],
         }
     }
+
+    /// The meeting app of a calendar meeting this call app records.
+    pub fn meeting_app(self) -> MeetingApp {
+        match self {
+            TargetApp::Teams => MeetingApp::Teams,
+            TargetApp::Meet => MeetingApp::Meet,
+        }
+    }
+}
+
+/// A browser window's title that says it shows a Google Meet call: Meet's own tab title ("Meet – abc-defg-hij",
+/// "Meet - Weekly sync"), with or without the browser's suffix, or a title naming a Meet code.
+pub fn is_meet_title(title: &str) -> bool {
+    let t = title.trim();
+    let meet_tab = t.strip_prefix("Meet").is_some_and(|r| ["-", "–", "—"].iter().any(|d| r.trim_start().starts_with(d)) && r.starts_with(' '));
+    meet_tab || t.split(|c: char| c.is_whitespace() || "()[]|,".contains(c)).any(is_meet_code)
 }
 
 /// Functional tests only, in a debug build: `ECHOCTL_CALL_APP_BUNDLE=<bundle id>` makes that app the call app
@@ -222,6 +256,24 @@ mod tests {
             assert_eq!(find_join_link(text), None, "{text}");
         }
         assert_eq!(find_join_link(&format!("https://zoom.us/j/81234567890?pwd={}", "a".repeat(LINK_MAX))), None, "too long");
+    }
+
+    #[test]
+    fn a_browser_window_shows_a_meet_call_by_meets_own_title_or_code() {
+        for t in ["Meet – abc-defg-hij - Google Chrome", "Meet - Weekly sync", "Meet — abc-defg-hij", "abc-defg-hij (Presenting) - Google Chrome"] {
+            assert!(is_meet_title(t), "{t}");
+        }
+        for t in ["Meeting notes - Google Docs", "Meetup – Berlin Rust", "Google Meet", "Inbox (3) - kim@acme.example - Gmail", "Meet", "Meetings-room-abc - Google Chrome", "ABC-DEFG-HIJ"] {
+            assert!(!is_meet_title(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn meet_is_chromes_audio_on_a_mac_and_nothing_on_windows_yet() {
+        assert_eq!(TargetApp::Meet.mac_bundle_prefixes(), &["com.google.Chrome"]);
+        assert!(TargetApp::Meet.windows_exe_names().is_empty());
+        assert_eq!(TargetApp::ALL.map(|a| (a.name(), a.meeting_app())), [("Teams", MeetingApp::Teams), ("Google Meet", MeetingApp::Meet)]);
+        assert_eq!(serde_json::to_value(TargetApp::Meet).unwrap(), "meet", "meta.json's app");
     }
 
     #[test]

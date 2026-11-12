@@ -17,7 +17,7 @@
   },
   {
    "id": "F-REC-02",
-   "feature": "Record arms Echo: the pill says \"Armed — records the next Teams call\" with Cancel; the arm records the next call or expires after 15 minutes",
+   "feature": "Record arms Echo: the pill says \"Armed — records the next call\" with Cancel; the arm records the next call or expires after 15 minutes",
    "priority": "critical",
    "check": "person",
    "axes": [
@@ -62,7 +62,7 @@
   },
   {
    "id": "F-REC-07",
-   "feature": "A call is two tracks, the mic and Teams' audio; a recording's folder is never reused",
+   "feature": "A call is two tracks, the mic and the call app's audio (Teams', or Chrome's for Google Meet); a recording's folder is never reused",
    "priority": "critical",
    "check": "agent",
    "axes": []
@@ -163,6 +163,15 @@
    "priority": "critical",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-REC-21",
+   "feature": "A Google Meet call in Chrome is recorded on a Mac like a Teams call (arm, Record this call, Ask mode, a meeting with a Meet link): Chrome holding the mic is its call only while a Chrome window's title shows a Meet call or a calendar meeting with a Meet link goes on (10 min before it to its end), and stays its call while Chrome holds the mic; Teams on the mic wins; Chrome on the mic for anything else isn't offered or recorded. The remote track is everything Chrome plays (every tab: \"Record?\" says so), meta.json's app is \"meet\", and nothing is read from Teams for it (no mute, names, shared screens or chat). A meeting's arm starts only on a call of its own app",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
   }
  ]
 }

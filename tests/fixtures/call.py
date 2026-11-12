@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """A test call fed from files: no device opened, no sound played (after `. <dir>/env`).
 
-    tests/fixtures/call.py start <conversation> [--for SECONDS | --hold]    a call starts now; prints what it set up
+    tests/fixtures/call.py start <conversation> [--for SECONDS | --hold] [--meet [--title TEXT]]
+                                                                             a call starts now; prints what it set up
     tests/fixtures/call.py end                                               hang up now
     tests/fixtures/call.py status                                            in a call or not, and since when
 
 The run's env (tests/fixtures/make_data.py) points a debug build's sources at files
 (crates/echoctl/src/audio/testfeed.rs): ECHOCTL_TEST_ME_WAV is the mic track, ECHOCTL_TEST_REMOTE_WAV the call app's
 audio, and ECHOCTL_TEST_CALL_FILE stands for the call app being in a call: Echo's watcher sees a call while that file
-exists, which started at the file's modification time. `start` puts the conversation's two tracks
+exists, which started at the file's modification time. `--meet` makes it a call in Chrome instead of Teams (Google
+Meet), and `--title` the title of Chrome's window (none: no window, so only a calendar meeting with a Meet link makes
+it a Meet call). `start` puts the conversation's two tracks
 (tests/fixtures/audio, built once per run into <dir>/conv/<name>) at those paths and creates the file. The call ends
 by itself 1 s after the conversation, as TestCall hangs up (`--for N`: after N s; `--hold`: only at `end`).
 Everything after the sources is Echo's real path: the watcher, the arm, the two tracks, live notes, the stop, the
@@ -51,7 +54,7 @@ def conversation(name):
     return d
 
 
-def start(name, seconds, hold):
+def start(name, seconds, hold, meet=False, title=None):
     me, remote, call = paths()
     if os.path.exists(call):
         die(f"a call is on already ({call}): `call.py end` first")
@@ -62,7 +65,7 @@ def start(name, seconds, hold):
         shutil.copyfile(src, tmp)
         os.replace(tmp, dst)  # a recording that opens it now reads the whole file
     length = json.load(open(os.path.join(conv, "expected.json")))["duration"]
-    open(call, "w").write(name + "\n")
+    open(call, "w").write(name + "\n" + ("app=meet\n" if meet else "") + (f"title={title}\n" if title else ""))
     began = os.stat(call).st_mtime
     ends = None if hold else (seconds if seconds is not None else length + 1.0)
     if ends is not None:
@@ -73,7 +76,7 @@ def start(name, seconds, hold):
         subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
     print(json.dumps({"conversation": name, "seconds": length, "started_at": time.strftime("%H:%M:%S", time.localtime(began)),
-                      "hangs_up_in": ends, "call_file": call, "me": me, "remote": remote}))
+                      "hangs_up_in": ends, "call_file": call, "me": me, "remote": remote, "app": "meet" if meet else "teams"}))
 
 
 def end():
@@ -89,7 +92,7 @@ def status():
     call = paths()[2]
     if os.path.exists(call):
         began = os.stat(call).st_mtime
-        print(json.dumps({"in_call": True, "conversation": open(call).read().strip(), "for_s": round(time.time() - began, 1)}))
+        print(json.dumps({"in_call": True, "conversation": open(call).read().splitlines()[0], "for_s": round(time.time() - began, 1)}))
     else:
         print(json.dumps({"in_call": False}))
 
@@ -98,7 +101,8 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "start" and len(argv) > 2:
         seconds = float(argv[argv.index("--for") + 1]) if "--for" in argv else None
-        start(argv[2], seconds, "--hold" in argv)
+        title = argv[argv.index("--title") + 1] if "--title" in argv else None
+        start(argv[2], seconds, "--hold" in argv, "--meet" in argv, title)
     elif cmd == "end":
         end()
     elif cmd == "status":

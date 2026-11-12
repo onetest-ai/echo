@@ -1,6 +1,6 @@
 # Echo
 
-**Echo records the Teams calls you choose, turns them into text on your own Mac, and gives you
+**Echo records the Teams calls you choose (and, on a Mac, Google Meet calls in Chrome), turns them into text on your own Mac, and gives you
 minutes and action items afterwards.** No bot joins the call, nothing is uploaded for
 transcription, and the audio is deleted as soon as the transcript is ready.
 
@@ -39,7 +39,9 @@ included: [docs/install.md](docs/install.md).
 Echo never records on its own. You decide, per call, in one of two ways:
 
 - **Right now:** click the octopus, then **Record next call**. Echo starts when the Teams call
-  starts and stops when it ends. In the Echo window, the small **EN ▾** on the button picks the
+  starts and stops when it ends. A Google Meet call in Chrome (Mac only) works the same way: Echo
+  knows it by Meet's tab in the front of a Chrome window, or by a calendar meeting with a Meet link,
+  and records everything Chrome plays — every tab's sound, so keep other tabs quiet. In the Echo window, the small **EN ▾** on the button picks the
   call's language (your default one unless you pick another).
 - **Ahead of time:** open the calendar (step 4) and click **Record** on a meeting. Echo arms
   itself a minute before it starts.

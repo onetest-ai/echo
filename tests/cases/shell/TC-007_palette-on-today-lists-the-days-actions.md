@@ -26,7 +26,7 @@ auto: [tests/auto/specs/S-13.spec.mjs]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today` and wait for the text "Your day"; press `ControlOrMeta+k` | A dialog "Actions" opens with the chip "On: Today ×" |
 | 2 | Read the group MY WORK | An item "Close: Send Acme the SSO checklist" and an item "Claude: Send Acme the SSO checklist" |
-| 3 | Read the group ECHO | "Record the next Teams call", "Record a memo", "Vocabulary", "Show or hide Inbox", "Expand or fold the sidebar", "Check for updates" |
+| 3 | Read the group ECHO | "Record the next call", "Record a memo", "Vocabulary", "Show or hide Inbox", "Expand or fold the sidebar", "Check for updates" |
 | 4 | Press Escape | The dialog closes |
 
 ## Expected Final State

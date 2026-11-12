@@ -285,6 +285,11 @@ fn dump_node(n: &Node, depth: usize, count: &mut usize) -> Value {
     Value::Object(m)
 }
 
+/// Google Meet isn't recorded on Windows yet (#227): its window is never looked at.
+pub fn meet_window_open() -> Option<bool> {
+    None
+}
+
 /// `echoctl ax-dump`: snapshot Teams' window trees every second for `seconds` seconds.
 pub fn dump(seconds: u64) -> Result<()> {
     let r = Reader::new(TargetApp::Teams).ok_or_else(|| anyhow!("UI Automation is not available"))?;

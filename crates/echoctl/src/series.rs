@@ -261,7 +261,7 @@ mod tests {
 
     /// #228: a series set to record always skips its Zoom or Google Meet meetings (Echo can't record them yet).
     #[test]
-    fn always_skips_a_zoom_or_google_meet_meeting() {
+    fn always_skips_a_zoom_meeting() {
         let (_env, _) = paths::testenv::folders("series-always-other-app");
         let now = chrono::Utc::now();
         let mut zoom = meeting("e1", Some("S1"), "Umbrella weekly", now + chrono::Duration::hours(1));

@@ -45,8 +45,8 @@ pub(super) fn describe_work(v: &Value) -> Result<String> {
 pub const EVENTS: &[(&str, &str)] = &[
     // The words say what text comes with it (a subject, a title): the user agrees to that too.
     ("meeting_soon", "a meeting is about to start (its subject)"),
-    ("call_started", "a Teams call starts"),
-    ("call_ended", "a Teams call ends"),
+    ("call_started", "a call starts (Teams, Google Meet)"),
+    ("call_ended", "a call ends"),
     ("recording_started", "a recording starts (the call's title)"),
     ("recording_stopped", "a recording stops"),
     ("transcribed", "a call's transcript is ready"),

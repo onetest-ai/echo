@@ -46,7 +46,7 @@ test('a calendar event offers what the card offered before', () => {
   assert.equal(eventAction({}, st({ recordable: false })), null)
 })
 
-test('a Zoom or Google Meet meeting offers no Record, Join or Teams transcript: recording isn\'t available for it yet (#228)', () => {
+test('a Zoom meeting, or a Google Meet one off a Mac, offers no Record, Join or Teams transcript: recording isn\'t available for it yet (#228)', () => {
   const st = (o) => ({ past: false, live: false, recordable: true, ...o })
   const zoom = { app: 'zoom', join_url: 'https://zoom.us/j/81234567890' }
   assert.equal(eventAction(zoom, st()), 'other-app')
@@ -55,8 +55,18 @@ test('a Zoom or Google Meet meeting offers no Record, Join or Teams transcript: 
   assert.equal(eventAction({ app: 'meet', join_url: 'https://meet.google.com/abc-defg-hij' }, st({ past: true, recordable: false })), null, 'over: no Teams transcript to import')
   assert.equal(eventAction({ ...zoom, recorded: { name: 'x' } }, st()), 'open-notes')
   assert.equal(eventAction({ app: 'teams', join_url: 'https://teams' }, st({ past: true, recordable: false })), 'import')
+  const mac = /Mac/.test(navigator.platform || navigator.userAgent)
   assert.deepEqual([meetingApp({ app: 'zoom' }), meetingApp({ app: 'meet' }), meetingApp({ app: 'teams' }), meetingApp({ app: null }), meetingApp({ app: 'toString' })],
-    [{ name: 'Zoom', other: true }, { name: 'Google Meet', other: true }, { name: 'Teams', other: false }, null, null])
+    [{ name: 'Zoom', other: true }, { name: 'Google Meet', other: !mac }, { name: 'Teams', other: false }, null, null])
+})
+
+test('on a Mac a Google Meet meeting offers Record, and Join & record while it goes on (#230)', () => {
+  if (!/Mac/.test(navigator.platform || navigator.userAgent)) return
+  const st = (o) => ({ past: false, live: false, recordable: true, ...o })
+  const meet = { app: 'meet', join_url: 'https://meet.google.com/abc-defg-hij' }
+  assert.equal(eventAction(meet, st()), 'record')
+  assert.equal(eventAction(meet, st({ live: true })), 'join')
+  assert.equal(eventAction({ ...meet, scheduled: true }, st()), 'scheduled')
 })
 
 test('no layout saved: views in their own areas, both panels closed', () => {
