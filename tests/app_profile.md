@@ -463,6 +463,10 @@ on `PATH` work in any build.
   each call) answer instead with made-up tokens. Write both — a failing one stands for "not signed in" — or the
   computer's own `/opt/homebrew/bin/gh` is found next. On Windows a script there is found only as `gh.cmd` / `git.cmd`
   (a `.cmd` wrapper that runs it), not under its bare name.
+- **Outside links:** a plugin's https link (a widget's `open`, a work row's title, its ⌘K entry) opens on its second click
+  through the window's `open_url`; with `ECHOCTL_TEST_OPEN_LOG_ONLY` (set by `<dir>/env`) Echo appends it to `<dir>/open.log` and
+  opens nothing, in any build and on any OS. The case checks that line, and never makes the second click without the variable
+  set (`.ai-run/guides/testing/testing.md` R10).
 
 ## Out of Scope / Manual Setup Required
 
