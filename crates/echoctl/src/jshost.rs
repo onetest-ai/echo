@@ -283,8 +283,9 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
             return Err(refuse());
         }
     }
-    // Checked on the real host above; a development build may send it to a fake service instead.
-    let url = &test_host(url, &hosts).unwrap_or_else(|| url.to_string());
+    // Checked on the real host above; a development build may send it to a fake service instead (or refuse it).
+    let fake = test_host(url, &hosts)?;
+    let url = fake.as_deref().unwrap_or(url);
     /// The half-written download: its own name per fetch, gone however the fetch ends unless renamed into place.
     struct Part(PathBuf);
     impl Drop for Part {
@@ -302,7 +303,6 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
         }
         None => None,
     };
-    let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"));
     let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
     if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
         bail!("method {method}");
@@ -313,17 +313,16 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     if url.contains('\0') || body.as_deref().is_some_and(|b| b.contains('\0')) || headers.iter().any(|(k, v)| k.is_empty() || !k.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c)) || v.as_str().unwrap_or("").contains(['\0', '\n', '\r'])) {
         bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
     }
-    // Only http(s), never a redirect elsewhere: what the plugin may reach is checked on this URL alone.
-    let mut cfg = format!("url = {}\nrequest = \"{method}\"\nproto = \"=http,https\"\ngloboff\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", q(url));
+    let mut cfg = curl_head(url, &method, fake.is_some());
     if let Some((_, _, part)) = &save {
-        cfg.push_str(&format!("output = {}\n", q(&part.0.to_string_lossy())));
+        cfg.push_str(&format!("output = {}\n", curl_quote(&part.0.to_string_lossy())));
     }
     for (k, v) in headers {
-        cfg.push_str(&format!("header = {}\n", q(&format!("{k}: {}", v.as_str().unwrap_or("")))));
+        cfg.push_str(&format!("header = {}\n", curl_quote(&format!("{k}: {}", v.as_str().unwrap_or("")))));
     }
     // `data-raw`: sent as written; `data-binary` would read a body starting with `@` as a file.
     if let Some(body) = body {
-        cfg.push_str(&format!("data-raw = {}\n", q(&body)));
+        cfg.push_str(&format!("data-raw = {}\n", curl_quote(&body)));
     }
     // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
     let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
@@ -653,32 +652,84 @@ fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String) -> u64 {
     token
 }
 
+/// A value in curl's config: quoted, its backslashes, quotes and line breaks escaped.
+fn curl_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
+}
+
+/// The first lines of curl's config for `ctx.http.fetch`. Only http(s), never a redirect elsewhere: what the plugin may
+/// reach is checked on this URL alone. A request sent to a fake service never goes through a proxy (`http_proxy`,
+/// `all_proxy`): it stays on this computer, its headers with it.
+fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
+    let mut cfg = format!("url = {}\nrequest = \"{method}\"\nproto = \"=http,https\"\ngloboff\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", curl_quote(url));
+    if to_fake {
+        cfg.push_str("noproxy = \"*\"\n");
+    }
+    cfg
+}
+
 /// Development builds and tests: `ECHOCTL_TEST_HOSTS=api.github.com=http://127.0.0.1:47990,…` sends a request to
 /// `https://<host>/<path>` — a host the manifest names, already checked — to `<base>/<path>`, a fake service on this
-/// computer (plain http to 127.0.0.1 or localhost only). Never in a release build.
-fn test_host(url: &str, hosts: &[String]) -> Option<String> {
+/// computer (plain http to 127.0.0.1 or localhost only). Fails closed: once it is set, a mapping that isn't a local
+/// address, or a named host it doesn't map, fails the request rather than reach the real host. `Ok(None)`: the URL
+/// as it is (unset, or an address the user listed). Never read by a release build.
+fn test_host(url: &str, hosts: &[String]) -> Result<Option<String>> {
     #[cfg(debug_assertions)]
     {
-        test_host_in(&std::env::var("ECHOCTL_TEST_HOSTS").ok()?, url, hosts)
+        match std::env::var_os("ECHOCTL_TEST_HOSTS") {
+            None => Ok(None),
+            Some(map) => test_host_in(map.to_str().ok_or_else(|| anyhow!("ECHOCTL_TEST_HOSTS isn't text"))?, url, hosts),
+        }
     }
     #[cfg(not(debug_assertions))]
     {
         let _ = (url, hosts);
-        None
+        Ok(None)
     }
 }
 
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-fn test_host_in(map: &str, url: &str, hosts: &[String]) -> Option<String> {
-    let rest = url.strip_prefix("https://")?;
+fn test_host_in(map: &str, url: &str, hosts: &[String]) -> Result<Option<String>> {
+    // Every entry, up front: one that is wrong fails every request, whichever host it names.
+    let mut fakes: Vec<(String, String)> = Vec::new();
+    for entry in map.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let Some((host, base)) = entry.split_once('=').map(|(h, b)| (h.trim().to_ascii_lowercase(), b.trim())) else {
+            bail!("ECHOCTL_TEST_HOSTS: “{entry}” isn't <host>=http://127.0.0.1:<port>");
+        };
+        if host.is_empty() || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+            bail!("ECHOCTL_TEST_HOSTS: “{host}” isn't a host name");
+        }
+        let Some(base) = local_base(base) else {
+            bail!("ECHOCTL_TEST_HOSTS: “{base}” (for {host}) isn't a local address — http://127.0.0.1:<port> or http://localhost:<port>");
+        };
+        if fakes.iter().any(|(h, _)| *h == host) {
+            bail!("ECHOCTL_TEST_HOSTS: {host} is mapped twice");
+        }
+        fakes.push((host, base));
+    }
+    let Some(rest) = url.strip_prefix("https://") else { return Ok(None) };
     let (host, path) = rest.find(['/', '?', '#']).map_or((rest, ""), |i| rest.split_at(i));
     if !hosts.iter().any(|h| h == host) {
-        return None;
+        // An address the user listed (`network.hosts_from`): theirs, as it is.
+        return Ok(None);
     }
-    let base = map.split(',').filter_map(|e| e.trim().split_once('=')).find(|(h, _)| *h == host)?.1.trim_end_matches('/');
-    let authority = base.strip_prefix("http://")?.split('/').next()?;
-    let name = authority.rsplit_once(':').filter(|(_, port)| port.bytes().all(|b| b.is_ascii_digit())).map_or(authority, |(n, _)| n);
-    (matches!(name, "127.0.0.1" | "localhost") && !base.contains(['@', '?', '#', ' '])).then(|| format!("{base}{path}"))
+    match fakes.iter().find(|(h, _)| h.eq_ignore_ascii_case(host)) {
+        Some((_, base)) => Ok(Some(format!("{base}{path}"))),
+        None => bail!("{host} isn't mapped in ECHOCTL_TEST_HOSTS: a test never reaches the real {host}"),
+    }
+}
+
+/// `http://127.0.0.1:<port>[/path]` or `http://localhost:<port>[/path]` (scheme and name in any case), written
+/// lower-case and without a trailing `/`; anything else None.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn local_base(base: &str) -> Option<String> {
+    let rest = base.get(..7).filter(|s| s.eq_ignore_ascii_case("http://")).and(base.get(7..))?;
+    let (authority, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
+    let (name, port) = authority.split_once(':')?;
+    let name = name.to_ascii_lowercase();
+    let port_ok = !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|p| p > 0);
+    let path_ok = !path.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control() || b"@?#\\".contains(&b));
+    (matches!(name.as_str(), "127.0.0.1" | "localhost") && port_ok && path_ok).then(|| format!("http://{name}:{port}{}", path.trim_end_matches('/')))
 }
 
 /// Where the plugin is installed.
@@ -1534,18 +1585,95 @@ mod tests {
 
     #[test]
     fn a_development_build_sends_a_named_host_to_a_fake_service_and_nothing_else() {
-        let hosts = vec!["api.github.com".to_string()];
-        let map = "api.github.com=http://127.0.0.1:47990, other.example=http://127.0.0.1:47991";
-        assert_eq!(test_host_in(map, "https://api.github.com/user/repos?per_page=5", &hosts).as_deref(), Some("http://127.0.0.1:47990/user/repos?per_page=5"));
-        assert_eq!(test_host_in(map, "https://api.github.com", &hosts).as_deref(), Some("http://127.0.0.1:47990"));
-        assert_eq!(test_host_in(map, "https://other.example/x", &hosts), None, "a host the manifest doesn't name");
-        assert_eq!(test_host_in(map, "http://api.github.com/x", &hosts), None, "only what was https");
-        for base in ["http://example.com:1", "https://127.0.0.1:1", "http://127.0.0.1:1@evil.example", "http://127.0.0.1.evil.example", "http://localhost:x"] {
-            assert_eq!(test_host_in(&format!("api.github.com={base}"), "https://api.github.com/x", &hosts), None, "{base}");
+        let hosts = vec!["api.github.com".to_string(), "uploads.github.com".to_string()];
+        let to = |map: &str, url: &str| test_host_in(map, url, &hosts).map_err(|e| e.to_string());
+        let map = " api.github.com = http://127.0.0.1:47990/ , other.example=HTTP://LocalHost:47991,";
+        assert_eq!(to(map, "https://api.github.com/user/repos?per_page=5"), Ok(Some("http://127.0.0.1:47990/user/repos?per_page=5".into())));
+        assert_eq!(to(map, "https://api.github.com"), Ok(Some("http://127.0.0.1:47990".into())));
+        assert_eq!(to("api.github.com=http://localhost:8080/api/", "https://api.github.com/x"), Ok(Some("http://localhost:8080/api/x".into())));
+        assert_eq!(to("API.GitHub.com=Http://LOCALHOST:8080", "https://api.github.com/x"), Ok(Some("http://localhost:8080/x".into())), "written in any case");
+        // Not a named https host: an address the user listed, left as it is (its grant was checked on it).
+        assert_eq!(to(map, "https://other.example/x"), Ok(None));
+        assert_eq!(to(map, "http://api.github.com/x"), Ok(None));
+        assert_eq!(to(map, "http://127.0.0.1:8080/x"), Ok(None));
+        // A named host the variable doesn't map never goes out: not to the real host.
+        let unmapped = to(map, "https://uploads.github.com/x").unwrap_err();
+        assert!(unmapped.contains("isn't mapped in ECHOCTL_TEST_HOSTS: a test never reaches the real uploads.github.com"), "{unmapped}");
+        assert!(to("", "https://api.github.com/x").unwrap_err().contains("isn't mapped"), "set but empty: nothing mapped");
+        // A base that isn't a local address fails the request, whichever host it names.
+        for base in [
+            "http://[::1]:47990",
+            "http://0.0.0.0:47990",
+            "https://127.0.0.1:47990",
+            "http://example.com:1",
+            "http://127.0.0.1:1@evil.example",
+            "http://user@127.0.0.1:1",
+            "http://127.0.0.1.evil.example:1",
+            "http://localhost:x",
+            "http://127.0.0.1:",
+            "http://127.0.0.1",
+            "http://localhost:0",
+            "http://localhost:65536",
+            "http://127.0.0.1:1/a b",
+            "http://127.0.0.1:1/?x",
+            "127.0.0.1:1",
+        ] {
+            for map in [format!("api.github.com={base}"), format!("api.github.com=http://127.0.0.1:1,other.example={base}")] {
+                let e = to(&map, "https://api.github.com/x").unwrap_err();
+                assert!(e.starts_with("ECHOCTL_TEST_HOSTS: ") && e.contains("isn't a local address"), "{map}: {e}");
+            }
         }
-        assert_eq!(test_host_in("api.github.com=http://localhost:8080/api/", "https://api.github.com/x", &hosts).as_deref(), Some("http://localhost:8080/api/x"));
+        for map in ["api.github.com", "api.github.com:443=http://127.0.0.1:1", "=http://127.0.0.1:1", "api.github.com=http://127.0.0.1:1,API.github.com=http://127.0.0.1:2"] {
+            assert!(to(map, "https://api.github.com/x").unwrap_err().starts_with("ECHOCTL_TEST_HOSTS: "), "{map}");
+        }
     }
 
+    #[test]
+    fn a_request_to_a_fake_service_never_goes_through_a_proxy() {
+        let port = serve_clips();
+        let url = format!("http://127.0.0.1:{port}/text");
+        let run = |to_fake: bool| {
+            let mut child = std::process::Command::new("curl")
+                .args(["-q", "-sS", "-K", "-"])
+                // Only on this curl: a proxy that isn't there, which every request would go through.
+                .env("http_proxy", "http://127.0.0.1:1")
+                .env("all_proxy", "http://127.0.0.1:1")
+                .env_remove("no_proxy")
+                .env_remove("NO_PROXY")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            std::io::Write::write_all(&mut child.stdin.take().unwrap(), curl_head(&url, "GET", to_fake).as_bytes()).unwrap();
+            let out = child.wait_with_output().unwrap();
+            (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        assert_eq!(run(true), (true, "hello\n200".to_string()));
+        assert!(!run(false).0, "without `noproxy` curl takes the proxy, even for 127.0.0.1");
+    }
+
+    /// Sets an environment variable until dropped, even when the test panics.
+    #[cfg(debug_assertions)]
+    struct EnvVar(&'static str);
+
+    #[cfg(debug_assertions)]
+    impl EnvVar {
+        fn set(name: &'static str, value: &str) -> Self {
+            std::env::set_var(name, value);
+            EnvVar(name)
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    impl Drop for EnvVar {
+        fn drop(&mut self) {
+            std::env::remove_var(self.0);
+        }
+    }
+
+    // A release build reads no ECHOCTL_TEST_HOSTS: there this would reach for the real hosts.
+    #[cfg(debug_assertions)]
     #[test]
     fn a_plugins_named_host_reaches_the_fake_service_set_for_tests() {
         let port = serve_clips();
@@ -1553,23 +1681,49 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/hub");
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "hub", "name": "Hub", "version": "0.1.0", "main": "main.js", "uses": {"network": {"hosts": ["api.acme.example"]}}}).to_string()).unwrap();
-        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('get', async (a) => await ctx.http.fetch(a.url)) }").unwrap();
+        std::fs::write(
+            d.join("echo-plugin.json"),
+            json!({"id": "hub", "name": "Hub", "version": "0.1.0", "main": "main.js",
+                   "uses": {"network": {"hosts": ["api.acme.example", "uploads.acme.example"], "hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS server", "type": "string"}]})
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            "export function apply(ctx) { ctx.command('ping', () => 'pong'); ctx.command('get', async (a) => await ctx.http.fetch(a.url)); ctx.command('save', async (a) => await ctx.http.fetch(a.url, { save: a.to })) }",
+        )
+        .unwrap();
         std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "hub", "source": "./plugins/hub"}]}).to_string()).unwrap();
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         plugins::install("hub", Some(&name), &plugins::review("hub", Some(&name)).unwrap().uses).unwrap();
+        plugins::set_setting("hub", "tts", &json!(format!("http://127.0.0.1:{port}"))).unwrap();
         sync();
-        std::env::set_var("ECHOCTL_TEST_HOSTS", format!("api.acme.example=http://127.0.0.1:{port},other.example=http://127.0.0.1:{port}"));
-        let get = |url: &str| call("hub", "get", &json!({"url": url}));
-        let first = (0..50).find_map(|_| get("https://api.acme.example/text").ok().or_else(|| {
+        // Loaded first, with no request: the retries never reach for a host.
+        let up = (0..50).find_map(|_| call("hub", "ping", &json!({})).ok().or_else(|| {
             std::thread::sleep(Duration::from_millis(50));
             None
         }));
-        let other = get("https://other.example/text");
-        std::env::remove_var("ECHOCTL_TEST_HOSTS");
-        assert_eq!(first.unwrap(), json!({"status": 200, "body": "hello"}));
-        assert!(other.unwrap_err().to_string().contains("may reach only the hosts its manifest names"), "the grant is checked first, on the real host");
+        assert_eq!(up, Some(json!("pong")));
+        let get = |url: &str| call("hub", "get", &json!({"url": url}));
+        let refused = |r: Result<Value>| r.unwrap_err().to_string();
+        let _map = EnvVar::set("ECHOCTL_TEST_HOSTS", &format!(" api.acme.example = http://127.0.0.1:{port} , other.example=http://127.0.0.1:{port}"));
+        assert_eq!(get("https://api.acme.example/text").unwrap(), json!({"status": 200, "body": "hello"}));
+        // A download comes through the fake service too.
+        let saved = call("hub", "save", &json!({"url": "https://api.acme.example/clip", "to": "audio/a.mp3"})).unwrap();
+        assert_eq!(saved, json!({"status": 200, "body": "", "saved": "audio/a.mp3", "bytes": 6}));
+        assert_eq!(std::fs::read(plugins::data_dir("hub").join("audio/a.mp3")).unwrap(), vec![0xff, 0xfb, 0x90, 0x00, 0x80, 0xfe]);
+        // The grant is checked first, on the real host.
+        assert!(refused(get("https://other.example/text")).contains("may reach only the hosts its manifest names"));
+        // A named host the variable doesn't map is refused, not sent to the real one.
+        assert!(refused(get("https://uploads.acme.example/text")).contains("isn't mapped in ECHOCTL_TEST_HOSTS"));
+        // The user's own address (`hosts_from`) is reached as it is.
+        assert_eq!(get(&format!("http://127.0.0.1:{port}/text")).unwrap(), json!({"status": 200, "body": "hello"}));
+        // A mapping that isn't a local address fails every request.
+        let _map = EnvVar::set("ECHOCTL_TEST_HOSTS", &format!("api.acme.example=http://127.0.0.1:{port},uploads.acme.example=http://0.0.0.0:{port}"));
+        assert!(refused(get("https://api.acme.example/text")).contains("isn't a local address"));
+        drop(_map);
         plugins::remove("hub", false).unwrap();
         sync();
     }
