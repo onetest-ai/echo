@@ -19,6 +19,8 @@
 .td-rows, .td-tasks { min-height: 0; overflow-y: auto; }
 .td-sec h2 { margin: 0 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
 .td-sec h2 .link-btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+/* A plugin widget's header may carry a thread's or client's name (any length): it wraps, never overflows its frame. */
+.pw-sec h2 { min-width: 0; overflow-wrap: anywhere; }
 .td-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .td-row:first-of-type { border-top: 0; }
 .td-row.past .td-t, .td-row.past .td-s { opacity: 0.6; }
