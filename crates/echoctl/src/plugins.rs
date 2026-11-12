@@ -1125,6 +1125,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     let _ = fs::remove_dir_all(installed_dir(id));
     crate::grants::remove_plugin(id);
+    // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
+    signin::forget_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));

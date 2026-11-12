@@ -114,6 +114,12 @@ function pluginCtx(id) {
     /** Echo's own pieces, so a plugin looks like Echo. */
     ui: {
       esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
+      /** Put text on the clipboard (a code to paste elsewhere) — only while the user's click or key is going on: a
+       *  plugin can't fill the clipboard by itself. At most 10,000 characters. */
+      copy: (text) => {
+        if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('the clipboard is filled only on your click')
+        send({ cmd: 'copy', text: String(text).slice(0, 10000) })
+      },
       /** Its CSS in the page, taken out when it unloads. */
       style: (css) => { const el = document.createElement('style'); el.dataset.plugin = id; el.textContent = String(css); document.head.appendChild(el); owned.styles.push(el) },
       /** Echo's graph (Sigma over graphology, as the Brain's): draw(box, key, build, {click}), focus, select, find. */

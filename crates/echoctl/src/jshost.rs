@@ -1188,11 +1188,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             if op == "signin.keep" {
                 read_only_here("keeping a sign-in")?;
-                plugins::signin::keep(&host, arg[1].as_str().unwrap_or(""))?;
+                plugins::signin::keep(id, &host, arg[1].as_str().unwrap_or(""))?;
                 Value::Bool(true)
             } else {
                 read_only_here("forgetting a sign-in")?;
-                json!(plugins::signin::forget_kept(&host)?)
+                json!(plugins::signin::forget_kept(id, &host)?)
             }
         }
         o => bail!("Echo has no service “{o}”"),
@@ -1215,7 +1215,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let host = arg[0].as_str().unwrap_or("");
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
             read_only_here("reading your sign-in")?;
-            let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses);
+            let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses).then_some(id);
             Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
@@ -1920,16 +1920,17 @@ mod tests {
               ctx.command('get', async (a) => await ctx.signin.get(a.host))
             }
             "#;
-        for (id, signin) in [("keeper", json!({"hosts": ["keep-jshost.example"], "keep": true})), ("reader", json!({"hosts": ["keep-jshost.example"]}))] {
+        let keeps = json!({"hosts": ["keep-jshost.example"], "keep": true});
+        for (id, signin) in [("keeper", keeps.clone()), ("other-keeper", keeps), ("reader", json!({"hosts": ["keep-jshost.example"]}))] {
             let d = mk.join("plugins").join(id);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"signin": signin}}).to_string()).unwrap();
             std::fs::write(d.join("main.js"), main).unwrap();
         }
-        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "keeper", "source": "./plugins/keeper"}, {"id": "reader", "source": "./plugins/reader"}]}).to_string()).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "keeper", "source": "./plugins/keeper"}, {"id": "other-keeper", "source": "./plugins/other-keeper"}, {"id": "reader", "source": "./plugins/reader"}]}).to_string()).unwrap();
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
-        for id in ["keeper", "reader"] {
+        for id in ["keeper", "other-keeper", "reader"] {
             let review = plugins::review(id, Some(&name)).unwrap();
             plugins::install(id, Some(&name), &review.uses).unwrap();
         }
@@ -1944,7 +1945,7 @@ mod tests {
         let token = json!({"host": "keep-jshost.example", "token": "madeup-any-service-token"});
         assert_eq!(call("keeper", "keep", &token).unwrap(), json!(true));
         assert_eq!(call("keeper", "get", &host).unwrap(), json!({"token": "madeup-any-service-token", "from": "echo"}));
-        let f = root.join("config/signin/keep-jshost.example.json");
+        let f = root.join("config/signin/keeper/keep-jshost.example.json");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1952,6 +1953,16 @@ mod tests {
         }
         let leaked = std::fs::read_dir(plugins::data_dir("keeper")).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("madeup-any")));
         assert!(!leaked, "never in the plugin's store");
+        // Another plugin that keeps sign-ins to the same host has its own: it neither gets, replaces nor forgets this one.
+        assert_eq!(call("other-keeper", "get", &host).unwrap(), Value::Null);
+        assert_eq!(call("other-keeper", "forget", &host).unwrap(), json!(false));
+        assert_eq!(call("other-keeper", "keep", &json!({"host": "keep-jshost.example", "token": "madeup-the-other-one"})).unwrap(), json!(true));
+        assert_eq!(call("keeper", "get", &host).unwrap()["token"], "madeup-any-service-token");
+        assert_eq!(call("other-keeper", "get", &host).unwrap()["token"], "madeup-the-other-one");
+        // Removed — even with its data kept — its sign-in goes; the other plugin's stays.
+        plugins::remove("other-keeper", true).unwrap();
+        assert!(!root.join("config/signin/other-keeper").exists());
+        assert!(f.exists());
         // A plugin whose sheet didn't say `keep` neither gets it nor keeps one.
         assert_eq!(call("reader", "get", &host).unwrap(), Value::Null);
         for command in ["keep", "forget"] {
@@ -1985,6 +1996,7 @@ mod tests {
         for id in ["keeper", "reader"] {
             plugins::remove(id, false).unwrap();
         }
+        assert!(!root.join("config/signin/keeper").exists());
         sync();
     }
 

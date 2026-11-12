@@ -12,9 +12,10 @@
 //!
 //! A plugin may also have Echo keep a sign-in it made itself (`uses.signin.keep`: however it got it — a device code,
 //! a browser sign-in — and whatever the service; Echo doesn't look inside): `ctx.signin.keep(host, token)` writes it to
-//! `<config dir>/signin/<host>.json` (0600, as Microsoft 365's `graph.json`; the Keychain would ask again after every
-//! re-signed build), outside every plugin's store, and `get` hands it back first — `{token, from: "echo"}` — to a
-//! plugin whose sheet said `keep` only; `ctx.signin.forget(host)` deletes it.
+//! `<config dir>/signin/<plugin>/<host>.json` (0600, as Microsoft 365's `graph.json`; the Keychain would ask again
+//! after every re-signed build), outside every plugin's store. It is that plugin's own: `get` hands it back first —
+//! `{token, from: "echo"}` — to that plugin only (its sheet said `keep`), no other plugin reads, replaces or forgets it,
+//! and it goes when the plugin is removed; `ctx.signin.forget(host)` deletes it.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -36,42 +37,54 @@ const KEEP_NONE: Duration = Duration::from_secs(10);
 /// The most of a program's output read.
 const MAX_OUT: usize = 64 * 1024;
 
-/// The user's sign-in to `host`: the one Echo keeps for it (`own`: the plugin's sheet said `keep`), else
+/// The user's sign-in to `host`: the one Echo keeps for plugin `own` (its sheet said `keep`), else
 /// `{token, from: "gh" | "git", user?}`, or `None` when there is none.
 /// `fresh`: ask the programs again instead of what was kept, and keep their answer.
-pub fn get(host: &str, fresh: bool, own: bool) -> Option<Value> {
-    if let Some(v) = kept(host).filter(|_| own) {
+pub fn get(host: &str, fresh: bool, own: Option<&str>) -> Option<Value> {
+    if let Some(v) = own.and_then(|p| kept(p, host)) {
         return Some(v);
     }
     cached(host, fresh, (KEEP, KEEP_NONE), || get_with(host, program("gh").as_deref(), program("git").as_deref(), &|_| {}))
 }
 
-/// Where Echo keeps a sign-in a plugin made to `host` (a plain host name its sheet named).
-fn kept_file(host: &str) -> std::path::PathBuf {
-    crate::paths::config_dir().join("signin").join(format!("{host}.json"))
+/// Plugin `plugin`'s kept sign-ins (an installed plugin's id: a–z 0–9 `-`).
+fn kept_dir(plugin: &str) -> std::path::PathBuf {
+    crate::paths::config_dir().join("signin").join(plugin)
 }
 
-/// The sign-in Echo keeps for `host`: `{token, from: "echo"}`, or `None`.
-pub fn kept(host: &str) -> Option<Value> {
-    let v: Value = serde_json::from_str(&std::fs::read_to_string(kept_file(host)).ok()?).ok()?;
+/// Where Echo keeps the sign-in plugin `plugin` made to `host` (a plain host name its sheet named).
+fn kept_file(plugin: &str, host: &str) -> std::path::PathBuf {
+    kept_dir(plugin).join(format!("{host}.json"))
+}
+
+/// The sign-in Echo keeps for `plugin` to `host`: `{token, from: "echo"}`, or `None`.
+pub fn kept(plugin: &str, host: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(kept_file(plugin, host)).ok()?).ok()?;
     let token = v["token"].as_str().filter(|t| plain(t))?;
     Some(json!({"token": token, "from": "echo"}))
 }
 
-/// Keep a sign-in to `host` (readable by the user only), replacing the one before.
-pub fn keep(host: &str, token: &str) -> anyhow::Result<()> {
+/// Keep `plugin`'s sign-in to `host` (readable by the user only), replacing its one before.
+pub fn keep(plugin: &str, host: &str, token: &str) -> anyhow::Result<()> {
     anyhow::ensure!(plain(token) && token.len() <= 8192, "a sign-in is one line of text, 8 KB at most");
-    let f = kept_file(host);
+    let f = kept_file(plugin, host);
     std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
     super::write_private(&f, json!({"token": token, "at": chrono::Utc::now().to_rfc3339()}).to_string().as_bytes())
 }
 
-/// Forget the sign-in Echo keeps for `host` (true: there was one). The service may keep its grant until revoked there.
-pub fn forget_kept(host: &str) -> anyhow::Result<bool> {
-    match std::fs::remove_file(kept_file(host)) {
+/// Forget `plugin`'s sign-in to `host` (true: there was one). The service may keep its grant until revoked there.
+pub fn forget_kept(plugin: &str, host: &str) -> anyhow::Result<bool> {
+    match std::fs::remove_file(kept_file(plugin, host)) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// Forget every sign-in Echo keeps for `plugin` (it is removed).
+pub fn forget_plugin(plugin: &str) {
+    if !plugin.is_empty() {
+        let _ = std::fs::remove_dir_all(kept_dir(plugin));
     }
 }
 

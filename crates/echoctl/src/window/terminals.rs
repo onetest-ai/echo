@@ -24,6 +24,19 @@ pub(super) fn shell_command() -> portable_pty::CommandBuilder {
 // ── Settings (the window's Settings activity) ───────────────────────────────────────────────
 
 pub(crate) fn copy_to_clipboard(text: &str) {
+    copy_to_clipboard_with(text, put_on_clipboard)
+}
+
+/// `copy_to_clipboard` with what puts it there given: test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) logs `copied: <text>`
+/// with the links it opens and never touches the computer's clipboard.
+pub(crate) fn copy_to_clipboard_with(text: &str, put: impl FnOnce(&str)) {
+    if crate::app::open_log_only(&format!("copied: {}", text.replace(['\n', '\r'], " "))) {
+        return;
+    }
+    put(text)
+}
+
+fn put_on_clipboard(text: &str) {
     use std::io::Write;
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn();
