@@ -293,6 +293,9 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // A reading that says "another call", waiting to be confirmed by a later one (`judge`).
     let mut candidate: Option<Candidate> = None;
     let looker = CallLook::default();
+    // A meeting's arm waiting while the user is on another call (#483): its id, once said.
+    let mut waits_other: Option<String> = None;
+    let mut last_arm_look: Option<Instant> = None;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -422,6 +425,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     call_ended_at = Some(Instant::now());
                     held_arm = None;
                     stopped_in_call = false;
+                    last_arm_look = None;
                     emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
                 }
             }
@@ -509,10 +513,41 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         // The arm is taken (removed) before the recording starts, under its lock: one cancelled
         // or replaced since this tick read it doesn't start, and one written during the
         // recording (the next meeting's) is never the one removed.
+        // An arm waiting for its meeting's call while the user is on another one stays until the meeting ends (#483).
         let startable = armed.as_ref().filter(|a| {
-            held_arm.as_deref() != Some(a.id.as_str()) && (now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES
+            held_arm.as_deref() != Some(a.id.as_str()) && ((now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES || waiting_for(waits_other.as_deref(), a, now))
         });
-        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && take_arm(&a.id)) {
+        // A meeting's arm starts only on that meeting's call: while the user is still on another call (one that began
+        // before this meeting could, or whose window names another), it waits — looked at again every few seconds —
+        // and starts once they are on this one (#483). A call window that can't be read changes nothing.
+        let on_its_call = match startable.filter(|_| rec.is_none() && call_active && detected.is_some() && call_window_readable()).and_then(|a| a.meeting.as_ref().map(|m| (a.id.clone(), m))) {
+            None => true,
+            Some((id, m)) => match looker.take() {
+                Some(seen) if last_arm_look.is_some() => match meetings_call(m, &seen) {
+                    Some(false) => {
+                        if waits_other.as_deref() != Some(id.as_str()) {
+                            waits_other = Some(id.clone());
+                            let subject = m.subject.clone().unwrap_or_else(|| "the meeting".into());
+                            emit("arm_waits_other_call", json!({ "subject": subject, "on": seen.name }));
+                            crate::app::notify(&format!("Waiting to record “{subject}”"), "You're on another call: Echo records it once you join this meeting.");
+                        }
+                        last_arm_look = Some(Instant::now());
+                        false
+                    }
+                    _ => true,
+                },
+                _ => {
+                    if last_arm_look.is_none_or(|t| t.elapsed() >= CALL_LOOK_EVERY) {
+                        last_arm_look = Some(Instant::now());
+                        looker.start();
+                    }
+                    false
+                }
+            },
+        };
+        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && on_its_call && take_arm(&a.id)) {
+            waits_other = None;
+            last_arm_look = None;
             // No meeting given: attach the agenda meeting this call overlaps, if any.
             let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
             // The AI profile is pinned now: changing the default later never changes this call.
@@ -552,7 +587,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         if let (None, Some(a)) = (&rec, &armed) {
             let age = (now - a.armed_at).to_std().unwrap_or_default();
-            if age > ARM_EXPIRES && take_arm(&a.id) {
+            // Waiting for its meeting's call while the user is on another one: kept until the meeting ends (#483).
+            if age > ARM_EXPIRES && !waiting_for(waits_other.as_deref(), a, now) && take_arm(&a.id) {
                 emit("arm_expired", json!({ "title": a.title }));
             }
         }
@@ -633,6 +669,15 @@ struct CallSeen {
 }
 
 fn call_seen() -> CallSeen {
+    // Development builds and tests: the call window as a file says (`{"began_s_ago": …, "title": …}`), for calls fed
+    // from files — the real Teams is never read for them.
+    #[cfg(debug_assertions)]
+    if let Some(v) = test_call_window() {
+        return CallSeen {
+            began: v["began_s_ago"].as_i64().map(|s| Utc::now() - chrono::Duration::seconds(s)),
+            name: v["title"].as_str().and_then(crate::ax::call_name),
+        };
+    }
     let (elapsed, title) = crate::ax::call_glance();
     CallSeen {
         began: elapsed.map(|e| Utc::now() - chrono::Duration::seconds(e as i64)),
@@ -664,6 +709,44 @@ impl CallLook {
     fn take(&self) -> Option<CallSeen> {
         self.out.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
+}
+
+/// Development builds and tests: `ECHOCTL_TEST_CALL_WINDOW` names a JSON file standing for the call window.
+#[cfg(debug_assertions)]
+fn test_call_window() -> Option<Value> {
+    let f = std::env::var_os("ECHOCTL_TEST_CALL_WINDOW")?;
+    serde_json::from_slice(&fs::read(f).ok()?).ok()
+}
+
+/// Whether the call window can be read here (the setting, or a test's stand-in).
+fn call_window_readable() -> bool {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ECHOCTL_TEST_CALL_WINDOW").is_some() {
+        return true;
+    }
+    crate::config::reads_call_window()
+}
+
+/// An arm waiting for its meeting's call while the user is on another one (`waits`: the waiting arm's id): kept until
+/// the meeting ends (#483).
+fn waiting_for(waits: Option<&str>, a: &Armed, now: DateTime<Utc>) -> bool {
+    waits == Some(a.id.as_str()) && a.meeting.as_ref().and_then(|m| parse_time(&m.end)).is_some_and(|end| now < end)
+}
+
+/// Whether the call going on is `meeting`'s, from one look at the call window: not when it began before the meeting
+/// could have (`MATCH_EARLY_MIN` before its start) or its window names another call; `None` when the look can't
+/// tell (nothing read) — then it is taken as the meeting's, as before (#483).
+fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
+    let norm = |s: &str| s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    if let (Some(name), Some(subject)) = (&seen.name, &meeting.subject) {
+        let (n, s) = (norm(name), norm(subject));
+        if !n.is_empty() && !s.is_empty() && !n.contains(&s) && !s.contains(&n) {
+            return Some(false);
+        }
+    }
+    let start = parse_time(&meeting.start)?;
+    let began = seen.began?;
+    Some(began >= start - chrono::Duration::minutes(crate::calendar::MATCH_EARLY_MIN))
 }
 
 /// A reading that says "another call", waiting for a later one to confirm it.
@@ -1342,6 +1425,30 @@ pub fn follow_events() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_meetings_arm_starts_only_on_that_meetings_call() {
+        let at = |s: &str| Some(s.to_string());
+        let m = MeetingContext { subject: at("Knowledge Fabric Solution"), start: at("2026-11-12T17:30:00Z"), end: at("2026-11-12T18:00:00Z"), ..Default::default() };
+        let t = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        let seen = |began: Option<&str>, name: Option<&str>| CallSeen { began: began.map(t), name: name.map(str::to_owned) };
+        // Still on the call before it (began an hour earlier, another name): not its call — wait.
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), Some("Equiniti weekly"))), Some(false));
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T16:30:00Z"), None)), Some(false), "by its timer alone");
+        assert_eq!(meetings_call(&m, &seen(None, Some("Call with Dana Lee"))), Some(false), "by its name alone");
+        // Its call: begun from 10 min before the meeting, named as it is (Teams may cut or decorate the name).
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("Knowledge Fabric Solution"))), Some(true));
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T17:24:00Z"), None)), Some(true), "joined a few minutes early");
+        assert_eq!(meetings_call(&m, &seen(None, Some("Knowledge Fabric Sol…"))), None, "a cut name says nothing against it");
+        assert_eq!(meetings_call(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("knowledge fabric solution | Microsoft Teams"))), Some(true));
+        // Nothing read: as before, it records.
+        assert_eq!(meetings_call(&m, &seen(None, None)), None);
+        // The arm waiting for its call is kept until the meeting ends, not past it; another arm isn't.
+        let a = Armed { id: "a1".into(), armed_at: t("2026-11-12T17:29:00Z"), title: None, meeting: Some(m.clone()), languages: None, ai_profile: None };
+        assert!(waiting_for(Some("a1"), &a, t("2026-11-12T17:50:00Z")), "past the 15 min an arm has, the meeting still on");
+        assert!(!waiting_for(Some("a1"), &a, t("2026-11-12T18:01:00Z")), "the meeting is over");
+        assert!(!waiting_for(Some("other"), &a, t("2026-11-12T17:50:00Z")));
+    }
+
     use super::*;
 
     #[test]

@@ -156,6 +156,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-REC-20",
+   "feature": "A meeting set to record (or armed for a meeting) starts recording only on that meeting's call: while the user is still on another call — one that began before the meeting could (10 min before its start) or whose call window names another call — Echo waits (event arm_waits_other_call, a notification \"Waiting to record …\"), looks again every few seconds, keeps the arm until the meeting ends, and starts once the user is on its call; a call window it can't read changes nothing",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
