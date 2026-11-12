@@ -185,13 +185,17 @@ const PRELUDE: &str = r#"
       /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
     },
-    /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`, from the GitHub CLI or git on this
-     *  computer: `get` resolves {token, from: 'gh' | 'git', user?} or null when there is none (kept a minute;
-     *  `{fresh: true}` asks again, e.g. after the token was refused); `sources` says which of the two programs are
-     *  here ({gh, git}), reading no sign-in. */
+    /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`: the one Echo keeps for it (with
+     *  `uses.signin.keep`), else the GitHub CLI's or git's on this computer: `get` resolves {token, from: 'echo' | 'gh'
+     *  | 'git', user?} or null when there is none (kept a minute; `{fresh: true}` asks again, e.g. after the token was
+     *  refused); `sources` says which of the two programs are here ({gh, git}), reading no sign-in. With
+     *  `uses.signin.keep`, `keep(host, token)` has Echo keep a sign-in you made (outside your store) and `forget(host)`
+     *  drops it (true: there was one). */
     signin: {
       get: (host, opts) => later('signin.get', [String(host), !!(opts && opts.fresh)]),
       sources: (host) => call('signin.sources', String(host)),
+      keep: (host, token) => call('signin.keep', [String(host), String(token)]),
+      forget: (host) => call('signin.forget', String(host)),
     },
     deliver: {
       status: () => call('deliver.status'),
@@ -1174,6 +1178,23 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, &s(arg))?;
             plugins::signin::sources()
         }
+        // A sign-in the plugin made itself, kept by Echo for it (`uses.signin.keep`).
+        "signin.keep" | "signin.forget" => {
+            let host = if op == "signin.keep" { arg[0].as_str().unwrap_or("").to_string() } else { s(arg) };
+            let uses = plugins::read_manifest(&package_dir(id)?)?.uses;
+            plugins::may_use_signin(&uses, &host)?;
+            if !plugins::may_keep_signin(&uses) {
+                bail!("it didn't ask Echo to keep a sign-in it makes when it was installed (uses.signin.keep)");
+            }
+            if op == "signin.keep" {
+                read_only_here("keeping a sign-in")?;
+                plugins::signin::keep(&host, arg[1].as_str().unwrap_or(""))?;
+                Value::Bool(true)
+            } else {
+                read_only_here("forgetting a sign-in")?;
+                json!(plugins::signin::forget_kept(&host)?)
+            }
+        }
         o => bail!("Echo has no service “{o}”"),
     })
 }
@@ -1194,7 +1215,8 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let host = arg[0].as_str().unwrap_or("");
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
             read_only_here("reading your sign-in")?;
-            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false)).unwrap_or(Value::Null))
+            let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses);
+            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "system.pick_folder" => {
@@ -1881,6 +1903,88 @@ mod tests {
         assert_eq!(call("gh-ish", "get", &json!({"host": "signin-jshost.example"})).unwrap(), Value::Null);
         plugins::signin::FAKE_PROGRAMS.lock().unwrap().clear();
         plugins::remove("gh-ish", false).unwrap();
+        sync();
+    }
+
+    /// `uses.signin.keep`: Echo keeps a sign-in the plugin made (whatever service, however made), outside its store, and
+    /// hands it back first to that plugin only; refused without `keep`, for a host it didn't name, in a read-only routine.
+    #[test]
+    fn echo_keeps_a_sign_in_a_plugin_made_and_hands_it_back_only_to_a_plugin_that_said_keep() {
+        let (_env, root) = paths::testenv::folders("jshost-signin-keep");
+        plugins::signin::FAKE_PROGRAMS.lock().unwrap().clear();
+        let mk = root.join("market");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('keep', (a) => ctx.signin.keep(a.host, a.token))
+              ctx.command('forget', (a) => ctx.signin.forget(a.host))
+              ctx.command('get', async (a) => await ctx.signin.get(a.host))
+            }
+            "#;
+        for (id, signin) in [("keeper", json!({"hosts": ["keep-jshost.example"], "keep": true})), ("reader", json!({"hosts": ["keep-jshost.example"]}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"signin": signin}}).to_string()).unwrap();
+            std::fs::write(d.join("main.js"), main).unwrap();
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "keeper", "source": "./plugins/keeper"}, {"id": "reader", "source": "./plugins/reader"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        for id in ["keeper", "reader"] {
+            let review = plugins::review(id, Some(&name)).unwrap();
+            plugins::install(id, Some(&name), &review.uses).unwrap();
+        }
+        sync();
+        let host = json!({"host": "keep-jshost.example"});
+        let first = (0..50).find_map(|_| call("keeper", "get", &host).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(first.unwrap(), Value::Null);
+        // Kept, handed back first; a file of Echo's the user alone may read, nothing in the plugin's store.
+        let token = json!({"host": "keep-jshost.example", "token": "madeup-any-service-token"});
+        assert_eq!(call("keeper", "keep", &token).unwrap(), json!(true));
+        assert_eq!(call("keeper", "get", &host).unwrap(), json!({"token": "madeup-any-service-token", "from": "echo"}));
+        let f = root.join("config/signin/keep-jshost.example.json");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let leaked = std::fs::read_dir(plugins::data_dir("keeper")).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("madeup-any")));
+        assert!(!leaked, "never in the plugin's store");
+        // A plugin whose sheet didn't say `keep` neither gets it nor keeps one.
+        assert_eq!(call("reader", "get", &host).unwrap(), Value::Null);
+        for command in ["keep", "forget"] {
+            let e = call("reader", command, &token).unwrap_err().to_string();
+            assert!(e.contains("didn't ask Echo to keep a sign-in"), "{command}: {e}");
+        }
+        // A host it didn't name; a sign-in that isn't one line.
+        let e = call("keeper", "keep", &json!({"host": "github.com", "token": "x"})).unwrap_err().to_string();
+        assert!(e.contains("didn't ask to use your sign-in"), "{e}");
+        let e = call("keeper", "keep", &json!({"host": "keep-jshost.example", "token": "a\nb"})).unwrap_err().to_string();
+        assert!(e.contains("one line of text"), "{e}");
+        // A read-only routine keeps and forgets nothing.
+        {
+            struct RunMode;
+            impl Drop for RunMode {
+                fn drop(&mut self) {
+                    std::env::remove_var(crate::guard::RUN_MODE);
+                }
+            }
+            let _routine = RunMode;
+            std::env::set_var(crate::guard::RUN_MODE, "routine");
+            for command in ["keep", "forget"] {
+                let e = call("keeper", command, &token).unwrap_err().to_string();
+                assert!(e.contains("isn't allowed in a read-only routine"), "{command}: {e}");
+            }
+        }
+        assert_eq!(call("keeper", "forget", &host).unwrap(), json!(true));
+        assert!(!f.exists());
+        assert_eq!(call("keeper", "get", &host).unwrap(), Value::Null);
+        assert_eq!(call("keeper", "forget", &host).unwrap(), json!(false));
+        for id in ["keeper", "reader"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 

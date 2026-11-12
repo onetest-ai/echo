@@ -1587,6 +1587,13 @@ mod tests {
         }
         // It grants no network of its own.
         assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap().iter().all(|l| !l.contains("Talks to")));
+        // `keep`: the plugin signs in itself and Echo keeps that sign-in for it.
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": true}}))).unwrap(),
+            ["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to; it may sign you in to github.com itself and have Echo keep that sign-in for it"]
+        );
+        assert_eq!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": false}}))).unwrap(), describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap());
+        assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": "yes"}}))).is_err());
         let granted = uses(json!({"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}));
         assert!(may_use_signin(&granted, "github.com").is_ok());
         for other in ["gitlab.com", "api.github.com", "GITHUB.COM", ""] {

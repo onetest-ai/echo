@@ -204,6 +204,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-22",
+   "feature": "With `uses.signin.keep: true` (the sheet adds 'it may sign you in to github.com itself and have Echo keep that sign-in for it') a plugin that made a sign-in itself — whatever the service and however it got it; Echo doesn't look inside — has Echo keep it: `ctx.signin.keep(host, token)` (a host of its `signin.hosts`; one line, 8 KB at most) writes `<config dir>/signin/<host>.json` (0600), outside every plugin's store; `ctx.signin.get(host)` then hands it back first as `{token, from: 'echo'}` — to a plugin whose sheet said `keep` only; `ctx.signin.forget(host)` deletes it (true: there was one); keeping and forgetting refused without `keep` and in a read-only routine",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

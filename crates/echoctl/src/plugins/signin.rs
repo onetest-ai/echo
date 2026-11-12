@@ -9,6 +9,12 @@
 //! host at a time, kept a minute (none found: 10 s) and then dropped from memory; `ctx.signin.get(host, {fresh: true})`
 //! asks the programs again and replaces what was kept (a plugin whose token was refused). The token is never written
 //! or logged by Echo; it goes to the host half only.
+//!
+//! A plugin may also have Echo keep a sign-in it made itself (`uses.signin.keep`: however it got it — a device code,
+//! a browser sign-in — and whatever the service; Echo doesn't look inside): `ctx.signin.keep(host, token)` writes it to
+//! `<config dir>/signin/<host>.json` (0600, as Microsoft 365's `graph.json`; the Keychain would ask again after every
+//! re-signed build), outside every plugin's store, and `get` hands it back first — `{token, from: "echo"}` — to a
+//! plugin whose sheet said `keep` only; `ctx.signin.forget(host)` deletes it.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -30,10 +36,43 @@ const KEEP_NONE: Duration = Duration::from_secs(10);
 /// The most of a program's output read.
 const MAX_OUT: usize = 64 * 1024;
 
-/// The user's sign-in to `host`: `{token, from: "gh" | "git", user?}`, or `None` when neither program has one.
+/// The user's sign-in to `host`: the one Echo keeps for it (`own`: the plugin's sheet said `keep`), else
+/// `{token, from: "gh" | "git", user?}`, or `None` when there is none.
 /// `fresh`: ask the programs again instead of what was kept, and keep their answer.
-pub fn get(host: &str, fresh: bool) -> Option<Value> {
+pub fn get(host: &str, fresh: bool, own: bool) -> Option<Value> {
+    if let Some(v) = kept(host).filter(|_| own) {
+        return Some(v);
+    }
     cached(host, fresh, (KEEP, KEEP_NONE), || get_with(host, program("gh").as_deref(), program("git").as_deref(), &|_| {}))
+}
+
+/// Where Echo keeps a sign-in a plugin made to `host` (a plain host name its sheet named).
+fn kept_file(host: &str) -> std::path::PathBuf {
+    crate::paths::config_dir().join("signin").join(format!("{host}.json"))
+}
+
+/// The sign-in Echo keeps for `host`: `{token, from: "echo"}`, or `None`.
+pub fn kept(host: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(kept_file(host)).ok()?).ok()?;
+    let token = v["token"].as_str().filter(|t| plain(t))?;
+    Some(json!({"token": token, "from": "echo"}))
+}
+
+/// Keep a sign-in to `host` (readable by the user only), replacing the one before.
+pub fn keep(host: &str, token: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(plain(token) && token.len() <= 8192, "a sign-in is one line of text, 8 KB at most");
+    let f = kept_file(host);
+    std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
+    super::write_private(&f, json!({"token": token, "at": chrono::Utc::now().to_rfc3339()}).to_string().as_bytes())
+}
+
+/// Forget the sign-in Echo keeps for `host` (true: there was one). The service may keep its grant until revoked there.
+pub fn forget_kept(host: &str) -> anyhow::Result<bool> {
+    match std::fs::remove_file(kept_file(host)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Which of the programs that could hold a sign-in are on this computer (no sign-in read): `{gh, git}`.

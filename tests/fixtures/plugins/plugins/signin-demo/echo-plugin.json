@@ -1,0 +1,8 @@
+{
+  "id": "signin-demo",
+  "name": "Sign-in demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: Echo keeps a sign-in it made itself (tests/cases/plugins/TC-025).",
+  "main": "main.js",
+  "uses": { "signin": { "hosts": ["github.com"], "keep": true } }
+}
