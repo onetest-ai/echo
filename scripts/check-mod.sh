@@ -24,6 +24,8 @@ node crates/echoctl/ui/copy-guard.test.mjs
 node crates/echoctl/ui/select-menu.test.mjs
 # Echo's suggestions for a text box: the rows for what is typed (suggest block).
 node crates/echoctl/ui/suggest.test.mjs
+# Echo's calendar for a date box: a month from Monday, the quick days (date picker block).
+node crates/echoctl/ui/date-picker.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
 # Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
