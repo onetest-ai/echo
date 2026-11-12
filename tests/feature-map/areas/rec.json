@@ -156,6 +156,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-REC-20",
+   "feature": "A meeting set to record (or armed for that meeting) starts recording only on that meeting's call: the call window naming the meeting, or a call begun from 10 min before it, is its call; a call begun before that whose window doesn't name it (another name, a channel's, none) is another — Echo waits (event arm_waits_other_call, one notification \"Waiting to record …\"), looks again every few seconds, keeps the arm until the meeting ends, and starts once the user is on its call. A name alone (a renamed or channel meeting) never makes it wait; a window it can't read changes nothing; \"Record\" on a call already going on records that call",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
