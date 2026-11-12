@@ -98,7 +98,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     // 3: Yolo; the bar says Claude is on it (or already its outcome: the run takes seconds).
     await today.claudeYolo.click()
     await expect(today.claudeDialog).toBeHidden()
-    const outcome = today.askBar.getByText(y.say, { exact: true })
+    const outcome = today.askSays(y.say)
     await expect(today.yoloWorking.or(outcome)).toBeVisible()
 
     // 4: the ask, done.
@@ -106,8 +106,9 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await expect.poll(() => asks()[0]?.state, { timeout: 60_000, intervals: [1_000] }).toBe(y.states.at(-1))
     expect(asks()[0]).toMatchObject({ title: y.task.title, state: y.states.at(-1), say: y.say })
 
-    // 5: its outcome above My work, with a Dismiss button (no reload).
+    // 5: its outcome above My work, under it where the draft is, with a Dismiss button (no reload).
     await expect(outcome).toBeVisible()
+    await expect(today.askSays(y.draftSays)).toBeVisible()
     await expect(today.dismiss).toBeVisible()
     await expect(today.yoloWorking).toBeHidden()
 

@@ -122,6 +122,7 @@
       }
     ],
     "draft": "mailto:kim@globex.example?subject=Globex%20pilot%20training%20slots&body=Hi%20Kim",
+    "draftSays": "A draft opened in your mail app — “Globex pilot training slots” to kim@globex.example",
     "rule": 0,
     "turns": 9,
     "tools": [
@@ -154,7 +155,7 @@
       "done"
     ],
     "changes": [
-      "^config/yolo/ask-[^/]+/(prompt\\.md|log\\.txt|answer\\.md)$",
+      "^config/yolo/ask-[^/]+/(prompt\\.md|log\\.txt|answer\\.md|drafts\\.jsonl)$",
       "^config/my-skills/",
       "^config/minutes-run/echo-mcp-[^/]+\\.json$",
       "^config/claude/ollama/",
@@ -4102,6 +4103,7 @@
         "people",
         "tasks",
         "found",
+        "link",
         "delete",
         "ledger",
         "help"

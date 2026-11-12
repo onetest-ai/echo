@@ -1789,6 +1789,10 @@
       {
         "about": "where you'll be, a reason on each line",
         "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:calendar.agenda",
         "kind": "day",
         "label": "Your day · agenda",
@@ -1803,6 +1807,10 @@
       {
         "about": "by the hour, overlaps side by side",
         "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:calendar.calendar",
         "kind": "day",
         "label": "Your day · calendar",
@@ -1817,6 +1825,9 @@
       {
         "about": "the whole day in one bar",
         "height": "hug",
+        "heights": [
+          1
+        ],
         "id": "core:calendar.strip",
         "kind": "day",
         "label": "Your day · strip",
@@ -1831,6 +1842,10 @@
       {
         "about": "meetings at once and invites to answer, with what Echo suggests",
         "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:calendar.choices",
         "kind": "choices",
         "label": "The day's choices",
@@ -1845,6 +1860,10 @@
       {
         "about": "what to walk in knowing, who's coming",
         "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:calendar.next",
         "kind": "next",
         "label": "Next meeting",
@@ -1860,6 +1879,10 @@
       {
         "about": "a bar a thread: done this week, to do, waiting",
         "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:tasks.glance",
         "kind": "glance",
         "label": "Threads at a glance",
@@ -1885,6 +1908,9 @@
       {
         "about": "how many tasks were done since Monday, and which",
         "height": "hug",
+        "heights": [
+          1
+        ],
         "id": "core:tasks.done",
         "kind": "glance",
         "label": "Done this week",
@@ -1910,6 +1936,9 @@
       {
         "about": "calls recorded since Monday, their time, how many have minutes",
         "height": "hug",
+        "heights": [
+          1
+        ],
         "id": "core:calls.week",
         "kind": "calls",
         "label": "Recorded this week",
@@ -1924,6 +1953,10 @@
       {
         "about": "late first, then by date; whose each one is",
         "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:tasks.mine",
         "kind": "work",
         "label": "My work · this week",
@@ -1938,6 +1971,10 @@
       {
         "about": "the last 24 hours, where you watch",
         "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:needs.now",
         "kind": "needs",
         "label": "Needs you now",
@@ -1952,6 +1989,10 @@
       {
         "about": "what your routines delivered to Today, until read",
         "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
         "id": "core:routines.cards",
         "kind": "cards",
         "label": "Routine cards",
