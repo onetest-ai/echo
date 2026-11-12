@@ -175,6 +175,16 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-19",
+   "feature": "A plugin adds a row to each thread's Profile under its Sources (client slot `thread.profile`: {id, label, render(thread), after(box, thread)}, thread = {id, name, client}); one that throws is left out and the Profile still draws; switched off or removed, its row leaves every thread. Its host half keeps values per thread with `ctx.threads.get/set/list` (JSON ≤ 16 KB, null removes, refused for a thread there isn't and in a read-only routine; `threads.json` not writable through `ctx.store.write`); a deleted thread's values are dropped, and with `threads_changed` in `uses.events.on` (sheet: 'Knows when a thread is renamed, merged or deleted') it hears {thread, change, into?}",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
   }
  ]
 }
