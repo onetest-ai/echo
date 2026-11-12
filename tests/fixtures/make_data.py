@@ -675,6 +675,9 @@ def setup_env(d, stale_plugin=True, test_market=True):
              # `open` only logs: a run never brings up a browser, a Finder window or the installed Echo (`echoctl up`,
              # the restart after a data-folder change).
              "ECHOCTL_TEST_OPEN_LOG_ONLY": "1",
+             # …and Echo's own opening of a link (the window's `open_url`, a sign-in, a join, a Settings pane) is logged
+             # here, as the stand-in logs it, instead of opening anything — on any OS (`app::open_log_only`).
+             "ECHOCTL_TEST_OPEN_LOG": f"{b}/open.log",
              # A development build writes a mail draft's mailto: link here instead of opening a mail app (`drafts::open`, any OS).
              "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log"}
     d.env.update(extra)

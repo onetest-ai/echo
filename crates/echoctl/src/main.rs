@@ -249,6 +249,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: cli::widget::WidgetCmd,
     },
+    /// The plugins' work rows: `show [--thread <id>]` (JSON, as My work or a thread's Work tab gets them)
+    Work {
+        #[command(subcommand)]
+        cmd: cli::widget::WorkCmd,
+    },
     /// Today → Needs you now (JSON): what waits on you from the last day in Teams and mail; --refresh reads them again
     #[command(hide = true)]
     Needs {
@@ -678,6 +683,7 @@ fn main() -> Result<()> {
         Cmd::Templates => cli::calls::templates(),
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
         Cmd::Widget { cmd } => cli::widget::widget(cmd),
+        Cmd::Work { cmd } => cli::widget::work(cmd),
         Cmd::Today { cmd } => cli::widget::today(cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),

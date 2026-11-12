@@ -12,6 +12,10 @@
     {
       "id": "thread-demo",
       "source": "./plugins/thread-demo"
+    },
+    {
+      "id": "work-demo",
+      "source": "./plugins/work-demo"
     }
   ]
 }

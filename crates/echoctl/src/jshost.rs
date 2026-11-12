@@ -22,6 +22,13 @@ use serde_json::{json, Value};
 
 use crate::{paths, plugins};
 
+mod test_hosts;
+pub mod work;
+
+use test_hosts::test_host;
+#[cfg(test)]
+use test_hosts::test_host_in;
+
 /// How long one command may take before its caller is told so (the work may go on).
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// JavaScript running without a break longer than this is stopped.
@@ -109,6 +116,13 @@ const PRELUDE: &str = r#"
       set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
       clear: (id) => call('widgets.clear', String(id)),
     },
+    /** Its items on Today → My work and in threads' Work (uses.work): `provide(({scope, thread}) => rows)` answers
+     *  Echo's ask — scope "me" (My work) or "thread" (that thread's Work tab) — with [{id, title, kind, where?, url?,
+     *  due?, late?, thread?}] (200 at most); `changed()` has Echo ask again. */
+    work: {
+      provide: (fn) => { call('work.provide'); commands.__work = (a) => fn(a || {}) },
+      changed: () => call('work.changed'),
+    },
     /** Its own values per thread (no grant: its data, by thread id): `get(thread, key)` → value | null, `set(thread,
      *  key, value)` (JSON, 16 KB at most, 64 keys a thread, 4 MB in all; null removes it), `list(key)` → [{thread,
      *  value}] of the threads that have it. They follow the thread: gone when it is deleted (hear it: `threads_changed` in
@@ -194,7 +208,9 @@ const PRELUDE: &str = r#"
 enum Msg {
     Load(String, PathBuf),
     Unload(String),
-    Call { plugin: String, command: String, args: String, reply: Sender<Result<Value, String>> },
+    Call { plugin: String, command: String, args: String, n: u64, reply: Sender<Result<Value, String>> },
+    /// A call's caller stopped waiting (its timeout): its reply is dropped, never kept for a plugin that doesn't settle.
+    Forget(String, u64),
     Event(String, String),
     /// An event whose payload differs per plugin: each one's fields set on the shared part.
     EventEach(String, Value, serde_json::Map<String, Value>),
@@ -439,11 +455,15 @@ pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration)
         sync_only(plugin);
     }
     let (tx, rx) = channel();
-    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
     match rx.recv_timeout(timeout) {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => bail!("{e}"),
-        Err(_) => bail!("{plugin} didn't answer {command} within {} s", timeout.as_secs()),
+        Err(_) => {
+            let _ = h.tx.send(Msg::Forget(plugin.into(), n));
+            bail!("{plugin} didn't answer {command} within {} s", timeout.as_secs())
+        }
     }
 }
 
@@ -478,6 +498,9 @@ struct Plugin {
 struct Current {
     id: String,
     replies: Vec<(u64, Result<Value, String>)>,
+    /// Its work provider runs now (Echo's `__work` ask, until that slice ends): a `ctx.work.changed()` from it is not
+    /// heard — the answer it is giving is the change (heard, every ask would ask again).
+    providing: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -539,15 +562,15 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     l.remove(&id);
                 }
             }
-            Ok(Msg::Call { plugin, command, args, reply }) => {
+            Ok(Msg::Call { plugin, command, args, n, reply }) => {
                 let Some(p) = plugins.get_mut(&plugin) else {
                     let why = status().get(&plugin).and_then(|r| r.clone().err()).unwrap_or_else(|| "it isn't installed and on".into());
                     let _ = reply.send(Err(format!("{plugin} isn't loaded: {why}")));
                     continue;
                 };
-                let n = NEXT.fetch_add(1, Ordering::Relaxed);
                 p.calls.insert(n, reply);
                 set_current(&current, &plugin);
+                current.lock().unwrap().providing = command == "__work";
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -558,6 +581,12 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                         }
                     })
                 });
+                current.lock().unwrap().providing = false;
+            }
+            Ok(Msg::Forget(plugin, n)) => {
+                if let Some(p) = plugins.get_mut(&plugin) {
+                    p.calls.remove(&n);
+                }
             }
             Ok(Msg::Event(name, payload)) => {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -612,6 +641,10 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     let _ = tx.send(r.clone());
                 }
             }
+        }
+        #[cfg(test)]
+        if let Ok(mut w) = tests::WAITING.lock() {
+            *w = plugins.iter().map(|(id, p)| (id.clone(), p.calls.len())).collect();
         }
     }
 }
@@ -683,6 +716,9 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
         }
         return json!({"value": null}).to_string();
     }
+    if op == "work.changed" && current.lock().is_ok_and(|c| c.providing) {
+        return json!({"value": null}).to_string();
+    }
     match service(&id, op, &arg) {
         Ok(v) => json!({ "value": v }).to_string(),
         Err(e) => json!({ "error": format!("{e:#}") }).to_string(),
@@ -720,69 +756,6 @@ fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
     cfg
 }
 
-/// Development builds and tests: `ECHOCTL_TEST_HOSTS=api.github.com=http://127.0.0.1:47990,…` sends a request to
-/// `https://<host>/<path>` — a host the manifest names, already checked — to `<base>/<path>`, a fake service on this
-/// computer (plain http to 127.0.0.1 or localhost only). Fails closed: once it is set, a mapping that isn't a local
-/// address, or a named host it doesn't map, fails the request rather than reach the real host. `Ok(None)`: the URL
-/// as it is (unset, or an address the user listed). Never read by a release build.
-fn test_host(url: &str, hosts: &[String]) -> Result<Option<String>> {
-    #[cfg(debug_assertions)]
-    {
-        match std::env::var_os("ECHOCTL_TEST_HOSTS") {
-            None => Ok(None),
-            Some(map) => test_host_in(map.to_str().ok_or_else(|| anyhow!("ECHOCTL_TEST_HOSTS isn't text"))?, url, hosts),
-        }
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = (url, hosts);
-        Ok(None)
-    }
-}
-
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
-fn test_host_in(map: &str, url: &str, hosts: &[String]) -> Result<Option<String>> {
-    // Every entry, up front: one that is wrong fails every request, whichever host it names.
-    let mut fakes: Vec<(String, String)> = Vec::new();
-    for entry in map.split(',').map(str::trim).filter(|e| !e.is_empty()) {
-        let Some((host, base)) = entry.split_once('=').map(|(h, b)| (h.trim().to_ascii_lowercase(), b.trim())) else {
-            bail!("ECHOCTL_TEST_HOSTS: “{entry}” isn't <host>=http://127.0.0.1:<port>");
-        };
-        if host.is_empty() || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
-            bail!("ECHOCTL_TEST_HOSTS: “{host}” isn't a host name");
-        }
-        let Some(base) = local_base(base) else {
-            bail!("ECHOCTL_TEST_HOSTS: “{base}” (for {host}) isn't a local address — http://127.0.0.1:<port> or http://localhost:<port>");
-        };
-        if fakes.iter().any(|(h, _)| *h == host) {
-            bail!("ECHOCTL_TEST_HOSTS: {host} is mapped twice");
-        }
-        fakes.push((host, base));
-    }
-    let Some(rest) = url.strip_prefix("https://") else { return Ok(None) };
-    let (host, path) = rest.find(['/', '?', '#']).map_or((rest, ""), |i| rest.split_at(i));
-    if !hosts.iter().any(|h| h == host) {
-        // An address the user listed (`network.hosts_from`): theirs, as it is.
-        return Ok(None);
-    }
-    match fakes.iter().find(|(h, _)| h.eq_ignore_ascii_case(host)) {
-        Some((_, base)) => Ok(Some(format!("{base}{path}"))),
-        None => bail!("{host} isn't mapped in ECHOCTL_TEST_HOSTS: a test never reaches the real {host}"),
-    }
-}
-
-/// `http://127.0.0.1:<port>[/path]` or `http://localhost:<port>[/path]` (scheme and name in any case), written
-/// lower-case and without a trailing `/`; anything else None.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
-fn local_base(base: &str) -> Option<String> {
-    let rest = base.get(..7).filter(|s| s.eq_ignore_ascii_case("http://")).and(base.get(7..))?;
-    let (authority, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
-    let (name, port) = authority.split_once(':')?;
-    let name = name.to_ascii_lowercase();
-    let port_ok = !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|p| p > 0);
-    let path_ok = !path.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control() || b"@?#\\".contains(&b));
-    (matches!(name.as_str(), "127.0.0.1" | "localhost") && port_ok && path_ok).then(|| format!("http://{name}:{port}{}", path.trim_end_matches('/')))
-}
 
 /// Where the plugin is installed.
 fn package_dir(id: &str) -> Result<PathBuf> {
@@ -827,6 +800,18 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
     Ok(base.join(p))
 }
 
+/// Not one of Echo's files in the plugin's store (written or removed only by Echo, under their locks): its settings,
+/// its work rows, its values per thread.
+fn not_echos(rel: &str) -> Result<()> {
+    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
+        Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
+        Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
+        _ => Ok(()),
+    }
+}
+
 /// A store path the plugin may write: not its `settings.json`, which holds what the user set (the addresses it may
 /// reach among them) and is changed only through `plugins::set_setting`.
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
@@ -836,16 +821,6 @@ fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     let base = plugins::data_dir(id);
     std::fs::create_dir_all(&base)?;
     crate::grants::inside(&dunce::canonicalize(&base)?, rel)
-}
-
-/// Not one of the store's files Echo writes (`settings.json`, `threads.json`): the plugin neither writes nor removes it.
-fn not_echos(rel: &str) -> Result<()> {
-    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    match first.trim_end_matches(['.', ' ']).split(':').next() {
-        Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
-        Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
-        _ => Ok(()),
-    }
 }
 
 /// When a host half starts: what lay in its store's `cache/` over 7 days, and downloads left half-written (`.part`,
@@ -913,7 +888,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "store.remove" => {
             let p = store_path(id, &s(arg))?;
-            // Not the store itself: Echo's files are in it (settings, thread values), and their locks aren't taken here.
+            // Not the store itself, nor Echo's files in it (its work rows, settings, thread values: their locks aren't
+            // taken here).
             if p == plugins::data_dir(id) {
                 bail!("ctx.store.remove needs a path inside the plugin's folder, not the folder itself");
             }
@@ -978,6 +954,15 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "widgets.clear" => {
             widget_store(id, &s(arg), None, None, None)?;
+            Value::Null
+        }
+        "work.provide" => {
+            uses(id, "work")?;
+            Value::Null
+        }
+        "work.changed" => {
+            uses(id, "work")?;
+            work::changed(id);
             Value::Null
         }
         "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1]))?,
@@ -1469,6 +1454,9 @@ pub fn inbox_items() -> Vec<(String, String, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The calls each loaded plugin still owes a reply (the host thread's, after each message).
+    pub(super) static WAITING: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
 
     fn got_size(plugin: &str, widget: &str) -> String {
         widget_last(plugin, widget).and_then(|l| l["data"]["items"][0]["sub"].as_str().map(str::to_owned)).unwrap_or_default()
@@ -2087,6 +2075,134 @@ mod tests {
         for id in ["hears", "deaf"] {
             plugins::remove(id, false).unwrap();
         }
+        sync();
+    }
+
+    #[test]
+    fn a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it() {
+        let (_env, root) = paths::testenv::folders("jshost-work");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let mk = root.join("market");
+        let d = mk.join("plugins/gh");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "gh", "name": "GitHub", "version": "0.1.0", "main": "main.js", "icon": "icon.svg", "uses": {"work": {}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              let broken = false
+              ctx.work.provide(({ scope, thread }) => {
+                if (broken) throw new Error('GitHub is down')
+                const review = { id: 'pr-7', title: 'Review: fix login', kind: 'review', where: 'acme-test/api', url: 'https://git.acme.example/pr/7', thread: 'alpha' }
+                return scope === 'me'
+                  ? [{ id: 'is-3', title: 'Flaky test', kind: 'assigned', due: '2099-01-01' }, review]
+                  : [{ id: 'pr-8', title: 'Bump deps', kind: 'PR', where: 'acme-test/api' }, review]
+              })
+              ctx.command('break', () => { broken = true; ctx.work.changed(); return 1 })
+              ctx.command('sneak', () => ctx.store.write('work.json', '{}'))
+              ctx.command('unsneak', () => ctx.store.remove('./work.json'))
+              ctx.command('wipe', () => ctx.store.remove(''))
+              ctx.command('hang', () => new Promise(() => {}))
+            }
+            "#,
+        )
+        .unwrap();
+        let q = mk.join("plugins/quiet");
+        std::fs::create_dir_all(&q).unwrap();
+        std::fs::write(q.join("echo-plugin.json"), json!({"id": "quiet", "name": "Quiet", "version": "0.1.0", "main": "main.js"}).to_string()).unwrap();
+        std::fs::write(q.join("main.js"), "export function apply(ctx) { ctx.command('try', () => ctx.work.provide(() => [])) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "gh", "source": "./plugins/gh"}, {"id": "quiet", "source": "./plugins/quiet"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        for id in ["gh", "quiet"] {
+            let review = plugins::review(id, Some(&name)).unwrap();
+            plugins::install(id, Some(&name), &review.uses).unwrap();
+        }
+        assert!(plugins::review("gh", Some(&name)).unwrap().uses.iter().any(|l| l == "Adds its items to Today → My work and to threads' Work"));
+        sync();
+        assert!((0..50).any(|_| call("quiet", "try", &json!({})).is_err_and(|e| e.to_string().contains("didn't ask for “work”")) || { std::thread::sleep(Duration::from_millis(50)); false }), "only with uses.work");
+        assert!(call("gh", "sneak", &json!({})).unwrap_err().to_string().contains("work.json"), "its work.json is Echo's to write");
+        assert!(call("gh", "unsneak", &json!({})).unwrap_err().to_string().contains("work.json"), "and to remove");
+        assert!(call("gh", "wipe", &json!({})).unwrap_err().to_string().contains("not the folder itself"), "the store with it");
+        // Never waited for: the first read asks in the background — waited for (`pending`) until it answers.
+        let (first, pending) = work::view(None);
+        assert!(first.is_empty() && pending, "{first:?}");
+        let me = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::view(None) }).find(|(r, p)| r.len() == 2 && !p).expect("answered").0;
+        assert_eq!((me[0]["id"].as_str(), me[1]["id"].as_str()), (Some("is-3"), Some("pr-7")), "by date, no date last");
+        assert_eq!((me[0]["source"].as_str(), me[0]["source_name"].as_str(), me[0]["icon"].as_str()), (Some("gh"), Some("GitHub"), Some("plugin/gh/icon.svg")));
+        // Alpha's Work: its own rows and the user's that name it, each once.
+        let _ = work::of_thread(&alpha);
+        let th = (0..100).map(|_| { std::thread::sleep(Duration::from_millis(50)); work::thread_view(&alpha) }).find(|(r, p)| r.len() == 2 && !p).expect("answered").0;
+        assert_eq!(th.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["pr-8", "pr-7"]);
+        // It fails: its last rows kept, marked not updated, with why — and where (My work's, not a thread's).
+        call("gh", "break", &json!({})).unwrap();
+        assert!(work::view(None).1, "changed: waited for again");
+        let gone = (0..100).find(|_| { std::thread::sleep(Duration::from_millis(50)); work::error("gh").is_some() });
+        assert!(gone.is_some(), "{:?}", work::error("gh"));
+        let (place, why) = work::error("gh").unwrap();
+        assert!(place == "My work" && why.contains("GitHub is down"), "{place}: {why}");
+        let stale = work::rows(None);
+        assert_eq!(stale.len(), 2, "kept");
+        assert!(stale.iter().all(|r| r["stale"].as_str().is_some_and(|e| e.contains("GitHub is down"))), "{stale:?}");
+        // Alpha deleted: its scope goes from the plugin's work.json.
+        assert!(std::fs::read_to_string(plugins::data_dir("gh").join(work::FILE)).unwrap().contains(&format!("thread:{alpha}")));
+        crate::projects::delete(&alpha).unwrap();
+        assert!(!std::fs::read_to_string(plugins::data_dir("gh").join(work::FILE)).unwrap().contains(&format!("thread:{alpha}")));
+        // A command that never settles: its caller stops waiting and the host keeps nothing for it.
+        assert!(call_within("gh", "hang", &json!({}), Duration::from_millis(200)).unwrap_err().to_string().contains("didn't answer"));
+        let left = (0..50).map(|_| { std::thread::sleep(Duration::from_millis(50)); WAITING.lock().unwrap().get("gh").copied() }).find(|w| *w == Some(0));
+        assert_eq!(left, Some(Some(0)), "its reply dropped");
+        // Removed: its rows go.
+        plugins::remove("gh", true).unwrap();
+        assert!(work::rows(None).is_empty() && work::of_thread(&alpha).is_empty());
+        plugins::remove("quiet", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_that_says_its_rows_changed_all_the_time_is_asked_once_a_turn() {
+        let (_env, root) = paths::testenv::folders("jshost-work-gap");
+        let mk = root.join("market");
+        let d = mk.join("plugins/chatty");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "chatty", "name": "Chatty", "version": "0.1.0", "main": "main.js", "uses": {"work": {}}}).to_string()).unwrap();
+        // Its provider says changed() itself (not heard), and a command says it twenty times at once.
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              const asks = []
+              ctx.work.provide(() => { asks.push(Date.now()); ctx.work.changed(); return [{ id: 'a', title: 'A', kind: 'PR' }] })
+              ctx.command('asks', () => asks)
+              ctx.command('poke', () => { for (let i = 0; i < 20; i++) ctx.work.changed(); return 1 })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "chatty", "source": "./plugins/chatty"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("chatty", Some(&name)).unwrap();
+        plugins::install("chatty", Some(&name), &review.uses).unwrap();
+        sync();
+        let asks = || call("chatty", "asks", &json!({})).unwrap().as_array().unwrap().iter().map(|t| t.as_f64().unwrap()).collect::<Vec<_>>();
+        let _ = work::view(None);
+        assert!((0..100).any(|_| { std::thread::sleep(Duration::from_millis(50)); !work::view(None).1 }), "answered, and no longer waited for");
+        // Its own changed() inside the provider: not heard — no ask after the first.
+        std::thread::sleep(Duration::from_millis(2500));
+        assert_eq!(asks().len(), 1, "a provider's own changed() asks nothing more");
+        assert!(!work::view(None).1, "and Today's wait ends");
+        // Twenty changes at once: asked now, and once more in its next turn (a second on, in tests) for any said after
+        // that ask began — never back to back, then quiet.
+        call("chatty", "poke", &json!({})).unwrap();
+        std::thread::sleep(Duration::from_millis(3000));
+        let t = asks();
+        assert!((2..=3).contains(&t.len()), "{t:?}");
+        assert!(t.windows(2).all(|w| w[1] - w[0] >= 950.0), "a turn between asks: {t:?}");
+        std::thread::sleep(Duration::from_millis(2000));
+        assert_eq!(asks().len(), t.len(), "then quiet");
+        plugins::remove("chatty", true).unwrap();
         sync();
     }
 

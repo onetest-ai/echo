@@ -1271,11 +1271,13 @@ pub fn stop() -> Result<()> {
 pub fn join(meeting: MeetingContext) -> Result<()> {
     let Some(url) = meeting.recordable()?.join_url.clone() else { bail!("meeting has no join_url") };
     let url = crate::apps::desktop_join_url(&url);
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&url).status()?;
-    #[cfg(windows)]
-    // Not `cmd /C start`: cmd would split the URL at `&`.
-    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
+    if !crate::app::open_log_only(&url) {
+        #[cfg(target_os = "macos")]
+        std::process::Command::new("open").arg(&url).status()?;
+        #[cfg(windows)]
+        // Not `cmd /C start`: cmd would split the URL at `&`.
+        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
+    }
     let title = meeting.subject.clone();
     arm(title, Some(meeting), None, None)
 }

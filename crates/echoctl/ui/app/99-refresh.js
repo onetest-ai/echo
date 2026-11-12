@@ -16,6 +16,8 @@ async function tick() {
   if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
+  // Today open a while: read again every minute (the plugins' work rows and widgets are asked again in the background).
+  if (S.view === 'today' && ticks % 30 === 0) await loadToday()
   // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
   // the live notes' and the minutes run's state, when the minutes come), whatever its status.
   // A call that isn't there (an old link, a deleted call) is asked for once, not every tick (#150).

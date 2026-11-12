@@ -230,10 +230,23 @@ fn from_page(uri: &str, base: &str) -> bool {
 }
 
 fn open_external(url: &str) {
-    #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(url).status();
-    #[cfg(windows)]
-    let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).status();
+    open_external_with(url, |url| {
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(url).status();
+        #[cfg(windows)]
+        let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).status();
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let _ = url;
+    });
+}
+
+/// `open_external` with what opens it given: test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) logs the link and never gets
+/// there — any OS, the served window too.
+fn open_external_with(url: &str, open: impl FnOnce(&str)) {
+    if crate::app::open_log_only(url) {
+        return;
+    }
+    open(url);
 }
 
 fn urlencode(s: &str) -> String {
@@ -762,6 +775,20 @@ mod tests {
     use super::*;
     use super::call::{call_detail, call_rev, calls_page};
     use super::terminals::{paste_bytes, shell_allowed};
+
+    #[test]
+    fn test_data_logs_an_outside_link_and_never_opens_it() {
+        let (_env, root) = crate::paths::testenv::folders("window-open-log-only");
+        let log = root.join("open.log");
+        // Only ever set here, never unset: a test process opens nothing either way.
+        std::env::set_var("ECHOCTL_TEST_OPEN_LOG_ONLY", "1");
+        std::env::set_var("ECHOCTL_TEST_OPEN_LOG", &log);
+        let mut opened = vec![];
+        open_external_with("https://git.acme.example/pr/7", |u| opened.push(u.to_string()));
+        open_external_with("obsidian://open?vault=v&file=f", |u| opened.push(u.to_string()));
+        assert!(opened.is_empty(), "nothing opened: {opened:?}");
+        assert_eq!(fs::read_to_string(&log).unwrap(), "https://git.acme.example/pr/7\nobsidian://open?vault=v&file=f\n", "each logged as the stand-in logs it");
+    }
 
     #[test]
     fn paging_reaches_every_call_once_with_undated_folders_last() {

@@ -260,6 +260,10 @@ pub fn changed(thread: &str, change: Change) -> Result<()> {
                 Err(e) => eprintln!("echoctl: plugin {plugin}: its values for thread {thread}: {e:#}"),
             }
         }
+        // The plugins' work rows asked for it (`ctx.work.provide`, its Work tab) go with it — in whichever process
+        // deletes or merges the thread (each plugin's work.json under its own lock); `into` asks for its own again.
+        #[cfg(feature = "js")]
+        crate::jshost::work::forget_thread(thread);
     }
     let payload = match change {
         Change::Renamed { name, from } => json!({"thread": thread, "born": was, "change": "renamed", "name": name, "from": from}),

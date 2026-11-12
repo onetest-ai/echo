@@ -33,6 +33,33 @@ pub fn widget(cmd: WidgetCmd) -> Result<()> {
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub enum WorkCmd {
+    /// The plugins' work rows (JSON), each plugin asked now: the user's (Today → My work), or a thread's (its Work tab:
+    /// what the plugins give for it and the user's rows that name it); `errors`: why a plugin's rows were left out
+    Show {
+        /// A thread's id: its rows
+        #[arg(long)]
+        thread: Option<String>,
+    },
+}
+
+pub fn work(cmd: WorkCmd) -> Result<()> {
+    match cmd {
+        WorkCmd::Show { thread } => {
+            if let Some(t) = &thread {
+                crate::projects::load(t)?;
+            }
+            #[cfg(feature = "js")]
+            print_json(&crate::jshost::work::show(thread.as_deref()));
+            #[cfg(not(feature = "js"))]
+            anyhow::bail!("this build runs no plugins");
+        }
+    }
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
 /// Where a widget goes, against one on Today (none: last, on a row of its own).
 #[derive(clap::Args)]
 #[group(multiple = false)]

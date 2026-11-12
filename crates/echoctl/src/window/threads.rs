@@ -429,6 +429,13 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                         let p = crate::config::Config::load().ok().and_then(|c| c.me);
                         let names = crate::tasks::my_names(&crate::tasks::Me::of(p.as_ref()), &t["nodes"]);
                         t["me"] = json!({ "name": p.map(|p| p.name), "names": names });
+                        // The plugins' items of this thread (`ctx.work.provide`): never in its ledger.
+                        #[cfg(feature = "js")]
+                        {
+                            let (rows, pending) = crate::jshost::work::thread_view(id);
+                            t["plugin_rows"] = json!(rows);
+                            t["plugin_rows_pending"] = json!(pending);
+                        }
                         t
                     }
                     Err(e) => json!({ "error": format!("{e:#}") }),

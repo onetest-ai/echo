@@ -25,6 +25,7 @@ const Plugins = {
 }
 // `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
 // `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
+// `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 // `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
 // `thread` = {id, name, client}.
 const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile']
@@ -157,26 +158,54 @@ function unloadPlugin(id) {
   delete Plugins.settings[id]
   for (const k of Object.keys(Plugins.widgetDraw)) if (k.startsWith(`plugin:${id}:`)) delete Plugins.widgetDraw[k]
   for (let i = PANEL_VIEWS.length - 1; i >= 0; i--) if (PANEL_VIEWS[i].plugin === id) PANEL_VIEWS.splice(i, 1)
+  // Its work rows' targets (`task.actions#<plugin>:<row>`) go with it.
+  slotForget(Plugins.targets, id)
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
 }
-/** A slot's buttons for `target`: `menu` (menu items) or `buttons`. */
-function slotItems(slot, target, style = 'buttons') {
-  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
+// ── plugin slot targets: which of a slot's items a target gets and which target a click is for (no DOM:
+// `plugin-work-rows.test.mjs`).
+/** A slot's items for `target`: those whose `when` says yes — a plugin's work row (`kind: 'plugin'`) only to the items
+ *  that ask for it (a `when` true for it), never to one written for Echo's tasks. */
+const slotFor = (slot, target) => (Plugins.slots[slot] || []).filter((x) => { try { return x.when ? x.when(target) : !(target && target.kind === 'plugin') } catch { return false } })
+/** A slot's buttons for `target`: `menu` (menu items) or `buttons`; `key` when the slot is drawn for several targets at
+ *  once (each row its own). */
+function slotItems(slot, target, style = 'buttons', key = '') {
+  const items = slotFor(slot, target)
   if (!items.length) return ''
-  Plugins.targets[slot] = target
+  Plugins.targets[slot + (key ? `#${key}` : '')] = target
+  const k = key ? ` data-plug-key="${esc(key)}"` : ''
   return items.map((x, i) => style === 'menu'
-    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}">${x.icon || ''}${esc(x.label)}</button>`
-    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}" title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
+    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}"${k}>${x.icon || ''}${esc(x.label)}</button>`
+    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}"${k} title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
 }
+/** The target a slot's button was drawn for (`data-plug-slot`, `data-plug-key`). */
+const slotTarget = (slot, key) => Plugins.targets[slot + (key ? `#${key}` : '')]
+/** A plugin's keyed targets (its work rows', `<slot>#<plugin>:<row>`) dropped: it was switched off or removed. */
+function slotForget(targets, plugin) {
+  for (const k of Object.keys(targets)) if (k.includes('#') && k.slice(k.indexOf('#') + 1).startsWith(`${plugin}:`)) delete targets[k]
+}
+/** What a slot button's click runs — `{item, target}` — or null: a row's button whose target went (its plugin was
+ *  switched off or removed, `slotForget`) runs nothing, never an item meant for Echo's tasks. */
+function slotClick(slot, key, i) {
+  const target = slotTarget(slot, key)
+  if (key && !target) return null
+  const item = slotFor(slot, target)[+i]
+  return item ? { item, target } : null
+}
+// end of the plugin slot targets block
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-plug-slot]')
   if (!t) return
-  const slot = t.dataset.plugSlot, target = Plugins.targets[slot]
-  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
-  const item = items[+t.dataset.plugI]
+  const hit = slotClick(t.dataset.plugSlot, t.dataset.plugKey, t.dataset.plugI)
   S.menuOpen = false
-  if (item) Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
+  if (!hit) return
+  const { item, target } = hit
+  Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
+    // On a plugin's work row: what it shows is read again (its plugin's answer may have changed it), Today or the
+    // thread's Work tab.
+    .then(() => target && target.kind === 'plugin' ? (S.view === 'today' ? loadToday() : S.view === 'projects' ? loadProject() : null) : null)
+    .then(() => target && target.kind === 'plugin' && render())
 })
 
 /** The transcription server row: an Echo, or an OpenAI-compatible server (Ollama with an audio

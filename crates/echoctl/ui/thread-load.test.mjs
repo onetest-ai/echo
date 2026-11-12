@@ -89,6 +89,27 @@ test('a thread just opened (no detail yet) takes its own board, whatever was cha
   assert.equal(S.pj.detail.board, OLD)
 })
 
+test("a thread's Work tab waits for its plugins' rows: read again soon, until they are answered", async () => {
+  const asked = []
+  let drawn = 0
+  const S = { view: 'projects', pj: { sel: 'acme-rollout', tab: 'work', work: null, detail: null } }
+  const answers = [{ nodes: {}, plugin_rows: [], plugin_rows_pending: true }, { nodes: {}, plugin_rows: [{ id: 'pr-7' }], plugin_rows_pending: false }]
+  const get = async (url) => {
+    asked.push(url)
+    return url.endsWith('/work') ? answers[Math.min(asked.filter((u) => u.endsWith('/work')).length - 1, 1)] : { id: 'acme-rollout' }
+  }
+  const noop = async () => {}
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'render', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, () => drawn++)
+  await loadProject()
+  assert.equal(S.pj.work.plugin_rows_pending, true)
+  await new Promise((r) => setTimeout(r, 800))
+  assert.equal(asked.filter((u) => u.endsWith('/work')).length, 2, 'read again after half a second')
+  assert.equal(S.pj.work.plugin_rows[0].id, 'pr-7')
+  assert.ok(drawn >= 1 && S.pj.workWaitTry === 0, 'drawn, and the wait ended')
+  await new Promise((r) => setTimeout(r, 1200))
+  assert.equal(asked.filter((u) => u.endsWith('/work')).length, 2, 'no more once answered')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { await f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
