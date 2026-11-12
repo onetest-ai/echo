@@ -813,10 +813,17 @@ fn not_echos(rel: &str) -> Result<()> {
 }
 
 /// A store path the plugin may write: not its `settings.json`, which holds what the user set (the addresses it may
-/// reach among them) and is changed only through `plugins::set_setting`.
+/// reach among them) and is changed only through `plugins::set_setting`; nor the Inbox items and widgets' data Echo
+/// checks as they are set (`ctx.inbox.set`, `ctx.widgets.set`) — a plugin may remove those, never write them.
 fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     store_path(id, rel)?;
     not_echos(rel)?;
+    let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match first.trim_end_matches(['.', ' ']).split(':').next() {
+        Some("inbox.json") => bail!("the plugin's inbox.json isn't its to write: use ctx.inbox.set"),
+        Some("widgets.json") => bail!("the plugin's widgets.json isn't its to write: use ctx.widgets.set"),
+        _ => {}
+    }
     // Kept inside the store once links are followed, and no Windows device name.
     let base = plugins::data_dir(id);
     std::fs::create_dir_all(&base)?;
@@ -1964,7 +1971,7 @@ mod tests {
         assert!(refused(call("fetcher", "get", &json!({"url": "https://example.com/"}))).contains("may reach only"), "a host nobody named");
         // The plugin can't widen what the user listed: not through its settings, not by writing their file.
         assert!(refused(call("fetcher", "widen", &json!({}))).contains("only you set the addresses"));
-        for to in ["settings.json", "./Settings.json", "settings.json."] {
+        for to in ["settings.json", "./Settings.json", "settings.json.", "inbox.json", "./Inbox.json", "widgets.json", "widgets.json:x"] {
             assert!(refused(call("fetcher", "scribble", &json!({"to": to}))).contains("isn't its to write"), "{to}");
             assert!(refused(call("fetcher", "save", &json!({"url": format!("http://127.0.0.1:{port}/text"), "to": to}))).contains("isn't its to write"), "{to}");
         }
