@@ -204,6 +204,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-22",
+   "feature": "With `uses.signin.device.<host>` (a host of its `signin.hosts`; the OAuth app's public `client_id`, no secret, and up to 10 `scopes`; the sheet adds 'it may ask Echo to sign you in to github.com (you confirm a code on github.com; Echo keeps that sign-in, with access to: repo, read:org)') Echo signs the user in itself with GitHub's device sign-in: `ctx.signin.device.start(host, {clientId?})` → `{code, url: https://<host>/login/device, expires_in}` for the plugin to show (Echo's own address, opened only on the user's click), Echo asks GitHub every `interval` s in the process that started it until the user confirms, refuses or the code runs out, and keeps the sign-in in `<config dir>/signin/<host>.json` (0600, outside every plugin's store; the device code never kept or shown to the plugin); `ctx.signin.get(host)` then hands it back first as `{token, from: 'echo', scopes}` — only to a plugin whose sheet named `device` for that host; `device.status` → `{state, code?, url?, error?, signed_in}`, `device.cancel` stops waiting (a later confirmation isn't kept), `device.forget` deletes the file; start and sign-out refused in a read-only routine, any host not named with `device` refused",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

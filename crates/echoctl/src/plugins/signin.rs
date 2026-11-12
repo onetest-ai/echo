@@ -9,6 +9,11 @@
 //! host at a time, kept a minute (none found: 10 s) and then dropped from memory; `ctx.signin.get(host, {fresh: true})`
 //! asks the programs again and replaces what was kept (a plugin whose token was refused). The token is never written
 //! or logged by Echo; it goes to the host half only.
+//!
+//! A plugin may also have Echo sign the user in itself (`uses.signin.device`: GitHub's device sign-in, run by
+//! `jshost::device`): that sign-in is Echo's own, kept in `<config dir>/signin/<host>.json` (0600, as Microsoft 365's
+//! `graph.json`; the Keychain would ask again after every re-signed build), outside every plugin's store, and comes
+//! first — only for a plugin whose sheet named it (`device`): `{token, from: "echo"}`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -30,10 +35,46 @@ const KEEP_NONE: Duration = Duration::from_secs(10);
 /// The most of a program's output read.
 const MAX_OUT: usize = 64 * 1024;
 
-/// The user's sign-in to `host`: `{token, from: "gh" | "git", user?}`, or `None` when neither program has one.
+/// The user's sign-in to `host`: Echo's own (`{token, from: "echo", scopes}`), else `{token, from: "gh" | "git", user?}`,
+/// or `None` when there is none.
 /// `fresh`: ask the programs again instead of what was kept, and keep their answer.
-pub fn get(host: &str, fresh: bool) -> Option<Value> {
+/// `own`: the plugin's sheet named Echo's own sign-in to `host` too (`uses.signin.device`); a plugin's that didn't
+/// never gets it.
+pub fn get(host: &str, fresh: bool, own: bool) -> Option<Value> {
+    if let Some(v) = saved(host).filter(|_| own) {
+        return Some(v);
+    }
     cached(host, fresh, (KEEP, KEEP_NONE), || get_with(host, program("gh").as_deref(), program("git").as_deref(), &|_| {}))
+}
+
+/// Where Echo keeps its own sign-in to `host` (a plain host name, `plugins::may_use_signin` checked).
+fn saved_file(host: &str) -> std::path::PathBuf {
+    crate::paths::config_dir().join("signin").join(format!("{host}.json"))
+}
+
+/// Echo's own sign-in to `host` (`uses.signin.device`): `{token, from: "echo", scopes}`, or `None`.
+pub fn saved(host: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(saved_file(host)).ok()?).ok()?;
+    let token = v["token"].as_str().filter(|t| plain(t) && !t.contains(' '))?;
+    Some(json!({"token": token, "from": "echo", "scopes": v["scopes"].as_str().unwrap_or("")}))
+}
+
+/// Keep Echo's own sign-in to `host` (readable by the user only), replacing any before it.
+pub fn save(host: &str, token: &str, scopes: &str, client_id: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(plain(token) && !token.contains(' '), "GitHub's answer has no usable sign-in");
+    let f = saved_file(host);
+    std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
+    let at = chrono::Utc::now().to_rfc3339();
+    super::write_private(&f, json!({"token": token, "scopes": scopes, "client_id": client_id, "at": at}).to_string().as_bytes())
+}
+
+/// Forget Echo's own sign-in to `host`: the file goes (GitHub keeps the app's grant until the user revokes it).
+pub fn forget_saved(host: &str) -> anyhow::Result<bool> {
+    match std::fs::remove_file(saved_file(host)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Which of the programs that could hold a sign-in are on this computer (no sign-in read): `{gh, git}`.

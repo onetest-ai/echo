@@ -1587,6 +1587,24 @@ mod tests {
         }
         // It grants no network of its own.
         assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap().iter().all(|l| !l.contains("Talks to")));
+        // `device`: Echo signs the user in itself, with the app and scopes the sheet shows.
+        let device = json!({"signin": {"hosts": ["github.com"], "device": {"github.com": {"client_id": "Ov23liMADEUP", "scopes": ["repo", "read:org"]}}}});
+        assert_eq!(
+            describe(&uses(device)).unwrap(),
+            ["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to; it may ask Echo to sign you in to github.com (you confirm a code on github.com; Echo keeps that sign-in, with access to: repo, read:org)"]
+        );
+        for bad in [
+            json!({"hosts": ["github.com"], "device": {}}),
+            json!({"hosts": ["github.com"], "device": []}),
+            json!({"hosts": ["github.com"], "device": {"gitlab.com": {"client_id": "x"}}}),
+            json!({"hosts": ["github.com"], "device": {"github.com": {}}}),
+            json!({"hosts": ["github.com"], "device": {"github.com": {"client_id": "a b"}}}),
+            json!({"hosts": ["github.com"], "device": {"github.com": {"client_id": "x", "scopes": "repo"}}}),
+            json!({"hosts": ["github.com"], "device": {"github.com": {"client_id": "x", "scopes": ["Repo"]}}}),
+            json!({"hosts": ["github.com"], "device": {"github.com": {"client_id": "x", "scopes": ["repo write"]}}}),
+        ] {
+            assert!(describe(&uses(json!({"signin": bad}))).is_err(), "{bad}");
+        }
         let granted = uses(json!({"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}));
         assert!(may_use_signin(&granted, "github.com").is_ok());
         for other in ["gitlab.com", "api.github.com", "GITHUB.COM", ""] {

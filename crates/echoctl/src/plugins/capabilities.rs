@@ -280,10 +280,48 @@ pub(super) fn describe_signin(v: &Value) -> Result<String> {
     if hosts.is_empty() || hosts.len() > 4 || !once || hosts.iter().any(|h| !plain_host(h)) {
         bail!("“signin” names 1 to 4 hosts, each once, by their plain names (e.g. github.com)");
     }
-    Ok(format!(
+    let mut line = format!(
         "Gets the sign-in saved on this computer for {} (GitHub CLI or git): it can act as you there and send it to the places it talks to",
         join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())
-    ))
+    );
+    if let Some(device) = v.get("device") {
+        let all = device.as_object().filter(|o| !o.is_empty()).ok_or_else(|| anyhow!("“signin” device: {{<host>: {{client_id, scopes}}}}"))?;
+        for host in all.keys() {
+            if !hosts.contains(host) {
+                bail!("“signin” device: “{host}” isn't one of its hosts");
+            }
+            let (_, scopes) = device_app(v, host)?;
+            line.push_str(&format!(
+                "; it may ask Echo to sign you in to {host} (you confirm a code on {host}; Echo keeps that sign-in{})",
+                if scopes.is_empty() { String::new() } else { format!(", with access to: {}", scopes.replace(' ', ", ")) }
+            ));
+        }
+    }
+    Ok(line)
+}
+
+/// `uses.signin.device.<host>`: the OAuth app Echo signs the user in with (GitHub's device sign-in, `jshost::device`) —
+/// its public client id (no secret: there is none) and the scopes asked for, space-separated.
+pub fn device_app(signin: &Value, host: &str) -> Result<(String, String)> {
+    let app = &signin["device"][host];
+    let id = app["client_id"].as_str().unwrap_or("");
+    if !client_id_ok(id) {
+        bail!("“signin” device {host}: client_id is the OAuth app's public id (letters, digits, . _ -)");
+    }
+    let scopes: Vec<&str> = match &app["scopes"] {
+        Value::Null => vec![],
+        Value::Array(a) => a.iter().map(|x| x.as_str().unwrap_or("")).collect(),
+        _ => bail!("“signin” device {host}: scopes is a list"),
+    };
+    if scopes.len() > 10 || scopes.iter().any(|x| x.is_empty() || x.len() > 40 || !x.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b":_-".contains(&b))) {
+        bail!("“signin” device {host}: up to 10 scopes, each like repo or read:org");
+    }
+    Ok((id.to_string(), scopes.join(" ")))
+}
+
+/// An OAuth app's public client id: 1 to 64 letters, digits, `.`, `_` or `-`.
+pub fn client_id_ok(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
 /// A host's plain name: lowercase letters, digits, `-` and dots between labels, at least one dot (`github.com`), and

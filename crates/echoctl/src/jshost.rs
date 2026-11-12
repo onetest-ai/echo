@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 
 use crate::{paths, plugins};
 
+mod device;
 mod inbox;
 mod test_hosts;
 
@@ -189,13 +190,24 @@ const PRELUDE: &str = r#"
       /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
     },
-    /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`, from the GitHub CLI or git on this
-     *  computer: `get` resolves {token, from: 'gh' | 'git', user?} or null when there is none (kept a minute;
-     *  `{fresh: true}` asks again, e.g. after the token was refused); `sources` says which of the two programs are
-     *  here ({gh, git}), reading no sign-in. */
+    /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`: Echo's own first (for a host named
+     *  in `device` below), else the GitHub CLI's or git's on this computer: `get` resolves {token, from: 'echo' | 'gh' | 'git', user?,
+     *  scopes?} or null when there is none (kept a minute; `{fresh: true}` asks again, e.g. after the token was
+     *  refused — a refused 'echo' one: `device.forget` and sign in again); `sources` says which of the two programs
+     *  are here ({gh, git}), reading no sign-in. With `uses.signin.device.<host>` Echo signs the user in itself
+     *  (GitHub's device sign-in): `device.start(host, {clientId?})` resolves {code, url, expires_in} — show the code
+     *  and the link; Echo waits for the user to confirm it there and keeps the sign-in; `device.status(host)` →
+     *  {state: 'none' | 'waiting' | 'done' | 'denied' | 'expired' | 'failed', code?, url?, error?, signed_in};
+     *  `device.cancel(host)` stops waiting; `device.forget(host)` signs out of Echo's own. */
     signin: {
       get: (host, opts) => later('signin.get', [String(host), !!(opts && opts.fresh)]),
       sources: (host) => call('signin.sources', String(host)),
+      device: {
+        start: (host, opts) => later('signin.device.start', [String(host), String((opts && opts.clientId) || '')]),
+        status: (host) => call('signin.device.status', String(host)),
+        cancel: (host) => call('signin.device.cancel', String(host)),
+        forget: (host) => call('signin.device.forget', String(host)),
+      },
     },
     deliver: {
       status: () => call('deliver.status'),
@@ -296,8 +308,6 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
 /// With `save: <path>` (relative, in the plugin's store) a 2xx answer's bytes go to that file and the answer is {status,
 /// body: "", saved, bytes}: the body is text, so audio and images can't come through it.
 fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    use std::io::Write as _;
-    use crate::app::NoWindow;
     if opts["save"].as_str().is_some_and(|s| !s.is_empty()) || opts["method"].as_str().is_some_and(|m| !m.eq_ignore_ascii_case("GET")) {
         read_only_here("a request other than GET")?;
     }
@@ -356,16 +366,7 @@ fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     if let Some(body) = body {
         cfg.push_str(&format!("data-raw = {}\n", curl_quote(&body)));
     }
-    // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
-    let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
-    let status = code.trim().parse::<u16>().unwrap_or(0);
+    let (status, body) = curl(&cfg, host)?;
     let Some((rel, to, part)) = save else { return Ok(json!({"status": status, "body": body})) };
     if (200..300).contains(&status) {
         // An empty answer may leave curl's file unmade.
@@ -752,6 +753,22 @@ fn curl_quote(s: &str) -> String {
 /// The first lines of curl's config for `ctx.http.fetch`. Only http(s), never a redirect elsewhere: what the plugin may
 /// reach is checked on this URL alone. A request sent to a fake service never goes through a proxy (`http_proxy`,
 /// `all_proxy`): it stays on this computer, its headers with it.
+/// Run curl with `cfg` (from [`curl_head`]) on its stdin: (HTTP status, body).
+fn curl(cfg: &str, host: &str) -> Result<(u16, String)> {
+    use std::io::Write as _;
+    use crate::app::NoWindow;
+    // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
+    let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
+    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    Ok((code.trim().parse::<u16>().unwrap_or(0), body.to_string()))
+}
+
 fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
     let mut cfg = format!("url = {}\nrequest = \"{method}\"\nproto = \"=http,https\"\ngloboff\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", curl_quote(url));
     if to_fake {
@@ -768,6 +785,16 @@ fn package_dir(id: &str) -> Result<PathBuf> {
 
 fn package_file(id: &str, rel: &str) -> Result<PathBuf> {
     plugins::inside_plugin(&package_dir(id)?, rel)
+}
+
+/// The OAuth app its sheet named for signing in to `host` (`uses.signin.device.<host>`): (client id, scopes).
+fn device_app(id: &str, host: &str) -> Result<(String, String)> {
+    let uses = plugins::read_manifest(&package_dir(id)?)?.uses;
+    plugins::may_use_signin(&uses, host)?;
+    if uses.get("signin").and_then(|v| v["device"].get(host)).is_none() {
+        bail!("it didn't ask Echo to sign you in to “{host}” when it was installed (uses.signin.device)");
+    }
+    plugins::device_app(&uses["signin"], host)
 }
 
 /// The plugin's manifest names capability `cap` in its `uses` (the install sheet said so).
@@ -1178,6 +1205,19 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, &s(arg))?;
             plugins::signin::sources()
         }
+        "signin.device.status" => {
+            device_app(id, &s(arg))?;
+            device::status(&s(arg))
+        }
+        "signin.device.cancel" => {
+            device_app(id, &s(arg))?;
+            json!(device::cancel(&s(arg)))
+        }
+        "signin.device.forget" => {
+            device_app(id, &s(arg))?;
+            read_only_here("signing out")?;
+            device::forget(&s(arg))?
+        }
         o => bail!("Echo has no service “{o}”"),
     })
 }
@@ -1198,7 +1238,19 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let host = arg[0].as_str().unwrap_or("");
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
             read_only_here("reading your sign-in")?;
-            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false)).unwrap_or(Value::Null))
+            let own = plugins::read_manifest(&package_dir(id)?)?.uses.get("signin").is_some_and(|v| v["device"].get(host).is_some());
+            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
+        }
+        "signin.device.start" => {
+            let host = arg[0].as_str().unwrap_or("");
+            let (default_id, scopes) = device_app(id, host)?;
+            read_only_here("signing in")?;
+            // The plugin may pass the user's own OAuth app (a setting of its); the scopes stay the sheet's.
+            let asked = arg[1].as_str().unwrap_or("");
+            if !asked.is_empty() && !plugins::client_id_ok(asked) {
+                bail!("“{asked}” isn't an OAuth app's client id");
+            }
+            device::start(host, if asked.is_empty() { &default_id } else { asked }, &scopes)
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "system.pick_folder" => {
@@ -1849,6 +1901,98 @@ mod tests {
         assert_eq!(call("gh-ish", "get", &json!({"host": "signin-jshost.example"})).unwrap(), Value::Null);
         plugins::signin::FAKE_PROGRAMS.lock().unwrap().clear();
         plugins::remove("gh-ish", false).unwrap();
+        sync();
+    }
+
+    /// `uses.signin.device`: Echo signs the user in itself for the host its sheet named, keeps that sign-in (handed back
+    /// as `from: "echo"`), signs out; any other host, or a read-only routine, is refused before GitHub is asked.
+    #[test]
+    fn a_plugin_has_echo_sign_the_user_in_only_where_its_sheet_said() {
+        let (_env, root) = paths::testenv::folders("jshost-signin-device");
+        plugins::signin::FAKE_PROGRAMS.lock().unwrap().clear();
+        let (base, seen) = device::fake_github(0, json!({"access_token": "gho_madeupviaecho", "scope": "repo,read:org"}));
+        *device::FAKE.lock().unwrap() = Some(base);
+        let mk = root.join("market");
+        let d = mk.join("plugins/dev-ish");
+        std::fs::create_dir_all(&d).unwrap();
+        let signin = json!({"hosts": ["device-jshost.example", "plain-jshost.example"], "device": {"device-jshost.example": {"client_id": "Ov23liMADEUP", "scopes": ["repo", "read:org"]}}});
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "dev-ish", "name": "Acme hub", "version": "0.1.0", "main": "main.js", "uses": {"signin": signin}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('start', async (a) => await ctx.signin.device.start(a.host, a.clientId ? { clientId: a.clientId } : undefined))
+              ctx.command('status', (a) => ctx.signin.device.status(a.host))
+              ctx.command('cancel', (a) => ctx.signin.device.cancel(a.host))
+              ctx.command('forget', (a) => ctx.signin.device.forget(a.host))
+              ctx.command('get', async (a) => await ctx.signin.get(a.host))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "dev-ish", "source": "./plugins/dev-ish"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("dev-ish", Some(&name)).unwrap();
+        plugins::install("dev-ish", Some(&name), &review.uses).unwrap();
+        sync();
+        let host = json!({"host": "device-jshost.example"});
+        let status = (0..50).find_map(|_| call("dev-ish", "status", &host).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(status.unwrap(), json!({"state": "none", "signed_in": false}));
+        // A host it named for the CLI's sign-in only, and one it didn't name at all: refused, GitHub never asked.
+        for (h, said) in [("plain-jshost.example", "didn't ask Echo to sign you in"), ("github.com", "didn't ask to use your sign-in")] {
+            for command in ["start", "status", "cancel", "forget"] {
+                let e = call("dev-ish", command, &json!({"host": h})).unwrap_err().to_string();
+                assert!(e.contains(said), "{h} {command}: {e}");
+            }
+        }
+        // Not a client id: refused.
+        let e = call("dev-ish", "start", &json!({"host": "device-jshost.example", "clientId": "a b"})).unwrap_err().to_string();
+        assert!(e.contains("isn't an OAuth app's client id"), "{e}");
+        // A read-only routine signs nobody in or out.
+        {
+            struct RunMode;
+            impl Drop for RunMode {
+                fn drop(&mut self) {
+                    std::env::remove_var(crate::guard::RUN_MODE);
+                }
+            }
+            let _routine = RunMode;
+            std::env::set_var(crate::guard::RUN_MODE, "routine");
+            for command in ["start", "forget"] {
+                let e = call("dev-ish", command, &host).unwrap_err().to_string();
+                assert!(e.contains("isn't allowed in a read-only routine"), "{command}: {e}");
+            }
+        }
+        assert!(seen.lock().unwrap().is_empty(), "GitHub not asked yet");
+        // The user's own OAuth app (a setting of the plugin's), the sheet's scopes.
+        let started = call("dev-ish", "start", &json!({"host": "device-jshost.example", "clientId": "Ov23liOWN"})).unwrap();
+        assert_eq!(started, json!({"code": "ABCD-1234", "url": "https://device-jshost.example/login/device", "expires_in": 900}));
+        assert_eq!(seen.lock().unwrap()[0], "/login/device/code client_id=Ov23liOWN&scope=repo%20read%3Aorg");
+        let done = (0..100).find_map(|_| {
+            let v = call("dev-ish", "status", &host).unwrap();
+            (v["state"] != "waiting").then_some(v).or_else(|| {
+                std::thread::sleep(Duration::from_millis(100));
+                None
+            })
+        });
+        assert_eq!(done.unwrap(), json!({"state": "done", "signed_in": true}));
+        assert_eq!(call("dev-ish", "get", &host).unwrap(), json!({"token": "gho_madeupviaecho", "from": "echo", "scopes": "repo read:org"}));
+        // Echo's own sign-in to a host the sheet named without `device` isn't handed over (none from the CLI either).
+        plugins::signin::save("plain-jshost.example", "gho_madeupnotyours", "repo", "Ov23liMADEUP").unwrap();
+        assert_eq!(call("dev-ish", "get", &json!({"host": "plain-jshost.example"})).unwrap(), Value::Null);
+        plugins::signin::forget_saved("plain-jshost.example").unwrap();
+        // Kept outside the plugin's store: nothing in it holds the token.
+        let store = plugins::data_dir("dev-ish");
+        let leaked = std::fs::read_dir(&store).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("gho_madeupviaecho")));
+        assert!(!leaked, "the token is never in the plugin's store");
+        assert_eq!(call("dev-ish", "forget", &host).unwrap(), json!({"forgot": true}));
+        assert_eq!(call("dev-ish", "get", &host).unwrap(), Value::Null);
+        *device::FAKE.lock().unwrap() = None;
+        plugins::remove("dev-ish", false).unwrap();
         sync();
     }
 

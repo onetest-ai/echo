@@ -1,0 +1,14 @@
+{
+  "id": "signin-demo",
+  "name": "Sign-in demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: Echo signs the user in to GitHub itself (tests/cases/plugins/TC-025).",
+  "main": "main.js",
+  "client": "client.js",
+  "uses": {
+    "signin": {
+      "hosts": ["github.com"],
+      "device": { "github.com": { "client_id": "Ov23liMADEUPDEMO", "scopes": ["repo", "read:org"] } }
+    }
+  }
+}
