@@ -186,10 +186,11 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
     })
 }
 
-/// The agenda offers a meeting to record now (from `before` its start until `after` it): one Echo can record, not a
-/// Zoom one (that has no "Record?" of its own, so a Teams call then is asked about as any call).
-pub fn offered_now(agenda: &[MeetingContext], now: DateTime<Utc>, before: Duration, after: Duration) -> bool {
-    agenda.iter().filter(|m| m.recordable().is_ok()).filter_map(watch::meeting_start).any(|st| now >= st - before && now <= st + after)
+/// The agenda offers a call in `app` a meeting to record now (from `before` its start until `after` it): one Echo can
+/// record and of that app (or of none known), not a Zoom one, nor a Meet one for a Teams call — its arm can't start on
+/// it, so that call is asked about as any call (#500).
+pub fn offered_now(agenda: &[MeetingContext], app: crate::apps::TargetApp, now: DateTime<Utc>, before: Duration, after: Duration) -> bool {
+    agenda.iter().filter(|m| m.recordable().is_ok() && m.is_in(app)).filter_map(watch::meeting_start).any(|st| now >= st - before && now <= st + after)
 }
 
 /// The start of `day` here, in UTC: local midnight (the earlier one when the clock goes back over
@@ -303,6 +304,17 @@ fn store(events: &[Value], quiet: bool) -> Result<()> {
 /// The agenda meeting a call in `app` starting now belongs to (10 min early … end), if exactly
 /// one matches; the one starting closest to now wins a tie.
 pub fn meeting_now(now: DateTime<Utc>, app: crate::apps::TargetApp) -> Option<MeetingContext> {
+    meetings_now(now, app).into_iter().next()
+}
+
+/// Whether a meeting with a Google Meet link goes on now (as `meeting_now` matches one), whichever is closest: a sign
+/// that Chrome on the mic is a Meet call (#500: one with no link starting closer hid it).
+pub fn meet_meeting_now(now: DateTime<Utc>) -> bool {
+    meetings_now(now, crate::apps::TargetApp::Meet).iter().any(|m| m.app() == Some(crate::apps::MeetingApp::Meet))
+}
+
+/// The agenda meetings a call in `app` starting now may belong to, the one starting closest to now first.
+fn meetings_now(now: DateTime<Utc>, app: crate::apps::TargetApp) -> Vec<MeetingContext> {
     let mut hits: Vec<(i64, MeetingContext)> = watch::agenda()
         .into_iter()
         // A meeting of another app (a Zoom one, a Meet one for a Teams call): not the call being recorded.
@@ -319,7 +331,7 @@ pub fn meeting_now(now: DateTime<Utc>, app: crate::apps::TargetApp) -> Option<Me
         })
         .collect();
     hits.sort_by_key(|(d, _)| *d);
-    hits.into_iter().next().map(|(_, m)| m)
+    hits.into_iter().map(|(_, m)| m).collect()
 }
 
 /// A call as `call_of_meeting` weighs it: the event id and start its `meeting.json` saved, when it started, and whether
@@ -508,9 +520,39 @@ mod tests {
         let now = Utc::now();
         let at = |url: &str| MeetingContext { start: Some(now.to_rfc3339()), join_url: Some(url.into()), ..Default::default() };
         let (before, after) = (Duration::seconds(58), Duration::minutes(4));
-        assert!(!offered_now(&[at("https://zoom.us/j/81234567890")], now, before, after));
-        assert!(offered_now(&[at("https://zoom.us/j/81234567890"), at("https://teams.example/ev-1")], now, before, after));
-        assert!(!offered_now(&[at("https://teams.example/ev-1")], now + Duration::minutes(5), before, after), "past the window");
+        assert!(!offered_now(&[at("https://zoom.us/j/81234567890")], TargetApp::Teams, now, before, after));
+        assert!(offered_now(&[at("https://zoom.us/j/81234567890"), at("https://teams.example/ev-1")], TargetApp::Teams, now, before, after));
+        assert!(!offered_now(&[at("https://teams.example/ev-1")], TargetApp::Teams, now + Duration::minutes(5), before, after), "past the window");
+    }
+
+    /// #500: a Teams call inside a Google Meet meeting's offer window is still asked about: that meeting's arm can't
+    /// start on Teams, so it offers nothing to a Teams call (it does to a Meet call; one with no link, to either).
+    #[test]
+    fn a_meeting_is_offered_only_to_a_call_of_its_app() {
+        let now = Utc::now();
+        let at = |url: Option<&str>| MeetingContext { start: Some(now.to_rfc3339()), join_url: url.map(Into::into), ..Default::default() };
+        let (before, after) = (Duration::seconds(58), Duration::minutes(4));
+        let meet = [at(Some("https://meet.google.com/abc-defg-hij"))];
+        assert!(!offered_now(&meet, TargetApp::Teams, now, before, after));
+        if cfg!(target_os = "macos") {
+            assert!(offered_now(&meet, TargetApp::Meet, now, before, after));
+            assert!(offered_now(&meet, TargetApp::MeetApp, now, before, after));
+        }
+        assert!(offered_now(&[at(None)], TargetApp::Teams, now, before, after), "no link: any call's");
+    }
+
+    /// #500: the Meet sign sees a Meet meeting going on though a meeting with no link starts closer to now (the call
+    /// is matched to the closest, which may be that one).
+    #[test]
+    fn a_meet_meeting_going_on_is_seen_beside_a_closer_one_with_no_link() {
+        let (_env, _home) = crate::paths::testenv::folders("calendar-meet-now");
+        let now = Utc::now();
+        let at = |id: &str, start: DateTime<Utc>, url: Option<&str>| MeetingContext { id: Some(id.into()), start: Some(start.to_rfc3339()), end: Some((start + Duration::minutes(30)).to_rfc3339()), join_url: url.map(Into::into), ..Default::default() };
+        watch::write_agenda(&[at("meet", now - Duration::minutes(5), Some("https://meet.google.com/abc-defg-hij")), at("room", now, None)]).unwrap();
+        assert_eq!(meeting_now(now, TargetApp::Meet).and_then(|m| m.id).as_deref(), Some("room"), "the closest");
+        assert_eq!(meet_meeting_now(now), cfg!(target_os = "macos"), "a Meet one goes on (recordable on a Mac)");
+        watch::write_agenda(&[at("room", now, None)]).unwrap();
+        assert!(!meet_meeting_now(now));
     }
 
     /// A call is matched only to a meeting of its own app: a Teams call during a Zoom or Google Meet meeting isn't

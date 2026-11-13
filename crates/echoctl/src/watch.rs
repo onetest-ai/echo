@@ -487,7 +487,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                             }
                         }
                         // Else asked as any call — unless the agenda offers its meeting (it does now that nothing records).
-                        let offered_by_agenda = crate::calendar::offered_now(&agenda, now, OFFER_BEFORE, OFFER_UNTIL_AFTER_START);
+                        let offered_by_agenda = crate::calendar::offered_now(&agenda, app, now, OFFER_BEFORE, OFFER_UNTIL_AFTER_START);
                         let ask = armed.is_none() && !offered_by_agenda && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
                         emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
                         if ask {
@@ -1402,6 +1402,21 @@ pub fn stop() -> Result<()> {
     Ok(())
 }
 
+/// Opens a meeting's link, in `app` when given (a Google Meet one in Chrome): an error when it can't be (#500: no Chrome
+/// installed), so nothing is armed for a meeting that never opened.
+#[cfg(target_os = "macos")]
+fn open_meeting(url: &str, app: Option<&str>) -> Result<()> {
+    let mut open = std::process::Command::new("open");
+    if let Some(app) = app {
+        open.args(["-a", app]);
+    }
+    let out = open.arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()?;
+    if !out.success() {
+        bail!("couldn't open the meeting{}", app.map(|a| format!(" — is {a} installed?")).unwrap_or_default());
+    }
+    Ok(())
+}
+
 /// `echoctl join`: open the meeting in the desktop app (a Google Meet one in Chrome, where Echo records it) and arm
 /// recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
@@ -1409,10 +1424,7 @@ pub fn join(meeting: MeetingContext) -> Result<()> {
     let url = crate::apps::desktop_join_url(&url);
     if !crate::app::open_log_only(&url) {
         #[cfg(target_os = "macos")]
-        {
-            let chrome: &[&str] = if meeting.app() == Some(crate::apps::MeetingApp::Meet) { &["-a", "Google Chrome"] } else { &[] };
-            std::process::Command::new("open").args(chrome).arg(&url).status()?;
-        }
+        open_meeting(&url, (meeting.app() == Some(crate::apps::MeetingApp::Meet)).then_some("Google Chrome"))?;
         #[cfg(windows)]
         // Not `cmd /C start`: cmd would split the URL at `&`.
         std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
@@ -1752,5 +1764,12 @@ mod tests {
         assert!(parse_time(&Some("2026-10-09T13:30:00.0000000".into())).is_some());
         assert!(parse_time(&Some("2026-10-09T16:30:00+03:00".into())).is_some());
         assert!(parse_time(&Some("2026-10-09T13:30:00Z".into())).is_some());
+    }
+
+    /// #500: joining a Google Meet meeting without Chrome is an error, not an arm with nothing opened.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn opening_a_meeting_in_an_app_that_isnt_there_is_an_error() {
+        assert!(open_meeting("https://meet.google.com/abc-defg-hij", Some("Echo Test No Such App")).is_err());
     }
 }
