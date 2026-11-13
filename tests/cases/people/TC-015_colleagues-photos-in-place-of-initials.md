@@ -28,8 +28,8 @@ tags: [people, photos, microsoft-365]
 | 3 | Open Calls and wait 10 s | The faces of colleagues from the user's own domain show photos (those who have one); faces of people from another domain keep their initials |
 | 4 | Open a thread's People → Map with a colleague placed in a stance | Their photo, with a ring in the stance's colour |
 | 5 | Run `ls "$ECHOCTL_CONFIG_DIR/photos"` | Files named by colleagues' addresses only, in the user's domain (`.jpg`, or `.none` for one without a photo); none for another domain |
-| 6 | Settings → Calendar & chat, turn "Colleagues' photos" off, open Calls again (reload the window) | Every face shows initials again |
-| 7 | If the organisation refuses the permission at step 2 | A notice "Photos not allowed"; the row keeps "Allow…"; the faces keep initials |
+| 6 | Settings → Calendar & chat, turn "Colleagues' photos" off, open Calls | Every face shows initials again |
+| 7 | If the organisation refuses the permission at step 2 | The browser says an admin must approve (or the sign-in errs); a notice "Sign-in for photos failed" (or "Photos not allowed" when the sign-in passed without it); the row keeps "Allow…"; the faces keep initials |
 
 ## Expected Final State
 The switch as left; the photos kept in the config folder's `photos/` (delete it to clean up).

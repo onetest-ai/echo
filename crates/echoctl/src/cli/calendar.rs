@@ -101,6 +101,7 @@ pub fn calendar(cmd: Option<CalendarCmd>) -> Result<()> {
         }
         Some(CalendarCmd::Photo { email }) => {
             let out = crate::photos::file(&email);
+            std::fs::create_dir_all(out.parent().unwrap_or(std::path::Path::new(".")))?;
             { print_json(&serde_json::json!({ "email": email, "allowed": graph::photos_allowed(), "got": graph::photo(&email, &out)?, "file": out })); Ok(()) }
         }
         Some(CalendarCmd::Chat { call }) => watch::fetch_call_chat(&call),

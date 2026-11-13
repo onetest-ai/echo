@@ -1,6 +1,7 @@
 // ── Colleagues' photos in place of initials (`api/photos`, the app's `photos`): asked once per name, in batches; the
 // app answers with the names it has a photo for and fetches the others in the background (only colleagues in the
-// user's own domain, only when the Microsoft 365 sign-in may read photos), so a name not answered is asked once more.
+// user's own domain, only when the Microsoft 365 sign-in may read photos): a name it is fetching (null) is asked again,
+// a little later each time.
 
 // ── photos
 const PHOTO = new Map() // name → its photo's address, or false (none), or 0 (asked, waiting)
@@ -12,21 +13,26 @@ function photoOf(name) {
   if (!PHOTO.has(name)) { PHOTO.set(name, 0); photoAsk.add(name); clearTimeout(photoTimer); photoTimer = setTimeout(askPhotos, 250) }
   return PHOTO.get(name) || null
 }
-async function askPhotos(again) {
+async function askPhotos(again, tries = 0) {
   const names = again || [...photoAsk]
   photoAsk.clear()
   if (!names.length) return
   let got
   try { got = await get(`api/photos?n=${encodeURIComponent(JSON.stringify(names))}`) } catch { return }
   let any = false
-  const miss = []
+  const wait = []
   for (const n of names) {
-    if (got && typeof got[n] === 'string') { PHOTO.set(n, got[n]); any = true } else if (again) PHOTO.set(n, false); else miss.push(n)
+    const v = got ? got[n] : undefined
+    if (typeof v === 'string') { PHOTO.set(n, v); any = true } else if (v === null && tries < 5) wait.push(n); else PHOTO.set(n, false)
   }
   if (any) render()
-  // The app fetches the ones it hasn't yet: asked once more a little later.
-  if (miss.length) setTimeout(() => askPhotos(miss), 6000)
+  // Being fetched: asked again at 5, 10, 20, 40, 80 s.
+  if (wait.length) setTimeout(() => askPhotos(wait, tries + 1), 5000 * 2 ** tries)
 }
+// The switch turned: every name is asked afresh.
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('[data-set="people_photos"]')) setTimeout(() => { PHOTO.clear(); render() }, 400)
+})
 /** The class and style a face takes for its photo: ` ph` and `--ph:url(…)`, or nothing. */
 function photoFace(name) {
   const e = photoOf(name)

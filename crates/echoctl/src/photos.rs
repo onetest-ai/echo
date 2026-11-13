@@ -21,9 +21,12 @@ const ALLOWED_FOR: Duration = Duration::from_secs(600);
 /// Where a person's photo is kept: their address, lower case, as the file name (only [a-z0-9._@-] kept).
 pub fn file(email: &str) -> PathBuf {
     let key: String = email.trim().to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric() || "._@-".contains(*c)).collect();
-    let dir = crate::paths::config_dir().join("photos");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join(format!("{key}.jpg"))
+    crate::paths::config_dir().join("photos").join(format!("{key}.jpg"))
+}
+
+/// Whether photos are shown: the switch (Settings → Calendar & chat), off by default.
+fn on() -> bool {
+    crate::config::Config::load().ok().and_then(|c| c.people_photos) == Some(true)
 }
 
 /// The user's own mail domain: their address in the settings, else the signed-in account's.
@@ -69,12 +72,12 @@ fn email_of(name: &str, people: &[crate::people::Person], mine: &str) -> Option<
         .map(|e| e.trim().to_lowercase())
 }
 
-/// For each name: its photo's address when there is one (the window shows `api/photo?e=`), else nothing. One not asked
-/// yet is fetched in the background — the window asks again. Nothing at all when the switch is off (Settings →
+/// For each name: its photo's address when there is one (the window shows `api/photo?e=`), null while it is being
+/// fetched (in the background: the window asks again), else nothing. Nothing at all when the switch is off (Settings →
 /// Calendar & chat) or the sign-in may not read photos.
 pub fn of_names(names: &[String]) -> Map<String, Value> {
     let mut out = Map::new();
-    if crate::config::Config::load().ok().and_then(|c| c.people_photos) != Some(true) {
+    if !on() {
         return out;
     }
     let Some(mine) = my_domain() else { return out };
@@ -89,6 +92,7 @@ pub fn of_names(names: &[String]) -> Map<String, Value> {
         if jpg.exists() {
             out.insert(name.clone(), Value::String(email));
         } else if !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
+            out.insert(name.clone(), Value::Null);
             wanted.push(email);
         }
     }
@@ -109,6 +113,9 @@ fn fetch(emails: Vec<String>) {
     std::thread::spawn(move || {
         for email in mine {
             let jpg = file(&email);
+            if let Some(dir) = jpg.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
             match crate::graph::photo(&email, &jpg) {
                 Ok(Some(true)) => shrink(&jpg),
                 Ok(Some(false)) => drop(std::fs::write(jpg.with_extension("none"), b"")),
@@ -130,9 +137,10 @@ fn shrink(jpg: &std::path::Path) {
     let _ = jpg;
 }
 
-/// A cached photo by its address (only one `of_names` handed out: in the cache folder, by its own name).
+/// A cached photo by its address (only one `of_names` handed out: in the cache folder, by its own name), while the
+/// switch is on.
 pub fn bytes(email: &str) -> Option<Vec<u8>> {
-    std::fs::read(file(email)).ok()
+    on().then(|| std::fs::read(file(email)).ok()).flatten()
 }
 
 #[cfg(test)]
@@ -156,9 +164,11 @@ mod tests {
         cfg.save().unwrap();
         std::fs::create_dir_all(crate::projects::dir()).unwrap();
         std::fs::write(crate::projects::dir().join("people.json"), r#"[{"id":"p1","name":"Dana Lee","emails":["dana@acme.example"]}]"#).unwrap();
+        std::fs::create_dir_all(file("x@y").parent().unwrap()).unwrap();
         std::fs::write(file("dana@acme.example"), b"jpeg").unwrap();
         let names = vec!["Dana Lee".to_string()];
         assert!(of_names(&names).is_empty(), "the switch is off by default, even with a photo kept");
+        assert!(bytes("dana@acme.example").is_none(), "nor is a kept photo served");
         cfg.people_photos = Some(true);
         cfg.save().unwrap();
         assert!(of_names(&names).is_empty(), "on, but not signed in: the sign-in may not read photos");

@@ -383,14 +383,17 @@ fn scopes_of(token: &str) -> Option<String> {
     serde_json::from_slice::<Value>(&bytes).ok()?["scp"].as_str().map(str::to_string)
 }
 
-/// A colleague's photo, 48x48 JPEG, by their address, into `out`: Some(true) written, Some(false) they have none or
-/// aren't in the directory (404), None not allowed (403: no photo permission).
+/// A colleague's photo (JPEG, as big as it was uploaded: the sized ones time out in some tenants) by their address, into
+/// `out`, written whole or not at all: Some(true) written, Some(false) they have none or aren't in the directory (404),
+/// None not allowed (403: no photo permission).
 pub fn photo(email: &str, out: &std::path::Path) -> Result<Option<bool>> {
     let token = access_token()?;
-    let url = format!("{GRAPH}/users/{}/photos/48x48/$value", urlencode(email.trim()));
+    let url = format!("{GRAPH}/users/{}/photo/$value", urlencode(email.trim()));
+    // Into a part file, renamed only when whole: a download cut short never passes for a photo.
+    let part = out.with_extension("part");
     let mut child = Command::new("curl").no_window()
-        .args(["-sS", "-K", "-", "-o"])
-        .arg(out)
+        .args(["-sS", "--max-time", "30", "-K", "-", "-o"])
+        .arg(&part)
         .args(["-w", "%{http_code}"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -400,12 +403,16 @@ pub fn photo(email: &str, out: &std::path::Path) -> Result<Option<bool>> {
     child.stdin.take().unwrap().write_all(format!("url = {}\nheader = {}\n", quote(&url), quote(&format!("Authorization: Bearer {token}"))).as_bytes())?;
     let o = child.wait_with_output()?;
     if !o.status.success() {
+        let _ = std::fs::remove_file(&part);
         bail!("network error: {}", String::from_utf8_lossy(&o.stderr).trim());
     }
     match String::from_utf8_lossy(&o.stdout).trim() {
-        "200" => Ok(Some(true)),
+        "200" => {
+            std::fs::rename(&part, out)?;
+            Ok(Some(true))
+        }
         code => {
-            let _ = std::fs::remove_file(out);
+            let _ = std::fs::remove_file(&part);
             match code {
                 "404" => Ok(Some(false)),
                 "403" | "401" => Ok(None),
