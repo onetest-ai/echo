@@ -120,6 +120,7 @@ function twRefocus() {
 }
 
 async function todayEditOpen() {
+  S.tdHover = null
   S.tdEdit = true
   // As the right panel was, for Done to put it back.
   const was = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay).right
@@ -130,10 +131,13 @@ async function todayEditOpen() {
   // At a narrow width the panel would cover the widgets' controls: it waits for "Add a widget" in the head (#395).
   if (!Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) Layout.show('add-widget', known)
   layoutChanged()
+  // Every widget's data, for the previews (api/today?all=1 while editing).
+  loadToday().then(render)
 }
 
 /** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
 function todayEditDone() {
+  S.tdHover = null
   S.tdEdit = false
   S.tdFocus = null
   const was = S.tdEditWas || { open: true, overlay: S.overlay }
@@ -145,7 +149,8 @@ function todayEditDone() {
   layoutChanged()
 }
 
-/** Add a widget (the right panel in edit mode): search, parts, a row a widget, the picked one's preview and Add. */
+/** Add a widget (the right panel in edit mode): search, parts, the preview — of the row under the pointer, else the
+ *  picked one — with its size and Add, always in sight above the list, which scrolls under it. */
 function addWidgetPanel() {
   const all = S.tdCatalog || []
   const on = new Set(((S.today && S.today.layout) || []).map((i) => i.widget))
@@ -154,20 +159,31 @@ function addWidgetPanel() {
   const shown = all.filter((w) => (part === 'All' || w.part === part) && (!q || `${w.label} ${w.about} ${w.part}`.toLowerCase().includes(q)))
   // The picked one is among what the part and search show (else the first of them; none shown: no preview).
   if (shown.length && !shown.some((x) => x.id === S.tdPick)) S.tdPick = shown[0].id
-  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
-  const w = shown.find((x) => x.id === S.tdPick)
+  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(twPickSize(w))}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
+  // Hovering a row shows its preview; leaving the list, the picked (clicked) one again.
+  const w = shown.find((x) => x.id === S.tdHover) || shown.find((x) => x.id === S.tdPick)
   let pick = ''
   if (w) {
-    const size = twPickSize(w)
-    const px = { S: 170, M: 280, L: 380 }[size] || 280
+    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === w.id)
+    const size = placed ? placed.size : twPickSize(w)
+    // One frame for every widget: Today's grid in small (3 columns, 2 rows), the widget drawn in the place its size
+    // and height take — how big its window on Today will be.
+    const COLW = 320, ROWH = 280, GAP = 16, BOX = 268
+    const scale = BOX / (3 * COLW + 2 * GAP), span = TW_SIZES[size] || 2
+    const tall = placed ? placed.height === 2 : false
+    const iw = span * COLW + (span - 1) * GAP, ih = (tall ? 2 : 1) * ROWH + (tall ? GAP : 0)
     const html = (S.tdParts || {})[w.id]
-    const pv = html ? `<div class="tw-pv-in" inert style="width:${px * 2}px">${html}</div>` : `<div class="set-sub tw-pv-none">${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-    const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}">${z}</button>`).join('')
+    const inner = html || `<div class="tw-pv-none"><b>${esc(w.label)}</b><span>${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</span></div>`
+    const cells = '<i></i>'.repeat(6)
+    const pv = `<div class="tw-cells" aria-hidden="true">${cells}</div><div class="tw-slot" style="width:${(iw * scale).toFixed(1)}px;height:${(ih * scale).toFixed(1)}px"><div class="tw-pv-in" inert style="width:${iw}px;height:${ih}px;transform:scale(${scale.toFixed(4)})">${inner}</div></div>`
+    const boxH = Math.round((2 * ROWH + GAP) * scale)
+    // On Today, a size is its size there (a click changes it); else the size its row's Add and a drag put it in at.
+    const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" data-tw-id="${esc(w.id)}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${z}">${z}</button>`).join('')
     const note = `${size} · ${TW_SIZES[size]} column${TW_SIZES[size] === 1 ? '' : 's'}${w.height === 'fill' ? ' · fills its column' : ''}`
-    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
+    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${BOX}px;height:${boxH}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)} on Today">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
-  return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div><div class="tw-list" role="list" aria-label="Widgets">${rows}</div>${pick}</div>`
+  return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
 }
 
 PANEL_VIEWS.push({
@@ -196,9 +212,37 @@ document.addEventListener('click', (e) => {
     return todayLayoutDo({ op: 'remove', widget: d.twRemove })
   }
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
-  if (d.twPickSize) { S.tdPickSize = d.twPickSize; return render() }
+  if (d.twPickSize) {
+    S.tdPickSize = d.twPickSize
+    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === d.twId)
+    if (placed && placed.size !== d.twPickSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twPickSize })
+    return render()
+  }
   if (d.twPart) { S.tdPart = d.twPart; return render() }
-  if (d.twPick) { S.tdPick = d.twPick; return render() }
+  if (d.twPick) { S.tdPick = d.twPick; S.tdHover = null; return render() }
+})
+// The preview follows the pointer over the list; out of the list it is the picked one's again.
+// Redrawn only when it changes (a redraw on a press would replace the button pressed, and lose its click).
+// The panel is drawn again: the focus goes back to the button it was on (by what it does), not to the page.
+const twHover = (id) => {
+  if ((S.tdHover || null) === (id || null)) return
+  const a = document.activeElement
+  // The keyboard on the preview's sizes: the preview stays (a size pressed is that widget's).
+  if (a && a.closest && a.closest('.tw-pick')) return
+  S.tdHover = id || null
+  const back = a && a.closest && a.closest('.tw-panel') && ['twAdd', 'twPart'].find((k) => a.dataset && a.dataset[k])
+  const sel = back && `.tw-panel [data-${back.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}="${CSS.escape(a.dataset[back])}"]`
+  render()
+  if (sel) setTimeout(() => { const el = document.querySelector(sel); if (el && document.activeElement !== el) el.focus({ preventScroll: true }) })
+}
+document.addEventListener('mouseover', (e) => {
+  if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
+  const row = e.target.closest('.tw-list [data-tw-pick]')
+  if (row) twHover(row.dataset.twPick)
+})
+document.addEventListener('mouseout', (e) => {
+  if (S.tdHover == null || !e.target.closest || !e.target.closest('.tw-list')) return
+  if (!(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.tw-list'))) twHover(null)
 })
 document.addEventListener('input', (e) => {
   if (!e.target.dataset || !e.target.dataset.twQ) return
@@ -214,7 +258,8 @@ document.addEventListener('dragstart', (e) => {
   const page = e.target.closest('.tw[data-tw]'), cat = e.target.closest('[data-tw-drag]')
   if (!page && !cat) return
   const w = cat && (S.tdCatalog || []).find((x) => x.id === cat.dataset.twDrag)
-  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: S.tdPick === cat.dataset.twDrag ? twPickSize(w) : undefined }
+  // From the panel at the size its preview shows (every row's: the same as its Add).
+  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: twPickSize(w) }
   try { e.dataTransfer.setData('text/plain', twDrag.id); e.dataTransfer.effectAllowed = 'move' } catch (x) { /* some webviews refuse */ }
   if (page) page.classList.add('dragging')
 })

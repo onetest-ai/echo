@@ -30,33 +30,42 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let mut v = crate::today::view(&tasks_view());
             // Which widgets Today shows, in what order and rows (this computer's `today-layout.json`).
             let layout = crate::today_layout::load();
+            // `all=1` (Today's edit mode, Add a widget's previews): every widget's data, placed or not.
+            let all = query_param(req.uri().query().unwrap_or(""), "all").is_some_and(|a| a == "1");
+            let ids: Vec<String> = if all { crate::widgets::catalog().into_iter().map(|w| w.id.to_string()).collect() } else { layout.iter().map(|i| i.widget.clone()).collect() };
+            let wants = |id: &str| ids.iter().any(|i| i == id);
             // Next meeting only when it is on Today: its prep and the invite's answers are read for it.
-            if layout.iter().any(|i| i.widget == "core:calendar.next") {
+            if wants("core:calendar.next") {
                 let day: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
                 v["next"] = crate::widgets::next_meeting(&day)["next"].clone();
             }
             // Threads at a glance and Done this week only when one is on Today (each thread's work is read for them).
             // Each with its own period (a widget's setting): `glances` by widget.
-            let glances: serde_json::Map<String, Value> = layout
-                .iter()
-                .filter(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done")
-                .map(|i| (i.widget.clone(), crate::glance::today(crate::today_layout::params_of(&i.widget).get("period").and_then(Value::as_str).unwrap_or("week"))))
+            let glances: serde_json::Map<String, Value> = ["core:tasks.glance", "core:tasks.done"]
+                .into_iter()
+                .filter(|id| wants(id))
+                .map(|id| (id.to_string(), crate::glance::today(crate::today_layout::params_of(id).get("period").and_then(Value::as_str).unwrap_or("week"))))
                 .collect();
             if !glances.is_empty() {
                 v["glances"] = json!(glances);
             }
             // Plugins' widgets on Today: their last data, by id (each asked again in the background when stale).
             let tasks = json!({});
-            let plugins: serde_json::Map<String, Value> = layout
+            let plugins: serde_json::Map<String, Value> = ids
                 .iter()
-                .filter(|i| i.widget.starts_with("plugin:"))
-                .filter_map(|i| crate::widgets::data(&i.widget, &crate::widgets::Inputs { tasks: &tasks }).ok().map(|d| (i.widget.clone(), d)))
+                .filter(|id| id.starts_with("plugin:"))
+                .filter_map(|id| {
+                    let i = crate::widgets::Inputs { tasks: &tasks };
+                    // On Today: asked again when stale; only previewed (edit mode): its last answer.
+                    let d = if layout.iter().any(|l| &l.widget == id) { crate::widgets::data(id, &i) } else { crate::widgets::preview_data(id, &i) };
+                    d.ok().map(|d| (id.clone(), d))
+                })
                 .collect();
             if !plugins.is_empty() {
                 v["plugins"] = json!(plugins);
             }
             // Recorded this week, only when it is on Today.
-            if layout.iter().any(|i| i.widget == "core:calls.week") {
+            if wants("core:calls.week") {
                 v["calls_week"] = crate::calls_week::today();
             }
             v["layout"] = json!(layout);

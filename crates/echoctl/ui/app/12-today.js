@@ -104,12 +104,14 @@ function todayView() {
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView((d.glances || {})['core:tasks.glance'], sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView((d.glances || {})['core:tasks.done'], sizeOf['core:tasks.done'] || 'S'), 'core:calls.week': callsWeekView(d.calls_week, sizeOf['core:calls.week'] || 'S') }
+  // Off Today, while editing: drawn at the size Add a widget's preview shows it at (twPickSize).
+  const sizeAt = (id, dflt) => sizeOf[id] || (S.tdEdit && typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || dflt
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeAt('core:calendar.next', 'M'), now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView((d.glances || {})['core:tasks.glance'], sizeAt('core:tasks.glance', 'M')), 'core:tasks.done': doneView((d.glances || {})['core:tasks.done'], sizeAt('core:tasks.done', 'S')), 'core:calls.week': callsWeekView(d.calls_week, sizeAt('core:calls.week', 'S')) }
   // Every placed card widget has its place, empty while its card is read (so edit mode can still move or take it off).
   for (const slug of ownCard) parts[`core:routines.card.${slug}`] = ''
   for (const c of d.cards || []) if (ownCard.has(c.slug)) parts[`core:routines.card.${c.slug}`] = cardHtml(c)
   // Plugins' widgets on the layout, drawn by their kind (13-today-plugins.js).
-  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeOf[id] || 'M')
+  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id, 'M'))
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.

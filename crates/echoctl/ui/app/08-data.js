@@ -74,7 +74,10 @@ async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
 }
 async function loadToday() {
-  try { S.today = await get('api/today') } catch { /* app restarting */ }
+  // Editing Today: every widget's data too (Add a widget previews each one). A plain read that comes back after editing
+  // began is dropped: the edit's own read (todayEditOpen) brings every widget's.
+  const all = !!S.tdEdit
+  try { const t = await get(all ? 'api/today?all=1' : 'api/today'); if (all || !S.tdEdit) S.today = t } catch { /* app restarting */ }
   todayWaitForPlugins()
 }
 /** A plugin's widget not answered yet (`pending`) holds its place (#410), and My work's plugin rows may wait for an
