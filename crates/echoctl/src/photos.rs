@@ -91,7 +91,7 @@ pub fn of_names(names: &[String]) -> Map<String, Value> {
         let jpg = file(&email);
         if jpg.exists() {
             out.insert(name.clone(), Value::String(email));
-        } else if !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
+        } else if !cooling() && !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
             out.insert(name.clone(), Value::Null);
             wanted.push(email);
         }
@@ -100,29 +100,87 @@ pub fn of_names(names: &[String]) -> Map<String, Value> {
     out
 }
 
-/// Fetches these photos one after another off the caller's thread; one already being fetched isn't asked twice.
+/// Between two photo requests: Microsoft 365 answers a burst with 502/503.
+const PACE: Duration = Duration::from_millis(1500);
+/// After a refusal (429, 5xx, the network): no photo is asked for this long, doubled each time in a row, up to 30 min.
+const COOL_FIRST: Duration = Duration::from_secs(60);
+const COOL_MAX: Duration = Duration::from_secs(30 * 60);
+
+/// The photos to fetch, the one worker that fetches them, and the pause after a refusal.
+struct Queue {
+    todo: BTreeSet<String>,
+    working: bool,
+    cool_until: Option<Instant>,
+    cool: Option<Duration>,
+}
+static QUEUE: Mutex<Queue> = Mutex::new(Queue { todo: BTreeSet::new(), working: false, cool_until: None, cool: None });
+
+/// The pause after a refusal: the first, else twice the last, at most COOL_MAX.
+fn next_cool(last: Option<Duration>) -> Duration {
+    last.map_or(COOL_FIRST, |c| (c * 2).min(COOL_MAX))
+}
+
+/// Whether photos are paused after a refusal.
+fn cooling() -> bool {
+    QUEUE.lock().unwrap_or_else(|e| e.into_inner()).cool_until.is_some_and(|t| Instant::now() < t)
+}
+
+/// Queues these photos for the one worker, which asks them one at a time, a pause apart; a refusal stops it and pauses
+/// every photo request (the queue is dropped: the window asks again later).
 fn fetch(emails: Vec<String>) {
-    static BUSY: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-    let mine: Vec<String> = {
-        let mut b = BUSY.lock().unwrap_or_else(|e| e.into_inner());
-        emails.into_iter().filter(|e| b.insert(e.clone())).collect()
-    };
-    if mine.is_empty() {
-        return;
-    }
-    std::thread::spawn(move || {
-        for email in mine {
-            let jpg = file(&email);
-            if let Some(dir) = jpg.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            match crate::graph::photo(&email, &jpg) {
-                Ok(Some(true)) => shrink(&jpg),
-                Ok(Some(false)) => drop(std::fs::write(jpg.with_extension("none"), b"")),
-                Ok(None) | Err(_) => {} // not allowed, or the network: asked again next time
-            }
-            BUSY.lock().unwrap_or_else(|e| e.into_inner()).remove(&email);
+    {
+        let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        q.todo.extend(emails);
+        if q.working || q.todo.is_empty() {
+            return;
         }
+        q.working = true;
+    }
+    std::thread::spawn(|| loop {
+        let next = {
+            let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+            match q.todo.pop_first() {
+                Some(e) => e,
+                None => {
+                    q.working = false;
+                    return;
+                }
+            }
+        };
+        let jpg = file(&next);
+        if let Some(dir) = jpg.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let got = crate::graph::photo(&next, &jpg);
+        let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        match got {
+            Ok(Some(true)) => {
+                q.cool = None;
+                drop(q);
+                shrink(&jpg);
+            }
+            Ok(Some(false)) => {
+                q.cool = None;
+                drop(q);
+                let _ = std::fs::write(jpg.with_extension("none"), b"");
+            }
+            // Not allowed (the permission was taken back): nothing more to ask until the token says otherwise.
+            Ok(None) => {
+                *ALLOWED.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), false));
+                q.todo.clear();
+                q.working = false;
+                return;
+            }
+            Err(_) => {
+                let cool = next_cool(q.cool);
+                q.cool = Some(cool);
+                q.cool_until = Some(Instant::now() + cool);
+                q.todo.clear();
+                q.working = false;
+                return;
+            }
+        }
+        std::thread::sleep(PACE);
     });
 }
 
@@ -146,6 +204,14 @@ pub fn bytes(email: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_pauses_photos_longer_each_time_in_a_row() {
+        let mins = |d: Duration| d.as_secs() / 60;
+        let mut c = None;
+        let seen: Vec<u64> = (0..7).map(|_| { let n = next_cool(c); c = Some(n); mins(n) }).collect();
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 30, 30]);
+    }
 
     #[test]
     fn only_the_users_own_domain_is_asked() {
