@@ -236,7 +236,8 @@ fn commands(s: &str) -> Vec<Vec<String>> {
                 started = true;
             }
             (None, '\\') => {
-                if let Some(n) = chars.next() {
+                // A backslash before a line break joins the lines: both go.
+                if let Some(n) = chars.next().filter(|&n| n != '\n') {
                     w.push(n);
                     started = true;
                 }
@@ -244,7 +245,10 @@ fn commands(s: &str) -> Vec<Vec<String>> {
             // In double quotes it escapes only these; before anything else it is itself (a Windows path's).
             (Some('"'), '\\') => {
                 match chars.clone().next() {
-                    Some(n @ ('$' | '`' | '"' | '\\' | '\n')) => {
+                    Some('\n') => {
+                        chars.next();
+                    }
+                    Some(n @ ('$' | '`' | '"' | '\\')) => {
                         chars.next();
                         w.push(n);
                     }
@@ -351,6 +355,7 @@ mod tests {
         assert_eq!(words(r#"cp a "C:\Users\x\Synced/n.md""#), ["cp", "a", r"C:\Users\x\Synced/n.md"]);
         assert_eq!(words(r#"echo "a\"b" "c\\d" "e\$f""#), ["echo", "a\"b", r"c\d", "e$f"]);
         assert_eq!(words(r"echo 'g\h' i\ j"), ["echo", r"g\h", "i j"], "single quotes keep it; unquoted it escapes");
+        assert_eq!(words("mkdir \"a\\\nb\" c\\\nd"), ["mkdir", "ab", "cd"], "a backslash and a line break join the lines");
     }
 
     #[test]
