@@ -78,7 +78,12 @@ type Known = std::collections::HashMap<String, Vec<Value>>;
 /// threads (`prep::weighed`: influence, interest, calls together), who declined left out. A call with no invite (a memo,
 /// one Echo found nobody for): none.
 fn faces(dir: &Path, known: &mut Known) -> Vec<String> {
-    let Ok(Some(m)) = crate::meeting::MeetingContext::load(dir) else { return vec![] };
+    let m = match crate::meeting::MeetingContext::load(dir) {
+        Ok(Some(m)) => m,
+        Ok(None) => return vec![],
+        // One Echo didn't write and can't read as a meeting (a hand-made file): its names as they stand.
+        Err(_) => return people(dir),
+    };
     let threads: Vec<String> = crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| p.id).collect();
     let today = chrono::Local::now().date_naive();
     crate::prep::weighed(&m, &threads, |id| {
