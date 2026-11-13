@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 
-use crate::apps::{MeetingApp, TargetApp};
+use crate::apps::TargetApp;
 
 /// How often Chrome's windows and the calendar are looked at while Chrome holds the mic and no Meet call is known.
 const MEET_LOOK_EVERY: Duration = Duration::from_secs(3);
@@ -68,7 +68,7 @@ impl MeetSign {
                 let seen = meet_of(
                     crate::audio::meet_tab_open() == Some(true),
                     crate::audio::meet_app_open() == Some(true),
-                    crate::calendar::meeting_now(Utc::now(), TargetApp::Meet).is_some_and(|m| m.app() == Some(MeetingApp::Meet)),
+                    crate::calendar::meet_meeting_now(Utc::now()),
                 );
                 *out.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), seen));
                 busy.store(false, Ordering::SeqCst);

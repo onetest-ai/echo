@@ -43,6 +43,7 @@ cases:
   - tests/cases/recording/TC-034_live-google-meet-call-in-chrome.md
   - tests/cases/recording/TC-035_a-meet-call-right-after-a-recorded-teams-call-is-a-new-recording.md
   - tests/cases/recording/TC-036_the-meet-app-installed-from-chrome-is-a-call-source-of-its-own.md
+  - tests/cases/recording/TC-037_a-teams-call-in-a-google-meet-meetings-window-is-asked-about.md
 auto: [tests/auto/specs/S-18.spec.mjs]
 ---
 
@@ -137,6 +138,7 @@ prelude" in every case below).
 | 35 | `recording/TC-034_live-google-meet-call-in-chrome.md` | — | **person** — a live Meet call in Chrome |
 | 36 | `recording/TC-035_a-meet-call-right-after-a-recorded-teams-call-is-a-new-recording.md` | — | After stage 34's teardown quit its app: step 1 starts its own |
 | 37 | `recording/TC-036_the-meet-app-installed-from-chrome-is-a-call-source-of-its-own.md` | — | After stage 36's teardown quit its app: step 1 starts its own |
+| 38 | `recording/TC-037_a-teams-call-in-a-google-meet-meetings-window-is-asked-about.md` | — | After stage 37's teardown quit its app: step 1 starts its own |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again
