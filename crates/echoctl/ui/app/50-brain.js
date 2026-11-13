@@ -233,7 +233,7 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a[href^="echo://"]')
   if (!a) return
   e.preventDefault()
-  window.echo.openLink(a.getAttribute('href'))
+  window.echo.openLink(a.getAttribute('href'), true)
 }, true)
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-dict-toggle],[data-dict-more],[data-dict-letter]')

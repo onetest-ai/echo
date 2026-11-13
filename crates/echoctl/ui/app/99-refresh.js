@@ -107,12 +107,14 @@ window.echo = {
     if (S.settings) S.settings.own_title_bar = on
     render()
   },
-  /** An echo:// link (a call at a moment, a thread, a client, a person, a mail): where Echo keeps it, or its mail in Outlook. */
-  async openLink(link) {
+  /** An echo:// link (a call at a moment, a thread, a client, a person, a mail): where Echo keeps it, or its mail in Outlook.
+   *  `here`: clicked in the window — a work item opens beside what the user is on, not in its thread (but in Threads). */
+  async openLink(link, here) {
     let t
     try { t = await get(`api/link?u=${encodeURIComponent(link)}`) } catch { return }
     if (t.error) return window.echo.notice(`Echo can't open that link: ${t.error}`)
     if (t.url) return send({ cmd: 'open_url', url: t.url })
+    if (t.node && here && S.view !== 'projects') return openTaskHere(t.hash.split('/')[1], t.node)
     S.jump = t.jump != null ? t.jump : null
     // A work item: its thread's Work tab with its details open.
     if (t.node) { S.pj.wantNode = t.node; S.pj.node = t.node; S.pj.inline = null }
