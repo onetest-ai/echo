@@ -211,7 +211,10 @@ function pluginWidgetView(id, w, size) {
   // named); after a failed ask, since when it hasn't changed, and why.
   const at = w.at ? new Date(w.at) : null
   const when = at && (at.toDateString() === new Date().toDateString() ? hm(at) : `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hm(at)}`)
-  const stale = !when ? '' : w.error ? `<span class="pw-upd warn" title="${esc(w.error)}">not updated since ${esc(when)}</span>` : `<span class="pw-upd" title="When its data came">updated ${esc(when)}</span>`
+  // An icon and the time; the words in its label and tooltip.
+  const REFRESHED = '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>'
+  const upd = (cls, say) => `<span class="pw-upd${cls}" role="img" aria-label="${esc(say)}" title="${esc(say)}">${ICON(REFRESHED)}${esc(when)}</span>`
+  const stale = !when ? '' : w.error ? upd(' warn', `Not updated since ${when} — ${w.error}`) : upd('', `Updated ${when}`)
   // A table says how many rows it has, and the plugin's note, beside its label.
   const d = w.data || {}
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
