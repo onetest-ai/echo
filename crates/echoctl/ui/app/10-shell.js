@@ -325,7 +325,7 @@ function list() {
       // Who was there: up to three faces on the right, the rest as +N; every name in the tooltip.
       // (Their initials are drawn by the stylesheet; the names are read as words, as the line said them before.)
       const who = c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '')
-      const faces = c.people.length ? `<span class="row-faces" title="${esc(c.people.join(', '))}"><span class="row-sr">${esc(who)}</span>${c.people.slice(0, 3).map((n) => avatar(n).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')).join('')}${c.people.length > 3 ? `<span class="row-more" aria-hidden="true">+${c.people.length - 3}</span>` : ''}</span>` : ''
+      const faces = c.people.length ? `<span class="row-faces" title="${esc(c.people.join(', '))}"><span class="row-sr">${esc(who)}</span>${c.people.slice(0, 3).map((n) => avatar(n, false, true).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')).join('')}${c.people.length > 3 ? `<span class="row-more" aria-hidden="true">+${c.people.length - 3}</span>` : ''}</span>` : ''
       const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       const due = minutesAhead(c)

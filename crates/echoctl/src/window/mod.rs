@@ -355,8 +355,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/state" => json_reply(state()),
         // Colleagues' photos (`photos`): which of these names have one, then each photo by its address.
         "/api/photos" => {
-            let names: Vec<String> = query_param(req.uri().query().unwrap_or(""), "n").and_then(|n| serde_json::from_str(&n).ok()).unwrap_or_default();
-            json_reply(Value::Object(crate::photos::of_names(&names)))
+            let q = req.uri().query().unwrap_or("");
+            let names: Vec<String> = query_param(q, "n").and_then(|n| serde_json::from_str(&n).ok()).unwrap_or_default();
+            json_reply(Value::Object(crate::photos::of_names(&names, query_param(q, "fetch").as_deref() == Some("1"))))
         }
         "/api/photo" => match query_param(req.uri().query().unwrap_or(""), "e").and_then(|e| crate::photos::bytes(&e)) {
             Some(b) => reply(200, "image/jpeg", b),

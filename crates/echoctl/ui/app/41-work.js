@@ -111,11 +111,11 @@ function workRow(w, n, level) {
   return `<button class="wk-row${S.pj.node === n.id ? ' on' : ''}${CLOSED_STATES.includes(n.state) ? ' closed' : ''}" style="padding-left:${12 + level * 18}px" data-pj="node" data-node="${esc(n.id)}"><span class="wk-id">${esc(n.id)}</span>${kind ? `<span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span>` : ''}<span class="wk-t${n.kind === 'story' ? ' story' : ''}">${esc(n.title)}</span>${tags}<span class="grow"></span><span class="wk-meta">${esc(meta)}</span>${st}</button>`
 }
 /** Initials for an avatar ("Pat Novak" → "PN"), with a colour of its own. */
-function avatar(name, owed) {
+function avatar(name, owed, meet) {
   if (!name) return '<span class="bd-av none" title="Nobody named">?</span>'
   const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
   const hue = ProjectArt.hash(name) % 360
-  const ph = photoFace(name)
+  const ph = photoFace(name, meet) // `meet`: a person of a call or meeting, whose photo may be fetched
   return `<span class="bd-av${owed ? ' owed' : ''}${ph.cls}" style="--h:${hue};${ph.style}" title="${esc(name)}${owed ? ' (the client owes it)' : ''}">${esc(ini)}</span>`
 }
 /** The board, as GitHub Projects lays one out: columns of a fixed width (the board scrolls sideways,

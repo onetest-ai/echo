@@ -73,9 +73,10 @@ fn email_of(name: &str, people: &[crate::people::Person], mine: &str) -> Option<
 }
 
 /// For each name: its photo's address when there is one (the window shows `api/photo?e=`), null while it is being
-/// fetched (in the background: the window asks again), else nothing. Nothing at all when the switch is off (Settings →
+/// fetched (in the background: the window asks again), else nothing. Only `fetch` names (people of the user's calls and
+/// meetings) are fetched, and only when not kept yet; any other is answered from what is kept. Nothing at all when the switch is off (Settings →
 /// Calendar & chat) or the sign-in may not read photos.
-pub fn of_names(names: &[String]) -> Map<String, Value> {
+pub fn of_names(names: &[String], fetch_missing: bool) -> Map<String, Value> {
     let mut out = Map::new();
     if !on() {
         return out;
@@ -91,7 +92,7 @@ pub fn of_names(names: &[String]) -> Map<String, Value> {
         let jpg = file(&email);
         if jpg.exists() {
             out.insert(name.clone(), Value::String(email));
-        } else if !cooling() && !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
+        } else if fetch_missing && !cooling() && !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
             out.insert(name.clone(), Value::Null);
             wanted.push(email);
         }
@@ -233,11 +234,11 @@ mod tests {
         std::fs::create_dir_all(file("x@y").parent().unwrap()).unwrap();
         std::fs::write(file("dana@acme.example"), b"jpeg").unwrap();
         let names = vec!["Dana Lee".to_string()];
-        assert!(of_names(&names).is_empty(), "the switch is off by default, even with a photo kept");
+        assert!(of_names(&names, true).is_empty(), "the switch is off by default, even with a photo kept");
         assert!(bytes("dana@acme.example").is_none(), "nor is a kept photo served");
         cfg.people_photos = Some(true);
         cfg.save().unwrap();
-        assert!(of_names(&names).is_empty(), "on, but not signed in: the sign-in may not read photos");
+        assert!(of_names(&names, true).is_empty(), "on, but not signed in: the sign-in may not read photos");
         assert!(!file("dana@acme.example").with_extension("none").exists(), "and nothing was asked");
     }
 
