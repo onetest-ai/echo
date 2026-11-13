@@ -60,6 +60,7 @@ cases:
   - tests/cases/today/TC-032_a-widgets-settings.md
   - tests/cases/today/TC-033_a-plugins-own-page-widget.md
   - tests/cases/today/TC-034_a-plugin-widget-not-answered-yet-holds-its-place.md
+  - tests/cases/shell/TC-018_a-task-link-opens-its-details-where-you-are.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -140,6 +141,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 54 | `today/TC-032_a-widgets-settings.md` | — | — |
 | 55 | `today/TC-033_a-plugins-own-page-widget.md` | — | — |
 | 56 | `today/TC-034_a-plugin-widget-not-answered-yet-holds-its-place.md` | — | Run it before stage 55 asks the plugin for Sprint board (or remove and install widget-demo again first): its widgets must never have been answered |
+| 57 | `shell/TC-018_a-task-link-opens-its-details-where-you-are.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.

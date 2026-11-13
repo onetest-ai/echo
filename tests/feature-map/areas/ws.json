@@ -72,6 +72,13 @@
    "axes": []
   },
   {
+   "id": "F-WS-11",
+   "feature": "A task link clicked inside the window (a prep, the minutes, Brain) opens the task's Details in the right panel beside what the user is on; inside Threads, and from outside Echo, it opens the thread's Work tab with its Details",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
    "id": "F-WS-09",
    "feature": "The top bar holds the sidebar switch, the Record pill (record and the call's language) and, at its right end, the account chip and the Inbox, on one line and overlapping nowhere from the narrowest window up; on macOS the strip drags the window but its controls click",
    "priority": "medium",

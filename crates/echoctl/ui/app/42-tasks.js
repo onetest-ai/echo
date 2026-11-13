@@ -94,18 +94,22 @@ document.addEventListener('click', async (e) => {
   e.preventDefault()
   const d = b.dataset
   if (d.tk === 'more') { S.tk.more[d.pile] = !S.tk.more[d.pile]; return render() }
-  if (d.tk === 'open') {
-    if (S.pj.sel !== d.project) { S.pj.sel = d.project; S.pj.detail = null; S.pj.work = null; S.pj.tab = 'work' }
-    S.pj.node = d.node
-    S.pj.inline = S.view
-    S.pj.editField = null
-    const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
-    if (eff.narrow) S.overlay = true
-    if (!S.pj.work) await loadWork()
-    Layout.show('work-item', known)
-    layoutChanged()
-  }
+  if (d.tk === 'open') await openTaskHere(d.project, d.node)
 })
+/** A thread's work item in the right panel's Details, over the view the user is on (Today, a call, a prep, Brain). */
+async function openTaskHere(project, node) {
+  // Another thread: what the router resets on a thread change, so Threads opens on it clean.
+  if (S.pj.sel !== project) Object.assign(S.pj, { sel: project, detail: null, work: null, tab: 'work', adding: null, pfEdit: null, menu: false, person: null, ppAdding: false, briefEdit: null, confirmDelete: false })
+  S.pj.node = node
+  S.pj.inline = S.view
+  S.pj.editField = null
+  const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+  if (eff.narrow) S.overlay = true
+  // A task added since the thread's work was read (from the minutes just clicked in, say): read it again.
+  if (!S.pj.work || !Object.hasOwn(S.pj.work.nodes || {}, node)) await loadWork()
+  Layout.show('work-item', known)
+  layoutChanged()
+}
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('[data-cc-sync]')
   if (!b) return
