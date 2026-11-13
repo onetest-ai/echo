@@ -33,7 +33,12 @@ function dashboardView() {
   const sizeAt = (id) => size[id] || (typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || 'M'
   for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id))
   // Echo's own, drawn as on Today (with the page's thread or client).
-  const OWN = { 'core:tasks.glance': glanceView, 'core:tasks.done': doneView, 'core:calls.week': callsWeekView }
+  const now = new Date()
+  const OWN = {
+    'core:tasks.glance': glanceView, 'core:tasks.done': doneView, 'core:calls.week': callsWeekView,
+    'core:calendar.agenda': (v) => yourDayView(v, now), 'core:calendar.calendar': (v) => dayCalendarView(v, now), 'core:calendar.strip': (v) => dayStripView(v, now),
+    'core:calendar.next': (v, z) => nextMeetingView(v.next, z, now), 'core:tasks.mine': (v) => myWorkView(v),
+  }
   for (const [id, v] of Object.entries(d.core || {})) if (OWN[id]) parts[id] = OWN[id](v, sizeAt(id))
   // Placed but not answered with anything yet: its place kept while editing (to move it, or take it off).
   for (const i of d.layout) if (!(i.widget in parts)) parts[i.widget] = ''

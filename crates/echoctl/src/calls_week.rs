@@ -27,7 +27,7 @@ fn seconds(meta: &Value) -> i64 {
 }
 
 /// Whether a call is in any of these threads — the threads, the organisations and the user read once, for many calls.
-fn call_in(ids: &[String]) -> impl Fn(&Path) -> bool {
+pub(crate) fn call_in(ids: &[String]) -> impl Fn(&Path) -> bool {
     use crate::projects;
     let threads: Vec<projects::Project> = projects::list().into_iter().filter(|p| ids.contains(&p.id)).collect();
     let orgs = projects::orgs().unwrap_or_default();

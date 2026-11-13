@@ -37,7 +37,9 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let layout = crate::today_layout::load_on(&page);
             let offered: Vec<String> = crate::widgets::catalog().into_iter().filter(|w| page.offers(w)).map(|w| w.id.to_string()).collect();
             let all = query_param(q, "all").is_some_and(|a| a == "1");
-            let tasks = json!({});
+            // My work reads the Tasks view (only when it is drawn here).
+            let mine = offered.iter().any(|id| id == "core:tasks.mine") && (all || layout.iter().any(|l| l.widget == "core:tasks.mine"));
+            let tasks = if mine { tasks_view() } else { json!({}) };
             let i = crate::widgets::Inputs { tasks: &tasks };
             // Echo's own widgets it offers (those that learn a thread or a client): their data with the page's settings.
             let core: serde_json::Map<String, Value> = offered
@@ -57,9 +59,21 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             json_reply(json!({"page": page.key(), "layout": layout, "offered": offered, "core": core, "plugins": plugins}))
         }
         "/api/today" => {
-            let mut v = crate::today::view(&tasks_view());
+            let tasks = tasks_view();
+            let mut v = crate::today::view(&tasks);
             // Which widgets Today shows, in what order and rows (this computer's `today-layout.json`).
             let layout = crate::today_layout::load();
+            // Your day, Next meeting and My work set to a thread or a client (⚙): each its own data, by widget (the
+            // head and the others keep the whole day).
+            let i = crate::widgets::Inputs { tasks: &tasks };
+            let scoped: serde_json::Map<String, Value> = ["core:calendar.agenda", "core:calendar.calendar", "core:calendar.strip", "core:calendar.next", "core:tasks.mine"]
+                .into_iter()
+                .filter(|id| layout.iter().any(|l| l.widget == *id) && crate::widgets::scope_of(&crate::today_layout::params_of(id)).is_some())
+                .filter_map(|id| crate::widgets::data(id, &i).ok().map(|d| (id.to_string(), d)))
+                .collect();
+            if !scoped.is_empty() {
+                v["scoped"] = json!(scoped);
+            }
             // `all=1` (Today's edit mode, Add a widget's previews): every widget's data, placed or not.
             let all = query_param(req.uri().query().unwrap_or(""), "all").is_some_and(|a| a == "1");
             let ids: Vec<String> = if all { crate::widgets::catalog().into_iter().map(|w| w.id.to_string()).collect() } else { layout.iter().map(|i| i.widget.clone()).collect() };

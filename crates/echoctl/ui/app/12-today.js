@@ -53,8 +53,12 @@ function todayView() {
   const ownCard = new Set((d.layout || []).map((i) => i.widget).filter((w) => w.startsWith('core:routines.card.')).map((w) => w.slice(19)))
   const cardHtml = (c) => `<section class="td-card" aria-label="${esc(c.title)}"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`
   const cards = (d.cards || []).filter((c) => !ownCard.has(c.slug)).map(cardHtml).join('')
-  const day = yourDayView(d, now)
-  const work = myWorkView(d.work || {})
+  // Your day, Next meeting and My work set to a thread or a client (⚙): their own data (`scoped`), the head the whole.
+  const own = (id) => (d.scoped || {})[id]
+  // (A day set to a thread lists its meetings and calls only, not the tasks due today among them: those are everyone's.)
+  const dayOf = (id) => (own(id) ? { ...d, day: own(id).day, scope: own(id).scope, work: {} } : d)
+  const day = yourDayView(dayOf('core:calendar.agenda'), now)
+  const work = myWorkView(own('core:tasks.mine') || d.work || {})
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
   // by side. Sizes take effect with the layout engine (#315).
@@ -62,7 +66,7 @@ function todayView() {
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   // Off Today, while editing: drawn at the size Add a widget's preview shows it at (twPickSize).
   const sizeAt = (id, dflt) => sizeOf[id] || (S.tdEdit && typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || dflt
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeAt('core:calendar.next', 'M'), now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView((d.glances || {})['core:tasks.glance'], sizeAt('core:tasks.glance', 'M')), 'core:tasks.done': doneView((d.glances || {})['core:tasks.done'], sizeAt('core:tasks.done', 'S')), 'core:calls.week': callsWeekView(d.calls_week, sizeAt('core:calls.week', 'S')) }
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(own('core:calendar.next') ? own('core:calendar.next').next : d.next, sizeAt('core:calendar.next', 'M'), now), 'core:calendar.calendar': dayCalendarView(dayOf('core:calendar.calendar'), now), 'core:calendar.strip': dayStripView(dayOf('core:calendar.strip'), now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView((d.glances || {})['core:tasks.glance'], sizeAt('core:tasks.glance', 'M')), 'core:tasks.done': doneView((d.glances || {})['core:tasks.done'], sizeAt('core:tasks.done', 'S')), 'core:calls.week': callsWeekView(d.calls_week, sizeAt('core:calls.week', 'S')) }
   // Every placed card widget has its place, empty while its card is read (so edit mode can still move or take it off).
   for (const slug of ownCard) parts[`core:routines.card.${slug}`] = ''
   for (const c of d.cards || []) if (ownCard.has(c.slug)) parts[`core:routines.card.${c.slug}`] = cardHtml(c)
@@ -126,7 +130,7 @@ function yourDayView(d, now) {
   const rows = agendaView(d, now)
   // A sync failed today and none has read the calendar today (the server says): today's meetings may be missing.
   const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: today’s meetings may be missing.</span></p>' : ''
-  return (d.day || []).length || stale ? `<section class="td-sec" aria-label="Your day"><h2>Your day</h2>${stale}<div class="td-rows" role="list" aria-label="Where you'll be">${rows}</div></section>` : ''
+  return (d.day || []).length || stale ? `<section class="td-sec" aria-label="Your day"><h2>Your day${d.scope ? ` · ${esc(d.scope)}` : ''}</h2>${stale}<div class="td-rows" role="list" aria-label="Where you'll be">${rows}</div></section>` : ''
 }
 
 /** Today → My work: a card a task due this week or late, the plugins' rows among them. */
@@ -169,7 +173,7 @@ function myWorkView(w) {
   tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
   const ask = linkAsked(S, 'wrOpen', Date.now())
   const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t), ask) : card(t, kind, who))
-  return cards2.length || S.todayAskId ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
+  return cards2.length || S.todayAskId ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
@@ -538,7 +542,7 @@ function dayCalendarView(d, now) {
   // (kept through redraws: data-keep-scroll).
   const day = today.toDateString()
   if (S.dcPlaced !== day) setTimeout(() => { const sc = $('.dc-scroll'), g = sc && sc.firstElementChild; if (sc && g) { S.dcPlaced = day; sc.scrollTop = Math.max(0, g.scrollHeight * (pos(now) / 100) - sc.clientHeight / 3) } })
-  return `<section class="td-sec dc-sec" aria-label="Your day"><h2>Your day</h2><div class="dc-scroll" data-keep-scroll="today-calendar"><div class="dc-grid" role="list" aria-label="Your day by the hour" style="min-height:${(to - from) * 40}px">${hours}${blocks}${nowAt}</div></div></section>`
+  return `<section class="td-sec dc-sec" aria-label="Your day"><h2>Your day${d.scope ? ` · ${esc(d.scope)}` : ''}</h2><div class="dc-scroll" data-keep-scroll="today-calendar"><div class="dc-grid" role="list" aria-label="Your day by the hour" style="min-height:${(to - from) * 40}px">${hours}${blocks}${nowAt}</div></div></section>`
 }
 
 /** Your day as a strip (`core:calendar.strip`): the day in one bar, a meeting a block (two at once: half its height
@@ -554,7 +558,7 @@ function dayStripView(d, now) {
   const ticks = Array.from({ length: Math.floor((to - from) / 2) + 1 }, (_, i) => `<span style="left:${(i * 120) / span * 100}%">${String(from + i * 2).padStart(2, '0')}</span>`).join('')
   const nowAt = now.getHours() >= from && now.getHours() < to ? `<div class="ds-now" style="left:${pos(now)}%" role="separator" aria-label="Now ${esc(hm(now))}"></div>` : ''
   const going = items.filter((x) => x.response !== 'tentativelyAccepted').length
-  return `<section class="td-sec ds-sec" aria-label="Your day, the strip"><h2>Your day <span class="set-sub">${going} meeting${going === 1 ? '' : 's'}</span></h2><div class="ds-bar" role="list" aria-label="Your day in one bar">${blocks}${nowAt}</div><div class="ds-ticks mono">${ticks}</div></section>`
+  return `<section class="td-sec ds-sec" aria-label="Your day, the strip"><h2>Your day${d.scope ? ` · ${esc(d.scope)}` : ''} <span class="set-sub">${going} meeting${going === 1 ? '' : 's'}</span></h2><div class="ds-bar" role="list" aria-label="Your day in one bar">${blocks}${nowAt}</div><div class="ds-ticks mono">${ticks}</div></section>`
 }
 
 // ── agenda rows: Your day as "where you'll be" (no DOM: `today-agenda.test.mjs`) ──────────────────────────────────
