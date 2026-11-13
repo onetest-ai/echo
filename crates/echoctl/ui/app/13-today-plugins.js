@@ -326,7 +326,13 @@ function pluginChartHtml(d, size, { str, num, foot }) {
       : `<div class="pc-x mono pc-under">${at.map((i, k) => {
         // Under its bar, no wider than its bar's slot (so never past the card); with more bars than labels, the
         // first from its bar's left edge and the last to its bar's right edge.
-        const sampled = at.length < n, w = `max-width:${Math.min(100 / (sampled ? at.length : n), 40).toFixed(1)}%`
+        const sampled = at.length < n, c = at.map((j) => ((j + 0.5) / n) * 100)
+        // As wide as the room to its neighbours allows: centred ones half a gap each side, an anchored edge one
+        // its whole width on one side (so none runs into the next).
+        const gaps = c.slice(1).map((x, j) => x - c[j])
+        let room = Math.min(40, ...(sampled ? gaps : [100 / n]))
+        if (sampled && c.length > 2) room = Math.min(room, ((c[1] - (at[0] / n) * 100) * 2) / 3, ((((at[at.length - 1] + 1) / n) * 100 - c[c.length - 2]) * 2) / 3)
+        const w = `max-width:${room.toFixed(1)}%`
         if (sampled && k === 0) return `<span class="first" style="left:${((i / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
         if (sampled && k === at.length - 1) return `<span class="last" style="right:${((1 - (i + 1) / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
         return `<span style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
