@@ -2345,7 +2345,7 @@
           null
         ]
       ],
-      "taskRoute": "#project/acme-rollout/work",
+      "taskStaysOn": "#today",
       "taskTitle": "Send the SSO checklist",
       "taskLink": "echo://task/acme-rollout/T001",
       "note": {

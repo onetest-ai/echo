@@ -1062,9 +1062,9 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widgetParagraph(label.note)).toHaveText(x.note.text.replace('\n', ''))
       expect(await today.widgetParagraph(label.note).innerText()).toBe(x.note.text)
       expect(dialogs).toEqual([])
-      // Open the task: Echo's own place for echo://task/…, its details on the right.
+      // Open the task: its details on the right, over Today (F-WS-11: a task link in the window opens where you are).
       await today.widgetLink(label.builds, x.builds[2][0]).click()
-      await expect.poll(() => today.hash()).toBe(x.taskRoute)
+      await expect.poll(() => today.hash()).toBe(x.taskStaysOn)
       await expect(today.detailsHeading(x.taskTitle)).toBeVisible()
       // The note cleared: gone from Today, `widget show` says it's empty.
       expect(data.cli('plugin', 'call', x.id, x.clearNote).code).toBe(0)
