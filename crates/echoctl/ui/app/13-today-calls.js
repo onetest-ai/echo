@@ -25,5 +25,5 @@ function callsWeekView(w, size) {
       return `<div class="cw-day${on ? ' on' : ''}" role="listitem" aria-label="${esc(name)}" title="${esc(name)}"><span class="cw-bar"><i style="height:${Math.round((c / max) * 100)}%"></i></span><span class="cw-d" aria-hidden="true">${esc(day(d).toLocaleDateString([], { weekday: 'short' }))}</span></div>`
     }).join('')}</div>`
   }
-  return `<section class="td-sec cw-sec" aria-label="Recorded this week" data-go="calls" title="Open Calls"><h2>Recorded this week <button class="link-btn" data-go="calls">Calls</button></h2>${stats}${none}${bars}</section>`
+  return `<section class="td-sec cw-sec" aria-label="Recorded this week" data-go="calls" title="Open Calls"><h2>Recorded this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="calls">Calls</button></h2>${stats}${none}${bars}</section>`
 }

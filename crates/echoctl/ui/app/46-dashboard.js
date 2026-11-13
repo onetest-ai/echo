@@ -30,7 +30,11 @@ function dashboardView() {
   const editing = S.dashEdit === page
   const size = Object.fromEntries(d.layout.map((i) => [i.widget, i.size]))
   const parts = {}
-  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, size[id] || (typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || 'M')
+  const sizeAt = (id) => size[id] || (typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || 'M'
+  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id))
+  // Echo's own, drawn as on Today (with the page's thread or client).
+  const OWN = { 'core:tasks.glance': glanceView, 'core:tasks.done': doneView, 'core:calls.week': callsWeekView }
+  for (const [id, v] of Object.entries(d.core || {})) if (OWN[id]) parts[id] = OWN[id](v, sizeAt(id))
   // Placed but not answered with anything yet: its place kept while editing (to move it, or take it off).
   for (const i of d.layout) if (!(i.widget in parts)) parts[i.widget] = ''
   S.dashParts = parts

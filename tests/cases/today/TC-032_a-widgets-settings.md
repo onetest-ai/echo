@@ -26,7 +26,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 |---|--------|----------------|
 | 1 | `target/debug/echoctl today add core:tasks.done --size S --above core:calendar.agenda`, `today add plugin:widget-demo:builds --size M --after core:tasks.done`; open `{{base_url}}/#today` (reload once if Last builds hasn't answered) | "Done this week", "N tasks since Monday"; Last builds' first line "Branch main" (its default) |
 | 2 | `target/debug/echoctl today set core:tasks.done period year` | Refused: "core:tasks.done's period doesn't take \"year\" (week, month)", exit 1 |
-| 3 | Edit Today; on Done this week click ⚙ ("Done this week: settings") | Under its header "Period" with week selected |
+| 3 | Edit Today; on Done this week click ⚙ ("Done this week: settings") | Under its header "Period" with week selected, "Thread" and "Client" with — (none set) |
 | 4 | Choose month | Done this week becomes "Done this month", "N tasks this month" (N at least the week's) |
 | 5 | On Last builds click ⚙, set Branch to release; Done | Its first line "Branch release" (the plugin was asked again with it); `target/debug/echoctl today` shows `params` {"period": "month"} on Done and {"branch": "release"} on Last builds |
 | 6 | `target/debug/echoctl today set core:tasks.done period week`; reload | Back to "Done this week" |

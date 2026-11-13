@@ -26,16 +26,33 @@ fn seconds(meta: &Value) -> i64 {
     t("started_at").zip(t("ended_at")).map_or(0, |(s, e)| (e - s).num_seconds().max(0))
 }
 
+/// Whether a call is in any of these threads — the threads, the organisations and the user read once, for many calls.
+fn call_in(ids: &[String]) -> impl Fn(&Path) -> bool {
+    use crate::projects;
+    let threads: Vec<projects::Project> = projects::list().into_iter().filter(|p| ids.contains(&p.id)).collect();
+    let orgs = projects::orgs().unwrap_or_default();
+    let me = crate::config::Config::load().ok().and_then(|c| c.me);
+    move |dir| {
+        let f = projects::CallFacts::of(dir, me.as_ref());
+        threads.iter().any(|p| projects::matches(p, &orgs, &f).is_some())
+    }
+}
+
 /// The week of `today` since its Monday: `calls` (memos among them, also counted in `memos`), `recorded_min` (their
 /// time, rounded to the minute), `with_minutes` (those with minutes, `notes.md`), and `days`: Monday to Sunday, each
-/// day's calls (the days after today 0).
-pub fn view(today: NaiveDate) -> Value {
+/// day's calls (the days after today 0). `scope`: only the calls of these threads (a widget set to a thread or a client).
+pub fn view(today: NaiveDate, scope: Option<&[String]>) -> Value {
     let from = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    // The scope's threads and what their rules read, once for the week (not again for each call).
+    let in_scope = scope.map(call_in);
     let mut days = [0u64; 7];
     let (mut n, mut memos, mut with_minutes, mut secs) = (0u64, 0u64, 0u64, 0i64);
     for dir in calls::all_calls() {
         let mut meta = None;
         let Some(day) = day_of(&dir, &mut meta).filter(|d| *d >= from && *d <= today) else { continue };
+        if in_scope.as_ref().is_some_and(|f| !f(&dir)) {
+            continue;
+        }
         let meta = meta.unwrap_or_else(|| calls::read_json(&dir.join("meta.json")));
         days[(day - from).num_days() as usize] += 1;
         n += 1;
@@ -48,16 +65,18 @@ pub fn view(today: NaiveDate) -> Value {
 }
 
 /// Today's view (`view` for the local date), read again at most every 30 s: Today asks for it on each refresh.
-pub fn today() -> Value {
+pub fn today(scope: Option<&[String]>) -> Value {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
-    static LAST: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
+    static LAST: Mutex<Vec<(String, Instant, Value)>> = Mutex::new(Vec::new());
+    let key = scope.map(|s| s.join(",")).unwrap_or_else(|| "*".into());
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, v)) = last.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(30)) {
+    if let Some((_, _, v)) = last.iter().find(|(k, at, _)| *k == key && at.elapsed() < Duration::from_secs(30)) {
         return v.clone();
     }
-    let v = view(Local::now().date_naive());
-    *last = Some((Instant::now(), v.clone()));
+    let v = view(Local::now().date_naive(), scope);
+    last.retain(|(k, at, _)| *k != key && at.elapsed() < Duration::from_secs(30));
+    last.push((key, Instant::now(), v.clone()));
     v
 }
 
@@ -103,22 +122,36 @@ mod tests {
         std::fs::create_dir_all(&rec).unwrap();
         std::fs::write(rec.join("meta.json"), json!({"started_at": local(2026, 11, 10, 15, 0).to_rfc3339()}).to_string()).unwrap();
 
-        let v = view(NaiveDate::from_ymd_opt(2026, 11, 10).unwrap());
+        let v = view(NaiveDate::from_ymd_opt(2026, 11, 10).unwrap(), None);
         assert_eq!(v["since"], "2026-11-09", "{v}");
         assert_eq!((v["calls"].as_u64(), v["memos"].as_u64(), v["with_minutes"].as_u64(), v["recorded_min"].as_i64()), (Some(4), Some(1), Some(2), Some(45 + 50 + 4)), "{v}");
         let days: Vec<u64> = v["days"].as_array().unwrap().iter().map(|d| d["calls"].as_u64().unwrap()).collect();
         assert_eq!(days, [1, 3, 0, 0, 0, 0, 0], "{v}");
         assert_eq!((v["days"][0]["date"].as_str(), v["days"][6]["date"].as_str()), (Some("2026-11-09"), Some("2026-11-15")));
         // On Sunday, last week's Sunday-night calls are its own: the week then starts on 2 Nov.
-        let v = view(NaiveDate::from_ymd_opt(2026, 11, 8).unwrap());
+        let v = view(NaiveDate::from_ymd_opt(2026, 11, 8).unwrap(), None);
         assert_eq!((v["since"].as_str(), v["calls"].as_u64(), v["recorded_min"].as_i64(), v["days"][6]["calls"].as_u64()), (Some("2026-11-02"), Some(2), Some(30), Some(2)), "{v}");
+    }
+
+    #[test]
+    fn a_scope_counts_only_its_threads_calls() {
+        let (_env, _) = crate::paths::testenv::folders("calls-week-scope");
+        let today = Local::now().date_naive();
+        let name = Local::now().format("%Y-%m-%d_%H-%M").to_string() + "_Acme sync";
+        call(&name, Local::now(), 30, false, false);
+        let t = crate::projects::create("Acme rollout", None, None).unwrap().id;
+        assert_eq!(view(today, None)["calls"], 1);
+        assert_eq!(view(today, Some(std::slice::from_ref(&t)))["calls"], 0, "no rule puts it in");
+        crate::projects::set_membership(&t, &crate::paths::calls_dir().join(&name), "include").unwrap();
+        assert_eq!(view(today, Some(&[t]))["calls"], 1);
+        assert_eq!(view(today, Some(&[]))["calls"], 0, "a client with no open thread: none");
     }
 
     #[test]
     fn a_week_with_no_calls_is_all_zeros() {
         let (_env, _) = crate::paths::testenv::folders("calls-week-empty");
         call("2026-11-01_100000-acme-sync", local(2026, 11, 1, 10, 0), 30, false, true);
-        let v = view(NaiveDate::from_ymd_opt(2026, 11, 12).unwrap());
+        let v = view(NaiveDate::from_ymd_opt(2026, 11, 12).unwrap(), None);
         assert_eq!((v["calls"].as_u64(), v["memos"].as_u64(), v["with_minutes"].as_u64(), v["recorded_min"].as_i64()), (Some(0), Some(0), Some(0), Some(0)), "{v}");
         assert!(v["days"].as_array().unwrap().iter().all(|d| d["calls"] == 0) && v["days"].as_array().unwrap().len() == 7, "{v}");
     }

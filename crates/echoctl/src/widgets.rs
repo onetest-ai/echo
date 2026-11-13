@@ -38,6 +38,45 @@ fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static 
     Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), heights: Cow::Borrowed(&[1]), temporal, refresh: 0, params: vec![] }
 }
 
+/// A thread or a client a widget shows (Today's ⚙, or set by a dashboard's page).
+fn scoped(kind: &str) -> crate::plugins::ParamDef {
+    let label = if kind == "thread" { "Thread" } else { "Client" };
+    crate::plugins::ParamDef { key: kind.into(), label: label.into(), kind: kind.into(), options: vec![], default: None }
+}
+
+/// The threads a widget's settings narrow it to: its thread, else its client's open threads (none set: every thread),
+/// and the name it then says ("Done this week · Aurora").
+pub fn scope_of(params: &serde_json::Map<String, Value>) -> Option<(Vec<String>, String)> {
+    if let Some(t) = params.get("thread").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+        let name = crate::projects::load(t).map(|p| p.name).unwrap_or_else(|_| t.to_string());
+        return Some((vec![t.to_string()], name));
+    }
+    let c = params.get("client").and_then(Value::as_str).filter(|c| !c.is_empty())?;
+    let name = crate::projects::clients().ok().and_then(|all| all.into_iter().find(|x| x.id == c)).map(|x| x.name).unwrap_or_else(|| c.to_string());
+    let threads = crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(c) && !p.stage.closed()).map(|p| p.id).collect();
+    Some((threads, name))
+}
+
+/// Threads at a glance / Done this week for a widget's settings: its period, its thread or client (`scope` named).
+pub fn glance_for(params: &serde_json::Map<String, Value>) -> Value {
+    let scope = scope_of(params);
+    let mut v = crate::glance::today(params.get("period").and_then(Value::as_str).unwrap_or("week"), scope.as_ref().map(|s| s.0.as_slice()));
+    if let Some((_, name)) = scope {
+        v["scope"] = json!(name);
+    }
+    v
+}
+
+/// Recorded this week for a widget's settings: its thread's or client's calls (`scope` named), else every call.
+pub fn calls_for(params: &serde_json::Map<String, Value>) -> Value {
+    let scope = scope_of(params);
+    let mut v = crate::calls_week::today(scope.as_ref().map(|s| s.0.as_slice()));
+    if let Some((_, name)) = scope {
+        v["scope"] = json!(name);
+    }
+    v
+}
+
 /// The period Threads at a glance and Done this week count: this week (from Monday) or this month.
 fn period() -> crate::plugins::ParamDef {
     crate::plugins::ParamDef { key: "period".into(), label: "Period".into(), kind: "choice".into(), options: vec!["week".into(), "month".into()], default: Some(json!("week")) }
@@ -60,9 +99,9 @@ pub fn core() -> Vec<Widget> {
     w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
     two(w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true)),
     two(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true)),
-    two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period()])),
-    with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period()]),
-    w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false),
+    two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period(), scoped("client")])),
+    with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period(), scoped("thread"), scoped("client")]),
+    with(w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false), vec![scoped("thread"), scoped("client")]),
     two(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false)),
     two(w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true)),
     two(w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true)),
@@ -158,8 +197,8 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page)
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
         "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
-        "glance" => crate::glance::today(crate::today_layout::params_of(id).get("period").and_then(Value::as_str).unwrap_or("week")),
-        "calls" => crate::calls_week::today(),
+        "glance" => glance_for(&crate::today_layout::params_on(page, id)),
+        "calls" => calls_for(&crate::today_layout::params_on(page, id)),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
     if w.temporal {
