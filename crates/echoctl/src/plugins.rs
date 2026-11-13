@@ -102,7 +102,7 @@ pub struct Manifest {
     pub icon: Option<String>,
 }
 
-/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `list`, `status`, `card`) at the sizes it takes.
+/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `chart`, `list`, `status`, `card`, `table`) at the sizes it takes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WidgetDef {
     pub id: String,
@@ -191,7 +191,7 @@ fn widget_heights() -> Vec<u8> {
 }
 
 /// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
-pub const WIDGET_KINDS: [&str; 7] = ["stat", "stats", "chart", "list", "status", "card", "page"];
+pub const WIDGET_KINDS: [&str; 8] = ["stat", "stats", "chart", "list", "status", "card", "table", "page"];
 
 /// Each enabled plugin's manifest (one it can't read is left out).
 pub fn enabled_manifests() -> Vec<(String, Manifest)> {
@@ -292,6 +292,10 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         let mut seen = std::collections::HashSet::new();
         if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
             bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+        }
+        // A table needs room for its columns: M and L.
+        if w.kind == "table" && w.sizes.iter().any(|s| s == "S") {
+            bail!("widget “{}” is a table: it takes sizes M and L", w.id);
         }
         if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
             bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
@@ -1707,5 +1711,20 @@ mod tests {
             let e = with(bad.clone()).unwrap_err().to_string();
             assert!(e.contains(why), "{bad}: {e}");
         }
+    }
+
+    #[test]
+    fn a_table_widget_takes_sizes_m_and_l() {
+        let (_env, root) = paths::testenv::folders("plugins-table-widget");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let with = |sizes: Value| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "main": "main.js", "widgets": [{"id": "rows", "label": "Rows", "kind": "table", "sizes": sizes, "heights": [1, 2]}]}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        fs::write(d.join("main.js"), "export function apply(ctx) {}").unwrap();
+        assert_eq!(with(json!(["M", "L"])).unwrap().widgets[0].kind, "table");
+        assert!(with(json!(["S", "M"])).unwrap_err().to_string().contains("is a table: it takes sizes M and L"));
+        assert!(with(json!(["M"])).is_ok(), "M alone");
     }
 }

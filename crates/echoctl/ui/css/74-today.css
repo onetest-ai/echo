@@ -213,6 +213,34 @@
 .pw-status.st-ok i { background: var(--me); } .pw-status.st-warn i { background: var(--warn); } .pw-status.st-bad i { background: var(--danger); }
 .pw-card b { font-size: 13.5px; }
 .pw-card p { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+.tone-muted { color: var(--text-3); }
+.pw-stats .link-btn { margin-top: 2px; }
+/* A table: Echo's list look, not a spreadsheet. Its column names stay put while the rows scroll inside the card. */
+.pw-sec .pw-n { font-size: 11px; color: var(--text-2); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pw-sec .pw-hnote { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Never longer than most of the window: past that its rows scroll inside the card (a hug line has no height of its own). */
+.pw-table { flex: 0 1 auto; min-height: 0; max-height: min(60vh, 560px); overflow: auto; }
+.pw-table table { min-width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pw-table th, .pw-table td { text-align: left; padding: 7px 12px 7px 0; vertical-align: baseline; }
+.pw-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); padding-top: 2px; padding-bottom: 6px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; box-shadow: inset 0 -1px 0 var(--line-strong); }
+.pw-table tbody td { border-top: 1px solid var(--line); }
+.pw-table tbody tr:not(.pw-tg):not(.pw-td):hover td { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.pw-table .k-number { text-align: right; font-variant-numeric: tabular-nums; }
+.pw-table td.k-date { color: var(--text-2); white-space: nowrap; }
+/* A text cell keeps to one line, cut with … past its width; a card too narrow for the columns scrolls sideways. */
+.pw-table td.k-text { min-width: 6em; max-width: 22em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-table td.k-number, .pw-table th { white-space: nowrap; }
+.pw-table td.k-pill { white-space: nowrap; }
+.pw-table .pw-tc { width: 14px; padding-right: 8px; }
+.pw-table .link-btn { font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.pw-pill { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 10px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 1; color: var(--text-2); }
+.pw-pill.tone-good { color: var(--me); } .pw-pill.tone-warn { color: var(--warn); } .pw-pill.tone-bad { color: var(--danger); } .pw-pill.tone-muted { color: var(--text-3); }
+.pw-tg th { padding: 10px 0 5px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.pw-tg th .mono { font-size: 11px; color: var(--text-3); text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
+.pw-chev { border: 0; background: none; padding: 0; color: var(--text-2); font-size: 13px; line-height: 1; cursor: default; width: 14px; text-align: left; }
+.pw-chev:hover { color: var(--text); }
+.pw-td td { padding: 0 0 6px; border-top: 0; }
+.pw-td div { margin-left: 22px; padding: 6px 10px; border-left: 2px solid var(--line-strong); display: grid; grid-template-columns: max-content max-content; justify-content: start; gap: 3px 24px; font-size: 12px; }
 /* Today → Recorded this week: three numbers; at M a bar a day, Monday to Sunday, today marked. A click opens Calls. */
 .cw-sec { cursor: pointer; }
 .cw-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; }
