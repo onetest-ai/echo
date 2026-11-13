@@ -26,7 +26,7 @@
   },
   {
    "id": "F-REC-03",
-   "feature": "Nothing records without an arm and a call; Ask mode shows Echo's own \"Record?\" dialog per call (not while the agenda offers a meeting of that call's app: a Google Meet meeting offers nothing to a Teams call), Manual only records when asked",
+   "feature": "Nothing records without an arm and a call; Ask mode shows Echo's own \"Record?\" dialog per call (a next call while one records isn't, while the agenda offers a meeting of that call's app — a Google Meet meeting offers nothing to a Teams call), Manual only records when asked",
    "priority": "critical",
    "check": "agent",
    "axes": [
