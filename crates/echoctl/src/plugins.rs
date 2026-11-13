@@ -678,6 +678,11 @@ pub fn refresh(name: &str) -> Result<Catalog> {
         let mut plugins = vec![];
         let mut seen = std::collections::HashSet::new();
         for e in file.plugins.into_iter().take(200) {
+            // In My plugins a folder whose name isn't an id is listed with why (elsewhere: left out).
+            if m.name == MINE && !valid_id(&e.id) && seen.insert(e.id.clone()) {
+                plugins.push(Offer { id: e.id, categories: vec![], featured: false, manifest: None, error: Some("its folder name isn't a plugin id: lower-case letters, digits and -".into()), dir: PathBuf::new(), commit: String::new() });
+                continue;
+            }
             if !valid_id(&e.id) || !seen.insert(e.id.clone()) {
                 continue;
             }
