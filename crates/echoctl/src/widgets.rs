@@ -203,7 +203,8 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page,
         "day" | "choices" => {
             let mut v = day();
             if let Some(t) = threads {
-                v["day"] = json!(day_in(crate::today::day(), t));
+                let all: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
+                v["day"] = json!(day_in(all, t));
             }
             v
         }
@@ -299,6 +300,19 @@ fn has_choices(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> bool {
     }
     let yes: Vec<_> = open.iter().filter(|(x, _)| !matches!(x["response"].as_str(), Some("tentativelyAccepted" | "declined"))).map(|(_, s)| *s).collect();
     yes.iter().enumerate().any(|(i, a)| yes[i + 1..].iter().any(|b| a.0 < b.1 && b.0 < a.1))
+}
+
+/// A widget on Today set to a thread or a client (`params`): its data cut from the day Today already read — Your
+/// day's lines, the next of them — or, for My work, its own; None when it isn't set to one.
+pub fn scoped_from(id: &str, day: &[Value], params: &serde_json::Map<String, Value>, i: &Inputs) -> Option<Value> {
+    let (threads, name) = scope_of(params)?;
+    let mut v = match id {
+        "core:calendar.next" => next_meeting(&day_in(day.to_vec(), &threads)),
+        "core:tasks.mine" => work_in(crate::today::work(i.tasks), &threads),
+        _ => json!({"day": day_in(day.to_vec(), &threads)}),
+    };
+    v["scope"] = json!(name);
+    Some(v)
 }
 
 /// The day's meetings and calls in these threads: a meeting the threads' rules put it in, a call recorded in one.

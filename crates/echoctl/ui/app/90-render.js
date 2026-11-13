@@ -449,8 +449,11 @@ CLICKS.push(
     S.todayClose = null
     send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' }, note: note.trim() || undefined } })
     // Gone from My work at once; Today is read again once the ledger has it.
-    if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
-    setTimeout(() => loadToday().then(render), 800)
+    const gone = (w) => { if (w) for (const k of ['mine', 'owed', 'waiting']) if (w[k]) w[k].items = (w[k].items || []).filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project)) }
+    gone(S.today && S.today.work)
+    gone(S.today && S.today.scoped && S.today.scoped['core:tasks.mine'])
+    gone(S.dash && S.dash.core && S.dash.core['core:tasks.mine'])
+    setTimeout(() => (S.view === 'today' ? loadToday() : loadDashboard()).then(render), 800)
     return render()
   } },
   { sel: '[data-today-seen]', area: 'today', when: (t) => t.dataset.todaySeen, run: (t) => { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() } },

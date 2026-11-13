@@ -56,5 +56,7 @@ function dashboardView() {
     : `<button class="icon-btn td-edit-btn" data-tw-edit="${esc(page)}" aria-label="Edit this ${whose}'s dashboard" title="${rows.length ? `Edit this ${whose}'s dashboard — move, size, add widgets` : `Add widgets that show this ${whose}`}">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
   if (editing) setTimeout(twRefocus) // a widget moved by the keyboard keeps it (as on Today)
   const empty = editing && !rows.length ? `<div class="tw-end dash-none" data-tw-end="1">Nothing here yet: Add a widget puts one that shows this ${whose}.</div>` : ''
-  return `<section class="dash${editing ? ' td-editing' : ''}${rows.length || editing ? '' : ' bare'}" aria-label="Dashboard"><div class="dash-h">${acts}</div>${rows.map(line).join('')}${empty}${editing && rows.length ? todayEditEnd() : ''}</section>`
+  // A meeting's card and menu from Your day (as on Today: `todayDetail`, Calendar's menu).
+  const card = `${todayDetail(now)}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}`
+  return `<section class="dash${editing ? ' td-editing' : ''}${rows.length || editing ? '' : ' bare'}" aria-label="Dashboard"><div class="dash-h">${acts}</div>${rows.map(line).join('')}${empty}${editing && rows.length ? todayEditEnd() : ''}${card}</section>`
 }

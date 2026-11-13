@@ -59,7 +59,9 @@ function todayView() {
   const dayOf = (id) => (own(id) ? { ...d, day: own(id).day, scope: own(id).scope, work: {} } : d)
   const day = yourDayView(dayOf('core:calendar.agenda'), now)
   const work = myWorkView(own('core:tasks.mine') || d.work || {})
-  const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
+  // A quiet day by the whole day (a widget set to a thread may be empty on a busy one).
+  const whole = (d.day || []).length || d.calendar_stale || mine.total || ['owed', 'waiting'].some((k) => ((d.work || {})[k] || {}).total) || ((d.work || {}).plugins || []).length
+  const empty = !cards && !whole ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
@@ -173,7 +175,9 @@ function myWorkView(w) {
   tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
   const ask = linkAsked(S, 'wrOpen', Date.now())
   const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t), ask) : card(t, kind, who))
-  return cards2.length || S.todayAskId ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
+  // Yolo's bar is Today's (it reads Today's asks), not a dashboard's.
+  const asks = S.view === 'today'
+  return cards2.length || (asks && S.todayAskId) ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${asks ? todayAskBar() : ''}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
@@ -418,8 +422,10 @@ function todayAnchor() {
   if (a) a.setAttribute('aria-current', 'true')
   return a
 }
+/** Where Your day's lines, menu and card work: Today, and a thread's or client's dashboard showing it. */
+const tdHere = () => S.view === 'today' || !!(typeof dashPageKey === 'function' && dashPageKey())
 document.addEventListener('click', async (e) => {
-  if (S.view !== 'today' || !e.target.closest) return
+  if (!tdHere() || !e.target.closest) return
   const sk = e.target.closest('[data-td-skipped]')
   if (sk) { S.tdSkipped = sk.dataset.tdSkipped === '1'; return render() }
   const m = e.target.closest('[data-td-menu]')
@@ -429,8 +435,8 @@ document.addEventListener('click', async (e) => {
     return
   }
   // In the menu or the card: an action ran — read today's calendar again, so both say what it is now.
-  if (e.target.closest('.ev-ctx, .td .detail')) setTimeout(async () => { if (S.tdSel || S.cal.ctx) { await todayMeeting(S.tdSel ? S.tdSel.id : ''); render() } }, 600)
-  if (e.target.closest('.td .detail [data-calclose]')) { S.tdSel = null; return render() }
+  if (e.target.closest('.ev-ctx, .td .detail, .dash .detail')) setTimeout(async () => { if (S.tdSel || S.cal.ctx) { await todayMeeting(S.tdSel ? S.tdSel.id : ''); render() } }, 600)
+  if (e.target.closest('.td .detail [data-calclose], .dash .detail [data-calclose]')) { S.tdSel = null; return render() }
   // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card beside what the
   // menu was opened on.
   const it = e.target.closest('[data-ev-ctx]')
@@ -442,24 +448,24 @@ document.addEventListener('click', async (e) => {
   }
 })
 document.addEventListener('contextmenu', async (e) => {
-  const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev], .ch-row[data-td-ev], .ch-m[data-td-ev]')
+  const row = tdHere() && e.target.closest && e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev], .ch-row[data-td-ev], .ch-m[data-td-ev]')
   if (!row || !row.dataset.tdEv) return
   e.preventDefault()
   const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
   if (await todayMeeting(id)) todayMenu(id, x, y, row)
 })
 // Your day scrolled (its list, its calendar, the page): the card stays beside its meeting, as Calendar's on its grid.
-document.addEventListener('scroll', () => { if (S.view === 'today' && S.tdSel) placeDetail() }, { capture: true, passive: true })
+document.addEventListener('scroll', () => { if (tdHere() && S.tdSel) placeDetail() }, { capture: true, passive: true })
 // A calendar's or strip's block with the keyboard: Enter opens its card beside it.
 document.addEventListener('keydown', async (e) => {
-  const b = S.view === 'today' && e.key === 'Enter' && e.target.matches && e.target.matches('.dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  const b = tdHere() && e.key === 'Enter' && e.target.matches && e.target.matches('.dc-ev[data-td-ev], .ds-ev[data-td-ev]')
   if (!b || !e.target.dataset.tdEv) return
   e.preventDefault()
   if (await todayMeeting(e.target.dataset.tdEv)) todayCard(e.target.dataset.tdEv, e.target)
 })
 // Escape in the menu: Calendar closes it; the keyboard goes back to the line's ⋯.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || S.view !== 'today' || !S.cal.ctx) return
+  if (e.key !== 'Escape' || !tdHere() || !S.cal.ctx) return
   const id = S.cal.ctx.id
   setTimeout(() => { const b = document.querySelector(`[data-td-menu="${CSS.escape(id)}"]`); if (b) b.focus() })
 })
@@ -912,7 +918,7 @@ function sendToClaude(line, profile, typed) {
 /** Today's dialogs, drawn in their own region (`#r-dlg`): Today is drawn again each minute (the now line), which would
  *  replace a dialog under the pointer (a click lost) and its typed words. */
 function todayDialogs() {
-  return S.view === 'today' ? todayCloseDialog() + needsDialog() : ''
+  return S.view === 'today' ? todayCloseDialog() + needsDialog() : tdHere() ? todayCloseDialog() : ''
 }
 /** A dialog drawn again (its item changed, the threads came) gets back what the user typed and chose. */
 function todayDialogsKeep() {
