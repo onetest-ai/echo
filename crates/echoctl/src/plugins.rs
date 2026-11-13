@@ -34,6 +34,7 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+pub mod scripts;
 mod sources;
 use sources::*;
 pub(crate) use sources::copy_tree;
@@ -91,6 +92,10 @@ pub struct Manifest {
     /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
+    /// The hash of the skill folders its scripts are in (`scripts::check`): on the sheet, so a change asks again.
+    /// Always Echo's: `read_manifest` sets it, whatever the file says (kept in the catalog it writes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts_digest: Option<String>,
     /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
     /// work rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,7 +239,7 @@ fn needs_echo(req: &str) -> Result<String> {
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).with_context(|| format!("no {MANIFEST}"))?;
-    let m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
+    let mut m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
     if !valid_id(&m.id) {
         bail!("its id “{}” isn't a plain name (a–z, 0–9, -)", m.id);
     }
@@ -261,6 +266,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
     }
     describe(&m.uses)?;
     package_skills(dir, &m)?;
+    m.scripts_digest = scripts::check(dir, &m)?;
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
         match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
@@ -418,6 +424,12 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its scripts' line carries their skill folders' hash: a version changing any of those files asks again.
+    if let Some(d) = &m.scripts_digest {
+        for l in lines.iter_mut().filter(|l| l.starts_with("Runs programs from its package")) {
+            l.push_str(&format!(" (their files: {d})"));
+        }
     }
     // Its package skills, by name: what they say is in its package, for Echo's sessions only.
     if !m.skills.is_empty() {
@@ -857,8 +869,13 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         let _ = fs::remove_dir_all(&tmp);
         bail!("its files changed while installing — try again");
     }
+    // Its scripts running from the version replaced stop with everything they started.
+    scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(&dest);
     fs::rename(&tmp, &dest)?;
+    if let Ok(m) = read_manifest(&dest) {
+        scripts::mark_runnable(&dest, &m);
+    }
     let rec = Installed {
         id: id.into(),
         name: rv.name,
@@ -943,6 +960,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
+    scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(installed_dir(id));
     crate::grants::remove_plugin(id);
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
@@ -1384,7 +1402,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");

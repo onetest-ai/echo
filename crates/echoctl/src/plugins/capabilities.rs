@@ -29,6 +29,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "files", ready: true, describe: describe_files },
     Capability { id: "work", ready: true, describe: describe_work },
     Capability { id: "signin", ready: true, describe: describe_signin },
+    Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
 ];
 
 /// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.

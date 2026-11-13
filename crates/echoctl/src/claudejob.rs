@@ -190,6 +190,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
     // The commands plugins let Echo's sessions run, by the CLI their skills name too.
     let session_commands = crate::plugins::session_commands();
+    // The plugin scripts marked readonly, by their launchers' paths: what a read-only routine may run of them.
+    let session_scripts = if spec.tools == Tools::Read { crate::grants::session_scripts(true) } else { vec![] };
     let mut clis = clis;
     clis.extend(crate::grants::session_clis(&session_plugins));
     if spec.tools != Tools::None {
@@ -228,6 +230,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             }
             a.extend(clis.iter().flat_map(|cli| guard::ROUTINE_COMMANDS.iter().map(move |c| format!("Bash({cli} {}:*)", c.split(" *").next().unwrap_or(c)))));
             a.extend(clis.iter().flat_map(|cli| session_commands.iter().map(move |(id, c)| format!("Bash({cli} plugin call {id} {c}:*)"))));
+            a.extend(session_scripts.iter().map(|s| format!("Bash({s}:*)")));
             a.push("mcp__echo".into());
             settings_file = Some(f);
         }
@@ -258,6 +261,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             c.env(guard::RUN_READ, session_read.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n"));
             c.env(guard::RUN_SKILLS, crate::grants::skill_names(&session_plugins).join("\n"));
             c.env(guard::RUN_PLUGIN_COMMANDS, session_commands.iter().map(|(id, c)| format!("{id} {c}")).collect::<Vec<_>>().join("\n"));
+            c.env(guard::RUN_PLUGIN_SCRIPTS, session_scripts.join("\n"));
         }
         Ok(c.spawn()?)
     }));

@@ -321,9 +321,59 @@ pub fn copy_package_skills(id: &str) -> Result<()> {
         return Ok(());
     }
     write_session_base(id, &dir)?;
+    // At each declared script's path, Echo's launcher of it: in a session it runs as every script does (`scripts::run`).
+    let launcher = dir.join("scripts").join("echoctl");
+    for s in crate::plugins::scripts::declared(&m.uses)? {
+        let f = inside(&dunce::canonicalize(dir.join("skills").join(&s.skill))?, &s.script)?;
+        paths::write_atomic(&f, crate::plugins::scripts::wrapper(id, &s, &launcher).as_bytes())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755))?;
+        }
+    }
     let mark = json!({"files": p.files, "skills": package.iter().map(|(n, _)| n).collect::<Vec<_>>()});
     paths::write_atomic(&dir.join(PACKAGE_MARK), serde_json::to_string_pretty(&mark)?.as_bytes())?;
     Ok(())
+}
+
+/// Plugin `id`'s package skill `skill` in its session folder, copied again first when the installed files changed.
+pub fn session_skill_dir(id: &str, skill: &str) -> Result<PathBuf> {
+    let p = crate::plugins::Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
+    let dir = session_dir(id);
+    if package_mark(&dir).0 != p.files {
+        copy_package_skills(id)?;
+    }
+    let d = dir.join("skills").join(skill);
+    if !package_mark(&dir).1.iter().any(|s| s == skill) || !d.is_dir() {
+        bail!("{skill} isn't one of {id}'s skills");
+    }
+    Ok(d)
+}
+
+/// Enabled plugins' declared scripts as Echo's sessions run them: the launcher at each one's path in the session
+/// copy, by its full path (both slash forms on Windows). `read_only`: only those marked `readonly`.
+pub fn session_scripts(read_only: bool) -> Vec<String> {
+    let dirs = session_plugins();
+    let mut out = vec![];
+    for p in crate::plugins::enabled() {
+        let dir = session_dir(&p.id);
+        if !dirs.contains(&dir) {
+            continue;
+        }
+        let Ok(m) = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)) else { continue };
+        for s in crate::plugins::scripts::declared(&m.uses).unwrap_or_default().into_iter().filter(|s| s.readonly || !read_only) {
+            let f = dir.join("skills").join(&s.skill).join(&s.script);
+            if f.is_file() {
+                for form in [f.display().to_string(), f.display().to_string().replace('\\', "/")] {
+                    if !out.contains(&form) {
+                        out.push(form);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Echo's sessions may read these folders of plugin `id` (each must be granted to it).

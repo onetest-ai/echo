@@ -859,6 +859,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
             Event::UserEvent(UiEvent::Quit) => {
                 // Terminals in the window (Claude sessions) end with Echo; they resume by id later.
                 crate::terminal::close_all();
+                // Plugins' scripts stop with Echo, with everything they started.
+                crate::plugins::scripts::stop_all();
                 if app::RESTART.load(Ordering::SeqCst) {
                     let _ = app::spawn_app(true);
                 }
