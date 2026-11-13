@@ -559,6 +559,8 @@ mod tests {
         assert_eq!(target("echo://call/2026-10-28_110000-aurora?t=725").unwrap(), serde_json::json!({"hash": "call/2026-10-28_110000-aurora/transcript", "jump": 725}));
         assert_eq!(target(&format!("echo://thread/{pilot}")).unwrap()["hash"], format!("project/{pilot}/brief"));
         assert_eq!(target("echo://client/acme").unwrap()["hash"], "client/acme/overview");
+        assert_eq!(target(&format!("echo://thread/{pilot}/profile")).unwrap()["hash"], format!("project/{pilot}/profile"));
+        assert_eq!(target("echo://client/acme/profile").unwrap()["hash"], "client/acme/profile");
         let p = target("echo://person/jane%40acme.example").unwrap();
         assert_eq!((p["hash"].as_str(), p["person"].as_str()), (Some(format!("project/{pilot}/people").as_str()), Some("jane@acme.example")), "{p}");
         assert!(target("echo://thread/nope").is_err() && target("echo://client/nope").is_err());
