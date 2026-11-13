@@ -35,7 +35,7 @@ tags: [calls, live-notes, recording, second-instance, file-fed]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run the prelude, then `target/debug/echoctl config --languages en --unscheduled manual --scheduled manual --auto-minutes false`, `target/debug/echoctl ai live off`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `$W 30 app`, `target/debug/echoctl status` | The config calls exit 0; `ai live off` prints "live notes during calls: off"; "waited … for app"; `status` prints `watcher` with a `pid`, `recording` null |
-| 2 | Run the prelude, then `target/debug/echoctl arm --title "LIVE-041 notes off"; $W 10 armed; $C start minutes-call --hold; $W 20 recording live-041` | "waited … for recording live-041" |
+| 2 | Run the prelude, then `target/debug/echoctl arm --title "LIVE-041 notes off"; $W 10 armed; $C start minutes-call --hold; $W 20 recording live-041-notes-off` | "waited … for recording live-041-notes-off" |
 | 3 | Navigate to `{{base_url}}/#calls`, wait for the row `[data-call$="-live-041-notes-off"]` (up to 15 s), click it; ask nothing. Snapshot the call, then click My notes (`[data-panel-flip="notes"]`) and snapshot the panel `#r-right` | The row is marked Recording. Between the call's view and My notes, the screen says that live notes are off and where to turn them on (Settings → AI & minutes, "Live notes during calls"), with no question asked first |
 | 4 | In the snapshots of step 3, look for the words "first live notes appear after about 90 seconds" | They appear nowhere: a call with live notes off promises no notes |
 | 5 | Run the prelude, then `sleep 95` (past the 90 s a live-notes-on call needs for its first summary), `L="$(ls -d "$ECHOCTL_HOME"/calls/*-live-041-notes-off)"; ls "$L"` | The folder holds neither `live-notes.json` nor `live-usage.json`: nothing was summarised and no model job was counted (the data's `claude` refuses every run, so these files are the evidence); no file of a question either (`live-asks.jsonl` absent) |
@@ -50,6 +50,6 @@ Opening the recording call, with no question asked, shows that live notes are of
 - `tests/fixtures/serve.sh down <dir>`; remove `$(dirname <dir>)` when the run is over
 
 ## Notes
-- **Expected to FAIL until #399:** steps 3 and 4 assert F-LIVE-04 as written. Today the window shows nothing about live notes being off until someone asks a question (`echoctl live ask`), and its box still says the first live notes come after about 90 seconds. Do not "fix" the case by asking a question first.
+- Steps 3 and 4 assert F-LIVE-04 as written, the behaviour #399 fixed (before it, the window said nothing about live notes being off until someone asked a question, and its box promised notes in about 90 seconds). Do not "fix" the case by asking a question first.
 - "Nothing is sent to a model" is read from the files a summary would leave after the 90 s of step 5, not from a model's log.
 - Rewritten 2026-11-11 from F-LIVE-04 and #399; not yet run.
