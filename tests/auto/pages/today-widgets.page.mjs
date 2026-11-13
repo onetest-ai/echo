@@ -415,7 +415,6 @@ export class TodayWidgetsPage extends TodayPage {
     return this.pickSizes.getByRole('button', { name: new RegExp(`: size ${size}$`) })
   }
 
-
   /** The preview of the picked widget at a size: what can be dragged onto Today (its name says where: on Today). */
   preview(label, size) {
     return this.rightPanel.getByLabel(`Preview of ${label} at ${size} on Today`, { exact: true })
@@ -556,7 +555,6 @@ export class TodayWidgetsPage extends TodayPage {
     return this.widget(name).getByRole('link', { name: text, exact: true })
   }
 
-  /** A widget's images (a plugin's text shown as text draws none). */
   /** A widget's images (a progress bar, an `<img>`), not its header's update stamp. */
   widgetImages(name) {
     return this.widget(name).locator('img, [role="img"]:not(.pw-upd)')

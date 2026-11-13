@@ -1047,7 +1047,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(await today.textColour(label.open, x.open.value)).toBe(warn)
       await expect(today.widgetSays(label.open, x.open.label)).toBeVisible()
       expect(await today.dotColour(label.ci)).toBe(warn)
-      // Its status' title (its heading also carries when it was updated, so it isn't the word alone).
+      // Its heading (its name, then its update stamp) and its status' title.
+      await expect(today.widget(label.ci).getByRole('heading', { level: 2, name: new RegExp(`^${x.ci.title}\\b`) })).toBeVisible()
       await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(1)
       await expect(today.widgetSays(label.ci, x.ci.failed)).toBeVisible()
       await expect(today.widgetSays(label.broken, x.broken)).toBeVisible()
