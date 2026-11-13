@@ -1,7 +1,7 @@
 // ── Colleagues' photos in place of initials (`api/photos`, the app's `photos`): asked once per name, in batches; the
 // app answers with the names it keeps a photo for, and fetches those of the user's calls and meetings it doesn't keep
 // yet in the background (only colleagues in the user's own domain, only when the Microsoft 365 sign-in may read
-// photos): a name it is fetching (null) is asked again, a little later each time.
+// photos): a name waiting to be fetched (null) is asked again, a little later each time, up to every 80 s.
 
 // ── photos
 const PHOTO = new Map() // name → its photo's address, or false (none), or 0 (asked, waiting)
@@ -22,17 +22,18 @@ function photoOf(name, meet) {
 }
 async function askPhotos(names, fetch, tries = 0) {
   if (!names.length) return
+  const later = (them) => setTimeout(() => askPhotos(them, fetch, tries + 1), Math.min(5000 * 2 ** tries, 80000))
   let got
-  try { got = await get(`api/photos?n=${encodeURIComponent(JSON.stringify(names))}${fetch ? '&fetch=1' : ''}`) } catch { return }
+  try { got = await get(`api/photos?n=${encodeURIComponent(JSON.stringify(names))}${fetch ? '&fetch=1' : ''}`) } catch { return later(names) }
   let any = false
   const wait = []
   for (const n of names) {
     const v = got ? got[n] : undefined
-    if (typeof v === 'string') { PHOTO.set(n, v); any = true } else if (v === null && tries < 5) wait.push(n); else PHOTO.set(n, false)
+    if (typeof v === 'string') { PHOTO.set(n, v); any = true } else if (v === null) wait.push(n); else PHOTO.set(n, false)
   }
   if (any) render()
-  // Being fetched: asked again at 5, 10, 20, 40, 80 s.
-  if (wait.length) setTimeout(() => askPhotos(wait, true, tries + 1), 5000 * 2 ** tries)
+  // Waiting to be fetched (in the queue, or out a pause): asked again at 5, 10, 20, 40, then every 80 s.
+  if (wait.length) later(wait)
 }
 // The switch turned: every name is asked afresh.
 document.addEventListener('click', (e) => {

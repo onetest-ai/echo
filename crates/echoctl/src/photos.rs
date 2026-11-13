@@ -92,7 +92,8 @@ pub fn of_names(names: &[String], fetch_missing: bool) -> Map<String, Value> {
         let jpg = file(&email);
         if jpg.exists() {
             out.insert(name.clone(), Value::String(email));
-        } else if fetch_missing && !cooling() && !jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR) {
+        } else if fetch_missing && !none_fresh(&jpg) {
+            // Not kept yet: null (the window asks again) while it waits in the queue or out a pause.
             out.insert(name.clone(), Value::Null);
             wanted.push(email);
         }
@@ -121,9 +122,10 @@ fn next_cool(last: Option<Duration>) -> Duration {
     last.map_or(COOL_FIRST, |c| (c * 2).min(COOL_MAX))
 }
 
-/// Whether photos are paused after a refusal.
-fn cooling() -> bool {
-    QUEUE.lock().unwrap_or_else(|e| e.into_inner()).cool_until.is_some_and(|t| Instant::now() < t)
+
+/// Whether "they have no photo" was found less than a week ago.
+fn none_fresh(jpg: &std::path::Path) -> bool {
+    jpg.with_extension("none").metadata().and_then(|m| m.modified()).is_ok_and(|t| SystemTime::now().duration_since(t).unwrap_or_default() < NONE_FOR)
 }
 
 /// Queues these photos for the one worker, which asks them one at a time, a pause apart; a refusal stops it and pauses
@@ -131,6 +133,9 @@ fn cooling() -> bool {
 fn fetch(emails: Vec<String>) {
     {
         let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        if q.cool_until.is_some_and(|t| Instant::now() < t) {
+            return;
+        }
         q.todo.extend(emails);
         if q.working || q.todo.is_empty() {
             return;
@@ -149,6 +154,10 @@ fn fetch(emails: Vec<String>) {
             }
         };
         let jpg = file(&next);
+        // Kept meanwhile (asked again while it was being fetched): never fetched twice.
+        if jpg.exists() || none_fresh(&jpg) {
+            continue;
+        }
         if let Some(dir) = jpg.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
