@@ -307,7 +307,14 @@ fn microsoft365(m: &MeetingContext, since: Option<&str>) -> Vec<Value> {
 /// Who's coming: the invite's people, with what the threads know of them (role, stance, calls, new).
 fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
     let today = Local::now().date_naive();
-    let known: Vec<Value> = thread_ids.iter().filter_map(|id| crate::people::of_thread(id, today).ok()).flat_map(|v| v["people"].as_array().cloned().unwrap_or_default()).collect();
+    weighed(m, thread_ids, |id| crate::people::of_thread(id, today).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default())
+}
+
+/// The invite's people but the user, each with what the threads know of them, those coming first by their weight in
+/// the threads (influence, interest, then calls together), who declined last. `known_in`: a thread's people (the
+/// People view's), asked once a thread.
+pub(crate) fn weighed(m: &MeetingContext, thread_ids: &[String], mut known_in: impl FnMut(&str) -> Vec<Value>) -> Vec<Value> {
+    let known: Vec<Value> = thread_ids.iter().flat_map(|id| known_in(id)).collect();
     let me = crate::config::Config::load().ok().and_then(|c| c.me);
     let is_me = |p: &crate::meeting::Person| {
         me.as_ref().is_some_and(|m| m.email.as_deref().is_some_and(|e| p.email.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(e))) || m.name.eq_ignore_ascii_case(&p.name))
@@ -769,6 +776,34 @@ mod tests {
             let subjects: Vec<&str> = v["meetings"].as_array().unwrap().iter().filter_map(|x| x["subject"].as_str()).collect();
             assert_eq!(subjects, ["Acme weekly sync"]);
         }
+    }
+
+    #[test]
+    fn the_people_come_by_their_weight_in_the_threads_without_the_user_each_thread_read_once() {
+        let _env = crate::paths::testenv::folders("prep-weighed");
+        let mut cfg = crate::config::Config::load().unwrap();
+        cfg.me = Some(crate::meeting::Person { name: "Sam Rivera".into(), email: Some("sam@acme.example".into()) });
+        cfg.save().unwrap();
+        let p = |n: &str, e: &str| crate::meeting::Person { name: n.into(), email: Some(e.into()) };
+        let m = MeetingContext {
+            organizer: Some(p("Sam Rivera", "sam@acme.example")),
+            attendees: vec![p("Kim Park", "kim@globex.example"), p("Omar Haddad", "omar@globex.example"), p("Dana Lee", "dana@globex.example")],
+            declined: vec![p("Raj Mehta", "raj@globex.example")],
+            ..Default::default()
+        };
+        let place = |e: &str, influence: u64, interest: u64, calls: u64| json!({"email": e, "key": e, "calls": calls, "places": [{"thread": "t1", "influence": influence, "interest": interest}]});
+        let mut asked = vec![];
+        let out = weighed(&m, &["t1".into(), "t2".into()], |id| {
+            asked.push(id.to_string());
+            if id == "t1" {
+                vec![place("dana@globex.example", 3, 1, 2), place("omar@globex.example", 1, 3, 9), place("raj@globex.example", 3, 3, 9)]
+            } else {
+                vec![]
+            }
+        });
+        let names: Vec<&str> = out.iter().map(|x| x["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["Dana Lee", "Omar Haddad", "Kim Park", "Raj Mehta"], "by influence, then interest; no weight after; who declined last; not the user");
+        assert_eq!(asked, ["t1", "t2"], "each thread asked once");
     }
 
     #[test]

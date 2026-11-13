@@ -335,7 +335,7 @@ scenario(test, 'S-23', 'A busy day of calls and minutes in every state', () => {
     await expect(view.kindChip(cs().invite)).toHaveText(new RegExp(`^${literal(chip)}`))
     await expect(view.factTitled(cs().fromTeamsHint)).toHaveText(cs().fromTeams)
     await view.openNewest(acme.title)
-    expect(await view.factLines()).toEqual([`${await when(view, acme.slug)} ${fill(cs().duration, { n: acme.minutes })} ${fill(data.text.calls.kindChip, { kind: acme.kind })}`, cs().kindSelect, fill(cs().more, { names: acme.people, n: acme.more })])
+    expect(await view.factLines()).toEqual([`${await when(view, acme.slug)} ${fill(cs().duration, { n: acme.minutes })} ${fill(data.text.calls.kindChip, { kind: acme.kind })}`, cs().kindSelect, acme.people])
   })
 
   test('17 · A call shows Chat and Screens tabs, with counts, only when it has chat or frames', covers('calls/TC-016', 'F-CALLS-07', 'F-CALLS-14', 'F-CALLS-15'), async ({ page }) => {

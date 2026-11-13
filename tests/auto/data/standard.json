@@ -4868,8 +4868,7 @@
       "screens": 2,
       "turns": 17,
       "minutes": 30,
-      "people": "Sam Rivera, Dana Lee, Omar Haddad, Rita Gomez, Ivan Petrov, Yuki Tanaka",
-      "more": 1,
+      "people": "Dana Lee, Omar Haddad, Rita Gomez, Ivan Petrov, Yuki Tanaka, Jo Weber",
       "kind": "Client",
       "sections": [
         "Summary",
@@ -4891,7 +4890,7 @@
       "slug": "globex-steering",
       "minutes": 45,
       "kind": "Client",
-      "people": "Sam Rivera, Kim Park, Noor Aziz, Ben Okafor",
+      "people": "Kim Park, Noor Aziz, Ben Okafor",
       "sections": [
         "Summary",
         "Decisions"
