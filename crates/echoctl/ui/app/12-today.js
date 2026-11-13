@@ -9,7 +9,7 @@ function drawToday(primary) {
   if (page2 && page2 !== page && pageTop) page2.scrollTop = pageTop
   // The card goes with what it was opened beside (its line folded away, its widget taken off), as Calendar's goes with
   // its block.
-  if (!todayAnchor() && S.tdSel) { S.tdSel = null; setTimeout(render); return }
+  if (tdKeepCard()) { setTimeout(render); return }
   // Today's view height, on the element (not in the HTML, which would then change with the window and be redrawn).
   const td = $('.td')
   if (td && S.tdView) td.style.setProperty('--td-view', `${S.tdView}px`)
@@ -60,7 +60,7 @@ function todayView() {
   const day = yourDayView(dayOf('core:calendar.agenda'), now)
   const work = myWorkView(own('core:tasks.mine') || d.work || {})
   // A quiet day by the whole day (a widget set to a thread may be empty on a busy one).
-  const whole = (d.day || []).length || d.calendar_stale || mine.total || ['owed', 'waiting'].some((k) => ((d.work || {})[k] || {}).total) || ((d.work || {}).plugins || []).length
+  const whole = S.todayAskId || (d.day || []).length || d.calendar_stale || mine.total || ['owed', 'waiting'].some((k) => ((d.work || {})[k] || {}).total) || ((d.work || {}).plugins || []).length
   const empty = !cards && !whole ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   // Its parts in the order of Today's layout (`today-layout.json`, `echoctl today`): a row a block, a row's widgets side
   // by side. Sizes take effect with the layout engine (#315).
@@ -407,6 +407,8 @@ const tdPick = (sel, id, at, toggle = true) => (toggle && sel && sel.id === id &
 /** Open (or, the same clicked again, close) a meeting's card beside the element `el` of Your day. */
 function todayCard(id, el, toggle = true) {
   S.tdSel = tdPick(S.tdSel, id, tdFormOf([...el.classList]), toggle)
+  // The page it was opened on (Today, or a dashboard): another page doesn't show it.
+  if (S.tdSel) S.tdSel.on = tdPageKey()
   render()
 }
 /** The open card: Calendar's own, drawn in Today's view; placed beside its anchor after the draw. */
@@ -421,6 +423,15 @@ function todayAnchor() {
   const a = S.tdSel && S.tdSel.at && document.querySelector(`.${S.tdSel.at}[data-td-ev="${CSS.escape(S.tdSel.id)}"]`)
   if (a) a.setAttribute('aria-current', 'true')
   return a
+}
+/** The page Your day is on: 'today', a dashboard's key, else null. */
+const tdPageKey = () => (S.view === 'today' ? 'today' : (typeof dashPageKey === 'function' && dashPageKey()) || null)
+/** The card goes with what it was opened beside: closed when its line isn't on this page (or it was opened on another),
+ *  else marked so `placeDetail` puts it beside its line. True: closed (draw again). */
+function tdKeepCard() {
+  if (S.tdSel && S.tdSel.on && S.tdSel.on !== tdPageKey()) { S.tdSel = null; return true }
+  if (!todayAnchor() && S.tdSel) { S.tdSel = null; return true }
+  return false
 }
 /** Where Your day's lines, menu and card work: Today, and a thread's or client's dashboard showing it. */
 const tdHere = () => S.view === 'today' || !!(typeof dashPageKey === 'function' && dashPageKey())

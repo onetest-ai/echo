@@ -55,6 +55,8 @@ function dashboardView() {
     ? '<span class="td-edit-acts"><button class="btn" data-tw-panel="1">Add a widget</button><button class="btn primary" data-tw-done="1">Done</button></span>'
     : `<button class="icon-btn td-edit-btn" data-tw-edit="${esc(page)}" aria-label="Edit this ${whose}'s dashboard" title="${rows.length ? `Edit this ${whose}'s dashboard — move, size, add widgets` : `Add widgets that show this ${whose}`}">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
   if (editing) setTimeout(twRefocus) // a widget moved by the keyboard keeps it (as on Today)
+  // A meeting's card beside its line, as on Today (closed when its line isn't here).
+  setTimeout(() => { if (dashPageKey() !== page) return; if (tdKeepCard()) render(); else if (S.tdSel) placeDetail() })
   const empty = editing && !rows.length ? `<div class="tw-end dash-none" data-tw-end="1">Nothing here yet: Add a widget puts one that shows this ${whose}.</div>` : ''
   // A meeting's card and menu from Your day (as on Today: `todayDetail`, Calendar's menu).
   const card = `${todayDetail(now)}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}`
