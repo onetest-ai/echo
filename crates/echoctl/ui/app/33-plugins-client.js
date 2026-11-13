@@ -134,9 +134,12 @@ async function loadPluginClients(snapshot) {
   let p = snapshot
   if (!p) try { p = await get('api/plugins') } catch { return }
   const want = (p.installed || []).filter((x) => x.enabled && x.client)
-  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && x.version === Plugins.loaded[id])) unloadPlugin(id)
+  // Drawn again only when a client half came or went (nothing changed: nothing to draw).
+  let changed = false
+  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && x.version === Plugins.loaded[id])) { unloadPlugin(id); changed = true }
   for (const x of want) {
     if (Plugins.loaded[x.id]) continue
+    changed = true
     Plugins.loaded[x.id] = x.version
     try {
       const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(x.version)}`, location.href).href)
@@ -146,7 +149,7 @@ async function loadPluginClients(snapshot) {
       delete Plugins.errors[x.id]
     } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
   }
-  render()
+  if (changed) render()
 }
 function unloadPlugin(id) {
   for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)

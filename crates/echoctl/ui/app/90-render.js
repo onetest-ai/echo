@@ -12,6 +12,40 @@ function patch(el, html) {
   if (kept.some(([t, l]) => t > 0 || l > 0)) [...el.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) { if (kept[i][0]) x.scrollTop = kept[i][0]; if (kept[i][1]) x.scrollLeft = kept[i][1] } })
 }
 
+/** A region drawn widget by widget (each marked `data-wkey`): only a widget whose markup changed is replaced; the others,
+ *  and the layout around them, stay as they are while the layout's own markup is the same. A changed layout (a widget
+ *  moved, added, resized): the whole region, as `patch`. */
+function patchKeyed(el, html) {
+  if (!el || el._html === html) return
+  const t = document.createElement('template')
+  t.innerHTML = html
+  // The outermost marked elements: a widget's own (one inside another goes with it).
+  const marked = [...t.content.querySelectorAll('[data-wkey]')].filter((n) => !(n.parentElement && n.parentElement.closest('[data-wkey]')))
+  const parts = new Map()
+  for (const n of marked) {
+    parts.set(n.dataset.wkey, n.outerHTML)
+    const slot = document.createElement('i')
+    slot.dataset.wslot = n.dataset.wkey
+    n.replaceWith(slot)
+  }
+  const skel = t.innerHTML
+  let whole = el._skel !== skel || !el._parts
+  if (!whole) {
+    for (const [k, h] of parts) {
+      if (el._parts.get(k) === h) continue
+      const old = el.querySelector(`[data-wkey="${CSS.escape(k)}"]`)
+      if (!old) { whole = true; break }
+      const nt = document.createElement('template')
+      nt.innerHTML = h
+      old.replaceWith(nt.content)
+    }
+  }
+  if (whole) { el._html = null; patch(el, html) }
+  el._html = html
+  el._skel = skel
+  el._parts = parts
+}
+
 // ── what the user sees, for Echo's Claude terminals (`view.rs`: a UserPromptSubmit hook adds it to
 // each prompt, so "this" means what is open or selected here). Sent when it changes, and every minute.
 let viewSent = '', viewTimer = null, frameSel = ''
