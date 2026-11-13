@@ -433,6 +433,7 @@ impl Ui {
             "check_updates" => Action::CheckUpdates,
             "update" => Action::Update,
             "calendar_login" => Action::CalendarLogin,
+            "photos_login" => Action::PhotosLogin,
             "calendar_logout" => Action::CalendarLogout,
             "calendar_sync" => Action::CalendarSync,
             "calendar_client_id" => Action::CalendarClientId,
@@ -583,6 +584,21 @@ impl Ui {
                         app::notify("Calendar connected", &who);
                     }
                     Err(e) => app::notify("Calendar sign-in failed", &format!("{e:#}")),
+                });
+                return;
+            }
+            // Colleagues' photos: their own sign-in; allowed, the switch goes on.
+            Action::PhotosLogin => {
+                std::thread::spawn(|| match crate::graph::login_photos() {
+                    Ok(_) if crate::photos::allowed_again() => {
+                        if let Ok(mut cfg) = Config::load() {
+                            cfg.people_photos = Some(true);
+                            let _ = cfg.save();
+                        }
+                        app::notify("Colleagues' photos on", "Echo shows your colleagues' photos in place of their initials.");
+                    }
+                    Ok(_) => app::notify("Photos not allowed", "Your organisation didn't allow Echo to read colleagues' photos."),
+                    Err(e) => app::notify("Sign-in for photos failed", &format!("{e:#}")),
                 });
                 return;
             }

@@ -191,6 +191,15 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-SET-22",
+   "feature": "Settings → Calendar & chat → \"Colleagues' photos\": not connected, it says photos come once Microsoft 365 is; connected but the sign-in may not read photos, Allow… (a sign-in of its own asking one more permission; allowed, the switch goes on; refused, it says so); allowed, a switch, off by default",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
   }
  ]
 }

@@ -12,6 +12,11 @@ pub enum CalendarCmd {
     Login,
     /// Forget the sign-in
     Logout,
+    /// Sign in again, allowing Echo to read colleagues' photos (a sign-in of its own: the tenant may refuse it)
+    LoginPhotos,
+    /// (diagnostics) Fetch one colleague's photo by address into Echo's photo cache
+    #[command(hide = true)]
+    Photo { email: String },
     /// Fetch the meeting chat of a recorded call into <call>/chat.json (also done live)
     Chat { call: String },
     /// Make a call of a meeting nobody recorded, from its Teams transcript (and its chat): the event's
@@ -88,6 +93,16 @@ pub fn calendar(cmd: Option<CalendarCmd>) -> Result<()> {
             let who = graph::login()?;
             println!("signed in as {who}");
             calendar::sync(false)
+        }
+        Some(CalendarCmd::LoginPhotos) => {
+            let who = graph::login_photos()?;
+            println!("signed in as {who}; photos {}", if graph::photos_allowed() { "allowed" } else { "not allowed by the tenant" });
+            Ok(())
+        }
+        Some(CalendarCmd::Photo { email }) => {
+            let out = crate::photos::file(&email);
+            std::fs::create_dir_all(out.parent().unwrap_or(std::path::Path::new(".")))?;
+            { print_json(&serde_json::json!({ "email": email, "allowed": graph::photos_allowed(), "got": graph::photo(&email, &out)?, "file": out })); Ok(()) }
         }
         Some(CalendarCmd::Chat { call }) => watch::fetch_call_chat(&call),
         Some(CalendarCmd::Transcripts { days }) => {

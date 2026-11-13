@@ -72,6 +72,13 @@
     "person.maybe_same",
     "person.side"
    ]
+  },
+  {
+   "id": "F-PPL-08",
+   "feature": "Colleagues' photos in place of initials (call rows, the people map with the stance as a ring, a work item's people, Today's meeting faces, people menus): only with the switch on and a sign-in that may read photos (else nothing is asked), only people in the user's own mail domain found in the people directory (others keep initials); fetched only for people of the user's calls and meetings (call rows, Today's meeting faces) and only when not kept yet — elsewhere a face shows a photo only once it is kept; one at a time, a pause apart, and a refusal (429, 5xx) pauses every photo request, longer each time (1 min to 30 min); one without a photo keeps initials, asked again after a week; kept on this computer, 96 px",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }

@@ -189,7 +189,7 @@ function nextMeetingView(n, size, now) {
   const coming = people.filter((x) => x.answer !== 'declined').length
   const shown = people.slice(0, 8)
   const ini = (nm) => String(nm || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
-  const faces = shown.map((x) => `<span class="td-av${x.answer === 'declined' ? ' no' : x.answer === 'accepted' ? ' yes' : ''}" title="${esc(`${x.name}${said(x)}`)}" role="listitem" aria-label="${esc(`${x.name}${said(x)}`)}">${esc(ini(x.name))}</span>`).join('')
+  const faces = shown.map((x) => `<span class="td-av${x.answer === 'declined' ? ' no' : x.answer === 'accepted' ? ' yes' : ''}${photoFace(x.name, true).cls}" style="${photoFace(x.name, true).style}" title="${esc(`${x.name}${said(x)}`)}" role="listitem" aria-label="${esc(`${x.name}${said(x)}`)}">${esc(ini(x.name))}</span>`).join('')
   const more = people.length > shown.length ? `<span class="set-sub">+${people.length - shown.length}</span>` : ''
   const fresh = people.filter((x) => x.new).map((x) => `${esc(x.name)}${x.role ? `, ${esc(x.role)},` : ''} is new to this thread.`).slice(0, 2).join(' ')
   const knowing = [b.summary ? `<li><span class="td-next-sum">${esc(b.summary)}</span></li>` : '', ...exp.map((x) => `<li><b>${x.kind === 'reply' ? '' : 'You owe: '}</b>${owe(x)}</li>`)].filter(Boolean).join('')

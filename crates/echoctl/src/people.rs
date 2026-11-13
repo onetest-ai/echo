@@ -291,7 +291,7 @@ fn fold(s: &str) -> String {
 }
 
 /// A name for matching: displayed, lower case, accents folded.
-fn norm(name: &str) -> String {
+pub(crate) fn norm(name: &str) -> String {
     fold(&display(name).to_lowercase())
 }
 
