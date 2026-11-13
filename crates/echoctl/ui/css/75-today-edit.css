@@ -36,15 +36,20 @@
 .tw-row:hover, .tw-row.sel { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .tw-tag { font-size: 10px; color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
 .tw-on { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-/* One height whatever it previews: pointing at another row never moves the list under the pointer. */
-.tw-pick { flex: none; height: min(270px, 34vh); box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; align-items: flex-start; }
-.tw-pick .tw-pv { flex: 0 1 auto; min-height: 0; }
-.tw-pick-h { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+/* One height whatever it previews (its frame is one size): pointing at another row never moves the list under the pointer. */
+.tw-pick { flex: none; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; align-items: flex-start; }
+.tw-pick-h { display: flex; gap: 8px; align-items: baseline; font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; }
+.tw-pick-h b { overflow: hidden; text-overflow: ellipsis; }
 .tw-pick-h .mono { font-size: 11px; color: var(--text-3); }
-.tw-pv { max-width: 100%; max-height: 190px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: grab; }
-.tw-pv-in { transform: scale(0.5); transform-origin: 0 0; pointer-events: none; }
-.tw-pv-none { padding: 14px; font-size: 12px; }
-.tw-size { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Today's grid in small, one size for every widget; the widget in the place it takes. */
+.tw-pv { position: relative; flex: none; overflow: hidden; border-radius: 8px; background: var(--bg); cursor: grab; }
+.tw-cells { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 4px; }
+.tw-cells i { border: 1px dashed var(--line-strong); border-radius: 5px; }
+.tw-slot { position: absolute; left: 0; top: 0; overflow: hidden; border: 1px solid var(--accent); border-radius: 5px; background: var(--surface); box-shadow: var(--shadow); }
+.tw-pv-in { transform-origin: 0 0; pointer-events: none; overflow: hidden; }
+.tw-pv-none { padding: 24px; display: flex; flex-direction: column; gap: 8px; font-size: 26px; color: var(--text-2); }
+.tw-pv-none b { font-size: 32px; color: var(--text); }
+.tw-size { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .tw-dots { display: flex; gap: 4px; }
 .tw-dot { border: 1px solid var(--line); background: transparent; color: var(--text-2); border-radius: 6px; font: 11px var(--mono); padding: 2px 8px; cursor: pointer; }
 .tw-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }

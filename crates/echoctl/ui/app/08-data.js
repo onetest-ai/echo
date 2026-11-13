@@ -74,7 +74,8 @@ async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
 }
 async function loadToday() {
-  try { S.today = await get('api/today') } catch { /* app restarting */ }
+  // Editing Today: every widget's data too (Add a widget previews each one).
+  try { S.today = await get(S.tdEdit ? 'api/today?all=1' : 'api/today') } catch { /* app restarting */ }
   todayWaitForPlugins()
 }
 /** A plugin's widget not answered yet (`pending`) holds its place (#410), and My work's plugin rows may wait for an

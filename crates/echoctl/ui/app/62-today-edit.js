@@ -131,6 +131,8 @@ async function todayEditOpen() {
   // At a narrow width the panel would cover the widgets' controls: it waits for "Add a widget" in the head (#395).
   if (!Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) Layout.show('add-widget', known)
   layoutChanged()
+  // Every widget's data, for the previews (api/today?all=1 while editing).
+  loadToday().then(render)
 }
 
 /** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
@@ -164,13 +166,21 @@ function addWidgetPanel() {
   if (w) {
     const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === w.id)
     const size = placed ? placed.size : twPickSize(w)
-    const px = { S: 170, M: 280, L: 380 }[size] || 280
+    // One frame for every widget: Today's grid in small (3 columns, 2 rows), the widget drawn in the place its size
+    // and height take — how big its window on Today will be.
+    const COLW = 320, ROWH = 280, GAP = 16, BOX = 268
+    const scale = BOX / (3 * COLW + 2 * GAP), span = TW_SIZES[size] || 2
+    const tall = placed ? placed.height === 2 : false
+    const iw = span * COLW + (span - 1) * GAP, ih = (tall ? 2 : 1) * ROWH + (tall ? GAP : 0)
     const html = (S.tdParts || {})[w.id]
-    const pv = html ? `<div class="tw-pv-in" inert style="width:${px * 2}px">${html}</div>` : `<div class="set-sub tw-pv-none">${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</div>`
+    const inner = html || `<div class="tw-pv-none"><b>${esc(w.label)}</b><span>${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</span></div>`
+    const cells = '<i></i>'.repeat(6)
+    const pv = `<div class="tw-cells" aria-hidden="true">${cells}</div><div class="tw-slot" style="width:${(iw * scale).toFixed(1)}px;height:${(ih * scale).toFixed(1)}px"><div class="tw-pv-in" inert style="width:${iw}px;height:${ih}px;transform:scale(${scale.toFixed(4)})">${inner}</div></div>`
+    const boxH = Math.round((2 * ROWH + GAP) * scale)
     // On Today, a size is its size there (a click changes it); else the size its row's Add and a drag put it in at.
     const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" data-tw-id="${esc(w.id)}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${z}">${z}</button>`).join('')
     const note = `${size} · ${TW_SIZES[size]} column${TW_SIZES[size] === 1 ? '' : 's'}${w.height === 'fill' ? ' · fills its column' : ''}`
-    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
+    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${BOX}px;height:${boxH}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)} on Today">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
   return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
