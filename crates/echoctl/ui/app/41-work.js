@@ -115,7 +115,8 @@ function avatar(name, owed) {
   if (!name) return '<span class="bd-av none" title="Nobody named">?</span>'
   const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
   const hue = ProjectArt.hash(name) % 360
-  return `<span class="bd-av${owed ? ' owed' : ''}" style="--h:${hue}" title="${esc(name)}${owed ? ' (the client owes it)' : ''}">${esc(ini)}</span>`
+  const ph = photoFace(name)
+  return `<span class="bd-av${owed ? ' owed' : ''}${ph.cls}" style="--h:${hue};${ph.style}" title="${esc(name)}${owed ? ' (the client owes it)' : ''}">${esc(ini)}</span>`
 }
 /** The board, as GitHub Projects lays one out: columns of a fixed width (the board scrolls sideways,
  *  cards are never squeezed), each a project's own Status option in a state category; cards with

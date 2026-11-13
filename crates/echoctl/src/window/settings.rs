@@ -14,7 +14,6 @@ pub(super) fn settings_snapshot() -> Value {
     let health: Vec<Value> = crate::permissions::report()
         .map(|r| r.checks.iter().map(|k| json!({ "id": k.id, "name": k.name, "status": format!("{:?}", k.status).to_lowercase(), "required": k.required, "why": k.why, "how": k.how, "url": k.settings_url })).collect())
         .unwrap_or_default();
-    #[allow(unused_mut)]
     let mut v = json!({
         "config_error": cfg.as_ref().err().map(|e| format!("{e:#}")),
         "home": paths::home(),
@@ -64,6 +63,8 @@ pub(super) fn settings_snapshot() -> Value {
         "models": crate::models::list_value().ok(),
         "downloading": crate::models::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
+    // Colleagues' photos: [the switch, the sign-in may read them].
+    v["photos"] = json!([c.is_some_and(|c| c.people_photos == Some(true)), crate::graph::account().is_some() && crate::photos::allowed()]);
     #[cfg(target_os = "macos")]
     {
         v["frames_permitted"] = json!(crate::frames::permitted());
@@ -191,6 +192,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "follow_app_mute" => cfg.follow_app_mute = Some(b()?),
         "capture_ui" => cfg.capture_ui = Some(b()?),
         "capture_chat" => cfg.capture_chat = Some(b()?),
+        "people_photos" => cfg.people_photos = Some(b()?),
         "echo_cancel" => cfg.echo_cancel = Some(b()?),
         "languages" => {
             let langs: Vec<String> = value.as_array().ok_or_else(|| anyhow::anyhow!("languages is a list"))?.iter()

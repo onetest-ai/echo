@@ -353,6 +353,11 @@ const SETTINGS_BODY = {
     return `<h2>Calendar &amp; chat</h2><p class="set-lead">Read-only, through Echo's own Microsoft 365 sign-in.</p>` + setCard('Microsoft 365', [
       setRow('Account', st.calendar ? `Signed in as ${esc(st.calendar)}` : 'Not connected: the calendar shows only what your tray knows about today.', st.calendar ? actBtn('calendar_sync', 'Sync now') + actBtn('calendar_logout', 'Sign out') : actBtn('calendar_login', 'Sign in…', '', true), '', 'Account'),
       setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat'), '', 'Meeting chat'),
+      // Colleagues' photos: a sign-in of their own (the organisation may refuse it), then a switch.
+      setRow("Colleagues' photos", !st.calendar ? 'In place of initials, once Microsoft 365 is connected.'
+        : (st.photos || [])[1] ? 'In place of initials: colleagues from your own domain, kept on this computer.'
+        : "In place of initials. Echo asks Microsoft 365 for one more permission, to read your colleagues' photos — your organisation may refuse it.",
+        !st.calendar ? '' : (st.photos || [])[1] ? sw('people_photos', (st.photos || [])[0], "Colleagues' photos") : actBtn('photos_login', 'Allow…'), '', "Colleagues' photos"),
       setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…'), '', 'App registration'),
       setRow('OneDrive on this computer', st.onedrive === 'none' ? 'Off: Echo treats no folder here as OneDrive.'
         : st.onedrive_now ? `<code>${esc(st.onedrive_now)}</code>${st.onedrive ? '' : ' (found by Echo)'}. Claude in Echo doesn't make a folder there that OneDrive keeps online but doesn't sync to this computer.`

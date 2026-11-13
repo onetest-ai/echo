@@ -72,6 +72,13 @@
     "person.maybe_same",
     "person.side"
    ]
+  },
+  {
+   "id": "F-PPL-08",
+   "feature": "Colleagues' photos in place of initials (call rows, the people map with the stance as a ring, a work item's people, Today's meeting faces, people menus): only with the switch on and a sign-in that may read photos (else nothing is asked), only people in the user's own mail domain found in the people directory (others keep initials); one without a photo keeps initials, asked again after a week; kept on this computer, 96 px",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }

@@ -119,6 +119,10 @@ pub struct Config {
     /// sign-in). Default on.
     #[serde(default)]
     pub capture_chat: Option<bool>,
+    /// Show colleagues' photos (from Microsoft 365, their own sign-in: `graph::login_photos`) in place of initials.
+    /// Default off.
+    #[serde(default)]
+    pub people_photos: Option<bool>,
     /// Microsoft 365 app registration (public client) the calendar sign-in uses; default
     /// CodeMie's. An organisation may register its own public client with redirect http://localhost
     /// and delegated Calendars.Read, and put its id here.

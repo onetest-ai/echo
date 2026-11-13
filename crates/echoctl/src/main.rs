@@ -48,6 +48,7 @@ mod paths;
 mod plugins;
 mod projects;
 mod people;
+mod photos;
 mod prep;
 mod projectsync;
 mod tasks;

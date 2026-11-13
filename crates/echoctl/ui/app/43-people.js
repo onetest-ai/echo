@@ -16,7 +16,7 @@ function placeOf(x) {
   if (!ps.length) return x.places && x.places[0] ? x.places[0] : null
   return ps.slice().sort((a, b) => (b.influence || 0) - (a.influence || 0))[0]
 }
-const ppAv = (name, stance, org) => `<span class="pp-av${org ? ' org' : ''} ${esc(stance || 'none')}" aria-hidden="true">${esc(initials(name))}</span>`
+const ppAv = (name, stance, org) => { const ph = org ? photoFace('') : photoFace(name); return `<span class="pp-av${org ? ' org' : ''} ${esc(stance || 'none')}${ph.cls}" style="${ph.style}" aria-hidden="true">${esc(initials(name))}</span>` }
 const sideLabel = (x) => x.side === 'yours' ? 'your company' : x.org ? x.org.name : x.domain || 'outside'
 function peopleView() {
   const d = peopleData()

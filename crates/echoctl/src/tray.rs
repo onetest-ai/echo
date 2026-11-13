@@ -376,6 +376,7 @@ enum Action {
     /// Open the Echo window (at a call, by folder name).
     OpenWindow(Option<String>),
     CalendarLogin,
+    PhotosLogin,
     CalendarLogout,
     CalendarSync,
     CalendarClientId,

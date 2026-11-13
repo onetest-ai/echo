@@ -21,6 +21,7 @@ cases:
   - tests/cases/settings/TC-011_transcription-keep-audio-files-on.md
   - tests/cases/settings/TC-012_transcription-echo-cancellation-off.md
   - tests/cases/settings/TC-019_calendar-and-chat-not-connected.md
+  - tests/cases/settings/TC-031_colleagues-photos-row-before-a-sign-in.md
   - tests/cases/settings/TC-020_sends-to-you-needs-sign-in.md
   - tests/cases/plugins/TC-001_plugins-none-installed-opens-on-discover.md
   - tests/cases/plugins/TC-009_marketplaces-tab-shows-the-built-in-one.md
@@ -105,6 +106,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 33 | `plugins/TC-015_update-that-asks-for-more-shows-the-new-lines-and-waits-for-a-yes.md` | — | — |
 | 34 | `plugins/TC-016_plugin-hears-only-the-events-its-sheet-named.md` | — | — |
 | 35 | `plugins/TC-017_plugin-claude-runs-and-session-skills-only-as-its-sheet-said.md` | — | — |
+| 36 | `settings/TC-031_colleagues-photos-row-before-a-sign-in.md` | — | — |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

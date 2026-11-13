@@ -33,6 +33,8 @@ pub const DEFAULT_CLIENT_ID: &str = "3d7688c6-f449-4d04-8b0d-57d94818e922";
 pub const DEFAULT_TENANT: &str = "common";
 /// Read-only: the calendar, and the chats the user is in (the meeting chat during a call).
 const SCOPES: &str = "openid profile offline_access User.Read Calendars.Read Chat.Read People.Read";
+/// People's photos: asked in a sign-in of its own, so a tenant that refuses it never blocks the main one.
+const PHOTO_SCOPE: &str = "User.ReadBasic.All";
 const GRAPH: &str = "https://graph.microsoft.com/v1.0";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -249,6 +251,15 @@ fn handle_redirect(mut stream: TcpStream, state: &str) -> Result<Option<String>>
 
 /// `echoctl calendar login`: browser sign-in; returns the account name.
 pub fn login() -> Result<String> {
+    login_with(SCOPES)
+}
+
+/// The sign-in again, asking also to read colleagues' photos (`User.ReadBasic.All`).
+pub fn login_photos() -> Result<String> {
+    login_with(&format!("{SCOPES} {PHOTO_SCOPE}"))
+}
+
+fn login_with(scopes: &str) -> Result<String> {
     let (client_id, tenant) = app_registration();
     let verifier = b64url(&random(48)?);
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
@@ -266,7 +277,7 @@ pub fn login() -> Result<String> {
             ("response_type", "code"),
             ("redirect_uri", &redirect),
             ("response_mode", "query"),
-            ("scope", SCOPES),
+            ("scope", scopes),
             ("state", &state),
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
@@ -314,7 +325,7 @@ pub fn login() -> Result<String> {
             ("code", &code),
             ("redirect_uri", &redirect),
             ("code_verifier", &verifier),
-            ("scope", SCOPES),
+            ("scope", scopes),
         ]),
     )?;
     let access = v["access_token"].as_str().ok_or_else(|| anyhow!("no access token in the reply"))?.to_string();
@@ -359,6 +370,51 @@ fn access_token() -> Result<String> {
 }
 
 /// Events between `from` and `to` (Graph shape, times in UTC), following pagination.
+/// Whether the sign-in may read colleagues' photos.
+pub fn photos_allowed() -> bool {
+    access_token().ok().and_then(|t| scopes_of(&t)).is_some_and(|s| s.split(' ').any(|x| x == PHOTO_SCOPE || x == "User.Read.All"))
+}
+
+/// The `scp` claim of an access token (its payload, not verified: only to know what to ask).
+fn scopes_of(token: &str) -> Option<String> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    serde_json::from_slice::<Value>(&bytes).ok()?["scp"].as_str().map(str::to_string)
+}
+
+/// A colleague's photo, 48x48 JPEG, by their address, into `out`: Some(true) written, Some(false) they have none or
+/// aren't in the directory (404), None not allowed (403: no photo permission).
+pub fn photo(email: &str, out: &std::path::Path) -> Result<Option<bool>> {
+    let token = access_token()?;
+    let url = format!("{GRAPH}/users/{}/photos/48x48/$value", urlencode(email.trim()));
+    let mut child = Command::new("curl").no_window()
+        .args(["-sS", "-K", "-", "-o"])
+        .arg(out)
+        .args(["-w", "%{http_code}"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("running curl")?;
+    child.stdin.take().unwrap().write_all(format!("url = {}\nheader = {}\n", quote(&url), quote(&format!("Authorization: Bearer {token}"))).as_bytes())?;
+    let o = child.wait_with_output()?;
+    if !o.status.success() {
+        bail!("network error: {}", String::from_utf8_lossy(&o.stderr).trim());
+    }
+    match String::from_utf8_lossy(&o.stdout).trim() {
+        "200" => Ok(Some(true)),
+        code => {
+            let _ = std::fs::remove_file(out);
+            match code {
+                "404" => Ok(Some(false)),
+                "403" | "401" => Ok(None),
+                c => bail!("Graph answered {c} for a photo"),
+            }
+        }
+    }
+}
+
 /// What the user's directory says about a person (the People API, `People.Read`: works for
 /// colleagues; someone outside the organisation comes back with a name only, or not at all). Found
 /// by their address among the person's addresses; `None` when nobody matches.

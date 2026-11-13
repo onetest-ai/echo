@@ -353,6 +353,15 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     }
     match path.as_str() {
         "/api/state" => json_reply(state()),
+        // Colleagues' photos (`photos`): which of these names have one, then each photo by its address.
+        "/api/photos" => {
+            let names: Vec<String> = query_param(req.uri().query().unwrap_or(""), "n").and_then(|n| serde_json::from_str(&n).ok()).unwrap_or_default();
+            json_reply(Value::Object(crate::photos::of_names(&names)))
+        }
+        "/api/photo" => match query_param(req.uri().query().unwrap_or(""), "e").and_then(|e| crate::photos::bytes(&e)) {
+            Some(b) => reply(200, "image/jpeg", b),
+            None => reply(404, "text/plain", b"no photo".to_vec()),
+        },
         // Where an echo:// link goes (the page routes it: `window.echo.openLink`).
         "/api/link" => {
             let q = req.uri().query().unwrap_or("");
