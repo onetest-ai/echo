@@ -37,7 +37,7 @@ data: small
 | 3 | `make_audio.py build very-short $ECHOCTL_HOME/calls/<day>_120000-very-short-stt`; `echoctl transcribe <that folder>` | Exit 0, "done in …s"; the audio is deleted |
 | 4 | `make_audio.py score <that folder>`; `head -6 <that folder>/transcript.md` | `pass` true, `wer` ≤ 0.15, `transcribed_in_silence` []; the header reads "**Model:** large-v3-turbo-q5_0 on <server name>" |
 | 5 | The server's owner runs `echoctl server share off`; wait until `curl -s -o /dev/null -w '%{http_code}' <URL>/` gets no connection | (`000`) |
-| 6 | Build `very-short` into `<day>_123000-very-short-fallback`; `echoctl transcribe <that folder>` | Its output has "transcription server: could not reach <URL>: … Connection refused" and "model: large-v3-turbo-q5_0 (server not reachable)"; exit 0 |
+| 6 | Build `very-short` into `<day>_123000-very-short-fallback`; `echoctl transcribe <that folder>` | Its output has "transcription server: could not reach <URL>: …" ending with why: "Connection refused" (the host answers, nothing listens) or "timeout: connect" (the host doesn't answer, as a 100.64.x address may not), and "model: large-v3-turbo-q5_0 (server not reachable)"; exit 0 |
 | 7 | `make_audio.py score <that folder>`; `head -6 <that folder>/transcript.md` | `pass` true, `wer` ≤ 0.15; the header reads "**Model:** large-v3-turbo-q5_0 (server not reachable)"; no `transcribe.error` |
 
 ## Expected Final State

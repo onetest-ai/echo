@@ -40,7 +40,7 @@
    "title": "Initech planning",
    "what": "Ukrainian, Russian and English in one call: a call has one language, so this one is for a language pinned for a call (each line then in it).",
    "turns": [
-    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 1.0, "text": "Привіт, Олено. Давай швидко пройдемося по плану на наступний тиждень."},
+    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 2.5, "text": "Привіт, Олено. Давай швидко пройдемося по плану на наступний тиждень."},
     {"who": "olena", "voice": "olena_ru", "lang": "ru", "gap": 0.8, "text": "Привет. У меня два вопроса: бюджет на обучение и сроки по пилоту."},
     {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 0.7, "text": "Бюджет вже погоджений. Пілот стартує в понеділок, їй-богу без затримок."},
     {"who": "olena", "voice": "olena_uk", "lang": "uk", "gap": 0.8, "text": "Чудово, тоді я підготую звіт і надішлю його до середи."},
