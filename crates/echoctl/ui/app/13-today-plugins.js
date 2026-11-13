@@ -209,7 +209,10 @@ function pluginWidgetView(id, w, size) {
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   // When its data came: plugins answer on their own schedule, so the time says how fresh it is (a day's other date
   // named); after a failed ask, since when it hasn't changed, and why.
-  const at = w.at ? new Date(w.at) : null
+  // From the plugin's own earlier read (`asOf` in its data: a timer's fetch, a cache) its data is that old, not as new as
+  // its answer; a time ahead of now is not believed.
+  const asOf = w.data && typeof w.data.asOf === 'string' ? new Date(w.data.asOf) : null
+  const at = asOf && !Number.isNaN(asOf.getTime()) && asOf.getTime() <= Date.now() + 60000 ? asOf : w.at ? new Date(w.at) : null
   const when = at && (at.toDateString() === new Date().toDateString() ? hm(at) : `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hm(at)}`)
   // An icon and the time; the words in its label and tooltip.
   const REFRESHED = '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>'

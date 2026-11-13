@@ -18,6 +18,8 @@ export function apply(ctx) {
     ],
     groups: [{ id: 'nwb', label: 'NWB-PAI · Northwind Bank' }, { id: 'ctl', label: 'CTL-GENAI · Contoso Labs' }, { id: 'later', label: 'Later this quarter' }],
     rows, note: '2 critical, 2 high', empty: 'Every position is assigned.',
+    // From an earlier read of its own (made-up): three hours ago, whenever Echo asks.
+    asOf: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
   }))
   ctx.widgets.provide('counts', () => ({ items: [
     { label: 'critical', value: 2, tone: 'bad', link: 'echo://thread/acme-rollout' },
