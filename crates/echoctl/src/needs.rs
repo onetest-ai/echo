@@ -310,27 +310,38 @@ pub fn refresh() -> Result<()> {
     let r = (|| -> Result<()> {
         let since = Utc::now() - Duration::hours(WINDOW_HOURS);
         let me = my_id().ok_or_else(|| anyhow!("your Microsoft 365 account couldn't be read"))?;
-        let mut asked = load()["asked"].as_object().cloned().unwrap_or_default();
-        let mut tagged = vec![];
-        let mut errors = vec![];
-        match teams_tagged(&me, since) {
-            Ok(v) => tagged.extend(v),
-            Err(e) => errors.push(format!("Teams: {e:#}")),
-        }
-        match mail_tagged(since) {
-            Ok(v) => tagged.extend(v),
-            Err(e) => errors.push(format!("mail: {e:#}")),
-        }
-        let mut items = waiting_on_me(tagged, &mut asked);
-        items.extend(hot(&me, since, &mut asked));
-        if asked.len() > 200 {
-            let keep: BTreeMap<String, Value> = asked.into_iter().rev().take(200).collect();
-            asked = keep.into_iter().collect();
-        }
-        keep_read(items, asked, errors)
+        read_and_keep(|asked| read_graph(&me, since, asked))
     })();
     RUNNING.store(false, Ordering::SeqCst);
     r
+}
+
+/// A read: what was asked of the model so far in, `read` (slow: Teams, mail, the model) out, then only what it found
+/// kept (`keep_read`, under the lock) — never a copy of the file from before the read.
+fn read_and_keep(read: impl FnOnce(&mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>)) -> Result<()> {
+    let mut asked = load()["asked"].as_object().cloned().unwrap_or_default();
+    let (items, errors) = read(&mut asked);
+    if asked.len() > 200 {
+        let keep: BTreeMap<String, Value> = asked.into_iter().rev().take(200).collect();
+        asked = keep.into_iter().collect();
+    }
+    keep_read(items, asked, errors)
+}
+
+fn read_graph(me: &str, since: DateTime<Utc>, asked: &mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>) {
+    let mut tagged = vec![];
+    let mut errors = vec![];
+    match teams_tagged(me, since) {
+        Ok(v) => tagged.extend(v),
+        Err(e) => errors.push(format!("Teams: {e:#}")),
+    }
+    match mail_tagged(since) {
+        Ok(v) => tagged.extend(v),
+        Err(e) => errors.push(format!("mail: {e:#}")),
+    }
+    let mut items = waiting_on_me(tagged, asked);
+    items.extend(hot(me, since, asked));
+    (items, errors)
 }
 
 /// What Today shows: the open items, newest first — hot first — leaving out those decided (I'll do it, Won't do).
@@ -474,10 +485,12 @@ mod tests {
         let now = Utc::now().to_rfc3339();
         let item = json!({"id": "mail:c1", "kind": "tagged", "at": now, "line": "Off-site plan", "from": "Dana Kowal", "where": "Mail to you"});
         save(&json!({"items": [item.clone()]})).unwrap();
-        // A read of Teams and mail finds the item; meanwhile the user ignores it; then the read is kept.
-        let found = vec![item];
-        decide("mail:c1", "ignore", None, None, None).unwrap();
-        keep_read(found, serde_json::Map::new(), vec![]).unwrap();
+        // A read of Teams and mail begins and finds the item; meanwhile (the read is slow) the user ignores it.
+        read_and_keep(|_| {
+            decide("mail:c1", "ignore", None, None, None).unwrap();
+            (vec![item], vec![])
+        })
+        .unwrap();
         assert_eq!(load()["decided"]["mail:c1"]["how"], "ignore", "the read keeps the decision made meanwhile");
         assert!(view()["items"].as_array().unwrap().is_empty(), "ignored: off Needs you now, though the read found it again");
         assert!(load()["decided"]["mail:c1"].get("note").is_none(), "nothing else kept: no comment, no task");
