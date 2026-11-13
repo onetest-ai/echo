@@ -135,6 +135,11 @@ mod tests {
         crate::today_layout::add_on(&page, "core:tasks.done", None, None).unwrap();
         assert_eq!(crate::today_layout::params_on(&page, "core:tasks.done")["thread"], id.as_str(), "its page sets it");
         assert!(crate::today_layout::add_on(&page, "core:tasks.glance", None, None).is_err(), "a thread's page doesn't offer Threads at a glance");
+        // On a client's page a widget's thread is one of the client's.
+        let cpage = crate::today_layout::Page::Client(acme.id.clone());
+        crate::today_layout::add_on(&cpage, "core:tasks.done", None, None).unwrap();
+        assert!(crate::today_layout::set_param_on(&cpage, "core:tasks.done", "thread", &id).unwrap_err().to_string().contains("isn't one of this client's threads"));
+        crate::today_layout::set_param_on(&cpage, "core:tasks.done", "thread", &other).unwrap();
         // On Today set to a thread, then to none again: every thread.
         crate::today_layout::add_on(&crate::today_layout::Page::Today, "core:tasks.done", None, None).unwrap();
         crate::today_layout::set_param_on(&crate::today_layout::Page::Today, "core:tasks.done", "thread", &other).unwrap();

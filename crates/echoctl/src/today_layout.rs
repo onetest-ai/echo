@@ -116,6 +116,14 @@ impl Page {
         }
     }
 
+    /// Whether a thread a widget is set to belongs here: on a client's page, one of its threads; elsewhere any.
+    fn holds_thread(&self, thread: &str) -> bool {
+        match self {
+            Page::Client(c) => crate::projects::load(thread).is_ok_and(|p| p.client.as_deref() == Some(c.as_str())),
+            _ => true,
+        }
+    }
+
     /// Where its widgets are, said in an error.
     fn on(&self) -> &'static str {
         match self {
@@ -381,6 +389,9 @@ pub fn set_param_on(page: &Page, widget: &str, key: &str, value: &str) -> Result
         });
     }
     let v = if def.kind == "bool" { serde_json::Value::Bool(matches!(value, "true" | "yes" | "on")) } else { serde_json::Value::String(value.to_string()) };
+    if def.kind == "thread" && !page.holds_thread(value) {
+        bail!("{value:?} isn't one of this client's threads");
+    }
     if !def.takes(&v) {
         bail!("{widget}'s {key} doesn't take {value:?}{}", if def.kind == "choice" { format!(" ({})", def.options.join(", ")) } else { String::new() });
     }
@@ -408,7 +419,9 @@ pub fn params_on(page: &Page, widget: &str) -> serde_json::Map<String, serde_jso
     let Ok(w) = widgets::find(widget) else { return out };
     let set = load_on(page).into_iter().find(|i| i.widget == widget).map(|i| i.params).unwrap_or_default();
     for p in &w.params {
-        if let Some(v) = set.get(&p.key).filter(|v| p.takes(v)).or(p.default.as_ref()) {
+        // On a client's page a thread of another client (set before, or by hand) doesn't count.
+        let here = |v: &&serde_json::Value| p.kind != "thread" || v.as_str().is_some_and(|t| page.holds_thread(t));
+        if let Some(v) = set.get(&p.key).filter(|v| p.takes(v)).filter(here).or(p.default.as_ref()) {
             out.insert(p.key.clone(), v.clone());
         }
     }
