@@ -486,7 +486,8 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     await expect(work.treeRow(x.move.node)).toContainText(x.tree.pinned)
     for (const id of [x.move.node, x.link, x.id]) expect(await work.indent(id)).toBeGreaterThan(await work.indent(x.story))
     await expect(work.treeRow(x.id)).toContainText(x.edit.title)
-    await expect(work.treeRow(x.id)).toContainText(x.tree.meta)
+    // Whose and when — the date with its weekday while it is within a week (Fri, Nov 20), so each part on its own.
+    for (const part of x.tree.meta.split(' · ')) await expect(work.treeRow(x.id)).toContainText(part)
     // Under Data migration, not under SSO for the Berlin pilot: the rows between the story and the next story.
     const order = await work.treeOrder()
     const story = order.indexOf(x.story)

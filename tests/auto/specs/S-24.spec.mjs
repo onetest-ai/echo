@@ -589,8 +589,10 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       ticks.slice(1).forEach((t, i) => expect(t - ticks[i]).toBe(c2.tick))
       expect(await today.blockLook(n.strip, s.maybe)).toMatchObject({ border: 'dashed' })
       // Two at once: each a part of the bar's height, one under the other.
-      const [a, b] = [await today.block(n.strip, s.choice).first().boundingBox(), await today.block(n.strip, s.folded[0]).first().boundingBox()]
-      const bar = await today.stripBar().boundingBox()
+      // (A box read again while a redraw replaces the block: the page redraws once its data comes.)
+      const boxOf = async (l) => { for (let i = 0; i < 20; i++) { const bb = await l.boundingBox(); if (bb) return bb; await seconds(0.1) } return l.boundingBox() }
+      const [a, b] = [await boxOf(today.block(n.strip, s.choice).first()), await boxOf(today.block(n.strip, s.folded[0]).first())]
+      const bar = await boxOf(today.stripBar())
       expect(a.height).toBeLessThan(bar.height)
       expect(a.y === b.y).toBe(false)
       // The calendar: the hours down, a block a meeting at its time with its subject and time, overlapping ones side by
@@ -707,12 +709,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect.poll(() => at(id.glance)).toBe(-1)
       await expect(today.catalogAdd(glance)).toBeVisible()
       await page.setViewportSize(w.sizes.wide)
-      // The strip takes M and L: S greyed; Add at M puts it on a new last row.
+      // The strip takes M and L: S greyed; L picked under its preview, then its row's Add puts it on a new last row at L.
       await today.catalogRow(strip).click()
       await expect(today.pickSize(w.size.S)).toBeDisabled()
-      await today.pickSize(w.size.M).click()
-      await today.addAt(w.size.M).click()
-      await expect.poll(() => layout().at(-1)).toEqual({ row: true, size: w.size.M, widget: id.strip })
+      await today.pickSize(w.size.L).click()
+      await today.catalogAdd(strip).click()
+      await expect.poll(() => layout().at(-1)).toEqual({ row: true, size: w.size.L, widget: id.strip })
       // Today read again after the add (the panel then says "on Today"), before typing: a refresh while the search has
       // the keyboard takes it away (reported, not this case's step).
       await expect(today.catalogOn(strip)).toBeVisible()
@@ -1045,7 +1047,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(await today.textColour(label.open, x.open.value)).toBe(warn)
       await expect(today.widgetSays(label.open, x.open.label)).toBeVisible()
       expect(await today.dotColour(label.ci)).toBe(warn)
-      await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(2) // its heading and its status' title
+      // Its status' title (its heading also carries when it was updated, so it isn't the word alone).
+      await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(1)
       await expect(today.widgetSays(label.ci, x.ci.failed)).toBeVisible()
       await expect(today.widgetSays(label.broken, x.broken)).toBeVisible()
       for (const [value, what, colour] of x.sprint) {
@@ -1164,14 +1167,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widgetSays(x.widgets.open, x.open.value)).toBeVisible()
       await expect(today.widgetSays(x.widgets.open, x.open.label)).toBeVisible()
       await expect(today.widgetImages(x.widgets.open)).toHaveAccessibleName(x.progress)
-      // Calls a day: five bars, the last one stronger; "Mon" and "Fri · 4 calls" under them, the note; a hover on each
-      // says its point.
+      // Calls a day: five bars in Echo's violet (one colour: one series), "Mon" … "Fri" under them, the note; a hover on
+      // each says its point.
       const marks = await today.chartMarks(x.widgets.trend)
       expect(marks).toHaveLength(t.bars)
       expect(marks.map((m) => m.says)).toContain(t.hover)
-      const rest = marks.slice(0, -1)
-      for (const m of rest) expect(m.fill === marks.at(-1).fill && m.opacity === marks.at(-1).opacity).toBe(false)
-      for (const m of rest.slice(1)) expect([m.fill, m.opacity]).toEqual([rest[0].fill, rest[0].opacity])
+      for (const m of marks.slice(1)) expect([m.fill, m.opacity]).toEqual([marks[0].fill, marks[0].opacity])
       for (const text of [t.first, t.last, t.note]) await expect(today.widgetSays(x.widgets.trend, text)).toBeVisible()
       // CI failed: a red dot, its text, Open and Re-run.
       expect(await today.dotColour(x.widgets.ci)).toBe(await today.themeColour(w.plugin.badColour))
@@ -1303,7 +1304,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await today.openToday()
       await drawn()
       // In Echo's frame, its label on top: three boxes, the <i> shown as text, nothing italic; its box the size and theme.
-      await expect(today.widgetHeading(board, x.heading, 2)).toBeVisible()
+      // Its heading: its name, then when its data came (the update stamp).
+      await expect(today.widget(board).getByRole('heading', { level: 2, name: new RegExp(`^${x.heading}\\b`) })).toBeVisible()
       expect(await today.pageWidget(board)).toEqual({ size: w.size.M, theme: x.theme, boxes: x.boxes, italic: false })
       // At L: drawn again at L.
       const big = data.cli('today', 'size', p.ids.board, x.large)
@@ -1368,7 +1370,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     const t = data.text.needs
     const today = new TodayPage(page, data)
     await today.open()
-    expect(await today.itemButtons(n.chat, n.chatLine)).toEqual(['Reply in Teams', t.claude])
+    // Reply, Claude, and Ignore (takes it off Needs you now for good).
+    expect(await today.itemButtons(n.chat, n.chatLine)).toEqual(['Reply in Teams', t.claude, 'Ignore — take it off Needs you now'])
     const before = data.read(data.home, 'projects', n.chatThread.id, 'ledger/events.jsonl')
     await today.claude(n.chat, n.chatLine)
     await expect(today.claudeDialog).toContainText(`${n.chatThread.name} · ${n.chat} — ${n.chatLine}`)
