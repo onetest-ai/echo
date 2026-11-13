@@ -276,10 +276,16 @@ export class TodayWidgetsPage extends TodayPage {
 
   /** How a block is drawn: dashed or solid, and the colour of its border. */
   async blockLook(widget, subject) {
-    return this.block(widget, subject).first().evaluate((el) => {
-      const s = getComputedStyle(el)
-      return { border: s.borderTopStyle === 'dashed' ? 'dashed' : 'solid', colour: s.borderTopColor }
-    })
+    // Read from a block in the page: one replaced by a redraw at that moment has no style (an empty colour) — read
+    // again, a few times, until the page holds it.
+    for (let i = 0; ; i++) {
+      const look = await this.block(widget, subject).first().evaluate((el) => {
+        const s = getComputedStyle(el)
+        return { border: s.borderTopStyle === 'dashed' ? 'dashed' : 'solid', colour: s.borderTopColor, on: el.isConnected }
+      })
+      if ((look.on && look.colour) || i >= 20) return { border: look.border, colour: look.colour }
+      await new Promise((r) => setTimeout(r, 100))
+    }
   }
 
   /** The strip's hour ticks and the calendar's hours, as numbers, in order. */
@@ -405,17 +411,13 @@ export class TodayWidgetsPage extends TodayPage {
   }
 
   pickSize(size) {
-    return this.pickSizes.getByRole('button', { name: size, exact: true })
+    // Each size names its widget ("Threads at a glance: size S"): the one ending in the size.
+    return this.pickSizes.getByRole('button', { name: new RegExp(`: size ${size}$`) })
   }
 
-  /** The picked widget's Add at <size> (or "On Today — make it …"). */
-  addAt(size) {
-    return this.rightPanel.getByRole('button', { name: `Add at ${size}`, exact: true })
-  }
-
-  /** The preview of the picked widget at a size: what can be dragged onto Today. */
+  /** The preview of the picked widget at a size: what can be dragged onto Today (its name says where: on Today). */
   preview(label, size) {
-    return this.rightPanel.getByLabel(`Preview of ${label} at ${size}`, { exact: true })
+    return this.rightPanel.getByLabel(`Preview of ${label} at ${size} on Today`, { exact: true })
   }
 
   /** The element that has the keyboard: its accessible name (aria-label, else its text) and its role's tag. */
@@ -531,14 +533,16 @@ export class TodayWidgetsPage extends TodayPage {
   /** A plugin's status widget's dot: its colour (the dot is drawn, not read: it has no text of its own). */
   async dotColour(name) {
     return this.onWidget(name, (el) => {
-      const dot = [...el.querySelectorAll('*')].find((x) => !x.children.length && !x.textContent.trim() && x.getBoundingClientRect().width > 0 && x.getBoundingClientRect().width <= 16)
+      // An HTML dot, not a part of an icon (the header's refresh icon is drawn in SVG).
+      const dot = [...el.querySelectorAll('*')].find((x) => x instanceof HTMLElement && !x.children.length && !x.textContent.trim() && x.getBoundingClientRect().width > 0 && x.getBoundingClientRect().width <= 16)
       return dot ? getComputedStyle(dot).backgroundColor : null
     })
   }
 
   /** A plugin's chart (its image, named by its points); its marks as drawn: what a hover on each says, and its colour. */
   chart(name) {
-    return this.widget(name).getByRole('img')
+    // The chart's own image (svg), not the header's update stamp.
+    return this.widget(name).locator('svg[role="img"]')
   }
 
   async chartMarks(name) {
@@ -551,9 +555,9 @@ export class TodayWidgetsPage extends TodayPage {
     return this.widget(name).getByRole('link', { name: text, exact: true })
   }
 
-  /** A widget's images (a plugin's text shown as text draws none). */
+  /** A widget's images (a progress bar, an `<img>`), not its header's update stamp. */
   widgetImages(name) {
-    return this.widget(name).getByRole('img')
+    return this.widget(name).locator('img, [role="img"]:not(.pw-upd)')
   }
 
   // ── What a widget holds, for checks that read it (texts, headings, lists, titles) ──

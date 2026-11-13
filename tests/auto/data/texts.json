@@ -1797,7 +1797,18 @@
         "id": "core:calendar.agenda",
         "kind": "day",
         "label": "Your day · agenda",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1815,7 +1826,18 @@
         "id": "core:calendar.calendar",
         "kind": "day",
         "label": "Your day · calendar",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1832,7 +1854,18 @@
         "id": "core:calendar.strip",
         "kind": "day",
         "label": "Your day · strip",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "M",
@@ -1868,7 +1901,18 @@
         "id": "core:calendar.next",
         "kind": "next",
         "label": "Next meeting",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1897,6 +1941,11 @@
               "month"
             ],
             "type": "choice"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
           }
         ],
         "part": "Tasks",
@@ -1925,6 +1974,16 @@
               "month"
             ],
             "type": "choice"
+          },
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
           }
         ],
         "part": "Tasks",
@@ -1943,7 +2002,18 @@
         "id": "core:calls.week",
         "kind": "calls",
         "label": "Recorded this week",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calls",
         "sizes": [
           "S",
@@ -1961,7 +2031,18 @@
         "id": "core:tasks.mine",
         "kind": "work",
         "label": "My work · this week",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Tasks",
         "sizes": [
           "S",
@@ -2356,7 +2437,7 @@
       "trend": {
         "bars": 5,
         "first": "Mon",
-        "last": "Fri · 4 calls",
+        "last": "Fri",
         "note": "Busiest on Tuesday.",
         "hover": "Tue: 7 calls",
         "kind": "chart",
@@ -2532,7 +2613,7 @@
           "core:tasks.mine",
           "period",
           "month",
-          "Error: core:tasks.mine has no setting \"period\""
+          "Error: core:tasks.mine has no setting \"period\" (it has thread, client)"
         ]
       ],
       "gear": "{label}: settings",
