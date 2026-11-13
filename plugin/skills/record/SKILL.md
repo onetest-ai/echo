@@ -1,6 +1,6 @@
 ---
 name: record
-description: "Use when the user says \"record this call\", \"record in Ukrainian\", \"record a memo\", \"let me dictate a note\", \"stop recording\" or \"don't record this\". Starts or stops Echo's recording of a Teams call, or a memo — the user alone, no call — optionally pinning its language and title."
+description: "Use when the user says \"record this call\", \"record in Ukrainian\", \"record a memo\", \"let me dictate a note\", \"stop recording\" or \"don't record this\". Starts or stops Echo's recording of a Teams or Google Meet call, or a memo — the user alone, no call — optionally pinning its language and title."
 argument-hint: "[stop] | [memo] | [language: en|uk|ru|es…] [title]"
 ---
 
@@ -20,7 +20,7 @@ transcribes the call and the notes follow by themselves.
    language. A call has one language; "in English and Ukrainian" → ask which. The app attaches the
    calendar meeting by itself.
 3. One line from the output: a call in progress → "● Recording"; no call yet → "Armed —
-   recording starts when your next Teams call begins (15 min)".
+   recording starts when your next call begins (15 min)".
 
 **Memo** ("record a memo", "let me dictate"): the user alone, no Teams call. `echoctl memo start` (`--languages
 uk` when they named one); it starts at once. `echoctl memo stop` (or `stop`) ends it. Its threads are found from what

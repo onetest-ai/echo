@@ -19,7 +19,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 ## Preconditions
 - Standard data set built right before the run (and the run before 21:00 local: the two meetings below must still be to come): `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`
 - The two invites are Microsoft 365 events that are not online meetings in Graph's terms: `isOnlineMeeting` false, no `onlineMeeting`, an empty location, the link only in `bodyPreview` (Zoom's invite text; Meet's link bare, as Google writes it). The data builder made them agenda meetings with Echo's own `echoctl agenda sync` (`other_app_invites` in `tests/fixtures/make_data.py`)
-- A meeting's block in the Day view is `[data-ev="<id>"]`; its card is `aside.detail`; Today's rows are `.td-row`
+- A meeting's block in the Day view is `[data-ev="<id>"]`; its card is `aside.detail`; Today's rows are `.ag-row` (list items)
 
 ## Test Data
 

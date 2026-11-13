@@ -166,20 +166,26 @@ const FRESH: Duration = Duration::from_millis(750);
 /// inside a request, and the watcher's loop (call detection) must not stall with it.
 const ANSWER_WITHIN: Duration = Duration::from_millis(500);
 
-/// The app's audio processes: one answer every `FRESH` at most, for all callers. A check lists the process objects
-/// (one request) and asks whether they run input or output only of the app's own, not of every process on the Mac.
+/// The app's audio processes: one answer every `FRESH` at most, for all callers and every call app. A check lists the
+/// process objects (one request) and asks whether they run input or output only of the call apps' own, not of every
+/// process on the Mac.
 pub fn app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
-    shared(&LAST, app, Instant::now(), ANSWER_WITHIN, query_app_processes)
+    let all = shared(&LAST, Instant::now(), ANSWER_WITHIN, query_app_processes)?;
+    Ok(all.into_iter().filter(|p| is_of(app, &p.bundle_id)).collect())
 }
 
-/// The last answer about an app and whether one is being asked for.
+fn is_of(app: TargetApp, bundle_id: &str) -> bool {
+    app.mac_bundle_prefixes().iter().any(|pre| bundle_id.starts_with(pre))
+}
+
+/// The last answer and whether one is being asked for.
 struct Shared<T> {
     state: std::sync::Mutex<Asked<T>>,
     answered: std::sync::Condvar,
 }
 
 struct Asked<T> {
-    last: Option<(Instant, TargetApp, T)>,
+    last: Option<(Instant, T)>,
     /// The query running, since when.
     asking: Option<Instant>,
     error: Option<String>,
@@ -191,33 +197,32 @@ impl<T> Shared<T> {
     }
 }
 
-/// `slot`'s answer for `app` while it is younger than `FRESH`, else a new one from `query`, kept for the next caller.
+/// `slot`'s answer while it is younger than `FRESH`, else a new one from `query`, kept for the next caller.
 /// `query` runs on a thread of its own, one at a time: callers wait for it until `within` after its start, then take
-/// the last answer about `app` (none yet: an error); a query that hangs past that delays no caller, nor is asked
-/// again until it returns.
+/// the last answer (none yet: an error); a query that hangs past that delays no caller, nor is asked again until it
+/// returns.
 fn shared<T: Clone + Send + 'static>(
     slot: &'static Shared<T>,
-    app: TargetApp,
     now: Instant,
     within: Duration,
-    query: impl FnOnce(TargetApp) -> Result<T> + Send + 'static,
+    query: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     let lock = || slot.state.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = lock();
-    if let Some((at, a, v)) = s.last.as_ref() {
-        if *a == app && now.saturating_duration_since(*at) < FRESH {
+    if let Some((at, v)) = s.last.as_ref() {
+        if now.saturating_duration_since(*at) < FRESH {
             return Ok(v.clone());
         }
     }
     if s.asking.is_none() {
         s.asking = Some(Instant::now());
         let asked = std::thread::Builder::new().name("audio-processes".into()).spawn(move || {
-            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| query(app)))
+            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(query))
                 .unwrap_or_else(|_| Err(anyhow!("the process query panicked")));
             let mut s = lock();
             s.asking = None;
             match answer {
-                Ok(v) => (s.last, s.error) = (Some((now, app, v)), None),
+                Ok(v) => (s.last, s.error) = (Some((now, v)), None),
                 Err(e) => s.error = Some(format!("{e:#}")),
             }
             slot.answered.notify_all();
@@ -231,13 +236,13 @@ fn shared<T: Clone + Send + 'static>(
     let (s, _) = slot.answered.wait_timeout_while(s, left, |s| s.asking.is_some()).unwrap_or_else(|e| e.into_inner());
     match (&s.error, &s.last) {
         (Some(e), _) if s.asking.is_none() => Err(anyhow!("{e}")),
-        (_, Some((_, a, v))) if *a == app => Ok(v.clone()),
+        (_, Some((_, v))) => Ok(v.clone()),
         _ => Err(anyhow!("Core Audio didn't answer in time")),
     }
 }
 
-fn query_app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
-    let prefixes = app.mac_bundle_prefixes();
+/// The audio processes of every call app.
+fn query_app_processes() -> Result<Vec<AudioProcess>> {
     let ids: Vec<AudioObjectID> = unsafe { get_vec(kAudioObjectSystemObject as AudioObjectID, kAudioHardwarePropertyProcessObjectList)? };
     let mut known = IDENTITY.lock().unwrap_or_else(|e| e.into_inner());
     let known = known.get_or_insert_with(Default::default);
@@ -255,7 +260,7 @@ fn query_app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
                     k
                 }
             };
-            prefixes.iter().any(|pre| bundle_id.starts_with(pre)).then(|| AudioProcess {
+            TargetApp::ALL.iter().any(|&app| is_of(app, &bundle_id)).then(|| AudioProcess {
                 object_id: id,
                 pid,
                 bundle_id,
@@ -593,12 +598,12 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn callers_share_one_answer_about_the_app_for_a_moment() {
+    fn callers_share_one_answer_about_the_call_apps_for_a_moment() {
         static LAST: Shared<usize> = Shared::new();
         static ASKED: AtomicUsize = AtomicUsize::new(0);
-        let query = |_: TargetApp| Ok(ASKED.fetch_add(1, Ordering::SeqCst) + 1);
+        let query = || Ok(ASKED.fetch_add(1, Ordering::SeqCst) + 1);
         let t0 = Instant::now();
-        let ask = |at| shared(&LAST, TargetApp::Teams, at, Duration::from_secs(5), query);
+        let ask = |at| shared(&LAST, at, Duration::from_secs(5), query);
         assert_eq!(ask(t0).unwrap(), 1);
         // Call detection, the tap and the mic asking within the moment: coreaudiod is asked once.
         for ms in [100, 400, 700] {
@@ -612,30 +617,30 @@ mod tests {
     fn a_query_that_hangs_delays_no_caller_and_is_not_asked_again() {
         static LAST: Shared<usize> = Shared::new();
         static ASKED: AtomicUsize = AtomicUsize::new(0);
-        let count = |v: usize| move |_: TargetApp| -> Result<usize> {
+        let count = |v: usize| move || -> Result<usize> {
             ASKED.fetch_add(1, Ordering::SeqCst);
             Ok(v)
         };
         let t0 = Instant::now();
-        assert_eq!(shared(&LAST, TargetApp::Teams, t0, Duration::from_secs(5), count(1)).unwrap(), 1);
+        assert_eq!(shared(&LAST, t0, Duration::from_secs(5), count(1)).unwrap(), 1);
         let (release, hang) = mpsc::channel::<()>();
-        let hangs = move |_: TargetApp| {
+        let hangs = move || {
             ASKED.fetch_add(1, Ordering::SeqCst);
             let _ = hang.recv(); // coreaudiod stalls until released
             Ok(2)
         };
         let started = Instant::now();
         // The watcher's own query hangs: it gets the last answer once its wait is up.
-        assert_eq!(shared(&LAST, TargetApp::Teams, t0 + FRESH, Duration::from_millis(100), hangs).unwrap(), 1);
+        assert_eq!(shared(&LAST, t0 + FRESH, Duration::from_millis(100), hangs).unwrap(), 1);
         // Another caller meanwhile (the remote track's supervisor): the last answer at once, and no second query.
         let later = Instant::now();
-        assert_eq!(shared(&LAST, TargetApp::Teams, t0 + FRESH * 2, Duration::from_millis(100), count(3)).unwrap(), 1);
+        assert_eq!(shared(&LAST, t0 + FRESH * 2, Duration::from_millis(100), count(3)).unwrap(), 1);
         assert!(later.elapsed() < Duration::from_millis(50), "a query hung past its wait delays no one");
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(ASKED.load(Ordering::SeqCst), 2, "the second caller didn't ask again");
         // Once it returns, its answer is the one shared while fresh.
         release.send(()).unwrap();
-        let answered = shared(&LAST, TargetApp::Teams, t0 + FRESH + Duration::from_millis(100), Duration::from_secs(5), count(4));
+        let answered = shared(&LAST, t0 + FRESH + Duration::from_millis(100), Duration::from_secs(5), count(4));
         assert_eq!(answered.unwrap(), 2);
         assert_eq!(ASKED.load(Ordering::SeqCst), 2);
     }
@@ -644,8 +649,8 @@ mod tests {
     fn a_query_that_panics_is_an_error_and_the_next_caller_asks_again() {
         static LAST: Shared<usize> = Shared::new();
         let t0 = Instant::now();
-        assert!(shared(&LAST, TargetApp::Teams, t0, Duration::from_secs(5), |_| -> Result<usize> { panic!("in coreaudiod") }).is_err());
-        assert_eq!(shared(&LAST, TargetApp::Teams, t0, Duration::from_secs(5), |_| Ok(1)).unwrap(), 1);
+        assert!(shared(&LAST, t0, Duration::from_secs(5), || -> Result<usize> { panic!("in coreaudiod") }).is_err());
+        assert_eq!(shared(&LAST, t0, Duration::from_secs(5), || Ok(1)).unwrap(), 1);
     }
 
     #[test]
@@ -653,7 +658,7 @@ mod tests {
         static LAST: Shared<usize> = Shared::new();
         let (release, hang) = mpsc::channel::<()>();
         let started = Instant::now();
-        let r = shared(&LAST, TargetApp::Teams, Instant::now(), Duration::from_millis(100), move |_| {
+        let r = shared(&LAST, Instant::now(), Duration::from_millis(100), move || {
             let _ = hang.recv();
             Ok(1)
         });
@@ -664,7 +669,7 @@ mod tests {
     #[test]
     fn a_failed_query_is_its_callers_error() {
         static LAST: Shared<usize> = Shared::new();
-        let r = shared(&LAST, TargetApp::Teams, Instant::now(), Duration::from_secs(5), |_| Err(anyhow!("no process list")));
+        let r = shared(&LAST, Instant::now(), Duration::from_secs(5), || Err(anyhow!("no process list")));
         assert_eq!(r.unwrap_err().to_string(), "no process list");
     }
 }

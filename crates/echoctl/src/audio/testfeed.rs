@@ -3,7 +3,8 @@
 //! - `ECHOCTL_TEST_ME_WAV=<wav>` replaces the microphone source (the mic track);
 //! - `ECHOCTL_TEST_REMOTE_WAV=<wav>` replaces the call app's audio tap (the remote track);
 //! - `ECHOCTL_TEST_CALL_FILE=<path>` replaces call detection: the call app is in a call while that file exists, and
-//!   the call started at its modification time (`tests/fixtures/call.py`);
+//!   the call started at its modification time (`tests/fixtures/call.py`); a line `app=meet` in it makes the call
+//!   Chrome's (Teams' otherwise), and a line `title=<text>` is the title of Chrome's window (no line: no window);
 //! - while `<that path>.stall` exists, every test stream's health check blocks, as a device listing does while a
 //!   Bluetooth headset reconnects.
 //!
@@ -23,6 +24,7 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{Context, Result};
 
 use super::{downmix, Chunk, Health, LiveStream, Source};
+use crate::apps::TargetApp;
 
 const ME: &str = "ECHOCTL_TEST_ME_WAV";
 const REMOTE: &str = "ECHOCTL_TEST_REMOTE_WAV";
@@ -44,9 +46,33 @@ pub fn remote() -> Option<Box<dyn Source>> {
     var(REMOTE).map(|path| Box::new(FileSource::new(path)) as Box<dyn Source>)
 }
 
-/// With `ECHOCTL_TEST_CALL_FILE` set: whether the call app is in a call (the file exists). None when unset.
-pub fn in_call() -> Option<bool> {
-    var(CALL).map(|p| p.exists())
+/// With `ECHOCTL_TEST_CALL_FILE` set: whether `app` is in a call (the file exists, naming that app). None when unset.
+pub fn in_call(app: TargetApp) -> Option<bool> {
+    var(CALL).map(|p| p.exists() && call_line(&p, "app").as_deref().unwrap_or("teams") == key(app))
+}
+
+/// With `ECHOCTL_TEST_CALL_FILE` set: whether Chrome's window (the call file's `title=` line) shows a Meet call.
+pub fn meet_tab_open() -> Option<bool> {
+    var(CALL).map(|p| call_line(&p, "title").is_some_and(|t| crate::apps::is_meet_title(&t)))
+}
+
+/// With `ECHOCTL_TEST_CALL_FILE` set: whether the Meet app is open (the call file's `meet_app=1` line).
+pub fn meet_app_open() -> Option<bool> {
+    var(CALL).map(|p| call_line(&p, "meet_app").as_deref() == Some("1"))
+}
+
+fn key(app: TargetApp) -> &'static str {
+    match app {
+        TargetApp::Teams => "teams",
+        // The Meet app's sound is Chrome's, as a Meet tab's: the call file's `app=meet` for both.
+        TargetApp::Meet | TargetApp::MeetApp => "meet",
+    }
+}
+
+/// The value of the call file's `<name>=` line.
+fn call_line(path: &Path, name: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines().find_map(|l| l.strip_prefix(name)?.strip_prefix('=').map(|v| v.trim().to_string()))
 }
 
 /// When the current call started: the call file's modification time, if there is one.

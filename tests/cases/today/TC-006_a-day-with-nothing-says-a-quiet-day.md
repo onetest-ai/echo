@@ -35,7 +35,7 @@ auto: [tests/auto/specs/S-10.spec.mjs]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#today` | The greeting and today's date; then "A quiet day" with "No meetings today and nothing on you in Tasks."; no "Your day", no "My work · this week" |
-| 2 | Press `ControlOrMeta+k` | The dialog with the chip "On: Today ×"; no group TODAY and no group MY WORK; the first group is ECHO ("Record the next Teams call", "Record a memo", …) |
+| 2 | Press `ControlOrMeta+k` | The dialog with the chip "On: Today ×"; no group TODAY and no group MY WORK; the first group is ECHO ("Record the next call", "Record a memo", …) |
 | 3 | Press Escape | The dialog closes |
 
 ## Expected Final State

@@ -113,27 +113,31 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     }
   })
 
-  test('10 · A Zoom or Google Meet meeting is never armed: no Record on its card or menu, `arm` and `join` refuse it', covers('calendar/TC-026', 'F-CAL-18', 'F-CAL-08', 'F-CAL-16'), async ({ page }) => {
+  test('10 · A Zoom meeting (a Google Meet one off a Mac) is never armed: no Record on its card or menu, `arm` and `join` refuse it', covers('calendar/TC-026', 'F-CAL-18', 'F-CAL-08', 'F-CAL-16'), async ({ page }) => {
     const o = set().otherApps
     const cal = new CalendarPage(page, data)
     await cal.open(c().routes.day)
-    for (const m of [o.zoom, o.meet]) {
+    // On a Mac a Google Meet meeting is recorded in Chrome (#230): its card offers Record.
+    const mac = process.platform === 'darwin'
+    for (const m of mac ? [o.zoom] : [o.zoom, o.meet]) {
       await cal.event(m.subject).click()
       for (const b of c().recordButtons) await expect(cal.cardButton(m.subject, b)).toHaveCount(0)
       await expect(cal.cardStarting(m.subject, fill(c().notYet, { app: m.app }))).toBeVisible()
       await cal.cardButton(m.subject, c().close).click()
     }
-    await cal.openWith(o.teams.subject, c().recordWhen)
-    await cal.cardButton(o.teams.subject, c().close).click()
+    for (const m of mac ? [o.teams, o.meet] : [o.teams]) {
+      await cal.openWith(m.subject, c().recordWhen)
+      await cal.cardButton(m.subject, c().close).click()
+    }
     expect(await cal.menuOf(o.zoom.subject)).toEqual(o.menu)
     await page.keyboard.press(data.text.shell.keys.escape)
     const arm = data.cliIn(JSON.stringify({ id: o.zoom.id, subject: o.zoom.subject, join_url: o.zoom.url }), 'arm', '--meeting', '-')
     expect(arm.code).toBe(1)
     expect(arm.err.trim()).toBe(fill(c().armRefused, { subject: o.zoom.subject, app: o.zoom.app }))
     const before = opened()
-    const join = data.cliIn(JSON.stringify({ subject: o.meet.subject, join_url: o.meet.url }), 'join', '-')
+    const join = data.cliIn(JSON.stringify({ subject: o.zoom.subject, join_url: o.zoom.url }), 'join', '-')
     expect(join.code).toBe(1)
-    expect(join.err.trim()).toBe(fill(c().armRefused, { subject: o.meet.subject, app: o.meet.app }))
+    expect(join.err.trim()).toBe(fill(c().armRefused, { subject: o.zoom.subject, app: o.zoom.app }))
     expect(opened()).toBe(before)
     expect(data.status().armed).toBeNull()
     expect(data.exists(data.home, data.text.app.stateDir, data.text.app.armedFile)).toBe(false)

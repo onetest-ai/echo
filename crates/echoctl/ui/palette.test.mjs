@@ -16,7 +16,7 @@ const ITEMS = [
   { label: 'Write minutes again' },
   { label: 'Ask Claude about this call', keywords: 'question terminal' },
   { label: 'Open Transcript' },
-  { label: 'Record the next Teams call', keywords: 'start arm' },
+  { label: 'Record the next call', keywords: 'start arm' },
   { label: 'Settings: Transcription' },
   { label: 'Bruno - Acme follow-up', keywords: 'Pat Novak Ivo Brandt Today' },
   { label: 'Delete this call…', disabled: null },

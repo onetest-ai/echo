@@ -299,7 +299,7 @@
       "Claude: {task}"
     ],
     "todayEcho": [
-      "Record the next Teams call",
+      "Record the next call",
       "Record a memo",
       "Vocabulary",
       "Show or hide Inbox",
@@ -924,7 +924,7 @@
       "My work"
     ],
     "echoFirst": [
-      "Record the next Teams call",
+      "Record the next call",
       "Record a memo"
     ]
   },

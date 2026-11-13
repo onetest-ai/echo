@@ -29,6 +29,7 @@ use crate::meeting::MeetingContext;
 use crate::paths;
 use crate::recorder::Recording;
 
+mod call_app;
 mod chat;
 pub use chat::*;
 
@@ -255,7 +256,7 @@ pub enum UiState {
 }
 
 /// The watcher loop. Returns once `stop` is set, after closing any recording.
-pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState)) -> Result<()> {
+pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState)) -> Result<()> {
     // Keep the event log bounded (clients follow it from the end and survive truncation).
     if fs::metadata(file("events.jsonl")).is_ok_and(|m| m.len() > EVENTS_MAX_BYTES) {
         let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
@@ -293,6 +294,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // A reading that says "another call", waiting to be confirmed by a later one (`judge`).
     let mut candidate: Option<Candidate> = None;
     let looker = CallLook::default();
+    let meet_sign = call_app::MeetSign::default();
     // A meeting's arm waiting while the user is on another call (#483): its id, once said.
     let mut waits_other: Option<String> = None;
     let mut unread_once = false;
@@ -393,8 +395,16 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             }
         }
 
-        // 2. Call presence (mic held by the app), debounced on release.
-        let detected = audio::app_in_call(app);
+        // 2. Call presence (mic held by a call app: Teams, or Chrome on a Meet call), debounced on release. `app` is
+        // the call's app from here on.
+        let (teams, chrome) = (audio::app_in_call(TargetApp::Teams), audio::app_in_call(TargetApp::Meet));
+        // An arm for a Google Meet meeting is a sign too: the user asked to record that meeting.
+        let meet_armed = armed.as_ref().and_then(|a| a.meeting.as_ref()).is_some_and(|m| m.app() == Some(crate::apps::MeetingApp::Meet));
+        // While a call's recording is open (its grace after a hang-up too), only its app's call is that call: another app
+        // taking the mic then is a new call, found once the recording has ended.
+        let on = rec.as_ref().filter(|r| !r.memo).map(|r| r.app()).or(in_call.then_some(app));
+        let (detected, on_app) = call_app::which_call(on, teams, chrome, || meet_sign.get().or(meet_armed.then_some(TargetApp::Meet)));
+        app = on_app.unwrap_or(app);
         match detected {
             Some(true) => {
                 mic_released_at = None;
@@ -412,7 +422,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     } else if rec.as_ref().is_some_and(|r| r.memo) {
                         // One recording at a time: a memo goes on, and this call isn't recorded.
                         emit("call_during_memo", json!({ "app": app }));
-                        crate::app::notify("A Teams call started", "It isn't recorded while your memo records: stop the memo to record it.");
+                        crate::app::notify(&format!("A {} call started", app.name()), "It isn't recorded while your memo records: stop the memo to record it.");
                     } else {
                         rejoined_at = Some(Instant::now());
                         last_call_look = Instant::now() - CALL_LOOK_EVERY; // look at once
@@ -441,7 +451,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         // another time, steadily; or its window names another call right after the mic came back) — the recording
         // ends here, and this call is a new one: recorded when an arm (or a scheduled meeting) waits for it, else
         // offered as any call that starts. Looked at off this thread (`CallLook`): a busy Teams never stalls the loop.
-        if rec.as_ref().is_some_and(|r| !r.memo) && in_call {
+        if rec.as_ref().is_some_and(|r| !r.memo) && in_call && app == TargetApp::Teams {
             if last_call_look.elapsed() >= CALL_LOOK_EVERY {
                 last_call_look = Instant::now();
                 if crate::config::reads_call_window() { looker.start() }
@@ -517,13 +527,14 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         // or replaced since this tick read it doesn't start, and one written during the
         // recording (the next meeting's) is never the one removed.
         // An arm waiting for its meeting's call while the user is on another one stays until the meeting ends (#483).
+        // A meeting's arm starts only on a call of its app (a Meet meeting's in Chrome, a Teams one's in Teams).
         let startable = armed.as_ref().filter(|a| {
-            held_arm.as_deref() != Some(a.id.as_str()) && ((now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES || waiting_for(waits_other.as_deref(), a, now))
+            a.meeting.as_ref().is_none_or(|m| m.is_in(app)) && held_arm.as_deref() != Some(a.id.as_str()) && ((now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES || waiting_for(waits_other.as_deref(), a, now))
         });
         // A meeting's arm starts only on that meeting's call: while the user is still on another call (one that began
         // before this meeting could, or whose window names another), it waits — looked at again every few seconds —
         // and starts once they are on this one (#483). A call window that can't be read changes nothing.
-        let on_its_call = match startable.filter(|_| rec.is_none() && call_active && detected.is_some() && call_window_readable()).and_then(|a| a.meeting.as_ref().map(|m| (a.id.clone(), m))) {
+        let on_its_call = match startable.filter(|_| rec.is_none() && call_active && detected.is_some() && app == TargetApp::Teams && call_window_readable()).and_then(|a| a.meeting.as_ref().map(|m| (a.id.clone(), m))) {
             None => true,
             Some((id, m)) => match looker.take() {
                 Some(seen) if last_arm_look.is_some() => match meetings_call(m, &seen) {
@@ -567,7 +578,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             unread_once = false;
             last_arm_look = None;
             // No meeting given: attach the agenda meeting this call overlaps, if any.
-            let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
+            let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now(), app));
             // The AI profile is pinned now: changing the default later never changes this call.
             let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
             match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
@@ -577,13 +588,15 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     if let Some(id) = meeting.as_ref().and_then(|m| m.id.as_deref()) {
                         let _ = crate::schedule::remove_id(id);
                     }
-                    mute_alive = start_mute_sync();
-                    ui_alive = start_ui_capture(&r.dir, r.t0);
-                    frames_alive = start_frame_capture(&r.dir, r.t0);
-                    if meeting.is_none() {
+                    // What Echo reads from Teams (its mute, window, shared screens, chat): not for a Meet call.
+                    let teams = app == TargetApp::Teams;
+                    mute_alive = start_mute_sync(teams);
+                    ui_alive = if teams { start_ui_capture(&r.dir, r.t0) } else { None };
+                    frames_alive = if teams { start_frame_capture(&r.dir, r.t0) } else { None };
+                    if meeting.is_none() && teams {
                         find_call_people(&r.dir);
                     }
-                    chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
+                    chat_alive = if teams { start_chat_capture(&r.dir, r.started_at, meeting.as_ref()) } else { None };
                     crate::livenotes::recording_started(&r.dir);
                     rec_call = None;
                     candidate = None;
@@ -593,6 +606,12 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                         "dir": r.dir.display().to_string(),
                         "title": a.title.clone().or_else(|| meeting.as_ref().and_then(|m| m.subject.clone())),
                     }));
+                    // However it was started (Record, a schedule, Join, the CLI): what a Meet call's remote track holds.
+                    if app == TargetApp::Meet {
+                        crate::app::notify("Recording the Google Meet call", "Everything Chrome plays is recorded, from every tab.");
+                    } else if app == TargetApp::MeetApp {
+                        crate::app::notify("Recording the Google Meet app's call", "Its sound is Chrome's: everything Chrome plays is recorded, from every tab too.");
+                    }
                     rec = Some(r);
                 }
                 Err(e) => {
@@ -926,10 +945,10 @@ fn finish(r: Recording, reason: &str) {
 /// Follow the call app's mute button while recording (macOS Accessibility, Windows UI
 /// Automation): muted ⇒ the mic
 /// track records silence. Emits `mic_muted` / `mic_unmuted` on changes.
-fn start_mute_sync() -> Option<Arc<AtomicBool>> {
+fn start_mute_sync(teams: bool) -> Option<Arc<AtomicBool>> {
     use crate::audio::mic::MUTED;
     MUTED.store(false, Ordering::SeqCst);
-    if !crate::config::reads_call_window() || !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
+    if !teams || !crate::config::reads_call_window() || !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
         return None;
     }
     #[cfg(any(target_os = "macos", windows))]
@@ -1383,13 +1402,17 @@ pub fn stop() -> Result<()> {
     Ok(())
 }
 
-/// `echoctl join`: open the meeting in the desktop app and arm recording for it.
+/// `echoctl join`: open the meeting in the desktop app (a Google Meet one in Chrome, where Echo records it) and arm
+/// recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
     let Some(url) = meeting.recordable()?.join_url.clone() else { bail!("meeting has no join_url") };
     let url = crate::apps::desktop_join_url(&url);
     if !crate::app::open_log_only(&url) {
         #[cfg(target_os = "macos")]
-        std::process::Command::new("open").arg(&url).status()?;
+        {
+            let chrome: &[&str] = if meeting.app() == Some(crate::apps::MeetingApp::Meet) { &["-a", "Google Chrome"] } else { &[] };
+            std::process::Command::new("open").args(chrome).arg(&url).status()?;
+        }
         #[cfg(windows)]
         // Not `cmd /C start`: cmd would split the URL at `&`.
         std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
@@ -1615,19 +1638,22 @@ mod tests {
         assert_eq!(pinned_profile(&a, None), crate::ai::SYSTEM);
     }
 
-    /// #228: Echo records Teams calls only. A Zoom or Google Meet meeting isn't armed or joined: the CLI and the window
-    /// get why, and nothing is left armed or opened.
+    /// #228: a Zoom meeting isn't armed or joined (nor a Google Meet one off a Mac, #230): the CLI and the window get
+    /// why, and nothing is left armed or opened.
     #[test]
-    fn a_zoom_or_google_meet_meeting_is_not_armed_or_joined() {
+    fn a_zoom_meeting_is_not_armed_or_joined() {
         let (_env, root) = crate::paths::testenv::folders("watch-arm-other-app");
         fs::create_dir_all(root.join("home/.echo")).unwrap();
         let zoom = MeetingContext { subject: Some("Umbrella check-in".into()), join_url: Some("https://umbrella.zoom.us/j/81234567890".into()), ..Default::default() };
         let e = arm(zoom.subject.clone(), Some(zoom.clone()), None, None).unwrap_err();
         assert_eq!(e.to_string(), "“Umbrella check-in” is a Zoom meeting: recording isn't available for Zoom meetings yet");
         assert!(read_json::<Armed>("armed.json").is_none(), "nothing armed");
-        let meet = MeetingContext { join_url: Some("https://meet.google.com/abc-defg-hij".into()), ..zoom.clone() };
-        assert!(join(meet).unwrap_err().to_string().contains("recording isn't available for Google Meet meetings yet"), "refused before the link is opened");
+        assert!(join(zoom.clone()).unwrap_err().to_string().contains("recording isn't available for Zoom meetings yet"), "refused before the link is opened");
         assert!(read_json::<Armed>("armed.json").is_none());
+        // A Google Meet meeting arms on a Mac (#230).
+        let meet = MeetingContext { join_url: Some("https://meet.google.com/abc-defg-hij".into()), ..zoom.clone() };
+        assert_eq!(arm(None, Some(meet), None, None).is_ok(), cfg!(target_os = "macos"));
+        let _ = fs::remove_file(file("armed.json"));
         // A Teams meeting, or one with no app known (the test data's links), arms as before.
         let teams = MeetingContext { join_url: Some("https://teams.example/ev-1".into()), ..zoom };
         arm(None, Some(teams), None, None).unwrap();
@@ -1701,7 +1727,7 @@ mod tests {
         c.follow_app_mute = Some(true);
         c.save().unwrap();
         assert!(start_ui_capture(&root, Instant::now()).is_none(), "no names read");
-        assert!(start_mute_sync().is_none(), "no mute sync, even with Follow Teams' mute on");
+        assert!(start_mute_sync(true).is_none(), "no mute sync, even with Follow Teams' mute on");
     }
 
     #[test]

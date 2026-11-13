@@ -39,7 +39,7 @@ tags: [recording, pill, arm, agenda, second-instance]
 | 4 | Override the clock to START − 1 min, redraw, snapshot the top bar | A group "Meeting soon" (`.pill.soon`) with the meeting's start time as the browser writes it (`new Date(START).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})`, e.g. "02:30 PM"), the text "Globex design review" and a button "Record it" (`[data-arm="ev-globex-review"]`); no "Record next call" and no "Memo" button |
 | 5 | Override the clock to START + 1 min, redraw, snapshot | The group "Meeting soon" is still there, with the same time, title and "Record it" (the meeting has just started) |
 | 6 | Override the clock to START + 15 min, redraw, snapshot | The idle pill again: "Record next call" and "Memo"; no group "Meeting soon" (the start is long past) |
-| 7 | Override the clock to START − 1 min, redraw, click "Record it"; wait up to 5 s; then run the prelude and `target/debug/echoctl status` | The pill is a group "Armed" reading "Armed — records the next Teams call" with a button "Cancel"; no "Meeting soon"; `status` prints `armed` with `"title": "Globex design review"` and `watcher.armed` true |
+| 7 | Override the clock to START − 1 min, redraw, click "Record it"; wait up to 5 s; then run the prelude and `target/debug/echoctl status` | The pill is a group "Armed" reading "Armed — records the next call" with a button "Cancel"; no "Meeting soon"; `status` prints `armed` with `"title": "Globex design review"` and `watcher.armed` true |
 | 8 | Click "Cancel"; wait up to 5 s; run the prelude and `target/debug/echoctl status` | `armed` is null; the pill shows "Meeting soon" again (the meeting is still close) with "Record it" |
 
 ## Expected Final State

@@ -569,18 +569,45 @@ pub fn mic_source(app: Option<TargetApp>) -> Box<dyn Source> {
 /// Is the app in a call right now (holding the mic)? None = this platform can't tell yet.
 pub fn app_in_call(app: TargetApp) -> Option<bool> {
     #[cfg(debug_assertions)]
-    if let Some(on) = testfeed::in_call() {
+    if let Some(on) = testfeed::in_call(app) {
         return Some(on);
     }
     #[cfg(target_os = "macos")]
     return Some(macos::app_processes(app).map(|ps| ps.iter().any(|p| p.running_input)).unwrap_or(false));
+    // An app with nothing to look for here (Meet on Windows, #227): no call, and no process snapshot asked for it.
     #[cfg(windows)]
-    return Some(windows::app_in_call(app));
+    return Some(!app.windows_exe_names().is_empty() && windows::app_in_call(app));
     #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = app;
         None
     }
+}
+
+/// Does a browser window show a Google Meet call? None: it can't be told (no Accessibility, another platform), or the
+/// user turned off reading the call app's window.
+pub fn meet_tab_open() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    if let Some(on) = testfeed::meet_tab_open() {
+        return Some(on);
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    if crate::config::reads_call_window() {
+        return crate::ax::meet_tab_open();
+    }
+    None
+}
+
+/// Whether Google Meet installed as an app from Chrome is open (its process; no window is read). None: can't tell.
+pub fn meet_app_open() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    if let Some(on) = testfeed::meet_app_open() {
+        return Some(on);
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    return crate::ax::meet_app_open();
+    #[allow(unreachable_code)]
+    None
 }
 
 /// The input device the call app is recording from, as (cpal device id, name). Following it

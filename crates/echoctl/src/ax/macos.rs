@@ -193,6 +193,32 @@ pub fn app_pid(executable_suffix: &str) -> Option<i32> {
 }
 
 pub const TEAMS_EXECUTABLE: &str = "Microsoft Teams.app/Contents/MacOS/MSTeams";
+pub const CHROME_EXECUTABLE: &str = "Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/// Google Meet installed as an app from Chrome: its own process (`com.google.Chrome.app.<Meet's id>`), whose window
+/// shows no title to Accessibility ("Google Meet" to the system, never the meeting) — so the app being open is the sign.
+/// A pattern (`pgrep -f`): one installed under another name too ("Google Meet (Work).app", a second profile's).
+pub const MEET_APP_EXECUTABLE: &str = "/Google Meet[^/]*\\.app/Contents/MacOS/app_mode_loader";
+
+/// Is Google Meet open as an app installed from Chrome? Its process only; no window is read.
+pub fn meet_app_open() -> Option<bool> {
+    Command::new("pgrep").args(["-f", MEET_APP_EXECUTABLE]).output().ok().map(|o| o.status.success())
+}
+
+/// Does a Chrome window show a Google Meet call (`apps::is_meet_title`)? Only the windows' titles are read, never a
+/// page. None: Accessibility isn't granted or Chrome can't be read.
+pub fn meet_tab_open() -> Option<bool> {
+    if !unsafe { AXIsProcessTrusted() } {
+        return None;
+    }
+    // Every Chrome running, not the first found: another one (a test browser started from the same app) may run beside
+    // the user's.
+    let out = Command::new("pgrep").args(["-f", CHROME_EXECUTABLE]).output().ok()?;
+    let pids: Vec<i32> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse().ok()).collect();
+    Some(pids.into_iter().filter_map(Element::application).any(|chrome| {
+        chrome.children("AXWindows").iter().filter_map(|w| w.string("AXTitle")).any(|t| crate::apps::is_meet_title(&t))
+    }))
+}
 
 /// `echoctl ax-dump`: snapshot Teams' window tree every second for `seconds` seconds.
 pub fn dump(seconds: u64) -> Result<()> {

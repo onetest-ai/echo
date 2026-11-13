@@ -187,7 +187,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
 }
 
 /// The agenda offers a meeting to record now (from `before` its start until `after` it): one Echo can record, not a
-/// Zoom or Google Meet one (that has no "Record?" of its own, so a Teams call then is asked about as any call).
+/// Zoom one (that has no "Record?" of its own, so a Teams call then is asked about as any call).
 pub fn offered_now(agenda: &[MeetingContext], now: DateTime<Utc>, before: Duration, after: Duration) -> bool {
     agenda.iter().filter(|m| m.recordable().is_ok()).filter_map(watch::meeting_start).any(|st| now >= st - before && now <= st + after)
 }
@@ -300,13 +300,13 @@ fn store(events: &[Value], quiet: bool) -> Result<()> {
     Ok(())
 }
 
-/// The agenda meeting a recording starting now belongs to (10 min early … end), if exactly
+/// The agenda meeting a call in `app` starting now belongs to (10 min early … end), if exactly
 /// one matches; the one starting closest to now wins a tie.
-pub fn meeting_now(now: DateTime<Utc>) -> Option<MeetingContext> {
+pub fn meeting_now(now: DateTime<Utc>, app: crate::apps::TargetApp) -> Option<MeetingContext> {
     let mut hits: Vec<(i64, MeetingContext)> = watch::agenda()
         .into_iter()
-        // A Zoom or Google Meet meeting: not the Teams call being recorded.
-        .filter(|m| m.recordable().is_ok())
+        // A meeting of another app (a Zoom one, a Meet one for a Teams call): not the call being recorded.
+        .filter(|m| m.recordable().is_ok() && m.is_in(app))
         .filter_map(|m| {
             let start = watch::meeting_start(&m)?;
             let end = m.end.as_ref().and_then(|e| DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&Utc))
@@ -357,6 +357,7 @@ pub fn call_of_meeting<'a>(id: &str, start: DateTime<Utc>, end: Option<DateTime<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::TargetApp;
 
     #[test]
     fn a_meetings_call_is_the_one_of_its_id_recorded_at_its_time() {
@@ -512,16 +513,20 @@ mod tests {
         assert!(!offered_now(&[at("https://teams.example/ev-1")], now + Duration::minutes(5), before, after), "past the window");
     }
 
-    /// A Teams call recorded during a Zoom or Google Meet meeting isn't that meeting.
+    /// A call is matched only to a meeting of its own app: a Teams call during a Zoom or Google Meet meeting isn't
+    /// that meeting, nor a Meet call during a Teams one.
     #[test]
-    fn a_call_is_never_matched_to_a_zoom_or_google_meet_meeting() {
+    fn a_call_is_matched_only_to_a_meeting_of_its_app() {
         let (_env, _home) = crate::paths::testenv::folders("calendar-now-other-app");
         let now = Utc::now();
         let at = |id: &str, url: &str| MeetingContext { id: Some(id.into()), start: Some(now.to_rfc3339()), end: Some((now + Duration::minutes(30)).to_rfc3339()), join_url: Some(url.into()), ..Default::default() };
         watch::write_agenda(&[at("zoom", "https://zoom.us/j/81234567890")]).unwrap();
-        assert!(meeting_now(now).is_none());
-        watch::write_agenda(&[at("zoom", "https://zoom.us/j/81234567890"), at("teams", "https://teams.example/ev-1")]).unwrap();
-        assert_eq!(meeting_now(now).and_then(|m| m.id).as_deref(), Some("teams"));
+        assert!(meeting_now(now, TargetApp::Teams).is_none());
+        watch::write_agenda(&[at("zoom", "https://zoom.us/j/81234567890"), at("teams", "https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), at("meet", "https://meet.google.com/abc-defg-hij")]).unwrap();
+        assert_eq!(meeting_now(now, TargetApp::Teams).and_then(|m| m.id).as_deref(), Some("teams"));
+        if cfg!(target_os = "macos") {
+            assert_eq!(meeting_now(now, TargetApp::Meet).and_then(|m| m.id).as_deref(), Some("meet"));
+        }
     }
 
     #[test]

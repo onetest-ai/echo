@@ -128,7 +128,7 @@ function calendarView() {
       const cls = ['ev', narrow.trim(), e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
       // Green already says recorded: only what the colour doesn't.
       const tag = [appTag(e), e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''].filter(Boolean).join(' ')
-      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}" title="${esc([e.subject, hm(st.s), otherApp(e) ? meetingApp(e).name : '', e.recorded ? '' : e.transcript ? 'Transcript' : e.scheduled ? 'Will record' : e.no_notetakers ? 'No notetakers' : ''].filter(Boolean).join(' · '))}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
+      return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}" title="${esc([e.subject, hm(st.s), notTeams(e) ? meetingApp(e).name : '', e.recorded ? '' : e.transcript ? 'Transcript' : e.scheduled ? 'Will record' : e.no_notetakers ? 'No notetakers' : ''].filter(Boolean).join(' · '))}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" role="group" aria-label="${esc(`${day.toLocaleDateString([], { weekday: 'short' })} ${day.getDate()}`)}"${sameDay(day, now) ? ' aria-current="date"' : ''} style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
   }).join('')
@@ -190,11 +190,12 @@ function eventDetail(e, now) {
     ${main}${people}${series ? `<section class="ec-sec">${series}</section>` : ''}${recap}
   </aside>`
 }
-/** The app of a meeting Echo can't record yet (Zoom, Google Meet), as a small label; nothing for Teams. */
+/** A meeting's app other than Teams (Zoom, Google Meet), as a small label; nothing for Teams. */
 function appTag(e) {
-  return otherApp(e) ? `<span class="tag app">${esc(meetingApp(e).name)}</span>` : ''
+  return notTeams(e) ? `<span class="tag app">${esc(meetingApp(e).name)}</span>` : ''
 }
-/** Why a Zoom or Google Meet meeting has no Record (#228). */
+const notTeams = (e) => !!meetingApp(e) && e.app !== 'teams'
+/** Why a meeting Echo can't record yet has no Record (#228). */
 function notYet(e) {
   return `Recording isn't available for ${esc(meetingApp(e).name)} meetings yet.`
 }
@@ -257,7 +258,7 @@ function eventMenu(d, now) {
   const rec = x && x.key && x.rule && x.rule.record === 'always'
   // A Zoom or Google Meet meeting: Echo can't record its series either (#228).
   const series = x && x.key && !otherApp(e) ? `<div data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}" style="display:contents">${item(`data-series-set="record" data-val="${esc(JSON.stringify(rec ? null : 'always'))}"`, rec ? "Stop recording every meeting of this series" : 'Record every meeting of this series')}</div>` : ''
-  const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, `Copy the ${otherApp(e) ? meetingApp(e).name : 'Teams'} link`) : ''
+  const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, `Copy the ${notTeams(e) ? meetingApp(e).name : 'Teams'} link`) : ''
   const groups = [(kind ? main[kind]() : '') + prep, thread + series, link, item(`data-ev-ctx="open" data-id="${esc(e.id)}"`, 'Show details')].filter(Boolean)
   // At the pointer, kept inside the window (its size is about known: 240 px wide, 32 px an item).
   const n = (groups.join('').match(/menu-item/g) || []).length

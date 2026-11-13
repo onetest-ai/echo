@@ -23,7 +23,7 @@ external_id: TC-CLA-014
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | In a session type "record my next call in Ukrainian" | "Armed — recording starts when your next Teams call begins"; the menu-bar icon turns armed |
+| 1 | In a session type "record my next call in Ukrainian" | "Armed — recording starts when your next call begins"; the menu-bar icon turns armed |
 | 2 | Join a Teams call | Recording starts, pinned to Ukrainian |
 | 3 | After a minute type "stop recording" | It stops; the transcript follows |
 
