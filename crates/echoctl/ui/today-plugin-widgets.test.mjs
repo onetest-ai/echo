@@ -159,7 +159,21 @@ test("a chart's edges: a funnel's first 8, a pie reads all its slices, zeros, on
   assert.ok(!draw('chart', { type: 'stacked', series: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], points: [{ label: 'z', values: { a: 1, b: 3 } }], percent: 'no' }, 'M').includes('25%'), 'percent only when true')
   refused('chart', { type: 'line', points: [{ label: 'a', value: 1.7e308 }] }, 'up to 10^15')
   const bars = draw('chart', { type: 'bar', points: [{ label: 'Q1', value: 1 }, { label: 'Q2', value: 2 }] }, 'M')
-  assert.match(bars, /<span style="left:25\.00%">Q1<\/span><span style="left:75\.00%">Q2<\/span>/, "a bar's label under its bar")
+  assert.match(bars, /<span style="left:25\.00%;max-width:40\.0%">Q1<\/span><span style="left:75\.00%;max-width:40\.0%">Q2<\/span>/, "a bar's label under its bar, no wider than its slot")
+  const longs = draw('chart', { type: 'bar', points: Array.from({ length: 24 }, (_, i) => ({ label: `a long label ${i}`, value: i })) }, 'M')
+  assert.match(longs, /<span class="first" style="left:0\.00%;max-width:[\d.]+%">a long label 0<\/span>/, 'many bars: the first from the left edge')
+  assert.match(longs, /<span class="last" style="right:0\.00%;max-width:[\d.]+%">a long label 23<\/span>/, 'and the last to the right edge')
+  // No two labels overlap, whatever the count: each label's span from its style, side by side in order.
+  for (const n of [7, 8, 9, 10, 11, 24]) {
+    const h = draw('chart', { type: 'bar', points: Array.from({ length: n }, (_, i) => ({ label: `l${i}`, value: 1 })) }, 'M')
+    const spans = [...h.matchAll(/<span (?:class="(first|last)" )?style="(left|right):([\d.]+)%;max-width:([\d.]+)%">/g)].map(([, edge, side, at, w]) => {
+      const x = +at, mw = +w
+      return edge === 'first' ? [x, x + mw] : edge === 'last' ? [100 - x - mw, 100 - x] : [x - mw / 2, x + mw / 2]
+    })
+    for (let k = 1; k < spans.length; k++) assert.ok(spans[k][0] >= spans[k - 1][1] - 0.11, `${n} bars: label ${k} clear of label ${k - 1} (${spans[k - 1]} / ${spans[k]})`)
+    assert.ok(spans[0][0] >= -0.01 && spans[spans.length - 1][1] <= 100.01, `${n} bars: inside the card`)
+  }
+  refused('chart', { type: 'line', points: [{ label: 'a', value: 1 }], headline: { value: 1, change: { by: 1e300 } } }, 'over 10^15')
 })
 
 test("a chart's text is escaped wherever it shows", () => {
