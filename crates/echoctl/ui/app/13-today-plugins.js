@@ -211,7 +211,7 @@ function pluginWidgetView(id, w, size) {
   // named); after a failed ask, since when it hasn't changed, and why.
   const at = w.at ? new Date(w.at) : null
   const when = at && (at.toDateString() === new Date().toDateString() ? hm(at) : `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hm(at)}`)
-  const stale = !when ? '' : w.error ? `<span class="pw-upd warn" title="${esc(w.error)}">not updated since ${esc(when)}</span>` : `<span class="pw-upd" title="Updated by ${esc(plugin)}">updated ${esc(when)}</span>`
+  const stale = !when ? '' : w.error ? `<span class="pw-upd warn" title="${esc(w.error)}">not updated since ${esc(when)}</span>` : `<span class="pw-upd" title="When its data came">updated ${esc(when)}</span>`
   // A table says how many rows it has, and the plugin's note, beside its label.
   const d = w.data || {}
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
