@@ -52,14 +52,20 @@ pub fn in_call(app: TargetApp) -> Option<bool> {
 }
 
 /// With `ECHOCTL_TEST_CALL_FILE` set: whether Chrome's window (the call file's `title=` line) shows a Meet call.
-pub fn meet_window_open() -> Option<bool> {
+pub fn meet_tab_open() -> Option<bool> {
     var(CALL).map(|p| call_line(&p, "title").is_some_and(|t| crate::apps::is_meet_title(&t)))
+}
+
+/// With `ECHOCTL_TEST_CALL_FILE` set: whether the Meet app is open (the call file's `meet_app=1` line).
+pub fn meet_app_open() -> Option<bool> {
+    var(CALL).map(|p| call_line(&p, "meet_app").as_deref() == Some("1"))
 }
 
 fn key(app: TargetApp) -> &'static str {
     match app {
         TargetApp::Teams => "teams",
-        TargetApp::Meet => "meet",
+        // The Meet app's sound is Chrome's, as a Meet tab's: the call file's `app=meet` for both.
+        TargetApp::Meet | TargetApp::MeetApp => "meet",
     }
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A test call fed from files: no device opened, no sound played (after `. <dir>/env`).
 
-    tests/fixtures/call.py start <conversation> [--for SECONDS | --hold] [--meet [--title TEXT]]
+    tests/fixtures/call.py start <conversation> [--for SECONDS | --hold] [--meet [--title TEXT] [--meet-app]]
                                                                              a call starts now; prints what it set up
     tests/fixtures/call.py end                                               hang up now
     tests/fixtures/call.py status                                            in a call or not, and since when
@@ -11,7 +11,7 @@ The run's env (tests/fixtures/make_data.py) points a debug build's sources at fi
 audio, and ECHOCTL_TEST_CALL_FILE stands for the call app being in a call: Echo's watcher sees a call while that file
 exists, which started at the file's modification time. `--meet` makes it a call in Chrome instead of Teams (Google
 Meet), and `--title` the title of Chrome's window (none: no window, so only a calendar meeting with a Meet link makes
-it a Meet call). `start` puts the conversation's two tracks
+it a Meet call); `--meet-app` has Google Meet installed as an app from Chrome open (`meet_app=1`). `start` puts the conversation's two tracks
 (tests/fixtures/audio, built once per run into <dir>/conv/<name>) at those paths and creates the file. The call ends
 by itself 1 s after the conversation, as TestCall hangs up (`--for N`: after N s; `--hold`: only at `end`).
 Everything after the sources is Echo's real path: the watcher, the arm, the two tracks, live notes, the stop, the
@@ -54,7 +54,7 @@ def conversation(name):
     return d
 
 
-def start(name, seconds, hold, meet=False, title=None):
+def start(name, seconds, hold, meet=False, title=None, meet_app=False):
     me, remote, call = paths()
     if os.path.exists(call):
         die(f"a call is on already ({call}): `call.py end` first")
@@ -65,7 +65,8 @@ def start(name, seconds, hold, meet=False, title=None):
         shutil.copyfile(src, tmp)
         os.replace(tmp, dst)  # a recording that opens it now reads the whole file
     length = json.load(open(os.path.join(conv, "expected.json")))["duration"]
-    open(call, "w").write(name + "\n" + ("app=meet\n" if meet else "") + (f"title={title}\n" if title else ""))
+    open(call, "w").write(name + "\n" + ("app=meet\n" if meet else "") + (f"title={title}\n" if title else "")
+                           + ("meet_app=1\n" if meet_app else ""))
     began = os.stat(call).st_mtime
     ends = None if hold else (seconds if seconds is not None else length + 1.0)
     if ends is not None:
@@ -102,7 +103,7 @@ def main(argv):
     if cmd == "start" and len(argv) > 2:
         seconds = float(argv[argv.index("--for") + 1]) if "--for" in argv else None
         title = argv[argv.index("--title") + 1] if "--title" in argv else None
-        start(argv[2], seconds, "--hold" in argv, "--meet" in argv, title)
+        start(argv[2], seconds, "--hold" in argv, "--meet" in argv, title, "--meet-app" in argv)
     elif cmd == "end":
         end()
     elif cmd == "status":

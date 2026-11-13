@@ -286,7 +286,12 @@ fn dump_node(n: &Node, depth: usize, count: &mut usize) -> Value {
 }
 
 /// Google Meet isn't recorded on Windows yet (#227): its window is never looked at.
-pub fn meet_window_open() -> Option<bool> {
+pub fn meet_tab_open() -> Option<bool> {
+    None
+}
+
+/// The Meet app (installed from Chrome) isn't recorded on Windows yet (#227).
+pub fn meet_app_open() -> Option<bool> {
     None
 }
 

@@ -586,15 +586,27 @@ pub fn app_in_call(app: TargetApp) -> Option<bool> {
 
 /// Does a browser window show a Google Meet call? None: it can't be told (no Accessibility, another platform), or the
 /// user turned off reading the call app's window.
-pub fn meet_window_open() -> Option<bool> {
+pub fn meet_tab_open() -> Option<bool> {
     #[cfg(debug_assertions)]
-    if let Some(on) = testfeed::meet_window_open() {
+    if let Some(on) = testfeed::meet_tab_open() {
         return Some(on);
     }
     #[cfg(any(target_os = "macos", windows))]
     if crate::config::reads_call_window() {
-        return crate::ax::meet_window_open();
+        return crate::ax::meet_tab_open();
     }
+    None
+}
+
+/// Whether Google Meet installed as an app from Chrome is open (its process; no window is read). None: can't tell.
+pub fn meet_app_open() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    if let Some(on) = testfeed::meet_app_open() {
+        return Some(on);
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    return crate::ax::meet_app_open();
+    #[allow(unreachable_code)]
     None
 }
 

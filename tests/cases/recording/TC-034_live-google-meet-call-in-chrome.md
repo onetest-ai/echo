@@ -28,7 +28,8 @@ tags: [recording, google-meet, chrome, live-check]
 | 3 | Play a YouTube video in another Chrome tab for 10 s; then stop it | (Expected by design: that sound is in the remote track — the dialog said so) |
 | 4 | Switch Chrome's front tab to another site for 10 s, then back | The recording goes on (a tab switch is no hang-up) |
 | 5 | Leave the Meet from Chrome; wait 15 s | The recording stops (`stop_reason` "call_ended"); the call's transcript has both sides' words, Me from the mic, the phone's words as the remote speaker |
-| 6 | Open Chrome alone on a site that uses the mic (a voice-search, a dictation page) with no Meet tab and no Meet meeting in the calendar | No "Record?" dialog; nothing records |
+| 6 | Open Chrome alone on a site that uses the mic (a voice-search, a dictation page) with no Meet tab, no Meet app open and no Meet meeting in the calendar | No "Record?" dialog; nothing records |
+| 7 | Install Meet as an app (meet.google.com → Chrome's install button: "Google Meet" in Chrome Apps), close every Meet tab, start a meeting in the app's window and join from the phone | The same dialog (or, armed, the recording starts) within a few seconds, saying the Meet app plays through Chrome (every tab recorded too); `watcher.app` "meet-app"; leaving the meeting in the app stops it (`call_ended`) though the app stays open |
 
 ## Expected Final State
 One call recorded from the Meet; nothing recorded for Chrome's other use of the mic.

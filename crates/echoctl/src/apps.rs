@@ -1,4 +1,4 @@
-//! Call apps Echo knows how to capture: Teams desktop, and Google Meet in Chrome (macOS).
+//! Call apps Echo knows how to capture: Teams desktop, and Google Meet in Chrome or installed as an app from it (macOS).
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -9,19 +9,28 @@ pub enum TargetApp {
     Teams,
     /// Google Meet in Chrome: its audio is the browser's, every tab's.
     Meet,
+    /// Google Meet installed as an app from Chrome: its own window, but its audio is still the browser's, every tab's.
+    #[serde(rename = "meet-app")]
+    MeetApp,
 }
 
 impl TargetApp {
     /// Every call app, in the order the watcher looks: a Teams call wins over the browser.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub const ALL: [TargetApp; 2] = [TargetApp::Teams, TargetApp::Meet];
+    pub const ALL: [TargetApp; 3] = [TargetApp::Teams, TargetApp::Meet, TargetApp::MeetApp];
 
     /// What the user sees it called.
     pub fn name(self) -> &'static str {
         match self {
             TargetApp::Teams => "Teams",
             TargetApp::Meet => "Google Meet",
+            TargetApp::MeetApp => "Google Meet app",
         }
+    }
+
+    /// Whether its sound is Chrome's (a Meet tab or the Meet app): every tab's is in it.
+    pub fn is_chrome(self) -> bool {
+        matches!(self, TargetApp::Meet | TargetApp::MeetApp)
     }
 
     /// macOS bundle-id prefixes. New Teams (`com.microsoft.teams2`) plays audio from helper
@@ -32,9 +41,9 @@ impl TargetApp {
     pub fn mac_bundle_prefixes(self) -> &'static [&'static str] {
         match (self, test_call_app()) {
             (TargetApp::Teams, Some(test)) => test,
-            (TargetApp::Meet, Some(_)) => &[],
+            (TargetApp::Meet | TargetApp::MeetApp, Some(_)) => &[],
             (TargetApp::Teams, None) => &["com.microsoft.teams2", "com.microsoft.teams"],
-            (TargetApp::Meet, None) => &["com.google.Chrome"],
+            (TargetApp::Meet | TargetApp::MeetApp, None) => &["com.google.Chrome"],
         }
     }
 
@@ -44,7 +53,7 @@ impl TargetApp {
     pub fn windows_exe_names(self) -> &'static [&'static str] {
         match self {
             TargetApp::Teams => &["ms-teams.exe", "teams.exe"],
-            TargetApp::Meet => &[],
+            TargetApp::Meet | TargetApp::MeetApp => &[],
         }
     }
 
@@ -52,7 +61,7 @@ impl TargetApp {
     pub fn meeting_app(self) -> MeetingApp {
         match self {
             TargetApp::Teams => MeetingApp::Teams,
-            TargetApp::Meet => MeetingApp::Meet,
+            TargetApp::Meet | TargetApp::MeetApp => MeetingApp::Meet,
         }
     }
 }
@@ -271,8 +280,9 @@ mod tests {
     fn meet_is_chromes_audio_on_a_mac_and_nothing_on_windows_yet() {
         assert_eq!(TargetApp::Meet.mac_bundle_prefixes(), &["com.google.Chrome"]);
         assert!(TargetApp::Meet.windows_exe_names().is_empty());
-        assert_eq!(TargetApp::ALL.map(|a| (a.name(), a.meeting_app())), [("Teams", MeetingApp::Teams), ("Google Meet", MeetingApp::Meet)]);
+        assert_eq!(TargetApp::ALL.map(|a| (a.name(), a.meeting_app())), [("Teams", MeetingApp::Teams), ("Google Meet", MeetingApp::Meet), ("Google Meet app", MeetingApp::Meet)]);
         assert_eq!(serde_json::to_value(TargetApp::Meet).unwrap(), "meet", "meta.json's app");
+        assert_eq!(serde_json::to_value(TargetApp::MeetApp).unwrap(), "meet-app", "meta.json's app");
     }
 
     #[test]

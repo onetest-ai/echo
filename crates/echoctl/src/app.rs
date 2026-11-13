@@ -760,7 +760,11 @@ pub fn offer_call(app: TargetApp) {
     }
     std::thread::spawn(move || {
         // A Meet call's sound is Chrome's: every tab's.
-        let tabs = if app == TargetApp::Meet { "\n\nEverything Chrome plays is recorded, from every tab." } else { "" };
+        let tabs = match app {
+            TargetApp::Meet => "\n\nEverything Chrome plays is recorded, from every tab.",
+            TargetApp::MeetApp => "\n\nThe Meet app plays through Chrome: everything Chrome plays is recorded, from every tab too.",
+            TargetApp::Teams => "",
+        };
         let answer = ask(&format!("A {} call started.\n\nRecord and transcribe it?{tabs}", app.name()), &["Not now", "Record"], "Record");
         if answer.as_deref() == Some("Record") {
             // The call going on is the one to record: no meeting given (the start attaches the one it overlaps), so it

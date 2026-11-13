@@ -403,7 +403,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // While a call's recording is open (its grace after a hang-up too), only its app's call is that call: another app
         // taking the mic then is a new call, found once the recording has ended.
         let on = rec.as_ref().filter(|r| !r.memo).map(|r| r.app()).or(in_call.then_some(app));
-        let (detected, on_app) = call_app::which_call(on, teams, chrome, || meet_armed || meet_sign.get());
+        let (detected, on_app) = call_app::which_call(on, teams, chrome, || meet_sign.get().or(meet_armed.then_some(TargetApp::Meet)));
         app = on_app.unwrap_or(app);
         match detected {
             Some(true) => {
@@ -609,6 +609,8 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                     // However it was started (Record, a schedule, Join, the CLI): what a Meet call's remote track holds.
                     if app == TargetApp::Meet {
                         crate::app::notify("Recording the Google Meet call", "Everything Chrome plays is recorded, from every tab.");
+                    } else if app == TargetApp::MeetApp {
+                        crate::app::notify("Recording the Google Meet app's call", "Its sound is Chrome's: everything Chrome plays is recorded, from every tab too.");
                     }
                     rec = Some(r);
                 }
