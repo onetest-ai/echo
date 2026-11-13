@@ -29,15 +29,21 @@ function patchKeyed(el, html) {
     n.replaceWith(slot)
   }
   const skel = t.innerHTML
-  let whole = el._skel !== skel || !el._parts
+  // A whole redraw: the region emptied or drawn by another view since (its `_html` reset), a changed layout, a widget
+  // not where it was drawn, or the same widget twice.
+  const at = (k) => el.querySelector(`[data-wkey="${CSS.escape(k)}"]`)
+  let whole = el._html == null || el._skel !== skel || !el._parts || marked.length !== parts.size || [...parts.keys()].some((k) => !at(k))
   if (!whole) {
     for (const [k, h] of parts) {
       if (el._parts.get(k) === h) continue
-      const old = el.querySelector(`[data-wkey="${CSS.escape(k)}"]`)
-      if (!old) { whole = true; break }
+      const old = at(k)
+      // Its scrolled lists keep where they were (as `patch` keeps them for a whole region).
+      const kept = [...old.querySelectorAll('.rows, [data-keep-scroll]')].map((x) => [x.scrollTop, x.scrollLeft])
       const nt = document.createElement('template')
       nt.innerHTML = h
+      const fresh = nt.content.firstElementChild
       old.replaceWith(nt.content)
+      if (fresh && kept.some(([a, b]) => a > 0 || b > 0)) [...fresh.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) { if (kept[i][0]) x.scrollTop = kept[i][0]; if (kept[i][1]) x.scrollLeft = kept[i][1] } })
     }
   }
   if (whole) { el._html = null; patch(el, html) }

@@ -264,6 +264,7 @@ window.echo = {
   render()
   await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention()])
   await loadPluginClients()
+  render() // what has loaded shows at once (the rest follows)
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
   if (S.view === 'today') await loadToday()
