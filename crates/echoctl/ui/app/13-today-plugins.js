@@ -206,7 +206,7 @@ function pluginChartHtml(d, size, { str, num, foot }) {
   if (new Set(series.map((x) => x.key)).size !== series.length) throw new Error('series keys must be unique')
   // The points that fit: a line or area its last 60, the bar types their last 24, a funnel its first 8 stages; a pie
   // or donut reads all its slices (6 drawn, the rest in Other).
-  const kept = type === 'funnel' ? d.points.slice(0, 8) : PIE ? d.points.slice(0, 200) : d.points.slice(-(type === 'line' || type === 'area' ? 60 : 24))
+  const kept = type === 'funnel' ? d.points.slice(0, 8) : PIE ? d.points : d.points.slice(-(type === 'line' || type === 'area' ? 60 : 24))
   const pts = kept.map((p, i) => {
     if (!p || typeof p !== 'object') throw new Error(`point ${i + 1} is not an object`)
     if (multi && (!p.values || typeof p.values !== 'object')) throw new Error(`point ${i + 1} needs values: {<key>: number}`)
