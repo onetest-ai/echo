@@ -186,7 +186,7 @@ function pluginChartHtml(d, size, { str, num, foot }) {
   const type = d.type
   if (!CHART_TYPES.includes(type)) throw new Error(`a chart needs type: ${CHART_TYPES.join(', ')}`)
   if (!Array.isArray(d.points) || !d.points.length) throw new Error('a chart needs points: [{label, value}]')
-  const PIE = type === 'pie' || type === 'donut', ONE = PIE || type === 'funnel'
+  const PIE = type === 'pie' || type === 'donut', ONE = PIE || type === 'funnel', pct100 = d.percent === true
   const unit = d.unit ? ` ${str(d.unit, 'unit', 12)}` : ''
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   // A date as Echo writes it (Nov 8); any other label as given.
@@ -200,23 +200,25 @@ function pluginChartHtml(d, size, { str, num, foot }) {
   const series = multi
     ? d.series.map((x, i) => {
       if (!x || typeof x.key !== 'string' || !x.key) throw new Error(`series ${i + 1} needs a key`)
-      return { key: x.key, label: str(x.label, `series ${i + 1}'s label`, 40) || x.key, color: TONE[x.tone] || `var(--chart-${i + 1})` }
+      return { key: x.key, label: str(x.label, `series ${i + 1}'s label`, 40) || x.key, color: (typeof x.tone === 'string' && Object.hasOwn(TONE, x.tone) && TONE[x.tone]) || `var(--chart-${i + 1})` }
     })
     : [{ key: '', label: '', color: 'var(--chart-1)' }]
   if (new Set(series.map((x) => x.key)).size !== series.length) throw new Error('series keys must be unique')
-  // The last points that fit: 60 on a line or area, 24 bars, 24 slices or stages read (8 drawn at most).
-  const cap = type === 'line' || type === 'area' ? 60 : 24
-  const pts = d.points.slice(-cap).map((p, i) => {
+  // The points that fit: a line or area its last 60, the bar types their last 24, a funnel its first 8 stages; a pie
+  // or donut reads all its slices (6 drawn, the rest in Other).
+  const kept = type === 'funnel' ? d.points.slice(0, 8) : PIE ? d.points.slice(0, 200) : d.points.slice(-(type === 'line' || type === 'area' ? 60 : 24))
+  const pts = kept.map((p, i) => {
     if (!p || typeof p !== 'object') throw new Error(`point ${i + 1} is not an object`)
     if (multi && (!p.values || typeof p.values !== 'object')) throw new Error(`point ${i + 1} needs values: {<key>: number}`)
     const vals = series.map((x) => {
-      const v = multi ? p.values[x.key] : p.value
+      const v = multi ? (Object.hasOwn(p.values, x.key) ? p.values[x.key] : null) : p.value
       return multi && v == null ? 0 : num(v, multi ? `point ${i + 1}'s ${x.key}` : `point ${i + 1}'s value`)
     })
     return { label: lab(p.label, `point ${i + 1}'s label`), vals }
   })
+  if (pts.some((p) => p.vals.some((v) => Math.abs(v) > 1e15))) throw new Error('a chart takes values up to 10^15')
   if (type !== 'line' && type !== 'bar' && pts.some((p) => p.vals.some((v) => v < 0))) throw new Error(`a ${type} takes no negative values (only line and bar do)`)
-  const fmt = (v) => `${Number.isInteger(v) ? v : Math.round(v * 10) / 10}${unit}`
+  const fmt = (v) => `${Number.isInteger(v) ? v : Math.round(v * 100) / 100}${unit}`
   const say = (p) => (multi ? `${p.label}: ${series.map((x, k) => `${x.label} ${fmt(p.vals[k])}`).join(', ')}` : `${p.label}: ${fmt(p.vals[0])}`)
   // The answer first: its value, what it is, its change (an arrow by `by`'s sign; green when good, red when not).
   let head = ''
@@ -237,7 +239,9 @@ function pluginChartHtml(d, size, { str, num, foot }) {
   let body
   if (PIE) {
     // Slices in order; those under 3%, and past the 6th, fold into Other.
-    const total = pts.reduce((a, p) => a + p.vals[0], 0) || 1
+    const sum0 = pts.reduce((a, p) => a + p.vals[0], 0)
+    if (!sum0) return `${head}<p class="set-sub pw-note">Nothing to show yet.</p>${note}${foot()}`
+    const total = sum0
     let slices = pts.map((p, i) => ({ label: p.label, v: p.vals[0], color: `var(--chart-${i + 1})` }))
     const big = slices.filter((x) => x.v / total >= 0.03).slice(0, 6), other = total - big.reduce((a, x) => a + x.v, 0)
     slices = big.map((x, i) => ({ ...x, color: `var(--chart-${i + 1})` }))
@@ -255,9 +259,9 @@ function pluginChartHtml(d, size, { str, num, foot }) {
     }).join('')
     const center = type === 'donut' && d.center && d.center.value != null ? `<div class="pc-center"><b>${esc(str(d.center.value, 'center.value', 12))}</b>${d.center.label ? `<span>${esc(str(d.center.label, 'center.label', 24))}</span>` : ''}</div>` : ''
     const pct = (v) => `${Math.round((v / total) * 100)}%`
-    body = `<div class="pc-pie"><div class="pc-disc"><svg viewBox="0 0 120 120" role="img" aria-label="${esc(slices.map((x) => `${x.label} ${pct(x.v)}`).join(', '))}">${arcs}</svg>${center}</div>${size === 'S' ? '' : `<div class="pc-lg col">${slices.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.label)}<em class="pc-share" aria-hidden="true"><span style="width:${((x.v / total) * 100).toFixed(1)}%;background:${x.color}"></span></em><b>${esc(type === 'pie' ? pct(x.v) : fmt(x.v))}</b></span>`).join('')}</div>`}</div>`
+    body = `<div class="pc-pie"><div class="pc-disc"><svg viewBox="0 0 120 120" role="img" aria-label="${esc(slices.map((x) => `${x.label} ${pct(x.v)}`).join(', '))}">${arcs}</svg>${center}</div>${size === 'S' || slices.length < 2 ? '' : `<div class="pc-lg col">${slices.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.label)}<em class="pc-share" aria-hidden="true"><span style="width:${((x.v / total) * 100).toFixed(1)}%;background:${x.color}"></span></em><b>${esc(type === 'pie' ? pct(x.v) : fmt(x.v))}</b></span>`).join('')}</div>`}</div>`
   } else if (type === 'funnel') {
-    const st = pts.slice(0, 8), first = st[0].vals[0] || 1
+    const st = pts, first = Math.max(...st.map((p) => p.vals[0])) || 1
     body = `<div class="pc-rows funnel" role="img" aria-label="${esc(all)}">${st.map((p, i) => {
       const prev = i ? st[i - 1].vals[0] : null
       return `<span class="pc-rl">${esc(p.label)}</span><span class="pc-bar"><span style="width:${((p.vals[0] / first) * 100).toFixed(1)}%;background:var(--chart-1)" title="${esc(say(p))}"></span></span><span class="mono pc-rn">${esc(fmt(p.vals[0]))}</span><span class="mono pc-rn dim">${prev ? `${Math.round((p.vals[0] / prev) * 100)}%` : ''}</span>`
@@ -265,20 +269,20 @@ function pluginChartHtml(d, size, { str, num, foot }) {
   } else if (type === 'bars' || type === 'stacked-bars') {
     const rows = pts.slice(-(size === 'L' ? 12 : size === 'S' ? 4 : 6))
     const sum = (p) => p.vals.reduce((a, v) => a + v, 0)
-    const max = type === 'stacked-bars' ? (d.percent ? 1 : Math.max(...rows.map(sum)) || 1) : Math.max(...rows.flatMap((p) => p.vals)) || 1
+    const max = type === 'stacked-bars' ? (pct100 ? 1 : Math.max(...rows.map(sum)) || 1) : Math.max(...rows.flatMap((p) => p.vals)) || 1
     const cell = (p) => {
       if (type === 'bars') return series.map((x, k) => `<span class="pc-bar"><span style="width:${((p.vals[k] / max) * 100).toFixed(1)}%;background:${x.color}" title="${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(p.vals[k])}`)}"></span></span>`).join('')
       const t = sum(p) || 1
-      return `<span class="pc-bar seg">${series.map((x, k) => `<span style="width:${(((d.percent ? p.vals[k] / t : p.vals[k] / max)) * 100).toFixed(1)}%;background:${x.color}" title="${esc(`${p.label} · ${x.label}: ${d.percent ? `${Math.round((p.vals[k] / t) * 100)}%` : fmt(p.vals[k])}`)}"></span>`).join('')}</span>`
+      return `<span class="pc-bar seg">${series.map((x, k) => `<span style="width:${(((pct100 ? p.vals[k] / t : p.vals[k] / max)) * 100).toFixed(1)}%;background:${x.color}" title="${esc(`${p.label} · ${x.label}: ${pct100 ? `${Math.round((p.vals[k] / t) * 100)}%` : fmt(p.vals[k])}`)}"></span>`).join('')}</span>`
     }
-    const end = (p) => (type === 'stacked-bars' ? (d.percent ? `${Math.round((p.vals[0] / (sum(p) || 1)) * 100)}%` : fmt(sum(p))) : multi ? '' : fmt(p.vals[0]))
+    const end = (p) => (type === 'stacked-bars' ? (pct100 ? `${Math.round((p.vals[0] / (sum(p) || 1)) * 100)}%` : fmt(sum(p))) : multi ? '' : fmt(p.vals[0]))
     body = `<div class="pc-rows" role="img" aria-label="${esc(all)}">${rows.map((p) => `<span class="pc-rl">${esc(p.label)}</span><span class="pc-cell">${cell(p)}</span><span class="mono pc-rn">${esc(end(p))}</span>`).join('')}</div>${legend(series.map((x) => [x.label, x.color]))}`
   } else {
     // Line, area, bar (grouped), stacked: one y-axis from 0 (below it when a value is negative).
     const W = 480, H = size === 'S' ? 72 : 120, n = pts.length
     const sums = pts.map((p) => p.vals.reduce((a, v) => a + v, 0))
     const flat = pts.flatMap((p) => p.vals)
-    const hi = type === 'stacked' ? (d.percent ? 1 : Math.max(...sums, 0)) : Math.max(...flat, 0)
+    const hi = type === 'stacked' ? (pct100 ? 1 : Math.max(...sums, 0)) : Math.max(...flat, 0)
     const lo = type === 'stacked' ? 0 : Math.min(...flat, 0)
     const span = hi - lo || 1, y = (v) => (H - 2 - ((v - lo) / span) * (H - 10))
     const grid = [0.25, 0.5, 0.75, 1].map((f) => `<line x1="0" x2="${W}" y1="${(H - 2 - f * (H - 10)).toFixed(1)}" y2="${(H - 2 - f * (H - 10)).toFixed(1)}" class="pc-grid"/>`).join('') + `<line x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" class="pc-base"/>`
@@ -288,7 +292,8 @@ function pluginChartHtml(d, size, { str, num, foot }) {
       marks = series.map((x, k) => {
         const line = pts.map((p, i) => `${xAt(i).toFixed(1)},${y(p.vals[k]).toFixed(1)}`).join(' ')
         const fill = type === 'area' ? `<polygon points="0,${y(0).toFixed(1)} ${line} ${W},${y(0).toFixed(1)}" style="fill:${x.color}" class="pc-area"/>` : ''
-        const dots = pts.map((p, i) => `<circle cx="${xAt(i).toFixed(1)}" cy="${y(p.vals[k]).toFixed(1)}" r="${n > 30 ? 0 : 2.5}" style="fill:${x.color}"><title>${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(p.vals[k])}`)}</title></circle>`).join('')
+        // Dots round however wide the chart is drawn (a zero-length line with a round cap); unseen past 30 points, still hovered.
+        const dots = pts.map((p, i) => { const cx = xAt(i).toFixed(1), cy = y(p.vals[k]).toFixed(1); return `<line class="pc-dot" x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy}" style="stroke:${x.color}${n > 30 ? ';opacity:0' : ''}" vector-effect="non-scaling-stroke"><title>${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(p.vals[k])}`)}</title></line>` }).join('')
         return `${fill}<polyline points="${line}" fill="none" style="stroke:${x.color}" vector-effect="non-scaling-stroke"/>${dots}`
       }).join('')
     } else {
@@ -299,11 +304,11 @@ function pluginChartHtml(d, size, { str, num, foot }) {
           const t = sums[i] || 1
           let acc = 0
           return series.map((x, k) => {
-            const v = d.percent ? p.vals[k] / t : p.vals[k]
+            const v = pct100 ? p.vals[k] / t : p.vals[k]
             const top = y(acc + v), bot = y(acc)
             acc += v
             const hgt = Math.max(0, bot - top - 2)
-            return hgt > 0 ? `<rect x="${x0.toFixed(1)}" y="${(top + 1).toFixed(1)}" width="${inner.toFixed(1)}" height="${hgt.toFixed(1)}" style="fill:${x.color}"><title>${esc(`${p.label} · ${x.label}: ${d.percent ? `${Math.round(v * 100)}%` : fmt(p.vals[k])}`)}</title></rect>` : ''
+            return hgt > 0 ? `<rect x="${x0.toFixed(1)}" y="${(top + 1).toFixed(1)}" width="${inner.toFixed(1)}" height="${hgt.toFixed(1)}" style="fill:${x.color}"><title>${esc(`${p.label} · ${x.label}: ${pct100 ? `${Math.round(v * 100)}%` : fmt(p.vals[k])}`)}</title></rect>` : ''
           }).join('')
         }
         return series.map((x, k) => {
@@ -313,8 +318,12 @@ function pluginChartHtml(d, size, { str, num, foot }) {
       }).join('')
     }
     // Up to 6 dates or names under it, evenly.
-    const ticks = n <= 6 ? pts.map((p) => p.label) : [0, 1, 2, 3, 4, 5].map((k) => pts[Math.round((k * (n - 1)) / 5)].label)
-    body = `<svg class="pc-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" role="img" aria-label="${esc(all)}">${grid}${marks}</svg><div class="pc-x mono">${ticks.map((t) => `<span>${esc(t)}</span>`).join('')}</div>${legend(series.map((x) => [x.label, x.color]))}`
+    const at = n <= 6 ? pts.map((_, i) => i) : [0, 1, 2, 3, 4, 5].map((k) => Math.round((k * (n - 1)) / 5))
+    // A line's labels at its ends and between; a bar's under its bar (each at its slot's middle).
+    const ticks = type === 'line' || type === 'area'
+      ? `<div class="pc-x mono">${at.map((i) => `<span>${esc(pts[i].label)}</span>`).join('')}</div>`
+      : `<div class="pc-x mono pc-under">${at.map((i) => `<span style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%">${esc(pts[i].label)}</span>`).join('')}</div>`
+    body = `<svg class="pc-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" role="img" aria-label="${esc(all)}">${grid}${marks}</svg>${ticks}${legend(series.map((x) => [x.label, x.color]))}`
   }
   return `${head}${body}${note}${foot()}`
 }

@@ -292,9 +292,12 @@
 .pc-svg .pc-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .pc-svg .pc-base { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .pc-svg polyline { stroke-width: 2; stroke-linejoin: round; }
+.pc-svg .pc-dot { stroke-width: 6; stroke-linecap: round; }
 .pc-svg .pc-area { fill-opacity: 0.22; }
 .pc-x { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 3px; gap: 6px; }
-.pc-x span { white-space: nowrap; }
+.pc-x span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pc-x.pc-under { position: relative; display: block; height: 15px; }
+.pc-x.pc-under span { position: absolute; top: 0; transform: translateX(-50%); max-width: 22%; text-align: center; }
 .pc-lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--text-2); margin-top: 6px; }
 .pc-lg span { display: inline-flex; align-items: center; gap: 6px; }
 .pc-lg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }

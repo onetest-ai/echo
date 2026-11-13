@@ -136,6 +136,39 @@ test("a chart's headline: the value, what it is, the change (arrow by sign, tone
   refused('stats', { items: [{ label: 'x', value: 1, trend: [1, 'b'] }] }, "item 1's trend 2 is not a number")
 })
 
+test("a chart's edges: a funnel's first 8, a pie reads all its slices, zeros, one slice, one point, many points, tones by own name", () => {
+  const stages = Array.from({ length: 30 }, (_, i) => ({ label: `s${i}`, value: 100 - i }))
+  const fun = draw('chart', { type: 'funnel', points: stages }, 'M')
+  assert.ok(fun.includes('>s0<') && fun.includes('>s7<') && !fun.includes('>s8<'), 'its first 8 stages')
+  const slices = Array.from({ length: 30 }, (_, i) => ({ label: `p${i}`, value: i < 6 ? 20 : 1 }))
+  const pie = draw('chart', { type: 'pie', points: slices }, 'M')
+  assert.ok(pie.includes('>p0<') && pie.includes('>p5<') && pie.includes('>Other<'), 'the first six, the rest in Other')
+  assert.match(pie, /p0<em[^]*?<b>14%<\/b>/, 'shares of the whole (20 of 144)')
+  assert.match(draw('chart', { type: 'donut', points: [{ label: 'a', value: 0 }, { label: 'b', value: 0 }] }, 'M'), /Nothing to show yet/, 'all zeros: no fake Other')
+  const one = draw('chart', { type: 'pie', points: [{ label: 'only', value: 5 }] }, 'M')
+  assert.equal((one.match(/<path /g) || []).length, 1)
+  assert.ok(!one.includes('pc-lg'), 'one slice: no legend')
+  assert.match(draw('chart', { type: 'line', points: [{ label: 'a', value: 3 }] }, 'M'), /<line class="pc-dot" x1="240\.0"/, 'one point in the middle')
+  const many = draw('chart', { type: 'line', points: Array.from({ length: 40 }, (_, i) => ({ label: `d${i}`, value: i })) }, 'M')
+  assert.match(many, /style="stroke:var\(--chart-1\);opacity:0" vector-effect="non-scaling-stroke"><title>d39: 39<\/title>/, 'many points: dots unseen but still hovered')
+  assert.match(draw('chart', { type: 'line', points: [{ label: 'a', value: -3 }, { label: 'b', value: 4 }] }, 'M'), /<title>a: -3<\/title>/)
+  const odd = draw('chart', { type: 'line', series: [{ key: 'toString', label: 'x', tone: 'constructor' }, { key: 'b', label: 'y' }], points: [{ label: 'a', values: { b: 1 } }] }, 'M')
+  assert.ok(!odd.includes('function') && odd.includes('stroke:var(--chart-1)'), 'an unknown tone is no colour of its own')
+  assert.match(odd, /a · x: 0/, 'a missing key named like a builtin is 0')
+  assert.match(draw('chart', { type: 'stacked-bars', series: [{ key: 'a', label: 'A' }], points: [{ label: 'z', values: { a: 0 } }], percent: true }, 'M'), /<span class="mono pc-rn">0%<\/span>/)
+  assert.ok(!draw('chart', { type: 'stacked', series: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], points: [{ label: 'z', values: { a: 1, b: 3 } }], percent: 'no' }, 'M').includes('25%'), 'percent only when true')
+  refused('chart', { type: 'line', points: [{ label: 'a', value: 1.7e308 }] }, 'up to 10^15')
+  const bars = draw('chart', { type: 'bar', points: [{ label: 'Q1', value: 1 }, { label: 'Q2', value: 2 }] }, 'M')
+  assert.match(bars, /<span style="left:25\.00%">Q1<\/span><span style="left:75\.00%">Q2<\/span>/, "a bar's label under its bar")
+})
+
+test("a chart's text is escaped wherever it shows", () => {
+  const x = '"><img src=x>'
+  const h = draw('chart', { type: 'line', unit: x, note: x, series: [{ key: 'a', label: x }, { key: 'b', label: 'b' }], points: [{ label: x, values: { a: 1, b: 2 } }], headline: { value: x, label: x, change: { by: 1, than: x } } }, 'M')
+  const d = draw('chart', { type: 'donut', center: { value: x, label: x }, points: [{ label: x, value: 1 }, { label: 'y', value: 2 }] }, 'M')
+  for (const out of [h, d]) assert.ok(!out.includes('<img'), 'no tag from the plugin')
+})
+
 test("a stat's progress; any kind's open (echo:// a link, https a button that asks) and actions (its plugin's commands)", () => {
   assert.match(draw('stat', { value: '$500', progress: { used: 300, of: 800 } }, 'M'), /width:37\.5%/)
   assert.match(draw('stat', { value: 1, open: 'echo://task/acme/T1' }, 'M'), /<a class="link-btn" href="echo:\/\/task\/acme\/T1">Open<\/a>/)
