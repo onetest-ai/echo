@@ -94,15 +94,15 @@ pub fn core() -> Vec<Widget> {
         w
     };
     vec![
-    two(w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false)),
-    two(w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false)),
-    w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
+    two(with(w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
+    two(with(w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
+    with(w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false), vec![scoped("thread"), scoped("client")]),
     two(w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true)),
-    two(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true)),
+    two(with(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true), vec![scoped("thread"), scoped("client")])),
     two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period(), scoped("client")])),
     with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period(), scoped("thread"), scoped("client")]),
     with(w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false), vec![scoped("thread"), scoped("client")]),
-    two(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false)),
+    two(with(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
     two(w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true)),
     two(w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true)),
     ]
@@ -165,12 +165,18 @@ pub struct Inputs<'a> {
 
 /// A widget's data. A temporal widget's says `empty` when it has nothing (Today takes no space for it).
 pub fn data(id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, true, &crate::today_layout::Page::Today)
+    data_as(id, i, true, &crate::today_layout::Page::Today, false)
+}
+
+/// A widget's data for the whole of Today — every thread, whatever it is set to (Today's head counts the day's
+/// meetings and the user's tasks from it).
+pub fn data_whole(id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, true, &crate::today_layout::Page::Today, true)
 }
 
 /// A widget's data as a dashboard shows it (a plugin's asked with that page's settings, its answer kept apart).
 pub fn data_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, true, page)
+    data_as(id, i, true, page, false)
 }
 
 /// A widget not on Today, for Add a widget's preview: as [`data`], but a plugin's is its last answer — its provider asked
@@ -181,19 +187,29 @@ pub fn preview_data(id: &str, i: &Inputs) -> Result<Value> {
 
 /// [`preview_data`] for a dashboard: asked with that page's settings, its answer kept as the page's.
 pub fn preview_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, false, page)
+    data_as(id, i, false, page, false)
 }
 
-fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page) -> Result<Value> {
+fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page, whole: bool) -> Result<Value> {
     let w = find(id)?;
     if let Some(rest) = id.strip_prefix("plugin:") {
         let (plugin, widget) = rest.split_once(':').unwrap_or((rest, ""));
         return Ok(plugin_data(plugin, widget, &w, placed, page));
     }
+    // Set to a thread or a client (Today's ⚙, a dashboard's page): only its threads' meetings, calls and tasks.
+    let scope = if whole || w.params.is_empty() { None } else { scope_of(&crate::today_layout::params_on(page, id)) };
+    let threads = scope.as_ref().map(|s| s.0.as_slice());
     let mut v = match w.kind.as_ref() {
-        "day" | "choices" => day(),
-        "next" => next_meeting(&crate::today::day()),
-        "work" => crate::today::work(i.tasks),
+        "day" | "choices" => {
+            let mut v = day();
+            if let Some(t) = threads {
+                let all: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
+                v["day"] = json!(day_in(all, t));
+            }
+            v
+        }
+        "next" => next_meeting(&threads.map_or_else(crate::today::day, |t| day_in(crate::today::day(), t))),
+        "work" => threads.map_or_else(|| crate::today::work(i.tasks), |t| work_in(crate::today::work(i.tasks), t)),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
         "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
@@ -201,6 +217,9 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page)
         "calls" => calls_for(&crate::today_layout::params_on(page, id)),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
+    if let (Some((_, name)), true) = (&scope, matches!(w.kind.as_ref(), "day" | "next" | "work")) {
+        v["scope"] = json!(name);
+    }
     if w.temporal {
         let empty = match w.kind.as_ref() {
             "next" => v["next"].is_null(),
@@ -283,6 +302,39 @@ fn has_choices(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> bool {
     yes.iter().enumerate().any(|(i, a)| yes[i + 1..].iter().any(|b| a.0 < b.1 && b.0 < a.1))
 }
 
+/// A widget on Today set to a thread or a client (`params`): its data cut from the day Today already read — Your
+/// day's lines, the next of them — or, for My work, its own; None when it isn't set to one.
+pub fn scoped_from(id: &str, day: &[Value], params: &serde_json::Map<String, Value>, i: &Inputs) -> Option<Value> {
+    let (threads, name) = scope_of(params)?;
+    let mut v = match id {
+        "core:calendar.next" => next_meeting(&day_in(day.to_vec(), &threads)),
+        "core:tasks.mine" => work_in(crate::today::work(i.tasks), &threads),
+        _ => json!({"day": day_in(day.to_vec(), &threads)}),
+    };
+    v["scope"] = json!(name);
+    Some(v)
+}
+
+/// The day's meetings and calls in these threads: a meeting the threads' rules put it in, a call recorded in one.
+fn day_in(day: Vec<Value>, threads: &[String]) -> Vec<Value> {
+    let call_in = crate::calls_week::call_in(threads);
+    let ours = |x: &Value| x["threads"].as_array().is_some_and(|ts| ts.iter().any(|t| t["id"].as_str().is_some_and(|id| threads.iter().any(|x| x == id))));
+    day.into_iter().filter(|x| ours(x) || x["call"].as_str().is_some_and(|c| call_in(&crate::paths::calls_dir().join(c)))).collect()
+}
+
+/// My work in these threads: Echo's tasks of theirs, the plugins' rows that name one (a row with no thread isn't).
+fn work_in(mut v: Value, threads: &[String]) -> Value {
+    let ours = |x: &Value, k: &str| x[k].as_str().is_some_and(|id| threads.iter().any(|t| t == id));
+    for pile in ["mine", "owed", "waiting"] {
+        let items: Vec<Value> = v[pile]["items"].as_array().into_iter().flatten().filter(|x| ours(x, "project")).cloned().collect();
+        v[pile] = json!({"total": items.len(), "items": items});
+    }
+    if let Some(rows) = v["plugins"].as_array() {
+        v["plugins"] = json!(rows.iter().filter(|r| ours(r, "thread")).cloned().collect::<Vec<_>>());
+    }
+    v
+}
+
 /// Your day (agenda, calendar and strip show the same day): its meetings and calls, and whether the calendar
 /// couldn't be read today.
 fn day() -> Value {
@@ -330,6 +382,25 @@ fn brief(p: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_day_and_my_work_set_to_threads_keep_only_theirs() {
+        let (_env, _) = crate::paths::testenv::folders("widgets-scope");
+        let ts = vec!["aurora".to_string()];
+        let day = vec![
+            json!({"kind": "meeting", "subject": "Aurora sync", "threads": [{"id": "aurora"}]}),
+            json!({"kind": "meeting", "subject": "Ledger sync", "threads": [{"id": "ledger"}]}),
+            json!({"kind": "meeting", "subject": "No thread", "threads": []}),
+            json!({"kind": "call", "subject": "A call in no thread", "call": "2026-11-13_100000-x"}),
+        ];
+        let kept: Vec<_> = day_in(day, &ts).into_iter().map(|x| x["subject"].clone()).collect();
+        assert_eq!(kept, vec![json!("Aurora sync")]);
+        let w = json!({"mine": {"items": [{"project": "aurora"}, {"project": "ledger"}], "total": 2}, "owed": {"items": [{"project": "ledger"}], "total": 1},
+                       "waiting": {"items": [], "total": 0}, "plugins": [{"id": "r1", "thread": "aurora"}, {"id": "r2"}]});
+        let v = work_in(w, &ts);
+        assert_eq!((v["mine"]["total"].as_u64(), v["owed"]["total"].as_u64()), (Some(1), Some(0)));
+        assert_eq!(v["plugins"], json!([{"id": "r1", "thread": "aurora"}]), "a plugin row that names no thread isn't one of theirs");
+    }
 
     #[test]
     fn a_widget_set_to_a_thread_or_a_client_names_it_in_its_label() {

@@ -656,7 +656,7 @@ pub fn ask_drop(id: &str) -> Result<()> {
 /// each from its widget's provider, so Today and `echoctl widget show` say the same.
 pub fn view(tasks: &Value) -> Value {
     let i = crate::widgets::Inputs { tasks };
-    let w = |id: &str| crate::widgets::data(id, &i).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+    let w = |id: &str| crate::widgets::data_whole(id, &i).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
     let (day, needs) = (w("core:calendar.agenda"), w("core:needs.now"));
     json!({"date": Local::now().to_rfc3339(), "day": day["day"], "calendar_stale": day["calendar_stale"], "work": w("core:tasks.mine"), "cards": w("core:routines.cards")["cards"],
            "asks": load_asks(), "needs": {"items": needs["items"], "checked_at": needs["checked_at"], "errors": needs["errors"], "signed_in": needs["signed_in"]},
