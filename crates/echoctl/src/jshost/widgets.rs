@@ -40,6 +40,8 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     match (data, error) {
         (_, Some("")) => {
             last["asked"] = json!(now);
+            // It has no provider (it only `set`s): a dashboard shows what it set (`widget_last_on`).
+            last["unasked"] = json!(true);
         }
         (_, Some(e)) => {
             last["error"] = json!(e);
@@ -57,9 +59,14 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     if let Some(size) = size {
         last["size"] = json!(size);
     }
-    // The plugin's own `set` / `clear` (no ask, no size): every copy — the dashboards' answers give way to it.
+    // The plugin's own `set` / `clear` (no ask, no size): every copy — each dashboard's shows it, until its own next ask.
     if *page == crate::today_layout::Page::Today && error.is_none() && size.is_none() {
-        all.retain(|k, _| !k.starts_with(&format!("{widget}@")));
+        let mine = format!("{widget}@");
+        for (_, v) in all.iter_mut().filter(|(k, _)| k.starts_with(&mine)) {
+            v["data"] = last["data"].clone();
+            v["at"] = last["at"].clone();
+            v["asked"] = last["asked"].clone();
+        }
     }
     all.insert(key, last);
     std::fs::create_dir_all(plugins::data_dir(id))?;
@@ -80,25 +87,33 @@ pub fn widget_last(plugin: &str, widget: &str) -> Option<Value> {
     widget_last_on(plugin, widget, &crate::today_layout::Page::Today)
 }
 
-/// A widget's last answer for a page: a dashboard's own once its provider answered for it, else Today's (a widget
-/// that only `set`s shows the same everywhere).
+/// A widget's last answer for a page — its own only: a dashboard never shows Today's answer (another thread's, or
+/// none), it waits for its own ask. One whose plugin has no provider (it only `set`s) shows what the plugin set.
 pub fn widget_last_on(plugin: &str, widget: &str, page: &crate::today_layout::Page) -> Option<Value> {
     let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
-    let own = all.get(&widget_key(widget, page)).cloned();
-    match own {
-        Some(o) if o.get("at").is_some() || *page == crate::today_layout::Page::Today => Some(o),
-        o => match all.get(widget).cloned() {
-            // Its own asking time and error stand (when it was last asked, for its next ask).
-            Some(mut base) => {
-                for k in ["asked", "error", "size"] {
-                    if let Some(v) = o.as_ref().and_then(|o| o.get(k)) {
-                        base[k] = v.clone();
-                    }
-                }
-                Some(base)
-            }
-            None => o,
-        },
+    let mut own = all.get(&widget_key(widget, page)).cloned()?;
+    if *page != crate::today_layout::Page::Today && own["unasked"] == true && own["data"].is_null() {
+        if let Some(base) = all.get(widget) {
+            own["data"] = base["data"].clone();
+            own["at"] = base["at"].clone();
+        }
+    }
+    Some(own)
+}
+
+/// A page's dashboard went (its thread or client deleted), or a widget came off it (`widget`): their answers go.
+pub fn widget_forget(page: &crate::today_layout::Page, widget: Option<&str>) {
+    let suffix = format!("@{}", page.key());
+    let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
+    for e in std::fs::read_dir(paths::state_dir().join("plugins")).into_iter().flatten().flatten() {
+        let id = e.file_name().to_string_lossy().into_owned();
+        let f = widgets_file(&id);
+        let Some(mut all) = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice::<serde_json::Map<String, Value>>(&b).ok()) else { continue };
+        let n = all.len();
+        all.retain(|k, _| !(k.ends_with(&suffix) && widget.is_none_or(|w| k == &format!("{w}{suffix}"))));
+        if all.len() != n {
+            let _ = serde_json::to_string_pretty(&all).map(|t| paths::write_atomic(&f, t.as_bytes()));
+        }
     }
 }
 

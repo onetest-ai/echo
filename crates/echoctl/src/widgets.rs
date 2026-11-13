@@ -137,7 +137,12 @@ pub fn data_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result
 /// A widget not on Today, for Add a widget's preview: as [`data`], but a plugin's is its last answer — its provider asked
 /// only when it never answered, not again each time it is stale (nobody looks at it on Today).
 pub fn preview_data(id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, false, &crate::today_layout::Page::Today)
+    preview_on(&crate::today_layout::Page::Today, id, i)
+}
+
+/// [`preview_data`] for a dashboard: asked with that page's settings, its answer kept as the page's.
+pub fn preview_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, false, page)
 }
 
 fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page) -> Result<Value> {

@@ -44,7 +44,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 .filter(|id| id.starts_with("plugin:"))
                 .filter_map(|id| {
                     let placed = layout.iter().any(|l| &l.widget == id);
-                    let d = if placed { crate::widgets::data_on(&page, id, &i) } else if all { crate::widgets::preview_data(id, &i) } else { return None };
+                    let d = if placed { crate::widgets::data_on(&page, id, &i) } else if all { crate::widgets::preview_on(&page, id, &i) } else { return None };
                     d.ok().map(|d| (id.clone(), d))
                 })
                 .collect();

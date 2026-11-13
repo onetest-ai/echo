@@ -29,11 +29,12 @@ tags: [today, widgets, plugins, dashboards, threads, clients]
 | 4 | Reload the thread's Brief (once more if the widget hasn't answered) | Over "What it is": "Open positions" with 3; `curl -s '{{base_url}}/api/dashboard?page=thread:acme-rollout'` has its data's note "thread acme-rollout · client acme" (the thread, and the thread's client) |
 | 5 | Click ✎ | The band framed for editing, "Add a widget" and "Done" over it; the right panel "Add a widget" lists only "Open positions" ("here") and "Last builds" (Add) — no Echo widget, no "Needs attention"; Open positions has no ⚙ |
 | 6 | In the panel click Add on "Last builds"; click its ⚙ | "Last builds" placed after Open positions; its settings show only "Branch" (no "Thread") |
-| 7 | Choose Branch "release"; click Done | No frames; "Last builds" shows "Branch release" as its first line |
+| 7 | Choose Branch "release"; click ↑ on Last builds' frame; switch to the Work tab and back; click Done | After ↑ Last builds is first and the keyboard focus stays on its frame; on Work no dashboard and no Add a widget panel; after Done no frames, "Last builds" shows "Branch release" as its first line |
+| 7a | `target/debug/echoctl today add plugin:table-demo:positions --size S`; open `{{base_url}}/#today`; then open `{{base_url}}/#project/globex-pilot/brief`, click ✎, hover "Open positions" in the panel, click its Add, wait a moment | Today: "Open positions" 12 (every thread). Globex pilot's dashboard: "Open positions" with 3 (its own answer, never Today's 12); click Done; `target/debug/echoctl today --thread globex-pilot remove plugin:table-demo:positions` |
 | 8 | Open `{{base_url}}/#client/acme/overview` | Above "About Acme": only ✎ (nothing on this page yet) |
 | 9 | `target/debug/echoctl today --client acme add plugin:table-demo:positions --size S`; reload (once more if it hasn't answered) | "Open positions" with 7; its note in `api/dashboard?page=client:acme` "every thread · client acme" |
 | 10 | Open `{{base_url}}/#project/globex-pilot/brief`; click ✎ | Only ✎ before; editing: "Nothing here yet: Add a widget puts one that shows this thread."; the panel offers both widgets with Add (each page its own layout). Click Done |
-| 11 | Open `{{base_url}}/#today`; `target/debug/echoctl today` | Today as it comes: no "Open positions", no "Last builds"; `today` lists none of the plugins' widgets |
+| 11 | `target/debug/echoctl today remove plugin:table-demo:positions`; open `{{base_url}}/#today`; `target/debug/echoctl today` | Today as it comes: no "Open positions", no "Last builds"; `today` lists none of the plugins' widgets |
 | 12 | `target/debug/echoctl today --thread acme-rollout reset`; `today --client acme reset`; reload the thread's Brief | `[]` each; only ✎ above "What it is" |
 
 ## Teardown

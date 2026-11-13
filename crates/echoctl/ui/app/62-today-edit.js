@@ -142,6 +142,8 @@ function twRefocus() {
 async function todayEditOpen(page) {
   S.tdHover = null
   S.tdPick = null
+  // Each edit starts with the whole list: a search or part from another page may match nothing here.
+  S.tdQ = ''; S.tdPart = 'All'; S.tdParams = null
   const dash = /^(thread|client):/.test(page || '')
   if (dash) S.dashEdit = page
   else S.tdEdit = true
@@ -207,7 +209,7 @@ function addWidgetPanel() {
     pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${BOX}px;height:${boxH}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)} on ${twWhere()}">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
-  if (!all.length) return `<div class="tw-panel"><p class="set-sub tw-none">No widget can show ${twPage().startsWith('client:') ? 'one client' : 'one thread'} yet: a plugin's widget with a ${twPage().startsWith('client:') ? 'client' : 'thread'} setting comes here.</p></div>`
+  if (!all.length && twPage() !== 'today') return `<div class="tw-panel">${S.overlay ? '<div class="tw-top"><div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div></div>' : ''}<p class="set-sub tw-none">No widget can show ${twPage().startsWith('client:') ? 'one client' : 'one thread'} yet: a plugin's widget with a ${twPage().startsWith('client:') ? 'client' : 'thread'} setting comes here.</p></div>`
   return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
 }
 

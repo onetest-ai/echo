@@ -3,10 +3,12 @@
 // adds one; edited as Today is (62-today-edit.js: ✎, Add a widget, sizes, moves, ⚙ without the page's own settings);
 // each page's layout its own (`today_layout::Page`, `echoctl today --thread / --client`).
 
-/** The page shown: 'thread:<id>' on a thread, 'client:<id>' on a client, else null. */
+/** The dashboard shown: 'thread:<id>' on a thread's Brief, 'client:<id>' on a client's Overview, else null (another
+ *  tab: no dashboard, and edit mode waits there). */
 function dashPageKey() {
   if (S.view !== 'projects' || S.pj.found) return null
-  return S.pj.client ? `client:${S.pj.client}` : S.pj.sel ? `thread:${S.pj.sel}` : null
+  if (S.pj.client) return (S.pj.ctab || 'overview') === 'overview' ? `client:${S.pj.client}` : null
+  return S.pj.sel && (!S.pj.tab || S.pj.tab === 'brief') ? `thread:${S.pj.sel}` : null
 }
 
 /** The page's dashboard: its layout, the widgets it offers, its widgets' data (editing: every offered one's, previewed). */
@@ -43,6 +45,7 @@ function dashboardView() {
   const acts = editing
     ? '<span class="td-edit-acts"><button class="btn" data-tw-panel="1">Add a widget</button><button class="btn primary" data-tw-done="1">Done</button></span>'
     : `<button class="icon-btn td-edit-btn" data-tw-edit="${esc(page)}" aria-label="Edit this ${whose}'s dashboard" title="${rows.length ? `Edit this ${whose}'s dashboard — move, size, add widgets` : `Add widgets that show this ${whose}`}">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
-  const empty = editing && !rows.length ? `<div class="tw-end dash-none">Nothing here yet: Add a widget puts one that shows this ${whose}.</div>` : ''
+  if (editing) setTimeout(twRefocus) // a widget moved by the keyboard keeps it (as on Today)
+  const empty = editing && !rows.length ? `<div class="tw-end dash-none" data-tw-end="1">Nothing here yet: Add a widget puts one that shows this ${whose}.</div>` : ''
   return `<section class="dash${editing ? ' td-editing' : ''}${rows.length || editing ? '' : ' bare'}" aria-label="Dashboard"><div class="dash-h">${acts}</div>${rows.map(line).join('')}${empty}${editing && rows.length ? todayEditEnd() : ''}</section>`
 }

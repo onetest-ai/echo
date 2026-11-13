@@ -30,7 +30,7 @@ pub mod work;
 pub use widgets::widget_last;
 #[cfg(test)]
 use widgets::widget_ask_now_on;
-pub use widgets::{widget_ask_now, widget_ask_on, widget_last_on};
+pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
 use widgets::widget_store;
 
 use test_hosts::test_host;
@@ -1492,6 +1492,20 @@ mod tests {
         // The dashboard API's data comes from the page's own copy.
         let i = crate::widgets::Inputs { tasks: &json!({}) };
         assert_eq!(crate::widgets::data_on(&thread, "plugin:staff:open", &i).unwrap()["kind"], "stat");
+        // A page that never answered shows nothing of Today's (another thread's, or every one): it waits for its own.
+        let other = crate::projects::create("Borealis", None, None).unwrap();
+        let bare = Page::Thread(other.id.clone());
+        l::add_on(&bare, "plugin:staff:open", Some("M"), None).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none(), "not Today's answer");
+        assert!(crate::widgets::data_on(&bare, "plugin:staff:open", &i).unwrap()["pending"] == true);
+        // A thread with no client: its client setting is the page's too (its default, none), not the user's.
+        assert!(l::set_param_on(&bare, "plugin:staff:open", "client", &acme.id).unwrap_err().to_string().contains("this page's"));
+        assert_eq!(ask(&bare), format!("{} / -", other.id));
+        // Off the page, or the thread deleted: its answer and its dashboard go.
+        l::remove_on(&client, "plugin:staff:open").unwrap();
+        assert!(widget_last_on("staff", "open", &client).is_none());
+        crate::projects::delete(&other.id).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none() && l::load_on(&bare).is_empty(), "a new thread with its id starts clean");
         plugins::remove("staff", false).unwrap();
         sync();
     }

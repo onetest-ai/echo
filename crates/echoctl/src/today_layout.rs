@@ -135,20 +135,20 @@ impl Page {
     }
 
     /// The settings this page sets on a widget (not the user's to change here): a thread's page its `thread` setting,
-    /// and a `client` one the thread's client; a client's page its `client` setting.
+    /// and a `client` one the thread's client (a thread with none: the setting's default, null when it has none); a
+    /// client's page its `client` setting.
     fn fixed(&self, w: &widgets::Widget) -> serde_json::Map<String, serde_json::Value> {
+        use serde_json::Value;
         let mut out = serde_json::Map::new();
         let client_of = |t: &str| crate::projects::load(t).ok().and_then(|p| p.client).filter(|c| !c.is_empty());
         for p in &w.params {
             let v = match (self, p.kind.as_str()) {
-                (Page::Thread(t), "thread") => Some(t.clone()),
-                (Page::Thread(t), "client") => client_of(t),
-                (Page::Client(c), "client") => Some(c.clone()),
-                _ => None,
+                (Page::Thread(t), "thread") => Value::String(t.clone()),
+                (Page::Thread(t), "client") => client_of(t).map(Value::String).or_else(|| p.default.clone()).unwrap_or(Value::Null),
+                (Page::Client(c), "client") => Value::String(c.clone()),
+                _ => continue,
             };
-            if let Some(v) = v {
-                out.insert(p.key.clone(), serde_json::Value::String(v));
-            }
+            out.insert(p.key.clone(), v);
         }
         out
     }
@@ -404,8 +404,26 @@ pub fn params_on(page: &Page, widget: &str) -> serde_json::Map<String, serde_jso
             out.insert(p.key.clone(), v.clone());
         }
     }
-    out.extend(page.fixed(&w));
+    for (k, v) in page.fixed(&w) {
+        if v.is_null() {
+            out.remove(&k);
+        } else {
+            out.insert(k, v);
+        }
+    }
     out
+}
+
+/// A thread or a client deleted: its dashboard goes (a new one may get its id), and the plugins' answers for it.
+pub fn forget(page: &Page) {
+    if *page == Page::Today {
+        return;
+    }
+    let f = page.file();
+    let _ = std::fs::remove_file(&f);
+    let _ = std::fs::remove_file(f.with_extension("lock"));
+    #[cfg(feature = "js")]
+    crate::jshost::widget_forget(page, None);
 }
 
 #[cfg(test)]
@@ -414,7 +432,7 @@ pub fn remove(widget: &str) -> Result<Vec<Item>> {
 }
 
 pub fn remove_on(page: &Page, widget: &str) -> Result<Vec<Item>> {
-    change(page, |items| {
+    let items = change(page, |items| {
         let i = items.iter().position(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
         let mut out = items;
         let gone = out.remove(i);
@@ -424,7 +442,13 @@ pub fn remove_on(page: &Page, widget: &str) -> Result<Vec<Item>> {
             }
         }
         Ok(out)
-    })
+    })?;
+    // Off a dashboard: its answer there goes too (Today's stays, the plugin's own).
+    #[cfg(feature = "js")]
+    if let (false, Some((_, w))) = (*page == Page::Today, widget.strip_prefix("plugin:").and_then(|r| r.split_once(':'))) {
+        crate::jshost::widget_forget(page, Some(w));
+    }
+    Ok(items)
 }
 
 #[cfg(test)]
