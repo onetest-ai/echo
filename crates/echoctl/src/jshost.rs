@@ -134,6 +134,11 @@ const PRELUDE: &str = r#"
       list: (key) => call('threads.list', String(key)),
     },
     profiles: () => call('profiles'),
+    /** Its package skills' scripts declared in uses.scripts: run(skill, script, args, {timeout}) → {status, stdout,
+     *  stderr, truncated?, timed_out?} — no shell, args a list of strings, timeout at most the declared one. */
+    scripts: {
+      run: (skill, script, args, opts) => later('scripts.run', [String(skill), String(script), (args || []).map(String), opts || {}]),
+    },
     claude: {
       run: (opts) => later('claude.run', opts),
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? */
@@ -560,6 +565,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             }
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
+                plugins::scripts::stop_plugin(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
@@ -1214,6 +1220,12 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
 
 fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
+        // A script it declared (`uses.scripts`): a read-only routine's host runs only one marked readonly.
+        "scripts.run" => {
+            let args: Vec<String> = arg[2].as_array().into_iter().flatten().map(|a| a.as_str().map(str::to_owned).ok_or_else(|| anyhow!("a script's arguments are strings"))).collect::<Result<_>>()?;
+            let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
+            plugins::scripts::run(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &args, arg[3]["timeout"].as_u64(), read_only)
+        }
         // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
         "claude.run" => {
             read_only_here("a Claude run")?;
@@ -2623,6 +2635,118 @@ mod tests {
 
     // A release build has no ECHOCTL_PICK_FOLDER: there `pickFolder` would open the real folder picker.
     #[cfg(debug_assertions)]
+    #[test]
+    #[cfg(unix)]
+    fn a_plugins_package_skill_reaches_the_sessions_and_its_declared_script_runs() {
+        let (_env, root) = paths::testenv::folders("jshost-scripts");
+        let mk = root.join("market");
+        let d = mk.join("plugins/kit");
+        let sk = d.join("skills/staffing");
+        std::fs::create_dir_all(sk.join("scripts")).unwrap();
+        std::fs::write(sk.join("SKILL.md"), "---\nname: staffing\ndescription: Reads a project's staffing.\n---\n\nRun scripts/read.sh.\n").unwrap();
+        // No mode bits on purpose: a package from git or a tarball may lose them; Echo makes declared scripts runnable.
+        std::fs::write(sk.join("scripts/read.sh"), "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\necho \"script=$ECHO_PLUGIN_SCRIPT claude=${CLAUDE_TEST_LEAK:-none} cache=$ECHO_PLUGIN_CACHE pwd=$(pwd)\"\n").unwrap();
+        std::fs::write(sk.join("scripts/slow.sh"), "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\nhead -c 1100000 /dev/zero | tr '\\0' a\n").unwrap();
+        std::fs::write(sk.join("scripts/write.sh"), "#!/bin/sh\necho wrote\n").unwrap();
+        std::fs::write(sk.join("scripts/other.sh"), "#!/bin/sh\necho other\n").unwrap();
+        let scripts = json!([
+            {"skill": "staffing", "script": "scripts/read.sh", "readonly": true},
+            {"skill": "staffing", "script": "scripts/slow.sh", "readonly": true, "timeout": 20},
+            {"skill": "staffing", "script": "scripts/big.sh", "readonly": true},
+            {"skill": "staffing", "script": "scripts/write.sh"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.1.0", "main": "main.js", "skills": ["skills/staffing"], "uses": {"scripts": scripts}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              const run = async (a) => { try { return await ctx.scripts.run('staffing', a.script, a.args, a.opts) } catch (e) { return { error: String(e.message || e) } } }
+              ctx.command('run', run)
+              ctx.command('twice', async () => {
+                const both = await Promise.allSettled([1, 2].map(() => ctx.scripts.run('staffing', 'scripts/slow.sh', [], { timeout: 2 })))
+                return both.map((r) => r.status === 'fulfilled' ? r.value : { error: String(r.reason.message || r.reason) })
+              })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
+        let line = agreed.iter().find(|l| l.starts_with("Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh” (read-only routines may run it; Echo can't check it only reads)")).unwrap_or_else(|| panic!("{agreed:?}")).clone();
+        assert!(line.contains("“staffing/scripts/write.sh”") && !line.contains("other.sh") && line.contains("(their files: "), "{line}");
+        plugins::install("kit", Some(&name), &agreed).unwrap();
+        // In Echo's sessions each declared script's path holds Echo's launcher of it; the original stays in the package.
+        let sp = crate::grants::session_plugins();
+        let wrapper = std::fs::read_to_string(sp[0].join("skills/staffing/scripts/read.sh")).unwrap();
+        assert!(wrapper.starts_with("#!/bin/sh\n") && wrapper.contains("plugin script 'kit' 'staffing' 'scripts/read.sh' -- \"$@\""), "{wrapper}");
+        assert_eq!(std::fs::read_to_string(sp[0].join("skills/staffing/scripts/other.sh")).unwrap(), "#!/bin/sh\necho other\n", "an undeclared file is copied as it is");
+        let ro = crate::grants::session_scripts(true);
+        assert!(ro.iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/read.sh")) && !ro.iter().any(|p| p.ends_with("write.sh") || p.ends_with("other.sh")), "{ro:?}");
+        assert!(crate::grants::session_scripts(false).iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/write.sh")));
+        sync();
+        let leak = EnvVar::set("CLAUDE_TEST_LEAK", "secret");
+        let run = |script: &str, args: Value, opts: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("kit", "run", &json!({"script": script, "args": args, "opts": opts})) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        // Plain words, no shell; the user's environment without Claude's; its cache folder; in its session copy.
+        let v = run("scripts/read.sh", json!(["$(id)", "a b; rm -rf ~"]), json!({}));
+        assert_eq!(v["status"], 0, "{v}");
+        let cache = plugins::data_dir("kit").join("cache");
+        let cwd = dunce::canonicalize(sp[0].join("skills/staffing")).unwrap();
+        assert_eq!(v["stdout"], format!("$(id)\na b; rm -rf ~\nscript=1 claude=none cache={} pwd={}\n", cache.display(), cwd.display()));
+        drop(leak);
+        assert!(run("scripts/other.sh", json!([]), json!({}))["error"].as_str().unwrap().contains("didn't declare the script “staffing/scripts/other.sh”"));
+        assert!(run("../../../bin/sh", json!([]), json!({}))["error"].as_str().unwrap().contains("didn't declare"));
+        assert!(run("scripts/read.sh", json!([]), json!({"timeout": 301}))["error"].as_str().unwrap().contains("300 s at most"));
+        // Its time runs out: stopped with what it started, no status.
+        let t = std::time::Instant::now();
+        let v = run("scripts/slow.sh", json!([]), json!({"timeout": 1}));
+        assert!(v["timed_out"] == true && v["status"].is_null() && t.elapsed() < Duration::from_secs(10), "{v}");
+        // Output past 1 MB is cut and said so.
+        let v = run("scripts/big.sh", json!([]), json!({}));
+        assert!(v["truncated"] == true && v["stdout"].as_str().unwrap().len() == 1 << 20 && v["status"] == 0, "{}", v["status"]);
+        // One run of a script at a time.
+        let v = call("kit", "twice", &json!({})).unwrap();
+        let busy = v.as_array().unwrap().iter().filter(|r| r["error"].as_str().is_some_and(|e| e.contains("is already running"))).count();
+        let ran = v.as_array().unwrap().iter().filter(|r| r["timed_out"] == true).count();
+        assert_eq!((busy, ran), (1, 1), "{v}");
+        // Whichever process runs it, a script's run holds its lock: Echo stops it from anywhere (a removal, an update).
+        let runner = std::thread::spawn(|| plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false));
+        let held = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false).is_err_and(|e| e.to_string().contains("already running"))
+        });
+        assert!(held, "the running script holds its lock");
+        let t = std::time::Instant::now();
+        plugins::scripts::stop_plugin("kit");
+        let v = runner.join().unwrap().unwrap();
+        assert!(v["status"].is_null() && v["timed_out"].is_null() && t.elapsed() < Duration::from_secs(5), "{v}");
+        // A read-only routine runs only a script marked readonly.
+        assert!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, true).unwrap_err().to_string().contains("isn't marked readonly"));
+        assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, false).unwrap()["stdout"], "wrote\n");
+        // A version changing a file of that skill folder asks again.
+        std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\necho small\n").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.2.0", "main": "main.js", "skills": ["skills/staffing"], "uses": {"scripts": scripts}}).to_string()).unwrap();
+        plugins::refresh(&name).unwrap();
+        assert!(plugins::update("kit", &[]).unwrap_err().to_string().contains("asks for more: Runs programs from its package"));
+        plugins::remove("kit", false).unwrap();
+        sync();
+        assert!(crate::grants::session_plugins().is_empty() && crate::grants::session_scripts(false).is_empty());
+    }
+
     #[test]
     fn a_plugins_package_skill_reaches_the_sessions_beside_its_runtime_skills() {
         let (_env, root) = paths::testenv::folders("jshost-package-skills");

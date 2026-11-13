@@ -44,6 +44,15 @@ pub enum PluginCmd {
         /// JSON arguments (default {})
         args: Option<String>,
     },
+    /// Run a plugin's declared script (`uses.scripts`) as Echo runs it: its output, its exit status (124 when its time ran out)
+    Script {
+        id: String,
+        skill: String,
+        script: String,
+        /// Its arguments (after `--`)
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
     Marketplace {
         #[command(subcommand)]
@@ -121,6 +130,23 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         }
         #[cfg(not(feature = "js"))]
         PluginCmd::Call { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
+        PluginCmd::Script { id, skill, script, args } => {
+            // In a read-only routine only a script marked readonly runs.
+            let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
+            let v = crate::plugins::scripts::run(&id, &skill, &script, &args, None, read_only)?;
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(v["stdout"].as_str().unwrap_or("").as_bytes());
+            let _ = std::io::stderr().write_all(v["stderr"].as_str().unwrap_or("").as_bytes());
+            if v["truncated"] == true {
+                eprintln!("(Echo kept the first 1 MB of its output)");
+            }
+            if v["timed_out"] == true {
+                eprintln!("(stopped: {skill}/{script} took longer than it may)");
+                std::process::exit(124);
+            }
+            let _ = std::io::stdout().flush();
+            std::process::exit(v["status"].as_i64().map(|s| s as i32).unwrap_or(1));
+        }
         PluginCmd::Marketplace { cmd } => match cmd {
             MarketCmd::List => print_json(&snapshot()["markets"]),
             MarketCmd::Add { source, name } => {

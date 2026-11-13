@@ -594,6 +594,10 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
             args.extend(["--allowedTools".into(), format!("Bash({cli} plugin call {id} {c}:*)")]);
         }
     }
+    // Their declared scripts, by their launchers' full paths (`uses.scripts`): no prompt for them either.
+    for s in crate::grants::session_scripts(false) {
+        args.extend(["--allowedTools".into(), format!("Bash({s}:*)")]);
+    }
     // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
     // context until one is used; Send to Claude on a task names one.
     match crate::skills::plugin() {
