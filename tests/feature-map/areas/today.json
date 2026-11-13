@@ -119,14 +119,14 @@
   },
   {
    "id": "F-TODAY-17",
-   "feature": "Threads at a glance (core:tasks.glance, M/L) and Done this week (core:tasks.done, S/M), put on with echoctl today: each open thread's tasks as a traffic-light bar — done this week (green), to do (amber), waiting on someone or blocked (red) — and its total, busiest first (M 5, L 10, the rest in Threads), its name opening its Work; the tasks done since Monday counted, at M the latest four with their thread, each opening its details; echoctl widget show gives the same data",
+   "feature": "Threads at a glance (core:tasks.glance, M/L) and Done this week (core:tasks.done, S/M), put on with echoctl today: each open thread's tasks as a traffic-light bar — done this week (green), to do (amber), waiting on someone or blocked (red) — and its total, busiest first (M 5, L 10, the rest in Threads), its name opening its Work; the tasks done since Monday counted, at M the latest four with their thread, each opening its details; echoctl widget show gives the same data; set to a client (Threads at a glance) or a thread or a client (Done this week): only its threads — a client's open ones — its header naming it ('Done this week · Acme rollout')",
    "priority": "medium",
    "check": "agent",
    "axes": []
   },
   {
    "id": "F-TODAY-18",
-   "feature": "Recorded this week (core:calls.week, S/M, put on with echoctl today): since Monday (local time), the calls recorded — memos counted, as in the Calls list — the time recorded (minutes under an hour, else hours to one decimal) and how many of them have minutes; at M a bar a day, Monday to Sunday, as tall as its calls, today marked, each day read as text; a week with none says so, zeros and empty bars; a click opens Calls; echoctl widget show gives the same data",
+   "feature": "Recorded this week (core:calls.week, S/M, put on with echoctl today): since Monday (local time), the calls recorded — memos counted, as in the Calls list — the time recorded (minutes under an hour, else hours to one decimal) and how many of them have minutes; at M a bar a day, Monday to Sunday, as tall as its calls, today marked, each day read as text; a week with none says so, zeros and empty bars; a click opens Calls; echoctl widget show gives the same data; set to a thread or a client: only the calls in its threads, its header naming it",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -164,7 +164,7 @@
   },
   {
    "id": "F-TODAY-23",
-   "feature": "A widget's settings: Echo's (Threads at a glance and Done this week: period week or month) and a plugin's (declared in its manifest's widget `params`: choice, bool, thread, client), set in edit mode (⚙ on the frame) or with echoctl today set <widget> <key> <value> — refused when it isn't one the widget takes — kept on Today's layout, defaults filled in; a plugin's provider gets them as params and is asked again when one changes; a widget set to a thread or a client (a setting of that type) names it in its header — \"Last builds · Acme rollout\" — whatever the plugin",
+   "feature": "A widget's settings: Echo's (Threads at a glance and Done this week: period week or month; Threads at a glance a client, Done this week and Recorded this week a thread and a client) and a plugin's (declared in its manifest's widget `params`: choice, bool, thread, client), set in edit mode (⚙ on the frame) or with echoctl today set <widget> <key> <value> — refused when it isn't one the widget takes — kept on Today's layout, defaults filled in; a plugin's provider gets them as params and is asked again when one changes; a widget set to a thread or a client (a setting of that type) names it in its header — \"Last builds · Acme rollout\" — whatever the plugin",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -202,7 +202,7 @@
   },
   {
    "id": "F-TODAY-28",
-   "feature": "A thread's and a client's dashboard: a band of widgets over a thread's Brief and a client's Overview, empty until the user adds one (✎, then Add a widget, sizes, moves, × and ⚙ as on Today); a thread's page offers only widgets with a thread setting, a client's only those with a client setting; the page sets that setting (a thread's page also a client setting, to the thread's client) — not shown in ⚙ and refused by `echoctl today set`; each page keeps its own layout on this computer (`echoctl today --thread <id> / --client <id>`, beside Today's, which stays as it is); a plugin's widget asked for each page with that page's settings, each answer kept apart, the plugin's own set / clear reaching every copy",
+   "feature": "A thread's and a client's dashboard: a band of widgets over a thread's Brief and a client's Overview, empty until the user adds one (✎, then Add a widget, sizes, moves, × and ⚙ as on Today); a thread's page offers only widgets with a thread setting, a client's only those with a client setting; the page sets that setting (a thread's page also a client setting, to the thread's client) — not shown in ⚙ and refused by `echoctl today set`; each page keeps its own layout on this computer (`echoctl today --thread <id> / --client <id>`, beside Today's, which stays as it is); a plugin's widget asked for each page with that page's settings, each answer kept apart, the plugin's own set / clear reaching every copy; Echo's own that show one thread or client are offered too (a thread's page: Done this week, Recorded this week; a client's: those and Threads at a glance)",
    "priority": "high",
    "check": "agent",
    "axes": []

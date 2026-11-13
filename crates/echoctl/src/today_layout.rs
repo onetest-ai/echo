@@ -503,7 +503,7 @@ mod tests {
         assert_eq!(params_of("core:tasks.done")["period"], "week", "its default");
         let err = |r: Result<Vec<Item>>| r.unwrap_err().to_string();
         assert!(err(set_param("core:tasks.done", "period", "year")).contains("doesn't take \"year\" (week, month)"));
-        assert!(err(set_param("core:tasks.done", "colour", "red")).contains("has no setting \"colour\" (it has period)"));
+        assert!(err(set_param("core:tasks.done", "colour", "red")).contains("has no setting \"colour\" (it has period, thread, client)"));
         assert!(err(set_param("core:tasks.mine", "period", "month")).contains("has no setting"));
         assert!(err(set_param("core:tasks.done", "period", "month")).contains("isn't on Today"), "only a widget on Today");
         add("core:tasks.done", Some("S"), None).unwrap();

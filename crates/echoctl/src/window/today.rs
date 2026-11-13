@@ -39,6 +39,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let all = query_param(q, "all").is_some_and(|a| a == "1");
             let tasks = json!({});
             let i = crate::widgets::Inputs { tasks: &tasks };
+            // Echo's own widgets it offers (those that learn a thread or a client): their data with the page's settings.
+            let core: serde_json::Map<String, Value> = offered
+                .iter()
+                .filter(|id| id.starts_with("core:") && (all || layout.iter().any(|l| &l.widget == *id)))
+                .filter_map(|id| crate::widgets::data_on(&page, id, &i).ok().map(|d| (id.clone(), d)))
+                .collect();
             let plugins: serde_json::Map<String, Value> = offered
                 .iter()
                 .filter(|id| id.starts_with("plugin:"))
@@ -48,7 +54,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     d.ok().map(|d| (id.clone(), d))
                 })
                 .collect();
-            json_reply(json!({"page": page.key(), "layout": layout, "offered": offered, "plugins": plugins}))
+            json_reply(json!({"page": page.key(), "layout": layout, "offered": offered, "core": core, "plugins": plugins}))
         }
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
@@ -68,7 +74,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let glances: serde_json::Map<String, Value> = ["core:tasks.glance", "core:tasks.done"]
                 .into_iter()
                 .filter(|id| wants(id))
-                .map(|id| (id.to_string(), crate::glance::today(crate::today_layout::params_of(id).get("period").and_then(Value::as_str).unwrap_or("week"))))
+                .map(|id| (id.to_string(), crate::widgets::glance_for(&crate::today_layout::params_of(id))))
                 .collect();
             if !glances.is_empty() {
                 v["glances"] = json!(glances);
@@ -90,7 +96,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             }
             // Recorded this week, only when it is on Today.
             if wants("core:calls.week") {
-                v["calls_week"] = crate::calls_week::today();
+                v["calls_week"] = crate::widgets::calls_for(&crate::today_layout::params_of("core:calls.week"));
             }
             v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
