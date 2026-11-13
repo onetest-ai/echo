@@ -31,7 +31,7 @@ tags: [today, widgets, plugins, untrusted-text]
 | 5 | Click 1101000002 (underlined, the row's link) | Nothing leaves Echo: under the rows "Open staffing.acme.example in the browser? Click it again · Cancel" |
 | 6 | Click 1101000002 again; then `cat <dir>/open.log` | The question goes; `open.log` ends with `https://staffing.acme.example/position/1101000002` |
 | 7 | Click 1101000003 (an `echo://` link) | It opens in Echo, no question first: the window shows the thread Acme rollout's Brief (`#project/acme-rollout/brief`); nothing more in `open.log` |
-| 8 | `target/debug/echoctl today size plugin:table-demo:staffing M`; reload | The columns Status and Why are gone; the rest as at L |
+| 8 | `target/debug/echoctl today size plugin:table-demo:staffing M`; reload | The columns Status and Why are gone; the rest as at L. 1101000002's position (a link, "1101000002 · Key Engineer for the DevOps platform…") ends with … before the Role column, a gap between them — never over Role; its whole text on hover |
 | 9 | Look at "Staffing" and "Wrong table" | Staffing: 2 critical (red) with "Details ›", 2 high (amber) with "Details ›", 1 on hold without; clicking the second "Details ›" asks "Open staffing.acme.example in the browser? Click it again · Cancel" (click Cancel). Wrong table: "Couldn't draw this — row 1's cell “start” isn't a date (YYYY-MM-DD)" |
 | 10 | `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove table-demo` | Today as it comes; `widget list` has no `plugin:table-demo:` widget |
 
