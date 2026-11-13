@@ -192,6 +192,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-27",
+   "feature": "A plugin's table widget (kind table, sizes M and L, heights 1 and 2): data {columns: [{key, label, kind text|number|pill|date, hide 'M'}], rows: [{id, cells, link?, group?, detail?}], groups?, note?, empty?} drawn like Echo's lists — the header with the label, the row count and the plugin's note; column names in small caps that stay put while the rows scroll inside the card (at most about 60% of the window); rows under their group's header (with its count) in the groups' order, the rest under 'Other'; pills with Echo's tones (good, warn, bad, muted); dates as '15 Nov'; numbers at the end; columns with hide 'M' left out at M; a text cell on one line, cut with … and whole on hover; a row's link on its first text cell (echo:// opens in Echo, https asks first, nothing else); a row's details under it on ▸; plugin text escaped; data it can't draw says why (1–10 columns, 200 rows, 6 detail lines, 50 groups); a stats item's link shown as 'Details ›' (echo:// or https after the question)",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

@@ -3,8 +3,9 @@
 // echo:// (Echo opens it). The data comes from api/today's `plugins` (the last answer of the plugin's host half).
 
 // ── plugin widget: a kind's data as HTML, or why it can't be drawn (no DOM: `today-plugin-widgets.test.mjs`) ───────
-/** `kind` (stat, stats, chart, list, status, card) with `data` at `size` → HTML; throws with what is wrong in the data. */
-function pluginWidgetHtml(kind, data, size) {
+/** `kind` (stat, stats, chart, list, status, card, table) with `data` at `size` → HTML; throws with what is wrong in the
+ *  data. `opened`: the ids of a table's rows shown with their details. */
+function pluginWidgetHtml(kind, data, size, opened = []) {
   const d = data && typeof data === 'object' ? data : null
   if (!d) throw new Error('its data is not an object')
   const str = (v, what, max = 200) => { if (v == null) return ''; if (typeof v !== 'string' && typeof v !== 'number') throw new Error(`${what} is not text`); return String(v).slice(0, max) }
@@ -12,6 +13,9 @@ function pluginWidgetHtml(kind, data, size) {
   const tone = (t) => (TONES.includes(t) ? ` tone-${t}` : '')
   // A link only to Echo's own places; anything else is shown as text.
   const linked = (text, link) => (typeof link === 'string' && /^echo:\/\/[a-z]+\//.test(link) ? `<a class="link-btn" href="${esc(link)}">${esc(text)}</a>` : esc(text))
+  // A link of a row or an item: echo:// opens in Echo, https asks first (`data-pw-open`); anything else: none ('').
+  const outLink = (text, link) => typeof link === 'string' && /^echo:\/\/[a-z]+\//.test(link) ? `<a class="link-btn" href="${esc(link)}">${esc(text)}</a>`
+    : typeof link === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(link) ? `<button type="button" class="link-btn" data-pw-open="${esc(link)}">${esc(text)}</button>` : ''
   const num = (v, what) => { const n = typeof v === 'number' || (typeof v === 'string' && v.trim()) ? Number(v) : NaN; if (!Number.isFinite(n)) throw new Error(`${what} is not a number`); return n }
   // Any kind may say where it opens (`open`: echo:// in Echo, https after a confirm) and up to 3 actions (its plugin's
   // commands, run on a click).
@@ -57,7 +61,9 @@ function pluginWidgetHtml(kind, data, size) {
   if (kind === 'stats') {
     if (!Array.isArray(d.items)) throw new Error('stats need items: [{label, value}]')
     const items = d.items.slice(0, size === 'L' ? 6 : size === 'S' ? 2 : 4)
-    return `<div class="pw-stats">${items.map((x, i) => `<div><b class="${tone(x && x.tone).trim()}">${esc(str(x && x.value, `item ${i + 1}'s value`, 24))}</b><span class="set-sub">${esc(str(x && x.label, `item ${i + 1}'s label`, 60))}</span></div>`).join('')}</div>${foot()}`
+    // An item may open matching rows elsewhere: "Details ›".
+    const more = (x) => (x ? outLink('Details ›', x.link) : '')
+    return `<div class="pw-stats">${items.map((x, i) => `<div><b class="${tone(x && x.tone).trim()}">${esc(str(x && x.value, `item ${i + 1}'s value`, 24))}</b><span class="set-sub">${esc(str(x && x.label, `item ${i + 1}'s label`, 60))}</span>${more(x)}</div>`).join('')}</div>${foot()}`
   }
   if (kind === 'list') {
     if (!Array.isArray(d.items)) throw new Error('a list needs items: [{title, sub?, link?}]')
@@ -74,7 +80,100 @@ function pluginWidgetHtml(kind, data, size) {
     const text = str(d.text, 'text', 2000)
     return `<div class="pw-card">${d.title ? `<b>${linked(str(d.title, 'title', 120), d.link)}</b>` : ''}${text ? `<p>${esc(text).replace(/\n/g, '<br>')}</p>` : ''}</div>${foot()}`
   }
+  if (kind === 'table') return pluginTableHtml(d, size, opened, { str, outLink }) + foot()
   throw new Error(`Echo doesn't draw the kind ${kind}`)
+}
+
+/** A table widget's body: its columns (text, number, pill, date; `hide: "M"` left out below L), its rows under their
+ *  group's header in the groups' order (the rest last), a row's link on its first text cell, its details under it when
+ *  `opened` names it. Throws with what is wrong. */
+function pluginTableHtml(d, size, opened, { str, outLink }) {
+  const TONES = ['good', 'warn', 'bad', 'muted']
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  if (!Array.isArray(d.columns) || !d.columns.length || d.columns.length > 10) throw new Error('a table needs 1–10 columns: [{key, label, kind?}]')
+  const keys = new Set()
+  const all = d.columns.map((c, i) => {
+    const key = c && typeof c.key === 'string' ? c.key : ''
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(key) || keys.has(key)) throw new Error(`column ${i + 1} needs a plain, unique key`)
+    keys.add(key)
+    const k = c.kind == null ? 'text' : c.kind
+    if (!['text', 'number', 'pill', 'date'].includes(k)) throw new Error(`column ${key}: kind is text, number, pill or date`)
+    if (c.hide != null && c.hide !== 'M') throw new Error(`column ${key}: hide is "M"`)
+    return { key, label: str(c.label, `column ${key}'s label`, 40), kind: k, hide: c.hide === 'M' }
+  })
+  const cols = all.filter((c) => !(c.hide && size !== 'L'))
+  if (!Array.isArray(d.rows)) throw new Error('a table needs rows: [{id, cells}]')
+  if (d.rows.length > 200) throw new Error('a table has 200 rows at most')
+  const groups = d.groups == null ? [] : d.groups
+  if (!Array.isArray(groups) || groups.length > 50) throw new Error('groups are a list of 50 at most: [{id, label}]')
+  const gids = new Map()
+  groups.forEach((g, i) => {
+    const id = g && (typeof g.id === 'string' || typeof g.id === 'number') ? String(g.id) : ''
+    if (!id || gids.has(id)) throw new Error(`group ${i + 1} needs a unique id`)
+    gids.set(id, str(g.label, `group ${id}'s label`, 120))
+  })
+  // A cell as drawn: by its column's kind; {text, tone} anywhere.
+  const cell = (v, col, row) => {
+    const what = `row ${row}'s cell “${col.key}”`
+    const obj = v && typeof v === 'object'
+    if (obj && !Array.isArray(v) && v.tone != null && !TONES.includes(v.tone)) throw new Error(`${what}: tone is good, warn, bad or muted`)
+    const raw = obj && !Array.isArray(v) ? v.text : v
+    const t = obj && !Array.isArray(v) && v.tone ? ` tone-${v.tone}` : ''
+    if (raw == null || raw === '') return { html: '', text: '', t }
+    if (col.kind === 'number') {
+      if (!Number.isFinite(typeof raw === 'number' ? raw : Number.NaN)) throw new Error(`${what} isn't a number`)
+      return { html: esc(String(raw)), text: String(raw), t }
+    }
+    const text = str(raw, what)
+    if (col.kind === 'date') {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+      if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) throw new Error(`${what} isn't a date (YYYY-MM-DD)`)
+      return { html: `<time datetime="${esc(text)}">${+m[3]} ${MON[+m[2] - 1]}</time>`, text, t }
+    }
+    if (col.kind === 'pill') return { html: `<span class="pw-pill${t}">${esc(text)}</span>`, text, t: '' }
+    return { html: esc(text), text, t }
+  }
+  const ids = new Set()
+  const rows = d.rows.map((r, i) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error(`row ${i + 1} is not an object`)
+    const id = typeof r.id === 'string' || typeof r.id === 'number' ? String(r.id) : ''
+    if (!id || id.length > 80 || ids.has(id)) throw new Error(`row ${i + 1} needs a unique id`)
+    ids.add(id)
+    if (r.group != null && !gids.has(String(r.group))) throw new Error(`row ${i + 1}'s group “${String(r.group).slice(0, 40)}” isn't in groups`)
+    if (r.cells != null && (typeof r.cells !== 'object' || Array.isArray(r.cells))) throw new Error(`row ${i + 1}'s cells are {key: value}`)
+    const cells = r.cells || {}
+    const drawn = all.map((c) => [c, cell(cells[c.key], c, i + 1)]).filter(([c]) => cols.includes(c)).map(([, x]) => x)
+    if (r.detail != null && (!Array.isArray(r.detail) || r.detail.length > 6)) throw new Error(`row ${i + 1}'s detail is a list of 6 lines at most`)
+    const detail = (r.detail || []).map((x, j) => ({ text: str(x && x.text, `row ${i + 1}'s detail ${j + 1}`), sub: str(x && x.sub, `row ${i + 1}'s detail ${j + 1}`) }))
+    return { id, group: r.group == null ? null : String(r.group), link: r.link, drawn, detail }
+  })
+  if (!rows.length) return `<p class="set-sub">${esc(str(d.empty, 'empty') || 'Nothing here.')}</p>`
+  const details = rows.some((r) => r.detail.length)
+  const linkAt = cols.findIndex((c) => c.kind === 'text')
+  const open = new Set((opened || []).map(String))
+  const span = cols.length + (details ? 1 : 0)
+  const line = (r) => {
+    const shown = open.has(r.id) && r.detail.length > 0
+    const chev = !details ? '' : r.detail.length
+      ? `<td class="pw-tc"><button type="button" class="pw-chev" data-pw-row="${esc(r.id)}" aria-expanded="${shown}" aria-label="${shown ? 'Hide details' : 'Show details'}">${shown ? '▾' : '▸'}</button></td>` : '<td class="pw-tc"></td>'
+    const tds = r.drawn.map((x, j) => {
+      const html = (j === linkAt && x.text && outLink(x.text, r.link)) || x.html
+      // A text cell keeps to one line, cut with … when narrow; its whole text on hover.
+      return `<td class="k-${cols[j].kind}${x.t}"${cols[j].kind === 'text' && x.text ? ` title="${esc(x.text)}"` : ''}>${html}</td>`
+    }).join('')
+    const more = shown ? `<tr class="pw-td"><td colspan="${span}"><div>${r.detail.map((x) => `<span>${esc(x.text)}</span><span class="set-sub">${esc(x.sub)}</span>`).join('')}</div></td></tr>` : ''
+    return `<tr>${chev}${tds}</tr>${more}`
+  }
+  const body = []
+  for (const [gid, label] of gids) {
+    const in_ = rows.filter((r) => r.group === gid)
+    if (in_.length) body.push(`<tr class="pw-tg"><th colspan="${span}" scope="rowgroup">${esc(label)} <span class="mono">${in_.length}</span></th></tr>`, ...in_.map(line))
+  }
+  const rest = rows.filter((r) => r.group == null)
+  if (rest.length && gids.size) body.push(`<tr class="pw-tg"><th colspan="${span}" scope="rowgroup">Other <span class="mono">${rest.length}</span></th></tr>`)
+  body.push(...rest.map(line))
+  const head = `${details ? '<th class="pw-tc" aria-label="Details"></th>' : ''}${cols.map((c) => `<th scope="col" class="k-${c.kind}">${esc(c.label)}</th>`).join('')}`
+  return `<div class="pw-table"><table><thead><tr>${head}</tr></thead><tbody>${body.join('')}</tbody></table></div>`
 }
 
 /** A widget its plugin never answered and whose ask failed (no data yet, not being asked): why, in its frame — it
@@ -106,14 +205,19 @@ function pluginWidgetView(id, w, size) {
       const theme = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       Plugins.drawing = true
       try { body = `<div class="pw-page">${String(draw({ data: w.data, size, theme }) ?? '')}</div>` } finally { Plugins.drawing = false }
-    } else body = pluginWidgetHtml(w.kind, w.data, size)
+    } else body = pluginWidgetHtml(w.kind, w.data, size, (S.pwRows && S.pwRows[id]) || [])
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   const stale = w.error ? `<span class="set-sub" title="${esc(w.error)}">· from ${esc(hm(new Date(w.at)))}</span>` : ''
+  // A table says how many rows it has, and the plugin's note, beside its label.
+  const d = w.data || {}
+  const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
   // An outside link asked for here: its host said before it opens (a second click on Open) — the one question on the
   // page, a work row's or a widget's (`linkAsked`; it lapses after 30 s).
   const armed = linkAsked(S, 'wrOpen', Date.now())
-  const ask = armed && armed.where === `pw:${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, 'Click Open again', 'data-pw-open-no="1"') : ''
-  return `<section class="td-sec pw-sec" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)} ${stale}</h2>${body}${ask}</section>`
+  // A table row's or a stats item's link has no "Open" to name: the click is on the link itself.
+  const again = w.kind === 'table' || w.kind === 'stats' ? 'Click it again' : 'Click Open again'
+  const ask = armed && armed.where === `pw:${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, again, 'data-pw-open-no="1"') : ''
+  return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}${ask}</section>`
 }
 
 // A plugin widget's actions and its outside link: an action runs its plugin's command (the user's click), then Today is
@@ -123,6 +227,18 @@ document.addEventListener('click', async (e) => {
   const sec = e.target.closest('[data-pw]')
   if (!sec) return
   const plugin = (sec.dataset.pw.split(':')[1] || '')
+  // A table row's details: shown or hidden on its ▸ (kept while Today redraws).
+  const row = e.target.closest('[data-pw-row]')
+  if (row) {
+    e.preventDefault()
+    const open = new Set(((S.pwRows || {})[sec.dataset.pw]) || [])
+    if (open.has(row.dataset.pwRow)) open.delete(row.dataset.pwRow)
+    else open.add(row.dataset.pwRow)
+    S.pwRows = { ...(S.pwRows || {}), [sec.dataset.pw]: [...open] }
+    render()
+    setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-row="${CSS.escape(row.dataset.pwRow)}"]`); if (b) b.focus() })
+    return
+  }
   const act = e.target.closest('[data-pw-cmd]')
   if (act) {
     e.preventDefault()

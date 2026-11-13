@@ -1,0 +1,42 @@
+{
+  "id": "table-demo",
+  "name": "Table demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a table widget (groups, pills, dates, numbers, a row's details, links) and stats with links (tests/cases/today/TC-042).",
+  "main": "main.js",
+  "widgets": [
+    {
+      "id": "staffing",
+      "label": "Needs attention",
+      "about": "Positions to staff, by project",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "heights": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "counts",
+      "label": "Staffing",
+      "about": "Counts that open their rows",
+      "kind": "stats",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "wrong",
+      "label": "Wrong table",
+      "about": "A table whose data Echo can't draw",
+      "kind": "table",
+      "sizes": [
+        "M"
+      ]
+    }
+  ]
+}

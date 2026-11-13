@@ -20,6 +20,10 @@
     {
       "id": "signin-demo",
       "source": "./plugins/signin-demo"
+    },
+    {
+      "id": "table-demo",
+      "source": "./plugins/table-demo"
     }
   ]
 }

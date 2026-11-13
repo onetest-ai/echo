@@ -90,6 +90,75 @@ test("a stat's progress; any kind's open (echo:// a link, https a button that as
   refused('chart', { type: 'bar', points: [{ label: 'x', value: null }] }, "point 1's value is not a number")
 })
 
+const table = {
+  columns: [
+    { key: 'urgency', label: 'Urgency', kind: 'pill' }, { key: 'pos', label: 'Position' }, { key: 'start', label: 'Start', kind: 'date' },
+    { key: 'cand', label: 'Candidates', kind: 'number' }, { key: 'why', label: 'Why', hide: 'M' },
+  ],
+  groups: [{ id: 'nwb', label: 'NWB · Northwind' }, { id: 'ctl', label: 'CTL · Contoso' }],
+  rows: [
+    { id: 'p3', group: 'ctl', cells: { urgency: { text: 'High', tone: 'warn' }, pos: 'P-3', start: '2026-11-24', cand: 4, why: 'not booked' } },
+    { id: 'p1', group: 'nwb', link: 'https://staffing.acme.example/p/1', cells: { urgency: { text: 'Critical', tone: 'bad' }, pos: 'P-1', start: '2026-11-15', cand: 3 }, detail: [{ text: 'Dana Example', sub: 'Proposed' }] },
+    { id: 'p9', cells: { urgency: 'Low', pos: 'P-9', start: '', cand: 0, why: { text: 'on hold', tone: 'muted' } }, link: 'echo://thread/acme' },
+  ],
+}
+
+test('a table: its columns (a pill, a short date, a number at the end), rows under their group in the groups\' order, the rest last', () => {
+  const h = draw('table', table, 'L')
+  assert.match(h, /<th scope="col" class="k-pill">Urgency<\/th>/)
+  assert.match(h, /<span class="pw-pill tone-bad">Critical<\/span>/)
+  assert.match(h, /<time datetime="2026-11-15">15 Nov<\/time>/)
+  assert.match(h, /<td class="k-number">3<\/td>/)
+  const at = (t) => h.indexOf(t)
+  assert.ok(at('NWB · Northwind') < at('P-1') && at('P-1') < at('CTL · Contoso') && at('CTL · Contoso') < at('P-3') && at('P-3') < at('Other') && at('Other') < at('P-9'), 'groups in their order, the rest last')
+  assert.match(h, /NWB · Northwind <span class="mono">1<\/span>/, "a group's count")
+  assert.match(h, /<td class="k-text tone-muted" title="on hold">on hold<\/td>/)
+})
+
+test('a table at M leaves out the columns hidden at M; at L it has them', () => {
+  assert.ok(!draw('table', table, 'M').includes('>Why<'))
+  assert.ok(draw('table', table, 'L').includes('>Why<'))
+})
+
+test("a table row's link is on its first text cell (https asks first, echo:// opens in Echo, anything else is text); its details show when opened", () => {
+  const h = draw('table', table, 'M')
+  assert.match(h, /<td class="k-text" title="P-1"><button type="button" class="link-btn" data-pw-open="https:\/\/staffing\.acme\.example\/p\/1">P-1<\/button><\/td>/)
+  assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">P-9<\/a>/)
+  const evil = draw('table', { columns: [{ key: 'a', label: 'A' }], rows: [{ id: 1, link: 'javascript:alert(1)', cells: { a: 'x' } }] }, 'M')
+  assert.ok(!evil.includes('javascript') && evil.includes('<td class="k-text" title="x">x</td>'))
+  assert.match(h, /data-pw-row="p1" aria-expanded="false" aria-label="Show details">▸/)
+  assert.ok(!h.includes('Dana Example'), 'closed: no details')
+  const open = draw('table', table, 'M', ['p1'])
+  assert.match(open, /aria-expanded="true" aria-label="Hide details">▾/)
+  assert.match(open, /<span>Dana Example<\/span><span class="set-sub">Proposed<\/span>/)
+})
+
+test('a table with no rows says its empty text; its text is escaped; wrong data refused with what is wrong', () => {
+  assert.match(draw('table', { columns: [{ key: 'a', label: 'A' }], rows: [], empty: 'Every position is assigned.' }, 'M'), /Every position is assigned\./)
+  const evil = '<img src=x onerror=alert(1)>'
+  const h = draw('table', { columns: [{ key: 'a', label: evil, kind: 'pill' }], groups: [{ id: 'g', label: evil }], rows: [{ id: 1, group: 'g', cells: { a: evil }, detail: [{ text: evil, sub: evil }] }] }, 'M', ['1'])
+  assert.ok(!h.includes('<img'), h)
+  const cols = [{ key: 'a', label: 'A' }]
+  refused('table', { rows: [] }, 'needs 1–10 columns')
+  refused('table', { columns: Array.from({ length: 11 }, (_, i) => ({ key: `c${i}`, label: 'x' })), rows: [] }, 'needs 1–10 columns')
+  refused('table', { columns: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], rows: [] }, 'column 2 needs a plain, unique key')
+  refused('table', { columns: [{ key: 'a', label: 'A', kind: 'money' }], rows: [] }, 'kind is text, number, pill or date')
+  refused('table', { columns: cols, rows: Array.from({ length: 201 }, (_, i) => ({ id: i })) }, '200 rows at most')
+  refused('table', { columns: cols, rows: [{ id: 1 }, { id: 1 }] }, 'row 2 needs a unique id')
+  refused('table', { columns: cols, rows: [{ id: 1, group: 'nope' }] }, "row 1's group “nope” isn't in groups")
+  refused('table', { columns: [{ key: 'n', label: 'N', kind: 'number' }], rows: [{ id: 1, cells: { n: 'many' } }] }, "row 1's cell “n” isn't a number")
+  refused('table', { columns: [{ key: 'd', label: 'D', kind: 'date' }], rows: [{ id: 1, cells: { d: '15/11/2026' } }] }, "row 1's cell “d” isn't a date (YYYY-MM-DD)")
+  refused('table', { columns: cols, rows: [{ id: 1, cells: { a: { text: 'x', tone: 'red' } } }] }, 'tone is good, warn, bad or muted')
+  refused('table', { columns: cols, rows: [{ id: 1, detail: Array(7).fill({ text: 'x' }) }] }, "row 1's detail is a list of 6 lines at most")
+})
+
+test("a stats item's link: Details › (echo:// in Echo, https asks first, anything else none)", () => {
+  const h = draw('stats', { items: [{ label: 'critical', value: 4, link: 'echo://thread/acme' }, { label: 'high', value: 8, link: 'https://staffing.acme.example/?u=high' }, { label: 'x', value: 1, link: 'javascript:x' }] }, 'M')
+  assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">Details ›<\/a>/)
+  assert.match(h, /data-pw-open="https:\/\/staffing\.acme\.example\/\?u=high">Details ›/)
+  assert.equal((h.match(/Details ›/g) || []).length, 2)
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
