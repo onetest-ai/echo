@@ -192,26 +192,63 @@ static SESSION_PLUGINS: Mutex<BTreeMap<String, PathBuf>> = Mutex::new(BTreeMap::
 /// Plugin → folders Echo's sessions may read (each one of its granted folders).
 static SESSION_READ: Mutex<BTreeMap<String, Vec<PathBuf>>> = Mutex::new(BTreeMap::new());
 
-/// Plugin `id`'s skills for Echo's sessions: `[{name, description, body}]` (an empty list takes them away). Echo
-/// writes the Claude Code plugin itself, in its own config folder: a `plugin.json` and one `SKILL.md` per skill
-/// with only `name` and `description` in its frontmatter — nothing else a Claude Code plugin could carry.
+/// What Echo copied from a plugin's package into its session folder: `{files, skills}` — the installed files' hash it
+/// came from and the skill folders that are the package's (the others are its runtime skills).
+const PACKAGE_MARK: &str = ".package.json";
+
+fn package_mark(dir: &Path) -> (String, Vec<String>) {
+    let v: Value = std::fs::read(dir.join(PACKAGE_MARK)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+    (v["files"].as_str().unwrap_or("").to_string(), v["skills"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect())
+}
+
+/// One writer of a plugin's session folder at a time, across processes (the app, a terminal's `plugin install`).
+fn session_lock(id: &str) -> Result<crate::app::FileLock> {
+    let locks = paths::config_dir().join("plugins").join("session").join(".locks");
+    std::fs::create_dir_all(&locks)?;
+    crate::plugins::wait_lock(&locks.join(format!("{id}.lock")))
+}
+
+/// The skill folders in a session folder.
+fn skill_dirs(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir.join("skills")).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect()
+}
+
+/// The Claude Code plugin around the skills: its `plugin.json` and the Echo CLI launcher, as Echo's own skills reach
+/// it (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`).
+fn write_session_base(id: &str, dir: &Path) -> Result<()> {
+    let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
+    let files = [
+        (dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?),
+        (dir.join("scripts").join("echoctl"), include_str!("../../../plugin/scripts/echoctl").to_string()),
+        (dir.join("scripts").join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").to_string()),
+    ];
+    for (f, text) in files {
+        std::fs::create_dir_all(f.parent().expect("a parent"))?;
+        paths::write_atomic(&f, text.as_bytes())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("scripts").join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Plugin `id`'s runtime skills for Echo's sessions: `[{name, description, body}]` (an empty list takes them away).
+/// Echo writes the Claude Code plugin itself, in its own config folder: a `plugin.json` and one `SKILL.md` per skill
+/// with only `name` and `description` in its frontmatter — nothing else a Claude Code plugin could carry. Its
+/// package skills (`copy_package_skills`) stay beside them; a name is never both.
 pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     let list = skills.as_array().ok_or_else(|| anyhow!("skills are a list"))?;
-    if list.len() > 10 {
-        bail!("at most 10 skills");
-    }
-    let dir = session_dir(id);
-    let _ = std::fs::remove_dir_all(&dir);
-    if list.is_empty() {
-        SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
-        return Ok(());
+    if list.len() > crate::plugins::MAX_SKILLS {
+        bail!("at most {} skills", crate::plugins::MAX_SKILLS);
     }
     let mut files = vec![];
     for sk in list {
         let name = sk["name"].as_str().unwrap_or("");
         let description = sk["description"].as_str().unwrap_or("").trim();
         let body = sk["body"].as_str().unwrap_or("");
-        if name.is_empty() || name.len() > 40 || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+        if !crate::plugins::valid_skill_name(name) {
             bail!("a skill's name is a few lowercase words with dashes");
         }
         if description.is_empty() || description.chars().count() > 1024 || description.contains(['\n', '\r']) {
@@ -225,23 +262,67 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
             bail!("skill {name}: “!`…`” runs a command in Claude Code; a plugin's skill is text only");
         }
         let md = format!("---\nname: {name}\ndescription: {}\n---\n\n{body}\n", serde_json::to_string(description)?);
-        files.push((dir.join("skills").join(name).join("SKILL.md"), md));
+        files.push((name.to_string(), md));
     }
-    let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
-    files.push((dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?));
-    // The Echo CLI for its skills, as Echo's own skills reach it: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`.
-    files.push((dir.join("scripts").join("echoctl"), include_str!("../../../plugin/scripts/echoctl").to_string()));
-    files.push((dir.join("scripts").join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").to_string()));
-    for (f, text) in files {
+    let _lock = session_lock(id)?;
+    let dir = session_dir(id);
+    let (_, package) = package_mark(&dir);
+    if let Some((name, _)) = files.iter().find(|(n, _)| package.contains(n)) {
+        bail!("skill {name}: the plugin's package has a skill of that name");
+    }
+    if files.len() + package.len() > crate::plugins::MAX_SKILLS {
+        bail!("at most {} skills, with the {} of its package", crate::plugins::MAX_SKILLS, package.len());
+    }
+    // Its runtime skills are replaced whole; the package's stay.
+    for old in skill_dirs(&dir).into_iter().filter(|n| !package.contains(n)) {
+        std::fs::remove_dir_all(dir.join("skills").join(old))?;
+    }
+    if files.is_empty() {
+        SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
+        if package.is_empty() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        return Ok(());
+    }
+    for (name, md) in files {
+        let f = dir.join("skills").join(name).join("SKILL.md");
         std::fs::create_dir_all(f.parent().expect("a parent"))?;
-        paths::write_atomic(&f, text.as_bytes())?;
+        paths::write_atomic(&f, md.as_bytes())?;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.join("scripts").join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
-    }
+    write_session_base(id, &dir)?;
     SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
+    Ok(())
+}
+
+/// Copy installed plugin `id`'s package skills (the manifest's `skills`) into its session folder, beside its runtime
+/// skills, replacing what an earlier version copied; a version without any takes them away. Only Echo writes there:
+/// the host half reaches neither the folder nor the installed package.
+pub fn copy_package_skills(id: &str) -> Result<()> {
+    let p = crate::plugins::Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
+    let pdir = crate::plugins::plugin_dir(&p);
+    let m = crate::plugins::read_manifest(&pdir)?;
+    let package = crate::plugins::package_skills(&pdir, &m)?;
+    let _lock = session_lock(id)?;
+    let dir = session_dir(id);
+    for old in package_mark(&dir).1 {
+        let _ = std::fs::remove_dir_all(dir.join("skills").join(old));
+    }
+    for (name, from) in &package {
+        let to = dir.join("skills").join(name);
+        // A runtime skill of the same name gives way to the package's.
+        let _ = std::fs::remove_dir_all(&to);
+        crate::plugins::copy_tree(from, &to)?;
+    }
+    if package.is_empty() {
+        let _ = std::fs::remove_file(dir.join(PACKAGE_MARK));
+        if skill_dirs(&dir).is_empty() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        return Ok(());
+    }
+    write_session_base(id, &dir)?;
+    let mark = json!({"files": p.files, "skills": package.iter().map(|(n, _)| n).collect::<Vec<_>>()});
+    paths::write_atomic(&dir.join(PACKAGE_MARK), serde_json::to_string_pretty(&mark)?.as_bytes())?;
     Ok(())
 }
 
@@ -270,10 +351,24 @@ pub fn drop_plugin(id: &str) {
     }
 }
 
-/// The Claude Code plugin folders Echo's sessions get (enabled plugins, folders that still exist).
+/// The Claude Code plugin folders Echo's sessions get: enabled plugins' runtime skills set in this run and their
+/// package skills, copied again first when the installed files changed since (an update, an install from a terminal).
 pub fn session_plugins() -> Vec<PathBuf> {
-    let on = enabled_ids();
-    SESSION_PLUGINS.lock().map(|m| m.iter().filter(|(id, d)| on.contains(id) && d.is_dir()).map(|(_, d)| d.clone()).collect()).unwrap_or_default()
+    let runtime = SESSION_PLUGINS.lock().map(|m| m.clone()).unwrap_or_default();
+    let mut out = vec![];
+    for p in crate::plugins::enabled() {
+        let dir = session_dir(&p.id);
+        let package = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)).is_ok_and(|m| !m.skills.is_empty());
+        if (package || dir.join(PACKAGE_MARK).is_file()) && package_mark(&dir).0 != p.files {
+            if let Err(e) = copy_package_skills(&p.id) {
+                eprintln!("plugin {}: its skills can't be copied: {e:#}", p.id);
+            }
+        }
+        if (package || runtime.contains_key(&p.id)) && dir.join(".claude-plugin").join("plugin.json").is_file() {
+            out.push(dir);
+        }
+    }
+    out
 }
 
 /// The Echo CLI as the skills of these plugin folders name it (`<dir>/scripts/echoctl`, both slash forms).

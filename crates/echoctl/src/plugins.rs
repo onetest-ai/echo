@@ -18,15 +18,12 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
-use crate::app::NoWindow;
 use crate::paths;
 
 pub mod addresses;
@@ -37,6 +34,9 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+mod sources;
+use sources::*;
+pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod signin;
@@ -87,6 +87,10 @@ pub struct Manifest {
     /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widgets: Vec<WidgetDef>,
+    /// Its package skills: folders in its package (`skills/<name>`, Agent Skills format: `SKILL.md`, `scripts/`,
+    /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
     /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
     /// work rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -256,6 +260,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    package_skills(dir, &m)?;
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
         match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
@@ -347,6 +352,64 @@ pub fn inside_plugin_dir(dir: &Path, rel: &str) -> Result<PathBuf> {
     Ok(d)
 }
 
+/// The most skills a plugin gives Echo's sessions, its package and runtime ones together.
+pub const MAX_SKILLS: usize = 10;
+
+/// Its package skills, checked: `(name, folder in the package)`. Each is a folder inside the plugin named as a skill
+/// (a–z, 0–9, -), once; its `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line
+/// `description`, and no `!` command anywhere in it (Claude Code runs one when the skill loads).
+pub fn package_skills(dir: &Path, m: &Manifest) -> Result<Vec<(String, PathBuf)>> {
+    if m.skills.len() > MAX_SKILLS {
+        bail!("it ships more than {MAX_SKILLS} skills");
+    }
+    let mut out: Vec<(String, PathBuf)> = vec![];
+    for rel in &m.skills {
+        let d = inside_plugin_dir(dir, rel).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
+        let name = d.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if !valid_skill_name(&name) || out.iter().any(|(n, _)| *n == name) {
+            bail!("skill “{rel}”: its folder is named as a skill (a–z, 0–9, -; up to 40), once");
+        }
+        let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
+        check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
+        out.push((name, d));
+    }
+    Ok(out)
+}
+
+/// A skill's name: lowercase words with dashes, up to 40 characters.
+pub fn valid_skill_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A package skill's `SKILL.md`: frontmatter of `name` (= `name`) and a one-line `description` only, no `!` command.
+fn check_skill_md(name: &str, text: &str) -> Result<()> {
+    let text = text.replace("\r\n", "\n");
+    let rest = text.strip_prefix("---\n").ok_or_else(|| anyhow!("SKILL.md starts with its frontmatter (---)"))?;
+    let (front, _) = rest.split_once("\n---").ok_or_else(|| anyhow!("SKILL.md's frontmatter has no end (---)"))?;
+    let (mut got_name, mut got_desc) = (None, None);
+    for line in front.lines().filter(|l| !l.trim().is_empty()) {
+        let (k, v) = line.split_once(':').ok_or_else(|| anyhow!("SKILL.md's frontmatter holds only name and description"))?;
+        let v = v.trim();
+        let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(v);
+        match k {
+            "name" if got_name.is_none() => got_name = Some(v.to_string()),
+            "description" if got_desc.is_none() => got_desc = Some(v.to_string()),
+            _ => bail!("SKILL.md's frontmatter holds only name and description (not “{}”)", k.trim()),
+        }
+    }
+    if got_name.as_deref() != Some(name) {
+        bail!("SKILL.md's name is its folder's, “{name}”");
+    }
+    let desc = got_desc.unwrap_or_default();
+    if desc.is_empty() || desc.chars().count() > 1024 || matches!(desc.as_str(), "|" | ">" | "|-" | ">-") {
+        bail!("SKILL.md needs a description of one line, up to 1024 characters");
+    }
+    if text.contains("!`") {
+        bail!("“!`…`” runs a command in Claude Code; a plugin's SKILL.md runs none");
+    }
+    Ok(())
+}
+
 /// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
 pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
     let mut lines = describe(&m.uses)?;
@@ -355,6 +418,12 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its package skills, by name: what they say is in its package, for Echo's sessions only.
+    if !m.skills.is_empty() {
+        let names: Vec<String> = m.skills.iter().map(|s| format!("“{}”", s.trim_end_matches('/').rsplit('/').next().unwrap_or(s))).collect();
+        let what = if names.len() == 1 { "the skill" } else { "the skills" };
+        lines.push(format!("Gives Claude in Echo {what} {} from its package — in Echo's sessions, not your Claude Code", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>())));
     }
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
     match m.widgets.len() {
@@ -474,265 +543,6 @@ pub(crate) fn wait_lock_for(path: &Path, what: &str, wait: std::time::Duration) 
             bail!("another Echo is changing {what} — try again in a moment");
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
-// ── sources and fetching ──
-
-#[derive(Debug, PartialEq)]
-enum Source {
-    Github { repo: String, git_ref: Option<String> },
-    Git { url: String, git_ref: Option<String> },
-    Local(PathBuf),
-}
-
-fn plain_ref(r: &str) -> bool {
-    !r.is_empty() && r.len() <= 100 && !r.starts_with('-') && r.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b)) && !r.contains("..")
-}
-
-fn parse_source(s: &str) -> Result<Source> {
-    let s = s.trim();
-    if s.starts_with("https://") || s.starts_with("ssh://") || s.starts_with("git@") {
-        let (url, r) = match s.rsplit_once('#') {
-            Some((u, r)) => (u, Some(r)),
-            None => (s, None),
-        };
-        if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            bail!("“{s}” isn't a git address");
-        }
-        if let Some(r) = r.filter(|r| !plain_ref(r)) {
-            bail!("“{r}” isn't a plain branch, tag or commit");
-        }
-        return Ok(Source::Git { url: url.into(), git_ref: r.map(str::to_string) });
-    }
-    let local = s.starts_with('/') || s.starts_with('.') || s.starts_with('~') || Path::new(s).is_absolute();
-    if local {
-        let p = if let Some(rest) = s.strip_prefix("~/") { paths::user_home().join(rest) } else { PathBuf::from(s) };
-        let p = dunce::canonicalize(&p).with_context(|| format!("no folder {s}"))?;
-        if !p.is_dir() {
-            bail!("{s} isn't a folder");
-        }
-        return Ok(Source::Local(p));
-    }
-    let (repo, r) = match s.split_once('@') {
-        Some((repo, r)) => (repo, Some(r)),
-        None => (s, None),
-    };
-    let ok = |p: &str| !p.is_empty() && p.len() <= 100 && !p.starts_with('.') && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
-    match repo.split_once('/') {
-        Some((o, n)) if ok(o) && ok(n) => {}
-        _ => bail!("“{s}” isn't owner/repo, a git address (https://…) or a folder"),
-    }
-    if let Some(r) = r.filter(|r| !plain_ref(r)) {
-        bail!("“{r}” isn't a plain branch, tag or commit");
-    }
-    Ok(Source::Github { repo: repo.into(), git_ref: r.map(str::to_string) })
-}
-
-/// A fetched tree: where its files are, and the commit they are (`local-<hash>` for a folder).
-struct Snapshot {
-    dir: PathBuf,
-    commit: String,
-}
-
-fn hex40(s: &str) -> Option<String> {
-    let s = s.trim();
-    (s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())).then(|| s.to_ascii_lowercase())
-}
-
-fn run_out(c: &mut Command) -> Result<Vec<u8>> {
-    let out = c.output().with_context(|| format!("{:?} can't start", c.get_program()))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        bail!("{}", err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("failed").trim());
-    }
-    Ok(out.stdout)
-}
-
-/// GitHub: the commit a ref (default: the default branch) points to.
-fn github_commit(repo: &str, git_ref: Option<&str>) -> Result<String> {
-    let r = git_ref.unwrap_or("HEAD");
-    let api = format!("https://api.github.com/repos/{repo}/commits/{r}");
-    let curl = run_out(Command::new("curl").no_window().args(["-fsSL", "-H", "Accept: application/vnd.github.sha", &api]));
-    if let Some(sha) = curl.as_ref().ok().and_then(|o| hex40(&String::from_utf8_lossy(o))) {
-        return Ok(sha);
-    }
-    // A private repository: the user's own `gh` sign-in.
-    let gh = crate::app::find_program("gh");
-    let out = run_out(Command::new(&gh).no_window().args(["api", "-H", "Accept: application/vnd.github.sha", &format!("repos/{repo}/commits/{r}")]))
-        .map_err(|e| anyhow!("can't read {repo} on GitHub ({}; gh: {e})", curl.err().map(|e| e.to_string()).unwrap_or_else(|| "no commit".into())))?;
-    hex40(&String::from_utf8_lossy(&out)).ok_or_else(|| anyhow!("GitHub gave no commit for {repo}@{r}"))
-}
-
-/// Unpack a GitHub commit's tarball into `dest` (empty, created).
-fn github_unpack(repo: &str, sha: &str, dest: &Path, work: &Path) -> Result<()> {
-    let tgz = work.join("tree.tar.gz");
-    let url = format!("https://codeload.github.com/{repo}/tar.gz/{sha}");
-    let curl = Command::new("curl").no_window().args(["-fsSL", "--max-filesize", "200000000", "-o"]).arg(&tgz).arg(&url).status();
-    if !curl.is_ok_and(|s| s.success()) {
-        let gh = crate::app::find_program("gh");
-        let bytes = run_out(Command::new(&gh).no_window().args(["api", &format!("repos/{repo}/tarball/{sha}")])).with_context(|| format!("downloading {repo}"))?;
-        fs::write(&tgz, bytes)?;
-    }
-    fs::create_dir_all(dest)?;
-    // bsdtar (macOS, Windows 10+) and GNU tar both drop absolute paths and refuse `..`; links are
-    // refused after, by `check_tree`.
-    run_out(Command::new("tar").no_window().arg("-xzf").arg(&tgz).arg("-C").arg(dest).arg("--strip-components").arg("1")).context("unpacking")?;
-    let _ = fs::remove_file(&tgz);
-    Ok(())
-}
-
-fn git_fetch(url: &str, git_ref: Option<&str>, dest: &Path) -> Result<String> {
-    let git = crate::app::find_program("git");
-    let mut c = Command::new(&git).no_window();
-    c.args(["clone", "--quiet", "--depth", "1", "--no-tags", "-c", "core.symlinks=false"]);
-    if let Some(r) = git_ref {
-        c.args(["--branch", r]);
-    }
-    c.arg("--").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0");
-    run_out(&mut c).with_context(|| format!("git can't fetch {url}"))?;
-    let sha = run_out(Command::new(&git).no_window().arg("-C").arg(dest).args(["rev-parse", "HEAD"]))?;
-    let sha = hex40(&String::from_utf8_lossy(&sha)).ok_or_else(|| anyhow!("git gave no commit"))?;
-    fs::remove_dir_all(dest.join(".git"))?;
-    Ok(sha)
-}
-
-/// Files, bytes: refuses links, special files and anything over the limit.
-fn check_tree(dir: &Path, limit: Limit) -> Result<(usize, u64)> {
-    let (mut files, mut bytes) = (0usize, 0u64);
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d)? {
-            let e = e?;
-            if e.file_name() == ".git" {
-                continue;
-            }
-            let md = fs::symlink_metadata(e.path())?;
-            let rel = e.path().strip_prefix(dir).unwrap_or(&e.path()).display().to_string();
-            if md.file_type().is_symlink() {
-                bail!("it holds a link ({rel}) — refused");
-            } else if md.is_dir() {
-                stack.push(e.path());
-            } else if md.is_file() {
-                files += 1;
-                bytes += md.len();
-            } else {
-                bail!("it holds a special file ({rel})");
-            }
-            if files > limit.files || bytes > limit.bytes {
-                bail!("it is too big (over {} files or {} MB)", limit.files, limit.bytes >> 20);
-            }
-        }
-    }
-    Ok((files, bytes))
-}
-
-/// sha256 over the tree's files in path order (path, size, bytes); what an install records.
-fn tree_hash(dir: &Path) -> Result<String> {
-    let mut list = vec![];
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d)? {
-            let p = e?.path();
-            if p.file_name().is_some_and(|n| n == ".git") {
-                continue;
-            }
-            let md = fs::symlink_metadata(&p)?;
-            if md.is_dir() {
-                stack.push(p);
-            } else if md.is_file() {
-                list.push(p);
-            }
-        }
-    }
-    let rel = |p: &Path| p.strip_prefix(dir).unwrap_or(p).components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
-    list.sort_by_key(|p| rel(p));
-    let mut h = Sha256::new();
-    for p in list {
-        let b = fs::read(&p)?;
-        h.update(rel(&p).as_bytes());
-        h.update([0]);
-        h.update((b.len() as u64).to_le_bytes());
-        h.update(&b);
-    }
-    Ok(format!("{:x}", h.finalize()))
-}
-
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
-    fs::create_dir_all(to)?;
-    for e in fs::read_dir(from)? {
-        let e = e?;
-        if e.file_name() == ".git" {
-            continue;
-        }
-        let md = fs::symlink_metadata(e.path())?;
-        let dest = to.join(e.file_name());
-        if md.is_dir() {
-            copy_tree(&e.path(), &dest)?;
-        } else if md.is_file() {
-            fs::copy(e.path(), &dest)?;
-        }
-    }
-    Ok(())
-}
-
-/// A folder name for a marketplace (its files and lock).
-fn market_key(name: &str) -> String {
-    let k: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' }).collect();
-    let h = format!("{:x}", Sha256::digest(name.as_bytes()));
-    format!("{}-{}", k.trim_matches('-').chars().take(40).collect::<String>(), &h[..8])
-}
-
-/// Fetch a source into `<base>/<commit>/` (kept if already there); older commits are removed.
-fn fetch(source: &str, base: &Path, limit: Limit) -> Result<Snapshot> {
-    match parse_source(source)? {
-        Source::Local(p) => {
-            check_tree(&p, limit)?;
-            Ok(Snapshot { commit: format!("local-{}", &tree_hash(&p)?[..12]), dir: p })
-        }
-        src => {
-            fs::create_dir_all(base)?;
-            let work = base.join(format!(".fetch-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&work);
-            fs::create_dir_all(&work)?;
-            let tree = work.join("tree");
-            let got = (|| -> Result<String> {
-                match &src {
-                    Source::Github { repo, git_ref } => {
-                        let sha = github_commit(repo, git_ref.as_deref())?;
-                        if base.join(&sha).is_dir() {
-                            return Ok(sha);
-                        }
-                        github_unpack(repo, &sha, &tree, &work)?;
-                        Ok(sha)
-                    }
-                    Source::Git { url, git_ref } => git_fetch(url, git_ref.as_deref(), &tree),
-                    Source::Local(_) => unreachable!(),
-                }
-            })();
-            let sha = match got {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = fs::remove_dir_all(&work);
-                    return Err(e);
-                }
-            };
-            let dir = base.join(&sha);
-            if !dir.is_dir() {
-                if let Err(e) = check_tree(&tree, limit) {
-                    let _ = fs::remove_dir_all(&work);
-                    return Err(e);
-                }
-                fs::rename(&tree, &dir)?;
-            }
-            let _ = fs::remove_dir_all(&work);
-            for e in fs::read_dir(base)?.flatten() {
-                if e.path() != dir && e.file_name().to_string_lossy().len() == 40 {
-                    let _ = fs::remove_dir_all(e.path());
-                }
-            }
-            Ok(Snapshot { dir, commit: sha })
-        }
     }
 }
 
@@ -1077,6 +887,10 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
                 let _ = fs::remove_dir_all(e.path());
             }
         }
+    }
+    // Its package skills, as this version ships them, for Echo's sessions.
+    if let Err(e) = crate::grants::copy_package_skills(id) {
+        eprintln!("plugin {id}: its skills can't be copied: {e:#}");
     }
     Ok(rec)
 }
@@ -1570,7 +1384,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1827,6 +1641,53 @@ mod tests {
         fs::write(d.join("a b.svg"), "<svg/>").unwrap();
         for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg", "Icon.SVG", "a b.svg", "x\"y.svg", "/icon.svg"] {
             assert!(with(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_plugins_package_skills_are_folders_of_its_own_with_a_plain_skill_md() {
+        let (_env, root) = paths::testenv::folders("plugins-package-skills");
+        let d = root.join("p");
+        let skill = |name: &str, md: &str| {
+            fs::create_dir_all(d.join("skills").join(name).join("references")).unwrap();
+            fs::write(d.join("skills").join(name).join("SKILL.md"), md).unwrap();
+        };
+        let with = |skills: Value| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "skills": skills}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        skill("read-staffing", "---\nname: read-staffing\ndescription: \"Reads the staffing of a project.\"\n---\n\nRun the script.\n");
+        skill("two", "---\nname: two\ndescription: Another one.\n---\nText.\n");
+        let m = with(json!(["skills/read-staffing", "./skills/two/"])).unwrap();
+        assert_eq!(package_skills(&d, &m).unwrap().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["read-staffing", "two"]);
+        assert_eq!(sheet(&m).unwrap(), ["Gives Claude in Echo the skills “read-staffing” and “two” from its package — in Echo's sessions, not your Claude Code"]);
+        let one = with(json!(["skills/two"])).unwrap();
+        assert_eq!(sheet(&one).unwrap(), ["Gives Claude in Echo the skill “two” from its package — in Echo's sessions, not your Claude Code"]);
+        // Each refused, with why.
+        skill("hooked", "---\nname: hooked\ndescription: x\nhooks: evil\n---\n");
+        skill("renamed", "---\nname: other\ndescription: x\n---\n");
+        skill("runs", "---\nname: runs\ndescription: x\n---\nFirst !`curl evil`\n");
+        skill("folded", "---\nname: folded\ndescription: >\n  two lines\n---\n");
+        skill("open", "---\nname: open\ndescription: x\n");
+        skill("Caps", "---\nname: Caps\ndescription: x\n---\n");
+        fs::create_dir_all(d.join("skills/empty")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        for (bad, why) in [
+            (json!(["skills/hooked"]), "only name and description"),
+            (json!(["skills/renamed"]), "its folder's"),
+            (json!(["skills/runs"]), "runs a command"),
+            (json!(["skills/folded"]), "only name and description"),
+            (json!(["skills/open"]), "no end"),
+            (json!(["skills/Caps"]), "named as a skill"),
+            (json!(["skills/empty"]), "no SKILL.md"),
+            (json!(["skills/two", "skills/two"]), "once"),
+            (json!(["../outside"]), "isn't a folder inside the plugin"),
+            (json!(["/tmp"]), "isn't a folder inside the plugin"),
+            (json!(["skills/none"]), "isn't in the plugin"),
+            (json!(vec!["skills/two"; 11]), "more than 10"),
+        ] {
+            let e = with(bad.clone()).unwrap_err().to_string();
+            assert!(e.contains(why), "{bad}: {e}");
         }
     }
 }

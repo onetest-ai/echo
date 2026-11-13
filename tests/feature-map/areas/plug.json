@@ -222,6 +222,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-24",
+   "feature": "A plugin may ship package skills: folders in its package named in the manifest's `skills` (Agent Skills format: `SKILL.md`, `references/`, `scripts/`; at most 10 with its runtime skills). The sheet names them ('Gives Claude in Echo the skill “x” from its package — in Echo's sessions, not your Claude Code'); a version whose skill folder is outside the plugin, isn't named as a skill, or whose `SKILL.md` frontmatter holds more than `name` (the folder's) and a one-line `description` or a `!` command can't be installed. Echo copies them as shipped into its own config folder (`plugins/session/<id>/skills/`) beside the plugin's runtime skills, at install and update and again before a session when the installed files changed; a runtime skill can't take a package skill's name and an empty runtime list leaves them; a switched-off plugin gives none; removing the plugin removes them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

@@ -2624,6 +2624,83 @@ mod tests {
     // A release build has no ECHOCTL_PICK_FOLDER: there `pickFolder` would open the real folder picker.
     #[cfg(debug_assertions)]
     #[test]
+    fn a_plugins_package_skill_reaches_the_sessions_beside_its_runtime_skills() {
+        let (_env, root) = paths::testenv::folders("jshost-package-skills");
+        let mk = root.join("market");
+        let d = mk.join("plugins/kit");
+        let write = |version: &str, body: &str| {
+            std::fs::create_dir_all(d.join("skills/staffing/references")).unwrap();
+            std::fs::write(d.join("skills/staffing/SKILL.md"), format!("---\nname: staffing\ndescription: Reads a project's staffing.\n---\n\n{body}\n")).unwrap();
+            std::fs::write(d.join("skills/staffing/references/fields.md"), "# Fields").unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": version, "main": "main.js", "skills": ["skills/staffing"], "uses": {"sessions": {"skills": true}}}).to_string()).unwrap();
+        };
+        write("0.1.0", "Read it.");
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('set', (a) => { ctx.sessions.skills(a.list); return true })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
+        assert!(agreed.iter().any(|l| l == "Gives Claude in Echo the skill “staffing” from its package — in Echo's sessions, not your Claude Code"), "{agreed:?}");
+        plugins::install("kit", Some(&name), &agreed).unwrap();
+        // Copied at install, before its host half ever ran: the folder as the package ships it, in Echo's config folder.
+        let sp = crate::grants::session_plugins();
+        assert_eq!(sp.len(), 1);
+        assert!(sp[0].starts_with(paths::config_dir()) && !sp[0].starts_with(plugins::data_dir("kit")));
+        assert_eq!(crate::grants::skill_names(&sp), vec!["echo-kit:staffing".to_string()]);
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it."));
+        assert_eq!(std::fs::read_to_string(sp[0].join("skills/staffing/references/fields.md")).unwrap(), "# Fields");
+        // Its runtime skills go beside it; a runtime skill of the package's name is refused; an empty list keeps the package's.
+        sync();
+        let set = |list: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("kit", "set", &json!({"list": list})) {
+                    Ok(v) => Some(Ok(v)),
+                    Err(e) if e.to_string().contains("package") => Some(Err(e.to_string())),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        set(json!([{"name": "notes", "description": "Notes.", "body": "Text."}])).unwrap();
+        let mut names = crate::grants::skill_names(&crate::grants::session_plugins());
+        names.sort();
+        assert_eq!(names, ["echo-kit:notes", "echo-kit:staffing"]);
+        assert!(set(json!([{"name": "staffing", "description": "Mine.", "body": "x"}])).unwrap_err().contains("package has a skill of that name"));
+        set(json!([])).unwrap();
+        assert_eq!(crate::grants::skill_names(&crate::grants::session_plugins()), vec!["echo-kit:staffing".to_string()]);
+        // An update copies the new version's folder; a copy older than the installed files is copied again.
+        write("0.2.0", "Read it again.");
+        plugins::refresh(&name).unwrap();
+        plugins::update("kit", &[]).unwrap().unwrap();
+        let sp = crate::grants::session_plugins();
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it again."));
+        std::fs::write(sp[0].join("skills/staffing/SKILL.md"), "stale").unwrap();
+        std::fs::write(sp[0].join(".package.json"), r#"{"files": "older", "skills": ["staffing"]}"#).unwrap();
+        let sp = crate::grants::session_plugins();
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it again."));
+        // Switched off: not in a session; removed: its folder goes.
+        plugins::set_enabled("kit", false).unwrap();
+        assert!(crate::grants::session_plugins().is_empty());
+        plugins::set_enabled("kit", true).unwrap();
+        let dir = crate::grants::session_plugins()[0].clone();
+        plugins::remove("kit", false).unwrap();
+        sync();
+        assert!(!dir.exists() && crate::grants::session_plugins().is_empty());
+    }
+
+    #[test]
     fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
         let (_env, root) = paths::testenv::folders("jshost-sessions");
         let vault = root.join("vault");
