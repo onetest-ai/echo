@@ -157,18 +157,20 @@ function addWidgetPanel() {
   const shown = all.filter((w) => (part === 'All' || w.part === part) && (!q || `${w.label} ${w.about} ${w.part}`.toLowerCase().includes(q)))
   // The picked one is among what the part and search show (else the first of them; none shown: no preview).
   if (shown.length && !shown.some((x) => x.id === S.tdPick)) S.tdPick = shown[0].id
-  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
+  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}"${S.tdPick === w.id ? ` data-tw-add-size="${esc(twPickSize(w))}"` : ''} aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
   // Hovering a row shows its preview; leaving the list, the picked (clicked) one again.
   const w = shown.find((x) => x.id === S.tdHover) || shown.find((x) => x.id === S.tdPick)
   let pick = ''
   if (w) {
-    const size = twPickSize(w)
+    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === w.id)
+    const size = placed ? placed.size : twPickSize(w)
     const px = { S: 170, M: 280, L: 380 }[size] || 280
     const html = (S.tdParts || {})[w.id]
     const pv = html ? `<div class="tw-pv-in" inert style="width:${px * 2}px">${html}</div>` : `<div class="set-sub tw-pv-none">${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-    const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}">${z}</button>`).join('')
+    // On Today, a size is its size there (a click changes it); else the size its row's Add and a drag put it in at.
+    const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" data-tw-id="${esc(w.id)}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${z}">${z}</button>`).join('')
     const note = `${size} · ${TW_SIZES[size]} column${TW_SIZES[size] === 1 ? '' : 's'}${w.height === 'fill' ? ' · fills its column' : ''}`
-    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
+    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
   return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
@@ -200,7 +202,12 @@ document.addEventListener('click', (e) => {
     return todayLayoutDo({ op: 'remove', widget: d.twRemove })
   }
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
-  if (d.twPickSize) { S.tdPickSize = d.twPickSize; return render() }
+  if (d.twPickSize) {
+    S.tdPickSize = d.twPickSize
+    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === d.twId)
+    if (placed && placed.size !== d.twPickSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twPickSize })
+    return render()
+  }
   if (d.twPart) { S.tdPart = d.twPart; return render() }
   if (d.twPick) { S.tdPick = d.twPick; S.tdHover = null; return render() }
 })
