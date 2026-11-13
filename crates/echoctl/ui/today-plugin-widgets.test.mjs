@@ -68,10 +68,72 @@ test('a chart: bar and line as SVG with each point titled, bars as rows; wrong p
   assert.equal((bar.match(/<rect /g) || []).length, 3)
   assert.match(bar, /<title>Tue: 7 calls<\/title>/)
   assert.match(draw('chart', { type: 'line', points }, 'M'), /<polyline points="/)
-  assert.equal((draw('chart', { type: 'bars', points }, 'M').match(/class="pw-bl"/g) || []).length, 3)
-  refused('chart', { type: 'pie', points }, 'type: bar, bars or line')
+  assert.equal((draw('chart', { type: 'bars', points }, 'M').match(/class="pc-rl"/g) || []).length, 3)
+  refused('chart', { type: 'radar', points }, 'type: line, area, bar')
   refused('chart', { type: 'bar', points: [{ label: 'x', value: 'many' }] }, "point 1's value is not a number")
   assert.ok(!draw('chart', { type: 'bar', points: [{ label: '<b>x</b>', value: 1 }] }, 'M').includes('<b>x'), 'labels escaped')
+})
+
+test("a chart's series: Echo's palette in order, a tone for meaning, a legend for 2+ (none at S); dates as Echo writes them", () => {
+  const series = [{ key: 'rec', label: 'recorded' }, { key: 'min', label: 'with minutes', tone: 'good' }]
+  const points = [{ label: '2026-11-02', values: { rec: 12, min: 8 } }, { label: '2026-11-09', values: { rec: 20 } }]
+  const line = draw('chart', { type: 'line', series, points }, 'M')
+  assert.equal((line.match(/<polyline /g) || []).length, 2)
+  assert.match(line, /stroke:var\(--chart-1\)/)
+  assert.match(line, /stroke:var\(--me\)/, 'a tone colours its series')
+  assert.match(line, /<title>Nov 9 · with minutes: 0<\/title>/, 'a missing key is 0, the date as Echo writes it')
+  assert.match(line, /class="pc-lg"/)
+  assert.ok(!draw('chart', { type: 'line', series, points }, 'S').includes('pc-lg'), 'no legend at S')
+  assert.ok(!draw('chart', { type: 'line', points: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }] }, 'M').includes('pc-lg'), 'one series: no legend')
+  const area = draw('chart', { type: 'area', series, points }, 'M')
+  assert.equal((area.match(/class="pc-area"/g) || []).length, 2)
+  refused('chart', { type: 'line', series: Array.from({ length: 7 }, (_, i) => ({ key: `k${i}`, label: 'x' })), points }, '6 series at most')
+  refused('chart', { type: 'pie', series, points }, 'a pie takes one series')
+  refused('chart', { type: 'line', series, points: [{ label: 'a', value: 3 }] }, 'point 1 needs values')
+  refused('chart', { type: 'line', series: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], points }, 'unique')
+})
+
+test('a chart cuts its points (the last kept) and takes negatives only on line and bar', () => {
+  const many = Array.from({ length: 80 }, (_, i) => ({ label: `p${i}`, value: i }))
+  const line = draw('chart', { type: 'line', points: many }, 'M')
+  assert.ok(line.includes('p79') && !line.includes('<title>p19:'), 'the last 60 on a line')
+  assert.equal((draw('chart', { type: 'bar', points: many }, 'M').match(/<rect /g) || []).length, 24)
+  for (const [size, n] of [['S', 4], ['M', 6], ['L', 12]]) assert.equal((draw('chart', { type: 'bars', points: many }, size).match(/class="pc-rl"/g) || []).length, n, `bars at ${size}`)
+  const neg = draw('chart', { type: 'bar', points: [{ label: 'a', value: -3 }, { label: 'b', value: 5 }] }, 'M')
+  assert.match(neg, /<title>a: -3<\/title>/)
+  refused('chart', { type: 'bars', points: [{ label: 'a', value: -3 }] }, 'no negative values')
+  refused('chart', { type: 'pie', points: [{ label: 'a', value: -3 }] }, 'no negative values')
+})
+
+test('stacked and stacked-bars, percent; pie and donut fold small slices into Other; a funnel says each share', () => {
+  const series = [{ key: 'o', label: 'open' }, { key: 'b', label: 'booked' }]
+  const points = [{ label: 'W1', values: { o: 6, b: 2 } }, { label: 'W2', values: { o: 3, b: 9 } }]
+  assert.equal((draw('chart', { type: 'stacked', series, points }, 'M').match(/<rect /g) || []).length, 4)
+  const pct = draw('chart', { type: 'stacked-bars', series, points, percent: true }, 'M')
+  assert.match(pct, /W1 · open: 75%/)
+  assert.match(pct, /<span class="mono pc-rn">75%<\/span>/, 'its first series\' share at the end')
+  const slices = [['A', 40], ['B', 30], ['C', 10], ['D', 8], ['E', 6], ['F', 3], ['G', 2], ['H', 1]].map(([label, value]) => ({ label, value }))
+  const pie = draw('chart', { type: 'pie', points: slices }, 'M')
+  assert.equal((pie.match(/<path /g) || []).length, 7, 'six slices and Other')
+  assert.match(pie, /Other<em class="pc-share"[^]*?<b>3%<\/b>/, 'G and H under 3% fold into Other')
+  const donut = draw('chart', { type: 'donut', points: slices.slice(0, 3), center: { value: 80, label: 'positions' } }, 'M')
+  assert.match(donut, /class="pc-center"><b>80<\/b><span>positions<\/span>/)
+  assert.ok(!draw('chart', { type: 'pie', points: slices, center: { value: 1 } }, 'M').includes('pc-center'), 'center only in a donut')
+  const fun = draw('chart', { type: 'funnel', points: [{ label: 'Leads', value: 120 }, { label: 'Won', value: 30 }] }, 'M')
+  assert.match(fun, /<span class="mono pc-rn dim">25%<\/span>/)
+})
+
+test("a chart's headline: the value, what it is, the change (arrow by sign, tone by good); stats' trend as a sparkline", () => {
+  const points = [{ label: 'a', value: 1 }, { label: 'b', value: 2 }]
+  const up = draw('chart', { type: 'line', points, unit: 'h', headline: { value: '24 h', label: 'this week', change: { by: 2, than: 'last week', good: true } } }, 'M')
+  assert.match(up, /<div class="pc-head"><b>24 h<\/b><span class="set-sub">this week<\/span><span class="pc-ch good">↑ 2 h vs last week<\/span><\/div>/)
+  assert.match(draw('chart', { type: 'line', points, headline: { value: 7, change: { by: -3, good: false } } }, 'M'), /<span class="pc-ch bad">↓ 3<\/span>/)
+  assert.match(draw('chart', { type: 'line', points, headline: { value: 7, change: { by: 0 } } }, 'M'), /<span class="pc-ch">→ 0<\/span>/)
+  refused('chart', { type: 'line', points, headline: { label: 'x' } }, 'headline needs value')
+  refused('chart', { type: 'line', points, headline: { value: 1, change: { by: 'lots' } } }, 'headline.change.by is not a number')
+  const st = draw('stats', { items: [{ label: 'calls', value: 23, trend: [1, 4, 2, 6] }, { label: 'one', value: 1, trend: [5] }] }, 'M')
+  assert.equal((st.match(/class="pc-spark"/g) || []).length, 1, 'a trend of 2+ numbers only')
+  refused('stats', { items: [{ label: 'x', value: 1, trend: [1, 'b'] }] }, "item 1's trend 2 is not a number")
 })
 
 test("a stat's progress; any kind's open (echo:// a link, https a button that asks) and actions (its plugin's commands)", () => {

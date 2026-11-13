@@ -24,6 +24,10 @@
     {
       "id": "table-demo",
       "source": "./plugins/table-demo"
+    },
+    {
+      "id": "chart-demo",
+      "source": "./plugins/chart-demo"
     }
   ]
 }

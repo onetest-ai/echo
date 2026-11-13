@@ -200,7 +200,10 @@
 .pw-stat { display: flex; align-items: baseline; gap: 8px; }
 .pw-stat b, .pw-stats b { font-size: 28px; font-weight: 650; line-height: 1.1; }
 .pw-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
-.pw-stats > div { display: flex; flex-direction: column; }
+.pw-stats > div { display: flex; flex-direction: column; min-width: 0; }
+.pw-stats.trends { gap: 12px 24px; flex: 1 1 auto; }
+/* A card taller than its numbers: the trends take the height (up to 140 px). */
+.pw-stats.trends > div > .pc-spark { flex: 1 1 28px; min-height: 28px; max-height: 140px; }
 .pw-stats b { font-size: 22px; }
 .tone-good { color: var(--me); } .tone-warn { color: var(--warn); } .tone-bad { color: var(--danger); }
 .pw-note { margin-top: 4px; }
@@ -275,23 +278,59 @@
 /* A plugin widget's chart, progress, link and actions. */
 .pw-prog { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; margin-top: 6px; }
 .pw-prog span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-.pw-chart { width: 100%; height: 90px; display: block; }
 /* A widget its plugin hasn't answered yet: its place held, about the height its kind draws (a list's
    depends on its rows: a few). */
 .pw-wait { overflow: hidden; }
 .pw-wait.k-stat { height: 66px; } .pw-wait.k-stat.s-S { height: 44px; } .pw-wait.k-stats { height: 43px; } .pw-wait.k-list { height: 140px; }
-.pw-wait.k-page { height: 72px; } .pw-wait.k-chart { height: 131px; }
-.pw-chart line { stroke: var(--line-strong); }
-.pw-chart rect { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
-.pw-chart rect.last { fill: var(--accent); }
-.pw-chart polyline { stroke: var(--accent); stroke-width: 2; }
-.pw-chart circle { fill: var(--accent); }
-.pw-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
-.pw-bars { display: grid; grid-template-columns: minmax(60px, 34%) minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; font-size: 12.5px; }
-.pw-bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pw-bt { height: 10px; }
-.pw-bt span { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
-.pw-bn { font-size: 11.5px; color: var(--text-2); }
+.pw-wait.k-page { height: 72px; } .pw-wait.k-chart { height: 161px; }
+/* A plugin's chart (pluginChartHtml): the answer above it, Echo's palette, one y-axis, a legend for 2+. */
+.pc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.pc-head b { font-size: 24px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pc-ch { font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pc-ch.good { color: var(--me); } .pc-ch.bad { color: var(--danger); }
+.pc-svg { width: 100%; display: block; overflow: visible; }
+.pc-svg .pc-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pc-svg .pc-base { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pc-svg polyline { stroke-width: 2; stroke-linejoin: round; }
+.pc-svg .pc-area { fill-opacity: 0.22; }
+.pc-x { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 3px; gap: 6px; }
+.pc-x span { white-space: nowrap; }
+.pc-lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--text-2); margin-top: 6px; }
+.pc-lg span { display: inline-flex; align-items: center; gap: 6px; }
+.pc-lg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.pc-lg.col { flex-direction: column; gap: 6px; margin-top: 0; min-width: 0; flex: 0 1 260px; }
+.pc-lg.col b { margin-left: auto; padding-left: 12px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-rows { display: grid; grid-template-columns: minmax(60px, 32%) minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; font-size: 12px; }
+.pc-rows.funnel { grid-template-columns: minmax(60px, 28%) minmax(0, 1fr) auto auto; }
+.pc-rl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pc-bar { display: flex; gap: 2px; height: 12px; min-width: 0; }
+.pc-bar > span { height: 100%; border-radius: 0 3px 3px 0; min-width: 0; }
+.pc-bar.seg > span { border-radius: 0; } .pc-bar.seg > span:first-child { border-radius: 3px 0 0 3px; } .pc-bar.seg > span:last-child { border-radius: 0 3px 3px 0; }
+.pc-rn { font-size: 11.5px; color: var(--text-2); text-align: right; } .pc-rn.dim { color: var(--text-3); }
+.pc-pie { display: flex; align-items: center; gap: 20px; flex: 1 1 auto; }
+/* A pie or donut grows with its card (the card's width: a container); a wide one gives each slice a share bar. */
+.pw-sec.k-chart { container-type: inline-size; }
+.pc-disc { position: relative; width: clamp(120px, 26cqi, 190px); aspect-ratio: 1; flex: none; }
+.pc-disc svg { width: 100%; height: 100%; display: block; }
+.pc-share { display: none; font-style: normal; flex: 1 1 auto; height: 6px; margin: 0 12px; border-radius: 3px; background: color-mix(in srgb, var(--text) 7%, transparent); overflow: hidden; min-width: 24px; }
+.pc-share > span { display: block; height: 100%; border-radius: 3px; }
+@container (min-width: 480px) {
+  /* One grid: swatch, name, share bar, value — the bars start together. */
+  .pc-pie .pc-lg.col { flex: 1 1 auto; max-width: 560px; display: grid; grid-template-columns: 10px max-content minmax(24px, 1fr) auto; align-items: center; gap: 10px 8px; }
+  .pc-pie .pc-lg.col > span { display: contents; }
+  .pc-pie .pc-lg.col b { padding-left: 0; margin-left: 0; min-width: 34px; text-align: right; }
+  .pc-share { margin: 0 4px; }
+  .pc-share { display: block; }
+}
+.pc-disc path { stroke: var(--surface); stroke-width: 2; }
+.pc-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pc-center b { font-size: clamp(22px, 5cqi, 30px); font-weight: 650; } .pc-center span { font-size: 11px; color: var(--text-2); }
+.pc-spark { position: relative; display: block; height: 28px; margin-top: 6px; }
+.pc-spark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.pc-spark polyline { stroke: var(--chart-1); stroke-width: 1.75; stroke-linejoin: round; }
+.pc-spark polygon { fill: var(--chart-1); fill-opacity: 0.12; }
+.pc-spark i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--chart-1); box-shadow: 0 0 0 2px var(--surface); }
 .pw-foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 8px; }
 .pw-ask { margin-top: 6px; }
 /* A widget two rows high: it in its columns, the lines beside it in the others; as tall as they are. */
