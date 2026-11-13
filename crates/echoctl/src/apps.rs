@@ -69,6 +69,7 @@ impl TargetApp {
 /// A browser window's title that says it shows a Google Meet call: Meet's own tab title ("Meet – abc-defg-hij",
 /// "Meet - Weekly sync"), with or without the browser's suffix. A Meet-code-shaped word elsewhere ("fix-mute-bug") is
 /// not one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // read only on a Mac (and by the test feed of a debug build)
 pub fn is_meet_title(title: &str) -> bool {
     title.trim().strip_prefix("Meet ").is_some_and(|r| ["-", "–", "—"].iter().any(|d| r.trim_start().starts_with(d)))
 }

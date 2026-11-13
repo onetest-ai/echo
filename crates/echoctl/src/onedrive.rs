@@ -208,7 +208,8 @@ pub fn targets(call: &Value) -> Vec<(PathBuf, bool)> {
 }
 
 /// A command line's sub-commands, each as its words: spaces split words, `'…'` and `"…"` quote (a `;`, `&` or `|`
-/// inside quotes stays in the word), `\` escapes the next character, an unquoted `;`, `&`, `|` or line break ends a
+/// inside quotes stays in the word), `\` escapes the next character (in double quotes only `$`, `` ` ``, `"`, `\` or a
+/// line break, as Bash does), an unquoted `;`, `&`, `|` or line break ends a
 /// sub-command, and a word starting with `~/` is under the home folder.
 fn commands(s: &str) -> Vec<Vec<String>> {
     let (mut all, mut words, mut w) = (vec![], vec![], String::new());
@@ -234,11 +235,22 @@ fn commands(s: &str) -> Vec<Vec<String>> {
                 q = Some(c);
                 started = true;
             }
-            (None, '\\') | (Some('"'), '\\') => {
+            (None, '\\') => {
                 if let Some(n) = chars.next() {
                     w.push(n);
                     started = true;
                 }
+            }
+            // In double quotes it escapes only these; before anything else it is itself (a Windows path's).
+            (Some('"'), '\\') => {
+                match chars.clone().next() {
+                    Some(n @ ('$' | '`' | '"' | '\\' | '\n')) => {
+                        chars.next();
+                        w.push(n);
+                    }
+                    _ => w.push('\\'),
+                }
+                started = true;
             }
             (Some(x), c) if c == x => q = None,
             _ => {
@@ -331,6 +343,16 @@ mod tests {
         assert!(setting(&root.join("no-such").to_string_lossy()).is_err());
     }
 
+    /// As Bash reads it: in double quotes a backslash escapes only `$`, `` ` ``, `"`, `\` and a line break, else it is
+    /// itself — a Windows path in quotes keeps its backslashes (it lost them, the 0.9.4 Windows check found).
+    #[test]
+    fn a_backslash_in_double_quotes_is_kept_unless_it_escapes() {
+        let words = |s: &str| commands(s).into_iter().flatten().collect::<Vec<_>>();
+        assert_eq!(words(r#"cp a "C:\Users\x\Synced/n.md""#), ["cp", "a", r"C:\Users\x\Synced/n.md"]);
+        assert_eq!(words(r#"echo "a\"b" "c\\d" "e\$f""#), ["echo", "a\"b", r"c\d", "e$f"]);
+        assert_eq!(words(r"echo 'g\h' i\ j"), ["echo", r"g\h", "i j"], "single quotes keep it; unquoted it escapes");
+    }
+
     #[test]
     fn a_write_finds_the_folder_onedrive_doesnt_have_here() {
         let (_env, root) = crate::paths::testenv::folders("onedrive-hook");
@@ -340,7 +362,7 @@ mod tests {
         let t = targets(&call("Bash", json!({"command": format!("mkdir -p '{0}/Projects/Acme' && cp notes.md \"{0}/Synced/n.md\"; echo hi", od.display())})));
         assert_eq!(t, vec![(od.join("Projects/Acme"), true), (od.join("Synced/n.md"), false)]);
         // A folder made after another command is still a folder; quotes keep `&` in a name; `\ ` escapes a space.
-        let t = targets(&call("Bash", json!({"command": format!("cd /tmp && mkdir \"{0}/Sales & Marketing\" ; mkdir {1}/My\\ Folder", od.display(), od.display())})));
+        let t = targets(&call("Bash", json!({"command": format!("cd /tmp && mkdir \"{0}/Sales & Marketing\" ; mkdir '{1}'/My\\ Folder", od.display(), od.display())})));
         assert_eq!(t, vec![(od.join("Sales & Marketing"), true), (od.join("My Folder"), true)]);
         assert_eq!(targets(&call("Write", json!({"file_path": "/x/a.md", "content": "x"}))), vec![(PathBuf::from("/x/a.md"), false)]);
         assert!(targets(&call("Read", json!({"file_path": "/x/a.md"}))).is_empty());
