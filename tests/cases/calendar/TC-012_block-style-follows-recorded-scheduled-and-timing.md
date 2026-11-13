@@ -38,9 +38,9 @@ tags: [calendar, blocks]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day" | The title is today's weekday and date; the day column is marked today and has the line "now" (`.now`) |
 | 2 | Read the classes and the small text of `ev-acme-sync` and `ev-globex-steering` | Both have `ev`, `online`, `recorded`, `past`; neither has a tag |
-| 3 | Read the block `ev-m01` (Acme design review) | `ev online past`; no `recorded`, no tag |
+| 3 | Read the block `ev-m01` (Acme design review) | `ev`, `online`, `past` (and `narrow` if it sits beside three or more); no `recorded`, no tag |
 | 4 | Read the blocks `ev-m02` and `ev-m04` | Both have `scheduled` and a tag "Will record" (`.tag.will`); not `past`; not `recorded` |
-| 5 | Read the blocks `ev-m07` and `ev-m08` | Only `ev online`: no `past`, `recorded`, `scheduled`, `transcript`, `declined`, `cancelled` and no tag |
+| 5 | Read the blocks `ev-m07` and `ev-m08` | Only `ev`, `online` and `narrow` (each sits in a group of more than four lanes): no `past`, `recorded`, `scheduled`, `transcript`, `declined`, `cancelled` and no tag |
 
 ## Expected Final State
 Each block shows the style of its state.

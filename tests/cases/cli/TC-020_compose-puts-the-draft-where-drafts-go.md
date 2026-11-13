@@ -18,7 +18,7 @@ tags: [cli, mail, drafts, compose]
 ## Preconditions
 - Small data built right before the run: `tests/fixtures/make-data.sh <dir>`; every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`. Microsoft 365 is not signed in (the test data's default)
 - The data's environment catches drafts: a development build writes each `mailto:` link to `<dir>/mail-drafts.log` (`ECHOCTL_TEST_MAIL_DRAFTS`) instead of opening a mail app — nothing opens, nothing is sent
-- A file `<dir>/slots.txt` with two lines: `Hi Kim,` and `which training slots work for you?`
+- A file `<dir>/slots.txt` with two lines, `Hi Kim,` and `which training slots work for you?`, and no newline after the second: `printf 'Hi Kim,\nwhich training slots work for you?' > <dir>/slots.txt` (the body goes into the link as it is)
 - The chosen app's name, `<APP>`: on macOS `Spark`; on Windows the full path of a program that exists, here `target\debug\echoctl.exe` as its full path (only its name is checked: the draft goes to the log)
 
 ## Steps
