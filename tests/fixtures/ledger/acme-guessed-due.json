@@ -1,4 +1,3 @@
 [
-  {"op": "create", "ref": "g", "kind": "task", "parent": "S003", "title": "Send Dana the rollout summary", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "Let's agree what the rollout needs before the Berlin pilot can start"},
-  {"op": "create", "ref": "h", "kind": "task", "parent": "S001", "title": "Send Dana the SSO checklist", "type": "action", "internal_owner": "Me", "due_text": "Friday", "quote": "I will send the SSO checklist to Dana by Friday"}
+  {"op": "create", "ref": "g", "kind": "task", "parent": "S003", "title": "Send Dana the rollout summary", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "Let's agree what the rollout needs before the Berlin pilot can start"}
 ]

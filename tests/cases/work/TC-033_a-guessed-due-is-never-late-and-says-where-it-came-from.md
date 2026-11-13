@@ -16,13 +16,13 @@ tags: [work, ledger, due, late]
 **Module:** Work | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- As work/TC-032 (standard data, `$A`, **W**); step 1 of TC-032 done (T026 with `due_text` "today", which W never says; T027 with "Friday", which W says)
+- As work/TC-032 (standard data, `$A`, **F**, **W**); step 1 of TC-032 done (T026 with `due_text` "today", which W never says; T027 with "next week", which F says)
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `$A tree` | T026 `due` = W's day, `due_guessed` true; T027 `due` = the Friday after W, no `due_guessed` |
+| 1 | `$A tree` | T026 `due` = W's day, `due_guessed` true; T027 `due` = the Friday of the week after F's (a day before the build at the latest, whatever the build day), no `due_guessed` |
 | 2 | `target/debug/echoctl project tasks` | In "I owe": T026 with `due` W's day, `late` false, `due_guessed` true, `due_from` `{"kind": "meeting", "date": <W's day>}`; T027 `late` true |
 | 3 | Open `{{base_url}}/#project/acme-rollout/work`, T026's details | Due reads "<W's day> · from the call of <W's day>" (no "late"); T027's Due is its date, and its card is marked late |
 | 4 | Open `{{base_url}}/#today` | My work lists T027 (late) and not T026 (its only due is guessed); the head's late count includes T027, not T026 |

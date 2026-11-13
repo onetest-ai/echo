@@ -34,7 +34,7 @@ The fake's answer for the comment `tell her to ask Priya`: for "Priya Nair", why
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today`, press `ControlOrMeta+k`, type `Won't do: Dana Lee`, press Enter (⌘K's NEEDS YOU NOW item for the row "Chat with Dana Lee"), type `tell her to ask Priya`, click the dialog's "Won't do" | The row leaves Needs you now; Asks shows a line "Won't do" for "Chat with Dana Lee" |
+| 1 | Navigate to `{{base_url}}/#today`, press `ControlOrMeta+k`, type `Won't do: Dana Lee`, press Enter (⌘K's NEEDS YOU NOW item for the row "Chat with Dana Lee"), type `tell her to ask Priya`, click the dialog's "Won't do" | The row leaves Needs you now; Asks shows a line "Won't do" for "Chat with Dana Lee": "Claude is noting who it's for…" while the run works, or already step 2's line when the run was quicker than the look (either passes) |
 | 2 | Wait up to 30 s for the line to change | "Won't do · for Priya Nair: Priya owns the Acme renewal pricing"; "A draft in Teams — nothing is sent until you press Send"; the draft "Hi Dana, Priya Nair owns the renewal pricing now: please ask her for the price list."; buttons "Send", "Edit", "Drop" |
 | 3 | Run `. <dir>/env && python3 -c "import json,os; a=[x for x in json.load(open(os.environ['ECHOCTL_HOME']+'/.echo/task-asks.json')) if x.get('kind')=='wont']; print(a[0]['state'], a[0]['draft']['channel'], a[0]['to']['chat'])"` | Prints `done teams 19:dana-lee@unq.gbl.spaces`: a draft, not sent, for the item's own chat |
 | 4 | Click "Edit" | The draft becomes a box (`#wd-text`) holding its text; "Edit" is gone; "Send" and "Drop" stay |
