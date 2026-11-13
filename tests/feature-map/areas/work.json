@@ -103,7 +103,7 @@
   },
   {
    "id": "F-WORK-10",
-   "feature": "Details → Status changes the state (to do, in progress, blocked, done or held, cancelled; a question open / answered); History says \"you set state · undo\" and `echoctl project tasks` shows it",
+   "feature": "Details → Status (one click opens its list) changes the state (to do, in progress, blocked, done or held, cancelled; a question open / answered); History says \"you set state · undo\" and `echoctl project tasks` shows it",
    "priority": "critical",
    "check": "agent",
    "axes": [
