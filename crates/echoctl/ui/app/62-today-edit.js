@@ -159,7 +159,7 @@ function addWidgetPanel() {
   const shown = all.filter((w) => (part === 'All' || w.part === part) && (!q || `${w.label} ${w.about} ${w.part}`.toLowerCase().includes(q)))
   // The picked one is among what the part and search show (else the first of them; none shown: no preview).
   if (shown.length && !shown.some((x) => x.id === S.tdPick)) S.tdPick = shown[0].id
-  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}"${S.tdPick === w.id ? ` data-tw-add-size="${esc(twPickSize(w))}"` : ''} aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
+  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(twPickSize(w))}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
   // Hovering a row shows its preview; leaving the list, the picked (clicked) one again.
   const w = shown.find((x) => x.id === S.tdHover) || shown.find((x) => x.id === S.tdPick)
   let pick = ''
@@ -223,7 +223,16 @@ document.addEventListener('click', (e) => {
 })
 // The preview follows the pointer over the list; out of the list it is the picked one's again.
 // Redrawn only when it changes (a redraw on a press would replace the button pressed, and lose its click).
-const twHover = (id) => { if ((S.tdHover || null) !== (id || null)) { S.tdHover = id || null; render() } }
+// The panel is drawn again: the focus goes back to the button it was on (by what it does), not to the page.
+const twHover = (id) => {
+  if ((S.tdHover || null) === (id || null)) return
+  S.tdHover = id || null
+  const a = document.activeElement
+  const back = a && a.closest && a.closest('.tw-panel') && ['twAdd', 'twPickSize', 'twPart'].find((k) => a.dataset && a.dataset[k])
+  const sel = back && `.tw-panel [data-${back.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}="${CSS.escape(a.dataset[back])}"]`
+  render()
+  if (sel) setTimeout(() => { const el = document.querySelector(sel); if (el && document.activeElement !== el) el.focus() })
+}
 document.addEventListener('mouseover', (e) => {
   if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
   const row = e.target.closest('.tw-list [data-tw-pick]')
@@ -247,7 +256,8 @@ document.addEventListener('dragstart', (e) => {
   const page = e.target.closest('.tw[data-tw]'), cat = e.target.closest('[data-tw-drag]')
   if (!page && !cat) return
   const w = cat && (S.tdCatalog || []).find((x) => x.id === cat.dataset.twDrag)
-  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: S.tdPick === cat.dataset.twDrag ? twPickSize(w) : undefined }
+  // From the panel at the size its preview shows (every row's: the same as its Add).
+  twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: twPickSize(w) }
   try { e.dataTransfer.setData('text/plain', twDrag.id); e.dataTransfer.effectAllowed = 'move' } catch (x) { /* some webviews refuse */ }
   if (page) page.classList.add('dragging')
 })

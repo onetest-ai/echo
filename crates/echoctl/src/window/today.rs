@@ -54,7 +54,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let plugins: serde_json::Map<String, Value> = ids
                 .iter()
                 .filter(|id| id.starts_with("plugin:"))
-                .filter_map(|id| crate::widgets::data(id, &crate::widgets::Inputs { tasks: &tasks }).ok().map(|d| (id.clone(), d)))
+                .filter_map(|id| {
+                    let i = crate::widgets::Inputs { tasks: &tasks };
+                    // On Today: asked again when stale; only previewed (edit mode): its last answer.
+                    let d = if layout.iter().any(|l| &l.widget == id) { crate::widgets::data(id, &i) } else { crate::widgets::preview_data(id, &i) };
+                    d.ok().map(|d| (id.clone(), d))
+                })
                 .collect();
             if !plugins.is_empty() {
                 v["plugins"] = json!(plugins);
