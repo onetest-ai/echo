@@ -197,7 +197,8 @@ pub const CHROME_EXECUTABLE: &str = "Google Chrome.app/Contents/MacOS/Google Chr
 
 /// Google Meet installed as an app from Chrome: its own process (`com.google.Chrome.app.<Meet's id>`), whose window
 /// shows no title to Accessibility ("Google Meet" to the system, never the meeting) — so the app being open is the sign.
-pub const MEET_APP_EXECUTABLE: &str = "/Google Meet.app/Contents/MacOS/app_mode_loader";
+/// A pattern (`pgrep -f`): one installed under another name too ("Google Meet (Work).app", a second profile's).
+pub const MEET_APP_EXECUTABLE: &str = "/Google Meet[^/]*\\.app/Contents/MacOS/app_mode_loader";
 
 /// Is Google Meet open as an app installed from Chrome? Its process only; no window is read.
 pub fn meet_app_open() -> Option<bool> {

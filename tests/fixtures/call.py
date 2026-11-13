@@ -103,7 +103,8 @@ def main(argv):
     if cmd == "start" and len(argv) > 2:
         seconds = float(argv[argv.index("--for") + 1]) if "--for" in argv else None
         title = argv[argv.index("--title") + 1] if "--title" in argv else None
-        start(argv[2], seconds, "--hold" in argv, "--meet" in argv, title, "--meet-app" in argv)
+        # The Meet app's call is Chrome's: --meet-app implies --meet.
+        start(argv[2], seconds, "--hold" in argv, "--meet" in argv or "--meet-app" in argv, title, "--meet-app" in argv)
     elif cmd == "end":
         end()
     elif cmd == "status":
