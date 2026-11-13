@@ -28,7 +28,7 @@ tags: [recording, memo, second-instance, file-fed]
 
 | Field | Value |
 |-------|-------|
-| Feed | acme-sync's tracks put at the feed paths by `call.py start acme-sync --hold` and then `call.py end`: `mic.wav` holds only Sam's lines ("Morning Dana, let's go through the single sign-on rollout.", "I'll send the checklist this afternoon, before four o'clock.", "Let's agree on Berlin first. Madrid follows two weeks later."), `remote.wav` Dana's ("…ideally by the end of today.", "…the Berlin office or with Madrid?", "…I'll book the training room for Thursday."). The memo hears the mic only |
+| Feed | acme-sync's tracks put at the feed paths by `call.py start acme-sync --hold` and then `call.py end`: `mic.wav` holds only Sam's lines ("Morning Dana, let's go through the single sign-on rollout.", "I'll send the checklist this afternoon, before four o'clock." — the transcript may write "4 o'clock", either is right, "Let's agree on Berlin first. Madrid follows two weeks later."), `remote.wav` Dana's ("…ideally by the end of today.", "…the Berlin office or with Madrid?", "…I'll book the training room for Thursday."). The memo hears the mic only |
 | Memo | started from the Memo button, stopped about 22 s after it started (`sleep 22`: the feed's own timeline) |
 | The script's split | acme-rollout 00:00–00:06, globex-pilot 00:06–00:12 |
 

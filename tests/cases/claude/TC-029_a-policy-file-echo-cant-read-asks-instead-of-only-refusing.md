@@ -26,7 +26,7 @@ tags: [claude, minutes, policy, profiles]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl notes <call> --wait; echo "exit $?"` | Refused: the policy sentence ending `(<$F> can't be read)`, then `To write them on Claude Code (as configured) instead: echoctl notes '<call name>' --profile system --wait`; `exit 1`; the call is still on Claude · work (`echoctl call` / `meta.json` `ai_profile` = `work`): nothing switched by itself |
+| 1 | `target/debug/echoctl notes <call> --wait; echo "exit $?"` | Refused: the policy sentence ending `(<$F> can't be read)`, then `To write them on Claude Code (as configured) instead: echoctl notes '<call name>' --profile system --wait`; `exit 1`; the call is still on Claude · work (`meta.json` has no `ai_profile`, so the default `work`, or `ai_profile` = `work`; not `system`): nothing switched by itself |
 | 2 | Open `{{base_url}}/#calls`, find "Initrode intro" (search) and open its Minutes | The failure is shown with a **Write on Claude Code (as configured)** button beside Try again |
 | 2a | Open the Inbox (Needs you) | "Minutes failed: Initrode intro" with the same choice as its main button, **Write on Claude Code (as configured)** (an automatic run's choice waits here) |
 | 3 | Click **Write on Claude Code (as configured)** | The minutes start on Claude Code (as configured): the call's profile is now `system`, the run's profile `system` (on test data the fake Claude Code then stops it: "test data: Claude Code is a fake here") |
