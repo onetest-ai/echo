@@ -39,7 +39,7 @@
   },
   {
    "id": "F-TASK-04",
-   "feature": "The Thread filter (with counts) and the Who does it filter (Anyone, Claude can do, By hand) narrow every pile",
+   "feature": "The Client filter (the clients with a thread here; a client narrows Thread to its threads and lets go a thread of another), the Thread filter (with counts) and the Who does it filter (Anyone, Claude can do, By hand) narrow every pile and Asks",
    "priority": "medium",
    "check": "agent",
    "axes": [

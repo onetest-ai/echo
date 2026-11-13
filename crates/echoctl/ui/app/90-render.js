@@ -31,7 +31,7 @@ function viewState() {
     else if (S.pj.client) { const cl = projClient(S.pj.client); v.client = { id: S.pj.client, name: cl ? cl.name : S.pj.client, tab: S.pj.ctab } }
     else if (S.pj.sel) { const p = projById(S.pj.sel); v.thread = { id: S.pj.sel, name: p ? p.name : S.pj.sel, tab: S.pj.tab } }
   }
-  if (S.view === 'tasks') v.filter = `Tasks across threads${S.tk.project ? ` · only ${(projById(S.tk.project) || {}).name || S.tk.project}` : ''}`
+  if (S.view === 'tasks') v.filter = `Tasks across threads${S.tk.project ? ` · only ${(projById(S.tk.project) || {}).name || S.tk.project}` : S.tk.client ? ` · only ${(((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === S.tk.client) || {}).name || S.tk.client}'s` : ''}`
   if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
   if (S.view === 'brain') v.filter = `Knowledge · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
   if (S.view === 'calendar') {

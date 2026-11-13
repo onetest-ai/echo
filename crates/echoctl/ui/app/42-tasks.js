@@ -4,6 +4,11 @@ const TASK_PILES = [['mine', 'I owe'], ['owed', 'Owed to me'], ['waiting', 'Wait
 const TASK_SORTS = [['due', 'Due'], ['quiet', 'Quiet longest'], ['project', 'Thread']]
 const TASK_SHOWN = 6
 const projById = (id) => ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === id)
+/** Tasks' Client and Thread filters on a card's thread: the thread picked, else the client's threads, else all. */
+function tkShows(project) {
+  if (S.tk.project) return project === S.tk.project
+  return !S.tk.client || (projById(project) || {}).client === S.tk.client
+}
 const dueText = (c) => c.due && c.due_guessed ? `<span class="tk-due guessed" title="Nobody said this date: never late">${esc(fmtDay(c.due))} · ${esc(dueFrom(c.due_from))}</span>`
   : c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
 /** Who a card is about (the user's rules, 2026-11-02): what you owe — its story, and what blocks
@@ -39,6 +44,11 @@ function tasksView() {
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
   if (d.error) return `<div class="tk"><p class="error">${esc(d.error)}</p></div>`
   const projects = d.projects || []
+  // A client narrows Thread to its threads (#533); a thread of another client picked before is let go.
+  const clients = ((S.pj.data && S.pj.data.clients) || []).filter((c) => projects.some((p) => (projById(p.id) || {}).client === c.id))
+  const client = S.tk.client && clients.some((c) => c.id === S.tk.client) ? S.tk.client : ''
+  const ofClient = projects.filter((p) => !client || (projById(p.id) || {}).client === client)
+  if (S.tk.project && !ofClient.some((p) => p.id === S.tk.project)) S.tk.project = ''
   const pick = S.tk.project && projects.some((p) => p.id === S.tk.project) ? S.tk.project : ''
   const name = (id) => (projById(id) || { name: id }).name
   const sorts = {
@@ -46,30 +56,32 @@ function tasksView() {
     quiet: (a, b) => (b.quiet || 0) - (a.quiet || 0),
     project: (a, b) => name(a.project).localeCompare(name(b.project)),
   }
-  const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">All threads</option>${projects.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
+  const cname = (id) => (clients.find((c) => c.id === id) || { name: id }).name
+  const clientChip = clients.length ? `<label class="fchip${client ? ' on' : ''}">${esc(client ? cname(client) : 'All clients')} ▾<select data-tk-client aria-label="Client"><option value="">All clients</option>${clients.map((c) => `<option value="${esc(c.id)}"${client === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''
+  const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : client ? `All of ${cname(client)}'s` : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">${esc(client ? `All of ${cname(client)}'s` : 'All threads')}</option>${ofClient.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
   const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   // Who does it (`taskmodes`): your tasks Claude can do, or the ones by hand.
   const MODES = [['', 'Anyone'], ['claude', 'Claude can do'], ['manual', 'By hand']]
   const modeChip = `<label class="fchip${S.tk.mode ? ' on' : ''}">${esc((MODES.find(([k]) => k === S.tk.mode) || MODES[0])[1])} ▾<select data-tk-mode aria-label="Who does it">${MODES.map(([k, l]) => `<option value="${k}"${S.tk.mode === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${modeChip}${sortChip}</header>`
+  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${clientChip}${projChip}${modeChip}${sortChip}</header>`
   if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
   const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0) + ((d.piles || {}).others || []).length
   if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
   const cols = TASK_PILES.map(([k, label]) => {
-    const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
+    const all = ((d.piles || {})[k] || []).filter((c) => tkShows(c.project) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
     return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
-  const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
+  const others = ((d.piles || {}).others || []).filter((c) => tkShows(c.project) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
   return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div>${othersPile(others, 'others')}</div>`
 }
 /** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
  *  and what we wait on them for. */
 function asksPanel() {
   const d = S.tk.data
-  const asks = ((d && d.asks) || []).map((a) => ({ ...a, items: a.items.filter((c) => !S.tk.project || c.project === S.tk.project) })).filter((a) => a.items.length)
+  const asks = ((d && d.asks) || []).map((a) => ({ ...a, items: a.items.filter((c) => tkShows(c.project)) })).filter((a) => a.items.length)
   const when = (n) => {
     if (!n || !n.start) return 'no meeting this week'
     const s = new Date(n.start), t = new Date()
@@ -120,6 +132,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const t = e.target
   if (t.matches && t.matches('[data-tk-project]')) { S.tk.project = t.value; render() }
+  if (t.matches && t.matches('[data-tk-client]')) { S.tk.client = t.value; S.tk.project = ''; render() }
   if (t.matches && t.matches('[data-tk-sort]')) { S.tk.sort = t.value; render() }
   if (t.matches && t.matches('[data-tk-mode]')) { S.tk.mode = t.value; render() }
 })
