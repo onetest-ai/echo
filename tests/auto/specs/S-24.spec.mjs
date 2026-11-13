@@ -313,7 +313,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       near(h.besideWidth, 2 * h.width)
       near(h.column, h.beside)
       expect(h.height).toBeLessThanOrEqual(h.view)
-      expect(await today.nowInView()).toBe(true)
+      await expect.poll(() => today.nowInView()).toBe(true) // placed on now once its column has its height (a frame later)
       expect((await today.inner(n.yourDay)).scrolls).toBe(true)
       expect(await today.rows(rest)).toEqual([[n.next, n.needs], [n.choices], [n.work]])
       const [next, needs, choices] = [await today.box(n.next), await today.box(n.needs), await today.box(n.choices)]
@@ -339,7 +339,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       const two = await today.hold()
       expect(two.held).toBe(true)
       near(two.besideWidth, two.width)
-      expect(await today.nowInView()).toBe(true)
+      await expect.poll(() => today.nowInView()).toBe(true) // placed on now once its column has its height (a frame later)
       expect(await today.rows(rest)).toEqual(rest.map((x) => [x]))
       for (const x of rest.slice(1)) near((await today.box(x)).x, (await today.box(n.next)).x)
       // The panel closed: the widths of three columns again, nothing moved.

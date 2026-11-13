@@ -4,7 +4,8 @@ function drawToday(primary) {
   const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
   // The page kept where it was scrolled when Today is drawn again (a meeting's card opening or closing redraws it).
   const page = $('.td'), pageTop = page ? page.scrollTop : 0
-  patch(primary, `<main class="main">${todayView()}</main>`)
+  // Widget by widget: a redraw replaces only the widgets whose markup changed.
+  patchKeyed(primary, `<main class="main">${todayView()}</main>`)
   const page2 = $('.td')
   if (page2 && page2 !== page && pageTop) page2.scrollTop = pageTop
   // The card goes with what it was opened beside (its line folded away, its widget taken off), as Calendar's goes with
@@ -18,7 +19,9 @@ function drawToday(primary) {
   const r = $('.td-rows'), now = r && r.querySelector('.td-now')
   // The row before the line starts at the top — whole, never cut (a fixed offset cut it).
   const past = now && now.previousElementSibling, from = past || now
-  if (r && r !== rows) {
+  // On every draw: a list kept as it was (its widget unchanged) keeps where it is scrolled (`keep`); one that couldn't
+  // scroll yet (drawn before its column had its height) is placed on now once it can.
+  if (r) {
     const place = () => {
       if (!r.isConnected) return
       const top0 = r.getBoundingClientRect().top - r.scrollTop, at = (el) => el.getBoundingClientRect().top - top0
@@ -37,7 +40,9 @@ function drawToday(primary) {
 function todayView() {
   const d = S.today
   if (!d) return `<div class="skeleton" style="padding:22px">${'<i></i>'.repeat(8)}</div>`
-  const now = new Date()
+  // Drawn to the minute: within a minute the same data draws the same page, so a redraw changes nothing (`patch` keeps
+  // it) — no rebuild every few seconds; the clock (`tickClocks`) and the minute's draw move what shows the time.
+  const now = new Date(Math.floor(Date.now() / 60000) * 60000)
   const date = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
   // The meetings you go to: not those you haven't answered, nor the maybes (Your day lists them, dashed).
   const meetings = (d.day || []).filter((x) => x.kind === 'meeting' && x.response !== 'notResponded' && x.response !== 'tentativelyAccepted').length
@@ -96,7 +101,7 @@ function todayView() {
   const alone = !plan.hold && plan.lines.length === 1
   const lineHtml = (line, width = cols) => {
     // In edit mode a widget is framed: grip, name, S M L, 1 2, × (13-today-edit.js); an empty one shows what it is.
-    const part = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
+    const part = (id) => wkey(id, S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
     // Two rows high: it in its columns, the lines beside it in the rest, on its other side.
     if (line.tall) {
       const t = line.tall, w = width - t.span
@@ -109,14 +114,14 @@ function todayView() {
     const used = line.items.reduce((a, i) => a + i.span, 0), spare = alone ? 0 : width - used
     if (!line.fill && line.items.length === 1 && spare <= 0) return part(line.items[0].id)
     // In a shared line a part of two blocks (Needs you now and its drafts) is one cell.
-    const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? `<div class="td-col">${parts[id]}</div>` : part(id)))
+    const cells = line.items.map(({ id }) => (line.items.length > 1 && id === 'core:needs.now' && !S.tdEdit ? wkey(id, `<div class="td-col">${parts[id]}</div>`) : part(id)))
     return `<div class="td-grid${line.fill ? '' : ' td-hug'}" style="grid-template-columns: ${[...line.items.map((i) => `minmax(0, ${i.span}fr)`), ...(spare > 0 ? [`minmax(0, ${spare}fr)`] : [])].join(' ')}">${cells.join('')}${spare > 0 ? '<div aria-hidden="true"></div>' : ''}</div>`
   }
   // One column: Your day that held a column becomes the strip (TodayResponsive C).
   // (Only when the strip has something to draw: a day of tasks or unanswered meetings keeps its list.)
   const strip = (plan.down === 'core:calendar.calendar' || plan.down === 'core:calendar.agenda') && !S.tdEdit ? dayStripView(d, now) : ''
   if (strip) parts[plan.down] = strip
-  const part0 = (id) => (S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
+  const part0 = (id) => wkey(id, S.tdEdit ? todayEditCell(id, parts[id], sizeOf[id]) : parts[id])
   // A widget holding the first column: it the whole height, the rest beside it in the other columns.
   const blocks = plan.hold
     ? `<div class="td-side" style="grid-template-columns: minmax(0, 1fr) minmax(0, ${cols - 1}fr)"><div class="td-hold">${part0(plan.hold.id)}</div><div class="td-rest">${plan.lines.map((l) => lineHtml(l, cols - 1)).join('')}</div></div>`
@@ -178,6 +183,11 @@ function myWorkView(w) {
   // Yolo's bar is Today's (it reads Today's asks), not a dashboard's.
   const asks = S.view === 'today'
   return cards2.length || (asks && S.todayAskId) ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${asks ? todayAskBar() : ''}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
+}
+
+/** A widget's markup marked by its id (`data-wkey` on its first element), so a redraw replaces it alone (`patchKeyed`). */
+function wkey(id, html) {
+  return html ? html.replace(/^\s*<([a-zA-Z][\w-]*)/, (m, tag) => `<${tag} data-wkey="${esc(id)}"`) : html
 }
 
 /** Today → Next meeting (`core:calendar.next`): S the meeting and its buttons, M what is expected from you, L its prep
