@@ -24,8 +24,8 @@ external_id: TC-WINOS-001
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `cargo build --release -p echoctl`, then `scripts\package-windows.ps1` | whisper.cpp compiled in (Vulkan + AVX2) |
-| 2 | List the zip | `echoctl.exe`, `vulkan-1.dll`, `VULKAN-RUNTIME-LICENSE.txt`, `README.md`, `LICENSE.txt`, `THIRD-PARTY-LICENSES.txt`, `plugin\` |
-| 3 | `dumpbin /dependents echoctl.exe` | No `MSVCP140` / `VCRUNTIME140` |
+| 2 | List the zip | `echoctl.exe`, `vulkan-1.dll`, `VULKAN-RUNTIME-LICENSE.txt`, `README.md`, `LICENSE.txt`, `THIRD-PARTY-LICENSES.txt`, `plugin\`, `nemo-speech\` (the Parakeet engine's DLLs, with the Visual C++ runtime DLLs it needs beside them) and `pdfium\pdfium.dll` with its licenses |
+| 3 | `dumpbin /dependents echoctl.exe` | No `MSVCP140` / `VCRUNTIME140` (echoctl.exe itself; `nemo-speech\` ships its own) |
 | 4 | Run it on a PC without a GPU driver (or a VM) | It starts and transcribes on the CPU |
 
 ## Expected Final State
