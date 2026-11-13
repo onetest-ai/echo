@@ -228,6 +228,7 @@ function pluginChartHtml(d, size, { str, num, foot }) {
     let ch = ''
     if (h.change != null) {
       const by = num(h.change.by, 'headline.change.by')
+      if (Math.abs(by) > 1e15) throw new Error('headline.change.by is over 10^15')
       const cls = h.change.good === true ? ' good' : h.change.good === false ? ' bad' : ''
       ch = `<span class="pc-ch${cls}">${by > 0 ? '↑' : by < 0 ? '↓' : '→'} ${esc(fmt(Math.abs(by)))}${h.change.than ? ` vs ${esc(str(h.change.than, 'headline.change.than', 40))}` : ''}</span>`
     }
@@ -322,7 +323,14 @@ function pluginChartHtml(d, size, { str, num, foot }) {
     // A line's labels at its ends and between; a bar's under its bar (each at its slot's middle).
     const ticks = type === 'line' || type === 'area'
       ? `<div class="pc-x mono">${at.map((i) => `<span>${esc(pts[i].label)}</span>`).join('')}</div>`
-      : `<div class="pc-x mono pc-under">${at.map((i) => `<span style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%">${esc(pts[i].label)}</span>`).join('')}</div>`
+      : `<div class="pc-x mono pc-under">${at.map((i, k) => {
+        // Under its bar, no wider than its bar's slot (so never past the card); with more bars than labels, the
+        // first from its bar's left edge and the last to its bar's right edge.
+        const sampled = at.length < n, w = `max-width:${Math.min(100 / (sampled ? at.length : n), 40).toFixed(1)}%`
+        if (sampled && k === 0) return `<span class="first" style="left:${((i / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
+        if (sampled && k === at.length - 1) return `<span class="last" style="right:${((1 - (i + 1) / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
+        return `<span style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%;${w}">${esc(pts[i].label)}</span>`
+      }).join('')}</div>`
     body = `<svg class="pc-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" role="img" aria-label="${esc(all)}">${grid}${marks}</svg>${ticks}${legend(series.map((x) => [x.label, x.color]))}`
   }
   return `${head}${body}${note}${foot()}`

@@ -159,7 +159,11 @@ test("a chart's edges: a funnel's first 8, a pie reads all its slices, zeros, on
   assert.ok(!draw('chart', { type: 'stacked', series: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], points: [{ label: 'z', values: { a: 1, b: 3 } }], percent: 'no' }, 'M').includes('25%'), 'percent only when true')
   refused('chart', { type: 'line', points: [{ label: 'a', value: 1.7e308 }] }, 'up to 10^15')
   const bars = draw('chart', { type: 'bar', points: [{ label: 'Q1', value: 1 }, { label: 'Q2', value: 2 }] }, 'M')
-  assert.match(bars, /<span style="left:25\.00%">Q1<\/span><span style="left:75\.00%">Q2<\/span>/, "a bar's label under its bar")
+  assert.match(bars, /<span style="left:25\.00%;max-width:40\.0%">Q1<\/span><span style="left:75\.00%;max-width:40\.0%">Q2<\/span>/, "a bar's label under its bar, no wider than its slot")
+  const longs = draw('chart', { type: 'bar', points: Array.from({ length: 24 }, (_, i) => ({ label: `a long label ${i}`, value: i })) }, 'M')
+  assert.match(longs, /<span class="first" style="left:0\.00%;max-width:16\.7%">a long label 0<\/span>/, 'many bars: the first from the left edge')
+  assert.match(longs, /<span class="last" style="right:0\.00%;max-width:16\.7%">a long label 23<\/span>/, 'and the last to the right edge')
+  refused('chart', { type: 'line', points: [{ label: 'a', value: 1 }], headline: { value: 1, change: { by: 1e300 } } }, 'over 10^15')
 })
 
 test("a chart's text is escaped wherever it shows", () => {
