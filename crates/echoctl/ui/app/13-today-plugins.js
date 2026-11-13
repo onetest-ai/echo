@@ -207,7 +207,11 @@ function pluginWidgetView(id, w, size) {
       try { body = `<div class="pw-page">${String(draw({ data: w.data, size, theme }) ?? '')}</div>` } finally { Plugins.drawing = false }
     } else body = pluginWidgetHtml(w.kind, w.data, size, (S.pwRows && S.pwRows[id]) || [])
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
-  const stale = w.error ? `<span class="set-sub" title="${esc(w.error)}">· from ${esc(hm(new Date(w.at)))}</span>` : ''
+  // When its data came: plugins answer on their own schedule, so the time says how fresh it is (a day's other date
+  // named); after a failed ask, since when it hasn't changed, and why.
+  const at = w.at ? new Date(w.at) : null
+  const when = at && (at.toDateString() === new Date().toDateString() ? hm(at) : `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hm(at)}`)
+  const stale = !when ? '' : w.error ? `<span class="pw-upd warn" title="${esc(w.error)}">not updated since ${esc(when)}</span>` : `<span class="pw-upd" title="Updated by ${esc(plugin)}">updated ${esc(when)}</span>`
   // A table says how many rows it has, and the plugin's note, beside its label.
   const d = w.data || {}
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''

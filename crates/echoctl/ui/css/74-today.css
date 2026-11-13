@@ -217,6 +217,9 @@
 .pw-stats .link-btn { margin-top: 2px; }
 /* A table: Echo's list look, not a spreadsheet. Its column names stay put while the rows scroll inside the card. */
 .pw-sec .pw-n { font-size: 11px; color: var(--text-2); text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* When a plugin's widget last got its data: quiet, at the header's end. */
+.pw-sec .pw-upd { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-3); white-space: nowrap; }
+.pw-sec .pw-upd.warn { color: var(--warn); }
 .pw-sec .pw-hnote { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* Never longer than most of the window: past that its rows scroll inside the card (a hug line has no height of its own). */
 .pw-table { flex: 0 1 auto; min-height: 0; max-height: min(60vh, 560px); overflow: auto; }
