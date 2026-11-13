@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-29.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="-globex-steering"]` | The header reads "Globex steering", "45 min", the kind chip "Client ▾", "from Teams transcript" (hint: "Made from the meeting's Teams transcript: no audio, no live notes"), the people "Sam Rivera, Kim Park, Noor Aziz, Ben Okafor", the thread chip "Globex pilot" |
+| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="-globex-steering"]` | The header reads "Globex steering", "45 min", the kind chip "Client ▾", "from Teams transcript" (hint: "Made from the meeting's Teams transcript: no audio, no live notes"), the people "Kim Park, Noor Aziz, Ben Okafor", the thread chip "Globex pilot" |
 | 2 | Click the tab "Transcript" | Two turns: `.turn.me` at 0:05 with `.who` "Me" (chip "en") and "Welcome to the steering meeting."; `.turn.remote` at 0:17 with `.who` "Speaker 1" (chip "en") and "We approve the pilot scope." |
 | 3 | Run `cat "$ECHOCTL_HOME/calls/$(ls "$ECHOCTL_HOME/calls" \| grep -- '-globex-steering$')/segments.json"` | The two turns of the Test Data; the window showed each one's name as stored |
 | 4 | Read the tabs | "Minutes" and "Transcript" only: no Live tab for an import |

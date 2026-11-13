@@ -66,10 +66,40 @@ pub(super) fn calls_page(q: &str) -> Value {
     };
     let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
     let next = (start + page.len() < dirs.len()).then(|| page.last().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).flatten();
-    json!({ "calls": page.into_iter().map(|d| call_summary(d)).collect::<Vec<_>>(), "next": next, "total": total })
+    // A thread's people are read once for the whole page.
+    let mut known = std::collections::HashMap::new();
+    json!({ "calls": page.into_iter().map(|d| summary(d, &mut known)).collect::<Vec<_>>(), "next": next, "total": total })
+}
+
+/// A thread's people (the People view's), by thread id, read once a page.
+type Known = std::collections::HashMap<String, Vec<Value>>;
+
+/// The faces of a call's row: its invite's people but the user, those who came first by their weight in the call's
+/// threads (`prep::weighed`: influence, interest, calls together), who declined left out. A call with no invite (a memo,
+/// one Echo found nobody for): none.
+fn faces(dir: &Path, known: &mut Known) -> Vec<String> {
+    let m = match crate::meeting::MeetingContext::load(dir) {
+        Ok(Some(m)) => m,
+        Ok(None) => return vec![],
+        // One Echo didn't write and can't read as a meeting (a hand-made file): its names as they stand.
+        Err(_) => return people(dir),
+    };
+    let threads: Vec<String> = crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| p.id).collect();
+    let today = chrono::Local::now().date_naive();
+    crate::prep::weighed(&m, &threads, |id| {
+        known.entry(id.to_string()).or_insert_with(|| crate::people::of_thread(id, today).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default()).clone()
+    })
+    .into_iter()
+    .filter(|x| x["answer"] != "declined")
+    .filter_map(|x| x["name"].as_str().map(str::to_owned))
+    .collect()
 }
 
 pub(super) fn call_summary(dir: &Path) -> Value {
+    summary(dir, &mut Known::new())
+}
+
+fn summary(dir: &Path, known: &mut Known) -> Value {
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let meta = read_json(&dir.join("meta.json"));
     let recording = watch::running_watcher().and_then(|w| w.recording);
@@ -82,7 +112,7 @@ pub(super) fn call_summary(dir: &Path) -> Value {
         "started_at": meta["started_at"],
         "minutes": minutes(&meta),
         "status": status(dir, recording.as_deref()),
-        "people": people(dir),
+        "people": faces(dir, known),
         "frames": dir.join("frames.jsonl").exists(),
         "chat": dir.join("chat.json").exists(),
         "imported": crate::teams_transcript::imported(&meta),

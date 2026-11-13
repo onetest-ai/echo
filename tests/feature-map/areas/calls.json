@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-CALLS-01",
-   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first, in the app's one order of calls (undated calls are the oldest: last in the list, never `latest` or the tray's newest); each row shows time, length, the first two people (+N) and thread icons",
+   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first, in the app's one order of calls (undated calls are the oldest: last in the list, never `latest` or the tray's newest); each row shows time, length, the first two people (+N; the invite's people but the user and who declined, by their weight in the call's threads: influence, interest, calls together) and thread icons",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -18,7 +18,7 @@
   },
   {
    "id": "F-CALLS-02",
-   "feature": "Each row's icon shows the call's state (recording, transcribing, minutes, transcript only, failed, audio only); a memo shows a mic and \"Memo\", an imported call \"Teams transcript\"; who was there as small faces right of the title (up to three, then +N; every name in the tooltip), the minutes countdown at the right end of the second line",
+   "feature": "Each row's icon shows the call's state (recording, transcribing, minutes, transcript only, failed, audio only); a memo shows a mic and \"Memo\", an imported call \"Teams transcript\"; who was there as small faces right of the title (up to three, then +N; every name in the tooltip; the same people in the same order as the row's names), the minutes countdown at the right end of the second line",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -46,7 +46,7 @@
   },
   {
    "id": "F-CALLS-05",
-   "feature": "A call's header shows title, weekday date and time, length, the kind-of-meeting chip, up to 6 people (\"and N more\"), \"Memo\" or \"from Teams transcript\"",
+   "feature": "A call's header shows title, weekday date and time, length, the kind-of-meeting chip, up to 6 people (\"and N more\"; the invite's but the user and who declined, by their weight in the call's threads), \"Memo\" or \"from Teams transcript\"",
    "priority": "high",
    "check": "agent",
    "axes": [
