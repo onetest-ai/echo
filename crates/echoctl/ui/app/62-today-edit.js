@@ -120,6 +120,7 @@ function twRefocus() {
 }
 
 async function todayEditOpen() {
+  S.tdHover = null
   S.tdEdit = true
   // As the right panel was, for Done to put it back.
   const was = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay).right
@@ -134,6 +135,7 @@ async function todayEditOpen() {
 
 /** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
 function todayEditDone() {
+  S.tdHover = null
   S.tdEdit = false
   S.tdFocus = null
   const was = S.tdEditWas || { open: true, overlay: S.overlay }
@@ -202,7 +204,7 @@ document.addEventListener('click', (e) => {
   if (d.twPart) { S.tdPart = d.twPart; return render() }
   if (d.twPick) { S.tdPick = d.twPick; S.tdHover = null; return render() }
 })
-// The preview follows the pointer (or the keyboard) over the list; out of the list it is the picked one's again.
+// The preview follows the pointer over the list; out of the list it is the picked one's again.
 // Redrawn only when it changes (a redraw on a press would replace the button pressed, and lose its click).
 const twHover = (id) => { if ((S.tdHover || null) !== (id || null)) { S.tdHover = id || null; render() } }
 document.addEventListener('mouseover', (e) => {
@@ -213,11 +215,6 @@ document.addEventListener('mouseover', (e) => {
 document.addEventListener('mouseout', (e) => {
   if (S.tdHover == null || !e.target.closest || !e.target.closest('.tw-list')) return
   if (!(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.tw-list'))) twHover(null)
-})
-document.addEventListener('focusin', (e) => {
-  if (S.view !== 'today' || !S.tdEdit || !e.target.closest || !e.target.closest('.tw-panel')) return
-  const row = e.target.closest('.tw-list [data-tw-pick]')
-  twHover(row ? row.dataset.twPick : null)
 })
 document.addEventListener('input', (e) => {
   if (!e.target.dataset || !e.target.dataset.twQ) return

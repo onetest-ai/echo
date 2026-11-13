@@ -37,7 +37,7 @@
 .tw-tag { font-size: 10px; color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
 .tw-on { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 /* One height whatever it previews: pointing at another row never moves the list under the pointer. */
-.tw-pick { flex: none; height: 330px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; align-items: flex-start; }
+.tw-pick { flex: none; height: min(330px, 38vh); box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; align-items: flex-start; }
 .tw-pick .tw-pv { flex: 0 1 auto; min-height: 0; }
 .tw-pick-h { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
 .tw-pick-h .mono { font-size: 11px; color: var(--text-3); }
