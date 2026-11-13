@@ -66,6 +66,10 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
             v["data"] = last["data"].clone();
             v["at"] = last["at"].clone();
             v["asked"] = last["asked"].clone();
+            // As on Today: what the plugin set replaces a failed ask's error.
+            if let Some(o) = v.as_object_mut() {
+                o.remove("error");
+            }
         }
     }
     all.insert(key, last);
