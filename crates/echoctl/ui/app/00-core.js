@@ -52,7 +52,7 @@ const S = {
   folderProfile: null, // the AI profile picked for Claude · Echo folder (null: the default)
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
-  tk: { data: null, project: '', sort: 'due', mode: '', more: {} }, // Tasks: across projects
+  tk: { data: null, client: '', project: '', sort: 'due', mode: '', more: {} }, // Tasks: across projects
   br: { tab: 'sources', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
   pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
