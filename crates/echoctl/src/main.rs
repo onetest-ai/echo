@@ -241,8 +241,15 @@ enum Cmd {
     /// Minutes templates (JSON): each one's words, header and sections, the {values} they may use, and the folder for
     /// your own (a template there named like a built-in changes it)
     Templates,
-    /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it
+    /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it;
+    /// with --thread or --client, that thread's or client's dashboard instead
     Today {
+        /// A thread's dashboard (its Brief) instead of Today
+        #[arg(long, global = true)]
+        thread: Option<String>,
+        /// A client's dashboard (its Overview) instead of Today
+        #[arg(long, global = true, conflicts_with = "thread")]
+        client: Option<String>,
         #[command(subcommand)]
         cmd: Option<cli::widget::TodayCmd>,
     },
@@ -691,7 +698,7 @@ fn main() -> Result<()> {
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
         Cmd::Widget { cmd } => cli::widget::widget(cmd),
         Cmd::Work { cmd } => cli::widget::work(cmd),
-        Cmd::Today { cmd } => cli::widget::today(cmd),
+        Cmd::Today { thread, client, cmd } => cli::widget::today(thread.as_deref(), client.as_deref(), cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),

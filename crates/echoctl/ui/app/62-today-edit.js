@@ -6,6 +6,21 @@
 
 const TW_SIZES = { S: 1, M: 2, L: 3 }
 
+// ── the page edited: Today, or a thread's or client's dashboard (46-dashboard.js), edited the same way ──────────────
+/** The page in edit mode and shown: 'today', 'thread:<id>' / 'client:<id>' (a dashboard), else null. */
+function twPage() {
+  if (S.view === 'today') return S.tdEdit ? 'today' : null
+  return S.dashEdit && S.dashEdit === dashPageKey() ? S.dashEdit : null
+}
+/** The edited page's layout, catalog (a dashboard: the widgets it offers) and drawn widgets. */
+const twLayout = () => ((twPage() || 'today') === 'today' ? S.today && S.today.layout : S.dash && S.dash.layout) || []
+const twCatalog = () => ((twPage() || 'today') === 'today' ? S.tdCatalog || [] : (S.tdCatalog || []).filter((w) => ((S.dash && S.dash.offered) || []).includes(w.id)))
+const twParts = () => ((twPage() || 'today') === 'today' ? S.tdParts : S.dashParts) || {}
+/** A widget's settings the page sets (not shown in its ⚙): a thread's page its thread and client, a client's its client. */
+const twFixed = (p) => { const pg = twPage() || 'today'; return pg.startsWith('thread:') ? p.type === 'thread' || p.type === 'client' : pg.startsWith('client:') ? p.type === 'client' : false }
+/** Where the edited page's widgets are, said on a button: "Today", "this dashboard". */
+const twWhere = () => ((twPage() || 'today') === 'today' ? 'Today' : 'this dashboard')
+
 /** The head's buttons: Edit; in edit mode Reset to the default and Done. */
 function todayEditHead() {
   return S.tdEdit
@@ -16,13 +31,14 @@ function todayEditHead() {
 /** A widget framed for editing: its name, the sizes it takes, ×; its content shown but inert; empty: what it is. */
 function todayEditCell(id, html, size) {
   const w = (S.tdCatalog || []).find((x) => x.id === id) || { id, label: id, sizes: ['S', 'M', 'L'] }
+  const dash = twPage() !== 'today'
   const sizes = (w.sizes || []).map((z) => `<button type="button" class="${z === size ? 'on' : ''}" data-tw-size="${esc(z)}" data-tw-id="${esc(id)}" aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${esc(z)}">${esc(z)}</button>`).join('')
   const rows = twRows(), r = rows.findIndex((row) => row.includes(id)), i = r < 0 ? -1 : rows[r].indexOf(id)
   const can = { up: r > 0, down: r >= 0 && r < rows.length - 1, left: i > 0, right: i >= 0 && i < (rows[r] || []).length - 1 }
   const MV = { left: ['←', 'before the one beside it'], up: ['↑', 'to a row above'], down: ['↓', 'to a row below'], right: ['→', 'after the one beside it'] }
   const moves = Object.entries(MV).filter(([k]) => can[k]).map(([k, [a, say]]) => `<button type="button" data-tw-move="${k}" data-tw-id="${esc(id)}" aria-label="Move ${esc(w.label)} ${say}" title="Move ${say}">${a}</button>`).join('')
   // Its settings (⚙): a select a choice, thread or client, a box a yes/no; changed, Today's layout says it.
-  const item = ((S.today && S.today.layout) || []).find((i) => i.widget === id) || {}
+  const item = twLayout().find((i) => i.widget === id) || {}
   const optsOf = (p) => (p.type === 'choice' ? p.options.map((o) => [o, o])
     : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => t.group !== 'closed').map((t) => [t.id, t.name])
     : p.type === 'client' ? ((S.pj.data && S.pj.data.clients) || []).map((c) => [c.id, c.name]) : [])
@@ -42,14 +58,16 @@ function todayEditCell(id, html, size) {
   // Its height (1 or 2 rows) when it takes both.
   // Set two rows high but drawn one (no column or nothing beside it, the middle of its row, another tall one in these
   // rows): the 2 stays pressed — it is the setting — and says why it is one row here.
-  const h = item.height || 1, hs = w.heights || [1], flat = h === 2 && !(S.tdTall || []).includes(id)
+  // A dashboard's widgets are one row high (its rows: a band over the page).
+  const h = item.height || 1, hs = dash ? [1] : w.heights || [1], flat = h === 2 && !(S.tdTall || []).includes(id)
   const say = (x) => (x === 1 ? 'One row high' : flat ? 'Two rows high, drawn one row here: it needs a column beside it with something in it, first or last in its row, and no other widget two rows high in these rows' : 'Two rows high: its row and the next')
   const heights = hs.length > 1 ? `<span class="tw-seg tw-hseg${flat ? ' flat' : ''}" role="group" aria-label="Height"><span aria-hidden="true">↕</span>${hs.map((x) => `<button type="button" class="${x === h ? 'on' : ''}" data-tw-height="${x}" data-tw-id="${esc(id)}" aria-pressed="${x === h}" aria-label="${esc(w.label)}: ${x} row${x === 1 ? '' : 's'} high${x === 2 && flat ? ', drawn one row here' : ''}" title="${esc(say(x))}">${x}</button>`).join('')}</span>` : ''
-  const params = (w.params || []).length
+  const own = (w.params || []).filter((p) => !twFixed(p))
+  const params = own.length
   const gear = params ? `<button type="button" id="tw-gear-${esc(id.replace(/[^a-z0-9-]/gi, '-'))}" class="icon-btn tw-gear${S.tdParams === id ? ' on' : ''}" data-tw-gear="${esc(id)}" aria-expanded="${S.tdParams === id}" aria-label="${esc(w.label)}: settings" title="Settings">${ICON('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')}</button>` : ''
-  const form = params && S.tdParams === id ? `<div class="tw-params" role="group" aria-label="Settings of ${esc(w.label)}">${w.params.map(pick).join('')}</div>` : ''
+  const form = params && S.tdParams === id ? `<div class="tw-params" role="group" aria-label="Settings of ${esc(w.label)}">${own.map(pick).join('')}</div>` : ''
   const body = html || `<div class="tw-empty set-sub">${esc(w.about || '')}${w.temporal ? ' — shows only while it has something' : ''}</div>`
-  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span>${heights}${gear}<button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off Today" title="Take it off Today">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>${form}<div class="tw-in" inert>${body}</div></section>`
+  return `<section class="tw${w.temporal ? ' tmp' : ''}" draggable="true" data-tw="${esc(id)}" aria-label="${esc(w.label)}"><div class="tw-h"><span class="tw-grip" aria-hidden="true">⠿</span><b>${esc(w.label)}</b>${moves ? `<span class="tw-mv" role="group" aria-label="Move">${moves}</span>` : ''}<span class="tw-seg" role="group" aria-label="Size">${sizes}</span>${heights}${gear}<button type="button" class="icon-btn tw-x" data-tw-remove="${esc(id)}" aria-label="Take ${esc(w.label)} off ${twWhere()}" title="Take it off ${twWhere()}">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>${form}<div class="tw-in" inert>${body}</div></section>`
 }
 
 /** The zone after the last widget: a widget dropped there goes last, on a row of its own. */
@@ -68,7 +86,8 @@ function dropSide(r, x, y) {
 
 /** A change to Today's layout; its reply refreshes Today (window.echo.refresh) once it is written. */
 function todayLayoutDo(body) {
-  send({ cmd: 'today_layout', ...body })
+  const page = twPage()
+  send({ cmd: 'today_layout', ...(page && page !== 'today' ? { page } : {}), ...body })
 }
 
 /** The size the panel offers a widget: the one picked if it takes it, else M, else its first. */
@@ -88,7 +107,7 @@ function todayEditPanel() {
 
 /** The layout's rows as the page draws them: widget ids, a row each (widgets not drawn left out). */
 function twRows() {
-  return todayRows((S.today && S.today.layout) || [], Object.keys(S.tdParts || {}))
+  return todayRows(twLayout(), Object.keys(twParts()))
 }
 
 /** A move by keyboard (#345): up — a row of its own above the row before; down — below the row after; left / right —
@@ -102,7 +121,7 @@ function todayEditMove(id, dir) {
     : dir === 'left' ? i > 0 && [rows[r][i - 1], 'before']
     : i < rows[r].length - 1 && [rows[r][i + 1], 'after']
   if (!to) return
-  S.tdFocus = { id, sel: `[data-tw-move="${dir}"]`, was: JSON.stringify(S.today.layout), at: Date.now() }
+  S.tdFocus = { id, sel: `[data-tw-move="${dir}"]`, was: JSON.stringify(twLayout()), at: Date.now() }
   todayLayoutDo({ op: 'move', widget: id, target: to[0], side: to[1] })
 }
 
@@ -111,34 +130,41 @@ function twRefocus() {
   const f = S.tdFocus
   if (!f) return
   // A change refused (its notice said why) never redraws: the focus wish lapses rather than land on a later change.
-  if (!S.tdEdit || Date.now() - f.at > 5000) { S.tdFocus = null; return }
-  // Only once Today is drawn from the changed layout (the change's reply refreshes it).
-  if (JSON.stringify((S.today || {}).layout) === f.was) return
+  if (!twPage() || Date.now() - f.at > 5000) { S.tdFocus = null; return }
+  // Only once the page is drawn from the changed layout (the change's reply refreshes it).
+  if (JSON.stringify(twLayout()) === f.was) return
   const frame = document.querySelector(`.tw[data-tw="${CSS.escape(f.id)}"]`)
   const el = frame && (frame.querySelector(f.sel) || frame.querySelector('button:not([disabled])'))
   if (el) { el.focus(); S.tdFocus = null }
 }
 
-async function todayEditOpen() {
+/** Edit mode on Today, or on the dashboard shown (`page`: its key). */
+async function todayEditOpen(page) {
   S.tdHover = null
-  S.tdEdit = true
+  S.tdPick = null
+  // Each edit starts with the whole list: a search or part from another page may match nothing here.
+  S.tdQ = ''; S.tdPart = 'All'; S.tdParams = null
+  const dash = /^(thread|client):/.test(page || '')
+  if (dash) S.dashEdit = page
+  else S.tdEdit = true
   // As the right panel was, for Done to put it back.
   const was = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay).right
   S.tdEditWas = { open: !!(was && was.shown), active: was && was.active, overlay: S.overlay }
   if (!S.tdCatalog) { try { S.tdCatalog = await get('api/widgets') } catch (e) { S.tdCatalog = [] } }
-  if (!S.tdPick) S.tdPick = (S.tdCatalog[0] || {}).id
+  if (!S.tdPick) S.tdPick = (twCatalog()[0] || {}).id
   const known = panelViews()
   // At a narrow width the panel would cover the widgets' controls: it waits for "Add a widget" in the head (#395).
   if (!Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay).narrow) Layout.show('add-widget', known)
   layoutChanged()
-  // Every widget's data, for the previews (api/today?all=1 while editing).
-  loadToday().then(render)
+  // Every widget's data, for the previews (api/today?all=1 while editing; a dashboard's, all=1 too).
+  ;(dash ? loadDashboard() : loadToday()).then(render)
 }
 
 /** Done: no frames; the right panel as it was before Edit (closed, or back to the view it showed). */
 function todayEditDone() {
   S.tdHover = null
-  S.tdEdit = false
+  if (S.view === 'today') S.tdEdit = false
+  else S.dashEdit = null
   S.tdFocus = null
   const was = S.tdEditWas || { open: true, overlay: S.overlay }
   const known = panelViews()
@@ -152,19 +178,19 @@ function todayEditDone() {
 /** Add a widget (the right panel in edit mode): search, parts, the preview — of the row under the pointer, else the
  *  picked one — with its size and Add, always in sight above the list, which scrolls under it. */
 function addWidgetPanel() {
-  const all = S.tdCatalog || []
-  const on = new Set(((S.today && S.today.layout) || []).map((i) => i.widget))
+  const all = twCatalog()
+  const on = new Set(twLayout().map((i) => i.widget))
   const parts = ['All', ...new Set(all.map((w) => w.part))]
   const part = S.tdPart || 'All', q = (S.tdQ || '').trim().toLowerCase()
   const shown = all.filter((w) => (part === 'All' || w.part === part) && (!q || `${w.label} ${w.about} ${w.part}`.toLowerCase().includes(q)))
   // The picked one is among what the part and search show (else the first of them; none shown: no preview).
   if (shown.length && !shown.some((x) => x.id === S.tdPick)) S.tdPick = shown[0].id
-  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(twPickSize(w))}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
+  const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? `<span class="tw-on">${twWhere() === 'Today' ? 'on Today' : 'here'}</span>` : `<button class="btn sm" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(twPickSize(w))}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
   // Hovering a row shows its preview; leaving the list, the picked (clicked) one again.
   const w = shown.find((x) => x.id === S.tdHover) || shown.find((x) => x.id === S.tdPick)
   let pick = ''
   if (w) {
-    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === w.id)
+    const placed = twLayout().find((i) => i.widget === w.id)
     const size = placed ? placed.size : twPickSize(w)
     // One frame for every widget: Today's grid in small (3 columns, 2 rows), the widget drawn in the place its size
     // and height take — how big its window on Today will be.
@@ -172,7 +198,7 @@ function addWidgetPanel() {
     const scale = BOX / (3 * COLW + 2 * GAP), span = TW_SIZES[size] || 2
     const tall = placed ? placed.height === 2 : false
     const iw = span * COLW + (span - 1) * GAP, ih = (tall ? 2 : 1) * ROWH + (tall ? GAP : 0)
-    const html = (S.tdParts || {})[w.id]
+    const html = twParts()[w.id]
     const inner = html || `<div class="tw-pv-none"><b>${esc(w.label)}</b><span>${esc(w.about)}${w.temporal ? ' — shows only while it has something' : ''}</span></div>`
     const cells = '<i></i>'.repeat(6)
     const pv = `<div class="tw-cells" aria-hidden="true">${cells}</div><div class="tw-slot" style="width:${(iw * scale).toFixed(1)}px;height:${(ih * scale).toFixed(1)}px"><div class="tw-pv-in" inert style="width:${iw}px;height:${ih}px;transform:scale(${scale.toFixed(4)})">${inner}</div></div>`
@@ -180,41 +206,43 @@ function addWidgetPanel() {
     // On Today, a size is its size there (a click changes it); else the size its row's Add and a drag put it in at.
     const dots = ['S', 'M', 'L'].map((z) => `<button type="button" class="tw-dot${z === size ? ' on' : ''}" data-tw-pick-size="${z}" data-tw-id="${esc(w.id)}" ${(w.sizes || []).includes(z) ? '' : 'disabled'} aria-pressed="${z === size}" aria-label="${esc(w.label)}: size ${z}">${z}</button>`).join('')
     const note = `${size} · ${TW_SIZES[size]} column${TW_SIZES[size] === 1 ? '' : 's'}${w.height === 'fill' ? ' · fills its column' : ''}`
-    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${BOX}px;height:${boxH}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)} on Today">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
+    pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${BOX}px;height:${boxH}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)} on ${twWhere()}">${pv}</div><div class="tw-size"><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span></div></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
+  if (!all.length && twPage() !== 'today') return `<div class="tw-panel">${S.overlay ? '<div class="tw-top"><div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div></div>' : ''}<p class="set-sub tw-none">No widget can show ${twPage().startsWith('client:') ? 'one client' : 'one thread'} yet: a plugin's widget with a ${twPage().startsWith('client:') ? 'client' : 'thread'} setting comes here.</p></div>`
   return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
 }
 
 PANEL_VIEWS.push({
   id: 'add-widget', label: 'Add a widget', area: 'right',
   icon: ICON('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M16.5 13.5v6M13.5 16.5h6"/>'),
-  when: () => S.view === 'today' && !!S.tdEdit,
+  when: () => !!twPage(),
   render: addWidgetPanel,
 })
 
 document.addEventListener('click', (e) => {
-  if (S.view !== 'today' || !e.target.closest) return
+  if ((S.view !== 'today' && S.view !== 'projects') || !e.target.closest) return
   const t = e.target.closest('[data-tw-gear],[data-tw-edit],[data-tw-panel],[data-tw-move],[data-tw-done],[data-tw-reset],[data-tw-size],[data-tw-height],[data-tw-remove],[data-tw-add],[data-tw-pick],[data-tw-pick-size],[data-tw-part]')
   if (!t) return
   const d = t.dataset
   if (d.twGear) { S.tdParams = S.tdParams === d.twGear ? null : d.twGear; return render() }
-  if (d.twEdit) return todayEditOpen()
+  if (d.twEdit) return todayEditOpen(d.twEdit)
   if (d.twPanel) return todayEditPanel()
   if (d.twMove) return todayEditMove(d.twId, d.twMove)
   if (d.twDone) return todayEditDone()
+  if (!twPage()) return
   if (d.twReset) return todayLayoutDo({ op: 'reset' })
   if (d.twSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twSize })
   if (d.twHeight) return todayLayoutDo({ op: 'height', widget: d.twId, height: Number(d.twHeight) })
   if (d.twRemove) {
     const all = twRows().flat(), i = all.indexOf(d.twRemove), next = all[i + 1] || all[i - 1]
-    if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(S.today.layout), at: Date.now() }
+    if (next) S.tdFocus = { id: next, sel: '[data-tw-remove]', was: JSON.stringify(twLayout()), at: Date.now() }
     return todayLayoutDo({ op: 'remove', widget: d.twRemove })
   }
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
   if (d.twPickSize) {
     S.tdPickSize = d.twPickSize
-    const placed = ((S.today && S.today.layout) || []).find((i) => i.widget === d.twId)
+    const placed = twLayout().find((i) => i.widget === d.twId)
     if (placed && placed.size !== d.twPickSize) return todayLayoutDo({ op: 'size', widget: d.twId, size: d.twPickSize })
     return render()
   }
@@ -236,7 +264,7 @@ const twHover = (id) => {
   if (sel) setTimeout(() => { const el = document.querySelector(sel); if (el && document.activeElement !== el) el.focus({ preventScroll: true }) })
 }
 document.addEventListener('mouseover', (e) => {
-  if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
+  if (!twPage() || !e.target.closest) return
   const row = e.target.closest('.tw-list [data-tw-pick]')
   if (row) twHover(row.dataset.twPick)
 })
@@ -254,10 +282,10 @@ document.addEventListener('input', (e) => {
 let twDrag = null
 const twClear = () => document.querySelectorAll('[data-drop]').forEach((x) => x.removeAttribute('data-drop'))
 document.addEventListener('dragstart', (e) => {
-  if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
+  if (!twPage() || !e.target.closest) return
   const page = e.target.closest('.tw[data-tw]'), cat = e.target.closest('[data-tw-drag]')
   if (!page && !cat) return
-  const w = cat && (S.tdCatalog || []).find((x) => x.id === cat.dataset.twDrag)
+  const w = cat && twCatalog().find((x) => x.id === cat.dataset.twDrag)
   // From the panel at the size its preview shows (every row's: the same as its Add).
   twDrag = page ? { from: 'page', id: page.dataset.tw } : { from: 'catalog', id: cat.dataset.twDrag, size: twPickSize(w) }
   try { e.dataTransfer.setData('text/plain', twDrag.id); e.dataTransfer.effectAllowed = 'move' } catch (x) { /* some webviews refuse */ }
@@ -296,7 +324,7 @@ document.addEventListener('dragend', () => {
 // A widget's setting changed in its ⚙ form: Today's layout keeps it (the widget then shows what it says).
 document.addEventListener('change', (e) => {
   const el = e.target
-  if (S.view !== 'today' || !el.dataset || !el.dataset.twParam) return
+  if (!twPage() || !el.dataset || !el.dataset.twParam) return
   const value = el.type === 'checkbox' ? el.checked : el.value
   if (value === '') return
   todayLayoutDo({ op: 'params', widget: el.dataset.twId, key: el.dataset.twParam, value })

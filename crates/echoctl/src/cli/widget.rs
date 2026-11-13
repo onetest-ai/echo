@@ -116,16 +116,17 @@ pub enum TodayCmd {
     Reset,
 }
 
-pub fn today(cmd: Option<TodayCmd>) -> Result<()> {
+pub fn today(thread: Option<&str>, client: Option<&str>, cmd: Option<TodayCmd>) -> Result<()> {
+    let page = layout::Page::of(thread, client)?;
     let items = match cmd.unwrap_or(TodayCmd::Show) {
-        TodayCmd::Show => layout::load(),
-        TodayCmd::Add { widget, size, target } => layout::add(&widget, size.as_deref(), target.get())?,
-        TodayCmd::Move { widget, target } => layout::move_to(&widget, target.get())?,
-        TodayCmd::Size { widget, size } => layout::resize(&widget, &size)?,
-        TodayCmd::Height { widget, height } => layout::set_height(&widget, height)?,
-        TodayCmd::Set { widget, key, value } => layout::set_param(&widget, &key, &value)?,
-        TodayCmd::Remove { widget } => layout::remove(&widget)?,
-        TodayCmd::Reset => layout::reset()?,
+        TodayCmd::Show => layout::load_on(&page),
+        TodayCmd::Add { widget, size, target } => layout::add_on(&page, &widget, size.as_deref(), target.get())?,
+        TodayCmd::Move { widget, target } => layout::move_on(&page, &widget, target.get())?,
+        TodayCmd::Size { widget, size } => layout::resize_on(&page, &widget, &size)?,
+        TodayCmd::Height { widget, height } => layout::set_height_on(&page, &widget, height)?,
+        TodayCmd::Set { widget, key, value } => layout::set_param_on(&page, &widget, &key, &value)?,
+        TodayCmd::Remove { widget } => layout::remove_on(&page, &widget)?,
+        TodayCmd::Reset => layout::reset_on(&page)?,
     };
     print_json(&serde_json::json!(items));
     Ok(())

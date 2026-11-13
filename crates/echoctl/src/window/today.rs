@@ -26,6 +26,30 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         }
         // The widgets Today can show (the catalog: Echo's, later the plugins').
         "/api/widgets" => json_reply(json!(crate::widgets::catalog())),
+        // A thread's or a client's dashboard (`page=thread:<id>`): its layout, each plugin widget's data as that page asks
+        // it (`all=1`, editing: every widget it offers, previewed), and the ids it offers.
+        "/api/dashboard" => {
+            let q = req.uri().query().unwrap_or("");
+            let page = match crate::today_layout::Page::parse(&query_param(q, "page").unwrap_or_default()) {
+                Ok(p) if p != crate::today_layout::Page::Today => p,
+                _ => return Some(json_reply(json!({"error": "a dashboard is a thread's or a client's page"}))),
+            };
+            let layout = crate::today_layout::load_on(&page);
+            let offered: Vec<String> = crate::widgets::catalog().into_iter().filter(|w| page.offers(w)).map(|w| w.id.to_string()).collect();
+            let all = query_param(q, "all").is_some_and(|a| a == "1");
+            let tasks = json!({});
+            let i = crate::widgets::Inputs { tasks: &tasks };
+            let plugins: serde_json::Map<String, Value> = offered
+                .iter()
+                .filter(|id| id.starts_with("plugin:"))
+                .filter_map(|id| {
+                    let placed = layout.iter().any(|l| &l.widget == id);
+                    let d = if placed { crate::widgets::data_on(&page, id, &i) } else if all { crate::widgets::preview_on(&page, id, &i) } else { return None };
+                    d.ok().map(|d| (id.clone(), d))
+                })
+                .collect();
+            json_reply(json!({"page": page.key(), "layout": layout, "offered": offered, "plugins": plugins}))
+        }
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
             // Which widgets Today shows, in what order and rows (this computer's `today-layout.json`).
@@ -164,22 +188,24 @@ fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> 
         _ => None,
     };
     let target = v["target"].as_str().filter(|t| !t.is_empty()).zip(side);
+    // Today's, or a thread's or client's dashboard (`page`: `thread:<id>`, `client:<id>`).
+    let page = l::Page::parse(v["page"].as_str().unwrap_or(""))?;
     match v["op"].as_str().unwrap_or("") {
-        "add" => l::add(w, v["size"].as_str(), target),
-        "move" => l::move_to(w, target),
+        "add" => l::add_on(&page, w, v["size"].as_str(), target),
+        "move" => l::move_on(&page, w, target),
         "params" => {
-            let items = l::set_param(w, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
+            let items = l::set_param_on(&page, w, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
             // A plugin's widget is asked again at once with its new settings.
             #[cfg(feature = "js")]
             if let Some((plugin, widget)) = w.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
-                crate::jshost::widget_ask(plugin, widget);
+                crate::jshost::widget_ask_on(plugin, widget, &page);
             }
             Ok(items)
         }
-        "size" => l::resize(w, v["size"].as_str().unwrap_or("")),
-        "height" => l::set_height(w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),
-        "remove" => l::remove(w),
-        "reset" => l::reset(),
+        "size" => l::resize_on(&page, w, v["size"].as_str().unwrap_or("")),
+        "height" => l::set_height_on(&page, w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),
+        "remove" => l::remove_on(&page, w),
+        "reset" => l::reset_on(&page),
         op => anyhow::bail!("Today's layout: no change {op:?}"),
     }
 }

@@ -264,6 +264,8 @@ pub fn changed(thread: &str, change: Change) -> Result<()> {
         // deletes or merges the thread (each plugin's work.json under its own lock); `into` asks for its own again.
         #[cfg(feature = "js")]
         crate::jshost::work::forget_thread(thread);
+        // Its dashboard and the plugins' answers for it too (`into` keeps its own).
+        crate::today_layout::forget(&crate::today_layout::Page::Thread(thread.to_string()));
     }
     let payload = match change {
         Change::Renamed { name, from } => json!({"thread": thread, "born": was, "change": "renamed", "name": name, "from": from}),

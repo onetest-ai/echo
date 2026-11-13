@@ -23,7 +23,15 @@ use serde_json::{json, Value};
 use crate::{paths, plugins};
 
 mod test_hosts;
+mod widgets;
 pub mod work;
+
+#[cfg(test)]
+pub use widgets::widget_last;
+#[cfg(test)]
+use widgets::widget_ask_now_on;
+pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
+use widgets::widget_store;
 
 use test_hosts::test_host;
 #[cfg(test)]
@@ -971,11 +979,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "widgets.set" => {
-            widget_store(id, &s(&arg[0]), Some(&arg[1]), None, None)?;
+            widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None)?;
             Value::Null
         }
         "widgets.clear" => {
-            widget_store(id, &s(arg), None, None, None)?;
+            widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None)?;
             Value::Null
         }
         "work.provide" => {
@@ -1354,115 +1362,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     }
 }
 
-// ── the plugins' Today widgets ──
-
-fn widgets_file(id: &str) -> PathBuf {
-    plugins::data_dir(id).join("widgets.json")
-}
-
-/// A widget's last data (`None`: cleared), or why its provider couldn't answer (the data before kept) — one the
-/// plugin declares, at most 64 KB; `size`: the size its provider was asked for.
-fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
-    let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
-    if !declared {
-        bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
-    }
-    if data.is_some_and(|d| d.to_string().len() > 64 * 1024) {
-        bail!("a widget's data is 64 KB at most");
-    }
-    let f = widgets_file(id);
-    let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
-    let mut all: serde_json::Map<String, Value> = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    // `at`: when its data was given (Today's "from HH:MM"); `asked`: when Echo last asked its provider (or found it
-    // had none), for the next ask; `error`: why the last ask failed, its data kept.
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut last = all.get(widget).cloned().unwrap_or_else(|| json!({"data": null}));
-    match (data, error) {
-        (_, Some("")) => {
-            last["asked"] = json!(now);
-        }
-        (_, Some(e)) => {
-            last["error"] = json!(e);
-            last["asked"] = json!(now);
-        }
-        (d, None) => {
-            // A `set` keeps the size its provider was last asked for (else Today would take it for a resize).
-            let kept = last.get("size").cloned();
-            last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
-            if let Some(k) = kept {
-                last["size"] = k;
-            }
-        }
-    }
-    if let Some(size) = size {
-        last["size"] = json!(size);
-    }
-    all.insert(widget.into(), last);
-    std::fs::create_dir_all(plugins::data_dir(id))?;
-    paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    Ok(())
-}
-
-static WIDGETS: Mutex<()> = Mutex::new(());
-/// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
-static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Widgets asked for again while being asked: one more ask once this one is in.
-static AGAIN: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
-
-/// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
-/// `{data, at, asked, error?}`.
-pub fn widget_last(plugin: &str, widget: &str) -> Option<Value> {
-    let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
-    all.get(widget).cloned()
-}
-
-/// Ask a widget's provider for its data in the background (5 s, as a command), keeping the answer — or, when it has
-/// no provider (it only `set`s) or fails, its last data with why.
-pub fn widget_ask(plugin: &str, widget: &str) {
-    let key = format!("{plugin}:{widget}");
-    {
-        let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
-        if asking.contains(&key) {
-            // Asked while an ask is on its way (a setting just changed): asked once more after it.
-            AGAIN.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
-            return;
-        }
-        asking.push(key.clone());
-    }
-    let (plugin, widget) = (plugin.to_string(), widget.to_string());
-    std::thread::spawn(move || {
-        loop {
-            widget_ask_now(&plugin, &widget);
-            if !AGAIN.lock().unwrap_or_else(|e| e.into_inner()).remove(&key) {
-                break;
-            }
-        }
-        ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
-    });
-}
-
-/// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
-pub fn widget_ask_now(plugin: &str, widget: &str) {
-    // Its settings as Today has them (defaults, then the user's), given to the provider.
-    // and the size it has there (S, M, L), so it can give as much as fits.
-    let id = format!("plugin:{plugin}:{widget}");
-    let (params, size) = (crate::today_layout::params_of(&id), crate::today_layout::size_on_today(&id));
-    let size = Some(size.as_str());
-    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size }), Duration::from_secs(5)) {
-        // Kept — or, refused (over 64 KB), why, its data before kept.
-        Ok(v) => {
-            if let Err(e) = widget_store(plugin, widget, Some(&v), None, size) {
-                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")), size);
-            }
-        }
-        // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
-        // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
-        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""), size)),
-        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")), size)),
-    }
-}
-
-// ── the plugins' Inbox items ──
+// ── the plugins' Today widgets (widgets.rs) ──
 
 fn inbox_file(id: &str) -> PathBuf {
     plugins::data_dir(id).join("inbox.json")
@@ -1518,6 +1418,96 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         got_size(plugin, widget)
+    }
+
+    #[test]
+    fn a_widget_on_a_dashboard_is_asked_for_its_page_and_kept_apart() {
+        use crate::today_layout::{self as l, Page};
+        let (_env, root) = paths::testenv::folders("jshost-dashboards");
+        let mk = root.join("market");
+        let d = mk.join("plugins/staff");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "open", "label": "Open positions", "kind": "stat", "params": [{"key": "thread", "label": "Thread", "type": "thread"}, {"key": "client", "label": "Client", "type": "client"}]},
+            {"id": "all", "label": "Everything", "kind": "stat"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "staff", "name": "Staff", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.widgets.provide('open', ({ params }) => ({ value: 1, label: `${params.thread || '-'} / ${params.client || '-'}` }))
+              ctx.widgets.provide('all', () => ({ value: 9 }))
+              ctx.command('push', () => { ctx.widgets.set('open', { value: 7, label: 'pushed' }); return 1 })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "staff", "source": "./plugins/staff"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("staff", Some(&name)).unwrap().uses;
+        plugins::install("staff", Some(&name), &agreed).unwrap();
+        sync();
+        let acme = crate::projects::add_client("Acme", &[], false).unwrap();
+        let t = crate::projects::create("Aurora", Some(&acme.id), None).unwrap();
+        let (thread, client) = (Page::Thread(t.id.clone()), Page::Client(acme.id.clone()));
+        // What each page offers: a thread's, widgets with a thread setting; a client's, with a client setting.
+        assert!(l::add_on(&thread, "plugin:staff:all", None, None).unwrap_err().to_string().contains("no thread setting"));
+        l::add_on(&thread, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add_on(&client, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add("plugin:staff:open", Some("M"), None).unwrap();
+        assert!(l::load().iter().any(|i| i.widget == "plugin:staff:open") && l::load_on(&thread).len() == 1, "each page its own layout");
+        // The page fills them: a thread's page its thread and the thread's client; a client's page its client.
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["thread"], t.id.as_str());
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["client"], acme.id.as_str());
+        assert_eq!(l::params_on(&client, "plugin:staff:open")["client"], acme.id.as_str());
+        assert!(l::set_param_on(&thread, "plugin:staff:open", "thread", "other").unwrap_err().to_string().contains("this page's"));
+        // Each place asked with its page's settings, its answer kept apart; Today's untouched.
+        let ask = |p: &Page| {
+            let mut last = String::new();
+            (0..100)
+                .find_map(|_| {
+                    widget_ask_now_on("staff", "open", p);
+                    match widget_last_on("staff", "open", p).and_then(|l| l["data"]["label"].as_str().map(str::to_owned)) {
+                        Some(v) => Some(v),
+                        None => {
+                            last = format!("{:?}", widget_last_on("staff", "open", p));
+                            std::thread::sleep(Duration::from_millis(50));
+                            None
+                        }
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        assert_eq!(ask(&thread), format!("{} / {}", t.id, acme.id));
+        assert_eq!(ask(&client), format!("- / {}", acme.id));
+        assert_eq!(ask(&Page::Today), "- / -");
+        assert_eq!(widget_last_on("staff", "open", &thread).unwrap()["data"]["label"], format!("{} / {}", t.id, acme.id), "not overwritten by the others");
+        // The plugin's own `set` reaches every copy: the dashboards' answers give way to it until asked again.
+        call("staff", "push", &json!({})).unwrap();
+        for p in [&thread, &client, &Page::Today] {
+            assert_eq!(widget_last_on("staff", "open", p).unwrap()["data"]["label"], "pushed", "{p:?}");
+        }
+        // The dashboard API's data comes from the page's own copy.
+        let i = crate::widgets::Inputs { tasks: &json!({}) };
+        assert_eq!(crate::widgets::data_on(&thread, "plugin:staff:open", &i).unwrap()["kind"], "stat");
+        // A page that never answered shows nothing of Today's (another thread's, or every one): it waits for its own.
+        let other = crate::projects::create("Borealis", None, None).unwrap();
+        let bare = Page::Thread(other.id.clone());
+        l::add_on(&bare, "plugin:staff:open", Some("M"), None).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none(), "not Today's answer");
+        assert!(crate::widgets::data_on(&bare, "plugin:staff:open", &i).unwrap()["pending"] == true);
+        // A thread with no client: its client setting is the page's too (its default, none), not the user's.
+        assert!(l::set_param_on(&bare, "plugin:staff:open", "client", &acme.id).unwrap_err().to_string().contains("this page's"));
+        assert_eq!(ask(&bare), format!("{} / -", other.id));
+        // Off the page, or the thread deleted: its answer and its dashboard go.
+        l::remove_on(&client, "plugin:staff:open").unwrap();
+        assert!(widget_last_on("staff", "open", &client).is_none());
+        crate::projects::delete(&other.id).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none() && l::load_on(&bare).is_empty(), "a new thread with its id starts clean");
+        plugins::remove("staff", false).unwrap();
+        sync();
     }
 
     #[test]
@@ -1638,6 +1628,10 @@ mod tests {
         assert!(param(json!({"key": "team", "label": "Team", "type": "colour"})).unwrap_err().contains("type Echo doesn't know"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice"})).unwrap_err().contains("choice of 1–12 options"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice", "options": ["a"], "default": "b"})).unwrap_err().contains("default isn't one it takes"));
+        // One thread and one client setting at most: a dashboard sets it.
+        let two = |t: &str| with(json!({"id": "a", "label": "A", "kind": "stat", "params": [{"key": "x", "label": "X", "type": t}, {"key": "y", "label": "Y", "type": t}]}), true);
+        assert!(two("thread").unwrap_err().contains("more than one thread setting"));
+        assert!(two("client").unwrap_err().contains("more than one client setting"));
     }
 
     #[test]

@@ -126,20 +126,30 @@ pub struct Inputs<'a> {
 
 /// A widget's data. A temporal widget's says `empty` when it has nothing (Today takes no space for it).
 pub fn data(id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, true)
+    data_as(id, i, true, &crate::today_layout::Page::Today)
+}
+
+/// A widget's data as a dashboard shows it (a plugin's asked with that page's settings, its answer kept apart).
+pub fn data_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, true, page)
 }
 
 /// A widget not on Today, for Add a widget's preview: as [`data`], but a plugin's is its last answer — its provider asked
 /// only when it never answered, not again each time it is stale (nobody looks at it on Today).
 pub fn preview_data(id: &str, i: &Inputs) -> Result<Value> {
-    data_as(id, i, false)
+    preview_on(&crate::today_layout::Page::Today, id, i)
 }
 
-fn data_as(id: &str, i: &Inputs, placed: bool) -> Result<Value> {
+/// [`preview_data`] for a dashboard: asked with that page's settings, its answer kept as the page's.
+pub fn preview_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, false, page)
+}
+
+fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page) -> Result<Value> {
     let w = find(id)?;
     if let Some(rest) = id.strip_prefix("plugin:") {
         let (plugin, widget) = rest.split_once(':').unwrap_or((rest, ""));
-        return Ok(plugin_data(plugin, widget, &w, placed));
+        return Ok(plugin_data(plugin, widget, &w, placed, page));
     }
     let mut v = match w.kind.as_ref() {
         "day" | "choices" => day(),
@@ -169,7 +179,7 @@ fn data_as(id: &str, i: &Inputs, placed: bool) -> Result<Value> {
 /// its provider again, in the background, once that is older than the widget's `refresh` (60 s at least). Never waits
 /// for the plugin: Today draws the last answer at once.
 #[cfg(not(feature = "js"))]
-fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool) -> Value {
+fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, _page: &crate::today_layout::Page) -> Value {
     json!({"kind": w.kind, "label": label_for(w), "data": null, "empty": true})
 }
 
@@ -205,15 +215,15 @@ fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
 }
 
 #[cfg(feature = "js")]
-fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool) -> Value {
-    let last = crate::jshost::widget_last(plugin, widget);
+fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crate::today_layout::Page) -> Value {
+    let last = crate::jshost::widget_last_on(plugin, widget, page);
     let every = w.refresh.max(60);
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     // Resized since its provider was last asked: asked again for the new size.
-    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on_today(&format!("plugin:{plugin}:{widget}")).as_str()));
+    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on(page, &format!("plugin:{plugin}:{widget}")).as_str()));
     // Not on Today (a preview): asked only when it never answered.
     if if placed { stale || resized } else { last.is_none() } {
-        crate::jshost::widget_ask(plugin, widget);
+        crate::jshost::widget_ask_on(plugin, widget, page);
     }
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
@@ -312,10 +322,10 @@ mod tests {
         }).to_string()).unwrap();
         let mut wd = w("plugin:mix-demo:hang", "plugins", "Never answers", "x", "stat", &["S", "M"], "hug", false);
         wd.refresh = 3600;
-        let v = plugin_data("mix-demo", "hang", &wd, true);
+        let v = plugin_data("mix-demo", "hang", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["at"].as_str()), (Some(true), Some(false), None), "{v}");
         assert_eq!(v["error"], "mix-demo didn't answer __widget:hang within 5 s");
-        let v = plugin_data("mix-demo", "none", &wd, true);
+        let v = plugin_data("mix-demo", "none", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["error"].is_null()), (Some(true), Some(false), true), "{v}");
     }
 
