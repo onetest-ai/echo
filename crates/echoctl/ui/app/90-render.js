@@ -402,6 +402,14 @@ CLICKS.push(
     if (!TPL.data) loadTemplates().then(render)
     return render()
   } },
+  // Ignore: off Needs you now at once, nothing else (no task, no comment, no Claude).
+  { sel: '[data-needs-ignore]', area: 'today', when: (t) => t.dataset.needsIgnore, run: (t) => {
+    const id = t.dataset.needsIgnore
+    send({ cmd: 'needs_decide', id, how: 'ignore' })
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  } },
   { sel: '[data-needs-todo-ok]', area: 'today', when: (t) => t.dataset.needsTodoOk, run: (t) => {
     const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
     if (!thread) { const el = $('#nd-thread'); if (el) el.focus(); return }

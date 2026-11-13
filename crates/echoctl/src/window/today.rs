@@ -90,7 +90,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
-        // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
+        // Today → Needs you now: I'll do it (a task, in a thread), Won't do or Ignore; Refresh reads Teams and mail again.
         "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str(), None) {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),

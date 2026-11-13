@@ -67,7 +67,8 @@ function paletteItems(target) {
       else if (x.app_url || x.chat) add('Needs you now', `Reply in Teams: ${name}`, () => press({ needsOpen: x.app_url || '', chat: x.chat || '' }), { keywords: 'teams answer chat' })
       add('Needs you now', `Claude: ${name}`, () => press({ needsClaude: x.id }), { keywords: 'ask work on it yolo skill' })
       add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
-      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
+      add('Needs you now', `Ignore: ${name}`, () => press({ needsIgnore: x.id }), { keywords: 'dismiss hide skip' })
+      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'not mine who for' })
     }
     // The meetings you go to (Your day also lists the ones not answered and the maybes).
     for (const x of (d.day || []).filter((x) => x.response !== 'notResponded' && x.response !== 'tentativelyAccepted')) {
