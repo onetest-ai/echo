@@ -243,7 +243,7 @@
   },
   {
    "id": "F-PLUG-26",
-   "feature": "My plugins: a built-in marketplace in the Echo data folder (`plugins/`), always listed (no menu: never hidden or removed), a subfolder with a manifest a plugin (its folder name its id); `echoctl plugin mine` names the folder and what Echo reads there; every install and update from it shows the whole permission sheet and needs the user's yes (`--yes`); a change to a plugin's files there is its update, same version or not; Echo installs a copy; one installed from another marketplace is never replaced by one of yours, nor yours by theirs; install and update refused inside a run Echo started",
+   "feature": "My plugins: a built-in marketplace in the Echo data folder (`plugins/`, only with a data folder chosen), always listed (no menu: never hidden or removed), a subfolder with a manifest a plugin (its folder name its id), never a catalog file; `echoctl plugin mine` names (and makes) the folder and what Echo reads there; installs and updates ask as any marketplace's (the sheet; `--yes` for what is new); a change to a plugin's files there is its update, same version or not; Echo installs a copy, checked against the sheet the user agreed to; one installed from another marketplace is never replaced by one of yours, nor yours by theirs; install and update refused inside a run Echo started",
    "priority": "high",
    "check": "agent",
    "axes": []

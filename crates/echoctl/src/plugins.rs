@@ -47,7 +47,7 @@ pub const BUILT_IN: &str = "onetest-ai/echo-plugins";
 const BUILT_IN_NAME: &str = "onetest";
 /// "My plugins": the user's own, the folder `plugins/` in their Echo data folder — a subfolder with a manifest a
 /// plugin, its folder name its id, no catalog file. Always listed; never removed.
-pub const MINE: &str = "mine";
+pub const MINE: &str = "my-plugins";
 
 /// My plugins' folder (made when first asked for).
 pub fn mine_dir() -> PathBuf {
@@ -547,10 +547,12 @@ impl Registry {
 
     /// Every marketplace, the built-in one first.
     pub fn all_markets(&self) -> Vec<(Market, bool)> {
-        let mut v = vec![
-            (Market { name: BUILT_IN_NAME.into(), source: built_in_source(), hidden: self.built_in_hidden }, true),
-            (Market { name: MINE.into(), source: mine_dir().display().to_string(), hidden: false }, true),
-        ];
+        let mut v = vec![(Market { name: BUILT_IN_NAME.into(), source: built_in_source(), hidden: self.built_in_hidden }, true)];
+        // My plugins: only with a data folder chosen (else it would be Echo's own plugins folder), and not when the user
+        // already has a marketplace by that name.
+        if paths::home_chosen() && !self.markets.iter().any(|m| m.name.eq_ignore_ascii_case(MINE)) {
+            v.push((Market { name: MINE.into(), source: mine_dir().display().to_string(), hidden: false }, true));
+        }
         v.extend(self.markets.iter().cloned().map(|m| (m, false)));
         v
     }
@@ -663,14 +665,14 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     let _lock = wait_lock(&base.join(".lock"))?;
     let now = chrono::Local::now().to_rfc3339();
     let got = (|| -> Result<Catalog> {
-        if m.name == MINE {
-            fs::create_dir_all(mine_dir())?;
-        }
-        let snap = fetch(&m.source, &base, MARKET_LIMIT)?;
-        let text = if m.name == MINE && !snap.dir.join(CATALOG).exists() {
-            mine_catalog(&snap.dir)?
+        // My plugins: read as it is, plugin by plugin (each checked on its own below; a missing folder is no plugins, never
+        // made here), never a catalog file in it.
+        let (snap, text) = if m.name == MINE {
+            (Snapshot { commit: String::new(), dir: mine_dir() }, mine_catalog(&mine_dir())?)
         } else {
-            fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?
+            let snap = fetch(&m.source, &base, MARKET_LIMIT)?;
+            let text = fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?;
+            (snap, text)
         };
         let file: CatalogFile = serde_json::from_str(&text).with_context(|| format!("its {CATALOG} isn't valid"))?;
         let mut plugins = vec![];
@@ -739,11 +741,13 @@ pub fn refresh(name: &str) -> Result<Catalog> {
 
 /// My plugins' catalog: each subfolder holding a manifest, by its folder name (no catalog file to keep).
 fn mine_catalog(dir: &Path) -> Result<String> {
-    let mut ids: Vec<String> = fs::read_dir(dir)?
+    // A folder with a manifest is a plugin (one whose name isn't an id is listed, and says so when installed).
+    let mut ids: Vec<String> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.path().join(MANIFEST).is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| valid_id(n))
         .collect();
     ids.sort();
     let plugins: Vec<Value> = ids.iter().map(|id| json!({"id": id, "source": format!("./{id}")})).collect();
@@ -888,8 +892,7 @@ pub struct Review {
 fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Review> {
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
     let uses = sheet(m)?;
-    // From My plugins every change asks again (its files are anyone's to change on this computer): the whole sheet.
-    let new_uses = if market == MINE { uses.clone() } else { uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect() };
+    let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
     Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, blocked: why_not(m) })
 }
 
@@ -921,10 +924,18 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     let tmp = installed_dir(id).join(format!(".new-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     copy_tree(&o.dir, &tmp)?;
-    // What was copied is what was checked.
+    // What was copied is what was checked, and what the user agreed to: the copy's own sheet (its files may have
+    // changed since the marketplace was read — a local folder above all).
     if tree_hash(&tmp)? != hash {
         let _ = fs::remove_dir_all(&tmp);
         bail!("its files changed while installing — try again");
+    }
+    match read_manifest(&tmp).and_then(|m| Ok((sheet(&m)?, m))) {
+        Ok((uses, m)) if m.id == rv.id && uses == rv.uses => {}
+        _ => {
+            let _ = fs::remove_dir_all(&tmp);
+            bail!("{} changed since you saw what it asks — look again (read its marketplace again)", rv.name);
+        }
     }
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
@@ -978,7 +989,7 @@ pub fn update_for(p: &Installed) -> Option<Review> {
 fn update_in(p: &Installed, c: &Catalog) -> Option<Review> {
     let o = c.plugins.iter().find(|o| o.id == p.id)?;
     // From My plugins, a change to its files is its update (no version bump needed there).
-    let changed = if p.market == MINE { o.commit != p.commit } else { crate::update::newer(&o.manifest.as_ref()?.version, &p.version) };
+    let changed = if p.market == MINE { o.commit != format!("local-{}", p.files.get(..12).unwrap_or("")) } else { crate::update::newer(&o.manifest.as_ref()?.version, &p.version) };
     changed.then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
 }
 
@@ -1644,18 +1655,22 @@ mod tests {
         let c = refresh(MINE).unwrap();
         assert!(c.error.is_none(), "{:?}", c.error);
         assert_eq!(c.plugins.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), vec!["standup"]);
-        // Every install from it asks (the whole sheet is new), and a copy is installed.
+        // What the user agreed to is what is installed: a manifest changed after the sheet was read is refused.
         let rv = review("standup", Some(MINE)).unwrap();
-        assert_eq!(rv.new_uses, rv.uses);
+        let first = fs::read_to_string(d.join(MANIFEST)).unwrap();
+        fs::write(d.join(MANIFEST), first.replace("\"uses\":{}", "\"uses\":{\"network\":{\"hosts\":[\"evil.example.com\"]}}")).unwrap();
+        assert!(install("standup", Some(MINE), &rv.uses).unwrap_err().to_string().contains("changed since you saw"));
+        fs::write(d.join(MANIFEST), &first).unwrap();
+        refresh(MINE).unwrap();
         let p = install("standup", Some(MINE), &rv.uses).unwrap();
         assert!(plugin_dir(&p).starts_with(paths::config_dir()), "a copy, not the folder itself");
         assert!(update_for(&p).is_none(), "nothing changed");
-        // A change to its files is its update — same version — and it asks again.
+        // A change to its files is its update — same version; it asks only for what is new (nothing here).
         fs::write(d.join("skills/README.md"), "changed").unwrap();
         refresh(MINE).unwrap();
         let p = Registry::load().unwrap().installed["standup"].clone();
         let up = update_for(&p).expect("a change to its files is an update");
-        assert_eq!((up.version.as_str(), up.new_uses.len()), ("0.1.0", up.uses.len()));
+        assert_eq!((up.version.as_str(), up.new_uses.len()), ("0.1.0", 0));
         assert_eq!(update("standup", &up.uses).unwrap().unwrap().version, "0.1.0");
         assert!(update_for(&Registry::load().unwrap().installed["standup"]).is_none());
         // One installed from another marketplace is never replaced by one of yours (nor the other way).

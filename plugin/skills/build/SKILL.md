@@ -8,7 +8,7 @@ argument-hint: "[what it should show, and where]"
 
 The user's own plugins live in **My plugins**: a folder in their Echo data folder, one subfolder a plugin, its
 folder name its id. Echo offers each there to install, and each change to its files as an update — always with the
-permission sheet, always the user's yes. Echo installs a copy; editing the folder changes nothing until updated.
+permission sheet when it asks for something new. Echo installs a copy; editing the folder changes nothing until updated.
 
 CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`), with plain words — no pipes, redirects or `$`.
 Inside a run Echo started (`ECHOCTL_HEADLESS` is set) do nothing: say this is done in the user's own session.
@@ -55,12 +55,13 @@ Ask for a `uses` line (network hosts, folders, Claude…) only when the widget n
 
 ## 4. Check, install
 
-1. `echoctl plugin mine` — your plugin is listed with no `error` (else fix what it says).
-2. `echoctl plugin install <id> --from mine` — without `--yes`: Echo prints what it asks (the sheet). Tell the user
+1. `echoctl plugin mine` — your plugin is listed with no `error` (else fix what it says). (No data folder chosen yet:
+   it says so — the user picks one in Settings first.)
+2. `echoctl plugin install <id> --from my-plugins` — without `--yes`: Echo prints what it asks (the sheet). Tell the user
    those lines in your own words and ask; only after their yes, run it again with `--yes`.
 3. `echoctl widget show plugin:<id>:<widget>` — the data Echo gets from your provider; fix the plugin until it has no
-   `error` and shows what the user wanted. (A change → `echoctl plugin update <id>`, again the sheet first, `--yes`
-   only after the user's yes.) If Echo wasn't running, it picks the plugin up when it starts.
+   `error` and shows what the user wanted. (A change → `echoctl plugin update <id>`; when it asks for something new,
+   it stops and prints it — `--yes` only after the user's yes.) If Echo wasn't running, it picks the plugin up when it starts.
 
 ## 5. Place it
 
@@ -74,5 +75,5 @@ Say where it is and how to change it: Edit on Today or ✎ on the dashboard; or 
 
 ## Changing it later
 
-Edit the files in `<folder>/<id>/`, then `echoctl plugin update <id>` (the sheet, the user's yes, `--yes`), then
+Edit the files in `<folder>/<id>/`, then `echoctl plugin update <id>` (asking for something new: the user's yes, `--yes`), then
 `echoctl widget show …` again. Removing: `echoctl plugin remove <id>`; the folder stays until the user deletes it.

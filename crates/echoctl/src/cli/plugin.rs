@@ -97,8 +97,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         if let Some(b) = &r.blocked {
             anyhow::bail!("{} can't be installed: {b}", r.name);
         }
-        // From My plugins every install and update asks (new code, whatever it uses).
-        if !yes && (!r.new_uses.is_empty() || r.market == MINE) {
+        if !yes && !(r.new_uses.is_empty()) {
             anyhow::bail!("run again with --yes to agree");
         }
         Ok(r.uses.clone())
@@ -164,6 +163,10 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             std::process::exit(v["status"].as_i64().map(|s| s as i32).unwrap_or(1));
         }
         PluginCmd::Mine => {
+            if !crate::paths::home_chosen() {
+                anyhow::bail!("choose Echo's data folder first (Settings → Data): your plugins go in it");
+            }
+            std::fs::create_dir_all(mine_dir())?;
             let c = refresh(MINE)?;
             let plugins: Vec<serde_json::Value> = c.plugins.iter().map(|o| serde_json::json!({"id": o.id, "version": o.manifest.as_ref().map(|m| m.version.clone()), "error": o.error})).collect();
             print_json(&serde_json::json!({"folder": mine_dir(), "plugins": plugins, "error": c.error}));

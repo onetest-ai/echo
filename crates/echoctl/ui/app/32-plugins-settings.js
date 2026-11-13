@@ -154,7 +154,7 @@ function plMarkets(p) {
     const state = busy ? esc(busy) : m.error ? `<span class="error">Can’t be read: ${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
     const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
     // My plugins: the user's own folder — no menu (never hidden or removed), a word on what goes there.
-    const mine = m.name === 'mine'
+    const mine = m.name === 'my-plugins'
     const menu = mine ? '' : S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
     const label = mine ? 'My plugins' : m.name
     const what = mine ? '<div class="pl-s">Your own plugins and widgets, a folder each — ask Claude to make one (the build skill).</div>' : ''
