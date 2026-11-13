@@ -36,6 +36,7 @@ mod capabilities;
 pub use capabilities::*;
 mod sources;
 use sources::*;
+pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod signin;
@@ -86,6 +87,10 @@ pub struct Manifest {
     /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widgets: Vec<WidgetDef>,
+    /// Its package skills: folders in its package (`skills/<name>`, Agent Skills format: `SKILL.md`, `scripts/`,
+    /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
     /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
     /// work rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -255,6 +260,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    package_skills(dir, &m)?;
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
         match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
@@ -346,6 +352,64 @@ pub fn inside_plugin_dir(dir: &Path, rel: &str) -> Result<PathBuf> {
     Ok(d)
 }
 
+/// The most skills a plugin gives Echo's sessions, its package and runtime ones together.
+pub const MAX_SKILLS: usize = 10;
+
+/// Its package skills, checked: `(name, folder in the package)`. Each is a folder inside the plugin named as a skill
+/// (a–z, 0–9, -), once; its `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line
+/// `description`, and no `!` command anywhere in it (Claude Code runs one when the skill loads).
+pub fn package_skills(dir: &Path, m: &Manifest) -> Result<Vec<(String, PathBuf)>> {
+    if m.skills.len() > MAX_SKILLS {
+        bail!("it ships more than {MAX_SKILLS} skills");
+    }
+    let mut out: Vec<(String, PathBuf)> = vec![];
+    for rel in &m.skills {
+        let d = inside_plugin_dir(dir, rel).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
+        let name = d.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if !valid_skill_name(&name) || out.iter().any(|(n, _)| *n == name) {
+            bail!("skill “{rel}”: its folder is named as a skill (a–z, 0–9, -; up to 40), once");
+        }
+        let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
+        check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
+        out.push((name, d));
+    }
+    Ok(out)
+}
+
+/// A skill's name: lowercase words with dashes, up to 40 characters.
+pub fn valid_skill_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A package skill's `SKILL.md`: frontmatter of `name` (= `name`) and a one-line `description` only, no `!` command.
+fn check_skill_md(name: &str, text: &str) -> Result<()> {
+    let text = text.replace("\r\n", "\n");
+    let rest = text.strip_prefix("---\n").ok_or_else(|| anyhow!("SKILL.md starts with its frontmatter (---)"))?;
+    let (front, _) = rest.split_once("\n---").ok_or_else(|| anyhow!("SKILL.md's frontmatter has no end (---)"))?;
+    let (mut got_name, mut got_desc) = (None, None);
+    for line in front.lines().filter(|l| !l.trim().is_empty()) {
+        let (k, v) = line.split_once(':').ok_or_else(|| anyhow!("SKILL.md's frontmatter holds only name and description"))?;
+        let v = v.trim();
+        let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(v);
+        match k {
+            "name" if got_name.is_none() => got_name = Some(v.to_string()),
+            "description" if got_desc.is_none() => got_desc = Some(v.to_string()),
+            _ => bail!("SKILL.md's frontmatter holds only name and description (not “{}”)", k.trim()),
+        }
+    }
+    if got_name.as_deref() != Some(name) {
+        bail!("SKILL.md's name is its folder's, “{name}”");
+    }
+    let desc = got_desc.unwrap_or_default();
+    if desc.is_empty() || desc.chars().count() > 1024 || matches!(desc.as_str(), "|" | ">" | "|-" | ">-") {
+        bail!("SKILL.md needs a description of one line, up to 1024 characters");
+    }
+    if text.contains("!`") {
+        bail!("“!`…`” runs a command in Claude Code; a plugin's SKILL.md runs none");
+    }
+    Ok(())
+}
+
 /// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
 pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
     let mut lines = describe(&m.uses)?;
@@ -354,6 +418,12 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its package skills, by name: what they say is in its package, for Echo's sessions only.
+    if !m.skills.is_empty() {
+        let names: Vec<String> = m.skills.iter().map(|s| format!("“{}”", s.trim_end_matches('/').rsplit('/').next().unwrap_or(s))).collect();
+        let what = if names.len() == 1 { "the skill" } else { "the skills" };
+        lines.push(format!("Gives Claude in Echo {what} {} from its package — in Echo's sessions, not your Claude Code", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>())));
     }
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
     match m.widgets.len() {
@@ -817,6 +887,10 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
                 let _ = fs::remove_dir_all(e.path());
             }
         }
+    }
+    // Its package skills, as this version ships them, for Echo's sessions.
+    if let Err(e) = crate::grants::copy_package_skills(id) {
+        eprintln!("plugin {id}: its skills can't be copied: {e:#}");
     }
     Ok(rec)
 }
@@ -1310,7 +1384,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1567,6 +1641,53 @@ mod tests {
         fs::write(d.join("a b.svg"), "<svg/>").unwrap();
         for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg", "Icon.SVG", "a b.svg", "x\"y.svg", "/icon.svg"] {
             assert!(with(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_plugins_package_skills_are_folders_of_its_own_with_a_plain_skill_md() {
+        let (_env, root) = paths::testenv::folders("plugins-package-skills");
+        let d = root.join("p");
+        let skill = |name: &str, md: &str| {
+            fs::create_dir_all(d.join("skills").join(name).join("references")).unwrap();
+            fs::write(d.join("skills").join(name).join("SKILL.md"), md).unwrap();
+        };
+        let with = |skills: Value| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "skills": skills}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        skill("read-staffing", "---\nname: read-staffing\ndescription: \"Reads the staffing of a project.\"\n---\n\nRun the script.\n");
+        skill("two", "---\nname: two\ndescription: Another one.\n---\nText.\n");
+        let m = with(json!(["skills/read-staffing", "./skills/two/"])).unwrap();
+        assert_eq!(package_skills(&d, &m).unwrap().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["read-staffing", "two"]);
+        assert_eq!(sheet(&m).unwrap(), ["Gives Claude in Echo the skills “read-staffing” and “two” from its package — in Echo's sessions, not your Claude Code"]);
+        let one = with(json!(["skills/two"])).unwrap();
+        assert_eq!(sheet(&one).unwrap(), ["Gives Claude in Echo the skill “two” from its package — in Echo's sessions, not your Claude Code"]);
+        // Each refused, with why.
+        skill("hooked", "---\nname: hooked\ndescription: x\nhooks: evil\n---\n");
+        skill("renamed", "---\nname: other\ndescription: x\n---\n");
+        skill("runs", "---\nname: runs\ndescription: x\n---\nFirst !`curl evil`\n");
+        skill("folded", "---\nname: folded\ndescription: >\n  two lines\n---\n");
+        skill("open", "---\nname: open\ndescription: x\n");
+        skill("Caps", "---\nname: Caps\ndescription: x\n---\n");
+        fs::create_dir_all(d.join("skills/empty")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        for (bad, why) in [
+            (json!(["skills/hooked"]), "only name and description"),
+            (json!(["skills/renamed"]), "its folder's"),
+            (json!(["skills/runs"]), "runs a command"),
+            (json!(["skills/folded"]), "only name and description"),
+            (json!(["skills/open"]), "no end"),
+            (json!(["skills/Caps"]), "named as a skill"),
+            (json!(["skills/empty"]), "no SKILL.md"),
+            (json!(["skills/two", "skills/two"]), "once"),
+            (json!(["../outside"]), "isn't a folder inside the plugin"),
+            (json!(["/tmp"]), "isn't a folder inside the plugin"),
+            (json!(["skills/none"]), "isn't in the plugin"),
+            (json!(vec!["skills/two"; 11]), "more than 10"),
+        ] {
+            let e = with(bad.clone()).unwrap_err().to_string();
+            assert!(e.contains(why), "{bad}: {e}");
         }
     }
 }

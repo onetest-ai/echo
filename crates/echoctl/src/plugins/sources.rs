@@ -191,7 +191,7 @@ pub(super) fn tree_hash(dir: &Path) -> Result<String> {
     Ok(format!("{:x}", h.finalize()))
 }
 
-pub(super) fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     fs::create_dir_all(to)?;
     for e in fs::read_dir(from)? {
         let e = e?;
