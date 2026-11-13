@@ -45,6 +45,14 @@ pub mod signin;
 /// Our public marketplace, always listed (it can be hidden, not removed).
 pub const BUILT_IN: &str = "onetest-ai/echo-plugins";
 const BUILT_IN_NAME: &str = "onetest";
+/// "My plugins": the user's own, the folder `plugins/` in their Echo data folder — a subfolder with a manifest a
+/// plugin, its folder name its id, no catalog file. Always listed; never removed.
+pub const MINE: &str = "mine";
+
+/// My plugins' folder (made when first asked for).
+pub fn mine_dir() -> PathBuf {
+    paths::home().join("plugins")
+}
 /// The marketplace's catalog file at the root of its repository.
 const CATALOG: &str = "echo-marketplace.json";
 /// A plugin's manifest at the root of its folder.
@@ -539,7 +547,10 @@ impl Registry {
 
     /// Every marketplace, the built-in one first.
     pub fn all_markets(&self) -> Vec<(Market, bool)> {
-        let mut v = vec![(Market { name: BUILT_IN_NAME.into(), source: built_in_source(), hidden: self.built_in_hidden }, true)];
+        let mut v = vec![
+            (Market { name: BUILT_IN_NAME.into(), source: built_in_source(), hidden: self.built_in_hidden }, true),
+            (Market { name: MINE.into(), source: mine_dir().display().to_string(), hidden: false }, true),
+        ];
         v.extend(self.markets.iter().cloned().map(|m| (m, false)));
         v
     }
@@ -652,8 +663,15 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     let _lock = wait_lock(&base.join(".lock"))?;
     let now = chrono::Local::now().to_rfc3339();
     let got = (|| -> Result<Catalog> {
+        if m.name == MINE {
+            fs::create_dir_all(mine_dir())?;
+        }
         let snap = fetch(&m.source, &base, MARKET_LIMIT)?;
-        let text = fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?;
+        let text = if m.name == MINE && !snap.dir.join(CATALOG).exists() {
+            mine_catalog(&snap.dir)?
+        } else {
+            fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?
+        };
         let file: CatalogFile = serde_json::from_str(&text).with_context(|| format!("its {CATALOG} isn't valid"))?;
         let mut plugins = vec![];
         let mut seen = std::collections::HashSet::new();
@@ -664,6 +682,12 @@ pub fn refresh(name: &str) -> Result<Catalog> {
             let featured = file.featured.contains(&e.id);
             let at = (|| -> Result<(PathBuf, String)> {
                 match &e.source {
+                    // My plugins: each plugin by its own files (a change to one is its update, not the others').
+                    Value::String(rel) if m.name == MINE => {
+                        let dir = inside(&snap.dir, rel)?;
+                        let h = tree_hash(&dir)?;
+                        Ok((dir, format!("local-{}", &h[..12])))
+                    }
                     Value::String(rel) => Ok((inside(&snap.dir, rel)?, snap.commit.clone())),
                     Value::Object(o) => {
                         let repo = o.get("github").and_then(Value::as_str).ok_or_else(|| anyhow!("its source names no github repository"))?;
@@ -711,6 +735,19 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     };
     paths::write_atomic(&base.join("catalog.json"), serde_json::to_string_pretty(&c)?.as_bytes())?;
     Ok(c)
+}
+
+/// My plugins' catalog: each subfolder holding a manifest, by its folder name (no catalog file to keep).
+fn mine_catalog(dir: &Path) -> Result<String> {
+    let mut ids: Vec<String> = fs::read_dir(dir)?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.path().join(MANIFEST).is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| valid_id(n))
+        .collect();
+    ids.sort();
+    let plugins: Vec<Value> = ids.iter().map(|id| json!({"id": id, "source": format!("./{id}")})).collect();
+    Ok(json!({"name": "My plugins", "plugins": plugins}).to_string())
 }
 
 /// A catalog read by this Echo within `STALE_SECS`.
@@ -771,6 +808,9 @@ pub fn market_remove(name: &str) -> Result<()> {
     if name == BUILT_IN_NAME {
         bail!("the built-in marketplace can be hidden, not removed");
     }
+    if name == MINE {
+        bail!("My plugins is always there: it is your own folder of plugins");
+    }
     Registry::update(|r| {
         let n = r.markets.len();
         r.markets.retain(|m| m.name != name);
@@ -788,6 +828,9 @@ pub fn market_hide(name: &str, hidden: bool) -> Result<()> {
         if name == BUILT_IN_NAME {
             r.built_in_hidden = hidden;
             return Ok(());
+        }
+        if name == MINE {
+            bail!("My plugins can't be hidden: it is your own folder of plugins");
         }
         let m = r.markets.iter_mut().find(|m| m.name == name).ok_or_else(|| anyhow!("no marketplace “{name}”"))?;
         m.hidden = hidden;
@@ -845,7 +888,8 @@ pub struct Review {
 fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Review> {
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
     let uses = sheet(m)?;
-    let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
+    // From My plugins every change asks again (its files are anyone's to change on this computer): the whole sheet.
+    let new_uses = if market == MINE { uses.clone() } else { uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect() };
     Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, blocked: why_not(m) })
 }
 
@@ -861,6 +905,9 @@ pub fn review(id: &str, market: Option<&str>) -> Result<Review> {
 pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
     let (mk, o) = find_offer(id, market)?;
     let before = Registry::load()?.installed.get(id).cloned();
+    if let Some(b) = before.as_ref().filter(|b| b.market != mk && (mk == MINE || b.market == MINE)) {
+        bail!("“{id}” is installed from {} — remove it first to install the one from {mk}", if b.market == MINE { "My plugins" } else { &b.market });
+    }
     let rv = review_of(&mk, &o, before.as_ref())?;
     if let Some(why) = &rv.blocked {
         bail!("{} can't be installed: {why}", rv.name);
@@ -930,7 +977,9 @@ pub fn update_for(p: &Installed) -> Option<Review> {
 /// The same, from a catalog already read.
 fn update_in(p: &Installed, c: &Catalog) -> Option<Review> {
     let o = c.plugins.iter().find(|o| o.id == p.id)?;
-    crate::update::newer(&o.manifest.as_ref()?.version, &p.version).then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
+    // From My plugins, a change to its files is its update (no version bump needed there).
+    let changed = if p.market == MINE { o.commit != p.commit } else { crate::update::newer(&o.manifest.as_ref()?.version, &p.version) };
+    changed.then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
 }
 
 /// Every installed plugin of `r` with an update waiting (from its marketplace's last fetched catalog, no network;
@@ -1585,6 +1634,40 @@ mod tests {
     }
 
     #[test]
+    fn my_plugins_are_the_data_folders_plugins_each_change_an_update_that_asks() {
+        let (_env, root) = paths::testenv::folders("plugins-mine");
+        // Always listed, never removed or hidden; its folder made when read.
+        assert!(Registry::load().unwrap().all_markets().iter().any(|(m, built)| m.name == MINE && *built));
+        assert!(market_remove(MINE).is_err() && market_hide(MINE, true).is_err());
+        let d = plugin(&paths::home(), "standup", "0.1.0", json!({}));
+        fs::create_dir_all(mine_dir().join("notes-only")).unwrap(); // no manifest: not a plugin
+        let c = refresh(MINE).unwrap();
+        assert!(c.error.is_none(), "{:?}", c.error);
+        assert_eq!(c.plugins.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), vec!["standup"]);
+        // Every install from it asks (the whole sheet is new), and a copy is installed.
+        let rv = review("standup", Some(MINE)).unwrap();
+        assert_eq!(rv.new_uses, rv.uses);
+        let p = install("standup", Some(MINE), &rv.uses).unwrap();
+        assert!(plugin_dir(&p).starts_with(paths::config_dir()), "a copy, not the folder itself");
+        assert!(update_for(&p).is_none(), "nothing changed");
+        // A change to its files is its update — same version — and it asks again.
+        fs::write(d.join("skills/README.md"), "changed").unwrap();
+        refresh(MINE).unwrap();
+        let p = Registry::load().unwrap().installed["standup"].clone();
+        let up = update_for(&p).expect("a change to its files is an update");
+        assert_eq!((up.version.as_str(), up.new_uses.len()), ("0.1.0", up.uses.len()));
+        assert_eq!(update("standup", &up.uses).unwrap().unwrap().version, "0.1.0");
+        assert!(update_for(&Registry::load().unwrap().installed["standup"]).is_none());
+        // One installed from another marketplace is never replaced by one of yours (nor the other way).
+        let mk = root.join("market");
+        plugin(&mk, "standup", "0.2.0", json!({}));
+        market(&mk, &["standup"]);
+        let other = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
+        refresh(&other).unwrap();
+        assert!(install("standup", Some(&other), &[]).unwrap_err().to_string().contains("remove it first"));
+    }
+
+    #[test]
     fn install_update_and_remove_from_a_local_marketplace() {
         let (_env, root) = paths::testenv::folders("plugins-flow");
         let mk = root.join("market");
@@ -1643,7 +1726,8 @@ mod tests {
         assert!(enabled().is_empty());
         let snap = snapshot();
         assert_eq!(snap["installed"][0]["id"], "demo");
-        assert_eq!(snap["markets"][1]["name"], "acme");
+        assert_eq!(snap["markets"][1]["name"], MINE, "My plugins right after the built-in one");
+        assert_eq!(snap["markets"][2]["name"], "acme");
         remove("demo", false).unwrap();
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
         market_remove("acme").unwrap();

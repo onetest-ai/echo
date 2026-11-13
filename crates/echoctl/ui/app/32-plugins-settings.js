@@ -153,9 +153,13 @@ function plMarkets(p) {
     const busy = plBusy(p, `market:${m.name}`)
     const state = busy ? esc(busy) : m.error ? `<span class="error">Can’t be read: ${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
     const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
-    const menu = S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
-    return `<div class="pl-mrow" role="group" aria-label="${esc(m.name)}">${plTile({ id: m.name, name: m.name })}<div class="pl-txt"><div class="pl-n">${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div><div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
-      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button><span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span></div>`
+    // My plugins: the user's own folder — no menu (never hidden or removed), a word on what goes there.
+    const mine = m.name === 'mine'
+    const menu = mine ? '' : S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
+    const label = mine ? 'My plugins' : m.name
+    const what = mine ? '<div class="pl-s">Your own plugins and widgets, a folder each — ask Claude to make one (the build skill).</div>' : ''
+    return `<div class="pl-mrow" role="group" aria-label="${esc(label)}">${plTile({ id: m.name, name: label })}<div class="pl-txt"><div class="pl-n">${esc(label)}${!mine && m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div>${what}<div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
+      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>${mine ? '' : `<span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span>`}</div>`
   })
   const add = `<section class="pl-add"><b>Add a marketplace</b>
     <div class="pl-addrow"><input class="set-in" id="pl-msrc" placeholder="owner/repo, a git address, or a folder" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="Name (optional)" aria-label="Name" spellcheck="false"><button class="btn primary" data-pl-madd>Add</button></div>
