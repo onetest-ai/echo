@@ -4,11 +4,9 @@
 //! `ctx.scripts.run`, and Echo's sessions through the wrapper Echo puts at the script's path in its session copy
 //! (`wrapper`), which hands it to `echoctl plugin script` — never Claude Code's own environment.
 
-use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
@@ -174,23 +172,45 @@ pub fn mark_runnable(dir: &Path, m: &super::Manifest) {
 
 // ── running ──
 
-/// Scripts running now: (plugin, script) → its process (group) id.
-static RUNNING: Mutex<BTreeMap<(String, String), u32>> = Mutex::new(BTreeMap::new());
+/// Where a script's lock and its holder's process group are: one run of a script at a time across processes (the app's
+/// host half, a session's `echoctl plugin script`), and any process can stop it. The system drops a lock with its process.
+fn locks() -> PathBuf {
+    crate::paths::config_dir().join("plugins").join(".locks").join("scripts")
+}
 
-/// Stop plugin `id`'s running scripts, each with everything it started (unloaded, updated, removed).
+fn lock_file(id: &str, s: &Script) -> PathBuf {
+    // A script's path holds only letters, digits, `.`, `_`, `-` and `/`: `~` for `/` keeps it one name.
+    locks().join(format!("{id}.{}.{}.lock", s.skill, s.script.replace('/', "~")))
+}
+
+fn group_file(lock: &Path) -> PathBuf {
+    lock.with_extension("pid")
+}
+
+/// Stop plugin `id`'s running scripts, each with everything it started, whichever process runs it (unloaded, updated,
+/// removed).
 pub fn stop_plugin(id: &str) {
-    let pids: Vec<u32> = RUNNING.lock().map(|m| m.iter().filter(|((p, _), _)| p == id).map(|(_, pid)| *pid).collect()).unwrap_or_default();
-    for pid in pids {
-        crate::ai::stop_group(pid);
-    }
+    stop_where(|name| name.starts_with(&format!("{id}.")));
 }
 
 /// Stop every running script (Echo quits).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn stop_all() {
-    let pids: Vec<u32> = RUNNING.lock().map(|m| m.values().copied().collect()).unwrap_or_default();
-    for pid in pids {
-        crate::ai::stop_group(pid);
+    stop_where(|_| true);
+}
+
+fn stop_where(which: impl Fn(&str) -> bool) {
+    for e in std::fs::read_dir(locks()).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".lock") || !which(&name) {
+            continue;
+        }
+        // Held: a run is on; its group is in the file beside the lock. Not held: nothing to stop.
+        if matches!(crate::app::FileLock::try_take(&e.path()), Ok(None)) {
+            if let Some(pid) = std::fs::read_to_string(group_file(&e.path())).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
+                crate::ai::stop_group(pid);
+            }
+        }
     }
 }
 
@@ -220,18 +240,12 @@ pub fn run(id: &str, skill: &str, script: &str, args: &[String], timeout: Option
     let cwd = crate::grants::session_skill_dir(id, &s.skill)?;
     let cache = super::data_dir(id).join("cache");
     std::fs::create_dir_all(&cache)?;
-    let key = (id.to_string(), s.name());
-    {
-        let mut r = RUNNING.lock().map_err(|_| anyhow!("busy"))?;
-        if r.contains_key(&key) {
-            bail!("{} is already running", s.name());
-        }
-        r.insert(key.clone(), 0);
-    }
-    let out = spawn_and_wait(&file, args, &cwd, &cache, Duration::from_secs(limit), &key);
-    if let Ok(mut r) = RUNNING.lock() {
-        r.remove(&key);
-    }
+    std::fs::create_dir_all(locks())?;
+    let lock_path = lock_file(id, &s);
+    let Some(_lock) = crate::app::FileLock::try_take(&lock_path)? else { bail!("{} is already running", s.name()) };
+    let group = group_file(&lock_path);
+    let out = spawn_and_wait(&file, args, &cwd, &cache, Duration::from_secs(limit), &group);
+    let _ = std::fs::remove_file(&group);
     out
 }
 
@@ -290,7 +304,7 @@ fn script_path() -> std::ffi::OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
-fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit: Duration, key: &(String, String)) -> Result<Value> {
+fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit: Duration, group: &Path) -> Result<Value> {
     let mut c = command_for(file)?.no_window();
     c.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // The user's environment, without what is Echo's or Claude Code's (keys, profiles' values, run scopes).
@@ -322,9 +336,8 @@ fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit:
         std::io::ErrorKind::PermissionDenied => anyhow!("{} isn't a program Echo can start (is its #! line there?)", file.display()),
         _ => anyhow!("{} can't be started: {e}", file.display()),
     })?;
-    if let Ok(mut r) = RUNNING.lock() {
-        r.insert(key.clone(), child.id());
-    }
+    // Its group (its own, led by it), for whoever stops it.
+    let _ = std::fs::write(group, child.id().to_string());
     let read = |mut s: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
             let (mut kept, mut cut, mut buf) = (Vec::new(), false, [0u8; 8192]);
@@ -355,8 +368,16 @@ fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit:
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    // What the script started may still hold its output open: stop the group before reading to the end.
-    crate::ai::stop_group(child.id());
+    // What the script started may still hold its output open: then (the group still has a process, so its id is still
+    // its) stop the group before reading to the end. A group stopped on its time is gone already.
+    let ends = Instant::now();
+    while !(out.is_finished() && err.is_finished()) && ends.elapsed() < Duration::from_secs(1) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let read_all = out.is_finished() && err.is_finished();
+    if !timed_out && !read_all {
+        crate::ai::stop_group(child.id());
+    }
     let ((stdout, cut_out), (stderr, cut_err)) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
     let mut v = json!({
         "status": if timed_out { Value::Null } else { status.code().map(Value::from).unwrap_or(Value::Null) },

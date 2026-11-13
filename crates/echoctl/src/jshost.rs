@@ -2723,6 +2723,17 @@ mod tests {
         let busy = v.as_array().unwrap().iter().filter(|r| r["error"].as_str().is_some_and(|e| e.contains("is already running"))).count();
         let ran = v.as_array().unwrap().iter().filter(|r| r["timed_out"] == true).count();
         assert_eq!((busy, ran), (1, 1), "{v}");
+        // Whichever process runs it, a script's run holds its lock: Echo stops it from anywhere (a removal, an update).
+        let runner = std::thread::spawn(|| plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false));
+        let held = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false).is_err_and(|e| e.to_string().contains("already running"))
+        });
+        assert!(held, "the running script holds its lock");
+        let t = std::time::Instant::now();
+        plugins::scripts::stop_plugin("kit");
+        let v = runner.join().unwrap().unwrap();
+        assert!(v["status"].is_null() && v["timed_out"].is_null() && t.elapsed() < Duration::from_secs(5), "{v}");
         // A read-only routine runs only a script marked readonly.
         assert!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, true).unwrap_err().to_string().contains("isn't marked readonly"));
         assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, false).unwrap()["stdout"], "wrote\n");
