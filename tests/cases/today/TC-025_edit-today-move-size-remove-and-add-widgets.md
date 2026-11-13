@@ -1,6 +1,6 @@
 ---
 id: TC-025
-title: Edit Today — each widget framed (name, sizes, ×), dragged onto another's top / bottom edge for a new row or its left / right half beside it, dropped at the end for a last row; Add a widget on the right (search, parts, preview at a size, Add or drag in); Reset and Done
+title: Edit Today — each widget framed (name, sizes, ×), dragged onto another's top / bottom edge for a new row or its left / right half beside it, dropped at the end for a last row; Add a widget on the right (search, parts, the preview above a list that scrolls under it — the pointed row's, else the picked one's — at a size, Add or drag in); Reset and Done
 priority: high
 type: functional
 requirements: [F-TODAY-15]
@@ -23,7 +23,8 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Open `{{base_url}}/#today`; click the pencil "Edit Today" in the head | The head shows "Reset to the default" and "Done"; each widget is framed: grip, its name, ← ↑ ↓ → for the moves it has (before / after in its row, a row above / below), the sizes it takes (the current one on), ×; the head also has "Add a widget"; its content shown but not clickable; Routine cards (nothing today) shows what it is, "shows only while it has something"; on the right "Add a widget": search, parts (All, Calendar, Tasks, Calls, Needs you, Routines), a row a widget with "on Today" or Add; under the list the picked widget's preview |
+| 1 | Open `{{base_url}}/#today`; click the pencil "Edit Today" in the head | The head shows "Reset to the default" and "Done"; each widget is framed: grip, its name, ← ↑ ↓ → for the moves it has (before / after in its row, a row above / below), the sizes it takes (the current one on), ×; the head also has "Add a widget"; its content shown but not clickable; Routine cards (nothing today) shows what it is, "shows only while it has something"; on the right "Add a widget": search, parts (All, Calendar, Tasks, Calls, Needs you, Routines), a row a widget with "on Today" or Add; above the list, under the parts, the picked widget's preview (its name, part, sizes, Add or On Today) |
+| 1a | Scroll the panel's list to its end; point at "Recorded this week" (don't click); then move the pointer onto Today's heading | Pointing: the preview above the list is Recorded this week's ("Recorded this week · Calls", "Add at M") while the list stays scrolled where it was (the preview always in sight); off the list: the preview is the picked one's again ("Your day · agenda", the highlighted row) |
 | 2 | On My work click S, then M | My work is S, then M again (M is its default); `echoctl today` says `core:tasks.mine` size M |
 | 3 | Drag My work by its frame onto the top edge of Needs you now | A line shows above Needs while over it; dropped, My work is on a row of its own above Needs (`echoctl today`: mine first, a row of its own) |
 | 4 | In the panel pick "Threads at a glance" (not on Today; Next meeting is, by default); drag its row onto the right half of My work | A line on My work's right edge while over; dropped, Threads at a glance sits right after My work in its row |

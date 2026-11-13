@@ -145,7 +145,8 @@ function todayEditDone() {
   layoutChanged()
 }
 
-/** Add a widget (the right panel in edit mode): search, parts, a row a widget, the picked one's preview and Add. */
+/** Add a widget (the right panel in edit mode): search, parts, the preview — of the row under the pointer, else the
+ *  picked one — with its size and Add, always in sight above the list, which scrolls under it. */
 function addWidgetPanel() {
   const all = S.tdCatalog || []
   const on = new Set(((S.today && S.today.layout) || []).map((i) => i.widget))
@@ -155,7 +156,8 @@ function addWidgetPanel() {
   // The picked one is among what the part and search show (else the first of them; none shown: no preview).
   if (shown.length && !shown.some((x) => x.id === S.tdPick)) S.tdPick = shown[0].id
   const rows = shown.map((w) => `<div class="tw-row${S.tdPick === w.id ? ' sel' : ''}" draggable="true" data-tw-drag="${esc(w.id)}" data-tw-pick="${esc(w.id)}" role="listitem" aria-label="${esc(w.label)}"><span><b>${esc(w.label)}</b>${w.temporal ? ' <span class="tw-tag" title="Shows only while it has something">when needed</span>' : ''}<br><span class="set-sub">${esc(w.about)}</span></span>${on.has(w.id) ? '<span class="tw-on">on Today</span>' : `<button class="btn sm" data-tw-add="${esc(w.id)}" aria-label="Add ${esc(w.label)}">Add</button>`}</div>`).join('') || '<p class="set-sub">No widget matches.</p>'
-  const w = shown.find((x) => x.id === S.tdPick)
+  // Hovering a row shows its preview; leaving the list, the picked (clicked) one again.
+  const w = shown.find((x) => x.id === S.tdHover) || shown.find((x) => x.id === S.tdPick)
   let pick = ''
   if (w) {
     const size = twPickSize(w)
@@ -167,7 +169,7 @@ function addWidgetPanel() {
     pick = `<div class="tw-pick"><div class="tw-pick-h"><b>${esc(w.label)}</b><span class="mono">${esc(w.part)}</span></div><div class="tw-pv" style="width:${px}px" draggable="true" data-tw-drag="${esc(w.id)}" aria-label="Preview of ${esc(w.label)} at ${esc(size)}">${pv}</div><div class="tw-dots" role="group" aria-label="Size">${dots}</div><span class="set-sub tw-note">${esc(note)}</span>${on.has(w.id) ? `<button class="btn" data-tw-size="${esc(size)}" data-tw-id="${esc(w.id)}">On Today — make it ${esc(size)}</button>` : `<button class="btn primary" data-tw-add="${esc(w.id)}" data-tw-add-size="${esc(size)}">Add at ${esc(size)}</button>`}<span class="set-sub tw-note">Or drag the preview onto Today.</span></div>`
   }
   // Done here too: at a narrow width this panel is over the page's head.
-  return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div><div class="tw-list" role="list" aria-label="Widgets">${rows}</div>${pick}</div>`
+  return `<div class="tw-panel"><div class="tw-top">${S.overlay ? '<div class="tw-top-acts"><button class="btn primary sm" data-tw-done="1">Done</button></div>' : ''}<input id="tw-q" class="tw-q" type="search" placeholder="Search widgets" aria-label="Search widgets" value="${esc(S.tdQ || '')}" data-tw-q="1"><div class="tw-parts" role="group" aria-label="Parts">${parts.map((p) => `<button type="button" class="tw-part${p === part ? ' on' : ''}" data-tw-part="${esc(p)}" aria-pressed="${p === part}">${esc(p)}</button>`).join('')}</div></div>${pick}<div class="tw-list" role="list" aria-label="Widgets" data-keep-scroll="1">${rows}</div></div>`
 }
 
 PANEL_VIEWS.push({
@@ -198,7 +200,24 @@ document.addEventListener('click', (e) => {
   if (d.twAdd) { e.stopPropagation(); return todayLayoutDo({ op: 'add', widget: d.twAdd, size: d.twAddSize || undefined }) }
   if (d.twPickSize) { S.tdPickSize = d.twPickSize; return render() }
   if (d.twPart) { S.tdPart = d.twPart; return render() }
-  if (d.twPick) { S.tdPick = d.twPick; return render() }
+  if (d.twPick) { S.tdPick = d.twPick; S.tdHover = null; return render() }
+})
+// The preview follows the pointer (or the keyboard) over the list; out of the list it is the picked one's again.
+// Redrawn only when it changes (a redraw on a press would replace the button pressed, and lose its click).
+const twHover = (id) => { if ((S.tdHover || null) !== (id || null)) { S.tdHover = id || null; render() } }
+document.addEventListener('mouseover', (e) => {
+  if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
+  const row = e.target.closest('.tw-list [data-tw-pick]')
+  if (row) twHover(row.dataset.twPick)
+})
+document.addEventListener('mouseout', (e) => {
+  if (S.tdHover == null || !e.target.closest || !e.target.closest('.tw-list')) return
+  if (!(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.tw-list'))) twHover(null)
+})
+document.addEventListener('focusin', (e) => {
+  if (S.view !== 'today' || !S.tdEdit || !e.target.closest || !e.target.closest('.tw-panel')) return
+  const row = e.target.closest('.tw-list [data-tw-pick]')
+  twHover(row ? row.dataset.twPick : null)
 })
 document.addEventListener('input', (e) => {
   if (!e.target.dataset || !e.target.dataset.twQ) return
