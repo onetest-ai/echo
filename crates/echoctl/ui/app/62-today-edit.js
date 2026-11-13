@@ -226,12 +226,14 @@ document.addEventListener('click', (e) => {
 // The panel is drawn again: the focus goes back to the button it was on (by what it does), not to the page.
 const twHover = (id) => {
   if ((S.tdHover || null) === (id || null)) return
-  S.tdHover = id || null
   const a = document.activeElement
-  const back = a && a.closest && a.closest('.tw-panel') && ['twAdd', 'twPickSize', 'twPart'].find((k) => a.dataset && a.dataset[k])
+  // The keyboard on the preview's sizes: the preview stays (a size pressed is that widget's).
+  if (a && a.closest && a.closest('.tw-pick')) return
+  S.tdHover = id || null
+  const back = a && a.closest && a.closest('.tw-panel') && ['twAdd', 'twPart'].find((k) => a.dataset && a.dataset[k])
   const sel = back && `.tw-panel [data-${back.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}="${CSS.escape(a.dataset[back])}"]`
   render()
-  if (sel) setTimeout(() => { const el = document.querySelector(sel); if (el && document.activeElement !== el) el.focus() })
+  if (sel) setTimeout(() => { const el = document.querySelector(sel); if (el && document.activeElement !== el) el.focus({ preventScroll: true }) })
 }
 document.addEventListener('mouseover', (e) => {
   if (S.view !== 'today' || !S.tdEdit || !e.target.closest) return
