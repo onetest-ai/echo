@@ -128,7 +128,7 @@ function pluginTableHtml(d, size, opened, { str, outLink }) {
     if (col.kind === 'date') {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
       if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) throw new Error(`${what} isn't a date (YYYY-MM-DD)`)
-      return { html: `<time datetime="${esc(text)}">${+m[3]} ${MON[+m[2] - 1]}</time>`, text, t }
+      return { html: `<time datetime="${esc(text)}">${MON[+m[2] - 1]} ${+m[3]}</time>`, text, t }
     }
     if (col.kind === 'pill') return { html: `<span class="pw-pill${t}">${esc(text)}</span>`, text, t: '' }
     return { html: esc(text), text, t }

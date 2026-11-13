@@ -107,7 +107,7 @@ test('a table: its columns (a pill, a short date, a number at the end), rows und
   const h = draw('table', table, 'L')
   assert.match(h, /<th scope="col" class="k-pill">Urgency<\/th>/)
   assert.match(h, /<span class="pw-pill tone-bad">Critical<\/span>/)
-  assert.match(h, /<time datetime="2026-11-15">15 Nov<\/time>/)
+  assert.match(h, /<time datetime="2026-11-15">Nov 15<\/time>/)
   assert.match(h, /<td class="k-number">3<\/td>/)
   const at = (t) => h.indexOf(t)
   assert.ok(at('NWB · Northwind') < at('P-1') && at('P-1') < at('CTL · Contoso') && at('CTL · Contoso') < at('P-3') && at('P-3') < at('Other') && at('Other') < at('P-9'), 'groups in their order, the rest last')
