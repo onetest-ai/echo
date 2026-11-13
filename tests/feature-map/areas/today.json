@@ -157,7 +157,7 @@
   },
   {
    "id": "F-TODAY-22",
-   "feature": "A plugin's widget kinds beyond the first five: chart (bar, bars, line — points titled with their value, the last one marked), a stat's progress bar, and on any kind a link (echo:// opens in Echo; https asks 'Open <host> in the browser?' before it leaves) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
+   "feature": "A plugin's widget kinds beyond the first five: chart (line, area, bar, bars, stacked, stacked-bars, pie, donut, funnel; one series or up to 6 in Echo's palette with a legend; a headline — its value, what it is, its change with an arrow, in tone good or bad; every mark titled with its value; dates as Echo writes them; data it can't draw says why), a stats item's trend as a sparkline,, a stat's progress bar, and on any kind a link (echo:// opens in Echo; https asks 'Open <host> in the browser?' before it leaves) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
    "priority": "medium",
    "check": "agent",
    "axes": []

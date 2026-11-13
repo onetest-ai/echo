@@ -39,31 +39,27 @@ function pluginWidgetHtml(kind, data, size, opened = []) {
     }
     return `<div class="pw-stat"><b class="${tone(d.tone).trim()}">${esc(str(d.value, 'value', 24))}</b>${d.unit ? `<span class="set-sub">${esc(str(d.unit, 'unit', 12))}</span>` : ''}${d.label ? `<span class="set-sub">${esc(str(d.label, 'label', 80))}</span>` : ''}</div>${bar}${d.note && size !== 'S' ? `<div class="set-sub pw-note">${esc(str(d.note, 'note'))}</div>` : ''}${foot()}`
   }
-  if (kind === 'chart') {
-    if (!['bar', 'bars', 'line'].includes(d.type)) throw new Error('a chart needs type: bar, bars or line')
-    if (!Array.isArray(d.points) || !d.points.length) throw new Error('a chart needs points: [{label, value}]')
-    const pts = d.points.slice(-(d.type === 'bars' ? (size === 'L' ? 10 : 6) : 31)).map((p, i) => ({ label: str(p && p.label, `point ${i + 1}'s label`, 40), value: num(p && p.value, `point ${i + 1}'s value`) }))
-    const max = Math.max(...pts.map((p) => p.value), 0) || 1, unit = d.unit ? ` ${str(d.unit, 'unit', 12)}` : ''
-    const say = (p) => `${p.label}: ${p.value}${unit}`
-    let body
-    if (d.type === 'bars') {
-      body = `<div class="pw-bars">${pts.map((p) => `<span class="pw-bl">${esc(p.label)}</span><span class="pw-bt"><span style="width:${((Math.max(0, p.value) / max) * 100).toFixed(1)}%"></span></span><span class="mono pw-bn">${esc(String(p.value))}</span>`).join('')}</div>`
-    } else {
-      const w = 480, h = 100, n = pts.length, step = w / n
-      const y = (v) => (h - (Math.max(0, v) / max) * (h - 6)).toFixed(1)
-      const marks = d.type === 'bar'
-        ? pts.map((p, i) => `<rect x="${(i * step + step * 0.15).toFixed(1)}" y="${y(p.value)}" width="${(step * 0.7).toFixed(1)}" height="${(h - y(p.value)).toFixed(1)}" rx="2"${i === n - 1 ? ' class="last"' : ''}><title>${esc(say(p))}</title></rect>`).join('')
-        : `<polyline points="${pts.map((p, i) => `${(n === 1 ? w / 2 : (i * w) / (n - 1)).toFixed(1)},${y(p.value)}`).join(' ')}" fill="none" vector-effect="non-scaling-stroke"/>${pts.map((p, i) => `<circle cx="${(n === 1 ? w / 2 : (i * w) / (n - 1)).toFixed(1)}" cy="${y(p.value)}" r="2.5"><title>${esc(say(p))}</title></circle>`).join('')}`
-      body = `<svg class="pw-chart ${d.type}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(pts.map(say).join(', '))}"><line x1="0" y1="${h}" x2="${w}" y2="${h}"/>${marks}</svg><div class="pw-axis mono"><span>${esc(pts[0].label)}</span><span>${esc(pts[n - 1].label)} · ${esc(String(pts[n - 1].value))}${esc(unit)}</span></div>`
-    }
-    return `${body}${d.note && size !== 'S' ? `<div class="set-sub pw-note">${esc(str(d.note, 'note'))}</div>` : ''}${foot()}`
-  }
+  if (kind === 'chart') return pluginChartHtml(d, size, { str, num, foot })
   if (kind === 'stats') {
     if (!Array.isArray(d.items)) throw new Error('stats need items: [{label, value}]')
     const items = d.items.slice(0, size === 'L' ? 6 : size === 'S' ? 2 : 4)
     // An item may open matching rows elsewhere: "Details ›".
     const more = (x) => (x ? outLink('Details ›', x.link) : '')
-    return `<div class="pw-stats">${items.map((x, i) => `<div><b class="${tone(x && x.tone).trim()}">${esc(str(x && x.value, `item ${i + 1}'s value`, 24))}</b><span class="set-sub">${esc(str(x && x.label, `item ${i + 1}'s label`, 60))}</span>${more(x)}</div>`).join('')}</div>${foot()}`
+    // An item's `trend`: a sparkline under its value (up to 30 numbers).
+    const spark = (x, i) => {
+      if (!x || x.trend == null) return ''
+      if (!Array.isArray(x.trend)) throw new Error(`item ${i + 1}'s trend is not a list of numbers`)
+      const t = x.trend.slice(-30).map((v, k) => num(v, `item ${i + 1}'s trend ${k + 1}`))
+      if (t.length < 2) return ''
+      // The column's width, a soft fill under it, a dot on the last value (the number above it).
+      const lo = Math.min(...t), hi = Math.max(...t), span = hi - lo || 1
+      const xy = t.map((v, k) => [(k / (t.length - 1)) * 100, 25 - ((v - lo) / span) * 22])
+      const line = xy.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ')
+      const [lx, ly] = xy[xy.length - 1]
+      return `<span class="pc-spark" aria-hidden="true"><svg viewBox="0 0 100 28" preserveAspectRatio="none"><polygon points="0,28 ${line} 100,28"/><polyline points="${line}" fill="none" vector-effect="non-scaling-stroke"/></svg><i style="left:${lx.toFixed(1)}%;top:${((ly / 28) * 100).toFixed(1)}%"></i></span>`
+    }
+    const trends = items.some((x) => x && Array.isArray(x.trend) && x.trend.length > 1)
+    return `<div class="pw-stats${trends ? ' trends' : ''}">${items.map((x, i) => `<div><b class="${tone(x && x.tone).trim()}">${esc(str(x && x.value, `item ${i + 1}'s value`, 24))}</b><span class="set-sub">${esc(str(x && x.label, `item ${i + 1}'s label`, 60))}</span>${spark(x, i)}${more(x)}</div>`).join('')}</div>${foot()}`
   }
   if (kind === 'list') {
     if (!Array.isArray(d.items)) throw new Error('a list needs items: [{title, sub?, link?}]')
@@ -180,6 +176,156 @@ function pluginTableHtml(d, size, opened, { str, outLink }) {
  *  goes once the plugin answers. Else '' (answered with nothing, or cleared: no place). */
 function pluginWidgetFailed(w) {
   return w && w.empty && w.error && !w.at && !w.pending ? `<p class="set-sub warn">Couldn't get its data — ${esc(w.error)}</p>` : ''
+}
+/** A plugin's chart (`kind: chart`; Workbench `WidgetsCharts`): Echo draws it as SVG in its own palette — line, area,
+ *  bar (grouped), stacked, bars and stacked-bars (horizontal), pie, donut, funnel; one series (`points: [{label, value}]`)
+ *  or several (`series` + each point's `values`); the answer above it (`headline`); a legend for 2+ series or slices
+ *  (none at S); every mark titled with its value. Throws with what is wrong in the data. */
+const CHART_TYPES = ['line', 'area', 'bar', 'bars', 'stacked', 'stacked-bars', 'pie', 'donut', 'funnel']
+function pluginChartHtml(d, size, { str, num, foot }) {
+  const type = d.type
+  if (!CHART_TYPES.includes(type)) throw new Error(`a chart needs type: ${CHART_TYPES.join(', ')}`)
+  if (!Array.isArray(d.points) || !d.points.length) throw new Error('a chart needs points: [{label, value}]')
+  const PIE = type === 'pie' || type === 'donut', ONE = PIE || type === 'funnel', pct100 = d.percent === true
+  const unit = d.unit ? ` ${str(d.unit, 'unit', 12)}` : ''
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  // A date as Echo writes it (Nov 8); any other label as given.
+  const lab = (v, what) => { const t = str(v, what, 40), m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t); return m && +m[2] >= 1 && +m[2] <= 12 ? `${MON[+m[2] - 1]} ${+m[3]}` : t }
+  // Echo's colours, never the plugin's: the palette in order; a `tone` gives one a meaning.
+  const TONE = { good: 'var(--me)', warn: 'var(--warn)', bad: 'var(--danger)', muted: 'var(--text-3)' }
+  const multi = d.series != null
+  if (multi && (!Array.isArray(d.series) || !d.series.length)) throw new Error('series needs [{key, label}]')
+  if (multi && d.series.length > 6) throw new Error('a chart takes 6 series at most')
+  if (multi && ONE && d.series.length > 1) throw new Error(`a ${type} takes one series`)
+  const series = multi
+    ? d.series.map((x, i) => {
+      if (!x || typeof x.key !== 'string' || !x.key) throw new Error(`series ${i + 1} needs a key`)
+      return { key: x.key, label: str(x.label, `series ${i + 1}'s label`, 40) || x.key, color: (typeof x.tone === 'string' && Object.hasOwn(TONE, x.tone) && TONE[x.tone]) || `var(--chart-${i + 1})` }
+    })
+    : [{ key: '', label: '', color: 'var(--chart-1)' }]
+  if (new Set(series.map((x) => x.key)).size !== series.length) throw new Error('series keys must be unique')
+  // The points that fit: a line or area its last 60, the bar types their last 24, a funnel its first 8 stages; a pie
+  // or donut reads all its slices (6 drawn, the rest in Other).
+  const kept = type === 'funnel' ? d.points.slice(0, 8) : PIE ? d.points : d.points.slice(-(type === 'line' || type === 'area' ? 60 : 24))
+  const pts = kept.map((p, i) => {
+    if (!p || typeof p !== 'object') throw new Error(`point ${i + 1} is not an object`)
+    if (multi && (!p.values || typeof p.values !== 'object')) throw new Error(`point ${i + 1} needs values: {<key>: number}`)
+    const vals = series.map((x) => {
+      const v = multi ? (Object.hasOwn(p.values, x.key) ? p.values[x.key] : null) : p.value
+      return multi && v == null ? 0 : num(v, multi ? `point ${i + 1}'s ${x.key}` : `point ${i + 1}'s value`)
+    })
+    return { label: lab(p.label, `point ${i + 1}'s label`), vals }
+  })
+  if (pts.some((p) => p.vals.some((v) => Math.abs(v) > 1e15))) throw new Error('a chart takes values up to 10^15')
+  if (type !== 'line' && type !== 'bar' && pts.some((p) => p.vals.some((v) => v < 0))) throw new Error(`a ${type} takes no negative values (only line and bar do)`)
+  const fmt = (v) => `${Number.isInteger(v) ? v : Math.round(v * 100) / 100}${unit}`
+  const say = (p) => (multi ? `${p.label}: ${series.map((x, k) => `${x.label} ${fmt(p.vals[k])}`).join(', ')}` : `${p.label}: ${fmt(p.vals[0])}`)
+  // The answer first: its value, what it is, its change (an arrow by `by`'s sign; green when good, red when not).
+  let head = ''
+  if (d.headline != null) {
+    const h = d.headline
+    if (typeof h !== 'object' || h.value == null) throw new Error('headline needs value')
+    let ch = ''
+    if (h.change != null) {
+      const by = num(h.change.by, 'headline.change.by')
+      const cls = h.change.good === true ? ' good' : h.change.good === false ? ' bad' : ''
+      ch = `<span class="pc-ch${cls}">${by > 0 ? '↑' : by < 0 ? '↓' : '→'} ${esc(fmt(Math.abs(by)))}${h.change.than ? ` vs ${esc(str(h.change.than, 'headline.change.than', 40))}` : ''}</span>`
+    }
+    head = `<div class="pc-head"><b>${esc(str(h.value, 'headline.value', 24))}</b>${h.label ? `<span class="set-sub">${esc(str(h.label, 'headline.label', 60))}</span>` : ''}${ch}</div>`
+  }
+  const legend = (items) => (items.length > 1 && size !== 'S' ? `<div class="pc-lg">${items.map(([l, c, v]) => `<span><i style="background:${c}"></i>${esc(l)}${v != null ? `<b>${esc(v)}</b>` : ''}</span>`).join('')}</div>` : '')
+  const note = d.note && size !== 'S' ? `<div class="set-sub pw-note">${esc(str(d.note, 'note'))}</div>` : ''
+  const all = pts.map(say).join('; ')
+  let body
+  if (PIE) {
+    // Slices in order; those under 3%, and past the 6th, fold into Other.
+    const sum0 = pts.reduce((a, p) => a + p.vals[0], 0)
+    if (!sum0) return `${head}<p class="set-sub pw-note">Nothing to show yet.</p>${note}${foot()}`
+    const total = sum0
+    let slices = pts.map((p, i) => ({ label: p.label, v: p.vals[0], color: `var(--chart-${i + 1})` }))
+    const big = slices.filter((x) => x.v / total >= 0.03).slice(0, 6), other = total - big.reduce((a, x) => a + x.v, 0)
+    slices = big.map((x, i) => ({ ...x, color: `var(--chart-${i + 1})` }))
+    if (other > 0) slices.push({ label: 'Other', v: other, color: 'var(--text-3)' })
+    const R = 56, r = type === 'donut' ? 38 : 0, C = 60
+    const at = (a, rad) => `${(C + rad * Math.sin(a)).toFixed(1)},${(C - rad * Math.cos(a)).toFixed(1)}`
+    let a0 = 0
+    const arcs = slices.map((x) => {
+      const a1 = a0 + (x.v / total) * Math.PI * 2, big1 = a1 - a0 > Math.PI ? 1 : 0
+      const full = x.v >= total
+      const path = full ? (r ? `M${C},${C - R} A${R},${R} 0 1 1 ${C - 0.01},${C - R} L${C - 0.01},${C - r} A${r},${r} 0 1 0 ${C},${C - r} Z` : `M${C},${C - R} A${R},${R} 0 1 1 ${C - 0.01},${C - R} Z`)
+        : r ? `M${at(a0, R)} A${R},${R} 0 ${big1} 1 ${at(a1, R)} L${at(a1, r)} A${r},${r} 0 ${big1} 0 ${at(a0, r)} Z` : `M${C},${C} L${at(a0, R)} A${R},${R} 0 ${big1} 1 ${at(a1, R)} Z`
+      a0 = a1
+      return `<path d="${path}" style="fill:${x.color}"><title>${esc(`${x.label}: ${fmt(x.v)}`)}</title></path>`
+    }).join('')
+    const center = type === 'donut' && d.center && d.center.value != null ? `<div class="pc-center"><b>${esc(str(d.center.value, 'center.value', 12))}</b>${d.center.label ? `<span>${esc(str(d.center.label, 'center.label', 24))}</span>` : ''}</div>` : ''
+    const pct = (v) => `${Math.round((v / total) * 100)}%`
+    body = `<div class="pc-pie"><div class="pc-disc"><svg viewBox="0 0 120 120" role="img" aria-label="${esc(slices.map((x) => `${x.label} ${pct(x.v)}`).join(', '))}">${arcs}</svg>${center}</div>${size === 'S' || slices.length < 2 ? '' : `<div class="pc-lg col">${slices.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.label)}<em class="pc-share" aria-hidden="true"><span style="width:${((x.v / total) * 100).toFixed(1)}%;background:${x.color}"></span></em><b>${esc(type === 'pie' ? pct(x.v) : fmt(x.v))}</b></span>`).join('')}</div>`}</div>`
+  } else if (type === 'funnel') {
+    const st = pts, first = Math.max(...st.map((p) => p.vals[0])) || 1
+    body = `<div class="pc-rows funnel" role="img" aria-label="${esc(all)}">${st.map((p, i) => {
+      const prev = i ? st[i - 1].vals[0] : null
+      return `<span class="pc-rl">${esc(p.label)}</span><span class="pc-bar"><span style="width:${((p.vals[0] / first) * 100).toFixed(1)}%;background:var(--chart-1)" title="${esc(say(p))}"></span></span><span class="mono pc-rn">${esc(fmt(p.vals[0]))}</span><span class="mono pc-rn dim">${prev ? `${Math.round((p.vals[0] / prev) * 100)}%` : ''}</span>`
+    }).join('')}</div>`
+  } else if (type === 'bars' || type === 'stacked-bars') {
+    const rows = pts.slice(-(size === 'L' ? 12 : size === 'S' ? 4 : 6))
+    const sum = (p) => p.vals.reduce((a, v) => a + v, 0)
+    const max = type === 'stacked-bars' ? (pct100 ? 1 : Math.max(...rows.map(sum)) || 1) : Math.max(...rows.flatMap((p) => p.vals)) || 1
+    const cell = (p) => {
+      if (type === 'bars') return series.map((x, k) => `<span class="pc-bar"><span style="width:${((p.vals[k] / max) * 100).toFixed(1)}%;background:${x.color}" title="${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(p.vals[k])}`)}"></span></span>`).join('')
+      const t = sum(p) || 1
+      return `<span class="pc-bar seg">${series.map((x, k) => `<span style="width:${(((pct100 ? p.vals[k] / t : p.vals[k] / max)) * 100).toFixed(1)}%;background:${x.color}" title="${esc(`${p.label} · ${x.label}: ${pct100 ? `${Math.round((p.vals[k] / t) * 100)}%` : fmt(p.vals[k])}`)}"></span>`).join('')}</span>`
+    }
+    const end = (p) => (type === 'stacked-bars' ? (pct100 ? `${Math.round((p.vals[0] / (sum(p) || 1)) * 100)}%` : fmt(sum(p))) : multi ? '' : fmt(p.vals[0]))
+    body = `<div class="pc-rows" role="img" aria-label="${esc(all)}">${rows.map((p) => `<span class="pc-rl">${esc(p.label)}</span><span class="pc-cell">${cell(p)}</span><span class="mono pc-rn">${esc(end(p))}</span>`).join('')}</div>${legend(series.map((x) => [x.label, x.color]))}`
+  } else {
+    // Line, area, bar (grouped), stacked: one y-axis from 0 (below it when a value is negative).
+    const W = 480, H = size === 'S' ? 72 : 120, n = pts.length
+    const sums = pts.map((p) => p.vals.reduce((a, v) => a + v, 0))
+    const flat = pts.flatMap((p) => p.vals)
+    const hi = type === 'stacked' ? (pct100 ? 1 : Math.max(...sums, 0)) : Math.max(...flat, 0)
+    const lo = type === 'stacked' ? 0 : Math.min(...flat, 0)
+    const span = hi - lo || 1, y = (v) => (H - 2 - ((v - lo) / span) * (H - 10))
+    const grid = [0.25, 0.5, 0.75, 1].map((f) => `<line x1="0" x2="${W}" y1="${(H - 2 - f * (H - 10)).toFixed(1)}" y2="${(H - 2 - f * (H - 10)).toFixed(1)}" class="pc-grid"/>`).join('') + `<line x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" class="pc-base"/>`
+    const xAt = (i) => (n === 1 ? W / 2 : (i * W) / (n - 1))
+    let marks = ''
+    if (type === 'line' || type === 'area') {
+      marks = series.map((x, k) => {
+        const line = pts.map((p, i) => `${xAt(i).toFixed(1)},${y(p.vals[k]).toFixed(1)}`).join(' ')
+        const fill = type === 'area' ? `<polygon points="0,${y(0).toFixed(1)} ${line} ${W},${y(0).toFixed(1)}" style="fill:${x.color}" class="pc-area"/>` : ''
+        // Dots round however wide the chart is drawn (a zero-length line with a round cap); unseen past 30 points, still hovered.
+        const dots = pts.map((p, i) => { const cx = xAt(i).toFixed(1), cy = y(p.vals[k]).toFixed(1); return `<line class="pc-dot" x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy}" style="stroke:${x.color}${n > 30 ? ';opacity:0' : ''}" vector-effect="non-scaling-stroke"><title>${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(p.vals[k])}`)}</title></line>` }).join('')
+        return `${fill}<polyline points="${line}" fill="none" style="stroke:${x.color}" vector-effect="non-scaling-stroke"/>${dots}`
+      }).join('')
+    } else {
+      const step = W / n, inner = step * 0.7, bw = type === 'stacked' ? inner : inner / series.length
+      marks = pts.map((p, i) => {
+        const x0 = i * step + step * 0.15
+        if (type === 'stacked') {
+          const t = sums[i] || 1
+          let acc = 0
+          return series.map((x, k) => {
+            const v = pct100 ? p.vals[k] / t : p.vals[k]
+            const top = y(acc + v), bot = y(acc)
+            acc += v
+            const hgt = Math.max(0, bot - top - 2)
+            return hgt > 0 ? `<rect x="${x0.toFixed(1)}" y="${(top + 1).toFixed(1)}" width="${inner.toFixed(1)}" height="${hgt.toFixed(1)}" style="fill:${x.color}"><title>${esc(`${p.label} · ${x.label}: ${pct100 ? `${Math.round(v * 100)}%` : fmt(p.vals[k])}`)}</title></rect>` : ''
+          }).join('')
+        }
+        return series.map((x, k) => {
+          const v = p.vals[k], top = Math.min(y(v), y(0)), hgt = Math.abs(y(v) - y(0))
+          return `<rect x="${(x0 + k * bw + (series.length > 1 ? 1 : 0)).toFixed(1)}" y="${top.toFixed(1)}" width="${Math.max(1, bw - (series.length > 1 ? 2 : 0)).toFixed(1)}" height="${hgt.toFixed(1)}" rx="2" style="fill:${x.color}"><title>${esc(`${p.label}${multi ? ` · ${x.label}` : ''}: ${fmt(v)}`)}</title></rect>`
+        }).join('')
+      }).join('')
+    }
+    // Up to 6 dates or names under it, evenly.
+    const at = n <= 6 ? pts.map((_, i) => i) : [0, 1, 2, 3, 4, 5].map((k) => Math.round((k * (n - 1)) / 5))
+    // A line's labels at its ends and between; a bar's under its bar (each at its slot's middle).
+    const ticks = type === 'line' || type === 'area'
+      ? `<div class="pc-x mono">${at.map((i) => `<span>${esc(pts[i].label)}</span>`).join('')}</div>`
+      : `<div class="pc-x mono pc-under">${at.map((i) => `<span style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%">${esc(pts[i].label)}</span>`).join('')}</div>`
+    body = `<svg class="pc-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" role="img" aria-label="${esc(all)}">${grid}${marks}</svg>${ticks}${legend(series.map((x) => [x.label, x.color]))}`
+  }
+  return `${head}${body}${note}${foot()}`
 }
 // end of the plugin widget block
 
