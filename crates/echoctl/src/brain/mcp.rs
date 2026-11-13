@@ -236,8 +236,8 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
             acc.sources(&store::open(&super::store_path())?)?.contains(&format!("call/{}", crate::calls::stamp_of(&dir)))
         }
         Link::Mail(src) => acc.sources(&store::open(&super::store_path())?)?.contains(src),
-        Link::Thread(id) | Link::Task { thread: id, .. } => threads.contains(id),
-        Link::Client(id) => crate::projects::list().iter().any(|p| p.client.as_deref() == Some(id) && threads.contains(&p.id)),
+        Link::Thread(id, _) | Link::Task { thread: id, .. } => threads.contains(id),
+        Link::Client(id, _) => crate::projects::list().iter().any(|p| p.client.as_deref() == Some(id) && threads.contains(&p.id)),
         Link::Person(key) => return crate::people::card(&threads, key, 40),
         // A prep: only when all its threads are this reader's.
         Link::Prep(id) => crate::prep::load(id).is_some_and(|p| {

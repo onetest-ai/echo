@@ -28,6 +28,9 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | `echo://call/$A?t=43` | `#call/$A/transcript`, scrolled so the turn at 0:43 is in the middle |
 | `echo://thread/acme-rollout` | `#project/acme-rollout/brief` |
 | `echo://client/acme` | `#client/acme/overview` |
+| `echo://thread/acme-rollout/profile` | `#project/acme-rollout/profile` (a thread on one of its tabs) |
+| `echo://client/acme/profile` | `#client/acme/profile` |
+| `echo://thread/acme-rollout/overview` | a notice, nothing opened (not one of a thread's tabs) |
 | `echo://person/dana@acme.example` | `#project/acme-renewal/people` (the first thread she is placed in: Acme renewal, then Acme rollout) with Dana Lee's panel |
 | `echo://task/acme-rollout/T001` | `#project/acme-rollout/work` with T001's Details |
 | `echo://prep/e11de173ab857a8b` | `#upcoming/e11de173ab857a8b` (Globex sponsor update, still to come) |
