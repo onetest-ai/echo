@@ -36,7 +36,8 @@ pub fn view(today: NaiveDate, period: &str, scope: Option<&[String]>) -> Value {
     let from = if period == "month" { today.with_day(1).unwrap_or(today) } else { week_start(today) };
     let mut threads = vec![];
     let mut done: Vec<(NaiveDate, Value)> = vec![];
-    for p in projects::list().iter().filter(|p| !p.stage.closed() && scope.is_none_or(|s| s.contains(&p.id))) {
+    // Every open thread; set to a thread or a client, those (a closed thread's own page counts it too).
+    for p in projects::list().iter().filter(|p| scope.map_or(!p.stage.closed(), |s| s.contains(&p.id))) {
         let Ok(t) = ledger::fold_linked(&p.id) else { continue };
         let (mut d, mut todo, mut waiting) = (0, 0, 0);
         // A mirror counts once, in its master's thread (as Tasks shows it), unless that thread is closed.
@@ -134,5 +135,15 @@ mod tests {
         crate::today_layout::add_on(&page, "core:tasks.done", None, None).unwrap();
         assert_eq!(crate::today_layout::params_on(&page, "core:tasks.done")["thread"], id.as_str(), "its page sets it");
         assert!(crate::today_layout::add_on(&page, "core:tasks.glance", None, None).is_err(), "a thread's page doesn't offer Threads at a glance");
+        // On Today set to a thread, then to none again: every thread.
+        crate::today_layout::add_on(&crate::today_layout::Page::Today, "core:tasks.done", None, None).unwrap();
+        crate::today_layout::set_param_on(&crate::today_layout::Page::Today, "core:tasks.done", "thread", &other).unwrap();
+        assert_eq!(crate::today_layout::params_of("core:tasks.done")["thread"], other.as_str());
+        crate::today_layout::set_param_on(&crate::today_layout::Page::Today, "core:tasks.done", "thread", "").unwrap();
+        assert!(!crate::today_layout::params_of("core:tasks.done").contains_key("thread"), "unset");
+        // A closed thread's own page still counts it (none set: only the open ones).
+        projects::set_stage(&other, projects::Stage::Done, None).unwrap();
+        assert_eq!(names(&view(today, "week", Some(std::slice::from_ref(&other)))), vec![other.clone()]);
+        assert!(!names(&view(today, "week", None)).contains(&other));
     }
 }

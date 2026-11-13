@@ -372,6 +372,14 @@ pub fn set_param_on(page: &Page, widget: &str, key: &str, value: &str) -> Result
         let keys: Vec<&str> = w.params.iter().map(|p| p.key.as_str()).collect();
         anyhow::anyhow!("{widget} has no setting {key:?}{}", if keys.is_empty() { String::new() } else { format!(" (it has {})", keys.join(", ")) })
     })?;
+    // A thread or client setting set to nothing: unset (the widget shows every thread again).
+    if value.is_empty() && matches!(def.kind.as_str(), "thread" | "client") {
+        return change(page, |mut items| {
+            let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
+            i.params.remove(key);
+            Ok(items)
+        });
+    }
     let v = if def.kind == "bool" { serde_json::Value::Bool(matches!(value, "true" | "yes" | "on")) } else { serde_json::Value::String(value.to_string()) };
     if !def.takes(&v) {
         bail!("{widget}'s {key} doesn't take {value:?}{}", if def.kind == "choice" { format!(" ({})", def.options.join(", ")) } else { String::new() });

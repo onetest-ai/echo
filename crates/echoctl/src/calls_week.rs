@@ -26,20 +26,32 @@ fn seconds(meta: &Value) -> i64 {
     t("started_at").zip(t("ended_at")).map_or(0, |(s, e)| (e - s).num_seconds().max(0))
 }
 
+/// Whether a call is in any of these threads — the threads, the organisations and the user read once, for many calls.
+fn call_in(ids: &[String]) -> impl Fn(&Path) -> bool {
+    use crate::projects;
+    let threads: Vec<projects::Project> = projects::list().into_iter().filter(|p| ids.contains(&p.id)).collect();
+    let orgs = projects::orgs().unwrap_or_default();
+    let me = crate::config::Config::load().ok().and_then(|c| c.me);
+    move |dir| {
+        let f = projects::CallFacts::of(dir, me.as_ref());
+        threads.iter().any(|p| projects::matches(p, &orgs, &f).is_some())
+    }
+}
+
 /// The week of `today` since its Monday: `calls` (memos among them, also counted in `memos`), `recorded_min` (their
 /// time, rounded to the minute), `with_minutes` (those with minutes, `notes.md`), and `days`: Monday to Sunday, each
 /// day's calls (the days after today 0). `scope`: only the calls of these threads (a widget set to a thread or a client).
 pub fn view(today: NaiveDate, scope: Option<&[String]>) -> Value {
     let from = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    // The scope's threads and what their rules read, once for the week (not again for each call).
+    let in_scope = scope.map(call_in);
     let mut days = [0u64; 7];
     let (mut n, mut memos, mut with_minutes, mut secs) = (0u64, 0u64, 0u64, 0i64);
     for dir in calls::all_calls() {
         let mut meta = None;
         let Some(day) = day_of(&dir, &mut meta).filter(|d| *d >= from && *d <= today) else { continue };
-        if let Some(s) = scope {
-            if !crate::projects::of_call(&dir).unwrap_or_default().iter().any(|(p, _)| s.contains(&p.id)) {
-                continue;
-            }
+        if in_scope.as_ref().is_some_and(|f| !f(&dir)) {
+            continue;
         }
         let meta = meta.unwrap_or_else(|| calls::read_json(&dir.join("meta.json")));
         days[(day - from).num_days() as usize] += 1;

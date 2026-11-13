@@ -40,7 +40,7 @@ function todayEditCell(id, html, size) {
   // Its settings (⚙): a select a choice, thread or client, a box a yes/no; changed, Today's layout says it.
   const item = twLayout().find((i) => i.widget === id) || {}
   const optsOf = (p) => (p.type === 'choice' ? p.options.map((o) => [o, o])
-    : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => t.group !== 'closed').map((t) => [t.id, t.name])
+    : p.type === 'thread' ? ((S.pj.data && S.pj.data.projects) || []).filter((t) => t.group !== 'closed' && (!(twPage() || '').startsWith('client:') || t.client === twPage().slice(7))).map((t) => [t.id, t.name])
     : p.type === 'client' ? ((S.pj.data && S.pj.data.clients) || []).map((c) => [c.id, c.name]) : [])
   // What the widget uses: the value set if it still takes it, else its default (as `params_of` does).
   const now = (p) => {
@@ -53,7 +53,9 @@ function todayEditCell(id, html, size) {
     // An id of plain characters: the render gives a changed setting its focus back (#395).
     const fid = `tw-p-${`${id}-${p.key}`.replace(/[^a-z0-9-]/gi, '-')}`
     if (p.type === 'bool') return `<label class="tw-param"><input id="${fid}" type="checkbox" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}" ${now(p) ? 'checked' : ''}> ${esc(p.label)}</label>`
-    return `<label class="tw-param">${esc(p.label)} <select id="${fid}" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}">${now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+    // A thread or a client can be unset again: every thread (any client).
+    const none = p.type === 'thread' ? 'All threads' : p.type === 'client' ? 'Any client' : null
+    return `<label class="tw-param">${esc(p.label)} <select id="${fid}" data-tw-param="${esc(p.key)}" data-tw-id="${esc(id)}"${none ? ' data-tw-unset="1"' : ''}>${none ? `<option value="" ${now(p) === undefined ? 'selected' : ''}>${none}</option>` : now(p) === undefined ? '<option value="">—</option>' : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === now(p) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   }
   // Its height (1 or 2 rows) when it takes both.
   // Set two rows high but drawn one (no column or nothing beside it, the middle of its row, another tall one in these
@@ -326,6 +328,6 @@ document.addEventListener('change', (e) => {
   const el = e.target
   if (!twPage() || !el.dataset || !el.dataset.twParam) return
   const value = el.type === 'checkbox' ? el.checked : el.value
-  if (value === '') return
+  if (value === '' && !el.dataset.twUnset) return
   todayLayoutDo({ op: 'params', widget: el.dataset.twId, key: el.dataset.twParam, value })
 })
