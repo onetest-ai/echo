@@ -1,0 +1,40 @@
+---
+id: TC-044
+title: A thread's and a client's dashboard — a band of widgets over the Brief and the Overview, offering only the widgets that show one thread (one client), the page setting which; edited as Today is; each page its own layout; Today untouched
+priority: high
+type: functional
+requirements: [F-TODAY-28]
+module: today
+run: agent
+platform: any
+data: standard
+tags: [today, widgets, plugins, dashboards, threads, clients]
+---
+
+# TC-044: A thread's and a client's dashboard
+
+**Module:** Today | **Priority:** High | **Type:** Functional
+
+## Preconditions
+- Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (its `env` sets `ECHOCTL_TEST_OPEN_LOG_ONLY`); the window served at `{{base_url}}`, `{{base_url}}/` loaded first; CLI steps after `. <dir>/env`; the browser 1440 × 1100
+- The test plugins `table-demo` and `widget-demo` from `tests/fixtures/plugins` (marketplace "test-plugins"): `target/debug/echoctl plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `target/debug/echoctl plugin install table-demo --yes`; `target/debug/echoctl plugin install widget-demo --yes`
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | Open `{{base_url}}/#project/acme-rollout/brief` | Above "What it is": only a ✎ button (its tooltip "Add widgets that show this thread"), no widgets |
+| 2 | `target/debug/echoctl today --thread acme-rollout add plugin:table-demo:staffing` | Refused: "plugin:table-demo:staffing can't go on a thread's dashboard: it has no thread setting" |
+| 3 | `target/debug/echoctl today --thread acme-rollout add plugin:table-demo:positions --size S`; then `today --thread acme-rollout set plugin:table-demo:positions thread globex-pilot` | The add prints the layout with `plugin:table-demo:positions` at S; the set is refused: "plugin:table-demo:positions's thread is this page's: it isn't set here" |
+| 4 | Reload the thread's Brief (once more if the widget hasn't answered) | Over "What it is": "Open positions" with 3; `curl -s '{{base_url}}/api/dashboard?page=thread:acme-rollout'` has its data's note "thread acme-rollout · client acme" (the thread, and the thread's client) |
+| 5 | Click ✎ | The band framed for editing, "Add a widget" and "Done" over it; the right panel "Add a widget" lists only "Open positions" ("here") and "Last builds" (Add) — no Echo widget, no "Needs attention"; Open positions has no ⚙ |
+| 6 | In the panel click Add on "Last builds"; click its ⚙ | "Last builds" placed after Open positions; its settings show only "Branch" (no "Thread") |
+| 7 | Choose Branch "release"; click Done | No frames; "Last builds" shows "Branch release" as its first line |
+| 8 | Open `{{base_url}}/#client/acme/overview` | Above "About Acme": only ✎ (nothing on this page yet) |
+| 9 | `target/debug/echoctl today --client acme add plugin:table-demo:positions --size S`; reload (once more if it hasn't answered) | "Open positions" with 7; its note in `api/dashboard?page=client:acme` "every thread · client acme" |
+| 10 | Open `{{base_url}}/#project/globex-pilot/brief`; click ✎ | Only ✎ before; editing: "Nothing here yet: Add a widget puts one that shows this thread."; the panel offers both widgets with Add (each page its own layout). Click Done |
+| 11 | Open `{{base_url}}/#today`; `target/debug/echoctl today` | Today as it comes: no "Open positions", no "Last builds"; `today` lists none of the plugins' widgets |
+| 12 | `target/debug/echoctl today --thread acme-rollout reset`; `today --client acme reset`; reload the thread's Brief | `[]` each; only ✎ above "What it is" |
+
+## Teardown
+- `target/debug/echoctl plugin remove table-demo`; `target/debug/echoctl plugin remove widget-demo`; `target/debug/echoctl plugin marketplace remove test-plugins`; `tests/fixtures/serve.sh down <dir>`; close the browser tab

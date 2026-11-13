@@ -10,6 +10,8 @@ const rows = [
   ...Array.from({ length: 8 }, (_, i) => ({ id: `q${i + 1}`, group: 'later', cells: { urgency: { text: 'Normal', tone: 'good' }, position: `11010001${String(i + 10)}`, role: `Engineer ${i + 1}`, start: `2027-02-${String(i + 10)}`, status: 'Open', candidates: i, why: 'starts next quarter' } })),
 ]
 export function apply(ctx) {
+  // Set to a thread or a client (on Today by its ⚙, on a dashboard by the page): says which, so a case sees it.
+  ctx.widgets.provide('positions', ({ params }) => ({ value: params.thread ? 3 : params.client ? 7 : 12, label: 'open positions', note: `${params.thread ? `thread ${params.thread}` : 'every thread'} · ${params.client ? `client ${params.client}` : 'every client'}` }))
   ctx.widgets.provide('staffing', () => ({
     columns: [
       { key: 'urgency', label: 'Urgency', kind: 'pill' }, { key: 'position', label: 'Position' }, { key: 'role', label: 'Role' },

@@ -26,7 +26,11 @@ mod test_hosts;
 mod widgets;
 pub mod work;
 
-pub use widgets::{widget_ask, widget_ask_now, widget_last};
+#[cfg(test)]
+pub use widgets::widget_last;
+#[cfg(test)]
+use widgets::widget_ask_now_on;
+pub use widgets::{widget_ask_now, widget_ask_on, widget_last_on};
 use widgets::widget_store;
 
 use test_hosts::test_host;
@@ -975,11 +979,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "widgets.set" => {
-            widget_store(id, &s(&arg[0]), Some(&arg[1]), None, None)?;
+            widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None)?;
             Value::Null
         }
         "widgets.clear" => {
-            widget_store(id, &s(arg), None, None, None)?;
+            widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None)?;
             Value::Null
         }
         "work.provide" => {
@@ -1417,6 +1421,82 @@ mod tests {
     }
 
     #[test]
+    fn a_widget_on_a_dashboard_is_asked_for_its_page_and_kept_apart() {
+        use crate::today_layout::{self as l, Page};
+        let (_env, root) = paths::testenv::folders("jshost-dashboards");
+        let mk = root.join("market");
+        let d = mk.join("plugins/staff");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "open", "label": "Open positions", "kind": "stat", "params": [{"key": "thread", "label": "Thread", "type": "thread"}, {"key": "client", "label": "Client", "type": "client"}]},
+            {"id": "all", "label": "Everything", "kind": "stat"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "staff", "name": "Staff", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.widgets.provide('open', ({ params }) => ({ value: 1, label: `${params.thread || '-'} / ${params.client || '-'}` }))
+              ctx.widgets.provide('all', () => ({ value: 9 }))
+              ctx.command('push', () => { ctx.widgets.set('open', { value: 7, label: 'pushed' }); return 1 })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "staff", "source": "./plugins/staff"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("staff", Some(&name)).unwrap().uses;
+        plugins::install("staff", Some(&name), &agreed).unwrap();
+        sync();
+        let acme = crate::projects::add_client("Acme", &[], false).unwrap();
+        let t = crate::projects::create("Aurora", Some(&acme.id), None).unwrap();
+        let (thread, client) = (Page::Thread(t.id.clone()), Page::Client(acme.id.clone()));
+        // What each page offers: a thread's, widgets with a thread setting; a client's, with a client setting.
+        assert!(l::add_on(&thread, "plugin:staff:all", None, None).unwrap_err().to_string().contains("no thread setting"));
+        l::add_on(&thread, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add_on(&client, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add("plugin:staff:open", Some("M"), None).unwrap();
+        assert!(l::load().iter().any(|i| i.widget == "plugin:staff:open") && l::load_on(&thread).len() == 1, "each page its own layout");
+        // The page fills them: a thread's page its thread and the thread's client; a client's page its client.
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["thread"], t.id.as_str());
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["client"], acme.id.as_str());
+        assert_eq!(l::params_on(&client, "plugin:staff:open")["client"], acme.id.as_str());
+        assert!(l::set_param_on(&thread, "plugin:staff:open", "thread", "other").unwrap_err().to_string().contains("this page's"));
+        // Each place asked with its page's settings, its answer kept apart; Today's untouched.
+        let ask = |p: &Page| {
+            let mut last = String::new();
+            (0..100)
+                .find_map(|_| {
+                    widget_ask_now_on("staff", "open", p);
+                    match widget_last_on("staff", "open", p).and_then(|l| l["data"]["label"].as_str().map(str::to_owned)) {
+                        Some(v) => Some(v),
+                        None => {
+                            last = format!("{:?}", widget_last_on("staff", "open", p));
+                            std::thread::sleep(Duration::from_millis(50));
+                            None
+                        }
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        assert_eq!(ask(&thread), format!("{} / {}", t.id, acme.id));
+        assert_eq!(ask(&client), format!("- / {}", acme.id));
+        assert_eq!(ask(&Page::Today), "- / -");
+        assert_eq!(widget_last_on("staff", "open", &thread).unwrap()["data"]["label"], format!("{} / {}", t.id, acme.id), "not overwritten by the others");
+        // The plugin's own `set` reaches every copy: the dashboards' answers give way to it until asked again.
+        call("staff", "push", &json!({})).unwrap();
+        for p in [&thread, &client, &Page::Today] {
+            assert_eq!(widget_last_on("staff", "open", p).unwrap()["data"]["label"], "pushed", "{p:?}");
+        }
+        // The dashboard API's data comes from the page's own copy.
+        let i = crate::widgets::Inputs { tasks: &json!({}) };
+        assert_eq!(crate::widgets::data_on(&thread, "plugin:staff:open", &i).unwrap()["kind"], "stat");
+        plugins::remove("staff", false).unwrap();
+        sync();
+    }
+
+    #[test]
     fn a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set() {
         let (_env, root) = paths::testenv::folders("jshost-widgets");
         let mk = root.join("market");
@@ -1534,6 +1614,10 @@ mod tests {
         assert!(param(json!({"key": "team", "label": "Team", "type": "colour"})).unwrap_err().contains("type Echo doesn't know"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice"})).unwrap_err().contains("choice of 1–12 options"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice", "options": ["a"], "default": "b"})).unwrap_err().contains("default isn't one it takes"));
+        // One thread and one client setting at most: a dashboard sets it.
+        let two = |t: &str| with(json!({"id": "a", "label": "A", "kind": "stat", "params": [{"key": "x", "label": "X", "type": t}, {"key": "y", "label": "Y", "type": t}]}), true);
+        assert!(two("thread").unwrap_err().contains("more than one thread setting"));
+        assert!(two("client").unwrap_err().contains("more than one client setting"));
     }
 
     #[test]

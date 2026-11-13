@@ -177,6 +177,12 @@ pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
             }
         }
     }
+    // A dashboard sets its thread / client setting: one of each, so it knows which.
+    for k in ["thread", "client"] {
+        if params.iter().filter(|p| p.kind == k).count() > 1 {
+            bail!("widget “{widget}” has more than one {k} setting");
+        }
+    }
     Ok(())
 }
 

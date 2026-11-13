@@ -1,5 +1,6 @@
 //! Today's layout: which widgets Today shows, in what order, how wide, where a row starts — kept on this computer
-//! (`<config>/today-layout.json`). One `place` makes every change, by the rules of the edit-mode prototype
+//! (`<config>/today-layout.json`); a thread's and a client's dashboard keep theirs beside it (`<config>/dashboards/`,
+//! [`Page`]). One `place` makes every change, by the rules of the edit-mode prototype
 //! (Workbench, `WidgetsGallery`); the CLI (`echoctl today …`) and, later, edit mode change it through it (#323).
 
 use std::path::PathBuf;
@@ -59,8 +60,98 @@ pub const DRAWN: &[&str] = &["core:needs.now", "core:routines.cards", "core:cale
 
 const MAX_BYTES: usize = 16 * 1024;
 
-fn file() -> PathBuf {
-    paths::config_dir().join("today-layout.json")
+/// Where a layout is: Today, or the dashboard of a thread (its Brief) or of a client (its Overview).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Page {
+    Today,
+    Thread(String),
+    Client(String),
+}
+
+impl Page {
+    /// `today`, `thread:<id>` or `client:<id>` (an id of letters, digits and dashes).
+    pub fn parse(s: &str) -> Result<Page> {
+        let id_ok = |id: &str| !id.is_empty() && id.len() <= 60 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !id.starts_with('-');
+        match s {
+            "" | "today" => Ok(Page::Today),
+            _ => match s.split_once(':') {
+                Some(("thread", id)) if id_ok(id) => Ok(Page::Thread(id.into())),
+                Some(("client", id)) if id_ok(id) => Ok(Page::Client(id.into())),
+                _ => bail!("{s:?} isn't a page: today, thread:<id> or client:<id>"),
+            },
+        }
+    }
+
+    /// The page a thread or a client names (none: Today), one that exists.
+    pub fn of(thread: Option<&str>, client: Option<&str>) -> Result<Page> {
+        match (thread.filter(|t| !t.is_empty()), client.filter(|c| !c.is_empty())) {
+            (Some(t), _) => {
+                crate::projects::load(t).map_err(|_| anyhow::anyhow!("no thread {t:?}: `echoctl project list` names them"))?;
+                Page::parse(&format!("thread:{t}"))
+            }
+            (None, Some(c)) => {
+                if !crate::projects::clients()?.iter().any(|x| x.id == c) {
+                    bail!("no client {c:?}: `echoctl client list` names them");
+                }
+                Page::parse(&format!("client:{c}"))
+            }
+            (None, None) => Ok(Page::Today),
+        }
+    }
+
+    /// What the page is called: `today`, `thread:<id>`, `client:<id>`.
+    pub fn key(&self) -> String {
+        match self {
+            Page::Today => "today".into(),
+            Page::Thread(id) => format!("thread:{id}"),
+            Page::Client(id) => format!("client:{id}"),
+        }
+    }
+
+    fn file(&self) -> PathBuf {
+        match self {
+            Page::Today => paths::config_dir().join("today-layout.json"),
+            Page::Thread(id) => paths::config_dir().join("dashboards").join(format!("thread-{id}.json")),
+            Page::Client(id) => paths::config_dir().join("dashboards").join(format!("client-{id}.json")),
+        }
+    }
+
+    /// Where its widgets are, said in an error.
+    fn on(&self) -> &'static str {
+        match self {
+            Page::Today => "on Today",
+            _ => "on this dashboard",
+        }
+    }
+
+    /// Whether this page offers `w`: Today every widget; a thread's dashboard one with a `thread` setting, a client's
+    /// one with a `client` setting.
+    pub fn offers(&self, w: &widgets::Widget) -> bool {
+        match self {
+            Page::Today => true,
+            Page::Thread(_) => w.params.iter().any(|p| p.kind == "thread"),
+            Page::Client(_) => w.params.iter().any(|p| p.kind == "client"),
+        }
+    }
+
+    /// The settings this page sets on a widget (not the user's to change here): a thread's page its `thread` setting,
+    /// and a `client` one the thread's client; a client's page its `client` setting.
+    fn fixed(&self, w: &widgets::Widget) -> serde_json::Map<String, serde_json::Value> {
+        let mut out = serde_json::Map::new();
+        let client_of = |t: &str| crate::projects::load(t).ok().and_then(|p| p.client).filter(|c| !c.is_empty());
+        for p in &w.params {
+            let v = match (self, p.kind.as_str()) {
+                (Page::Thread(t), "thread") => Some(t.clone()),
+                (Page::Thread(t), "client") => client_of(t),
+                (Page::Client(c), "client") => Some(c.clone()),
+                _ => None,
+            };
+            if let Some(v) = v {
+                out.insert(p.key.clone(), serde_json::Value::String(v));
+            }
+        }
+        out
+    }
 }
 
 fn item(widget: &str, size: &str, row: bool) -> Item {
@@ -84,12 +175,17 @@ pub fn default_items() -> Vec<Item> {
 /// Today's widgets: the saved layout, else the default. A widget the catalog doesn't have now (a plugin off) is kept
 /// — the page just doesn't draw it — so a change never loses its place; a size it doesn't take becomes its first.
 pub fn load() -> Vec<Item> {
-    normalize(std::fs::read(file()).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()).and_then(|f| f.items))
+    load_on(&Page::Today)
 }
 
-/// What Today shows of a saved list (None: the default).
-fn normalize(saved: Option<Vec<Item>>) -> Vec<Item> {
-    let mut items = saved.unwrap_or_else(default_items);
+/// A page's widgets: its saved layout, else its default (Today's; a dashboard starts empty).
+pub fn load_on(page: &Page) -> Vec<Item> {
+    normalize(page, std::fs::read(page.file()).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()).and_then(|f| f.items))
+}
+
+/// What a page shows of a saved list (None: its default).
+fn normalize(page: &Page, saved: Option<Vec<Item>>) -> Vec<Item> {
+    let mut items = saved.unwrap_or_else(|| if *page == Page::Today { default_items() } else { vec![] });
     for i in &mut items {
         if let Ok(w) = widgets::find(&i.widget) {
             if !w.sizes.contains(&i.size.as_str()) {
@@ -155,9 +251,13 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
     out
 }
 
-/// A widget's size, checked: one it takes (the default: M if it takes it, else its first).
-fn size_of(widget: &str, size: Option<&str>) -> Result<String> {
+/// A widget's size, checked: one it takes (the default: M if it takes it, else its first) — and, on a dashboard, one
+/// the page offers.
+fn size_of(page: &Page, widget: &str, size: Option<&str>) -> Result<String> {
     let w = widgets::find(widget)?;
+    if !page.offers(&w) {
+        bail!("{widget} can't go on a {} dashboard: it has no {} setting", if matches!(page, Page::Client(_)) { "client's" } else { "thread's" }, if matches!(page, Page::Client(_)) { "client" } else { "thread" });
+    }
     // A plugin's widget is drawn by its kind (12-today.js, pluginWidgetView).
     if !DRAWN.contains(&widget) && !widget.starts_with("plugin:") && !widget.starts_with(widgets::CARD) {
         bail!("{widget} isn't on Today's page yet: its view comes with the next widget steps (#315)");
@@ -169,42 +269,53 @@ fn size_of(widget: &str, size: Option<&str>) -> Result<String> {
     Ok(s)
 }
 
-/// Changes the saved layout (starting from what Today shows) under its lock, and returns Today's widgets after it.
-fn change(f: impl FnOnce(Vec<Item>) -> Result<Vec<Item>>) -> Result<Vec<Item>> {
-    std::fs::create_dir_all(paths::config_dir())?;
+/// Changes a page's saved layout (starting from what it shows) under its lock, and returns its widgets after it.
+fn change(page: &Page, f: impl FnOnce(Vec<Item>) -> Result<Vec<Item>>) -> Result<Vec<Item>> {
+    let file = page.file();
+    std::fs::create_dir_all(file.parent().expect("a folder"))?;
     // A file that can't be read (a hand edit gone wrong) is kept beside it, and the change starts from the default —
     // as the page already shows.
-    if std::fs::read(file()).is_ok_and(|b| serde_json::from_slice::<File>(&b).is_err()) {
-        std::fs::rename(file(), file().with_extension("unreadable.json"))?;
+    if std::fs::read(&file).is_ok_and(|b| serde_json::from_slice::<File>(&b).is_err()) {
+        std::fs::rename(&file, file.with_extension("unreadable.json"))?;
     }
-    crate::calls::update_state(&file(), |v: &mut File| {
+    crate::calls::update_state(&file, |v: &mut File| {
         // What it holds now, read under the lock: two changes at once both count.
-        let next = f(normalize(v.items.take()))?;
+        let next = f(normalize(page, v.items.take()))?;
         let bytes = serde_json::to_vec(&next)?.len();
         if bytes > MAX_BYTES {
-            bail!("Today's layout would be {bytes} bytes, over {MAX_BYTES}");
+            bail!("the layout would be {bytes} bytes, over {MAX_BYTES}");
         }
         v.items = Some(next);
         Ok(())
     })?;
-    Ok(load())
+    Ok(load_on(page))
 }
 
+#[cfg(test)]
 pub fn add(widget: &str, size: Option<&str>, target: Option<(&str, Side)>) -> Result<Vec<Item>> {
-    let size = size_of(widget, size)?;
-    change(|items| {
+    add_on(&Page::Today, widget, size, target)
+}
+
+pub fn add_on(page: &Page, widget: &str, size: Option<&str>, target: Option<(&str, Side)>) -> Result<Vec<Item>> {
+    let size = size_of(page, widget, size)?;
+    change(page, |items| {
         if items.iter().any(|i| i.widget == widget) {
-            bail!("{widget} is on Today already: `echoctl today move` or `today size` change it");
+            bail!("{widget} is {} already: `echoctl today move` or `today size` change it", page.on());
         }
-        on_today(&items, target)?;
+        on_today(page, &items, target)?;
         Ok(place(&items, widget, &size, target))
     })
 }
 
+#[cfg(test)]
 pub fn move_to(widget: &str, target: Option<(&str, Side)>) -> Result<Vec<Item>> {
-    change(|items| {
-        let cur = items.iter().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?.clone();
-        on_today(&items, target)?;
+    move_on(&Page::Today, widget, target)
+}
+
+pub fn move_on(page: &Page, widget: &str, target: Option<(&str, Side)>) -> Result<Vec<Item>> {
+    change(page, |items| {
+        let cur = items.iter().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?.clone();
+        on_today(page, &items, target)?;
         if target.is_some_and(|(t, _)| t == widget) {
             return Ok(items);
         }
@@ -212,24 +323,34 @@ pub fn move_to(widget: &str, target: Option<(&str, Side)>) -> Result<Vec<Item>> 
     })
 }
 
+#[cfg(test)]
 pub fn resize(widget: &str, size: &str) -> Result<Vec<Item>> {
-    let size = size_of(widget, Some(size))?;
-    change(|mut items| {
-        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+    resize_on(&Page::Today, widget, size)
+}
+
+pub fn resize_on(page: &Page, widget: &str, size: &str) -> Result<Vec<Item>> {
+    let size = size_of(page, widget, Some(size))?;
+    change(page, |mut items| {
+        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
         i.size = size;
         Ok(items)
     })
 }
 
 /// A widget's height on Today: 1 or 2 rows, of those it takes.
+#[cfg(test)]
 pub fn set_height(widget: &str, height: u8) -> Result<Vec<Item>> {
+    set_height_on(&Page::Today, widget, height)
+}
+
+pub fn set_height_on(page: &Page, widget: &str, height: u8) -> Result<Vec<Item>> {
     let w = widgets::find(widget)?;
     if !w.heights.contains(&height) {
         let takes: Vec<String> = w.heights.iter().map(|h| h.to_string()).collect();
         bail!("{widget} is {} row{} high, not {height}", takes.join(" or "), if takes == ["1"] { "" } else { "s" });
     }
-    change(|mut items| {
-        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+    change(page, |mut items| {
+        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
         i.height = height;
         Ok(items)
     })
@@ -237,8 +358,16 @@ pub fn set_height(widget: &str, height: u8) -> Result<Vec<Item>> {
 
 /// Set one of a widget's settings on Today (`value` as text: a choice's option, true / false, a thread's or a client's
 /// id), refusing a key it doesn't have or a value it doesn't take.
+#[cfg(test)]
 pub fn set_param(widget: &str, key: &str, value: &str) -> Result<Vec<Item>> {
+    set_param_on(&Page::Today, widget, key, value)
+}
+
+pub fn set_param_on(page: &Page, widget: &str, key: &str, value: &str) -> Result<Vec<Item>> {
     let w = widgets::find(widget)?;
+    if page.fixed(&w).contains_key(key) {
+        bail!("{widget}'s {key} is this page's: it isn't set here");
+    }
     let def = w.params.iter().find(|p| p.key == key).ok_or_else(|| {
         let keys: Vec<&str> = w.params.iter().map(|p| p.key.as_str()).collect();
         anyhow::anyhow!("{widget} has no setting {key:?}{}", if keys.is_empty() { String::new() } else { format!(" (it has {})", keys.join(", ")) })
@@ -247,34 +376,46 @@ pub fn set_param(widget: &str, key: &str, value: &str) -> Result<Vec<Item>> {
     if !def.takes(&v) {
         bail!("{widget}'s {key} doesn't take {value:?}{}", if def.kind == "choice" { format!(" ({})", def.options.join(", ")) } else { String::new() });
     }
-    change(|mut items| {
-        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+    change(page, |mut items| {
+        let i = items.iter_mut().find(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
         i.params.insert(key.into(), v.clone());
         Ok(items)
     })
 }
 
-/// A widget's size on Today (S, M or L); off Today, the first size it takes.
-pub fn size_on_today(widget: &str) -> String {
-    load().into_iter().find(|i| i.widget == widget).map(|i| i.size).or_else(|| widgets::find(widget).ok().and_then(|w| w.sizes.first().map(|s| s.to_string()))).unwrap_or_else(|| "M".into())
+/// A widget's size on a page (S, M or L); off it, the first size it takes.
+pub fn size_on(page: &Page, widget: &str) -> String {
+    load_on(page).into_iter().find(|i| i.widget == widget).map(|i| i.size).or_else(|| widgets::find(widget).ok().and_then(|w| w.sizes.first().map(|s| s.to_string()))).unwrap_or_else(|| "M".into())
 }
 
 /// A widget's settings as Today has them: its defaults, then what the user set (a value it no longer takes, dropped).
 pub fn params_of(widget: &str) -> serde_json::Map<String, serde_json::Value> {
+    params_on(&Page::Today, widget)
+}
+
+/// A widget's settings on a page: its defaults, then what the user set there (a value it no longer takes, dropped),
+/// then what the page sets ([`Page::fixed`]: a dashboard's thread or client).
+pub fn params_on(page: &Page, widget: &str) -> serde_json::Map<String, serde_json::Value> {
     let mut out = serde_json::Map::new();
     let Ok(w) = widgets::find(widget) else { return out };
-    let set = load().into_iter().find(|i| i.widget == widget).map(|i| i.params).unwrap_or_default();
+    let set = load_on(page).into_iter().find(|i| i.widget == widget).map(|i| i.params).unwrap_or_default();
     for p in &w.params {
         if let Some(v) = set.get(&p.key).filter(|v| p.takes(v)).or(p.default.as_ref()) {
             out.insert(p.key.clone(), v.clone());
         }
     }
+    out.extend(page.fixed(&w));
     out
 }
 
+#[cfg(test)]
 pub fn remove(widget: &str) -> Result<Vec<Item>> {
-    change(|items| {
-        let i = items.iter().position(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't on Today"))?;
+    remove_on(&Page::Today, widget)
+}
+
+pub fn remove_on(page: &Page, widget: &str) -> Result<Vec<Item>> {
+    change(page, |items| {
+        let i = items.iter().position(|i| i.widget == widget).ok_or_else(|| anyhow::anyhow!("{widget} isn't {}", page.on()))?;
         let mut out = items;
         let gone = out.remove(i);
         if gone.row {
@@ -286,13 +427,19 @@ pub fn remove(widget: &str) -> Result<Vec<Item>> {
     })
 }
 
+#[cfg(test)]
 pub fn reset() -> Result<Vec<Item>> {
-    change(|_| Ok(default_items()))
+    reset_on(&Page::Today)
 }
 
-fn on_today(items: &[Item], target: Option<(&str, Side)>) -> Result<()> {
+/// A page as it comes: Today's default, a dashboard empty.
+pub fn reset_on(page: &Page) -> Result<Vec<Item>> {
+    change(page, |_| Ok(if *page == Page::Today { default_items() } else { vec![] }))
+}
+
+fn on_today(page: &Page, items: &[Item], target: Option<(&str, Side)>) -> Result<()> {
     match target {
-        Some((t, _)) if !items.iter().any(|i| i.widget == t) => bail!("{t} isn't on Today: `echoctl today` lists what is"),
+        Some((t, _)) if !items.iter().any(|i| i.widget == t) => bail!("{t} isn't {}: `echoctl today` lists what is", page.on()),
         _ => Ok(()),
     }
 }
@@ -349,13 +496,13 @@ mod tests {
         let (_env, _) = paths::testenv::folders("today-layout-default");
         assert_eq!(show(&load()), "| core:calendar.agenda | core:calendar.next core:needs.now | core:calendar.choices | core:routines.cards | core:tasks.mine");
         std::fs::create_dir_all(paths::config_dir()).unwrap();
-        std::fs::write(file(), "{ not json").unwrap();
+        std::fs::write(Page::Today.file(), "{ not json").unwrap();
         assert_eq!(load(), default_items());
         // A change starts from the default and keeps the unreadable file beside it.
         assert_eq!(show(&remove("core:routines.cards").unwrap()), "| core:calendar.agenda | core:calendar.next core:needs.now | core:calendar.choices | core:tasks.mine");
-        assert_eq!(std::fs::read_to_string(file().with_extension("unreadable.json")).unwrap(), "{ not json");
+        assert_eq!(std::fs::read_to_string(Page::Today.file().with_extension("unreadable.json")).unwrap(), "{ not json");
         // A widget the catalog doesn't have now (a plugin off) keeps its place through a change.
-        std::fs::write(file(), r#"{"items":[{"widget":"plugin:x:y","size":"M","row":true},{"widget":"core:tasks.mine","size":"M"}]}"#).unwrap();
+        std::fs::write(Page::Today.file(), r#"{"items":[{"widget":"plugin:x:y","size":"M","row":true},{"widget":"core:tasks.mine","size":"M"}]}"#).unwrap();
         assert_eq!(show(&resize("core:tasks.mine", "S").unwrap()), "| plugin:x:y core:tasks.mine");
     }
 
@@ -368,17 +515,17 @@ mod tests {
         assert!(err(set_height("core:tasks.glance", 2)).contains("isn't on Today"));
         let after = set_height("core:tasks.mine", 2).unwrap();
         assert_eq!(after.iter().find(|i| i.widget == "core:tasks.mine").unwrap().height, 2);
-        let disk: serde_json::Value = serde_json::from_slice(&std::fs::read(file()).unwrap()).unwrap();
+        let disk: serde_json::Value = serde_json::from_slice(&std::fs::read(Page::Today.file()).unwrap()).unwrap();
         let on_disk = |w: &str| disk["items"].as_array().unwrap().iter().find(|i| i["widget"] == w).unwrap()["height"].clone();
         assert_eq!(on_disk("core:tasks.mine"), 2, "kept on disk");
         assert!(on_disk("core:needs.now").is_null(), "1 is not written");
         move_to("core:tasks.mine", Some(("core:needs.now", Side::Before))).unwrap();
         assert_eq!(load().iter().find(|i| i.widget == "core:tasks.mine").unwrap().height, 2, "kept through a move");
         // A height the widget doesn't take (a hand edit) is 1.
-        std::fs::write(file(), r#"{"items":[{"widget":"core:calls.week","size":"S","height":2,"row":true}]}"#).unwrap();
+        std::fs::write(Page::Today.file(), r#"{"items":[{"widget":"core:calls.week","size":"S","height":2,"row":true}]}"#).unwrap();
         assert_eq!(load()[0].height, 1);
         // One that isn't a height at all: 1, and the rest of the layout kept.
-        std::fs::write(file(), r#"{"items":[{"widget":"core:tasks.mine","size":"S","height":"tall","row":true},{"widget":"core:needs.now","size":"M","height":2.5}]}"#).unwrap();
+        std::fs::write(Page::Today.file(), r#"{"items":[{"widget":"core:tasks.mine","size":"S","height":"tall","row":true},{"widget":"core:needs.now","size":"M","height":2.5}]}"#).unwrap();
         assert_eq!(load().iter().map(|i| (i.widget.as_str(), i.height)).collect::<Vec<_>>(), [("core:tasks.mine", 1), ("core:needs.now", 1)]);
     }
 
