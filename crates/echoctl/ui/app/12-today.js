@@ -648,10 +648,12 @@ function needsView(n, asks) {
     // mails are told apart; its buttons are found in it.
     return `<div class="nd-row" role="listitem" aria-label="${esc(x.where || '')} — ${esc(x.line || '')}"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
       <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
-      <div class="nd-a">${reply}${act(`data-needs-claude="${esc(x.id)}"`, 'Claude — work on this, or Yolo', CLAUDE_SPARK)}</div></div>`
+      <div class="nd-a">${reply}${act(`data-needs-claude="${esc(x.id)}"`, 'Claude — work on this, or Yolo', CLAUDE_SPARK)}${act(`data-needs-ignore="${esc(x.id)}"`, 'Ignore — take it off Needs you now', ND_IGNORE)}</div></div>`
   }).join('')
   return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div><div role="list" aria-labelledby="nd-h">${rows}</div></section>`
 }
+/** Ignore an item of Needs you now: an eye crossed out. */
+const ND_IGNORE = '<path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c5 0 9 4.5 10 7-0.4 1-1.2 2.3-2.4 3.5M6.6 6.6C4.5 8 3 10 2 12c1 2.5 5 7 10 7 1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'
 /** My work's ✦ (Claude — work on it, or Yolo), on its cards and on Needs you now's items. */
 const CLAUDE_SPARK = '<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>'
 /** The dialogs of Needs you now: I'll do it (a task's title and its thread), Read and reply (the mail, your answer). */

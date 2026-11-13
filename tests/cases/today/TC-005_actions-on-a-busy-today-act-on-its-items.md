@@ -26,7 +26,7 @@ tags: [today, palette]
 |---|---|---|
 | Globex sponsor update (37 minutes after the build, with the other meetings to come; prep written) | TODAY: "Show prep: Globex sponsor update" | opens `#upcoming/e11de173ab857a8b` |
 | Meetings still to come without a prep | TODAY: "Prepare: <subject>" | starts a prep run (not pressed) |
-| Needs you now: Dana Lee (Teams 1:1), Kim Park (mail), Lena Vogel (@mention) | NEEDS YOU NOW: "Reply in Teams: …" / "Read and reply: …", "Claude: …", "I'll do it: …", "Won't do: …" | not pressed |
+| Needs you now: Dana Lee (Teams 1:1), Kim Park (mail), Lena Vogel (@mention) | NEEDS YOU NOW: "Reply in Teams: …" / "Read and reply: …", "Claude: …", "I'll do it: …", "Ignore: …", "Won't do: …" | not pressed |
 | Book the workshop room (I owe, due this week) | MY WORK: "Close: Book the workshop room", "Claude: Book the workshop room" | Close asks first ("Close this task?"); Claude starts Claude Code (not pressed) |
 
 ## Steps
