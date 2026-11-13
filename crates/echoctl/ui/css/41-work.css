@@ -137,8 +137,10 @@
 .wp-facts > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .wp-val { border: 0; background: none; padding: 0; color: var(--text); font: inherit; text-align: left; cursor: default; }
 .wp-val:hover { color: var(--accent-ink); }
-.wp-val.empty { color: var(--warn); }
-.wp-val.empty u { color: var(--text-2); }
+/* A field not set: one quiet line, its Set the way to fill it (`unset`, never the page's `.empty` state) */
+.wp-val.unset { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); }
+.wp-val.unset u { text-decoration: none; color: var(--accent-ink); }
+.wp-val.unset:hover u { text-decoration: underline; }
 .wp-link { border: 0; background: none; padding: 0; color: var(--text); font: inherit; text-align: left; cursor: default; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wp-link:hover { color: var(--accent-ink); }
 a.wp-link { display: block; text-decoration: none; cursor: pointer; }
@@ -147,9 +149,9 @@ a.wp-link { display: block; text-decoration: none; cursor: pointer; }
 .wp-desc > :last-child { margin-bottom: 0; }
 .wp-desc-add { align-self: stretch; display: flex; align-items: baseline; gap: 4px; margin: 2px 0 6px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--text-3); text-align: left; white-space: nowrap; }
 .wp-desc-add:hover { border-color: var(--accent); color: var(--accent-ink); }
-.wp-desc-add.wp-val.empty { color: var(--text-3); }
-.wp-desc-add u { text-decoration: none; color: var(--accent-ink); }
-.wp-desc-add.warn, .wp-desc-add.warn.wp-val.empty { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.wp-desc-add.wp-val.unset { color: var(--text-3); }
+.wp-desc-add u, .wp-desc-add.wp-val.unset:hover u { text-decoration: none; color: var(--accent-ink); }
+.wp-desc-add.warn, .wp-desc-add.warn.wp-val.unset { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
 /* A work item's status in its facts: a tinted pill in the status's colour. */
 .wp-val .wk-st { display: inline-flex; align-items: center; min-width: 0; padding: 2px 9px; border-radius: 11px; font-size: 11.5px; font-weight: 600; background: color-mix(in srgb, currentColor 13%, transparent); }
 .wp-val .wk-st.open { color: var(--text-2); }
@@ -170,7 +172,7 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .wk-bar { flex-wrap: nowrap; }
 .wk-sync { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .wk-bar .link-btn { flex: none; white-space: nowrap; }
-.wp-val.empty { white-space: nowrap; }
+.wp-val.unset { white-space: nowrap; }
 .wk-board { grid-template-columns: repeat(5, minmax(140px, 1fr)); }
 
 /* Profile and client pages, as designed: one card, a label column, values as text and tokens */

@@ -20,6 +20,6 @@
 .cl-rec-sub { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: 11.5px; }
 .cl-rec.bare .cl-rec-sub { color: var(--warn); }
 .cl-chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.wp-val.empty { white-space: nowrap; }
-.wp-val.empty u { margin-left: 2px; }
+.wp-val.unset { white-space: nowrap; }
+.wp-val.unset u { margin-left: 2px; }
 

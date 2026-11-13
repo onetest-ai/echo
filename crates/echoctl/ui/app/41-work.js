@@ -370,14 +370,14 @@ function workPanel() {
   // A face whose initials the stylesheet draws: the value's text stays the name alone (as it is read and checked).
   const face = (name) => avatar(name).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')
   const val = (field, text, empty, input) => edit === field ? input
-    : `<button class="wp-val${text ? '' : ' empty'}${PERSON.includes(field) && text ? ' person' : ''}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || `${empty} · Set`)}">${text ? (PERSON.includes(field) ? `${face(text)}<span>${esc(text)}</span>` : esc(text)) : `${esc(empty)} · <u>Set</u>`}</button>`
+    : `<button class="wp-val${text ? '' : ' unset'}${PERSON.includes(field) && text ? ' person' : ''}" data-pj="edit-field" data-field="${field}" aria-label="${esc(FIELD[field] || field)}: ${esc(text || `${empty} · Set`)}">${text ? (PERSON.includes(field) ? `${face(text)}<span>${esc(text)}</span>` : esc(text)) : `${esc(empty)} · <u>Set</u>`}</button>`
   const titles = (ids) => ids.map((i) => `<button class="wp-link" data-pj="node" data-node="${esc(i)}">${esc(i)} ${esc((N[i] || {}).title || '')}</button>`).join('')
   const trackable = n.kind === 'story' || n.kind === 'task' || n.kind === 'question'
   const [word, cls] = workStatus(n)
   const states = n.kind === 'question' ? [['open', 'open'], ['done', 'answered']] : [['open', 'to do'], ['in_progress', 'in progress'], ['blocked', 'blocked'], ['done', n.type === 'session' ? 'held' : 'done'], ['cancelled', 'cancelled']]
   const actionItems = (n.history || []).filter((h) => h.op === 'create' && h.quote).slice(0, 1)
   const rows = [
-    trackable ? ['Status', edit === 'state' ? `<select class="wp-in" data-ledger-set="state" aria-label="Status">${states.map(([v, l]) => `<option value="${v}"${n.state === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : `<button class="wp-val" data-pj="edit-field" data-field="state"><span class="wk-st ${esc(cls)}">● ${esc(word)}</span></button>${n.derived ? ` <span class="set-sub">${esc(n.derived)}</span>` : ''}`] : null,
+    trackable ? ['Status', edit === 'state' ? `<select class="wp-in" data-ledger-set="state" aria-label="Status" autofocus>${states.map(([v, l]) => `<option value="${v}"${n.state === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : `<button class="wp-val" data-pj="edit-field" data-field="state"><span class="wk-st ${esc(cls)}">● ${esc(word)}</span></button>${n.derived ? ` <span class="set-sub">${esc(n.derived)}</span>` : ''}`] : null,
     n.kind === 'decision' ? ['Decided by', val('decided_by', n.decided_by, 'not known', `<input class="wp-in" data-ledger-set="decided_by" value="${esc(n.decided_by || '')}" placeholder="Me, or a name" aria-label="Decided by" autofocus ${who}>`)] : null,
     ...(n.kind === 'risk' ? [['likelihood', 'Likelihood'], ['impact', 'Impact']].map(([f, l]) => [l, val(f, LEVEL_LABEL[n[f]] || '', 'not rated', `<select class="wp-in" data-ledger-set="${f}" aria-label="${l}" autofocus><option value="">not rated</option>${Object.entries(LEVEL_LABEL).map(([v, t]) => `<option value="${v}"${n[f] === v ? ' selected' : ''}>${t}</option>`).join('')}</select>`)]) : []),
     n.kind === 'task' || n.kind === 'story' || n.kind === 'risk' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus ${who}>`)] : null,
@@ -407,7 +407,7 @@ function workPanel() {
   const description = !rt ? ''
     : de ? `${head}<div class="wp-desc-edit"><textarea id="wp-desc" rows="6" spellcheck="true" aria-label="${esc(rt.label || 'Description')} (Markdown)" placeholder="${esc(rt.placeholder)}">${esc(de.text)}</textarea><div class="wp-desc-bar"><span class="set-sub">${MAC ? '⌘S' : 'Ctrl+S'} saves, Esc cancels</span><span class="grow"></span><button class="btn ghost" data-pj="desc-cancel">Cancel</button><button class="btn primary" data-pj="desc-save">Save</button></div></div>`
     : n.description ? `${head}<div class="wp-desc doc" data-pj="desc-edit" title="Click to change">${n.description_html || esc(n.description)}</div>`
-    : `${head}<button class="wp-val empty wp-desc-add${n.kind === 'risk' && !CLOSED_STATES.includes(n.state) ? ' warn' : ''}" data-pj="desc-edit">${esc(rt.empty)} · <u>Add</u></button>`
+    : `${head}<button class="wp-val unset wp-desc-add${n.kind === 'risk' && !CLOSED_STATES.includes(n.state) ? ' warn' : ''}" data-pj="desc-edit">${esc(rt.empty)} · <u>Add</u></button>`
   const met = n.ac.filter((a) => a.met).length
   const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
   const hist = (n.history || []).slice().reverse().map((h0) => {
