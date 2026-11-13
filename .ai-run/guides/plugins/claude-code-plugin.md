@@ -13,6 +13,7 @@
 - R6. The status-line mod never calls a model or asks for minutes, and does nothing inside a run Echo started (`ECHOCTL_HEADLESS`). Evidence: `plugin/hooks/register.tsx::ECHOCTL_HEADLESS`
 - R7. Keep `process-call` one `SKILL.md`. Evidence: `guard::own_call`
 - R8. Pass the plugin shipped with the app with `--plugin-dir` to runs and sessions on `claude` / `local` profiles. Evidence: `notes::plugin_dir`
+- R9. The `build` skill makes the user's own plugins and widgets only in My plugins' folder (`echoctl plugin mine`), by the plugin authoring rules Echo prints (`echoctl plugin guide`); it checks each widget with `echoctl widget show`, installs only after the user agreed to what the sheet names, and places widgets with `echoctl today` (Today, `--thread`, `--client`). Evidence: `plugin/skills/build/SKILL.md::description`
 
 ### Read first
 | When you are | Exemplar | Tests |
