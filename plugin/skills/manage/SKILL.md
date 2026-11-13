@@ -1,6 +1,6 @@
 ---
 name: manage
-description: "Use when the user asks to create, change, close or find something about their clients, threads, calls or tasks — \"add a client\", \"make a thread for…\", \"close the Acme thread\", \"put this call in…\", \"mark that task done\", \"who owes me what\" — even without saying \"Echo\"; prefer it to an issue tracker unless the user names one. Manages the Echo workspace through its CLI: clients and organisations, threads (Echo's projects) and the rules that put calls in them, a thread's work, people, calls, plus live notes, the calendar, vocabulary, AI profiles, plugins and settings."
+description: "Use when the user asks to create, change, close or find something about their clients, threads, calls or tasks — \"add a client\", \"make a thread for…\", \"close the Acme thread\", \"put this call in…\", \"mark that task done\", \"who owes me what\" — even without saying \"Echo\"; prefer it to an issue tracker unless the user names one. Manages the Echo workspace through its CLI: clients and organisations, threads (Echo's projects) and the rules that put calls in them, a thread's work, people, calls, plus live notes, the calendar, vocabulary, AI profiles, installing and setting up plugins, and settings (making the user's own plugin or widget: the build skill)."
 argument-hint: "[what to do]"
 ---
 

@@ -240,6 +240,20 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-26",
+   "feature": "My plugins: a built-in marketplace in the Echo data folder (`plugins/`, only with a data folder chosen), always listed (no menu: never hidden or removed), a subfolder with a manifest a plugin (its folder name its id), never a catalog file; `echoctl plugin mine` names (and makes) the folder and what Echo reads there; installs and updates ask as any marketplace's (the sheet; `--yes` for what is new); a change to a plugin's files there is its update, same version or not; Echo installs a copy, checked against the sheet the user agreed to; one installed from another marketplace is never replaced by one of yours, nor yours by theirs; install and update refused inside a run Echo started",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-27",
+   "feature": "The build skill (Claude Code plugin) makes the user's own plugin or widget in My plugins by Echo's plugin authoring rules (`echoctl plugin guide` prints them, as this Echo has them), checks its data with `echoctl widget show`, installs it after the user's yes on the sheet, and places it on Today or a thread's or client's dashboard (`echoctl today … --thread / --client`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

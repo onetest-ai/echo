@@ -53,6 +53,11 @@ pub enum PluginCmd {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// My plugins: the folder your own plugins go in (made if missing), and what Echo reads there (JSON)
+    Mine,
+    /// The plugin authoring rules (Markdown), as this Echo has them: manifest, widgets and their data, host and window
+    /// halves, testing, publishing
+    Guide,
     /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
     Marketplace {
         #[command(subcommand)]
@@ -76,6 +81,14 @@ pub enum MarketCmd {
     Update { name: Option<String> },
 }
 
+/// Plugins are installed and updated by the user, never from inside a run Echo started.
+fn refuse_in_run() -> Result<()> {
+    if crate::notes::headless() {
+        anyhow::bail!("plugins are installed and updated by you, not from inside a run Echo started");
+    }
+    Ok(())
+}
+
 pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
     use plugins::*;
     // Install / update ask in the terminal's own words; --yes is the answer.
@@ -92,12 +105,14 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
     match cmd {
         PluginCmd::List => print_json(&snapshot()),
         PluginCmd::Install { id, from, yes } => {
+            refuse_in_run()?;
             let r = review(&id, from.as_deref())?;
             let agreed = agree(&r, yes)?;
             let p = install(&id, from.as_deref(), &agreed)?;
             println!("Installed {} {}", p.name, p.version);
         }
         PluginCmd::Update { id, yes } => {
+            refuse_in_run()?;
             let ids: Vec<String> = match id {
                 Some(i) => vec![i],
                 None => Registry::load()?.installed.into_keys().collect(),
@@ -147,6 +162,16 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             let _ = std::io::stdout().flush();
             std::process::exit(v["status"].as_i64().map(|s| s as i32).unwrap_or(1));
         }
+        PluginCmd::Mine => {
+            if !crate::paths::home_chosen() {
+                anyhow::bail!("choose Echo's data folder first (Settings → Data): your plugins go in it");
+            }
+            std::fs::create_dir_all(mine_dir())?;
+            let c = refresh(MINE)?;
+            let plugins: Vec<serde_json::Value> = c.plugins.iter().map(|o| serde_json::json!({"id": o.id, "version": o.manifest.as_ref().map(|m| m.version.clone()), "error": o.error})).collect();
+            print_json(&serde_json::json!({"folder": mine_dir(), "plugins": plugins, "error": c.error}));
+        }
+        PluginCmd::Guide => print!("{}", include_str!("../../../../.ai-run/guides/plugins/plugin-authoring.md")),
         PluginCmd::Marketplace { cmd } => match cmd {
             MarketCmd::List => print_json(&snapshot()["markets"]),
             MarketCmd::Add { source, name } => {
