@@ -77,6 +77,9 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const ledger = path.join(data.home, 'projects', y.thread.id, data.text.work.ledger)
     data.model.use(y.script)
     data.model.clear()
+    // Yolo runs as the folder session (#590): this script needs its tools without prompts, so the user's choice is on.
+    await page.goto(data.base + '/')
+    await page.evaluate(() => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key: 'folder_skip_permissions', value: true }) }))
 
     // 1: what the data folder and this checkout hold before; T005 open.
     const before = data.files()

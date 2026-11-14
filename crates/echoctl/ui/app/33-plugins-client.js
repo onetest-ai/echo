@@ -366,7 +366,7 @@ const SETTINGS_BODY = {
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
       ]) +
       setCard('Claude in the window', [
-        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts'), '', 'Claude in the window: no permission prompts'),
+        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts. Routines and Yolo run with the same choice.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts'), '', 'Claude in the window: no permission prompts'),
       ])
   },
   calendar(st) {

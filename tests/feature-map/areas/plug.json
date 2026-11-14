@@ -142,7 +142,7 @@
   },
   {
    "id": "F-PLUG-15",
-   "feature": "A plugin may name commands of its own in `uses.sessions.commands`; the sheet says 'lets Claude in Echo run its commands … without asking', and Echo's sessions that get plugins' skills (a read-only routine, the folder session) may run `echoctl plugin call <id> <command>` for exactly those, without a prompt — any other plugin command stays refused; its skills reach the CLI at `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; a command a read-only routine runs this way changes nothing (no folder writes, Claude runs, sends or requests but GET)",
+   "feature": "A plugin may name commands of its own in `uses.sessions.commands`; the sheet says 'lets Claude in Echo run its commands … without asking', and Echo's sessions (the folder session, and routines and Yolo, which run as it does) may run `echoctl plugin call <id> <command>` for exactly those, without a prompt — any other plugin command stays refused; its skills reach the CLI at `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; a command a read-only routine runs this way changes nothing (no folder writes, Claude runs, sends or requests but GET)",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -234,7 +234,7 @@
   },
   {
    "id": "F-PLUG-25",
-   "feature": "A plugin may declare scripts of its package skills in `uses.scripts` ([{skill, script, readonly?, timeout?}]: a plain path in one of its skills, timeout 1–3600 s, 300 by default; at most 20). The sheet line names each with 'read-only routines may run it; Echo can't check it only reads' and its time over 5 min, and carries their skill folders' hash, so a version changing any file there asks again. Echo makes the declared ones runnable and runs one only as declared: its host half by `ctx.scripts.run(skill, script, args, {timeout})` → {status, stdout, stderr, truncated?, timed_out?} (no shell; at most the declared time; output 1 MB each; one run of a script at a time, across processes — a session's run and the host half's included; stopped with what it started on timeout, unload, update, removal or quit, whichever process runs it), Echo's sessions through the launcher Echo puts at its path in the session copy (`echoctl plugin script`), the folder session allowing every declared one, a read-only routine given and its guard allowing only the readonly ones by full path with plain words (no interpreter, pipe or other script); a script gets the user's environment without CLAUDE*, ANTHROPIC* and ECHOCTL* keys, plus ECHO_PLUGIN_SCRIPT=1, ECHO_PLUGIN_CACHE (the store's cache/) and the Echo that runs it (ECHOCTL_HOME once a data folder is chosen, ECHOCTL_CONFIG_DIR, ECHOCTL_BIN: an `echoctl` it starts through the plugin's `scripts/echoctl` is that Echo, on its data and config folders), and runs in its session skill folder; an undeclared script is refused; on test data a script keeps Echo's open guard (ECHOCTL_TEST_OPEN_LOG_ONLY, ECHOCTL_TEST_OPEN_LOG): a page a program it starts opens only goes to open.log",
+   "feature": "A plugin may declare scripts of its package skills in `uses.scripts` ([{skill, script, readonly?, timeout?}]: a plain path in one of its skills, timeout 1–3600 s, 300 by default; at most 20). The sheet line names each with 'read-only routines may run it; Echo can't check it only reads' and its time over 5 min, and carries their skill folders' hash, so a version changing any file there asks again. Echo makes the declared ones runnable and runs one only as declared: its host half by `ctx.scripts.run(skill, script, args, {timeout})` → {status, stdout, stderr, truncated?, timed_out?} (no shell; at most the declared time; output 1 MB each; one run of a script at a time, across processes — a session's run and the host half's included; stopped with what it started on timeout, unload, update, removal or quit, whichever process runs it), Echo's sessions through the launcher Echo puts at its path in the session copy (`echoctl plugin script`), the folder session — and routines and Yolo, which run as it does — allowing every declared one by its launcher's path in `.plugins/<id>/`; the read-only guard (kept, no longer on routines) allows only the readonly ones by full path with plain words (no interpreter, pipe or other script); a script gets the user's environment without CLAUDE*, ANTHROPIC* and ECHOCTL* keys, plus ECHO_PLUGIN_SCRIPT=1, ECHO_PLUGIN_CACHE (the store's cache/) and the Echo that runs it (ECHOCTL_HOME once a data folder is chosen, ECHOCTL_CONFIG_DIR, ECHOCTL_BIN: an `echoctl` it starts through the plugin's `scripts/echoctl` is that Echo, on its data and config folders), and runs in its session skill folder; an undeclared script is refused; on test data a script keeps Echo's open guard (ECHOCTL_TEST_OPEN_LOG_ONLY, ECHOCTL_TEST_OPEN_LOG): a page a program it starts opens only goes to open.log",
    "priority": "critical",
    "check": "agent",
    "axes": [
@@ -326,6 +326,15 @@
    "check": "agent",
    "axes": [
     "plugin.offer"
+   ]
+  },
+  {
+   "id": "F-PLUG-35",
+   "feature": "A plugin's Claude run (`ctx.claude.run`: a routine, the Scheduler's) and a Yolo task run as the Claude · Echo folder session does (#590): in the data folder (so `.plugins/<id>/` loads), with the folder session's arguments (`folder_args::build`, `terminal::folder_session_args`): its settings file and hooks (the window's view hook, the OneDrive and `plugins-hook` checks, the core's SessionStart hook), Echo's own plugin and the user's skills, the plugins' commands and scripts allowed by their `.plugins/<id>/` launchers, the folders plugins were given, and the user's choice 'Claude in the window: no permission prompts' (on: `--dangerously-skip-permissions`; off: a headless run refuses what would ask) — whatever `tools` the run asked (`none`, `read`, `folder`, `skip` are still taken; `skip` still needs the plugin's sheet to say so); no read-only guard; its record keeps what it asked and what it used (`permissions.json`, the log's first line). A plugin's skills laid out in `.plugins` aren't passed again by `--plugin-dir`; one not laid out (runtime skills, no prefix) still is. Won't do's no-tools run keeps its own permissions; minutes, sync, a call's session and live notes are unchanged",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
    ]
   }
  ]

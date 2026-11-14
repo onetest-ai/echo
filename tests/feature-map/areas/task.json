@@ -115,7 +115,7 @@
   },
   {
    "id": "F-TASK-12",
-   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work, with where each mail draft it wrote is (a run stopped by its 20-minute limit says so); the run reads its thread's brief, people, work and calls, and may change only its own task",
+   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile, run as the folder session (its knowledge, its permissions: prompts skipped only with the user's 'no permission prompts' choice, else what would ask is refused); the outcome shows above My work, with where each mail draft it wrote is (a run stopped by its 20-minute limit says so); the run reads its thread's brief, people, work and calls, and may change only its own task",
    "priority": "high",
    "check": "agent",
    "axes": [

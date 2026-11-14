@@ -940,6 +940,20 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_routine_reads_what_plugins_tell_claude_and_loads_their_laid_out_skills() {
+        let (_env, root) = crate::paths::testenv::folders("guard-routine-plugins");
+        let home = dunce::canonicalize(root.join("home")).unwrap();
+        fs::create_dir_all(home.join(".plugins/kit/.claude/skills/kit-staffing")).unwrap();
+        fs::write(home.join(".plugins/kit/CLAUDE.md"), "# Kit").unwrap();
+        let s = Scope { call: home.clone(), previous: None, clis: vec!["echoctl".into()], ask: true, project: None, routine: true, extra: vec![], skills: vec!["kit-staffing".into()], plugin_commands: vec![], plugin_scripts: vec![] };
+        s.judge(&tool("Read", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string()}))).unwrap();
+        s.judge(&tool("Glob", json!({"path": home.join(".plugins").display().to_string(), "pattern": "**/CLAUDE.md"}))).unwrap();
+        s.judge(&tool("Skill", json!({"skill": "kit-staffing"}))).unwrap();
+        assert!(s.judge(&tool("Skill", json!({"skill": "kit-other"}))).is_err());
+        assert!(s.judge(&tool("Write", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string(), "content": "x"}))).is_err());
+    }
+
+    #[test]
     fn what_plugins_tell_claude_is_never_written_by_a_run() {
         let (_env, root) = crate::paths::testenv::folders("guard-plugins");
         let kit = dunce::canonicalize(root.join("home")).unwrap().join(".plugins/kit");

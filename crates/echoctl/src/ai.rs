@@ -924,7 +924,8 @@ d="$CLAUDE_CONFIG_DIR"
 case "$1 $2" in
 "--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
-"-p "*) case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
+"-p "*) printf '%s\n' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
+  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;

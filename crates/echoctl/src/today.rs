@@ -384,7 +384,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         tools: crate::claudejob::Tools::Skip,
         run_dir: paths::config_dir().join("yolo").join(id),
         timeout: std::time::Duration::from_secs(20 * 60),
-        plugins: vec![],
+        session: true,
         task: Some(format!("{project}/{node}")),
         thread: Some(project.to_string()),
         echo_plugin: true,
@@ -392,12 +392,8 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
     std::thread::spawn(move || {
-        let mut spec = spec;
-        // The user's skills as they are now (off the window's thread: it copies their files).
-        let out = crate::skills::plugin().and_then(|d| {
-            spec.plugins = vec![d];
-            crate::claudejob::run(&spec)
-        });
+        // As the folder session: the user's skills as they are now among what it gets (off the window's thread).
+        let out = crate::claudejob::run(&spec);
         let mut v = match out {
             Ok((answer, _, _)) => json!({"state": "done", "say": answer.trim().chars().take(400).collect::<String>()}),
             Err(e) => json!({"state": "failed", "say": format!("{e:#}")}),
@@ -462,7 +458,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         tools: crate::claudejob::Tools::Skip,
         run_dir: paths::config_dir().join("yolo").join(id),
         timeout: std::time::Duration::from_secs(20 * 60),
-        plugins: vec![],
+        session: true,
         task: None,
         thread: item["thread"].as_str().filter(|t| !t.is_empty()).map(str::to_owned),
         echo_plugin: true,
@@ -471,11 +467,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
     // The run names its item: Today keeps it out of Needs you now while the run works.
     save_ask(json!({"id": id, "state": "working", "title": title, "item": item_id, "at": Local::now().to_rfc3339()}));
     std::thread::spawn(move || {
-        let mut spec = spec;
-        let out = crate::skills::plugin().and_then(|d| {
-            spec.plugins = vec![d];
-            crate::claudejob::run(&spec)
-        });
+        let out = crate::claudejob::run(&spec);
         let mut v = match out {
             Ok((answer, _, _)) => {
                 // Handed over: the item leaves Needs you now (a decision kept even if it's gone from the list by now).
@@ -589,7 +581,8 @@ pub fn wont_do(id: &str, item_id: &str, comment: &str) -> Result<()> {
         tools: crate::claudejob::Tools::None,
         run_dir: paths::config_dir().join("wont").join(id),
         timeout: std::time::Duration::from_secs(5 * 60),
-        plugins: vec![],
+        // Others' words, no tools at all: its own permissions, not the folder session's.
+        session: false,
         task: None,
         thread: None,
         echo_plugin: false,

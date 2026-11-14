@@ -39,6 +39,7 @@ mod meeting;
 #[cfg(feature = "tray")]
 mod diagrams;
 mod drafts;
+mod folder_args;
 mod onedrive;
 mod minutes;
 mod notes;

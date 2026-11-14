@@ -105,7 +105,7 @@
       "Status report"
     ],
     "say": "Drafted the training-slots mail to Kim Park (virtual model); sending it through Microsoft 365 was refused. Left for you: send the draft.",
-    "logFirst": "Echo runs “Yolo: Book the training slots” on Virtual model, model virtual (skip permissions)",
+    "logFirst": "Echo runs “Yolo: Book the training slots” on Virtual model, model virtual (asked: skip permissions; runs with the folder session's: every permission prompt skipped)",
     "bashSteps": 8,
     "refusals": [
       {
