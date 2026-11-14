@@ -11,7 +11,7 @@
   - for each feature that changes, its existing cases checked against the new behaviour: obsolete ones removed, duplicates merged (not the whole area).
 
   Evidence: `workbench.test.mjs`
-- R2. A Rust test that touches the data folder or config dir takes `paths::testenv::folders(name)` first and keeps its guard alive; nothing else sets `ECHOCTL_HOME` / `ECHOCTL_CONFIG_DIR`. Evidence: `paths::testenv::folders`
+- R2. A Rust test that touches the data folder or config dir takes `paths::testenv::folders(name)` first and keeps its guard alive: it points `ECHOCTL_HOME`, `ECHOCTL_CONFIG_DIR`, `HOME` and `CLAUDE_CONFIG_DIR` at the test's own folders and unsets `ZDOTDIR`, so no test reads the user's Echo or Claude Code setup; nothing else sets them. Evidence: `paths::testenv::folders`
 - R3. Rust tests are a `#[cfg(test)] mod tests` at the end of their module, each named as the behaviour it proves (`only_this_calls_files_and_the_previous_minutes`). Evidence: `guard::only_this_calls_files_and_the_previous_minutes`
 - R4. Wait for a released lock with `paths::testenv::eventually`, never a fixed sleep. Evidence: `paths::testenv::eventually`
 - R5. A functional case is one behaviour, `tests/cases/<area>/TC-NNN_<slug>.md`, with `run: agent | person` and `platform`; a scenario (`tests/scenarios/S-NN_<slug>.md`) chains cases into a journey. Rules for writing them are in `tests/app_profile.md`. Evidence: `tests/app_profile.md`
