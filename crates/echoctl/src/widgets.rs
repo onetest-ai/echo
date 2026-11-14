@@ -239,18 +239,19 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page,
 /// its provider again, in the background, once that is older than the widget's `refresh` (60 s at least). Never waits
 /// for the plugin: Today draws the last answer at once.
 #[cfg(not(feature = "js"))]
-fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, _page: &crate::today_layout::Page) -> Value {
-    json!({"kind": w.kind, "label": label_for(w), "data": null, "empty": true})
+fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, page: &crate::today_layout::Page) -> Value {
+    json!({"kind": w.kind, "label": label_for(w, page), "data": null, "empty": true})
 }
 
 /// Its label on Today: one set to a thread or a client (a setting of type `thread` / `client`) names it — "GitHub at
 /// a glance · Echo" — so a widget showing one thread says which. Whatever the plugin is.
-/// [`label_on_today`] with its settings as Today has them — read only for a widget that has a thread or client setting.
-fn label_for(w: &Widget) -> String {
+/// [`label_on_today`] with its settings as the page drawn has them (a dashboard's own thread or client named, as Echo's
+/// own widgets name it) — read only for a widget that has a thread or client setting.
+fn label_for(w: &Widget, page: &crate::today_layout::Page) -> String {
     if !w.params.iter().any(|p| p.kind == "thread" || p.kind == "client") {
         return w.label.to_string();
     }
-    label_on_today(w, &crate::today_layout::params_of(&w.id))
+    label_on_today(w, &crate::today_layout::params_on(page, &w.id))
 }
 
 fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
@@ -294,7 +295,7 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crat
     let last = if placed && reset { None } else { last };
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
-    json!({"kind": w.kind, "label": label_for(w), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
+    json!({"kind": w.kind, "label": label_for(w, page), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
@@ -425,6 +426,16 @@ mod tests {
         assert_eq!(label_on_today(&wd, &set(json!({"thread": "gone-thread"}))), "GitHub at a glance", "a thread that isn't there: its own label");
         wd.params.push(param("client", "client"));
         assert_eq!(label_on_today(&wd, &set(json!({"thread": echo.id, "client": acme.id}))), "GitHub at a glance · Echo · Acme");
+        // Each page's own settings, never Today's: Today set to Echo; another thread's Brief names that thread, a
+        // client's Overview that client (a thread of another client set there by hand isn't its).
+        use crate::today_layout::Page;
+        let beta = crate::projects::create("Beta", None, None).unwrap();
+        let done = find("core:tasks.done").unwrap();
+        crate::today_layout::add("core:tasks.done", None, None).unwrap();
+        crate::today_layout::set_param("core:tasks.done", "thread", &echo.id).unwrap();
+        assert_eq!(label_for(&done, &Page::Today), "Done this week · Echo");
+        assert_eq!(label_for(&done, &Page::Thread(beta.id.clone())), "Done this week · Beta", "the Brief's thread, not Today's");
+        assert_eq!(label_for(&done, &Page::Client(acme.id.clone())), "Done this week · Acme");
     }
 
     #[cfg(feature = "js")]
