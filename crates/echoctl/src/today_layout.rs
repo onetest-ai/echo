@@ -80,7 +80,8 @@ impl Page {
             if base == Page::Today || !id_ok(board) {
                 bail!("{s:?} isn't a page: today, thread:<id>, client:<id>, or either with /<dashboard>");
             }
-            return Ok(Page::Board(Box::new(base), board.into()));
+            // Only one that exists (a removed one's layout never comes back from a window still showing it).
+            return base.on_board(Some(board));
         }
         match s {
             "" | "today" => Ok(Page::Today),
@@ -479,6 +480,15 @@ pub fn forget_board(kind: crate::boards::Kind, board: &str) {
     let f = board_file(kind, board);
     let _ = std::fs::remove_file(&f);
     let _ = std::fs::remove_file(f.with_extension("lock"));
+    // Its widgets' answers on every page.
+    #[cfg(feature = "js")]
+    {
+        let base = match kind {
+            crate::boards::Kind::Thread => Page::Thread("-".into()),
+            crate::boards::Kind::Client => Page::Client("-".into()),
+        };
+        crate::jshost::widget_forget(&Page::Board(Box::new(base), board.into()), None);
+    }
 }
 
 /// A thread or a client deleted: its dashboard goes (a new one may get its id), and the plugins' answers for it.
@@ -539,6 +549,21 @@ fn on_today(page: &Page, items: &[Item], target: Option<(&str, Side)>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dashboard_of_its_own_is_a_page_only_while_it_exists_and_only_on_a_thread_or_client() {
+        let (_env, _root) = paths::testenv::folders("layout-boards");
+        crate::boards::add(crate::boards::Kind::Thread, "Hiring").unwrap();
+        let p = Page::parse("thread:acme-rollout/hiring").unwrap();
+        assert_eq!(p, Page::Board(Box::new(Page::Thread("acme-rollout".into())), "hiring".into()));
+        assert_eq!(p.key(), "thread:acme-rollout/hiring");
+        assert_eq!(p.file(), Page::parse("thread:globex-pilot/hiring").unwrap().file(), "one layout for every thread");
+        for bad in ["client:acme/hiring", "today/hiring", "thread:x/a/b", "thread:x/../y", "thread:x/gone", "thread:x/"] {
+            assert!(Page::parse(bad).is_err(), "{bad} isn't a page");
+        }
+        crate::boards::remove(crate::boards::Kind::Thread, "hiring").unwrap();
+        assert!(Page::parse("thread:acme-rollout/hiring").is_err(), "removed: no page (nothing writes its layout again)");
+    }
 
     fn lay(xs: &[(&str, bool)]) -> Vec<Item> {
         xs.iter().map(|(w, r)| item(w, "M", *r)).collect()

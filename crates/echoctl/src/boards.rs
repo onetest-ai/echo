@@ -99,7 +99,7 @@ pub fn add(kind: Kind, name: &str) -> Result<Board> {
         if all.len() >= MAX {
             bail!("{MAX} dashboards at most");
         }
-        if all.iter().any(|b| b.name.eq_ignore_ascii_case(&name)) {
+        if all.iter().any(|b| b.name.to_lowercase() == name.to_lowercase()) {
             bail!("there is a dashboard {name:?} already");
         }
         let base: String = crate::recorder::slugify(&name).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
@@ -113,6 +113,8 @@ pub fn add(kind: Kind, name: &str) -> Result<Board> {
         }
         let b = Board { id, name };
         all.push(b.clone());
+        // Nothing left from an earlier one of that id (a window that wrote after it was removed).
+        crate::today_layout::forget_board(kind, &b.id);
         Ok(b)
     })
 }
@@ -121,7 +123,7 @@ pub fn rename(kind: Kind, id: &str, name: &str) -> Result<Board> {
     let name = name_ok(name)?;
     change(|f| {
         let all = f.of(kind);
-        if all.iter().any(|b| b.id != id && b.name.eq_ignore_ascii_case(&name)) {
+        if all.iter().any(|b| b.id != id && b.name.to_lowercase() == name.to_lowercase()) {
             bail!("there is a dashboard {name:?} already");
         }
         let b = all.iter_mut().find(|b| b.id == id).ok_or_else(|| anyhow!("no dashboard {id:?}"))?;

@@ -107,14 +107,25 @@ pub fn widget_last_on(plugin: &str, widget: &str, page: &crate::today_layout::Pa
 
 /// A page's dashboard went (its thread or client deleted), or a widget came off it (`widget`): their answers go.
 pub fn widget_forget(page: &crate::today_layout::Page, widget: Option<&str>) {
-    let suffix = format!("@{}", page.key());
+    use crate::today_layout::Page;
+    let key = page.key();
+    // A dashboard of its own is every thread's (client's): its answers on each page go. A thread's (client's) page
+    // takes its dashboards' with it.
+    let board = match page {
+        Page::Board(base, b) => Some((format!("{}:", base.key().split(':').next().unwrap_or_default()), format!("/{b}"))),
+        _ => None,
+    };
+    let here = |p: &str| match &board {
+        Some((kind, b)) => p.starts_with(kind.as_str()) && p.ends_with(b.as_str()),
+        None => p == key || p.strip_prefix(key.as_str()).is_some_and(|r| r.starts_with('/')),
+    };
     let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
     for e in std::fs::read_dir(paths::state_dir().join("plugins")).into_iter().flatten().flatten() {
         let id = e.file_name().to_string_lossy().into_owned();
         let f = widgets_file(&id);
         let Some(mut all) = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice::<serde_json::Map<String, Value>>(&b).ok()) else { continue };
         let n = all.len();
-        all.retain(|k, _| !(k.ends_with(&suffix) && widget.is_none_or(|w| k == &format!("{w}{suffix}"))));
+        all.retain(|k, _| !k.split_once('@').is_some_and(|(w, p)| here(p) && widget.is_none_or(|x| x == w)));
         if all.len() != n {
             let _ = serde_json::to_string_pretty(&all).map(|t| paths::write_atomic(&f, t.as_bytes()));
         }
@@ -173,3 +184,28 @@ pub(super) fn widget_ask_now_on(plugin: &str, widget: &str, page: &crate::today_
 }
 
 // ── the plugins' Inbox items ──
+
+#[cfg(test)]
+mod forget_tests {
+    use super::*;
+    use crate::today_layout::Page;
+
+    #[test]
+    fn answers_go_with_their_page_their_dashboards_and_a_dashboard_on_every_page() {
+        let (_env, _root) = paths::testenv::folders("widget-forget");
+        let f = widgets_file("demo");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        let put = |keys: &[&str]| std::fs::write(&f, serde_json::to_vec(&keys.iter().map(|k| (k.to_string(), json!(1))).collect::<serde_json::Map<_, _>>()).unwrap()).unwrap();
+        let left = || { let m: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap(); m.keys().cloned().collect::<Vec<_>>() };
+        let all = ["a", "a@thread:x", "a@thread:x/hiring", "a@thread:xy", "b@thread:y/hiring", "a@client:c/hiring"];
+        put(&all);
+        widget_forget(&Page::Thread("x".into()), None);
+        assert_eq!(left(), ["a", "a@client:c/hiring", "a@thread:xy", "b@thread:y/hiring"], "the thread's own and its dashboards', not thread xy's");
+        put(&all);
+        widget_forget(&Page::Board(Box::new(Page::Thread("x".into())), "hiring".into()), Some("b"));
+        assert_eq!(left(), ["a", "a@client:c/hiring", "a@thread:x", "a@thread:x/hiring", "a@thread:xy"], "b off Hiring: on every thread");
+        put(&all);
+        widget_forget(&Page::Board(Box::new(Page::Thread("-".into())), "hiring".into()), None);
+        assert_eq!(left(), ["a", "a@client:c/hiring", "a@thread:x", "a@thread:xy"], "Hiring removed: every thread's, never a client's");
+    }
+}

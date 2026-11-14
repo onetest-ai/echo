@@ -3,7 +3,10 @@
 // they are on. + adds one; its ⋯ renames it, moves it left or right, removes it.
 
 async function loadBoards() {
-  try { S.boards = await get('api/boards') } catch { /* app restarting */ }
+  const was = JSON.stringify(S.boards || null)
+  try { S.boards = await get('api/boards') } catch { return /* app restarting */ }
+  // One added, renamed, moved or removed elsewhere: the tabs (and a removed one's page, back to the first) follow.
+  if (was !== 'null' && JSON.stringify(S.boards) !== was) { await loadDashboard(); render() }
 }
 const boardsOf = (kind) => ((S.boards || {})[kind]) || []
 /** The board a tab id names (`b-<id>`), or null. */
@@ -20,7 +23,7 @@ function boardPlus(kind) {
 /** The tab row's buttons, + after the last board. */
 function boardTabRow(kind, tabs, active, attr) {
   const n = 1 + boardsOf(kind).length
-  return tabs.map(([t, label], i) => `<button class="tab" role="tab" data-pj="${attr}" data-tab-id="${t}" aria-selected="${active === t}">${label}</button>${i === n - 1 ? boardPlus(kind) : ''}`).join('')
+  return tabs.map(([t, label], i) => `<button class="tab" role="tab" data-pj="${attr}" data-tab-id="${esc(t)}" aria-selected="${active === t}">${label}</button>${i === n - 1 ? boardPlus(kind) : ''}`).join('')
 }
 
 /** A board's page: its name with ⋯ (rename, move, remove), then its widgets. */
@@ -65,6 +68,15 @@ document.addEventListener('click', (e) => {
     case 'remove-cancel': S.boardRemove = null; return render()
     case 'remove': S.boardRemove = null; return boardOp({ op: 'remove', kind, id: b.id }, () => boardGo(kind, null))
   }
+})
+
+// Another page: an unfinished name, a menu or a question goes.
+window.addEventListener('hashchange', () => { S.boardNew = null; S.boardRename = null; S.boardMenu = false; S.boardRemove = null })
+// Clicked away from a name field: it closes (Enter keeps it, Esc drops it).
+document.addEventListener('focusout', (e) => {
+  const t = e.target
+  if (!t || !t.dataset || !(t.dataset.boardNew || t.dataset.boardRename)) return
+  setTimeout(() => { if (document.activeElement === t) return; S.boardNew = null; S.boardRename = null; render() }, 150)
 })
 
 document.addEventListener('keydown', (e) => {

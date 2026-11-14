@@ -123,7 +123,7 @@ async function loadProject() {
     const id = S.pj.client
     try { const d = await get('api/client/' + encodeURIComponent(id)); if (S.pj.client === id) S.pj.cdata = d } catch { /* app restarting */ }
     if (S.pj.ctab === 'people') await loadPeople()
-    if (S.pj.ctab === 'overview' || (typeof boardOfTab === 'function' && boardOfTab('client', S.pj.ctab))) await loadDashboard()
+    if (S.pj.ctab === 'overview' || String(S.pj.ctab).startsWith('b-')) await loadDashboard()
     return
   }
   const id = S.pj.sel
@@ -136,7 +136,7 @@ async function loadProject() {
     if (S.pj.sel === id) S.pj.detail = S.pj.boardAt > asked - BOARD_SETTLE_MS && S.pj.detail ? { ...d, board: S.pj.detail.board } : d
   } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
-  if (!S.pj.tab || S.pj.tab === 'brief' || (typeof boardOfTab === 'function' && boardOfTab('thread', S.pj.tab))) await loadDashboard()
+  if (!S.pj.tab || S.pj.tab === 'brief' || String(S.pj.tab).startsWith('b-')) await loadDashboard()
   if (S.pj.tab === 'profile') {
     try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
   }
