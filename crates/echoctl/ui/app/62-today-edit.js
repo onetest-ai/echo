@@ -25,7 +25,7 @@ const twWhere = () => ((twPage() || 'today') === 'today' ? 'Today' : 'this dashb
 function todayEditHead() {
   return S.tdEdit
     ? '<span class="td-edit-acts"><button class="btn" data-tw-panel="1">Add a widget</button><button class="btn ghost" data-tw-reset="1">Reset to the default</button><button class="btn primary" data-tw-done="1">Done</button></span>'
-    : `<button class="icon-btn td-edit-btn" data-tw-edit="1" aria-label="Edit Today" title="Edit Today — move, size, add widgets">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
+    : `${exportBtn('today', 'Today')}<button class="icon-btn td-edit-btn" data-tw-edit="1" aria-label="Edit Today" title="Edit Today — move, size, add widgets">${ICON('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>')}</button>`
 }
 
 /** A widget framed for editing: its name, the sizes it takes, ×; its content shown but inert; empty: what it is. */

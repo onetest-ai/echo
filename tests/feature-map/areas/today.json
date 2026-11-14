@@ -217,6 +217,16 @@
    "cases": [
     "today/TC-048"
    ]
+  },
+  {
+   "id": "F-TODAY-30",
+   "feature": "Export as HTML: Today, a thread's Brief and a client's Overview with widgets, and their own dashboards, have a download icon beside ✎ (not while editing; not on a dashboard with no widgets); it saves one self-contained file into the user's Downloads, \"Echo - <page> - <YYYY-MM-DD HHMM>.html\" (the page's name kept to safe characters; a taken name gets \" (2)\"; at most 20 MB), shows it in Finder / Explorer and says \"Saved to Downloads: <name>\": Echo's head (the page's title — Today, \"Acme · Overview\", \"Acme · Staffing\" — and the time of the snapshot), the widgets as drawn (lists at their whole height, charts kept, buttons, inputs and menus out, https links opening apart, Echo's own links as text) in Echo's styles, light or dark as the system is, then \"Data\": each placed widget's data as tables (a plugin's table, stats, list, chart series; Echo's own: what each shows, a row a line), every text escaped; no script and nothing loaded from outside",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "today/TC-049"
+   ]
   }
  ]
 }
