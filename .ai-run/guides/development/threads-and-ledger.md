@@ -8,7 +8,7 @@
 - R1. An agent's proposal to the work ledger counts only through `ledger::apply`, which refuses a quote that is not one contiguous span (≥ 3 normalised words) of its evidence item (`ledger::quote_in`); status changes also need the verifier's `supports`. Evidence: `ledger::quote_in`
 - R2. Record the user's own edit through `ledger::human_event`: it pins the field, and an agent's later evidence lands in history without changing it; every such edit can be undone. Evidence: `ledger::human_event`
 - R3. Change a thread (project) through `projects::update` (projects lock, load, `check`, write) and a client through `projects::update_client`. Evidence: `projects::update`
-- R4. A Microsoft 365 command that sends, replies, posts or uploads returns `{sent: false, would}` without `--yes` and calls `m365::not_in_run` before it sends (refused when `ECHOCTL_HEADLESS` is set). Evidence: `m365::mail_send`
+- R4. A Microsoft 365 command that sends, replies, posts or uploads returns `{sent: false, would}` without `--yes` and calls `m365::not_in_run` before it sends (refused when `ECHOCTL_HEADLESS` is set, but for a routine's or Yolo's run acting on its own: `untrusted-text.md` R21). Evidence: `m365::mail_send`
 - R5. A call's threads are computed from rules, pins and exclusions, never stored in the call; a suggestion never assigns a call to a thread. Evidence: `projects::calls_of`, `projects::suggest`
 - R6. Closing a question or risk goes through op `answer`, verified, never a `description` edit; a near-duplicate is `suggest_merge`, never merged automatically. Evidence: `ledger::apply`
 - R7. The verify step runs in a fresh process, apart from the extractor. Evidence: `projectsync::run`
