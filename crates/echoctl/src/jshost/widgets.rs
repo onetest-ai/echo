@@ -22,10 +22,12 @@ fn widget_key(widget: &str, page: &crate::today_layout::Page) -> String {
 /// plugin declares, at most 64 KB; `size`: the size its provider was asked for. Given for Today (a `set` or a `clear`
 /// from the plugin), it replaces every page's: the dashboards' own answers go, and they show it until asked again.
 pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::Page, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
-    let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
-    if !declared {
+    // Its kind as declared now: an answer is kept with it, and one kept for another kind (the plugin changed it in an
+    // update) is never drawn as this one (`widgets::plugin_data` asks again).
+    let kind = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).and_then(|(_, m)| m.widgets.iter().find(|w| w.id == widget).map(|w| w.kind.clone()));
+    let Some(kind) = kind else {
         bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
-    }
+    };
     if data.is_some_and(|d| d.to_string().len() > 64 * 1024) {
         bail!("a widget's data is 64 KB at most");
     }
@@ -37,6 +39,11 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let key = widget_key(widget, page);
     let mut last = all.get(&key).cloned().unwrap_or_else(|| json!({"data": null}));
+    // Kept for another kind: its data goes (a failed ask, or a widget with no provider, keeps nothing to misdraw).
+    if last["kind"].as_str().is_some_and(|k| k != kind) {
+        last["data"] = Value::Null;
+        last["at"] = Value::Null;
+    }
     match (data, error) {
         (_, Some("")) => {
             last["asked"] = json!(now);
@@ -59,6 +66,7 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     if let Some(size) = size {
         last["size"] = json!(size);
     }
+    last["kind"] = json!(kind);
     // The plugin's own `set` / `clear` (no ask, no size): every copy — each dashboard's shows it, until its own next ask.
     if *page == crate::today_layout::Page::Today && error.is_none() && size.is_none() {
         let mine = format!("{widget}@");
@@ -66,6 +74,7 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
             v["data"] = last["data"].clone();
             v["at"] = last["at"].clone();
             v["asked"] = last["asked"].clone();
+            v["kind"] = last["kind"].clone();
             // As on Today: what the plugin set replaces a failed ask's error.
             if let Some(o) = v.as_object_mut() {
                 o.remove("error");
@@ -97,7 +106,8 @@ pub fn widget_last_on(plugin: &str, widget: &str, page: &crate::today_layout::Pa
     let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
     let mut own = all.get(&widget_key(widget, page)).cloned()?;
     if *page != crate::today_layout::Page::Today && own["unasked"] == true && own["data"].is_null() {
-        if let Some(base) = all.get(widget) {
+        // Today's, unless it was kept for another kind than this one's.
+        if let Some(base) = all.get(widget).filter(|b| b["kind"].is_null() || own["kind"].is_null() || b["kind"] == own["kind"]) {
             own["data"] = base["data"].clone();
             own["at"] = base["at"].clone();
         }

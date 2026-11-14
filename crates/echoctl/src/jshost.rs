@@ -1621,6 +1621,29 @@ mod tests {
         widget_ask_now("ci", "health");
         assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "CI on dev");
         assert!(crate::today_layout::set_param("plugin:ci:health", "branch", "prod").is_err());
+        // An answer kept for another kind (an update changed the widget's kind; or kept before kinds were noted) is
+        // never drawn as this one: its place held, its provider asked now, the new answer kept with its kind.
+        assert_eq!(widget_last("ci", "builds").unwrap()["kind"], "list", "kept with its kind");
+        let f = plugins::data_dir("ci").join("widgets.json");
+        let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+        all["builds"]["kind"] = json!("table");
+        std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
+        let v = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!((v["pending"].as_bool(), v["empty"].as_bool()), (Some(true), Some(true)), "not drawn as a list");
+        let again = (0..100).find_map(|_| widget_last("ci", "builds").filter(|l| l["kind"] == "list").or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(again.unwrap()["data"]["items"][0]["title"], "main #41 passed", "asked again at once");
+        // Its ask failing (or a widget with no provider): the other kind's data goes, never stamped as this one.
+        for err in ["timed out", ""] {
+            let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+            all["builds"]["kind"] = json!("table");
+            std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
+            widgets::widget_store("ci", "builds", &crate::today_layout::Page::Today, None, Some(err), None).unwrap();
+            let l = widget_last("ci", "builds").unwrap();
+            assert_eq!((l["kind"].as_str(), l["data"].is_null()), (Some("list"), true), "{err:?}: {l}");
+        }
         plugins::remove("ci", false).unwrap();
         sync();
     }

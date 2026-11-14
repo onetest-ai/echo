@@ -274,7 +274,9 @@ fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
 
 #[cfg(feature = "js")]
 fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crate::today_layout::Page) -> Value {
-    let last = crate::jshost::widget_last_on(plugin, widget, page);
+    // Data kept for another kind (the plugin changed it in an update, or kept before kinds were noted): not drawn as
+    // this one — its place held and its provider asked now. With no data (a failed ask, nothing to show) it stands.
+    let last = crate::jshost::widget_last_on(plugin, widget, page).filter(|l| l["data"].is_null() || l["kind"].as_str() == Some(w.kind.as_ref()));
     let every = w.refresh.max(60);
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     // Resized since its provider was last asked: asked again for the new size.

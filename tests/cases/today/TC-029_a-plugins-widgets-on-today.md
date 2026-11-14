@@ -31,6 +31,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 5 | `target/debug/echoctl plugin call widget-demo clear-note`; reload | Note is gone from Today (it has nothing to show); `echoctl widget show plugin:widget-demo:note` says `"empty": true` |
 | 6 | Edit Today → Add a widget, part "Widget demo" | Its eight widgets listed with their about lines, the ones on Today "on Today" |
 | 7 | `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove widget-demo` | Today as it comes; `widget list` has no `plugin:widget-demo:` widget |
+| 8 | `target/debug/echoctl plugin install widget-demo --yes`; `target/debug/echoctl today add plugin:widget-demo:open --size S`; reload and wait for "Open tickets" to show its number; then in `$ECHOCTL_HOME/.echo/plugins/widget-demo/widgets.json` set the `open` entry's `"kind"` to `"table"` (as if an update had changed it); reload | Right after the reload "Open tickets" holds its place without drawing the old answer (no "Couldn't draw this"), then shows its number again (asked at once); `widgets.json` has `"kind": "stat"` for it again. Then `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove widget-demo` |
 
 ## Notes
 - The drawing of each kind is the node test `today-plugin-widgets.test.mjs`; the manifest's checks and provide / set / clear are the Rust tests in `jshost`.
