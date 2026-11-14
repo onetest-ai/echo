@@ -102,7 +102,7 @@ pub fn capture(app: apps::TargetApp, seconds: Option<u64>, title: Option<String>
 pub fn memo(cmd: MemoCmd) -> Result<()> {
     match cmd {
         MemoCmd::Start { languages, ai } => {
-            if std::env::var_os("ECHOCTL_HEADLESS").is_some() {
+            if crate::notes::run_limited() {
                 anyhow::bail!("refused inside a run Echo started");
             }
             watch::memo_start(languages.map(|l| l.split(',').map(str::to_owned).collect()), ai)

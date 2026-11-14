@@ -501,6 +501,10 @@ const PARENT_SESSION: &[&str] = &[
     "CLAUDE_PID",
     "CLAUDE_EFFORT",
     "AI_AGENT",
+    // A routine's or Yolo's own marks: a run started from inside one is no such run unless its caller says so
+    // (`claudejob` sets them on purpose).
+    crate::notes::RUN_SESSION,
+    crate::notes::RUN_ACTIONS,
 ];
 
 /// The command for Claude Code with profile `p` (built, not started; tested).
@@ -924,13 +928,15 @@ d="$CLAUDE_CONFIG_DIR"
 case "$1 $2" in
 "--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
-"-p "*) case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
+"-p "*) printf '%s\0' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
+  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;
   fail) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
   hang) echo $$ > "$d/login.pid"; exec sleep 60 ;;
   esac ;;
+*) printf '%s\0' "$@" > "$d/session.args.new"; pwd > "$d/session.cwd"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/session.settings"; prev=$a; done; mv "$d/session.args.new" "$d/session.args" ;;
 esac
 "#,
         )
@@ -1265,6 +1271,21 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn a_run_started_inside_a_routine_is_no_routine_unless_its_caller_says_so() {
+        let (_env, root) = crate::paths::testenv::folders("ai-nested-run");
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        std::env::set_var(crate::notes::RUN_ACTIONS, root.join("actions.jsonl"));
+        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let c = build_command(&p, Path::new("/bin/echo"), &["-p".into()], &root, false, false);
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        std::env::remove_var(crate::notes::RUN_ACTIONS);
+        let removed: Vec<String> = c.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        for k in [crate::notes::RUN_SESSION, crate::notes::RUN_ACTIONS] {
+            assert!(removed.iter().any(|r| r == k), "{k}: {removed:?}");
+        }
+    }
+
     #[test]
     fn the_login_shell_command_starts_claude_with_the_profiles_routing() {
         let (_env, root) = crate::paths::testenv::folders("ai-shell-command");

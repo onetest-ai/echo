@@ -41,6 +41,11 @@ const TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const CLAIM_STALE: Duration = Duration::from_secs(30 * 60);
 /// Set for the Claude Code run (and inherited by the Echo CLI and the mod inside it).
 pub const HEADLESS: &str = "ECHOCTL_HEADLESS";
+/// A routine's or Yolo's run, as the folder session (`claudejob`, #590): `acts` when the user lets Claude act on its
+/// own (it may change and send as the folder session may), `asks` otherwise. Set by Echo, never by the run.
+pub const RUN_SESSION: &str = "ECHOCTL_RUN_SESSION";
+/// Where the CLI notes each change and send an unattended run makes (one JSON line each), for its outcome.
+pub const RUN_ACTIONS: &str = "ECHOCTL_RUN_ACTIONS";
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct Run {
@@ -134,6 +139,86 @@ fn test_delay(v: Option<&str>) -> Option<Duration> {
 /// Inside a run Echo started (the mod and the CLI stay out of the way there).
 pub fn headless() -> bool {
     std::env::var_os(HEADLESS).is_some()
+}
+
+/// Inside a routine's or Yolo's run that acts on its own (the user's choice): it sends and changes as the folder
+/// session does.
+pub fn run_acts() -> bool {
+    headless() && std::env::var(RUN_SESSION).is_ok_and(|v| v == "acts")
+}
+
+/// Inside a routine's or Yolo's run, as the folder session (whatever the user's choice).
+pub fn session_run() -> bool {
+    headless() && std::env::var_os(RUN_SESSION).is_some()
+}
+
+/// Inside a routine's or Yolo's run that prepares and asks (the user's choice off).
+pub fn run_asks() -> bool {
+    session_run() && !run_acts()
+}
+
+/// Inside a routine's run (no Yolo task or thread of its own), as the folder session.
+pub fn routine_session() -> bool {
+    headless() && std::env::var_os(RUN_SESSION).is_some() && std::env::var_os(crate::guard::RUN_TASK).is_none() && std::env::var_os(crate::guard::RUN_THREAD).is_none()
+}
+
+/// The CLI's limits for a run Echo started apply: any run but a routine that acts on its own (Yolo keeps its own
+/// task's and thread's).
+pub fn run_limited() -> bool {
+    headless() && !(run_acts() && routine_session())
+}
+
+/// What an Echo command does that a routine's or Yolo's outcome lists: `send` (Microsoft 365 with `--yes`), `draft`
+/// (`compose`), `change` (anything else that isn't a read), or nothing.
+pub fn action_kind(argv: &[String]) -> Option<&'static str> {
+    let w: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.starts_with('-')).collect();
+    let first = *w.first()?;
+    // Echo's own hooks and servers, and what only reads.
+    const QUIET: [&str; 14] = ["view-hook", "onedrive-hook", "plugins-hook", "run-guard", "core", "mcp", "live-mcp", "context", "attention", "previous", "status", "read", "templates", "me"];
+    if QUIET.contains(&first) {
+        return None;
+    }
+    let second = w.get(1).copied().unwrap_or("");
+    match first {
+        "m365" => (argv.iter().any(|a| a == "--yes") && argv.iter().any(|a| matches!(a.as_str(), "send" | "reply" | "post" | "upload"))).then_some("send"),
+        "compose" => Some("draft"),
+        "deliver" if second == "send" => Some("send"),
+        "calendar" | "agenda" | "needs" | "widget" | "today" if matches!(second, "" | "events" | "list" | "show") => None,
+        "prep" if !argv.iter().any(|a| a == "--write") => None,
+        "project" if matches!(second, "list" | "show" | "of" | "tasks" | "people" | "found") => None,
+        "project" if second == "ledger" && matches!(w.get(3).copied(), Some("tree" | "status" | "pending" | "context" | "list")) => None,
+        "project" if second == "work" && w.len() < 4 => None,
+        "client" | "org" if matches!(second, "list" | "people" | "show") => None,
+        "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
+        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
+        _ => Some("change"),
+    }
+}
+
+/// Note what command `argv` changed or sent, inside an unattended run that keeps such a list (`RUN_ACTIONS`), with its
+/// `outcome` when it wasn't plain success (it failed, a script's exit status).
+pub fn note_action(argv: &[String], outcome: Option<&str>) {
+    let Some(kind) = action_kind(argv) else { return };
+    note(kind, &argv.join(" "), outcome);
+}
+
+/// Note one change or send (`kind`: `change`, `send`, `draft`) a run made, by what made it (`what`).
+pub fn note(kind: &str, what: &str, outcome: Option<&str>) {
+    let Some(f) = std::env::var_os(RUN_ACTIONS).filter(|_| headless()) else { return };
+    let line: String = what.chars().take(400).collect();
+    let mut v = serde_json::json!({"at": chrono::Local::now().to_rfc3339(), "kind": kind, "command": line});
+    if let Some(o) = outcome {
+        v["outcome"] = serde_json::json!(o.chars().take(300).collect::<String>());
+    }
+    if let Ok(mut out) = fs::OpenOptions::new().create(true).append(true).open(f) {
+        let _ = writeln!(out, "{v}");
+    }
+}
+
+/// The changes and sends a run noted (`note_action`), oldest first.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn run_actions(file: &Path) -> Vec<serde_json::Value> {
+    fs::read_to_string(file).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
 /// What a run Echo started may not ask of the CLI it is allowed: the user's own always-on
@@ -1408,6 +1493,35 @@ fn kill(pid: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unattended_runs_changes_and_sends_are_noted_and_its_reads_are_not() {
+        let k = |a: &str| action_kind(&a.split(' ').map(str::to_owned).collect::<Vec<_>>());
+        assert_eq!(k("m365 mail send --to kim@acme.example --subject Slots --body-file m.md --yes"), Some("send"));
+        assert_eq!(k("m365 mail send --to kim@acme.example --subject Slots --body-file m.md"), None, "a preview sends nothing");
+        assert_eq!(k("compose --to kim@acme.example --subject Slots --body-file m.md"), Some("draft"));
+        assert_eq!(k("project ledger pilot edit {}"), Some("change"));
+        assert_eq!(k("project work pilot {}"), Some("change"));
+        assert_eq!(k("project create Another"), Some("change"));
+        assert_eq!(k("deliver send --title x"), Some("send"));
+        assert_eq!(k("plugin script kit staffing scripts/read.sh -- ACME-1"), Some("change"));
+        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
+            assert_eq!(k(read), None, "{read}");
+        }
+        let (_env, root) = crate::paths::testenv::folders("notes-run-actions");
+        let f = root.join("actions.jsonl");
+        std::env::set_var(HEADLESS, "1");
+        std::env::set_var(RUN_ACTIONS, &f);
+        note_action(&["project".into(), "ledger".into(), "pilot".into(), "edit".into(), "{}".into()], None);
+        note_action(&["status".into()], None);
+        note_action(&["project".into(), "create".into(), "X".into()], Some("failed: refused"));
+        std::env::remove_var(RUN_ACTIONS);
+        std::env::remove_var(HEADLESS);
+        let got = run_actions(&f);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1]["outcome"], "failed: refused", "a change that failed is noted, with how");
+        assert_eq!((got[0]["kind"].as_str(), got[0]["command"].as_str()), (Some("change"), Some("project ledger pilot edit {}")));
+    }
 
     /// A live session's claim: this test's own process holds it, now.
     fn live_claim() -> String {

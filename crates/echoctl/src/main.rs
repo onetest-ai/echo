@@ -39,6 +39,7 @@ mod meeting;
 #[cfg(feature = "tray")]
 mod diagrams;
 mod drafts;
+mod folder_args;
 mod onedrive;
 mod minutes;
 mod notes;
@@ -370,9 +371,12 @@ enum Cmd {
         cc: Vec<String>,
         #[arg(long)]
         subject: String,
-        /// Plain-text body
+        /// Plain-text body, from a file
+        #[arg(long, required_unless_present = "body", conflicts_with = "body")]
+        body_file: Option<std::path::PathBuf>,
+        /// Plain-text body, as given (a run that writes no files)
         #[arg(long)]
-        body_file: std::path::PathBuf,
+        body: Option<String>,
         /// A model wrote it (its name): the draft says so
         #[arg(long)]
         ai: Option<String>,
@@ -690,7 +694,9 @@ fn main() -> Result<()> {
         }
         return app::run(apps::TargetApp::Teams, true, true);
     }
-    match Cli::parse().cmd {
+    // What a command an unattended run makes changes or sends is noted for its outcome (`notes::note_action`).
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let out = match Cli::parse().cmd {
         Cmd::Attention => {
             cli::print_json(&attention::peek());
             Ok(())
@@ -754,8 +760,13 @@ fn main() -> Result<()> {
         Cmd::Delete { call } => calls::delete(&call),
         Cmd::Frames { call, keep } => calls::prune_frames(&call, &keep),
         Cmd::Html { call, open, auto } => minutes::command(&call, open, auto),
-        Cmd::Compose { to, cc, subject, body_file, ai } => {
-            let v = drafts::compose(&to, &cc, &subject, &body_file, ai.as_deref())?;
+        Cmd::Compose { to, cc, subject, body_file, body, ai } => {
+            let body = match (body, body_file) {
+                (Some(b), _) => b,
+                (None, Some(f)) => std::fs::read_to_string(&f).map_err(|e| anyhow::anyhow!("reading {}: {e}", f.display()))?,
+                (None, None) => anyhow::bail!("give the mail's text: --body or --body-file"),
+            };
+            let v = drafts::compose(&to, &cc, &subject, &body, ai.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
@@ -815,5 +826,8 @@ fn main() -> Result<()> {
         Cmd::Status => watch::status(),
         Cmd::Up => cli::app::up(),
         Cmd::Agenda { cmd } => cli::calendar::agenda(cmd),
-    }
+    };
+    // A change that failed is noted too, with why.
+    notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+    out
 }

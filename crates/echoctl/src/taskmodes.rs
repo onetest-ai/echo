@@ -32,10 +32,11 @@ pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
     // A field the user set — or cleared — is theirs (pinned); only one they never touched falls back to the guess.
     let pick = |mine: &Option<String>, k: &str| if n.pinned.iter().any(|p| p == k) { json!(mine) } else { mine.clone().map(Value::from).unwrap_or_else(|| g[k].clone()) };
     let mode = pick(&n.mode, "mode");
-    let mine = |k: &str| if n.pinned.iter().any(|p| p == k) { "you" } else { "guess" };
+    // Set by a routine's or Yolo's run (`by: run`): Echo's run's, never "you".
+    let mine = |k: &str| if n.by_run.iter().any(|p| p == k) { "run" } else if n.pinned.iter().any(|p| p == k) { "you" } else { "guess" };
     if !mode.is_string() {
         // The user cleared it: theirs, no mode — and not to be guessed again.
-        return if n.pinned.iter().any(|p| p == "mode") { json!({"mode": null, "by": "you"}) } else { Value::Null };
+        return if n.pinned.iter().any(|p| p == "mode") { json!({"mode": null, "by": mine("mode")}) } else { Value::Null };
     }
     // Who wrote each field: a guessed one is model output from others' words — a suggestion, never the user's.
     json!({"mode": mode, "how": pick(&n.how, "how"), "prompt": pick(&n.prompt, "prompt"), "skill": pick(&n.skill, "skill"),

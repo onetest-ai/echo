@@ -42,8 +42,9 @@ pub(crate) fn enc_path(p: &str) -> String {
 
 /// Refused inside a run Echo started: those read others' words, and nothing they read may send for them.
 fn not_in_run() -> Result<()> {
-    if std::env::var_os("ECHOCTL_HEADLESS").is_some() {
-        bail!("refused inside a run Echo started: only the user's own sessions send through Microsoft 365");
+    // A routine or Yolo the user lets act on its own sends as the folder session does (and the send is noted).
+    if crate::notes::headless() && !crate::notes::run_acts() {
+        bail!("refused inside a run Echo started: only the user's own sessions send through Microsoft 365 — leave a mail as a draft with `echoctl compose`");
     }
     Ok(())
 }
@@ -595,6 +596,26 @@ mod tests {
         let u = drive_upload(&f, "Documents/x.md", false).unwrap();
         assert_eq!(u["sent"], false);
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn a_routine_sends_only_when_the_user_lets_it_act_and_else_is_told_to_draft() {
+        let (_env, _root) = crate::paths::testenv::folders("m365-run-acts");
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                std::env::remove_var("ECHOCTL_HEADLESS");
+                std::env::remove_var(crate::notes::RUN_SESSION);
+            }
+        }
+        let _unset = Unset;
+        std::env::set_var("ECHOCTL_HEADLESS", "1");
+        std::env::set_var(crate::notes::RUN_SESSION, "asks");
+        assert!(not_in_run().unwrap_err().to_string().contains("leave a mail as a draft with `echoctl compose`"));
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        not_in_run().unwrap();
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        assert!(not_in_run().is_err(), "a minutes or sync run never sends");
     }
 
     #[test]

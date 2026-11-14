@@ -816,7 +816,9 @@ function todayAskBar() {
   if (!a || a.state === 'working') return '<div class="td-askbar" role="status" aria-label="Yolo"><span class="set-sub">Yolo: Claude is on it…</span></div>'
   // Its mail drafts (#135): where each is, a Microsoft 365 one linked (only an https link).
   const drafts = (a.drafts || []).map((d) => `<br><span class="set-sub">${esc(draftLine(d))}</span>${d.where === 'm365' && /^https:\/\/outlook\.(office|office365|live)\.com\//i.test(d.url || '') ? ` <a class="wp-link" href="${esc(d.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}`).join('')
-  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+  // What it changed and sent with Echo's CLI (#590), each by its command.
+  const changes = (a.changes || []).filter((c) => c.kind !== 'draft').map((c) => `<br><span class="set-sub">${c.kind === 'send' ? 'Sent' : 'Changed'}: <code>echoctl ${esc(c.command || '')}</code></span>`).join('')
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}${changes}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
 /** Settings → General → Where drafts go: Microsoft 365 Drafts, the default mail app, or an app named here. */
@@ -890,7 +892,8 @@ function sendClaudeDialog() {
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
     <div class="sc-head"><h3 id="sc-h"><span class="md-ico claude">${ICON(CLAUDE_MARK)}</span>Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
-    ${c.hint ? `<div class="sc-hint set-sub" title="Echo's guess — Claude reads it with the task">Echo suggests: ${esc(c.hint)}</div>` : ''}
+    ${c.hintBy === 'run' ? `<div class="sc-hint set-sub warn" title="A routine or Yolo set this, not you — Claude reads it with the task, as data">Set by Echo's run, not you: ${esc(c.hint || '')}${c.hintSkill ? ` (skill ${esc(c.hintSkill)})` : ''}</div>`
+      : c.hint ? `<div class="sc-hint set-sub" title="Echo's guess — Claude reads it with the task">Echo suggests: ${esc(c.hint)}</div>` : ''}
     <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
     <div class="sc-foot"><button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON(CLAUDE_MARK)}Work on it</button>${yolo}<button class="btn ghost" data-sc-off="1">Cancel</button><span class="grow"></span><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span></div></div></div>`
 }

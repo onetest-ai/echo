@@ -139,7 +139,8 @@
       "toReview": "--warn"
     },
     "statusWord": "● {word}",
-    "callsToRead": "\\d+ calls? to read"
+    "callsToRead": "\\d+ calls? to read",
+    "runSet": "Echo's run set {field}"
   },
   "prep": {
     "inShort": "In short",
@@ -983,7 +984,7 @@
     "liveNotes": "Live notes",
     "liveOn": "Live notes on",
     "autoMinutes": "Write minutes automatically",
-    "skipRow": "Claude in the window: no permission prompts",
+    "skipRow": "Claude acts on its own",
     "skipFlag": "--dangerously-skip-permissions",
     "skipSays": [
       "runs any command and tool without asking",

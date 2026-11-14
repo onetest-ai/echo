@@ -115,7 +115,7 @@
   },
   {
    "id": "F-TASK-12",
-   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work, with where each mail draft it wrote is (a run stopped by its 20-minute limit says so); the run reads its thread's brief, people, work and calls, and may change only its own task",
+   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile, run as the folder session (its knowledge and permissions, by the user's one choice 'Claude acts on its own': on, it acts and sends, each change and send listed in its outcome; off, it reads, edits its task and leaves mail as drafts; in both, its own task's thread is all of Echo's threads it reads); the outcome shows above My work, with where each mail draft it wrote is (a run stopped by its 20-minute limit says so); the run reads its thread's brief, people, work and calls, and may change only its own task",
    "priority": "high",
    "check": "agent",
    "axes": [

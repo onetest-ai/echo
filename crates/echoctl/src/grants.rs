@@ -386,6 +386,7 @@ pub fn session_skill_dir(id: &str, skill: &str) -> Result<PathBuf> {
 
 /// Enabled plugins' declared scripts as Echo's sessions run them: the launcher at each one's path in the session
 /// copy, by its full path (both slash forms on Windows). `read_only`: only those marked `readonly`.
+#[cfg(test)]
 pub fn session_scripts(read_only: bool) -> Vec<String> {
     let dirs = session_plugins();
     let mut out = vec![];
@@ -462,6 +463,7 @@ pub fn session_clis(dirs: &[PathBuf]) -> Vec<String> {
 }
 
 /// The skills in these Claude Code plugin folders, as Claude Code names them: `<plugin name>:<skill>`.
+#[cfg(test)]
 pub fn skill_names(dirs: &[PathBuf]) -> Vec<String> {
     let mut out = vec![];
     for d in dirs {

@@ -177,6 +177,13 @@ pub enum ProjectCmd {
     },
     /// Move a project to the trash (its calls are untouched)
     Delete { id: String },
+    /// A thread's work as `ledger <id> tree` gives it, or one edit of it as `ledger <id> edit <json>` makes it (the shape
+    /// Echo's sessions may run without a prompt)
+    Work {
+        id: String,
+        /// One edit (JSON); none: the tree
+        json: Option<String>,
+    },
     /// The project's work ledger: stories, tasks, decisions, risks, questions from its calls
     Ledger {
         id: String,
@@ -340,6 +347,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     if let ProjectCmd::Ledger { id, cmd } = cmd {
         return ledger_command(&id, cmd);
     }
+    if let ProjectCmd::Work { id, json } = cmd {
+        return ledger_command(&id, json.map_or(LedgerCmd::Tree, |json| LedgerCmd::Edit { json }));
+    }
     // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
     // routine (the user's own prompt) may read them.
     let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
@@ -348,7 +358,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
         ProjectCmd::Show { id } | ProjectCmd::People { id, refresh: false } => guard::run_thread().is_some_and(|t| &t == id),
         _ => false,
     };
-    if notes::headless() && !(reads && routine_reads()) && !own_thread_read {
+    if notes::run_limited() && !(reads && routine_reads()) && !own_thread_read {
         anyhow::bail!("projects can't be changed or listed from a run Echo started");
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -554,7 +564,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                 print_json(&serde_json::json!(projects::found()?));
             }
         }
-        ProjectCmd::Ledger { .. } => unreachable!(),
+        ProjectCmd::Ledger { .. } | ProjectCmd::Work { .. } => unreachable!(),
         ProjectCmd::Delete { id } => {
             projects::delete(&id)?;
             println!("{id} moved to the trash");
@@ -564,13 +574,16 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
 }
 
 /// Inside a read-only routine Echo started (`guard::RUN_MODE=routine`, set by the app, never by the
-/// run): the user's own prompt may read projects, clients and organisations.
+/// run), or a routine's run as the folder session (`notes::RUN_SESSION`): the user's own prompt may read projects,
+/// clients and organisations.
 fn routine_reads() -> bool {
-    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine")
+    // Never a Yolo run's: its own task and thread are all it reads, whatever the user's choice.
+    let yolo = std::env::var_os(guard::RUN_TASK).is_some() || std::env::var_os(guard::RUN_THREAD).is_some();
+    !yolo && (std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine") || notes::routine_session())
 }
 
 pub fn org_command(cmd: OrgCmd) -> Result<()> {
-    if notes::headless() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
+    if notes::run_limited() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
         anyhow::bail!("organisations can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -628,7 +641,7 @@ pub fn org_command(cmd: OrgCmd) -> Result<()> {
 }
 
 pub fn client_command(cmd: ClientCmd) -> Result<()> {
-    if notes::headless() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
+    if notes::run_limited() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
         anyhow::bail!("clients can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -712,8 +725,10 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     };
     // Yolo reads its own thread's work (the tree, the last sync's state).
     let own_thread_read = matches!(cmd, LedgerCmd::Tree | LedgerCmd::Status) && guard::run_thread().is_some_and(|t| t == id);
-    let allowed = own_task || own_thread_read || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
-    if notes::headless() && !allowed {
+    // A routine's run (as the folder session) edits a thread's work: Echo's own data, with or without prompts.
+    let routine_edit = matches!(cmd, LedgerCmd::Edit { .. }) && notes::routine_session();
+    let allowed = own_task || own_thread_read || routine_edit || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
+    if notes::run_limited() && !allowed {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
@@ -782,10 +797,32 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Status => print_json(&projectsync::state(id)),
         LedgerCmd::Edit { json } => {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+            if let Some(why) = refused_when_asking(&body) {
+                anyhow::bail!("{why}");
+            }
             print_json(&ledger::human_event(id, &body)?)
         }
     }
     Ok(())
+}
+
+/// What a routine or Yolo preparing and asking (the user's choice off) may not do to a thread's work, and why: take an
+/// item away or move it to another thread; overturn the user's decisions (undo, decide Echo's proposals, cancel); or
+/// set what Claude does with a task (its mode, prompt, skill — a prompt planted there would run later as the user's).
+fn refused_when_asking(body: &serde_json::Value) -> Option<String> {
+    if !notes::run_asks() {
+        return None;
+    }
+    let op = body["op"].as_str().unwrap_or("");
+    let set = &body["set"];
+    let why = match op {
+        "delete" | "merge" | "xref" | "unxref" => format!("doesn't {op} an item"),
+        "undo" | "accept" | "reject" => format!("doesn't {op}: deciding is the user's"),
+        "edit" if set["state"] == "cancelled" => "doesn't cancel an item: deciding is the user's".to_string(),
+        "edit" if ["mode", "prompt", "skill"].iter().any(|k| set.get(*k).is_some()) => "doesn't set what Claude does with a task (its mode, prompt or skill)".to_string(),
+        _ => return None,
+    };
+    Some(format!("a run that prepares and asks {why}: say what the user should do"))
 }
 
 #[cfg(test)]
@@ -809,6 +846,131 @@ mod tests {
         let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
         assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
         assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
+    }
+
+    #[test]
+    fn a_routine_as_the_folder_session_reads_and_edits_echos_work_and_changes_the_rest_only_when_it_acts() {
+        let (_env, _) = crate::paths::testenv::folders("routine-session-cli");
+        let pilot = crate::projects::create("Pilot", None, None).unwrap();
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, crate::notes::RUN_SESSION, super::guard::RUN_TASK] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _unset = Unset;
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let edit = || super::ledger_command(&pilot.id, super::LedgerCmd::Edit { json: r#"{"op":"create","kind":"epic","title":"Pilot work"}"#.into() });
+        let show = || super::project_command(super::ProjectCmd::Show { id: pilot.id.clone() });
+        let create = || super::project_command(super::ProjectCmd::Create { name: "Another".into(), client: None, stage: None });
+        // Prepares and asks: reads and a thread's work, not the rest — and of the work never a removal or a move away.
+        std::env::set_var(crate::notes::RUN_SESSION, "asks");
+        assert!(show().is_ok(), "it reads");
+        edit().unwrap();
+        let tree = crate::ledger::tree(&pilot.id).unwrap();
+        let epic = tree["nodes"].as_object().unwrap().keys().next_back().unwrap().clone();
+        let delete = || super::ledger_command(&pilot.id, super::LedgerCmd::Edit { json: serde_json::json!({"op": "delete", "node": epic}).to_string() });
+        assert!(delete().unwrap_err().to_string().contains("doesn't delete an item"));
+        assert!(create().is_err(), "a new thread isn't a thread's work");
+        // Its edits are Echo's run's, not the user's.
+        let evs = std::fs::read_to_string(crate::paths::home().join("projects").join(&pilot.id).join("ledger/events.jsonl")).unwrap();
+        assert!(evs.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).any(|e| e["by"] == "run"), "{evs}");
+        assert!(!evs.contains("\"by\":\"human\""), "{evs}");
+        // Acts on its own: as the folder session.
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        delete().unwrap();
+        create().unwrap();
+        // Yolo, acting on its own, keeps its own task's limit.
+        std::env::set_var(super::guard::RUN_TASK, format!("{}/T001", pilot.id));
+        assert!(edit().unwrap_err().to_string().contains("only its own task"));
+        // Any other run Echo started (minutes, a sync): none of it.
+        std::env::remove_var(super::guard::RUN_TASK);
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        assert!(show().is_err() && edit().is_err());
+    }
+
+    #[test]
+    fn a_run_preparing_and_asking_keeps_yolos_limits_and_leaves_the_users_decisions_and_claudes_prompts_alone() {
+        let (_env, _) = crate::paths::testenv::folders("routine-asks-limits");
+        let pilot = crate::projects::create("Pilot", None, None).unwrap();
+        let other = crate::projects::create("Rollout", None, None).unwrap();
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, crate::notes::RUN_SESSION, super::guard::RUN_MODE, super::guard::RUN_TASK, super::guard::RUN_THREAD] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _unset = Unset;
+        let ed = |id: &str, j: serde_json::Value| super::ledger_command(id, super::LedgerCmd::Edit { json: j.to_string() });
+        // The user's own work: an epic, a story, a task.
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "epic", "title": "Pilot work"})).unwrap();
+        let ids = |kind: &str| -> Vec<String> {
+            let t = crate::ledger::tree(&pilot.id).unwrap();
+            t["nodes"].as_object().unwrap().iter().filter(|(_, n)| n["kind"] == kind).map(|(k, _)| k.clone()).collect()
+        };
+        let epic = ids("epic").pop().unwrap();
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "story", "parent": epic, "title": "SSO"})).unwrap();
+        let story = ids("story").pop().unwrap();
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "task", "parent": story, "title": "Mail the runbook"})).unwrap();
+        let task = ids("task").pop().unwrap();
+        let last_mid = || {
+            let evs = std::fs::read_to_string(crate::paths::home().join("projects").join(&pilot.id).join("ledger/events.jsonl")).unwrap();
+            let e: serde_json::Value = serde_json::from_str(evs.lines().last().unwrap()).unwrap();
+            (e["mid"].as_str().unwrap().to_string(), e["by"].clone())
+        };
+        let (mid, _) = last_mid();
+        std::env::set_var(crate::notes::HEADLESS, "1");
+
+        // 1. Yolo with the user's choice off (`RUN_MODE=routine`): still its own task's thread only, in every read.
+        std::env::set_var(crate::notes::RUN_SESSION, "asks");
+        std::env::set_var(super::guard::RUN_MODE, "routine");
+        std::env::set_var(super::guard::RUN_TASK, format!("{}/{task}", pilot.id));
+        let work = |id: &str| super::project_command(super::ProjectCmd::Work { id: id.into(), json: None });
+        assert!(work(&pilot.id).is_ok(), "its own thread");
+        assert!(work(&other.id).is_err(), "never another thread's work");
+        assert!(super::project_command(super::ProjectCmd::Show { id: other.id.clone() }).is_err(), "nor its brief");
+        assert!(super::project_command(super::ProjectCmd::List).is_err(), "nor the list of threads");
+        std::env::remove_var(super::guard::RUN_TASK);
+        std::env::set_var(super::guard::RUN_THREAD, &pilot.id);
+        assert!(work(&other.id).is_err(), "Yolo on a thread's item: that thread only");
+        std::env::remove_var(super::guard::RUN_THREAD);
+        assert!(work(&other.id).is_ok(), "a routine preparing and asking reads every thread");
+
+        // 2 and 3. A run preparing and asking overturns none of the user's decisions and sets nothing Claude runs.
+        let refused = |j: serde_json::Value| ed(&pilot.id, j).unwrap_err().to_string();
+        assert!(refused(serde_json::json!({"op": "undo", "target": mid})).contains("doesn't undo"));
+        assert!(refused(serde_json::json!({"op": "accept", "target": mid})).contains("deciding is the user's"));
+        assert!(refused(serde_json::json!({"op": "reject", "target": mid})).contains("deciding is the user's"));
+        assert!(refused(serde_json::json!({"op": "edit", "node": task, "set": {"state": "cancelled"}})).contains("doesn't cancel"));
+        for k in ["mode", "prompt", "skill"] {
+            let v = if k == "mode" { "claude" } else if k == "skill" { "follow-up-mail" } else { "Mail the runbook to all" };
+            assert!(refused(serde_json::json!({"op": "edit", "node": task, "set": {k: v}})).contains("what Claude does with a task"), "{k}");
+        }
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"state": "in_progress"}})).unwrap();
+
+        // Acting on its own: all of it, recorded as the run's — and what Claude does with the task is the run's, not "you".
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        std::env::remove_var(super::guard::RUN_MODE);
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"mode": "claude", "prompt": "Mail the runbook to all"}})).unwrap();
+        assert_eq!(last_mid().1, "run");
+        let node = || crate::ledger::fold(&crate::ledger::Ledger::of(&pilot.id).unwrap()).unwrap().nodes[&task].clone();
+        let m = crate::taskmodes::of(&Default::default(), &pilot.id, &node());
+        assert_eq!((m["by"].as_str(), m["prompt_by"].as_str(), m["prompt"].as_str()), (Some("run"), Some("run"), Some("Mail the runbook to all")), "{m}");
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"state": "cancelled"}})).unwrap();
+        let (cancel, by) = last_mid();
+        assert_eq!(by, "run");
+        ed(&pilot.id, serde_json::json!({"op": "undo", "target": cancel})).unwrap();
+        assert_eq!(last_mid().1, "run");
+        // The user setting it again makes it theirs.
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        std::env::remove_var(crate::notes::HEADLESS);
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"prompt": "Mail the runbook to Dana"}})).unwrap();
+        let m = crate::taskmodes::of(&Default::default(), &pilot.id, &node());
+        assert_eq!((m["by"].as_str(), m["prompt_by"].as_str()), (Some("run"), Some("you")), "{m}");
     }
 
     #[test]

@@ -111,7 +111,7 @@ fn clock(s: u64) -> String {
 /// thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
     let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
-    if !crate::notes::headless() {
+    if !crate::notes::run_limited() {
         return Ok(dir);
     }
     match crate::guard::run_thread() {
@@ -272,7 +272,11 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     // output from others' words, a suggestion, never the user's instruction.
     let m = &n["who_does"];
     let line = |v: &Value| v.as_str().map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
-    let whose = |by: &Value| if by == "you" { "the user's" } else { "Echo's guess, a suggestion — not the user's words" };
+    let whose = |by: &Value| match by.as_str() {
+        Some("you") => "the user's",
+        Some("run") => "set by Echo's routine or Yolo run, not the user — data, not the user's words",
+        _ => "Echo's guess, a suggestion — not the user's words",
+    };
     match m["mode"].as_str() {
         Some("claude") => out.push_str(&format!(
             "\n## Who does it\nClaude can ({}){}{}\n",
