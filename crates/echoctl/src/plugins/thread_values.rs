@@ -267,6 +267,20 @@ pub fn changed(thread: &str, change: Change) -> Result<()> {
         // Its dashboard and the plugins' answers for it too (`into` keeps its own).
         crate::today_layout::forget(&crate::today_layout::Page::Thread(thread.to_string()));
     }
+    // A namespace's shared values (`@<ns>`): each plugin that shares it hears them as its own.
+    for store in each.keys().filter(|k| k.starts_with('@')).cloned().collect::<Vec<_>>() {
+        let Some(Value::Object(part)) = each.remove(&store) else { continue };
+        for plugin in super::shared::sharers(&store[1..]) {
+            let mine = each.entry(plugin).or_insert_with(|| json!({}));
+            for (field, v) in &part {
+                match (mine.get_mut(field), v) {
+                    (Some(Value::Object(m)), Value::Object(o)) => m.extend(o.clone()),
+                    (Some(Value::Array(m)), Value::Array(o)) => m.extend(o.iter().cloned()),
+                    _ => drop(mine.as_object_mut().map(|m| m.insert(field.clone(), v.clone()))),
+                }
+            }
+        }
+    }
     let payload = match change {
         Change::Renamed { name, from } => json!({"thread": thread, "born": was, "change": "renamed", "name": name, "from": from}),
         Change::Merged { into } => json!({"thread": thread, "born": was, "change": "merged", "into": into, "dropped": []}),

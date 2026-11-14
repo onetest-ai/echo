@@ -28,6 +28,14 @@
     {
       "id": "chart-demo",
       "source": "./plugins/chart-demo"
+    },
+    {
+      "id": "share-a",
+      "source": "./plugins/share-a"
+    },
+    {
+      "id": "share-b",
+      "source": "./plugins/share-b"
     }
   ]
 }
