@@ -164,6 +164,9 @@ fn subtree_classes(n: &UiNode, depth: usize, out: &mut std::collections::BTreeSe
 const ROSTER_STATES: &[&str] = &[
     "muted", "unmuted", "organizer", "organiser", "presenter", "presenting", "attendee", "guest", "external", "available", "away",
     "busy", "offline", "in a meeting", "in a call", "no response", "do not disturb", "be right back", "out of office", "hand raised",
+    "raised hand", "sharing", "screen sharing", "sharing screen", "lobby", "in the lobby", "waiting in lobby", "waiting in the lobby",
+    "speaking", "spotlighted", "pinned", "video on", "video off", "camera on", "camera off", "on hold", "on the phone", "appear away",
+    "appear offline", "invited", "declined", "accepted", "tentative", "unverified", "co-organizer", "co-organiser",
 ];
 /// A surname's first word that makes a two-word name a surname alone ("Van Dyke, Anna").
 const SURNAME_PARTICLES: &[&str] = &["van", "von", "de", "da", "del", "della", "der", "di", "du", "la", "le", "st", "st.", "mac", "al", "el", "ten", "ter"];
@@ -545,6 +548,9 @@ mod tests {
         // After a complete name an unknown word is a state, not a first name.
         assert_eq!(roster_name("Priya Nair, Presenting, Muted"), ("Priya Nair".into(), 1));
         assert_eq!(roster_name("Priya Nair, Hand raised, Muted"), ("Priya Nair".into(), 1));
+        assert_eq!(roster_name("Priya Nair, Sharing, Muted"), ("Priya Nair".into(), 1));
+        assert_eq!(roster_name("Priya, Waiting in lobby"), ("Priya".into(), 1));
+        assert_eq!(roster_name("Garcia Lopez, Lobby"), ("Garcia Lopez".into(), 1));
         // A Spanish double surname: one word after it is the first name, read as "Maria Garcia Lopez".
         assert_eq!(roster_name("Garcia Lopez, Maria, Muted"), ("Garcia Lopez, Maria".into(), 2));
         assert_eq!(crate::people::display(&roster_name("Garcia Lopez, Maria (Acme), Unmuted").0), "Maria Garcia Lopez");
