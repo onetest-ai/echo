@@ -104,11 +104,11 @@ function paletteItems(target) {
   add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
   add('Echo', 'Expand or fold the sidebar', flipBar, { keywords: 'activity bar labels names drawer', hint: BAR_KEY })
   add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
-  add('Go to', 'Yolo runs', () => press({ yoloRuns: '' }), { keywords: 'claude on its own what did claude do history log runs' })
   add('Echo', "What's new", () => press({ wnOpen: '' }), { keywords: 'release notes changes update version news' })
   add('Echo', 'Ask for permissions', () => press({ act: 'ask_permissions' }), { keywords: 'microphone screen accessibility health' })
   // Go to
   for (const a of shownActivities()) add('Go to', a.label, () => goActivity(a.id))
+  add('Go to', 'Yolo runs', () => press({ yoloRuns: '' }), { keywords: 'claude on its own what did claude do history log runs' })
   for (const p of (S.pj.data && S.pj.data.projects) || []) {
     const st = ProjectArt.stage(p.stage)
     add('Threads', p.name, () => go(`project/${p.id}/brief`), { keywords: `thread project ${p.client_name || ''} ${st.label} ${st.group}`, hint: st.label })

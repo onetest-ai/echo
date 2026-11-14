@@ -6,8 +6,8 @@ ACTIVITIES.push({ id: 'yolo', label: 'Yolo runs', layout: 'single', when: () => 
 S.yo = { data: null, at: 0, view: false, f: { state: '', task: '', thread: '', from: '', to: '', changed: false, q: '' }, logs: {} }
 
 // ── yolo runs: the list's filters and words (no DOM: `yolo-runs.test.mjs`)
-const YO_STATES = [['', 'All states'], ['working', 'Working'], ['done', 'Done'], ['nothing', "Didn't do it"], ['failed', 'Failed']]
-const YO_STATE_WORD = { working: 'Working…', done: 'Done', nothing: "Didn't do it", failed: 'Failed' }
+const YO_STATES = [['', 'All states'], ['working', 'Working'], ['done', 'Done'], ['failed', 'Failed']]
+const YO_STATE_WORD = { working: 'Working…', done: 'Done', failed: 'Failed' }
 const YO_PERMISSIONS = { acts: 'Acted on its own', asks: 'Prepared and asked' }
 /** What a run was on, as the Task filter keeps it: its task, or its item of Needs you now (an older run: its title). */
 const yoKey = (r) => r.kind === 'needs' ? `item:${r.item || r.title}` : r.project && r.node ? `task:${r.project}/${r.node}` : `title:${r.title}`
@@ -25,15 +25,22 @@ function yoShown(runs, f) {
     && (!f.changed || !!r.changed)
     && (!q || `${r.title || ''} ${r.say || ''}`.toLowerCase().includes(q)))
 }
-/** The Task and Thread filters' choices, from the runs: `{tasks: [[key, title]], threads: [[id, name]]}`, each once. */
+/** The Task and Thread filters' choices, from the runs: `{tasks: [[key, label]], threads: [[id, name]]}`, each once; two
+ *  tasks of one title told apart by their thread (then by their id). */
 function yoChoices(runs) {
   const tasks = new Map(), threads = new Map()
   for (const r of runs || []) {
-    if (!tasks.has(yoKey(r))) tasks.set(yoKey(r), r.title || '')
+    if (!tasks.has(yoKey(r))) tasks.set(yoKey(r), r)
     if (r.thread && !threads.has(r.thread)) threads.set(r.thread, r.thread_name || r.thread)
   }
+  const count = (list) => list.reduce((m, [, l]) => m.set(l, (m.get(l) || 0) + 1), new Map())
+  let labels = [...tasks].map(([k, r]) => [k, r.title || '', r])
+  let n = count(labels)
+  labels = labels.map(([k, l, r]) => [k, n.get(l) > 1 && r.thread ? `${l} · ${r.thread_name || r.thread}` : l, r])
+  n = count(labels)
+  labels = labels.map(([k, l, r]) => [k, n.get(l) > 1 ? `${l} (${r.node || r.item || r.id})` : l])
   const byName = (a, b) => a[1].localeCompare(b[1])
-  return { tasks: [...tasks].sort(byName), threads: [...threads].sort(byName) }
+  return { tasks: labels.sort(byName), threads: [...threads].sort(byName) }
 }
 /** Whether any filter is set. */
 const yoFiltered = (f) => !!(f.state || f.task || f.thread || f.from || f.to || f.changed || (f.q || '').trim())
@@ -48,15 +55,31 @@ function yoWhen(iso, now) {
   if (d.toDateString() === y.toDateString()) return `Yesterday ${tm}`
   return `${YO_WD[d.getDay()]} ${d.getDate()} ${YO_MON[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`} ${tm}`
 }
-/** What a run changed and sent with Echo's CLI, as lines: `[word, command, outcome]` — a draft is in its drafts. */
-const yoChanges = (r) => (r.changes || []).filter((c) => c.kind === 'change' || c.kind === 'send')
+/** What it did through Echo, in a few words (`through`: counts of changes, sends, refused ones), '' for none. */
+function yoThrough(t) {
+  const n = (k, one, many) => (t && t[k] ? `${t[k]} ${t[k] === 1 ? one : many}` : '')
+  return [n('changes', 'change', 'changes'), n('sends', 'send', 'sends'), n('tried', 'refused', 'refused')].filter(Boolean).join(', ')
+}
+/** What a run changed and sent with Echo's CLI (its details' `changes`), as lines: `[word, command, outcome]` — a draft
+ *  is in its drafts. */
+const yoChanges = (d) => ((d && d.changes) || []).filter((c) => c.kind === 'change' || c.kind === 'send')
   .map((c) => { const failed = /^failed/.test(c.outcome || ''); return [failed ? (c.kind === 'send' ? 'Tried to send' : 'Tried to change') : c.kind === 'send' ? 'Sent' : 'Changed', c.command || '', failed ? c.outcome : ''] })
 // end of the yolo runs block
 
 async function loadYolo() {
   S.yo.at = Date.now()
   try { S.yo.data = await get('api/yolo') } catch { /* app restarting */ }
+  // An open run's details follow it while it works.
+  const working = new Set(((S.yo.data && S.yo.data.runs) || []).filter((r) => r.state === 'working').map((r) => r.id))
+  await Promise.all(Object.keys(S.yo.logs).filter((id) => working.has(id) || S.yo.logs[id].working).map((id) => yoDetails(id, working.has(id))))
   if (S.view === 'yolo') render()
+}
+/** A run's details: its log's end and what it changed and sent through Echo (`yolo::details`). */
+async function yoDetails(id, working) {
+  let v = null
+  try { v = await get(`api/yolo/log?id=${encodeURIComponent(id)}`) } catch { /* app restarting */ }
+  if (!S.yo.logs[id]) return
+  S.yo.logs[id] = v && typeof v.log === 'string' ? { ...v, working } : { error: (v && v.error) || "The log can't be read now." }
 }
 // Read when the page is entered, again every 5 s while a run works, else every 30 s.
 setInterval(() => {
@@ -86,7 +109,7 @@ function yoloView(now) {
     ${chip('state', 'State', 'All states', YO_STATES)}${chip('task', 'Task', 'All tasks and items', ch.tasks)}${chip('thread', 'Thread', 'All threads', ch.threads)}
     <label class="yo-date"><span>From</span><input type="date" data-yo-f="from" value="${esc(f.from)}" aria-label="From"></label>
     <label class="yo-date"><span>To</span><input type="date" data-yo-f="to" value="${esc(f.to)}" aria-label="To"></label>
-    <label class="yo-check"><input type="checkbox" data-yo-f="changed"${f.changed ? ' checked' : ''}>Changed or sent something</label>
+    <label class="yo-check"><input type="checkbox" data-yo-f="changed"${f.changed ? ' checked' : ''}>Changed or sent through Echo</label>
     <input class="yo-q" id="yo-q" type="search" data-yo-f="q" value="${esc(f.q)}" placeholder="Search what Claude said" aria-label="Search the runs">
     ${yoFiltered(f) ? '<button class="link-btn" data-yo-clear>Clear</button>' : ''}</div>`
   const shown = yoShown(runs, f)
@@ -103,15 +126,19 @@ function yoRun(r, now) {
   const thread = p ? `<span class="tk-pj" title="${esc(p.name)}">${projIcon(p, 12)}<span class="tk-pjn">${esc(p.name)}</span></span>` : ''
   const meta = [yoWhen(r.started, now), r.state === 'working' ? 'working now' : yoTook(r.took) ? `took ${yoTook(r.took)}` : ''].filter(Boolean).join(' · ')
   const perm = YO_PERMISSIONS[r.permissions] ? `<span class="yo-perm" title="The permissions it ran with (Settings → AI & minutes)">${YO_PERMISSIONS[r.permissions]}</span>` : ''
-  const changes = yoChanges(r).map(([w, c, o]) => `<li><span class="yo-w${o ? ' failed' : ''}">${w}</span> <code>echoctl ${esc(c)}</code>${o ? ` <span class="set-sub">— ${esc(o)}</span>` : ''}</li>`)
   const drafts = (r.drafts || []).map((x) => `<li><span class="yo-w">Drafted</span> ${esc(draftLine(x))}${x.where === 'm365' && /^https:\/\/outlook\.(office|office365|live)\.com\//i.test(x.url || '') ? ` <a class="wp-link" href="${esc(x.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}</li>`)
-  const did = changes.length + drafts.length ? `<ul class="yo-did" aria-label="What it changed, sent and drafted">${changes.join('')}${drafts.join('')}</ul>` : r.state === 'working' ? '' : '<div class="set-sub">Changed, sent and drafted nothing.</div>'
-  const open = !!S.yo.logs[r.id]
-  const log = open ? `<pre class="yo-log" aria-label="Log">${esc(S.yo.logs[r.id] === true ? 'Reading…' : S.yo.logs[r.id])}</pre>` : ''
+  // What it did through Echo's CLI, counted; nothing said for an older run Echo didn't follow, nor for one at work.
+  const through = yoThrough(r.through)
+  const did = (through ? `<div class="yo-did-n"><span class="yo-w">Through Echo:</span> ${esc(through)}</div>` : r.tracked && !(r.drafts || []).length && r.state !== 'working' ? '<div class="set-sub" title="Echo notes only what a run does with its CLI">Nothing through Echo</div>' : '')
+    + (drafts.length ? `<ul class="yo-did" aria-label="Its drafts">${drafts.join('')}</ul>` : '')
+  const d = S.yo.logs[r.id], open = !!d
+  const changes = d && d !== true ? yoChanges(d).map(([w, c, o]) => `<li><span class="yo-w${o ? ' failed' : ''}">${w}</span> <code>echoctl ${esc(c)}</code>${o ? ` <span class="set-sub">— ${esc(o)}</span>` : ''}</li>`) : []
+  const details = !open ? '' : d === true ? '<div class="set-sub">Reading…</div>' : d.error ? `<div class="set-sub">${esc(d.error)}</div>`
+    : `${changes.length ? `<ul class="yo-did" aria-label="What it changed and sent through Echo">${changes.join('')}</ul>` : ''}${d.cut ? '<div class="set-sub">The log is long: its last 200 KB.</div>' : ''}<pre class="yo-log" aria-label="Log">${esc(d.log)}</pre>`
   return `<article class="yo-run ${esc(r.state)}" role="listitem" aria-label="${esc(`${YO_STATE_WORD[r.state] || r.state}: ${r.title}`)}">
-    <div class="yo-h"><span class="yo-st"><span class="yo-dot" aria-hidden="true"></span>${YO_STATE_WORD[r.state] || esc(r.state)}</span><span class="yo-meta">${esc(meta)}</span>${perm}<span class="grow"></span>${r.log ? `<button class="btn ghost yo-logbtn" data-yo-log="${esc(r.id)}" aria-expanded="${open}">${open ? 'Hide the log' : 'Log'}</button>` : ''}</div>
+    <div class="yo-h"><span class="yo-st"><span class="yo-dot" aria-hidden="true"></span>${YO_STATE_WORD[r.state] || esc(r.state)}</span><span class="yo-meta">${esc(meta)}</span>${perm}<span class="grow"></span>${r.log ? `<button class="btn ghost yo-logbtn" data-yo-log="${esc(r.id)}" aria-expanded="${open}">${open ? 'Hide details' : 'Details'}</button>` : ''}</div>
     <div class="yo-on">${what}${thread}</div>
-    ${r.say ? `<div class="yo-say">${esc(r.say)}</div>` : ''}${did}${log}</article>`
+    ${r.say ? `<div class="yo-say">${esc(r.say)}</div>` : ''}${did}${details}</article>`
 }
 
 document.addEventListener('click', async (e) => {
@@ -123,10 +150,7 @@ document.addEventListener('click', async (e) => {
   if (S.yo.logs[id]) { delete S.yo.logs[id]; return render() }
   S.yo.logs[id] = true
   render()
-  let v = null
-  try { v = await get(`api/yolo/log?id=${encodeURIComponent(id)}`) } catch { /* app restarting */ }
-  if (!S.yo.logs[id]) return
-  S.yo.logs[id] = v && typeof v.log === 'string' ? v.log : (v && v.error) || "The log can't be read now."
+  await yoDetails(id, ((S.yo.data && S.yo.data.runs) || []).some((r) => r.id === id && r.state === 'working'))
   render()
 })
 const yoSet = (e) => {

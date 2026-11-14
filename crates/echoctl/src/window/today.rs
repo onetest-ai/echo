@@ -24,11 +24,11 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
             json_reply(crate::graph::message(&id).map(|m| json!({"subject": m["subject"], "from": m["from"], "at": m["at"], "text": m["text"], "url": m["url"]})).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
-        // Yolo runs (#603): every run Claude did on its own, newest first; a run's log (`?id=`), as text the page escapes.
+        // Yolo runs (#603): every run Claude did on its own, newest first; a run's details (`?id=`): its log's end, as text the page escapes, and what it changed and sent.
         "/api/yolo" => json_reply(json!({"runs": crate::yolo::runs(), "keep_days": crate::yolo::KEEP_DAYS})),
         "/api/yolo/log" => {
             let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
-            json_reply(crate::yolo::log(&id).map(|l| json!({"log": l})).unwrap_or_else(|| json!({"error": "that run's log is gone"})))
+            json_reply(crate::yolo::details(&id).unwrap_or_else(|| json!({"error": "that run's log is gone"})))
         }
         // The widgets Today can show (the catalog: Echo's, later the plugins').
         "/api/widgets" => json_reply(json!(crate::widgets::catalog())),

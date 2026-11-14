@@ -1,5 +1,5 @@
-/* Yolo runs (#603): the head and the filters stay, the list scrolls inside. */
-.yo { padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; overflow-y: auto; }
+/* Yolo runs (#603): one scroll — the head and the filters stay, only the list scrolls. */
+.yo { padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; overflow: hidden; }
 .yo-head { flex: none; }
 .yo-head .grow { flex: 1; }
 .yo-filters { flex: none; display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
@@ -10,7 +10,7 @@
 .yo-check input { margin: 0; accent-color: var(--accent); }
 .yo-q { flex: 1 1 160px; min-width: 120px; max-width: 280px; height: 26px; font: inherit; font-size: 12.5px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-control); padding: 0 8px; }
 .yo-count { flex: none; }
-.yo-list { flex: 1 1 auto; min-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); }
+.yo-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); }
 .yo-run { padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .yo-run:last-child { border-bottom: 0; }
 .yo-h { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; font-size: 12px; min-height: 24px; }
@@ -33,6 +33,7 @@ button.yo-t { color: var(--accent-ink); font-size: 13.5px; }
 .yo-say { font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .yo-did { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); }
 .yo-did li { overflow-wrap: anywhere; }
+.yo-did-n { font-size: 12px; color: var(--text-2); }
 .yo-did code { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); }
 .yo-w { font-weight: 600; color: var(--text); }
 .yo-w.failed { color: var(--warn); }
