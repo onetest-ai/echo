@@ -160,7 +160,7 @@ const PRELUDE: &str = r#"
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
       hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
       /** Install it (user scope of the default profile's Claude Code): only the one `uses.channel.plugin` names. */
-      installPlugin: (spec, profile) => later('claude.install_plugin', [spec, profile || '']),
+      installPlugin: (spec) => later('claude.install_plugin', [spec, '']),
     },
     /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
      *  it is open, with `env` (the channel's own keys; Claude and Anthropic ones are refused). */
@@ -825,18 +825,18 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
     m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
 }
 
-/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
-/// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
 /// `ctx.claude.hasPlugin` / `installPlugin`: only for the Claude Code plugin the plugin's manifest names as its channel
 /// (`uses.channel.plugin`, what its install sheet shows).
 fn may_touch_claude_plugin(id: &str, spec: &str) -> Result<()> {
     let named = plugins::read_manifest(&package_dir(id)?)?.uses.get("channel").and_then(|c| c["plugin"].as_str()).map(str::to_owned);
     if named.as_deref() != Some(spec) {
-        bail!("{id} may install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “{spec}”");
+        bail!("{id} may ask about or install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “{spec}”");
     }
     Ok(())
 }
 
+/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
+/// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
 fn read_only_here(what: &str) -> Result<()> {
     if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
         bail!("{what} isn't allowed in a read-only routine");
@@ -2530,9 +2530,9 @@ mod tests {
             Err(e) if !e.to_string().contains("not loaded") => Some(e.to_string()),
             _ => { std::thread::sleep(Duration::from_millis(50)); None }
         }).unwrap();
-        assert!(err.contains("may install only the Claude Code plugin its install sheet named"), "{err}");
+        assert!(err.contains("may ask about or install only the Claude Code plugin its install sheet named"), "{err}");
         assert!(may_touch_claude_plugin("chan", "telegram@claude-plugins-official").is_ok(), "the named one passes the gate");
-        assert!(call("chan", "has", &json!({"spec": "evil@somewhere"})).unwrap_err().to_string().contains("may install only"), "nor asked about another");
+        assert!(call("chan", "has", &json!({"spec": "evil@somewhere"})).unwrap_err().to_string().contains("may ask about or install only"), "nor asked about another");
         std::env::set_var(crate::guard::RUN_MODE, "routine");
         let refused = call("chan", "install", &json!({"spec": "telegram@claude-plugins-official"}));
         std::env::remove_var(crate::guard::RUN_MODE);
