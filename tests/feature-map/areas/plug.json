@@ -95,7 +95,7 @@
   },
   {
    "id": "F-PLUG-10",
-   "feature": "`echoctl plugin list` gives installed, offered and marketplaces as JSON",
+   "feature": "`echoctl plugin list` gives installed, offered and marketplaces as JSON; `echoctl plugin marketplace update / remove / hide / show <name>` and `install --from <name>` take a marketplace by its name in any case or by its source (owner/repo, URL, folder), and one not found is named with the marketplaces there are",
    "priority": "medium",
    "check": "agent",
    "axes": [

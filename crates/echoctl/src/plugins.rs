@@ -562,6 +562,25 @@ impl Registry {
     }
 }
 
+/// The marketplace a person means on the command line: its name in any case, or its source (`owner/repo`, a URL, a
+/// folder); none or several → why, with the names there are.
+pub fn market_named(said: &str) -> Result<String> {
+    let all: Vec<Market> = Registry::load()?.all_markets().into_iter().map(|(m, _)| m).collect();
+    if let Some(m) = all.iter().find(|m| m.name == said) {
+        return Ok(m.name.clone());
+    }
+    let same_folder = |a: &str, b: &str| matches!((fs::canonicalize(a), fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y);
+    let hits: Vec<&Market> = all.iter().filter(|m| m.name.eq_ignore_ascii_case(said) || m.source == said || same_folder(&m.source, said)).collect();
+    match hits.as_slice() {
+        [m] => Ok(m.name.clone()),
+        _ => {
+            let names: Vec<&str> = all.iter().map(|m| m.name.as_str()).collect();
+            let what = if hits.is_empty() { "no marketplace" } else { "more than one marketplace is" };
+            bail!("{what} “{said}” — the marketplaces: {}", names.join(", "))
+        }
+    }
+}
+
 /// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's). Echo's shared JSON files use it too.
 pub(crate) fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
     wait_lock_for(path, "plugins", std::time::Duration::from_secs(30))
@@ -1863,4 +1882,19 @@ mod tests {
         assert!(with(json!(["S", "M"])).unwrap_err().to_string().contains("is a table: it takes sizes M and L"));
         assert!(with(json!(["M"])).is_ok(), "M alone");
     }
+
+    #[test]
+    fn a_marketplace_is_found_by_its_name_in_any_case_or_by_its_source() {
+        let (_env, root) = paths::testenv::folders("plugins-market-named");
+        let mk = root.join("market");
+        fs::create_dir_all(&mk).unwrap();
+        fs::write(mk.join("echo-marketplace.json"), json!({"name": "Acme", "plugins": []}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("Acme")).unwrap();
+        assert_eq!(market_named("Acme").unwrap(), name);
+        assert_eq!(market_named("acme").unwrap(), name, "any case");
+        assert_eq!(market_named(mk.to_str().unwrap()).unwrap(), name, "its folder");
+        let e = market_named("globex").unwrap_err().to_string();
+        assert!(e.contains("no marketplace “globex”") && e.contains("Acme"), "names the ones there are: {e}");
+    }
+
 }

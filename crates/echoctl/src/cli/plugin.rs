@@ -106,6 +106,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::List => print_json(&snapshot()),
         PluginCmd::Install { id, from, yes } => {
             refuse_in_run()?;
+            let from = from.map(|f| market_named(&f)).transpose()?;
             let r = review(&id, from.as_deref())?;
             let agreed = agree(&r, yes)?;
             let p = install(&id, from.as_deref(), &agreed)?;
@@ -182,12 +183,12 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                     None => println!("Added {n}: {} plugins", c.plugins.len()),
                 }
             }
-            MarketCmd::Remove { name } => market_remove(&name)?,
-            MarketCmd::Hide { name } => market_hide(&name, true)?,
-            MarketCmd::Show { name } => market_hide(&name, false)?,
+            MarketCmd::Remove { name } => market_remove(&market_named(&name)?)?,
+            MarketCmd::Hide { name } => market_hide(&market_named(&name)?, true)?,
+            MarketCmd::Show { name } => market_hide(&market_named(&name)?, false)?,
             MarketCmd::Update { name } => match name {
                 Some(n) => {
-                    let c = refresh(&n)?;
+                    let c = refresh(&market_named(&n)?)?;
                     if let Some(e) = c.error {
                         anyhow::bail!("{e}");
                     }
