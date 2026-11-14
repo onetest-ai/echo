@@ -89,8 +89,9 @@ window.echo = {
         return render()
       }
       const list = (TPL.data && TPL.data.templates) || []
-      const rm = TPL.removing
-      TPL.removing = null
+      // A removal ends only with its own answer (no id): a save answered meanwhile leaves it pending.
+      const rm = id === null ? TPL.removing : null
+      if (id === null) TPL.removing = null
       if (created && id) { const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x); TPL.scrollTo = true } }
       else if (id === null && rm) {
         // Deleted: nothing chosen. Reset: Echo's own again, in the editor.
