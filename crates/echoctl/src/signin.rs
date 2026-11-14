@@ -689,6 +689,7 @@ pub fn refresh(p: &Profile, force: bool) {
         let _active = Active;
         // Usable before — or refused by a model under this token, which no `auth status` undoes.
         let was = ai::refused_by_model(&p) || ai::observation(&p.id).is_some_and(|o| usable(&p, &o));
+        let before = ai::observation(&p.id).map(|o| o.result);
         // Published by `observe`. Refused while a sign-in holds the lock: nothing was learned, so
         // the next look (once it is released) checks again at once.
         let refused = ai::observe(&p, &|| with(|s| s.shutdown)).is_err_and(|e| e.downcast_ref::<ai::SigningIn>().is_some());
@@ -702,6 +703,23 @@ pub fn refresh(p: &Profile, force: bool) {
         });
         if now && !was && !with(|s| s.shutdown) {
             recovered(&p.id);
+        }
+        // What it found differs: the Inbox is collected again, and the window reads it at its next tick (#513).
+        if ai::observation(&p.id).map(|o| o.result) != before {
+            crate::attention::stale();
+        }
+    });
+}
+
+/// Each Claude profile's sign-in checked now and waited for, side by side: `echoctl attention`'s process has no
+/// background check to wait for, so without it the list never had its sign-in item (#513).
+pub fn check_all_now() {
+    let Ok(s) = ai::Settings::load() else { return };
+    std::thread::scope(|sc| {
+        for p in s.profiles.iter().filter(|p| p.kind.signs_in()) {
+            sc.spawn(move || {
+                let _ = ai::observe(p, &|| false);
+            });
         }
     });
 }
@@ -1176,6 +1194,36 @@ mod tests {
         ensure("w", "record");
         assert!(with(|s| s.flows.is_empty()), "nothing after shutdown");
         reset();
+    }
+
+    #[test]
+    fn a_check_that_finds_something_new_has_the_inbox_collected_again() {
+        let (_env, root) = crate::paths::testenv::folders("signin-inbox-again");
+        reset();
+        let _fake = fake::install(&root);
+        let p = fake::profile("w", None, fake::SIGNED_OUT);
+        crate::attention::cache_for_test(serde_json::json!({"open": []}));
+        assert_eq!(st(&p), "unknown", "nothing known yet: a check starts");
+        until("signed out", || st(&p) == "signed_out");
+        until("threads ended", idle);
+        assert!(!crate::attention::cached(), "the Inbox's last answer is dropped: the window reads it again (#513)");
+        // Checked again and found the same: the Inbox keeps its answer.
+        crate::attention::cache_for_test(serde_json::json!({"open": []}));
+        refresh(&p, true);
+        until("threads ended", idle);
+        assert!(crate::attention::cached());
+    }
+
+    #[test]
+    fn checked_now_a_profiles_sign_in_is_known_at_once() {
+        // `echoctl attention`'s process: no background check to wait for.
+        let (_env, root) = crate::paths::testenv::folders("signin-check-now");
+        reset();
+        let _fake = fake::install(&root);
+        let p = fake::profile("w", None, fake::SIGNED_OUT);
+        check_all_now();
+        assert_eq!(st(&p), "signed_out");
+        assert!(idle(), "no check left running");
     }
 
     #[test]

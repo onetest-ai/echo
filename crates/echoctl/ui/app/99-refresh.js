@@ -17,7 +17,11 @@ async function tick() {
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
   // While a transcript is imported, every few seconds: the call shows once it is there.
   if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()
-  if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
+  // The Inbox: every 10th tick, sooner while a decision works, and at once when the app says it changed (#513).
+  const inbox = S.state && S.state.attention
+  const moved = inbox != null && S.inboxSeen != null && inbox !== S.inboxSeen
+  if (inbox != null) S.inboxSeen = inbox
+  if (moved || ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); await loadBoards(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   // Today open a while: read again every minute (the plugins' work rows and widgets are asked again in the background).

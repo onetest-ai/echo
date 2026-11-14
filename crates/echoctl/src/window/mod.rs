@@ -436,6 +436,8 @@ fn state() -> Value {
     }
     json!({
         "version": env!("CARGO_PKG_VERSION"),
+        // Moves when the Inbox may have changed (a sign-in check settled, a job ended): the window reads it again.
+        "attention": crate::attention::generation(),
         // What is installed and on: the window's plugin parts follow its change.
         "plugins": plugins,
         "recording": w.as_ref().and_then(|w| w.recording.clone()),

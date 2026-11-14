@@ -478,6 +478,12 @@ pub fn stale() {
     }
 }
 
+/// Moves each time the list may have changed (`stale`): the window reads it again when it does.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Whether an answer is kept for the next request (tests).
 #[cfg(test)]
 pub(crate) fn cached() -> bool {
@@ -537,6 +543,7 @@ pub fn view(fresh: bool) -> Value {
 /// The same for the CLI, read only: a terminal's process sees neither the app's sign-in checks nor
 /// its update check, so it never writes the record (what it can't see would look done).
 pub fn peek() -> Value {
+    crate::signin::check_all_now();
     let got = collect();
     let mut rec = read(&file());
     let open = fold(&mut rec, &got, chrono::Utc::now());
