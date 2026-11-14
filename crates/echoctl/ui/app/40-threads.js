@@ -137,14 +137,15 @@ function projectMain(data) {
   if (p.error) return `<div class="empty"><div><h3>This thread can't be opened</h3><p class="error">${esc(p.error)}</p></div></div>`
   const open = workOpenCount()
   const tabs = [['brief', 'Brief'], ['work', `Work${open ? `<span class="n">${open}</span>` : ''}`], ['calls', `Calls<span class="n">${p.call_count}</span>`], ['people', `People${peopleCount() ? `<span class="n">${peopleCount()}</span>` : ''}`], ['profile', 'Profile']]
+  tabs.splice(0, tabs.length, ...withBoards('thread', tabs))
   const tab = tabs.some(([t]) => t === S.pj.tab) ? S.pj.tab : 'brief'
   const client = p.client_name ? `<span class="tag pj-client-tag" title="Client">${clientIcon(projClient(p.client), 14)}${esc(p.client_name)}</span>` : ''
   const facts = [`${p.call_count} call${p.call_count === 1 ? '' : 's'}`, p.since ? `since ${esc(p.since)}` : '', p.last_call ? `last call ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''].filter(Boolean).join(' · ')
   const menu = `<span class="pj-add-wrap pj-more"><button class="icon-btn" data-pj="menu" aria-haspopup="menu" aria-expanded="${S.pj.menu}" aria-label="Thread actions" title="Thread actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.pj.menu ? `<div class="menu" role="menu">${p.client ? `<button class="menu-item" role="menuitem" data-pj="client" data-id="${esc(p.client)}">Open ${esc(p.client_name || 'the client')}</button>` : ''}<button class="menu-item" role="menuitem" data-claude-about>Claude about this thread</button><button class="menu-item" role="menuitem" data-pj="sync">Sync now</button><div class="menu-sep" role="separator"></div><button class="menu-item danger" role="menuitem" data-pj="delete-ask">Delete…</button></div>` : ''}</span>`
   const confirmDel = S.pj.confirmDelete ? `<div class="notice"><span class="grow">Delete <b>${esc(p.name)}</b>? Its brief, profile and work go to the trash; its calls stay.</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="delete">Move to trash</button></div>` : ''
   const head = `<header class="pj-head" role="group" aria-labelledby="pj-h"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2 id="pj-h">${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div>${pjLinksLine(p)}</div><span class="grow"></span>${menu}</div>${confirmDel}
-    <div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button class="tab" role="tab" data-pj="tab" data-tab-id="${id}" aria-selected="${tab === id}">${label}</button>`).join('')}</div></header>`
-  const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : projectBrief(p)
+    <div class="tabs" role="tablist">${boardTabRow('thread', tabs, tab, 'tab')}</div></header>`
+  const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : boardOfTab('thread', tab) ? boardPage('thread', boardOfTab('thread', tab)) : projectBrief(p)
   return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' ? ' wide' : ''}">${body}</div>`
 }
 

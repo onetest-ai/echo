@@ -57,6 +57,7 @@ mod taskmodes;
 mod glance;
 mod today;
 mod today_layout;
+mod boards;
 mod widgets;
 mod teams_transcript;
 mod view;
@@ -242,7 +243,7 @@ enum Cmd {
     /// your own (a template there named like a built-in changes it)
     Templates,
     /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it;
-    /// with --thread or --client, that thread's or client's dashboard instead
+    /// with --thread or --client, that thread's or client's dashboard instead (--board: one of its own dashboards)
     Today {
         /// A thread's dashboard (its Brief) instead of Today
         #[arg(long, global = true)]
@@ -250,8 +251,17 @@ enum Cmd {
         /// A client's dashboard (its Overview) instead of Today
         #[arg(long, global = true, conflicts_with = "thread")]
         client: Option<String>,
+        /// One of the dashboards beside the Brief (the Overview), by its id (`echoctl dashboard list`): its layout is
+        /// every thread's (client's), shown here with this one's data
+        #[arg(long, global = true)]
+        board: Option<String>,
         #[command(subcommand)]
         cmd: Option<cli::widget::TodayCmd>,
+    },
+    /// The dashboards beside every thread's Brief or every client's Overview: list, add, rename, move, remove
+    Dashboard {
+        #[command(subcommand)]
+        cmd: cli::widget::DashboardCmd,
     },
     /// Today's widgets: `list` the catalog, `show <id>` a widget's data (JSON, as Today gets it)
     Widget {
@@ -698,7 +708,8 @@ fn main() -> Result<()> {
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
         Cmd::Widget { cmd } => cli::widget::widget(cmd),
         Cmd::Work { cmd } => cli::widget::work(cmd),
-        Cmd::Today { thread, client, cmd } => cli::widget::today(thread.as_deref(), client.as_deref(), cmd),
+        Cmd::Today { thread, client, board, cmd } => cli::widget::today(thread.as_deref(), client.as_deref(), board.as_deref(), cmd),
+        Cmd::Dashboard { cmd } => cli::widget::dashboard(cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),

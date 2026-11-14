@@ -26,6 +26,8 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         }
         // The widgets Today can show (the catalog: Echo's, later the plugins').
         "/api/widgets" => json_reply(json!(crate::widgets::catalog())),
+        // The dashboards beside every thread's Brief and every client's Overview, in their order.
+        "/api/boards" => json_reply(json!({"thread": crate::boards::list(crate::boards::Kind::Thread), "client": crate::boards::list(crate::boards::Kind::Client)})),
         // A thread's or a client's dashboard (`page=thread:<id>`): its layout, each plugin widget's data as that page asks
         // it (`all=1`, editing: every widget it offers, previewed), and the ids it offers.
         "/api/dashboard" => {
@@ -146,6 +148,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // A thread's or client's own dashboards: add (last), rename, move (to a place), remove — as `echoctl dashboard`.
+        "board_op" => match board_op(v) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Today → Needs you now: I'll do it (a task, in a thread), Won't do or Ignore; Refresh reads Teams and mail again.
         "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str(), None) {
             Ok(_) => true.into(),
@@ -209,6 +216,19 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
 }
 
 /// A change to Today's layout from edit mode (`{cmd: "today_layout", op, widget, size?, target?, side?}`).
+fn board_op(v: &Value) -> anyhow::Result<()> {
+    use crate::boards::{self, Kind};
+    let kind = Kind::parse(v["kind"].as_str().unwrap_or(""))?;
+    let (id, name) = (v["id"].as_str().unwrap_or(""), v["name"].as_str().unwrap_or(""));
+    match v["op"].as_str().unwrap_or("") {
+        "add" => boards::add(kind, name).map(|_| ()),
+        "rename" => boards::rename(kind, id, name).map(|_| ()),
+        "move" => boards::move_to(kind, id, v["to"].as_u64().unwrap_or(0) as usize).map(|_| ()),
+        "remove" => boards::remove(kind, id),
+        o => anyhow::bail!("unknown dashboard operation {o:?}"),
+    }
+}
+
 fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> {
     use crate::today_layout::{self as l, Side};
     let w = v["widget"].as_str().unwrap_or("");

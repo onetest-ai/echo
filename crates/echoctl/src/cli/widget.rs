@@ -116,8 +116,8 @@ pub enum TodayCmd {
     Reset,
 }
 
-pub fn today(thread: Option<&str>, client: Option<&str>, cmd: Option<TodayCmd>) -> Result<()> {
-    let page = layout::Page::of(thread, client)?;
+pub fn today(thread: Option<&str>, client: Option<&str>, board: Option<&str>, cmd: Option<TodayCmd>) -> Result<()> {
+    let page = layout::Page::of(thread, client)?.on_board(board)?;
     let items = match cmd.unwrap_or(TodayCmd::Show) {
         TodayCmd::Show => layout::load_on(&page),
         TodayCmd::Add { widget, size, target } => layout::add_on(&page, &widget, size.as_deref(), target.get())?,
@@ -129,5 +129,66 @@ pub fn today(thread: Option<&str>, client: Option<&str>, cmd: Option<TodayCmd>) 
         TodayCmd::Reset => layout::reset_on(&page)?,
     };
     print_json(&serde_json::json!(items));
+    Ok(())
+}
+
+#[derive(Subcommand)]
+pub enum DashboardCmd {
+    /// The dashboards in their order (JSON), beside every thread's Brief (--thread) or every client's Overview (--client)
+    List {
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// A new dashboard, last: `echoctl dashboard add --client Staffing` (then `echoctl today --client <id> --board <its id> add …`)
+    Add {
+        name: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Rename one (its id stays)
+    Rename {
+        id: String,
+        name: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Put one at a place: 1 is first after the Brief (the Overview)
+    Move {
+        id: String,
+        to: usize,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Remove one from every thread (client), its layout with it
+    Remove {
+        id: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+}
+
+pub fn dashboard(cmd: DashboardCmd) -> Result<()> {
+    use crate::boards::{self, Kind};
+    let kind = |client: bool| if client { Kind::Client } else { Kind::Thread };
+    match cmd {
+        DashboardCmd::List { client, .. } => print_json(&serde_json::to_value(boards::list(kind(client)))?),
+        DashboardCmd::Add { name, client, .. } => print_json(&serde_json::to_value(boards::add(kind(client), &name)?)?),
+        DashboardCmd::Rename { id, name, client, .. } => print_json(&serde_json::to_value(boards::rename(kind(client), &id, &name)?)?),
+        DashboardCmd::Move { id, to, client, .. } => print_json(&serde_json::to_value(boards::move_to(kind(client), &id, to.saturating_sub(1))?)?),
+        DashboardCmd::Remove { id, client, .. } => {
+            boards::remove(kind(client), &id)?;
+            print_json(&serde_json::to_value(boards::list(kind(client)))?)
+        }
+    }
     Ok(())
 }

@@ -1,0 +1,9 @@
+/* A thread's and a client's own dashboards (47-boards.js): + after their tabs, a page's name with its ⋯. */
+.tab.bd-plus { min-width: 28px; padding-left: 8px; padding-right: 8px; color: var(--text-2); font-size: 16px; line-height: 1; }
+.tab.bd-plus:hover { color: var(--text); }
+.bd-new { display: inline-flex; align-items: center; padding: 0 6px; }
+.bd-new input, .bd-rename { font: inherit; font-size: 13px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); width: 170px; }
+.bd-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.bd-head h3 { margin: 0; font-size: 15px; }
+.bd-head .set-sub { flex: 1; }
+.bd-rename { font-size: 15px; font-weight: 600; width: 240px; }

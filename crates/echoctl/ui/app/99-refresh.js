@@ -18,7 +18,7 @@ async function tick() {
   // While a transcript is imported, every few seconds: the call shows once it is there.
   if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()
   if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
-  if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
+  if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); await loadBoards(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   // Today open a while: read again every minute (the plugins' work rows and widgets are asked again in the background).
   if (S.view === 'today' && ticks % 30 === 0) await loadToday()
@@ -266,7 +266,7 @@ window.echo = {
 ;(async () => {
   route()
   render()
-  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention()])
+  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention(), loadBoards()])
   await loadPluginClients()
   render() // what has loaded shows at once (the rest follows)
   if (S.view === 'projects') await loadProject()

@@ -66,12 +66,22 @@ pub enum Page {
     Today,
     Thread(String),
     Client(String),
+    /// One of the dashboards beside a thread's Brief (a client's Overview), on that page: its layout shared by every
+    /// thread (client) — `boards` lists them —, its widgets showing the page they are on.
+    Board(Box<Page>, String),
 }
 
 impl Page {
     /// `today`, `thread:<id>` or `client:<id>` (an id of letters, digits and dashes).
     pub fn parse(s: &str) -> Result<Page> {
         let id_ok = |id: &str| !id.is_empty() && id.len() <= 60 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !id.starts_with('-');
+        if let Some((page, board)) = s.split_once('/') {
+            let base = Page::parse(page)?;
+            if base == Page::Today || !id_ok(board) {
+                bail!("{s:?} isn't a page: today, thread:<id>, client:<id>, or either with /<dashboard>");
+            }
+            return Ok(Page::Board(Box::new(base), board.into()));
+        }
         match s {
             "" | "today" => Ok(Page::Today),
             _ => match s.split_once(':') {
@@ -99,12 +109,35 @@ impl Page {
         }
     }
 
-    /// What the page is called: `today`, `thread:<id>`, `client:<id>`.
+    /// This page on one of its dashboards (none: the page itself), one that exists.
+    pub fn on_board(self, board: Option<&str>) -> Result<Page> {
+        let Some(b) = board.filter(|b| !b.is_empty()) else { return Ok(self) };
+        let kind = match &self {
+            Page::Thread(_) => crate::boards::Kind::Thread,
+            Page::Client(_) => crate::boards::Kind::Client,
+            _ => bail!("a dashboard is a thread's or a client's: say --thread or --client"),
+        };
+        if crate::boards::find(kind, b).is_none() {
+            bail!("no {} dashboard {b:?}: `echoctl dashboard list --{}` names them", kind.name(), kind.name());
+        }
+        Ok(Page::Board(Box::new(self), b.into()))
+    }
+
+    /// The thread's or client's page a dashboard is on (any other page: itself).
+    fn base(&self) -> &Page {
+        match self {
+            Page::Board(p, _) => p,
+            p => p,
+        }
+    }
+
+    /// What the page is called: `today`, `thread:<id>`, `client:<id>`, either with `/<dashboard>`.
     pub fn key(&self) -> String {
         match self {
             Page::Today => "today".into(),
             Page::Thread(id) => format!("thread:{id}"),
             Page::Client(id) => format!("client:{id}"),
+            Page::Board(p, b) => format!("{}/{b}", p.key()),
         }
     }
 
@@ -113,12 +146,13 @@ impl Page {
             Page::Today => paths::config_dir().join("today-layout.json"),
             Page::Thread(id) => paths::config_dir().join("dashboards").join(format!("thread-{id}.json")),
             Page::Client(id) => paths::config_dir().join("dashboards").join(format!("client-{id}.json")),
+            Page::Board(p, b) => board_file(if matches!(**p, Page::Client(_)) { crate::boards::Kind::Client } else { crate::boards::Kind::Thread }, b),
         }
     }
 
     /// Whether a thread a widget is set to belongs here: on a client's page, one of its threads; elsewhere any.
     fn holds_thread(&self, thread: &str) -> bool {
-        match self {
+        match self.base() {
             Page::Client(c) => crate::projects::load(thread).is_ok_and(|p| p.client.as_deref() == Some(c.as_str())),
             _ => true,
         }
@@ -126,7 +160,7 @@ impl Page {
 
     /// Where its widgets are, said in an error.
     fn on(&self) -> &'static str {
-        match self {
+        match self.base() {
             Page::Today => "on Today",
             _ => "on this dashboard",
         }
@@ -135,10 +169,10 @@ impl Page {
     /// Whether this page offers `w`: Today every widget; a thread's dashboard one with a `thread` setting, a client's
     /// one with a `client` setting.
     pub fn offers(&self, w: &widgets::Widget) -> bool {
-        match self {
-            Page::Today => true,
+        match self.base() {
             Page::Thread(_) => w.params.iter().any(|p| p.kind == "thread"),
             Page::Client(_) => w.params.iter().any(|p| p.kind == "client"),
+            _ => true,
         }
     }
 
@@ -150,7 +184,7 @@ impl Page {
         let mut out = serde_json::Map::new();
         let client_of = |t: &str| crate::projects::load(t).ok().and_then(|p| p.client).filter(|c| !c.is_empty());
         for p in &w.params {
-            let v = match (self, p.kind.as_str()) {
+            let v = match (self.base(), p.kind.as_str()) {
                 (Page::Thread(t), "thread") => Value::String(t.clone()),
                 (Page::Thread(t), "client") => client_of(t).map(Value::String).or_else(|| p.default.clone()).unwrap_or(Value::Null),
                 (Page::Client(c), "client") => Value::String(c.clone()),
@@ -264,7 +298,7 @@ pub fn place(items: &[Item], widget: &str, size: &str, target: Option<(&str, Sid
 fn size_of(page: &Page, widget: &str, size: Option<&str>) -> Result<String> {
     let w = widgets::find(widget)?;
     if !page.offers(&w) {
-        bail!("{widget} can't go on a {} dashboard: it has no {} setting", if matches!(page, Page::Client(_)) { "client's" } else { "thread's" }, if matches!(page, Page::Client(_)) { "client" } else { "thread" });
+        bail!("{widget} can't go on a {} dashboard: it has no {} setting", if matches!(page.base(), Page::Client(_)) { "client's" } else { "thread's" }, if matches!(page.base(), Page::Client(_)) { "client" } else { "thread" });
     }
     // A plugin's widget is drawn by its kind (12-today.js, pluginWidgetView).
     if !DRAWN.contains(&widget) && !widget.starts_with("plugin:") && !widget.starts_with(widgets::CARD) {
@@ -435,9 +469,22 @@ pub fn params_on(page: &Page, widget: &str) -> serde_json::Map<String, serde_jso
     out
 }
 
+/// A dashboard's layout, the same on every thread (client).
+fn board_file(kind: crate::boards::Kind, board: &str) -> PathBuf {
+    paths::config_dir().join("dashboards").join("boards").join(format!("{}-{board}.json", kind.name()))
+}
+
+/// A dashboard removed (`boards::remove`): its layout goes.
+pub fn forget_board(kind: crate::boards::Kind, board: &str) {
+    let f = board_file(kind, board);
+    let _ = std::fs::remove_file(&f);
+    let _ = std::fs::remove_file(f.with_extension("lock"));
+}
+
 /// A thread or a client deleted: its dashboard goes (a new one may get its id), and the plugins' answers for it.
 pub fn forget(page: &Page) {
-    if *page == Page::Today {
+    // A dashboard's layout is every thread's (client's): `forget_board` takes it.
+    if *page == Page::Today || matches!(page, Page::Board(..)) {
         return;
     }
     let f = page.file();
