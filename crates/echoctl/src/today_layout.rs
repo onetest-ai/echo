@@ -181,7 +181,7 @@ impl Page {
     /// The settings this page sets on a widget (not the user's to change here): a thread's page its `thread` setting,
     /// and a `client` one the thread's client (a thread with none: the setting's default, null when it has none); a
     /// client's page its `client` setting.
-    pub(crate) fn fixed(&self, w: &widgets::Widget) -> serde_json::Map<String, serde_json::Value> {
+    fn fixed(&self, w: &widgets::Widget) -> serde_json::Map<String, serde_json::Value> {
         use serde_json::Value;
         let mut out = serde_json::Map::new();
         let client_of = |t: &str| crate::projects::load(t).ok().and_then(|p| p.client).filter(|c| !c.is_empty());

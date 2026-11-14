@@ -245,20 +245,13 @@ fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, page: &c
 
 /// Its label on Today: one set to a thread or a client (a setting of type `thread` / `client`) names it — "GitHub at
 /// a glance · Echo" — so a widget showing one thread says which. Whatever the plugin is.
-/// [`label_on_today`] with its settings as the page drawn has them — read only for a widget that has a thread or client
-/// setting. What the page itself fills (a dashboard's thread or client) isn't named: the page is it.
+/// [`label_on_today`] with its settings as the page drawn has them (a dashboard's own thread or client named, as Echo's
+/// own widgets name it) — read only for a widget that has a thread or client setting.
 fn label_for(w: &Widget, page: &crate::today_layout::Page) -> String {
     if !w.params.iter().any(|p| p.kind == "thread" || p.kind == "client") {
         return w.label.to_string();
     }
-    label_on_page(w, page, crate::today_layout::params_on(page, &w.id))
-}
-
-fn label_on_page(w: &Widget, page: &crate::today_layout::Page, mut set: serde_json::Map<String, Value>) -> String {
-    for (k, _) in page.fixed(w) {
-        set.remove(&k);
-    }
-    label_on_today(w, &set)
+    label_on_today(w, &crate::today_layout::params_on(page, &w.id))
 }
 
 fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
@@ -433,13 +426,16 @@ mod tests {
         assert_eq!(label_on_today(&wd, &set(json!({"thread": "gone-thread"}))), "GitHub at a glance", "a thread that isn't there: its own label");
         wd.params.push(param("client", "client"));
         assert_eq!(label_on_today(&wd, &set(json!({"thread": echo.id, "client": acme.id}))), "GitHub at a glance · Echo · Acme");
-        // On a dashboard the page names what it fills: a thread's Brief its thread (and client), a client's Overview
-        // its client — only a thread set there is named.
+        // Each page's own settings, never Today's: Today set to Echo; another thread's Brief names that thread, a
+        // client's Overview that client (a thread of another client set there by hand isn't its).
         use crate::today_layout::Page;
-        let both = set(json!({"thread": echo.id, "client": acme.id}));
-        assert_eq!(label_on_page(&wd, &Page::Thread(echo.id.clone()), both.clone()), "GitHub at a glance");
-        assert_eq!(label_on_page(&wd, &Page::Client(acme.id.clone()), both.clone()), "GitHub at a glance · Echo");
-        assert_eq!(label_on_page(&wd, &Page::Today, both), "GitHub at a glance · Echo · Acme");
+        let beta = crate::projects::create("Beta", None, None).unwrap();
+        let done = find("core:tasks.done").unwrap();
+        crate::today_layout::add("core:tasks.done", None, None).unwrap();
+        crate::today_layout::set_param("core:tasks.done", "thread", &echo.id).unwrap();
+        assert_eq!(label_for(&done, &Page::Today), "Done this week · Echo");
+        assert_eq!(label_for(&done, &Page::Thread(beta.id.clone())), "Done this week · Beta", "the Brief's thread, not Today's");
+        assert_eq!(label_for(&done, &Page::Client(acme.id.clone())), "Done this week · Acme");
     }
 
     #[cfg(feature = "js")]
