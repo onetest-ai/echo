@@ -306,7 +306,8 @@ fn script_path() -> std::ffi::OsString {
 
 /// What a script doesn't get of Echo's environment: Echo's and Claude Code's own (keys, profiles' values, run scopes) —
 /// but test data's guard it does (`ECHOCTL_TEST_OPEN_LOG_ONLY`, `ECHOCTL_TEST_OPEN_LOG`), so a program it starts that
-/// opens a page (a sign-in's browser) only logs it there, as Echo does.
+/// opens a page (a sign-in's browser) only logs it there, as Echo does. Echo's data and config folders and its binary
+/// are set anew (`spawn_and_wait`).
 fn withheld(key: &str) -> bool {
     let up = key.to_ascii_uppercase();
     if up == "ECHOCTL_TEST_OPEN_LOG_ONLY" || up == "ECHOCTL_TEST_OPEN_LOG" {
@@ -326,6 +327,15 @@ fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit:
         }
     }
     c.env("PATH", script_path()).env("ECHO_PLUGIN_SCRIPT", "1").env("ECHO_PLUGIN_CACHE", cache);
+    // An `echoctl` it starts (the plugin's `scripts/echoctl`) is this Echo, on its data and config folders (#569); the
+    // data folder only once one is chosen, so before setup it doesn't look done.
+    if crate::paths::home_source() != "default" {
+        c.env("ECHOCTL_HOME", crate::paths::home());
+    }
+    c.env("ECHOCTL_CONFIG_DIR", crate::paths::config_dir());
+    if let Ok(exe) = std::env::current_exe() {
+        c.env("ECHOCTL_BIN", exe);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -444,6 +454,28 @@ mod tests {
             assert!(withheld(k), "{k}");
         }
         assert!(!withheld("HOME") && !withheld("PATH"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_echoctl_a_script_starts_is_this_echo_on_its_data_and_config_folders_with_its_secrets_still_withheld() {
+        let (_env, root) = crate::paths::testenv::folders("scripts-echo-folders");
+        let f = root.join("env.sh");
+        std::fs::write(&f, "#!/bin/sh\nprintf '%s|%s|%s|%s' \"$ECHOCTL_HOME\" \"$ECHOCTL_CONFIG_DIR\" \"$ECHOCTL_BIN\" \"${ECHOCTL_P_TEST_KEY:-none}\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("ECHOCTL_P_TEST_KEY", "secret");
+        let out = spawn_and_wait(&f, &[], &root, &root, Duration::from_secs(10), &root.join("group"));
+        std::env::remove_var("ECHOCTL_P_TEST_KEY");
+        let out = out.unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let want = format!("{}|{}|{}|none", crate::paths::home().display(), crate::paths::config_dir().display(), exe.display());
+        assert_eq!(out["stdout"], want, "{out}");
+        // Before setup (no data folder chosen) it gets no data folder: its echoctl sees setup isn't done.
+        std::env::remove_var("ECHOCTL_HOME");
+        assert_eq!(crate::paths::home_source(), "default");
+        let out = spawn_and_wait(&f, &[], &root, &root, Duration::from_secs(10), &root.join("group")).unwrap();
+        assert_eq!(out["stdout"], format!("|{}|{}|none", crate::paths::config_dir().display(), exe.display()), "{out}");
     }
 
     #[test]
