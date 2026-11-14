@@ -54,13 +54,15 @@ client's dashboard: `params: [{key: "thread", label: "Thread", type: "thread"}]`
 Ask for a `uses` line (network hosts, folders, Claude…) only when the widget needs it — each is a line the user agrees to.
 
 Its part for Claude in Echo — every plugin you make has one: `"agent": {"summary": "<one line: what it gives Claude and
-when to turn to it>"}` in `echo-plugin.json`, and `agent/CLAUDE.md` (8 KB at most): what the plugin gives Claude, when
+when to turn to it>", "prefix": "<2–4 of a–z, 0–9>"}` in `echo-plugin.json` (the prefix names its skills; pick one no
+plugin from another marketplace uses — `echoctl plugin list` gives each installed plugin's `prefix`; your own plugins
+may share one), and `agent/CLAUDE.md` (8 KB at most): what the plugin gives Claude, when
 to use it, its commands (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl plugin call <id> <command>`, each named in
 `uses.sessions.commands`) and its widgets. Echo lays it out in the data folder's `.plugins/<id>/` and lists it in the
 core every session of Echo's folder starts with; Claude reads it only when it works with the plugin. Add, only when
 the plugin needs them: a skill for a fixed procedure in `agent/skills/<name>/SKILL.md` (frontmatter `name` and a
-one-line `description` only; Claude in Echo sees it as `<id>-<name>`, 64 characters at most, so name it that way in `CLAUDE.md`), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
-names. Nothing hidden (no dot-named file or folder) anywhere in `agent/` or a skill folder. `echoctl plugin check`
+one-line `description` only; Claude in Echo sees it as `<prefix>-<name>`, so name it that way in `CLAUDE.md`), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
+names. No `.claude` folder anywhere in `agent/` or a skill folder. `echoctl plugin check`
 names any limit you break.
 
 ## 4. Check, install

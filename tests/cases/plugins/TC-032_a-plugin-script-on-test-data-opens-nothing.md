@@ -23,7 +23,7 @@ tags: [plugins, scripts, test-safety]
 M="$D/market"; K="$M/plugins/acme-signin"
 mkdir -p "$K/skills/signin/scripts"
 echo '{"name":"acme-local","plugins":[{"id":"acme-signin","source":"./plugins/acme-signin"}]}' > "$M/echo-marketplace.json"
-echo '{"id":"acme-signin","name":"Acme sign-in","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","skills":["skills/signin"],"uses":{"scripts":[{"skill":"signin","script":"scripts/signin.sh"}]}}' > "$K/echo-plugin.json"
+echo '{"id":"acme-signin","name":"Acme sign-in","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","skills":["skills/signin"],"agent":{"prefix":"acme"},"uses":{"scripts":[{"skill":"signin","script":"scripts/signin.sh"}]}}' > "$K/echo-plugin.json"
 printf -- '---\nname: signin\ndescription: Signs in to Acme.\n---\n\nRun scripts/signin.sh.\n' > "$K/skills/signin/SKILL.md"
 printf '#!/bin/sh\necho "guard=${ECHOCTL_TEST_OPEN_LOG_ONLY:-none} home=${ECHOCTL_HOME:-none}"\n[ -n "$ECHOCTL_TEST_OPEN_LOG_ONLY" ] || { echo "no guard: not opening"; exit 3; }\no=$(command -v open); grep -q ECHOCTL_TEST_OPEN_LOG_ONLY "$o" 2>/dev/null || { echo "not the test data open: $o"; exit 4; }\nopen https://signin.acme.example/device\n' > "$K/skills/signin/scripts/signin.sh"
 echo "export function apply(ctx) { ctx.command('signin', () => ctx.scripts.run('signin', 'scripts/signin.sh', [])) }" > "$K/main.js"

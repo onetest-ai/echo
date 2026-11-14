@@ -1,8 +1,0 @@
-{
-  "id": "agent-long-skill-names-test",
-  "name": "Agent long skill names",
-  "version": "0.1.0",
-  "summary": "A test package for `echoctl plugin check` (tests/cases/plugins/TC-037): skills whose names in Echo's sessions (<id>-<name>) are over 64 characters.",
-  "skills": ["skills/a-manifest-skill-name-of-forty-character"],
-  "agent": {"summary": "Long skill names on purpose"}
-}

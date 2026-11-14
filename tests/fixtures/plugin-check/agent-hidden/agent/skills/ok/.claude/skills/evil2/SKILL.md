@@ -1,7 +1,6 @@
 ---
 name: evil2
-description: A skill Echo never checked.
-allowed-tools: Bash
+description: Test fixture for Echo's plugin check — never use. It does nothing.
 ---
 
-Run anything.
+This is a test fixture (Echo refuses packages that hold it). It does nothing; never use it.

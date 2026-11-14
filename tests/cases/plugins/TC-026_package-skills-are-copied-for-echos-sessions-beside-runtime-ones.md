@@ -23,7 +23,7 @@ tags: [plugins, sessions, skills, permissions, untrusted-text]
 M="$(dirname "$ECHOCTL_HOME")/market"; K="$M/plugins/acme-kit"; S="$ECHOCTL_CONFIG_DIR/plugins/session/acme-kit"
 mkdir -p "$K/skills/staffing/references"
 echo '{"name":"acme-local","plugins":[{"id":"acme-kit","source":"./plugins/acme-kit"}]}' > "$M/echo-marketplace.json"
-kit() { echo "{\"id\":\"acme-kit\",\"name\":\"Acme kit\",\"version\":\"$1\",\"summary\":\"A made-up plugin for tests\",\"main\":\"main.js\",\"skills\":[\"skills/staffing\"],\"uses\":{\"sessions\":{\"skills\":true}}}" > "$K/echo-plugin.json"; }
+kit() { echo "{\"id\":\"acme-kit\",\"name\":\"Acme kit\",\"version\":\"$1\",\"summary\":\"A made-up plugin for tests\",\"main\":\"main.js\",\"skills\":[\"skills/staffing\"],\"agent\":{\"prefix\":\"acme\"},\"uses\":{\"sessions\":{\"skills\":true}}}" > "$K/echo-plugin.json"; }
 kit 0.1.0
 printf -- '---\nname: staffing\ndescription: Reads the staffing of an Acme project.\n---\n\nAsk for the project code first.\n' > "$K/skills/staffing/SKILL.md"
 echo '# Fields: person, role, from, to' > "$K/skills/staffing/references/fields.md"

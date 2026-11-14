@@ -2989,7 +2989,7 @@ mod tests {
             {"skill": "staffing", "script": "scripts/big.sh", "readonly": true},
             {"skill": "staffing", "script": "scripts/write.sh"},
         ]);
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.1.0", "main": "main.js", "skills": ["skills/staffing"], "uses": {"scripts": scripts}}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.1.0", "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": scripts}}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"
@@ -3072,7 +3072,7 @@ mod tests {
         assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, false).unwrap()["stdout"], "wrote\n");
         // A version changing a file of that skill folder asks again.
         std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\necho small\n").unwrap();
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.2.0", "main": "main.js", "skills": ["skills/staffing"], "uses": {"scripts": scripts}}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.2.0", "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": scripts}}).to_string()).unwrap();
         plugins::refresh(&name).unwrap();
         assert!(plugins::update("kit", &[]).unwrap_err().to_string().contains("asks for more: Runs programs from its package"));
         plugins::remove("kit", false).unwrap();
@@ -3089,7 +3089,7 @@ mod tests {
             std::fs::create_dir_all(d.join("skills/staffing/references")).unwrap();
             std::fs::write(d.join("skills/staffing/SKILL.md"), format!("---\nname: staffing\ndescription: Reads a project's staffing.\n---\n\n{body}\n")).unwrap();
             std::fs::write(d.join("skills/staffing/references/fields.md"), "# Fields").unwrap();
-            std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": version, "main": "main.js", "skills": ["skills/staffing"], "uses": {"sessions": {"skills": true}}}).to_string()).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": version, "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"sessions": {"skills": true}}}).to_string()).unwrap();
         };
         write("0.1.0", "Read it.");
         std::fs::write(
@@ -3171,7 +3171,7 @@ mod tests {
         let d = mk.join("plugins/vaults");
         std::fs::create_dir_all(&d).unwrap();
         let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true, "commands": ["search", "backlinks"]}, "echo": {"read": ["clients"]}});
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses, "agent": {"prefix": "vlt"}}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"

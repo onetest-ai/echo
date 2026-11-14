@@ -4,8 +4,17 @@
   "version": "0.1.0",
   "summary": "A test plugin: a part for Claude in Echo — a guide, a rule, a skill with a script, and guides given at run time (tests/cases/plugins/TC-035–TC-037).",
   "main": "main.js",
-  "agent": {"summary": "Staffing of Acme projects: who works where, from when to when"},
+  "agent": {
+    "summary": "Staffing of Acme projects: who works where, from when to when",
+    "prefix": "demo"
+  },
   "uses": {
-    "scripts": [{"skill": "staffing", "script": "scripts/positions.sh", "readonly": true}]
+    "scripts": [
+      {
+        "skill": "staffing",
+        "script": "scripts/positions.sh",
+        "readonly": true
+      }
+    ]
   }
 }

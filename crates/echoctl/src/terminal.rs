@@ -812,7 +812,7 @@ mod tests {
         std::fs::create_dir_all(d.join("skills/staffing/scripts")).unwrap();
         std::fs::write(d.join("skills/staffing/SKILL.md"), "---\nname: staffing\ndescription: Staffing.\n---\n\nRun scripts/read.sh.\n").unwrap();
         std::fs::write(d.join("skills/staffing/scripts/read.sh"), "#!/bin/sh\necho read\n").unwrap();
-        std::fs::write(d.join("echo-plugin.json"), serde_json::json!({"id": "kit", "name": "Kit", "version": "0.1.0", "skills": ["skills/staffing"], "uses": {"scripts": [{"skill": "staffing", "script": "scripts/read.sh"}]}}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), serde_json::json!({"id": "kit", "name": "Kit", "version": "0.1.0", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": [{"skill": "staffing", "script": "scripts/read.sh"}]}}).to_string()).unwrap();
         std::fs::write(root.join("market/echo-marketplace.json"), serde_json::json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
         let name = crate::plugins::market_add(root.join("market").to_str().unwrap(), Some("t")).unwrap();
         crate::plugins::refresh(&name).unwrap();
