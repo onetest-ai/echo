@@ -218,7 +218,7 @@ mod tests {
     fn every_run_newest_first_with_its_outcome_what_it_did_through_echo_and_its_drafts() {
         let (_env, _root) = paths::testenv::folders("yolo-runs");
         let change = json!({"kind": "change", "command": "project work acme '{}'"});
-        run("ask-1", json!({"title": "Book the room", "project": "acme", "node": "T1", "thread": "acme", "started": ago(30), "ended": ago(29), "state": "done", "say": "Booked it."}), &[change.clone()], &[]);
+        run("ask-1", json!({"title": "Book the room", "project": "acme", "node": "T1", "thread": "acme", "started": ago(30), "ended": ago(29), "state": "done", "say": "Booked it."}), std::slice::from_ref(&change), &[]);
         run("ask-2", json!({"title": "Collect the list", "project": "acme", "node": "T2", "started": ago(20), "ended": ago(20), "state": "done", "say": "Nobody sent it yet."}), &[], &[]);
         let refused = json!({"kind": "change", "command": "project create X", "outcome": "failed: refused"});
         run("ask-3", json!({"title": "Mail to you", "subject": "Contract redlines", "item": "mail:x", "started": ago(10), "ended": ago(9), "state": "done", "say": "Drafted a reply."}), &[refused, json!({"kind": "draft", "command": "compose --to kim@acme.example"})], &[json!({"where": "mail-app", "to": ["kim@acme.example"], "subject": "Re: x"})]);
