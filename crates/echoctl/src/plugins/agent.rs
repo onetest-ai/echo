@@ -313,6 +313,18 @@ pub fn skill_name(id: &str, name: &str) -> String {
     format!("{id}-{name}")
 }
 
+/// The longest name a skill may have (Agent Skills).
+pub const MAX_SKILL_NAME: usize = 64;
+
+/// Skill `name` of plugin `id` fits as Echo names it in the folder session (`<id>-<name>`, 64 characters at most).
+pub fn check_skill_length(id: &str, name: &str) -> Result<()> {
+    let full = skill_name(id, name);
+    if full.len() > MAX_SKILL_NAME {
+        bail!("Echo's sessions name it “{full}”, {} characters: a skill's name is {MAX_SKILL_NAME} at most (the plugin's id, “-”, the skill's)", full.len());
+    }
+    Ok(())
+}
+
 /// What Echo laid out for plugin `id`, outside the folder: `{files, at, echo, content}` — the installed files' hash,
 /// the folder's path, this Echo's version and the hash of what was written.
 fn record_file(id: &str) -> PathBuf {
@@ -1014,6 +1026,11 @@ mod tests {
         let t = fs::read_to_string(dir.join(".claude/skills/vaults-work/SKILL.md")).unwrap();
         assert!(t.starts_with("---\nname: vaults-work\ndescription: \"The Work vault.\"\n---"), "{t}");
         assert!(fs::read_to_string(dir.join("CLAUDE.md")).unwrap().contains("`vaults-find`, `vaults-work`"));
+        // A runtime skill too long as Echo names it (`<id>-<name>` over 64) is refused; 64 fits.
+        let name = "a".repeat(40);
+        let e = crate::grants::set_session_skills(&"p".repeat(24), &json!([{"name": name, "description": "x", "body": "y"}])).unwrap_err().to_string();
+        assert!(e.contains("65 characters: a skill's name is 64 at most"), "{e}");
+        assert!(crate::grants::set_session_skills(&"p".repeat(23), &json!([{"name": name, "description": "x", "body": "y"}])).is_ok(), "64 fits");
         crate::grants::set_session_skills("vaults", &json!([])).unwrap();
         assert!(!dir.join(".claude/skills/vaults-work").exists() && dir.join(".claude/skills/vaults-find").is_dir());
     }
@@ -1046,6 +1063,15 @@ mod tests {
             ("agent/skills/: 21 skills: 20 at most", Box::new(|d: &Path| (0..21).for_each(|i| skill(&d.join(format!("agent/skills/s{i}")), &format!("s{i}"))))),
             ("agent/skills/Bad_Name/SKILL.md: skill “agent/skills/Bad_Name”: its folder is named as a skill", Box::new(|d: &Path| skill(&d.join("agent/skills/Bad_Name"), "Bad_Name"))),
             ("agent/skills/s/SKILL.md: skill “agent/skills/s”: SKILL.md's frontmatter holds only name and description (not “hooks”)", Box::new(|d: &Path| write(&d.join("agent/skills/s/SKILL.md"), "---\nname: s\ndescription: x\nhooks: y\n---\n"))),
+            // `<id>-<name>` past 64 characters, for a skill of agent/ and of the manifest alike.
+            ("agent/skills/a-skill-name-of-exactly-forty-characters/SKILL.md: skill “agent/skills/a-skill-name-of-exactly-forty-characters”: Echo's sessions name it “a-plugin-id-of-twenty-six-c-a-skill-name-of-exactly-forty-characters”, 68 characters: a skill's name is 64 at most", Box::new(|d: &Path| {
+                write(&d.join("echo-plugin.json"), &json!({"id": "a-plugin-id-of-twenty-six-c", "name": "Kit", "version": "0.1.0", "agent": {"summary": "x"}}).to_string());
+                skill(&d.join("agent/skills/a-skill-name-of-exactly-forty-characters"), "a-skill-name-of-exactly-forty-characters");
+            })),
+            ("skills/a-skill-name-of-exactly-forty-characters/SKILL.md: skill “skills/a-skill-name-of-exactly-forty-characters”: Echo's sessions name it", Box::new(|d: &Path| {
+                write(&d.join("echo-plugin.json"), &json!({"id": "a-plugin-id-of-twenty-six-c", "name": "Kit", "version": "0.1.0", "skills": ["skills/a-skill-name-of-exactly-forty-characters"], "agent": {"summary": "x"}}).to_string());
+                skill(&d.join("skills/a-skill-name-of-exactly-forty-characters"), "a-skill-name-of-exactly-forty-characters");
+            })),
             // Hidden anywhere: a nested `.claude/` would be loaded unchecked.
             ("agent/guides/.claude: hidden", Box::new(|d: &Path| skill(&d.join("agent/guides/.claude/skills/evil"), "evil"))),
             ("agent/skills/ok/.claude: hidden", Box::new(|d: &Path| {

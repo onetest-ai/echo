@@ -522,6 +522,7 @@ fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)>, Vec<Prob
             if !valid_skill_name(&name) || out.iter().any(|(n, _)| *n == name) {
                 bail!("skill “{rel}”: its folder is named as a skill (a–z, 0–9, -; up to 40), once");
             }
+            agent::check_skill_length(&m.id, &name).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
             let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
             check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
             // A hidden file or folder (`.claude/skills/…` inside it) would reach Claude Code unchecked; `agent/` is

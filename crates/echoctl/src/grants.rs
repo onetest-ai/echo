@@ -267,6 +267,7 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
         if !crate::plugins::valid_skill_name(name) {
             bail!("a skill's name is a few lowercase words with dashes");
         }
+        crate::plugins::agent::check_skill_length(id, name).map_err(|e| anyhow!("skill {name}: {e}"))?;
         if description.is_empty() || description.chars().count() > 1024 || description.contains(['\n', '\r']) {
             bail!("skill {name}: a description of one line, up to 1024 characters");
         }
