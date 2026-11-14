@@ -796,6 +796,9 @@ pub struct Offer {
     pub categories: Vec<String>,
     #[serde(default)]
     pub featured: bool,
+    /// Its place in the marketplace's `featured` list: Discover's Featured in that order (#589).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub featured_at: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest: Option<Manifest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -852,13 +855,14 @@ pub fn refresh(name: &str) -> Result<Catalog> {
         for e in file.plugins.into_iter().take(200) {
             // In My plugins a folder whose name isn't an id is listed with why (elsewhere: left out).
             if m.name == MINE && !valid_id(&e.id) && seen.insert(e.id.clone()) {
-                plugins.push(Offer { id: e.id, categories: vec![], featured: false, manifest: None, error: Some("its folder name isn't a plugin id: lower-case letters, digits and -".into()), dir: PathBuf::new(), commit: String::new() });
+                plugins.push(Offer { id: e.id, categories: vec![], featured: false, featured_at: None, manifest: None, error: Some("its folder name isn't a plugin id: lower-case letters, digits and -".into()), dir: PathBuf::new(), commit: String::new() });
                 continue;
             }
             if !valid_id(&e.id) || !seen.insert(e.id.clone()) {
                 continue;
             }
-            let featured = file.featured.contains(&e.id);
+            let featured_at = file.featured.iter().position(|f| *f == e.id);
+            let featured = featured_at.is_some();
             let at = (|| -> Result<(PathBuf, String)> {
                 match &e.source {
                     // My plugins: each plugin by its own files (a change to one is its update, not the others').
@@ -895,8 +899,8 @@ pub fn refresh(name: &str) -> Result<Catalog> {
                 }
                 Ok((dir, commit, m))
             }) {
-                Ok((dir, commit, m)) => Offer { id: e.id, categories: e.categories, featured, manifest: Some(m), error: None, dir, commit },
-                Err(err) => Offer { id: e.id, categories: e.categories, featured, manifest: None, error: Some(format!("{err:#}")), dir: PathBuf::new(), commit: String::new() },
+                Ok((dir, commit, m)) => Offer { id: e.id, categories: e.categories, featured, featured_at, manifest: Some(m), error: None, dir, commit },
+                Err(err) => Offer { id: e.id, categories: e.categories, featured, featured_at, manifest: None, error: Some(format!("{err:#}")), dir: PathBuf::new(), commit: String::new() },
             };
             plugins.push(offer);
         }
@@ -1298,11 +1302,17 @@ pub fn snapshot() -> Value {
     let mut discover = vec![];
     for (m, built_in) in r.all_markets() {
         let c = catalog(&m.name);
+        // What it offers (`echoctl plugin marketplace list`, #589): installed true from it, false from another one.
+        let offers: Vec<Value> = c.as_ref().map(|c| c.plugins.iter().map(|o| json!({
+            "id": o.id, "name": o.manifest.as_ref().map_or(o.id.as_str(), |mf| mf.name.as_str()),
+            "version": o.manifest.as_ref().map(|mf| mf.version.clone()), "featured": o.featured,
+            "installed": r.installed.get(&o.id).map(|p| p.market == m.name), "error": o.error,
+        })).collect()).unwrap_or_default();
         markets.push(json!({
             "name": m.name, "source": m.source, "built_in": built_in, "hidden": m.hidden,
             "fetched_at": c.as_ref().map(|c| c.fetched_at.clone()), "commit": c.as_ref().map(|c| c.commit.clone()),
             "error": c.as_ref().and_then(|c| c.error.clone()), "count": c.as_ref().map(|c| c.plugins.len()).unwrap_or(0),
-            "title": c.as_ref().map(|c| c.name.clone()).filter(|n| !n.is_empty()),
+            "title": c.as_ref().map(|c| c.name.clone()).filter(|n| !n.is_empty()), "plugins": offers,
         }));
         if m.hidden {
             continue;
@@ -1314,7 +1324,7 @@ pub fn snapshot() -> Value {
             };
             discover.push(json!({
                 "id": o.id, "name": name, "version": version, "summary": summary, "market": m.name, "built_in": built_in,
-                "categories": o.categories, "featured": o.featured, "uses": uses, "why_not": why,
+                "categories": o.categories, "featured": o.featured, "featured_at": o.featured_at, "uses": uses, "why_not": why,
                 "installed": r.installed.get(&o.id).map(|p| p.market == m.name),
             }));
         }
@@ -1770,6 +1780,35 @@ mod tests {
         let other = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
         refresh(&other).unwrap();
         assert!(install("standup", Some(&other), &[]).unwrap_err().to_string().contains("remove it first"));
+    }
+
+    #[test]
+    fn a_marketplaces_featured_order_and_its_plugins_are_listed() {
+        // Discover's Featured in the marketplace's `featured` order; `echoctl plugin marketplace list` its plugins (#589).
+        let (_env, root) = paths::testenv::folders("plugins-featured-order");
+        let mk = root.join("market");
+        let ids = ["acme", "mid", "zeta"];
+        for id in ids {
+            plugin(&mk, id, "0.1.0", json!({}));
+        }
+        let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+        fs::write(mk.join(CATALOG), json!({"name": "Order", "featured": ["zeta", "acme"], "plugins": plugins}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("order")).unwrap();
+        refresh(&name).unwrap();
+        let snap = snapshot();
+        let mine = |x: &&Value| x["market"] == name.as_str();
+        let at: Vec<(&str, Value)> = snap["discover"].as_array().unwrap().iter().filter(mine).map(|x| (x["id"].as_str().unwrap(), x["featured_at"].clone())).collect();
+        assert_eq!(at, [("acme", json!(1)), ("mid", Value::Null), ("zeta", json!(0))]);
+        let m = snap["markets"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap();
+        let listed: Vec<(&str, &str, &str, bool)> = m["plugins"].as_array().unwrap().iter()
+            .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap(), p["version"].as_str().unwrap(), p["featured"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(listed, [("acme", "Plugin acme", "0.1.0", true), ("mid", "Plugin mid", "0.1.0", false), ("zeta", "Plugin zeta", "0.1.0", true)]);
+        assert!(m["plugins"][0]["installed"].is_null(), "not installed");
+        market_hide(&name, true).unwrap();
+        let snap = snapshot();
+        let m = snap["markets"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap();
+        assert_eq!(m["plugins"].as_array().unwrap().len(), 3, "hidden from Discover, still listed");
     }
 
     #[test]

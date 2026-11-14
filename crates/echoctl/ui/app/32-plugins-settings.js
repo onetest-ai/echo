@@ -109,11 +109,15 @@ function plDetail(p, x) {
   </section>`
 }
 function plDiscover(p) {
+  // Featured: by marketplace (as listed), each in its own `featured` order, not by name (#589).
+  const markets = (p.markets || []).map((m) => m.name)
+  const at = (x) => (x.featured_at == null ? Infinity : x.featured_at)
+  const featuredOrder = (a, b) => (markets.indexOf(a.market) - markets.indexOf(b.market)) || (at(a) - at(b)) || 0
   const all = (p.discover || []).filter(plMatch)
   const cats = [...new Set((p.discover || []).flatMap((x) => x.categories || []))].sort()
   const cat = cats.includes(S.plCat) ? S.plCat : ''
   const list = all.filter((x) => !cat || (x.categories || []).includes(cat))
-    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
+    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || (a.featured && featuredOrder(a, b)) || a.name.localeCompare(b.name))
   const chips = cats.length ? `<div class="pl-cats" role="group" aria-label="Categories">${['', ...cats].map((k) => `<button class="pl-cat${k === cat ? ' on' : ''}" data-pl-cat="${esc(k)}">${esc(k ? k[0].toUpperCase() + k.slice(1) : 'All')}</button>`).join('')}</div>` : ''
   const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
   if (!list.length) return chips + reading + `<p class="set-sub">${S.plQuery || cat ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
