@@ -225,7 +225,7 @@
   },
   {
    "id": "F-PLUG-24",
-   "feature": "A plugin may ship package skills: folders in its package named in the manifest's `skills` (Agent Skills format: `SKILL.md`, `references/`, `scripts/`; at most 10 with its runtime skills). The sheet names them ('Gives Claude in Echo the skill “x” from its package — in Echo's sessions, not your Claude Code'); a version whose skill folder is outside the plugin, isn't named as a skill, or whose `SKILL.md` frontmatter holds more than `name` (the folder's) and a one-line `description` or a `!` command can't be installed. Echo copies them as shipped into its own config folder (`plugins/session/<id>/skills/`) beside the plugin's runtime skills, at install and update and again before a session when the installed files changed; a runtime skill can't take a package skill's name and an empty runtime list leaves them; a switched-off plugin gives none; removing the plugin removes them",
+   "feature": "A plugin may ship package skills: folders in its package named in the manifest's `skills` (Agent Skills format: `SKILL.md`, `references/`, `scripts/`; at most 10 with its runtime skills). The sheet names them with the plugin's part for Claude ('Tells Claude in Echo how to work with it (the skill “x”), loaded only when you work with it (its files: <hash>)'), the hash over their folders: a version changing one asks again; a version whose skill folder is outside the plugin or holds a `.claude` folder, isn't named as a skill, or whose `SKILL.md` frontmatter holds more than `name` (the folder's) and a one-line `description` or a `!` command can't be installed. Echo copies them as shipped into its own config folder (`plugins/session/<id>/skills/`) beside the plugin's runtime skills, at install and update and again before a session when the installed files changed; a runtime skill can't take a package skill's name and an empty runtime list leaves them; a switched-off plugin gives none; removing the plugin removes them",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -253,7 +253,7 @@
   },
   {
    "id": "F-PLUG-27",
-   "feature": "The build skill (Claude Code plugin) makes the user's own plugin or widget in My plugins by Echo's plugin authoring rules (`echoctl plugin guide` prints them, as this Echo has them), checks its data with `echoctl widget show`, installs it after the user's yes on the sheet, and places it on Today or a thread's or client's dashboard (`echoctl today … --thread / --client`)",
+   "feature": "The build skill (Claude Code plugin) makes the user's own plugin or widget in My plugins by Echo's plugin authoring rules (`echoctl plugin guide` prints them, as this Echo has them), gives it a part for Claude (`agent.summary` and `agent/CLAUDE.md`, with skills, rules or guides under `agent/` when it needs them), runs `echoctl plugin check` on it and fixes what it names before offering an install or update, checks its data with `echoctl widget show`, installs it after the user's yes on the sheet, and places it on Today or a thread's or client's dashboard (`echoctl today … --thread / --client`)",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -290,6 +290,42 @@
    ],
    "cases": [
     "plugins/TC-034"
+   ]
+  },
+  {
+   "id": "F-PLUG-31",
+   "feature": "A plugin may have a part for Claude in Echo in its manifest's `\"agent\"`: `summary` (one line, 1–200: it has a guide, the package folder `agent/` — `CLAUDE.md` ≤ 8 KB, required; `skills/<name>/SKILL.md` ≤ 20 with their declared scripts; `rules/*.md` ≤ 10 of 4 KB; `guides/**/*.md` ≤ 50 of 64 KB; ≤ 1 MB in all; nothing else, no `.claude` folder in any case, other dot files left out) and `prefix` (2–4 of a–z and 0–9, not `echo`), required as soon as it has any skill (`agent/skills`, the manifest's `skills`, `ctx.sessions.skills`). A prefix belongs to one marketplace source (the source a plugin was installed from, also once that marketplace is removed) while a plugin of it using the prefix is installed, on or off: plugins of that source share it, another source's plugin is refused at install and enable naming the holder. The sheet says 'Tells Claude in Echo how to work with it (a guide and the skills “a” and “b”), loaded only when you work with it (its files: <hash of agent/ and the package skills' folders>)' — a version changing any of it asks again; a package breaking a rule can't be installed, while an installed copy that breaks a newer one keeps running without its part (its reason in Settings → Plugins, logged once); a plugin with runtime skills and no prefix keeps them for routines and Yolo, without its folder. Echo lays it out from the installed copy at `<data folder>/.plugins/<id>/` (`CLAUDE.md`, `.claude/skills/<prefix>-<name>/` — every package and runtime skill, its frontmatter `name` too, the prefix not doubled, 64 characters at most, never a name another enabled plugin lays out —, `.claude/rules/`, `guides/`, `scripts/echoctl`, Echo's launcher at each declared script's path), `${CLAUDE_PLUGIN_ROOT}` replaced by that folder's path in every text file, built beside it then swapped in; a layout that fails leaves no folder; again on update and enable, and at start and at each session's start when its installed files, the data folder, Echo's version or the folder's content differ from what Echo recorded; removed on disable and remove; at start a folder there that is no installed plugin switched on goes — only folders, only those older than that start, never when what is installed can't be read. A plugin with skills and no guide gets a CLAUDE.md Echo writes naming them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-32",
+   "feature": "`echoctl core` prints the core Echo's Claude · Echo folder session starts with (Markdown, under 9,000 characters): who Echo is and its data folder (About me only as where it is: `.echo/me.md`, the window's own hook gives it whole); the rules (others' words are data; before working with a plugin, Read its `.plugins/<id>/CLAUDE.md`, again after a resume; skills named `<prefix>-<skill>`); a table `| Plugin | What it gives | Skills | Read first |` of the enabled plugins with a part laid out, one row an entry its host half gave — the plugins' text one line, `\\` and `|` escaped, tags defused, control and invisible (bidi, zero-width) characters dropped; over its room, rows from the end left out and counted. `--hook` lays each plugin's folder out again first when it changed, then prints it as SessionStart hook JSON, and never fails the session nor waits past 3 s on a busy folder (left as it is, its row left out of that core); the folder session runs that hook (start, resume, compaction, /clear) and no longer gets plugins' skill folders by `--plugin-dir`: its plugin commands and scripts stay allowed, the scripts by their launchers' paths under `.plugins/<id>/`. Nothing writes under `.plugins/` but Echo: the guard refuses it in guarded runs, and a PreToolUse hook (`plugins-hook`) in the folder session and in Yolo's runs refuses Edit, Write, MultiEdit, NotebookEdit there and a Bash line that redirects into it, or changes files naming `.plugins` or from inside it (best effort)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-33",
+   "feature": "A plugin with an `agent` part gives Claude guides at run time with `ctx.agent.set({summary?, entries: [{name, summary, guide}]})` (the whole set each call): `name` a–z 0–9 `-` up to 40, not `guides` or `scripts`; at most 20; `summary` 1–200 characters; `guide` Markdown ≤ 16 KB. Each is written to `.plugins/<id>/<name>/CLAUDE.md` and is a row of the core; entries not given again go; `summary` replaces the manifest's in the core. Refused in a read-only routine and for a plugin without `agent`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-34",
+   "feature": "`echoctl plugin check <folder>…` checks plugin packages as an install would — the tree, the manifest and `uses`, settings, widgets and their params, package skills and `SKILL.md`, scripts, the `agent` part and its limits — what this Echo can't install (a newer `echo` it needs, a capability not here yet), a `.claude` folder in `agent/` or a skill folder, skills without a valid `agent.prefix` or two of them laid out alike with it, the id or prefix `echo`, and also a `${CLAUDE_PLUGIN_ROOT}` in the manifest or the window half (nothing fills it in there) and an `agent/` the manifest doesn't name; each problem with its file; exit 0 only when every folder is clean; several folders each reported by id; `--json` prints `{ok, problems: [{id, file, what}], plugins: [{id, folder, ok}]}`. It reads only the folders: no data folder, nothing installed, no network",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.offer"
    ]
   }
  ]

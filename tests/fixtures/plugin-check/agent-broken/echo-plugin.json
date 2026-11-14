@@ -1,0 +1,10 @@
+{
+  "id": "agent-broken",
+  "name": "Agent broken",
+  "version": "0.1.0",
+  "summary": "A broken test package for `echoctl plugin check` (tests/cases/plugins/TC-037): each file below breaks one rule.",
+  "main": "main.js",
+  "client": "client.js",
+  "agent": {"summary": "Broken on purpose"},
+  "widgets": [{"id": "count", "label": "Count", "kind": "gauge"}]
+}

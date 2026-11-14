@@ -34,8 +34,11 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+pub mod agent;
 pub mod scripts;
 pub mod shared;
+mod settings;
+pub use settings::*;
 mod sources;
 use sources::*;
 pub(crate) use sources::copy_tree;
@@ -109,6 +112,27 @@ pub struct Manifest {
     /// work rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Its part for Claude in Echo: `{"summary": "<one line>"}`, with the folder `agent/` in its package (`agent.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Value>,
+    /// The hash of what its package tells Claude — its `agent/` folder and its package skills' folders: on the sheet,
+    /// so a version changing any of it asks again. Always Echo's, as `scripts_digest`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_digest: Option<String>,
+    /// The skills its package gives Claude in Echo (the manifest's `skills` and `agent/skills/`), by name. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_names: Vec<String>,
+    /// What is wrong with its part for Claude (`agent/`, its package skills and their scripts), by a rule its installed
+    /// copy may predate: the plugin still runs, Claude in Echo gets none of that part. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_problems: Vec<String>,
+}
+
+/// A problem with a plugin package: the file it is in (relative to the package) and what is wrong.
+#[derive(Debug, Clone, Serialize)]
+pub struct Problem {
+    pub file: String,
+    pub what: String,
 }
 
 /// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `chart`, `list`, `status`, `card`, `table`) at the sizes it takes.
@@ -253,102 +277,212 @@ fn needs_echo(req: &str) -> Result<String> {
     Ok(v.to_string())
 }
 
-/// Read and check a manifest: its fields, settings and capability values (`describe`).
+/// Read and check a manifest: its fields, settings and capability values (`describe`), its widgets — refused with the
+/// first problem there — and its part for Claude (`agent/`, its skills and scripts), whose problems it only notes
+/// (`part_problems`): a plugin installed before a newer rule keeps running. An install refuses them (`read_package`).
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
+    // An installed copy changes only by an install, which forgets it here: read and walked once, not on each look.
+    let installed = dir.starts_with(plugins_dir().join("installed"));
+    let stamp = fs::metadata(dir.join(MANIFEST)).and_then(|m| m.modified()).ok();
+    if installed {
+        if let Some((_, m)) = READ.lock().ok().and_then(|c| c.get(dir).cloned()).filter(|(s, _)| *s == stamp) {
+            return Ok(m);
+        }
+    }
+    let (m, problems) = check_package(dir)?;
+    if let Some(p) = problems.into_iter().find(|p| !m.part_problems.contains(&p.what)) {
+        bail!("{}", p.what);
+    }
+    if installed {
+        if let Ok(mut c) = READ.lock() {
+            c.insert(dir.to_path_buf(), (stamp, m.clone()));
+        }
+    }
+    Ok(m)
+}
+
+/// A package as an install, an update and a marketplace's offer take it: every problem refuses it, its part for Claude's
+/// too.
+pub fn read_package(dir: &Path) -> Result<Manifest> {
+    let m = read_manifest(dir)?;
+    if let Some(p) = m.part_problems.first() {
+        bail!("{p}");
+    }
+    Ok(m)
+}
+
+/// Installed copies' manifests as read (`read_manifest`), by folder, with the manifest's time then.
+static READ: Mutex<BTreeMap<PathBuf, (Option<std::time::SystemTime>, Manifest)>> = Mutex::new(BTreeMap::new());
+
+/// An installed copy replaced or removed: read it again next time.
+pub(super) fn forget_read(id: &str) {
+    if let Ok(mut c) = READ.lock() {
+        c.retain(|d, _| !d.starts_with(installed_dir(id)));
+    }
+}
+
+/// Read a manifest and find every problem of its package (`echoctl plugin check` shows them all; an install refuses
+/// the first). Errs only when the manifest can't be read at all.
+pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).with_context(|| format!("no {MANIFEST}"))?;
     let mut m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
-    if !valid_id(&m.id) {
-        bail!("its id “{}” isn't a plain name (a–z, 0–9, -)", m.id);
-    }
-    if m.name.trim().is_empty() || m.name.chars().count() > 60 {
-        bail!("its name must be 1–60 characters");
-    }
-    if !crate::update::valid_version(&m.version) {
-        bail!("its version “{}” isn't like 1.2.3", m.version);
-    }
-    if m.summary.chars().count() > 240 {
-        bail!("its summary is longer than 240 characters");
-    }
-    if let Some(r) = &m.echo {
-        needs_echo(r)?;
-    }
+    let mut out: Vec<Problem> = vec![];
+    let mut put = |file: &str, r: Result<()>| {
+        if let Err(e) = r {
+            out.push(Problem { file: file.into(), what: format!("{e:#}") });
+        }
+    };
+    let man = MANIFEST;
+    put(man, (|| {
+        if !valid_id(&m.id) {
+            bail!("its id “{}” isn't a plain name (a–z, 0–9, -)", m.id);
+        }
+        // Echo's own plugin's skills are `echo:<name>`.
+        if m.id == "echo" {
+            bail!("its id “echo” is Echo's own");
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if m.name.trim().is_empty() || m.name.chars().count() > 60 {
+            bail!("its name must be 1–60 characters");
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if !crate::update::valid_version(&m.version) {
+            bail!("its version “{}” isn't like 1.2.3", m.version);
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if m.summary.chars().count() > 240 {
+            bail!("its summary is longer than 240 characters");
+        }
+        Ok(())
+    })());
+    put(man, m.echo.as_deref().map_or(Ok(()), |r| needs_echo(r).map(|_| ())));
     let mut keys = std::collections::HashSet::new();
     for s in &m.settings {
-        if !valid_id(&s.key.replace('_', "-")) || !keys.insert(s.key.clone()) {
-            bail!("setting “{}” needs a plain, unique key", s.key);
-        }
-        if !SETTING_KINDS.contains(&s.kind.as_str()) {
-            bail!("setting “{}” has a type Echo doesn't know ({})", s.key, SETTING_KINDS.join(", "));
+        put(man, (|| {
+            if !valid_id(&s.key.replace('_', "-")) || !keys.insert(s.key.clone()) {
+                bail!("setting “{}” needs a plain, unique key", s.key);
+            }
+            if !SETTING_KINDS.contains(&s.kind.as_str()) {
+                bail!("setting “{}” has a type Echo doesn't know ({})", s.key, SETTING_KINDS.join(", "));
+            }
+            Ok(())
+        })());
+    }
+    put(man, describe(&m.uses).map(|_| ()));
+    // Its part for Claude in Echo (`agent` and `agent/`); the skills of `agent/skills/` with its other package skills;
+    // their scripts. Noted apart (`part_problems`).
+    let mut part = agent::problems(dir, &m);
+    let agent_ok = part.is_empty();
+    let (skills, skill_problems, unread) = agent::skill_problems(dir, &m);
+    // A skill it can't read just now isn't checked further (its scripts, the sheet's hash): no rule is broken.
+    let skills_ok = skill_problems.is_empty() && unread.is_empty();
+    part.extend(skill_problems);
+    m.skill_names = skills.iter().map(|(n, _)| n.clone()).collect();
+    // Two of its own skills laid out alike (`x` and `<prefix>-x`): as an install would refuse it.
+    if let Some(p) = agent::prefix_of(&m).filter(|p| agent::valid_prefix(p)) {
+        if let Err(e) = agent::own_clash(&m.id, &p, &m.skill_names) {
+            part.push(Problem { file: man.into(), what: format!("{e:#}") });
         }
     }
-    describe(&m.uses)?;
-    package_skills(dir, &m)?;
-    m.scripts_digest = scripts::check(dir, &m)?;
+    // Its skills are named with its prefix in Echo's sessions.
+    if !skills.is_empty() && agent::prefix_of(&m).is_none() {
+        part.push(Problem { file: man.into(), what: "it has skills: “agent.prefix” (2–4 of a–z, 0–9) names them in Echo's sessions".into() });
+    }
+    m.agent_digest = (agent_ok && skills_ok).then(|| agent::digest(dir, &m)).flatten();
+    m.scripts_digest = None;
+    if skills_ok {
+        match scripts::check(dir, &m) {
+            Ok(d) => m.scripts_digest = d,
+            Err(e) => part.push(Problem { file: man.into(), what: format!("{e:#}") }),
+        }
+    }
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
-        match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
-            None => bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin"),
-            Some(s) if s.default.is_some() => bail!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter"),
-            Some(_) => {}
-        }
+        put(man, match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
+            None => Err(anyhow!("network.hosts_from names “{k}”, which isn't a string setting of the plugin")),
+            Some(s) if s.default.is_some() => Err(anyhow!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter")),
+            Some(_) => Ok(()),
+        });
     }
     let mut ids = std::collections::HashSet::new();
-    if m.widgets.len() > MAX_WIDGETS {
-        bail!("it declares more than {MAX_WIDGETS} widgets");
-    }
+    put(man, (|| {
+        if m.widgets.len() > MAX_WIDGETS {
+            bail!("it declares more than {MAX_WIDGETS} widgets");
+        }
+        Ok(())
+    })());
     for w in &m.widgets {
-        if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
-            bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
-        }
-        if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
-            bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
-        }
-        if !WIDGET_KINDS.contains(&w.kind.as_str()) {
-            bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
-        }
-        let mut seen = std::collections::HashSet::new();
-        if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
-            bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
-        }
-        // A table needs room for its columns: M and L.
-        if w.kind == "table" && w.sizes.iter().any(|s| s == "S") {
-            bail!("widget “{}” is a table: it takes sizes M and L", w.id);
-        }
-        if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
-            bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
-        }
-        if !["hug", "fill"].contains(&w.height.as_str()) {
-            bail!("widget “{}” is hug or fill high", w.id);
-        }
-        if w.refresh.is_some_and(|r| r < 60) {
-            bail!("widget “{}” is asked again every 60 s at most often", w.id);
-        }
-        if m.main.is_none() {
-            bail!("widget “{}” needs a host half (main) to give its data", w.id);
-        }
-        if w.kind == "page" && m.client.is_none() {
-            bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
-        }
-        check_params(&w.id, &w.params)?;
+        put(man, check_widget(w, &m, &mut ids));
     }
     // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
     // only, ending `.svg` — what the window serves as an image.
     if let Some(i) = &m.icon {
-        if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
-            bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
-        }
-        if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
-            bail!("its icon {i} must be an .svg of 16 KB at most");
-        }
+        put(man, (|| {
+            if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
+                bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
+            }
+            if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
+                bail!("its icon {i} must be an .svg of 16 KB at most");
+            }
+            Ok(())
+        })());
     }
     for f in [&m.main, &m.client].into_iter().flatten() {
-        let p = inside_plugin(dir, f)?;
-        if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
-            bail!("{f} isn't a JavaScript module (.js)");
-        }
+        put(f, (|| {
+            let p = inside_plugin(dir, f)?;
+            if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
+                bail!("{f} isn't a JavaScript module (.js)");
+            }
+            Ok(())
+        })());
     }
-    Ok(m)
+    m.part_problems = part.iter().map(|p| p.what.clone()).collect();
+    out.extend(part);
+    Ok((m, out))
+}
+
+/// One widget of the manifest, checked (`ids`: the ones seen so far).
+fn check_widget(w: &WidgetDef, m: &Manifest, ids: &mut std::collections::HashSet<String>) -> Result<()> {
+    if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
+        bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
+    }
+    if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
+        bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
+    }
+    if !WIDGET_KINDS.contains(&w.kind.as_str()) {
+        bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
+        bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+    }
+    // A table needs room for its columns: M and L.
+    if w.kind == "table" && w.sizes.iter().any(|s| s == "S") {
+        bail!("widget “{}” is a table: it takes sizes M and L", w.id);
+    }
+    if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
+        bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
+    }
+    if !["hug", "fill"].contains(&w.height.as_str()) {
+        bail!("widget “{}” is hug or fill high", w.id);
+    }
+    if w.refresh.is_some_and(|r| r < 60) {
+        bail!("widget “{}” is asked again every 60 s at most often", w.id);
+    }
+    if m.main.is_none() {
+        bail!("widget “{}” needs a host half (main) to give its data", w.id);
+    }
+    if w.kind == "page" && m.client.is_none() {
+        bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
+    }
+    check_params(&w.id, &w.params)
 }
 
 /// A file of the plugin's own: a relative path inside its folder that exists.
@@ -383,25 +517,20 @@ pub fn inside_plugin_dir(dir: &Path, rel: &str) -> Result<PathBuf> {
 /// The most skills a plugin gives Echo's sessions, its package and runtime ones together.
 pub const MAX_SKILLS: usize = 10;
 
-/// Its package skills, checked: `(name, folder in the package)`. Each is a folder inside the plugin named as a skill
-/// (a–z, 0–9, -), once; its `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line
-/// `description`, and no `!` command anywhere in it (Claude Code runs one when the skill loads).
+/// Its package skills, checked: `(name, folder in the package)` — the manifest's `skills` folders, then with an `agent`
+/// part each folder of `agent/skills/`. Each is a folder inside the plugin named as a skill (a–z, 0–9, -), once; its
+/// `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line `description`, and no `!` command
+/// anywhere in it (Claude Code runs one when the skill loads).
 pub fn package_skills(dir: &Path, m: &Manifest) -> Result<Vec<(String, PathBuf)>> {
-    if m.skills.len() > MAX_SKILLS {
-        bail!("it ships more than {MAX_SKILLS} skills");
+    let (skills, problems, unread) = agent::skill_problems(dir, m);
+    if let Some(p) = problems.into_iter().next() {
+        bail!("{}", p.what);
     }
-    let mut out: Vec<(String, PathBuf)> = vec![];
-    for rel in &m.skills {
-        let d = inside_plugin_dir(dir, rel).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
-        let name = d.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        if !valid_skill_name(&name) || out.iter().any(|(n, _)| *n == name) {
-            bail!("skill “{rel}”: its folder is named as a skill (a–z, 0–9, -; up to 40), once");
-        }
-        let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
-        check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
-        out.push((name, d));
+    // One it can't read just now: an error, not a rule broken (`agent::lay_out` tries again).
+    if let Some(u) = unread.into_iter().next() {
+        bail!("{u}");
     }
-    Ok(out)
+    Ok(skills)
 }
 
 /// A skill's name: lowercase words with dashes, up to 40 characters.
@@ -410,7 +539,7 @@ pub fn valid_skill_name(name: &str) -> bool {
 }
 
 /// A package skill's `SKILL.md`: frontmatter of `name` (= `name`) and a one-line `description` only, no `!` command.
-fn check_skill_md(name: &str, text: &str) -> Result<()> {
+pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
     let text = text.replace("\r\n", "\n");
     let rest = text.strip_prefix("---\n").ok_or_else(|| anyhow!("SKILL.md starts with its frontmatter (---)"))?;
     let (front, _) = rest.split_once("\n---").ok_or_else(|| anyhow!("SKILL.md's frontmatter has no end (---)"))?;
@@ -453,11 +582,21 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
             l.push_str(&format!(" (their files: {d})"));
         }
     }
-    // Its package skills, by name: what they say is in its package, for Echo's sessions only.
-    if !m.skills.is_empty() {
-        let names: Vec<String> = m.skills.iter().map(|s| format!("“{}”", s.trim_end_matches('/').rsplit('/').next().unwrap_or(s))).collect();
-        let what = if names.len() == 1 { "the skill" } else { "the skills" };
-        lines.push(format!("Gives Claude in Echo {what} {} from its package — in Echo's sessions, not your Claude Code", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>())));
+    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
+    // a version changing any of it asks again.
+    if agent::has_guide(m) || !m.skill_names.is_empty() {
+        let mut what = vec![];
+        if agent::has_guide(m) {
+            what.push("a guide".to_string());
+        }
+        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
+        match names.len() {
+            0 => {}
+            1 => what.push(format!("the skill {}", names[0])),
+            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
+        }
+        let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
+        lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
     }
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
     match m.widgets.len() {
@@ -469,7 +608,7 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
 }
 
 /// Why this Echo can't install it (`None` = it can).
-fn why_not(m: &Manifest) -> Option<String> {
+pub(crate) fn why_not(m: &Manifest) -> Option<String> {
     let here = env!("CARGO_PKG_VERSION");
     if let Some(v) = m.echo.as_deref().and_then(|r| needs_echo(r).ok()) {
         if crate::update::newer(&v, here) {
@@ -504,6 +643,10 @@ pub struct Installed {
     pub installed_at: String,
     /// The permission sheet the user agreed to.
     pub uses: Vec<String>,
+    /// Its marketplace's source when it was installed (`owner/repo`, a URL, a folder): what holds its skills prefix,
+    /// even once that marketplace is removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -746,7 +889,7 @@ pub fn refresh(name: &str) -> Result<Catalog> {
             })();
             let offer = match at.and_then(|(dir, commit)| {
                 check_tree(&dir, PLUGIN_LIMIT)?;
-                let m = read_manifest(&dir)?;
+                let m = read_package(&dir)?;
                 if m.id != e.id {
                     bail!("its manifest says “{}”", m.id);
                 }
@@ -964,23 +1107,35 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         let _ = fs::remove_dir_all(&tmp);
         bail!("its files changed while installing — try again");
     }
-    match read_manifest(&tmp).and_then(|m| Ok((sheet(&m)?, m))) {
-        Ok((uses, m)) if m.id == rv.id && uses == rv.uses => {}
+    let new = match read_package(&tmp).and_then(|m| Ok((sheet(&m)?, m))) {
+        Ok((uses, m)) if m.id == rv.id && uses == rv.uses => m,
         _ => {
             let _ = fs::remove_dir_all(&tmp);
             bail!("{} changed since you saw what it asks — look again (read its marketplace again)", rv.name);
+        }
+    };
+    // No skill of it laid out under a name another plugin's has (`acme` + `kit-x` and `acme-kit` + `x`).
+    // Its skills prefix held by no other marketplace's plugins; no skill laid out under a name another plugin's has.
+    if let Some(prefix) = agent::prefix_of(&new) {
+        let checked = agent::claim_prefix(id, &mk, &prefix, false).and_then(|()| if before.as_ref().is_none_or(|b| b.enabled) { agent::clash(id, &prefix, &new.skill_names) } else { Ok(()) });
+        if let Err(e) = checked {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
         }
     }
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(&dest);
+    forget_read(id);
     fs::rename(&tmp, &dest)?;
     if let Ok(m) = read_manifest(&dest) {
         scripts::mark_runnable(&dest, &m);
     }
     // An update keeps when it was first installed (a namespace's owner is the earliest: `shared`).
     let first = before.as_ref().filter(|b| b.market == mk).map_or_else(|| chrono::Local::now().to_rfc3339(), |b| b.installed_at.clone());
+    let source = Registry::load().ok().and_then(|r| r.market(&mk).map(|m| m.source.clone()));
     let rec = Installed {
+        source,
         id: id.into(),
         name: rv.name,
         version: rv.version.clone(),
@@ -995,8 +1150,14 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
-    // Each namespace's owner kept from now on: a later removal or update never hands one over (`shared`).
+    // Each namespace's owner kept from now on: a later removal or update never hands one over (`shared`); its skills
+    // prefix too.
     shared::bind_all();
+    if let Some(prefix) = read_manifest(&dest).ok().as_ref().and_then(agent::prefix_of) {
+        if let Err(e) = agent::claim_prefix(id, &rec.market, &prefix, true) {
+            eprintln!("plugin {id}: {e:#}");
+        }
+    }
     // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
     // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
     let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
@@ -1015,6 +1176,8 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     if let Err(e) = crate::grants::copy_package_skills(id) {
         eprintln!("plugin {id}: its skills can't be copied: {e:#}");
     }
+    // Its part for Claude in Echo's folder session, in the data folder (`.plugins/<id>/`).
+    let _ = agent::lay_out(id);
     changed();
     Ok(rec)
 }
@@ -1059,12 +1222,31 @@ pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
+    if on {
+        let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
+        if let Ok(m) = read_manifest(&plugin_dir(&p)) {
+            if let Some(prefix) = agent::prefix_of(&m) {
+                agent::claim_prefix(id, &p.market, &prefix, true)?;
+                // Its package skills and the runtime ones its host half set before.
+                let mut names = m.skill_names.clone();
+                names.extend(crate::grants::runtime_skill_dirs(id, &m.skill_names).into_iter().map(|(n, _)| n));
+                agent::clash(id, &prefix, &names)?;
+            }
+        }
+    }
     Registry::update(|r| {
         let p = r.installed.get_mut(id).ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
         p.enabled = on;
         Ok(())
-    })
-    .inspect(|_| changed())
+    })?;
+    // Its part for Claude goes with it, and comes back with it.
+    if on {
+        let _ = agent::lay_out(id);
+    } else {
+        agent::remove(id);
+    }
+    changed();
+    Ok(())
 }
 
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
@@ -1074,7 +1256,9 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(installed_dir(id));
+    forget_read(id);
     crate::grants::remove_plugin(id);
+    agent::remove(id);
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
     signin::forget_plugin(id);
     if !keep_data {
@@ -1093,170 +1277,6 @@ pub fn enabled() -> Vec<Installed> {
 }
 
 
-
-// ── settings ──
-
-/// A plugin's own folder in the data folder (its settings and state).
-pub fn data_dir(id: &str) -> PathBuf {
-    paths::state_dir().join("plugins").join(id)
-}
-
-fn secrets_file(id: &str) -> PathBuf {
-    plugins_dir().join("secrets").join(format!("{id}.json"))
-}
-
-/// The addresses the user listed (`uses.network.hosts_from`), outside the plugin's store: nothing the plugin writes
-/// can reach this file, whatever name it uses.
-fn addresses_file(id: &str) -> PathBuf {
-    plugins_dir().join("addresses").join(format!("{id}.json"))
-}
-
-/// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
-    read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
-}
-
-fn read_map(path: &Path) -> serde_json::Map<String, Value> {
-    fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
-}
-
-fn installed_manifest(id: &str) -> Result<Manifest> {
-    let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
-    read_manifest(&plugin_dir(&p))
-}
-
-/// The settings as the page shows them: each definition with its value (a secret only as set / not).
-pub fn settings_view(id: &str) -> Result<Vec<Value>> {
-    let m = installed_manifest(id)?;
-    let mut vals = read_map(&data_dir(id).join("settings.json"));
-    let listed = address_settings(&m.uses);
-    vals.retain(|k, _| !listed.contains(k));
-    vals.extend(read_map(&addresses_file(id)));
-    let secrets = read_map(&secrets_file(id));
-    Ok(m.settings
-        .iter()
-        .map(|s| {
-            let mut v = serde_json::to_value(s).unwrap_or_default();
-            if s.kind == "secret" {
-                v["set"] = secrets.contains_key(&s.key).into();
-            } else {
-                v["value"] = vals.get(&s.key).cloned().or_else(|| s.default.clone()).unwrap_or(Value::Null);
-            }
-            v
-        })
-        .collect())
-}
-
-/// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
-}
-
-/// When the user last said no to a plugin's addresses from the window: for a minute after, the page's requests for it
-/// are refused without a dialog, so a page can't keep asking until the user gives in.
-static REFUSED: Mutex<BTreeMap<String, std::time::Instant>> = Mutex::new(BTreeMap::new());
-
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn refused_lately(id: &str) -> bool {
-    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).get(id).is_some_and(|t| t.elapsed().as_secs() < 60)
-}
-
-/// For a setting from the window: the plugin's name and the addresses to allow, when `value` lists addresses it may
-/// reach (checked first, so a wrong one is refused at once); `None` for anything else or an empty list (it narrows).
-/// The list as saved is asked about too: a check against the saved file would race with a save under way.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn addresses_to_allow(id: &str, key: &str, value: &Value) -> Result<Option<(String, Vec<String>)>> {
-    let m = installed_manifest(id)?;
-    let text = value.as_str().unwrap_or("").trim();
-    if !address_settings(&m.uses).iter().any(|k| k == key) || text.is_empty() {
-        return Ok(None);
-    }
-    if text.chars().count() > 2000 {
-        bail!("an address list is 2000 characters at most");
-    }
-    let label = m.settings.iter().find(|s| s.key == key).map_or(key, |s| s.label.as_str());
-    addresses::parse_list(text).with_context(|| format!("“{label}” isn't an address the plugin may reach"))?;
-    let name: String = m.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    Ok(Some((name, text.split([',', ' ', '\n', '\r', '\t']).filter(|p| !p.is_empty()).map(str::to_owned).collect())))
-}
-
-/// The user's yes, in a dialog of the system's, to `name` reaching `list`. Development builds and tests:
-/// `ECHOCTL_ALLOW_ADDRESSES=yes|no` answers instead (never in a release build).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn allow_addresses(name: &str, list: &[String]) -> bool {
-    #[cfg(debug_assertions)]
-    if let Ok(a) = std::env::var("ECHOCTL_ALLOW_ADDRESSES") {
-        return a == "yes";
-    }
-    let msg = format!("Let {name} reach these addresses?\n\n{}\n\nAllow only if you entered them yourself.", list.join("\n"));
-    crate::app::ask(&msg, &["Don't allow", "Allow"], "Don't allow").as_deref() == Some("Allow")
-}
-
-/// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
-pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
-    uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
-}
-
-/// Save one setting, checked against its definition; an empty secret forgets it.
-pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
-    let m = installed_manifest(id)?;
-    let def = m.settings.iter().find(|s| s.key == key).ok_or_else(|| anyhow!("{} has no setting “{key}”", m.name))?;
-    let value = match (def.kind.as_str(), value) {
-        ("bool", Value::Bool(_)) => value.clone(),
-        ("bool", Value::String(s)) if s == "true" || s == "false" => Value::Bool(s == "true"),
-        ("string" | "folder" | "secret", Value::String(s)) if s.chars().count() <= 2000 => Value::String(s.trim().to_string()),
-        _ => bail!("“{}” takes a {}", def.label, def.kind),
-    };
-    if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
-        bail!("{} isn't a folder", value.as_str().unwrap_or(""));
-    }
-    let is_address = address_settings(&m.uses).iter().any(|k| k == key);
-    if is_address {
-        addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
-    }
-    let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    if is_address {
-        let f = addresses_file(id);
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        all.insert(key.into(), value);
-        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    } else if def.kind == "secret" {
-        let f = secrets_file(id);
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        if value.as_str().is_some_and(str::is_empty) {
-            all.remove(key);
-        } else {
-            all.insert(key.into(), value);
-        }
-        write_private(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    } else {
-        let f = data_dir(id).join("settings.json");
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        all.insert(key.into(), value);
-        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    }
-    Ok(())
-}
-
-/// Written atomically and readable only by the user (Unix: 0600 from the start).
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let mut o = fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o600);
-    }
-    std::io::Write::write_all(&mut o.open(&tmp)?, bytes)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
 
 // ── for the window ──
 
@@ -1304,6 +1324,8 @@ pub fn snapshot() -> Value {
         .values()
         .map(|p| {
             let m = read_manifest(&plugin_dir(p)).ok();
+            let m_part = m.as_ref().and_then(|m| m.part_problems.first().cloned()).or_else(|| agent::withheld(&p.id));
+            let m_prefix = m.as_ref().and_then(agent::prefix_of);
             let summary = m.as_ref().map(|m| m.summary.clone()).unwrap_or_default();
             let client = m.as_ref().and_then(|m| m.client.clone());
             let caps: Vec<String> = m.map(|m| m.uses.keys().cloned().collect()).unwrap_or_default();
@@ -1313,6 +1335,8 @@ pub fn snapshot() -> Value {
                 "market_gone": r.market(&p.market).is_none(),
                 "update": update_for(p).map(|u| review_json(&u)),
                 "settings": settings_view(&p.id).unwrap_or_default(),
+                "claude_problem": m_part,
+                "prefix": m_prefix,
             })
         })
         .collect();
@@ -1538,7 +1562,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1846,16 +1870,17 @@ mod tests {
             fs::write(d.join("skills").join(name).join("SKILL.md"), md).unwrap();
         };
         let with = |skills: Value| {
-            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "skills": skills}).to_string()).unwrap();
-            read_manifest(&d)
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "skills": skills, "agent": {"prefix": "p1"}}).to_string()).unwrap();
+            read_package(&d)
         };
         skill("read-staffing", "---\nname: read-staffing\ndescription: \"Reads the staffing of a project.\"\n---\n\nRun the script.\n");
         skill("two", "---\nname: two\ndescription: Another one.\n---\nText.\n");
         let m = with(json!(["skills/read-staffing", "./skills/two/"])).unwrap();
         assert_eq!(package_skills(&d, &m).unwrap().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["read-staffing", "two"]);
-        assert_eq!(sheet(&m).unwrap(), ["Gives Claude in Echo the skills “read-staffing” and “two” from its package — in Echo's sessions, not your Claude Code"]);
+        let line = sheet(&m).unwrap();
+        assert!(line.len() == 1 && line[0].starts_with("Tells Claude in Echo how to work with it (the skills “read-staffing” and “two”), loaded only when you work with it (its files: "), "{line:?}");
         let one = with(json!(["skills/two"])).unwrap();
-        assert_eq!(sheet(&one).unwrap(), ["Gives Claude in Echo the skill “two” from its package — in Echo's sessions, not your Claude Code"]);
+        assert!(sheet(&one).unwrap()[0].starts_with("Tells Claude in Echo how to work with it (the skill “two”), loaded only when you work with it (its files: "));
         // Each refused, with why.
         skill("hooked", "---\nname: hooked\ndescription: x\nhooks: evil\n---\n");
         skill("renamed", "---\nname: other\ndescription: x\n---\n");

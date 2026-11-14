@@ -96,6 +96,7 @@ function plDetail(p, x) {
   if (card && x.enabled && !sec) { try { own = card.render() } catch (e) { own = `<p class="error">${esc(String(e))}</p>` } }
   const broke = (Plugins.errors[x.id] ? `<p class="error">Its window part didn't load: ${esc(Plugins.errors[x.id])}</p>` : '')
     + (x.work_error && x.enabled ? `<p class="set-sub">Its items in ${esc(x.work_error.place)} weren't updated the last time: ${esc(x.work_error.error)}</p>` : '')
+    + (x.claude_problem && x.enabled ? `<p class="set-sub">Claude in Echo doesn't get its guide and skills: ${esc(x.claude_problem)}</p>` : '')
   return `<section class="pl-detail" aria-label="${esc(x.name)}">
     <div class="pl-dhead">${plTile(x, true)}<div style="flex:1;min-width:0"><div class="pl-dn">${esc(x.name)}</div><div class="set-sub">${esc(x.version)} · from <b>${esc(x.market)}</b>${x.market_gone ? ' (removed — no updates)' : ''} · commit <code>${esc((x.commit || '').slice(0, 10))}</code></div></div>
       <button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button></div>

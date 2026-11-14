@@ -249,6 +249,15 @@ impl Scope {
     pub fn judge(&self, call: &Value) -> Result<(), String> {
         let tool = call["tool_name"].as_str().unwrap_or("");
         let input = &call["tool_input"];
+        // What plugins tell Claude (`.plugins/` in the data folder) is Echo's to write: a session there loads it.
+        if matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
+            let raw = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str());
+            if let Ok(p) = resolve(raw) {
+                if crate::plugins::agent::inside_root(&p) {
+                    return Err(format!("{} is what a plugin tells Claude: only Echo writes there", p.display()));
+                }
+            }
+        }
         if let Some(ps) = &self.project {
             return self.judge_project(ps, call, tool, input);
         }
@@ -928,6 +937,24 @@ mod tests {
         // Reading one is no harm (it was there before the run): the CLAUDE.md files under calls/
         // aren't loaded (`claudeMdExcludes`).
         s.judge(&tool("Read", json!({"file_path": call.join("CLAUDE.md").display().to_string()}))).unwrap();
+    }
+
+    #[test]
+    fn what_plugins_tell_claude_is_never_written_by_a_run() {
+        let (_env, root) = crate::paths::testenv::folders("guard-plugins");
+        let kit = dunce::canonicalize(root.join("home")).unwrap().join(".plugins/kit");
+        fs::create_dir_all(kit.join(".claude/skills/x")).unwrap();
+        fs::write(kit.join("CLAUDE.md"), "# Kit").unwrap();
+        // Even a run whose own folder it were: a write there is Echo's alone.
+        let s = Scope { call: kit.clone(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] };
+        for (t, f) in [("Write", "notes.md"), ("Edit", "CLAUDE.md"), ("Write", ".claude/skills/x/SKILL.md"), ("MultiEdit", "notes.md")] {
+            let e = s.judge(&tool(t, json!({"file_path": kit.join(f).display().to_string(), "content": "x"}))).unwrap_err();
+            assert!(e.contains("only Echo writes there"), "{t} {f}: {e}");
+        }
+        let e = s.judge(&tool("NotebookEdit", json!({"notebook_path": kit.join("n.ipynb").display().to_string()}))).unwrap_err();
+        assert!(e.contains("only Echo writes there"), "{e}");
+        // Reading it is what a session does.
+        s.judge(&tool("Read", json!({"file_path": kit.join("CLAUDE.md").display().to_string()}))).unwrap();
     }
 
     #[test]

@@ -31,7 +31,7 @@ tags: [plugins, claude, sessions, skills, permissions, untrusted-text]
 ```bash
 M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-asker" "$M/plugins/acme-quiet"
 echo '{"name":"acme-local","plugins":[{"id":"acme-asker","source":"./plugins/acme-asker"},{"id":"acme-quiet","source":"./plugins/acme-quiet"}]}' > "$M/echo-marketplace.json"
-echo '{"id":"acme-asker","name":"Acme asker","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","uses":{"claude":{},"sessions":{"skills":true}}}' > "$M/plugins/acme-asker/echo-plugin.json"
+echo '{"id":"acme-asker","name":"Acme asker","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","agent":{"prefix":"ask"},"uses":{"claude":{},"sessions":{"skills":true}}}' > "$M/plugins/acme-asker/echo-plugin.json"
 echo '{"id":"acme-quiet","name":"Acme quiet","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","uses":{"network":{"hosts":["api.acme.example"]}}}' > "$M/plugins/acme-quiet/echo-plugin.json"
 cat > "$M/plugins/acme-asker/main.js" <<'EOF'
 export function apply(ctx) {

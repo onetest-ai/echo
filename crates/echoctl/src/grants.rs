@@ -24,7 +24,7 @@ fn grants_file(id: &str) -> PathBuf {
     paths::config_dir().join("plugins").join("grants").join(format!("{id}.json"))
 }
 
-fn session_dir(id: &str) -> PathBuf {
+pub(crate) fn session_dir(id: &str) -> PathBuf {
     paths::config_dir().join("plugins").join("session").join(id)
 }
 
@@ -201,6 +201,12 @@ fn package_mark(dir: &Path) -> (String, Vec<String>) {
     (v["files"].as_str().unwrap_or("").to_string(), v["skills"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect())
 }
 
+/// How many of the package's skills there are from its `agent/skills/` (they don't count against `MAX_SKILLS`).
+fn agent_skill_count(dir: &Path) -> usize {
+    let v: Value = std::fs::read(dir.join(PACKAGE_MARK)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+    v["agent"].as_u64().unwrap_or(0) as usize
+}
+
 /// One writer of a plugin's session folder at a time, across processes (the app, a terminal's `plugin install`).
 fn session_lock(id: &str) -> Result<crate::app::FileLock> {
     let locks = paths::config_dir().join("plugins").join("session").join(".locks");
@@ -217,21 +223,31 @@ fn skill_dirs(dir: &Path) -> Vec<String> {
 /// it (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`).
 fn write_session_base(id: &str, dir: &Path) -> Result<()> {
     let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
-    let files = [
-        (dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?),
-        (dir.join("scripts").join("echoctl"), include_str!("../../../plugin/scripts/echoctl").to_string()),
-        (dir.join("scripts").join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").to_string()),
-    ];
-    for (f, text) in files {
-        std::fs::create_dir_all(f.parent().expect("a parent"))?;
-        paths::write_atomic(&f, text.as_bytes())?;
-    }
+    let f = dir.join(".claude-plugin").join("plugin.json");
+    std::fs::create_dir_all(f.parent().expect("a parent"))?;
+    paths::write_atomic(&f, serde_json::to_string_pretty(&manifest)?.as_bytes())?;
+    write_launchers(&dir.join("scripts"))
+}
+
+/// The Echo CLI launchers in `scripts` (`echoctl`, runnable, and `echoctl.cmd`), as Echo's own skills reach it.
+pub(crate) fn write_launchers(scripts: &Path) -> Result<()> {
+    std::fs::create_dir_all(scripts)?;
+    paths::write_atomic(&scripts.join("echoctl"), include_str!("../../../plugin/scripts/echoctl").as_bytes())?;
+    paths::write_atomic(&scripts.join("echoctl.cmd"), include_str!("../../../plugin/scripts/echoctl.cmd").as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.join("scripts").join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
+        std::fs::set_permissions(scripts.join("echoctl"), std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+/// Plugin `id`'s runtime skills in its session folder: `(name, folder)` of each one not its package's (`package`).
+pub(crate) fn runtime_skill_dirs(id: &str, package: &[String]) -> Vec<(String, PathBuf)> {
+    let dir = session_dir(id);
+    let mut out: Vec<(String, PathBuf)> = skill_dirs(&dir).into_iter().filter(|n| !package.contains(n)).map(|n| (n.clone(), dir.join("skills").join(n))).filter(|(_, d)| d.join("SKILL.md").is_file()).collect();
+    out.sort();
+    out
 }
 
 /// Plugin `id`'s runtime skills for Echo's sessions: `[{name, description, body}]` (an empty list takes them away).
@@ -240,6 +256,9 @@ fn write_session_base(id: &str, dir: &Path) -> Result<()> {
 /// package skills (`copy_package_skills`) stay beside them; a name is never both.
 pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     let list = skills.as_array().ok_or_else(|| anyhow!("skills are a list"))?;
+    // Named with its prefix in Echo's sessions. Without one (a plugin from before prefixes) its session copy still
+    // updates — routines and Yolo use it —; the folder session just doesn't get them (`agent::lay_out` says why).
+    let prefix = if list.is_empty() { None } else { crate::plugins::agent::installed_prefix(id).ok() };
     if list.len() > crate::plugins::MAX_SKILLS {
         bail!("at most {} skills", crate::plugins::MAX_SKILLS);
     }
@@ -250,6 +269,9 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
         let body = sk["body"].as_str().unwrap_or("");
         if !crate::plugins::valid_skill_name(name) {
             bail!("a skill's name is a few lowercase words with dashes");
+        }
+        if let Some(p) = &prefix {
+            crate::plugins::agent::check_skill_length(p, name).map_err(|e| anyhow!("skill {name}: {e}"))?;
         }
         if description.is_empty() || description.chars().count() > 1024 || description.contains(['\n', '\r']) {
             bail!("skill {name}: a description of one line, up to 1024 characters");
@@ -270,8 +292,14 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     if let Some((name, _)) = files.iter().find(|(n, _)| package.contains(n)) {
         bail!("skill {name}: the plugin's package has a skill of that name");
     }
-    if files.len() + package.len() > crate::plugins::MAX_SKILLS {
-        bail!("at most {} skills, with the {} of its package", crate::plugins::MAX_SKILLS, package.len());
+    // No name another enabled plugin lays out (`<prefix>-<name>`).
+    let all: Vec<String> = package.iter().cloned().chain(files.iter().map(|(n, _)| n.clone())).collect();
+    if let Some(p) = prefix.as_ref().filter(|_| !files.is_empty()) {
+        crate::plugins::agent::clash(id, p, &all)?;
+    }
+    let counted = package.len().saturating_sub(agent_skill_count(&dir));
+    if files.len() + counted > crate::plugins::MAX_SKILLS {
+        bail!("at most {} skills, with the {counted} of its package", crate::plugins::MAX_SKILLS);
     }
     // Its runtime skills are replaced whole; the package's stay.
     for old in skill_dirs(&dir).into_iter().filter(|n| !package.contains(n)) {
@@ -279,18 +307,22 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     }
     if files.is_empty() {
         SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
-        if package.is_empty() {
+        if package.is_empty() && !dir.join("agent.json").is_file() {
             let _ = std::fs::remove_dir_all(&dir);
         }
-        return Ok(());
+    } else {
+        for (name, md) in files {
+            let f = dir.join("skills").join(name).join("SKILL.md");
+            std::fs::create_dir_all(f.parent().expect("a parent"))?;
+            paths::write_atomic(&f, md.as_bytes())?;
+        }
+        write_session_base(id, &dir)?;
+        SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
     }
-    for (name, md) in files {
-        let f = dir.join("skills").join(name).join("SKILL.md");
-        std::fs::create_dir_all(f.parent().expect("a parent"))?;
-        paths::write_atomic(&f, md.as_bytes())?;
-    }
-    write_session_base(id, &dir)?;
-    SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
+    drop(_lock);
+    // The folder session finds them in the plugin's folder in the data folder too.
+    // Its own reason, if it isn't, said once by `lay_out` and kept for Settings.
+    let _ = crate::plugins::agent::lay_out(id);
     Ok(())
 }
 
@@ -315,7 +347,7 @@ pub fn copy_package_skills(id: &str) -> Result<()> {
     }
     if package.is_empty() {
         let _ = std::fs::remove_file(dir.join(PACKAGE_MARK));
-        if skill_dirs(&dir).is_empty() {
+        if skill_dirs(&dir).is_empty() && !dir.join("agent.json").is_file() {
             let _ = std::fs::remove_dir_all(&dir);
         }
         return Ok(());
@@ -332,7 +364,8 @@ pub fn copy_package_skills(id: &str) -> Result<()> {
             std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755))?;
         }
     }
-    let mark = json!({"files": p.files, "skills": package.iter().map(|(n, _)| n).collect::<Vec<_>>()});
+    let agent = if crate::plugins::agent::has_guide(&m) { crate::plugins::agent::skill_folders(&pdir).len() } else { 0 };
+    let mark = json!({"files": p.files, "skills": package.iter().map(|(n, _)| n).collect::<Vec<_>>(), "agent": agent});
     paths::write_atomic(&dir.join(PACKAGE_MARK), serde_json::to_string_pretty(&mark)?.as_bytes())?;
     Ok(())
 }
@@ -408,7 +441,7 @@ pub fn session_plugins() -> Vec<PathBuf> {
     let mut out = vec![];
     for p in crate::plugins::enabled() {
         let dir = session_dir(&p.id);
-        let package = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)).is_ok_and(|m| !m.skills.is_empty());
+        let package = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)).is_ok_and(|m| !m.skill_names.is_empty());
         if (package || dir.join(PACKAGE_MARK).is_file()) && package_mark(&dir).0 != p.files {
             if let Err(e) = copy_package_skills(&p.id) {
                 eprintln!("plugin {}: its skills can't be copied: {e:#}", p.id);
