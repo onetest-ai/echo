@@ -1,6 +1,6 @@
 ---
 id: TC-032
-title: On test data a plugin's script keeps Echo's open guard — a program it starts that opens a page with `open` (a sign-in's browser) only adds a line to open.log; nothing else of Echo's reaches it
+title: On test data a plugin's script keeps Echo's open guard — a program it starts that opens a page with `open` (a sign-in's browser) only adds a line to open.log
 priority: high
 type: functional
 requirements: [F-PLUG-25]
@@ -35,7 +35,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-signin --yes` | "Installed Acme sign-in 0.1.0" |
-| 2 | `L=$(wc -l < "$D/open.log" 2>/dev/null \|\| echo 0)`; `echoctl plugin call acme-signin signin` | `"status": 0`; `stdout` starts `guard=1 home=none` (the guard reaches the script, Echo's data folder doesn't) |
+| 2 | `L=$(wc -l < "$D/open.log" 2>/dev/null \|\| echo 0)`; `echoctl plugin call acme-signin signin` | `"status": 0`; `stdout` starts `guard=1 home=` and the test data's folder, `$ECHOCTL_HOME` (the guard and Echo's data folder reach the script: an `echoctl` it starts is `plugins/TC-038`) |
 | 3 | `tail -n +$((L+1)) "$D/open.log"` | One new line: `https://signin.acme.example/device`; no browser window opened |
 
 ## Expected Final State
@@ -46,4 +46,4 @@ Acme sign-in installed; open.log has the sign-in's line; nothing opened.
 
 ## Notes
 - Covered: a program that opens a page through `open` on PATH. One that opens a browser another way (Python's `webbrowser`, `/usr/bin/open` by its full path, Windows' `start`) bypasses the test data's fake.
-- The variable list a script keeps is the Rust test `plugins::scripts::a_script_gets_test_datas_open_guard_but_nothing_else_of_echos_or_claudes`.
+- The variable list a script keeps is the Rust test `plugins::scripts::a_script_gets_test_datas_open_guard_but_nothing_else_of_echos_or_claudes`; the folders and binary Echo sets for it, `plugins::scripts::an_echoctl_a_script_starts_is_this_echo_on_its_data_and_config_folders_with_its_secrets_still_withheld`.
