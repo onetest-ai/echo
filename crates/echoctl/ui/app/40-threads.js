@@ -146,6 +146,6 @@ function projectMain(data) {
   const head = `<header class="pj-head" role="group" aria-labelledby="pj-h"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2 id="pj-h">${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div>${pjLinksLine(p)}</div><span class="grow"></span>${menu}</div>${confirmDel}
     <div class="tabs" role="tablist">${boardTabRow('thread', tabs, tab, 'tab')}</div></header>`
   const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : boardOfTab('thread', tab) ? boardPage('thread', boardOfTab('thread', tab)) : projectBrief(p)
-  return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' ? ' wide' : ''}">${body}</div>`
+  return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' || boardOfTab('thread', tab) || tab === 'brief' ? ' wide' : ''}">${body}</div>`
 }
 

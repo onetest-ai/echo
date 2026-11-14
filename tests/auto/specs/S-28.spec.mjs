@@ -236,6 +236,7 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     await clients.goto(linkRoute(fill(k.thread, { id: l.thread.id })))
     await expect.poll(() => clients.hash()).toBe(fill(data.text.threads.routes.tab, { id: l.thread.id, tab: l.tabs.brief }))
     await expect(clients.heading(l.thread.name)).toBeVisible()
+    await clients.aboutFold.click() // What it is folds: opened first
     await expect(clients.paragraph(l.thread.brief)).toHaveText(l.thread.brief)
 
     await clients.goto(linkRoute(fill(k.client, { id: l.client.id })))

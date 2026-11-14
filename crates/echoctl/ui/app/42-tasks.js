@@ -179,7 +179,10 @@ function projectBrief(p) {
   }
   const body = p.brief && p.brief.trim() ? `<div class="doc me-doc" role="region" aria-label="The thread's brief">${p.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — say what this thread is for, so the minutes and Claude know.</div>'
   const recent = (p.calls || []).slice(0, 5).map((c) => `<button class="pj-call" data-call="${esc(c.name)}"><span class="pj-call-d">${c.started_at ? esc(dayLabel(new Date(c.started_at))) : ''}</span><span class="t">${esc(c.title || c.name)}</span>${c.minutes ? '' : '<span class="set-sub">no minutes yet</span>'}</button>`).join('')
-  return `${dashboardView()}${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>What it is</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${body}</div></section>${pjLinked(p)}
+  // An accordion as a client's About (folded by default), when there is something to fold.
+  const key = `thread:${p.id}`, open = aboutIsOpen(key), has = !!(p.brief && p.brief.trim())
+  const title = has ? `<button type="button" class="about-fold" data-pj="about-fold" data-client="${esc(key)}" aria-expanded="${open}">${CHEV(open)} <b>What it is</b></button>` : '<div><b>What it is</b></div>'
+  return `${dashboardView()}${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card${has ? ` about-acc${open ? ' open' : ''}` : ''}"><div class="set-row">${title}<div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${!has || open ? body : ''}</div></section>${pjLinked(p)}
     <section class="set-sec"><h3>Latest calls</h3><div class="set-card pj-calls">${recent || '<div class="set-row"><div class="set-sub">No calls yet: add a rule on Profile, or put a call in from its header.</div></div>'}</div></section>`
 }
 
@@ -448,7 +451,7 @@ function clientView(data) {
   if (tab !== 'profile') {
     if (!cd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
     if (cd.error) return `${head}<div class="pane pj-pane"><p class="error">${esc(cd.error)}</p></div>`
-    return `${head}<div class="pane pj-pane${tab === 'tasks' || tab === 'people' ? ' wide' : ''}">${tab === 'calls' ? clientCalls(cd) : tab === 'tasks' ? clientTasks(cd) : tab === 'people' ? peopleView() : boardOfTab('client', tab) ? boardPage('client', boardOfTab('client', tab)) : clientOverview(cd, c)}</div>`
+    return `${head}<div class="pane pj-pane${tab === 'tasks' || tab === 'people' || boardOfTab('client', tab) || tab === 'overview' ? ' wide' : ''}">${tab === 'calls' ? clientCalls(cd) : tab === 'tasks' ? clientTasks(cd) : tab === 'people' ? peopleView() : boardOfTab('client', tab) ? boardPage('client', boardOfTab('client', tab)) : clientOverview(cd, c)}</div>`
   }
   return `${head}
   <div class="pane pj-pane"><div class="pf-card">
@@ -462,7 +465,7 @@ function clientView(data) {
   </div><p class="pf-foot">Saved as you change it · <code>projects/clients.json</code></p></div>`
 }
 
-/** Which clients' About is open (this computer's; folded when not said). */
+/** Which clients' About and threads' What it is (`thread:<id>`) are open (this computer's; folded when not said). */
 const aboutStored = () => { try { return JSON.parse(localStorage.getItem('echo.aboutOpen') || '{}') || {} } catch { return {} } }
 /** Whether client `id`'s About is open: this window's choice, else this computer's (own keys only). */
 const aboutIsOpen = (id) => (S.aboutOpen && Object.hasOwn(S.aboutOpen, id) ? S.aboutOpen[id] : Object.hasOwn(aboutStored(), id) && aboutStored()[id] === true)

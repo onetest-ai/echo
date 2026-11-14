@@ -16,7 +16,7 @@
   },
   {
    "id": "F-CLIENT-02",
-   "feature": "Overview shows About <client> (Edit) and a card per thread: stage, calls, last call, stories done, open tasks per pile and late, the last decisions, risks (no response first), open questions; About with text is an accordion, folded at first: its name opens or folds it, remembered per client on this computer; Edit opens it",
+   "feature": "Overview shows About <client> (Edit) and a card per thread: stage, calls, last call, stories done, open tasks per pile and late, the last decisions, risks (no response first), open questions; About with text is an accordion, folded at first: its name opens or folds it, remembered per client on this computer; Edit opens it; the Overview uses the pane's full width",
    "priority": "high",
    "check": "agent",
    "axes": [

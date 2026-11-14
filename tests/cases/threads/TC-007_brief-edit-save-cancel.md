@@ -1,6 +1,6 @@
 ---
 id: TC-007
-title: The Brief is edited in place: ⌘S saves it as Markdown, Esc cancels, Latest calls lists the thread's calls
+title: The Brief is edited in place: ⌘S saves it as Markdown, Esc cancels, What it is folds, Latest calls lists the thread's calls
 priority: high
 type: functional
 requirements: [F-THR-10]
@@ -11,7 +11,7 @@ tags: [threads, brief]
 auto: [tests/auto/specs/S-05.spec.mjs]
 ---
 
-# TC-007: The Brief is edited in place: ⌘S saves it as Markdown, Esc cancels, Latest calls lists the thread's calls
+# TC-007: The Brief is edited in place: ⌘S saves it as Markdown, Esc cancels, What it is folds, Latest calls lists the thread's calls
 
 **Module:** Threads | **Priority:** High | **Type:** Functional
 
@@ -35,6 +35,10 @@ auto: [tests/auto/specs/S-05.spec.mjs]
 | 3 | Type `Draft to throw away` and press Escape | The text area is gone; "Nothing yet — say what this thread is for…" is shown again |
 | 4 | Click "Edit", type `Pilot for **Globex** design review.` and press ⌘S (Ctrl+S on Windows) | The editor closes; the card shows the text "Pilot for Globex design review." with "Globex" in bold (a `strong` element) |
 | 5 | Run `echoctl project show globex-pilot` | `"brief"` is `Pilot for **Globex** design review.` |
+| 6 | Reload the page | "What it is" is open (a chevron pointing down, the button's `aria-expanded` is `true`), the text shown: Edit opened it and it is remembered |
+| 7 | Click "What it is" | It folds: the text is hidden, "Edit" stays on its line, `aria-expanded` is `false` |
+| 8 | Run `localStorage.removeItem('echo.aboutOpen')` in the page and reload | "What it is" is folded at first |
+| 9 | Click "What it is" | It opens, showing "Pilot for Globex design review." |
 
 ## Expected Final State
 The brief of Globex pilot reads "Pilot for Globex design review." and is stored as Markdown.

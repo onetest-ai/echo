@@ -128,6 +128,8 @@ scenario(test, 'S-27', "Others' words everywhere: nothing runs, nothing breaks",
     await row.click()
     await h.tab(v().tabNames.brief).click()
     await expect(h.headingStarting(`${t.base} ${h.piece(t.name)}`)).toBeVisible()
+    // What it is folds (F-THR-10): opened first.
+    await page.locator('[data-pj="about-fold"]').click()
     const brief = h.region(v().brief)
     await expect(h.shows(t.brief[0], brief)).toBeVisible()
     await expect(h.showsText(H().markup, brief)).toBeVisible()
