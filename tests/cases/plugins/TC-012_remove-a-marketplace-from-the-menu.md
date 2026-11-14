@@ -32,10 +32,10 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 1 | Add the marketplace: `echoctl plugin marketplace add "$M" --name acme-local` (prints `Added acme-local: 1 plugins`) | Prints `Added acme-local: 1 plugins` |
 | 2 | Navigate to `{{base_url}}/#settings/plugins`, click the tab "Marketplaces" and click "⋯" on the row "acme-local" | The menu has "Hide its plugins from Discover" and "Remove — installed plugins stay, without updates" |
 | 3 | Click "Remove — installed plugins stay, without updates" | The row "acme-local" is gone; the tab reads "Marketplaces" with the count `2` |
-| 4 | Run `echoctl plugin list` | `markets` holds only `onetest` |
+| 4 | Run `echoctl plugin list` | `markets` holds `onetest` and `my-plugins` only |
 
 ## Expected Final State
-Only the built-in marketplace remains.
+Only Echo's own marketplace and My plugins remain.
 
 ## Notes
 - The plugin has no code (no `main`, no `client`): it needs nothing from the network and runs nothing; its manifest is the only thing Echo reads.
