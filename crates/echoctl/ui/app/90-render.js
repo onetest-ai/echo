@@ -171,7 +171,7 @@ function renderNow() {
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
   patch($('#r-ann'), announcement())
-  patch($('#r-dlg'), todayDialogs())
+  patch($('#r-dlg'), todayDialogs() + whatsNewDialog())
   todayDialogsKeep()
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite" aria-label="Notices">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
@@ -313,6 +313,10 @@ CLICKS.push(
     let val; try { val = JSON.parse(t.dataset.val) } catch { val = t.dataset.val }
     return setSetting(t.dataset.set, val)
   } },
+  // What's new (`whatsNewDialog`): closed by × or Got it; Show me opens the item's place; ⌘K and Settings open it again.
+  { sel: '[data-wn-close]', area: 'shell', when: (t) => t.dataset.wnClose !== undefined, run: (t) => { S.wn = null; return render() } },
+  { sel: '[data-wn-go]', area: 'shell', when: (t) => t.dataset.wnGo, run: (t) => whatsNewGo(t.dataset.wnGo) },
+  { sel: '[data-wn-open]', area: 'shell', when: (t) => t.dataset.wnOpen !== undefined, run: (t) => whatsNewOpen() },
   { sel: '[data-announce]', area: 'shell', when: (t) => t.dataset.announce !== undefined, run: (t) => { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id }); if (t.dataset.announce) send({ cmd: 'settings_action', action: t.dataset.announce, arg: t.dataset.arg || '' }); return render() } },
   { sel: '[data-act]', area: 'settings', when: (t) => t.dataset.act, run: (t) => { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return } },
   { sel: '[data-lang-del]', area: 'settings', when: (t) => t.dataset.langDel, run: (t) => { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() } },

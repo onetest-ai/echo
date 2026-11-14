@@ -75,6 +75,8 @@ node crates/echoctl/ui/own-title-bar.test.mjs
 node crates/echoctl/ui/selftest-terminal.test.mjs
 # Where the octopus lives, in the platform's words: the menu bar on macOS, the notification area on Windows (trayWords, #420).
 node crates/echoctl/ui/tray-words.test.mjs
+# What's new after an update: its heading, where Show me goes, once per version (WhatsNew).
+node crates/echoctl/ui/whats-new.test.mjs
 # A mail sent from an item: its row says when, to whom, and whether it was answered (sentMailLine, #92).
 node crates/echoctl/ui/sent-mail.test.mjs
 # Where mail drafts go: the setting's line and a run's draft as its outcome says it (draftsNow, draftLine, #135).

@@ -2490,6 +2490,11 @@ def main():
     ap.add_argument("--clock", choices=["real", "fast"], default="real",
                     help="fast: the debug build's test clock in <dir>/env (ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90: automatic "
                     "minutes 90 s after the call or the last note instead of 15 minutes), for the recording and minutes scenarios")
+    ap.add_argument("--whats-new-seen", default="running", metavar="VERSION",
+                    help="the last version whose What's new the window showed (whats-new-seen.json in the config folder): "
+                    "running (the default: this build's, nothing to show), previous (the entry before the newest in "
+                    "crates/echoctl/whats-new.json: an update to this one), a version (e.g. 0.0.1: every entry), or none "
+                    "(no file: a fresh install, or an Echo from before What's new)")
     a = ap.parse_args()
     global NOW, AI, AI_URL, AI_MODEL
     AI, AI_URL, AI_MODEL = a.ai or "fake", (a.ai_url or "").rstrip("/") or None, a.ai_model
@@ -2553,6 +2558,7 @@ def main():
     cfg = json.load(open(cfg_file)) if os.path.exists(cfg_file) else {}
     cfg["calendar_command"] = []
     d.write_json(cfg_file, cfg)
+    whats_new_seen(d, a.whats_new_seen)
     d.manifest["ai"] = AI
     if a.clock == "fast":
         with open(os.path.join(base, "env"), "a") as f:
@@ -2562,6 +2568,21 @@ def main():
     global BUILT
     BUILT = True
     print(f"test data ({a.set}) in {base} (. {base}/env)")
+
+
+def whats_new_seen(d, seen):
+    """What's new as seen up to `seen` (`--whats-new-seen`): by default this build's version, so no case meets the
+    dialog unless it asks for it (lifecycle/TC-011…TC-016)."""
+    if seen == "none":
+        return
+    if seen == "running":
+        seen = subprocess.run([d.bin, "--version"], capture_output=True, text=True, check=True).stdout.split()[-1]
+    elif seen == "previous":
+        versions = [e["version"] for e in json.load(open(os.path.join(ROOT, "crates", "echoctl", "whats-new.json")))]
+        if len(versions) < 2:
+            sys.exit("--whats-new-seen previous: whats-new.json has no entry before the newest")
+        seen = versions[1]
+    d.write_json(os.path.join(d.config, "whats-new-seen.json"), {"version": seen})
 
 
 def model_server(model):

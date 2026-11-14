@@ -73,6 +73,27 @@
    "priority": "high",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-LIFE-10",
+   "feature": "After an update, the window shows What's new once: the items of every version since the last one seen, newest first under version headers, each an icon, a title of a few words and one plain sentence; a reopen doesn't show it again; a fresh install (no calls yet) shows nothing",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-11",
+   "feature": "What's new closes with ×, Esc or Got it, and an item's Show me closes it and opens that item's place in Echo",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-12",
+   "feature": "What's new is reachable again from ⌘K (\"What's new\") and Settings → General, beside Echo's version: every version's items, newest first",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
