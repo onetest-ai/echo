@@ -84,12 +84,14 @@ function todayView() {
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
   const asks = layoutRows.flat().includes('core:needs.now') ? '' : wontView(d.asks)
   // Laid out by the engine (#328): Today's columns from its width, each row filling it by its widgets' sizes. Your day
-  // and My work fill the height and always sit in the grid (their inner scroll); an empty temporal part takes no space.
+  // and My work fill the height and always sit in the grid (their inner scroll), as a plugin's widget declared `fill`
+  // does (#523); an empty temporal part takes no space.
   const FILL = ['core:calendar.agenda', 'core:tasks.mine', 'core:calendar.calendar']
+  const fills = (id) => FILL.includes(id) || ((d.plugins || {})[id] || {}).height === 'fill'
   const size = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
   const SPAN = { S: 1, M: 2, L: 3 }
   const high = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.height || 1]))
-  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), height: high[id] || 1, fill: FILL.includes(id), empty: !parts[id] && !S.tdEdit })))
+  const rowsIn = layoutRows.map((r) => r.map((id) => ({ id, span: SPAN[size[id]] || (id === 'core:tasks.mine' ? 1 : id === 'core:calendar.agenda' ? 2 : 3), height: high[id] || 1, fill: fills(id), empty: !parts[id] && !S.tdEdit })))
   // Measured on every draw (the width may have changed on another page), then watched while Today shows.
   const tdWidth = todayWidth()
   const cols = tdWidth ? todayCols(tdWidth, S.todayCols) : S.todayCols || 3

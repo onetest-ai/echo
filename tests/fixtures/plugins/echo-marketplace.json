@@ -44,6 +44,10 @@
     {
       "id": "agent-demo",
       "source": "./plugins/agent-demo"
+    },
+    {
+      "id": "fill-demo",
+      "source": "./plugins/fill-demo"
     }
   ]
 }
