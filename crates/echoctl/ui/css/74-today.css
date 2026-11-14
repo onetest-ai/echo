@@ -246,8 +246,9 @@
 .pw-pill.tone-good { color: var(--me); } .pw-pill.tone-warn { color: var(--warn); } .pw-pill.tone-bad { color: var(--danger); } .pw-pill.tone-muted { color: var(--text-3); }
 .pw-tg th { padding: 10px 0 5px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
 .pw-tg th .mono { font-size: 11px; color: var(--text-3); text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
-.pw-chev { border: 0; background: none; padding: 0; color: var(--text-2); font-size: 13px; line-height: 1; cursor: default; width: 14px; text-align: left; }
-.pw-chev:hover { color: var(--text); }
+.pw-chev { border: 0; background: none; padding: 0; color: var(--text-2); line-height: 0; cursor: default; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+.pw-chev:hover { color: var(--text); background: var(--hover, rgba(127,127,127,.12)); }
+.pw-chev .chev { width: 12px; height: 12px; }
 .pw-td td { padding: 0 0 6px; border-top: 0; }
 .pw-td div { margin-left: 22px; padding: 6px 10px; border-left: 2px solid var(--line-strong); display: grid; grid-template-columns: max-content max-content; justify-content: start; gap: 3px 24px; font-size: 12px; }
 /* Today → Recorded this week: three numbers; at M a bar a day, Monday to Sunday, today marked. A click opens Calls. */

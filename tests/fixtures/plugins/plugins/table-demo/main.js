@@ -9,7 +9,17 @@ const rows = [
   // Enough rows to scroll inside the card (its column names stay put).
   ...Array.from({ length: 8 }, (_, i) => ({ id: `q${i + 1}`, group: 'later', cells: { urgency: { text: 'Normal', tone: 'good' }, position: `11010001${String(i + 10)}`, role: `Engineer ${i + 1}`, start: `2027-02-${String(i + 10)}`, status: 'Open', candidates: i, why: 'starts next quarter' } })),
 ]
+let nudged = 0
 export function apply(ctx) {
+  // A thread's or a client's table on its dashboard: a row's details, an https link (asked once), an action.
+  ctx.command('nudge', () => { nudged++; return true })
+  ctx.command('nudged', () => nudged)
+  ctx.widgets.provide('roles', ({ params }) => ({
+    columns: [{ key: 'position', label: 'Position' }, { key: 'role', label: 'Role' }],
+    rows: rows.slice(0, 2).map((r) => ({ id: r.id, link: r.link, detail: r.detail, cells: { position: r.cells.position, role: r.cells.role } })),
+    note: params.thread ? `thread ${params.thread}` : params.client ? `client ${params.client}` : 'everywhere',
+    open: 'https://staffing.acme.example/roles', actions: [{ label: 'Nudge', command: 'nudge' }],
+  }))
   // Set to a thread or a client (on Today by its ⚙, on a dashboard by the page): says which, so a case sees it.
   ctx.widgets.provide('positions', ({ params }) => ({ value: params.thread ? 3 : params.client ? 7 : 12, label: 'open positions', note: `${params.thread ? `thread ${params.thread}` : 'every thread'} · ${params.client ? `client ${params.client}` : 'every client'}` }))
   ctx.widgets.provide('staffing', () => ({
