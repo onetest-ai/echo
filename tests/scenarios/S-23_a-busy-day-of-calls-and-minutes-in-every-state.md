@@ -48,7 +48,7 @@ auto: [tests/auto/specs/S-23.spec.mjs]
 | Asset | Made by | Used by stages |
 |---|---|---|
 | Standard data, built right before the run | `serve.sh up <dir> <port> --set standard` | all |
-| The Calls list | stage 1, step 1 (the only navigation to `#calls`) | 2–30: every later stage clicks its rows; only stage 25 opens a call by URL, and stage 29 reloads (a check) |
+| The Calls list | stage 1, step 1 (the only navigation to `#calls`) | 2–30: every later stage clicks its rows; only stage 25 opens a call by URL, stage 29 reloads (a check), and stage 30 then opens the call's minutes page by URL |
 | Globex standup's countdown ("Minutes in N min", 15 minutes after the build) | the data | 2–5 |
 | Globex standup moved by "15 minutes more" | stage 4, step 2 | 5: its steps 3–5 ("Until I say", then "Write them automatically again") are stage 4's teardown and check that it is undone |
 | Globex standup open | stage 3, step 1 | 4, 5, 6 |
