@@ -15,4 +15,4 @@
   - a minor or major release: also every agent scenario and every `critical` case, agent and person-run.
 
   Merging a long-lived branch into `main` runs every agent scenario too, only when the user decides. Evidence: `feature-map.py::auto_report` (ref: The release test bar's runs)
-- R6. On Windows before a release, also check the reduced-feature build. Evidence: `crates/echoctl/Cargo.toml::features` (ref: Windows before a release)
+- R6. Windows is checked on every PR, not only on Windows: the Windows type-check without default features (`cargo check -p echoctl --target x86_64-pc-windows-msvc --no-default-features`) is one of R1's gates. Before a release, on a Windows computer, also `cargo check -p echoctl --no-default-features --features tray,brain`. Evidence: `crates/echoctl/Cargo.toml::features` (ref: Gates, Windows before a release)

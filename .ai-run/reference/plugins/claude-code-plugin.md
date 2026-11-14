@@ -6,7 +6,9 @@ How the Claude Code plugin in `plugin/` is laid out. It changes with the code, i
 ## Launchers
 
 Two launchers find the CLI: `plugin/scripts/echoctl` (sh, also Git Bash on Windows) and `plugin/scripts/echoctl.cmd`.
-Both look in this order: `$ECHOCTL_BIN`, then `plugin/bin`, then `<config dir>/app-path`.
+Both look in this order: `$ECHOCTL_BIN`, `plugin/bin` (a dev build), the app's own path (`<config dir>/app-path`, written
+at each app start), `echoctl` on `PATH`, then the default install places (`/Applications/Echo.app`,
+`~/Applications/Echo.app`, `%LOCALAPPDATA%\Programs\echo\echoctl.exe`).
 
 ## Dev build
 

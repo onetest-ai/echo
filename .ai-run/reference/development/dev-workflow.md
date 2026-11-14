@@ -46,8 +46,9 @@ An agent's worktree builds with `CARGO_TARGET_DIR=<worktree>/target`; `serve.sh`
 ## A dev app beside Echo
 
 - Its own folders: `ECHOCTL_CONFIG_DIR=<dir>` and `ECHOCTL_HOME=<dir>` (`app::record_app_path`, `paths::config_dir`).
-- Run it with `target/debug/echoctl app run` (`--no-tray` without the icon); `echoctl app start` starts the app detached
-  (the installed bundle through LaunchServices when there is one, `app::spawn_app`). Stop it with `echoctl app quit`.
+- Run it in the foreground with `target/debug/echoctl app run` (`--no-tray` without the icon), or in the background with
+  `target/debug/echoctl app start`: `app::spawn_app` opens the installed bundle only when the running binary is inside
+  one, so a dev build starts itself, with the folders of its environment. Stop it with `echoctl app quit`.
 
 ## Debugging
 

@@ -12,6 +12,15 @@ on. It changes with the code, in the same PR. The rules are in `.ai-run/guides/c
   does not expire before the meeting ends.
 - A scheduled meeting leaves the schedule once its recording starts; stopping never re-arms it.
 
+## Opt-in
+
+- A recording starts only after `watch::take_arm`; arms come from the user's choices: Record or `echoctl arm`
+  (`watch::arm`), a calendar meeting's own choice, or a series rule the user set (`series.rs`: record always, ask or
+  never; a meeting set by hand wins).
+- Calendar meetings follow config: `ask` (offer "record?" about a minute before, the default) or `manual`.
+- A call nobody armed: `watch::run_loop` emits `call_started` and, when `Config::ask_unscheduled` (config
+  `unscheduled`: `ask`, the default, or `manual`), offers it (`app::offer_call`).
+
 ## Stop during a call
 
 A user Stop during a call ends only the recording: the call's pending arm is held (`held_arm`) and no scheduled meeting
@@ -93,9 +102,16 @@ audio is kept (`keep_audio`), and noted through `calls::update_meta`.
 
 ## Transcription server
 
+- The server the user connected: `remote::Client::configured` (`remote::connect`, `remote::connect_openai` for an
+  OpenAI-compatible one; `remote::disconnect`).
 - Protocol: `/v1/hello`, `/v1/utterance` (`remote::Answer`).
 - `remote::Refused` is the final answer (a wrong key, a bad request); `transcribe::Transcriber::utterance` falls back to
   this computer's model on any other error.
+
+## Learned vocabulary in config
+
+Every saved config writes `learned` (`[]` when empty) (`config::learned_always`), so a config this build saved is never
+taken for one from before learned terms; `vocab::migrate` migrates only a config without the key.
 
 ## Speaking ring
 

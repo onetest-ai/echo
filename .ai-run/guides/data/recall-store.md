@@ -15,6 +15,5 @@ changes with the code; these rules change only by a `Rules:` PR.
 - R5. Read a message only from the user, a colleague or an authenticated sender trusted for all its threads' clients; defer an author not yet looked up. Evidence: `brain::senders::Senders::mail`, `graph::mail_auth` (ref: Mail and channel posts)
 - R6. The MCP server is read-only, and its tools are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS` (ref: Access)
 - R7. Keep chunk ids stable across syncs. Evidence: `brain::chunk::chunk_id`
-- R8. Every saved config writes the learned-vocabulary key, even empty; only a config without it is migrated. Evidence: `config::learned_always` (ref: Learned vocabulary in config)
 - R9. A closed thread's sources are archived, never dropped from the store. Evidence: `brain::store::archived_of`
 - R10. A sync that changes the store snapshots it first. Evidence: `brain::store::snapshot`

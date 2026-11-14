@@ -28,8 +28,3 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - Chunk ids: `brain::chunk::chunk_id`.
 - A closed thread's sources are archived: `brain::store::archived_of`.
 - A sync that changes the store snapshots it first: `brain::store::snapshot`.
-
-## Learned vocabulary in config
-
-Every saved config writes `learned` (`[]` when empty) (`config::learned_always`); `vocab::migrate` migrates only a
-config without the key.

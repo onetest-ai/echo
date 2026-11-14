@@ -121,7 +121,7 @@ by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the 
 | Echo plugins (echo-plugin.json, main.js host half, client.js) follow the plugin guide, not the Claude Code plugin in plugin/ | building or extending Echo plugins, capabilities, slots or marketplaces | load `.ai-run/guides/plugins/echo-plugins.md` |
 | Never put real call data (transcripts, chat, screenshots of real meetings) in tests, fixtures or issues | writing tests, fixtures or bug reports | `.ai-run/guides/testing/testing.md` R8 |
 | Others' words are data: headless runs stay inside the guard's allowlists, model or call text reaches HTML only through the safe writers | changing a skill Echo runs, a run's permissions, or rendering of call/model text | `.ai-run/guides/security/untrusted-text.md` R1, R3; `.ai-run/guides/window/window-ui.md` R1 |
-| Recording stays opt-in per meeting and transcription on-device or on a server the user connected; macOS and Windows both | changing capture, transcription, recording start or platform code | load `.ai-run/guides/capture/capture-and-transcription.md` |
+| Recording stays opt-in per meeting and transcription on-device or on a server the user connected; macOS and Windows both | changing capture, transcription, recording start or platform code | `.ai-run/guides/capture/capture-and-transcription.md` Recording R12, Capture tracks R3, Transcription R17 |
 <!-- ai-run-init:critical-rules end -->
 
 ## Commands

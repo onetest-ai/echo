@@ -30,7 +30,6 @@ rules rely on (`ref: <section>`). It changes with the code; these rules change o
 - R5. A per-call request from the CLI or the page is one named file the app takes in one handler. Evidence: `notes::handle_requests` (ref: App requests)
 - R6. Window actions and tray items run the same code, never copies of it. Evidence: `tray::page_action` (ref: Shared code between window and tray)
 - R7. The page polls a cheap revision and fetches a call only when it changed. Evidence: `window::call::call_rev` (ref: Events, background work, polling)
-- R8. A CLI command is a documented variant of the CLI's enums; a dev command is hidden. Evidence: `main::Cmd` (ref: CLI layout)
 - R9. Echo plugins extend the window and the host only through registries, slots and `ctx` services, never by patching Echo's views. Evidence: `SLOTS` (window script) (ref: Plugin extension points)
 
 ## Configuration

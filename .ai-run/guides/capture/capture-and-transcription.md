@@ -19,6 +19,7 @@ these rules rely on (`ref: <section>`). It changes with the code; these rules ch
 - R9. An arm for a meeting starts only on that meeting's call when the call window can be read: the window naming the meeting, or a call begun shortly before it, is its call. Evidence: `watch::meetings_call` (ref: Meeting matching)
 - R10. A call begun before that whose window doesn't name the meeting makes the arm wait until the user is on its call; a name alone never does. Evidence: `watch::meetings_call` (ref: Meeting matching)
 - R11. A call window it can't read at all starts the arm on the call going on, and Record on a call already going on arms no meeting. Evidence: `watch::meetings_call`
+- R12. Recording is opt-in per meeting: a call is recorded only when the user chose it (Record, its meeting, or a series the user set to always); a call nobody chose is at most offered. Evidence: `watch::take_arm`, `app::offer_call` (ref: Opt-in)
 
 ### Constraints
 | Do not | Do instead | Evidence |
@@ -30,6 +31,7 @@ these rules rely on (`ref: <section>`). It changes with the code; these rules ch
 ### Rules
 - R1. Every track of a recording shares one start time and stays sample-aligned across reopens. Evidence: `audio::write_track` (ref: Tracks)
 - R2. A capture source sends mono chunks with its epoch and native rate, and tells a planned change apart from a failure. Evidence: `audio::Track::poll` (ref: Capture sources)
+- R3. Capture, accessibility and permissions work on macOS and Windows both: a change to them lands in both OSes' files. Evidence: `permissions::report` (ref: `.ai-run/reference/architecture/architecture.md`, Per-OS files)
 
 ## Transcription
 
@@ -49,6 +51,8 @@ these rules rely on (`ref: <section>`). It changes with the code; these rules ch
 - R13. The hinted-decode guard applies to the live and the final pass alike. Evidence: `transcribe::GUARD_MIN_S` (ref: Vocabulary hint)
 - R14. A Teams speaking-ring class is taken when confirmed in recorded trees, or, with two or more others, only when it lights one tile at a time; never on fit alone. Evidence: `speaking::calibrate` (ref: Speaking ring)
 - R15. A call has one language, and its model is the one given for that language; a change by hand swaps the model, never per utterance. Evidence: `models::for_call` (ref: Language and model)
+- R16. Every saved config writes the learned-vocabulary key, even empty; only a config without it is migrated. Evidence: `config::learned_always` (ref: Learned vocabulary in config)
+- R17. Transcription runs on this computer or on a transcription server the user connected; call audio goes nowhere else. Evidence: `transcribe::Transcriber::utterance`, `remote::Client::configured` (ref: Transcription server)
 
 ### Constraints
 | Do not | Do instead | Evidence |

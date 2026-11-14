@@ -9,12 +9,12 @@ in the same PR. The rules are in `.ai-run/guides/testing/testing.md`; how to wri
 | Kind | Place |
 |---|---|
 | Rust tests | a `#[cfg(test)] mod tests` at the end of their module, named as the behaviour (`guard::only_this_calls_files_and_the_previous_minutes`) |
-| node tests over a window-script block | `crates/echoctl/ui/<name>.test.mjs`, listed in `scripts/check-mod.sh` |
+| node tests over a window-script block | `crates/echoctl/ui/<name>.test.mjs`; `scripts/check-mod.sh` is the list of mod and window checks, and a new `ui/*.test.mjs` adds itself there |
 | functional cases | `tests/cases/<area>/TC-NNN_<slug>.md`, with `run: agent \| person` and `platform` |
 | scenarios | `tests/scenarios/S-NN_<slug>.md` |
 | the functional map | `tests/feature-map/areas/<area>.json` (one JSON file per area); a case names its features in `requirements:` |
 | Playwright autotests | `tests/auto`; a case lists its spec under `auto:` in its frontmatter; run with `npm test` there |
-| run results | `tests/reports/` (git-ignored) |
+| run results | `tests/reports/` (git-ignored), never in a case |
 | made-up data | `tests/fixtures/make_data.py` (acme.example-style names) |
 
 ## The test environment (Rust)
