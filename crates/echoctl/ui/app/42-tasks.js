@@ -463,14 +463,17 @@ function clientView(data) {
 }
 
 /** Which clients' About is open (this computer's; folded when not said). */
-const aboutOpen = () => { try { return JSON.parse(localStorage.getItem('echo.aboutOpen') || '{}') } catch { return {} } }
+const aboutStored = () => { try { return JSON.parse(localStorage.getItem('echo.aboutOpen') || '{}') || {} } catch { return {} } }
+/** Whether client `id`'s About is open: this window's choice, else this computer's (own keys only). */
+const aboutIsOpen = (id) => (S.aboutOpen && Object.hasOwn(S.aboutOpen, id) ? S.aboutOpen[id] : Object.hasOwn(aboutStored(), id) && aboutStored()[id] === true)
 function aboutFold(id) {
-  const o = aboutOpen()
-  if (o[id]) delete o[id]
-  else o[id] = true
-  try { localStorage.setItem('echo.aboutOpen', JSON.stringify(o)) } catch { /* storage off: folded each time */ }
-  // In memory too: a window without storage still opens it until it closes.
-  S.aboutOpen = { ...(S.aboutOpen || {}), [id]: !!o[id] }
+  const open = !aboutIsOpen(id)
+  // In memory (a window without storage still folds and opens it), and on this computer when it can.
+  S.aboutOpen = { ...(S.aboutOpen || {}), [id]: open }
+  const o = aboutStored()
+  if (open) o[id] = true
+  else delete o[id]
+  try { localStorage.setItem('echo.aboutOpen', JSON.stringify(o)) } catch { /* storage off: this window only */ }
 }
 
 /** A client's Overview: its description (the user's, edited in place as a thread's brief) and a card
@@ -483,7 +486,7 @@ function clientOverview(cd, c) {
     : cd.brief && cd.brief.trim()
       // An accordion: folded by default (the threads below in view), each client's open or folded remembered.
       ? (() => {
-        const open = S.aboutOpen && c.id in S.aboutOpen ? S.aboutOpen[c.id] : aboutOpen()[c.id] === true
+        const open = aboutIsOpen(c.id)
         return `<section class="set-sec"><div class="set-card about-acc${open ? ' open' : ''}"><div class="set-row"><button type="button" class="about-fold" data-pj="about-fold" data-client="${esc(c.id)}" aria-expanded="${open}">${CHEV(open)} <b>About ${esc(c.name)}</b></button><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${open ? `<div class="doc me-doc" role="region" aria-label="${esc(`About ${c.name}`)}">${cd.brief_html}</div>` : ''}</div></section>`
       })()
       : `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div><div class="me-doc set-sub">Nothing yet — who they are, what you do for them, who matters.</div></div></section>`

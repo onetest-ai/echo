@@ -506,7 +506,7 @@ document.addEventListener('click', (e) => {
     case 'term-remove': return projectSend('term_remove', { term: d.term })
     case 'person-add': { const name = $('#pj-person-name').value.trim(); if (!name) return $('#pj-person-name').focus(); return projectSend('person_add', { name, email: $('#pj-person-email').value.trim(), role: $('#pj-person-role').value.trim() }) }
     case 'person-remove': return projectSend('person_remove', { name: d.name, email: d.email })
-    case 'brief-edit': if (S.pj.client && !(S.aboutOpen && S.aboutOpen[S.pj.client]) && aboutOpen()[S.pj.client] !== true) aboutFold(S.pj.client) // what was edited stays open
+    case 'brief-edit': if (S.pj.client && !aboutIsOpen(S.pj.client)) aboutFold(S.pj.client) // what was edited stays open
       S.pj.briefEdit = (S.pj.client ? S.pj.cdata && S.pj.cdata.brief : S.pj.detail && S.pj.detail.brief) || ''; render(); { const t = $('#pj-brief'); if (t) t.focus() } return
     case 'brief-cancel': S.pj.briefEdit = null; return render()
     case 'about-fold': aboutFold(d.client); render(); { const b = document.querySelector('[data-pj="about-fold"]'); if (b) b.focus() } return
