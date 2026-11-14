@@ -390,8 +390,8 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
-    // Its record on Yolo runs (#603), beside its files: by this Echo (`pid`), which the run lives in.
-    crate::yolo::record(&id, &json!({"title": title, "project": project, "node": node, "thread": project, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id()}));
+    // Its record on Yolo runs (#603), beside its files: by this Echo (`pid`, `echo`: its stamp), which the run lives in.
+    crate::yolo::record(&id, &json!({"title": title, "project": project, "node": node, "thread": project, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id(), "echo": crate::yolo::instance()}));
     std::thread::spawn(move || {
         // Runs older than Yolo runs keeps go (off the window's thread).
         crate::yolo::prune();
@@ -472,7 +472,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
     // The run names its item: Today keeps it out of Needs you now while the run works.
     save_ask(json!({"id": id, "state": "working", "title": title, "item": item_id, "at": Local::now().to_rfc3339()}));
     let subject: String = item["line"].as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(80).collect();
-    crate::yolo::record(&id, &json!({"title": title, "subject": subject, "item": item_id, "thread": spec.thread, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id()}));
+    crate::yolo::record(&id, &json!({"title": title, "subject": subject, "item": item_id, "thread": spec.thread, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id(), "echo": crate::yolo::instance()}));
     std::thread::spawn(move || {
         crate::yolo::prune();
         let out = crate::claudejob::run(&spec);

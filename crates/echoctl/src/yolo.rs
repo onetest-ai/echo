@@ -80,15 +80,27 @@ fn took_effect(a: &Value) -> bool {
     matches!(a["kind"].as_str(), Some("change" | "send")) && !a["outcome"].as_str().is_some_and(|o| o.starts_with("failed"))
 }
 
-/// Whether a run marked working still runs: the Echo that started it is alive (`pid`), and — without a pid — it is
-/// within its limit, or its log was written lately (a laptop asleep in the middle of a run wakes and goes on).
+/// This Echo, as a run's record names the Echo it lives in: its pid and when it started (a pid alone may be another
+/// process's after a crash or a reboot).
+pub fn instance() -> &'static str {
+    static STAMP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    STAMP.get_or_init(|| Local::now().to_rfc3339())
+}
+
+/// Whether a run marked working still runs. Past its limit with its log quiet for 5 minutes, it doesn't (its thread
+/// ended without a record), whoever it names; a laptop asleep in the middle of a run wakes and writes on. Before that:
+/// a run lives in the Echo that started it — this one, which serves the list — so one naming another Echo (`pid` and
+/// `echo`, its stamp) ended with it; a record without them is taken as working.
 fn still_working(d: &Path, rec: &Value, start: DateTime<Local>) -> bool {
-    if let Some(pid) = rec["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) {
-        return crate::app::process_alive(pid);
-    }
     let now = Local::now();
     let logged = fs::metadata(d.join("log.txt")).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from);
-    start > now - Duration::minutes(STALE_MINUTES) || logged.is_some_and(|t| t > now - Duration::minutes(5))
+    if start <= now - Duration::minutes(STALE_MINUTES) && logged.is_none_or(|t| t <= now - Duration::minutes(5)) {
+        return false;
+    }
+    match rec["pid"].as_u64() {
+        Some(pid) => pid == u64::from(std::process::id()) && rec["echo"].as_str() == Some(instance()),
+        None => true,
+    }
 }
 
 /// One run as the list shows it: what it was on (a task, or an item of Needs you now), its thread, when, how long, its
@@ -232,21 +244,32 @@ mod tests {
     }
 
     #[test]
-    fn a_run_still_working_is_failed_only_once_its_echo_is_gone_or_it_is_past_its_limit_and_quiet() {
+    #[cfg(unix)]
+    fn a_run_still_working_lives_only_in_this_echo_and_never_past_its_limit_with_a_quiet_log() {
         let (_env, _root) = paths::testenv::folders("yolo-stale");
-        // Its Echo is alive: working, however long ago it started.
-        run("ask-alive", json!({"title": "a", "started": ago(60), "state": "working", "pid": std::process::id()}), &[], &[]);
-        // Its Echo is gone (a pid no process has): failed at once.
-        run("ask-gone", json!({"title": "b", "started": ago(1), "state": "working", "pid": i32::MAX as u32}), &[], &[]);
-        // No pid (an older record): past its limit but its log written just now (a laptop that slept), still working;
-        run("ask-slept", json!({"title": "c", "started": ago(40), "state": "working"}), &[], &[]);
-        // past its limit and its log quiet for longer than 5 minutes: failed.
-        run("ask-quiet", json!({"title": "d", "started": ago(40), "state": "working"}), &[], &[]);
-        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
-        fs::File::options().write(true).open(dir().join("ask-quiet/log.txt")).unwrap().set_modified(old).unwrap();
+        let me = std::process::id();
+        let quiet = |id: &str| {
+            let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
+            fs::File::options().write(true).open(dir().join(id).join("log.txt")).unwrap().set_modified(old).unwrap();
+        };
+        // This Echo's: working, its log written lately even past its limit (a laptop that slept).
+        run("ask-mine", json!({"title": "a", "started": ago(1), "state": "working", "pid": me, "echo": instance()}), &[], &[]);
+        run("ask-slept", json!({"title": "b", "started": ago(40), "state": "working", "pid": me, "echo": instance()}), &[], &[]);
+        // Its pid now another live process's (this test's parent): failed.
+        run("ask-reused", json!({"title": "c", "started": ago(1), "state": "working", "pid": std::os::unix::process::parent_id(), "echo": instance()}), &[], &[]);
+        // This pid, but an earlier Echo's stamp (a reboot gave it the same pid): failed.
+        run("ask-stale", json!({"title": "d", "started": ago(1), "state": "working", "pid": me, "echo": "2026-01-01T00:00:00+00:00"}), &[], &[]);
+        // This Echo's, past its limit and its log quiet (its thread ended without a record): failed.
+        run("ask-capped", json!({"title": "e", "started": ago(40), "state": "working", "pid": me, "echo": instance()}), &[], &[]);
+        quiet("ask-capped");
+        // No pid (an older record): working within its limit, failed past it with a quiet log.
+        run("ask-old-new", json!({"title": "f", "started": ago(2), "state": "working"}), &[], &[]);
+        run("ask-old-quiet", json!({"title": "g", "started": ago(40), "state": "working"}), &[], &[]);
+        quiet("ask-old-quiet");
         let all = runs();
         let state = |id: &str| all.iter().find(|r| r["id"] == id).unwrap()["state"].as_str().unwrap().to_string();
-        assert_eq!([state("ask-alive"), state("ask-gone"), state("ask-slept"), state("ask-quiet")], ["working", "failed", "working", "failed"]);
+        let got: Vec<String> = ["ask-mine", "ask-slept", "ask-reused", "ask-stale", "ask-capped", "ask-old-new", "ask-old-quiet"].iter().map(|i| state(i)).collect();
+        assert_eq!(got, ["working", "working", "failed", "failed", "failed", "working", "failed"]);
     }
 
     #[test]
