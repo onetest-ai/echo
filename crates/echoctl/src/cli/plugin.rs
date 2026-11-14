@@ -12,8 +12,10 @@ use crate::plugins;
 pub enum PluginCmd {
     /// Installed plugins, what the marketplaces offer, and the marketplaces (JSON)
     List,
-    /// Install a plugin (shows what it uses; --yes agrees)
+    /// Install a plugin (shows what it uses; --yes agrees). A folder (a path, or `.`) is copied into My plugins first,
+    /// then installed from there; the same folder again is its update
     Install {
+        /// A plugin's id, or a folder with a plugin
         id: String,
         /// The marketplace, when more than one offers it
         #[arg(long)]
@@ -115,7 +117,20 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::List => print_json(&snapshot()),
         PluginCmd::Install { id, from, yes } => {
             refuse_in_run()?;
-            let from = from.map(|f| market_named(&f)).transpose()?;
+            let mut from = from.map(|f| market_named(&f)).transpose()?;
+            // A folder: copied into My plugins, installed from there (#589). An id never has a `/`.
+            let folder = std::path::Path::new(&id);
+            let id = if id.contains('/') || id.contains('\\') || id == "." || id == ".." || folder.join("echo-plugin.json").is_file() {
+                if from.as_deref().is_some_and(|f| f != MINE) {
+                    anyhow::bail!("a folder installs from My plugins, not from {}", from.unwrap_or_default());
+                }
+                let (id, copy) = copy_into_mine(folder)?;
+                println!("Copied {} into My plugins ({})", folder.display(), copy.display());
+                from = Some(MINE.to_string());
+                id
+            } else {
+                id
+            };
             let r = review(&id, from.as_deref())?;
             let agreed = agree(&r, yes)?;
             let p = install(&id, from.as_deref(), &agreed)?;
