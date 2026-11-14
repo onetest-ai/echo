@@ -684,10 +684,25 @@ fn figure(dest: &str, alt: &str, images: &mut Images) -> String {
 /// the figure gets no caption (an invisible separator: never typed in minutes).
 const ATTACHED: &str = "\u{2063}";
 
-/// The On screen section's heading: its text starts or ends with "on screen" (a trailing `:` or `.` aside).
+/// The On screen section's heading: its text starts or ends with the words "on screen" (a closing `#` sequence and a
+/// trailing `:` or `.` aside).
 fn on_screen(text: &str) -> bool {
-    let t = text.trim().trim_end_matches([':', '.']).trim_end().to_lowercase();
-    t.starts_with("on screen") || t.ends_with("on screen")
+    let t = text.trim();
+    let open = t.trim_end_matches('#');
+    let t = if open.len() < t.len() && (open.is_empty() || open.ends_with(char::is_whitespace)) { open } else { t };
+    let t = t.trim().trim_end_matches([':', '.']).trim_end().to_lowercase();
+    let word = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+    t.strip_prefix("on screen").is_some_and(|r| !word(r.chars().next()))
+        || t.strip_suffix("on screen").is_some_and(|r| !word(r.chars().next_back()))
+}
+
+/// The frames a text shows as pictures of its own (`![…](frames/<file>)`).
+fn own_frames(text: &str) -> impl Iterator<Item = &str> + '_ {
+    text.match_indices("![").filter_map(|(k, _)| {
+        let rest = &text[k + 2..];
+        let dest = rest[rest.find("](")? + 2..].strip_prefix("frames/")?;
+        Some(&dest[..dest.find([')', ' ']).unwrap_or(dest.len())])
+    })
 }
 
 /// The first frame file a bullet names: `<digits>m<two digits>s.jpg` or `.png` as a whole word, in any case (lowercased).
@@ -750,7 +765,7 @@ fn attach_screens(md: &str, frames: &[Frame]) -> String {
             item.push_str(lines[i]);
             i += 1;
         }
-        if !item.find("![").is_some_and(|k| item[k..].contains("](frames/")) {
+        if own_frames(&item).next().is_none() {
             bullets.push((i, at, named_frame(&item)));
         }
     }
@@ -1337,10 +1352,12 @@ mod tests {
     #[test]
     fn on_screen_sections_start_or_end_with_on_screen_and_hold_nested_headings() {
         let f = jpgs(&[("01m05s.jpg", 65.0), ("01m20s.jpg", 80.0), ("05m07s.jpg", 307.0)]);
-        for h in ["## Appendix: On screen", "## On screen — slides", "## On screen:"] {
+        for h in ["## Appendix: On screen", "## On screen — slides", "## On screen:", "## Appendix: On screen ##", "## On screen ##"] {
             assert_eq!(after(&attach_screens(&format!("{h}\n- [01:05] A\n"), &f), "- [01:05] A").as_deref(), Some("01m05s.jpg"), "{h}");
         }
-        assert_eq!(after(&attach_screens("## Not a screen\n- [01:05] A\n", &f), "- [01:05] A"), None);
+        for h in ["## Not a screen", "## Registration screen", "## On screening", "## Notes on screen#"] {
+            assert_eq!(after(&attach_screens(&format!("{h}\n- [01:05] A\n"), &f), "- [01:05] A"), None, "{h}");
+        }
         let md = "## Appendix: On screen\n### On screen — first\n- [01:05] A\n### Second topic\n- [05:07] B\n## Decisions\n- [01:06] C\n";
         let got = attach_screens(md, &f);
         assert_eq!((after(&got, "- [01:05] A").as_deref(), after(&got, "- [05:07] B").as_deref(), after(&got, "- [01:06] C")), (Some("01m05s.jpg"), Some("05m07s.jpg"), None));
@@ -1401,6 +1418,15 @@ mod tests {
         assert!(got.contains("(05m07s.jpg)\n  ![Timeline](frames/01m05s.jpg)\n- [05:05] Later"), "untouched: {got}");
         assert_eq!(after(&got, "- [05:05] Later").as_deref(), Some("05m07s.jpg"), "05m07s stayed free");
         assert_eq!(render(md, "T", None, &any, &f).matches("<figure>").count(), 2);
+    }
+
+    #[test]
+    fn a_picture_from_elsewhere_is_no_picture_of_its_own() {
+        let f = jpgs(&[("05m07s.jpg", 307.0)]);
+        let md = "## On screen\n- [05:00] ![icon](https://acme.example/i.png) Plan [05m07s.jpg](frames/05m07s.jpg)\n";
+        assert_eq!(after(&attach_screens(md, &f), "[05m07s.jpg](frames/05m07s.jpg)").as_deref(), Some("05m07s.jpg"));
+        let own = "## On screen\n- [05:00] Plan ![Plan](frames/05m07s.jpg)\n";
+        assert_eq!(after(&attach_screens(own, &f), "![Plan](frames/05m07s.jpg)"), None);
     }
 
     #[test]
