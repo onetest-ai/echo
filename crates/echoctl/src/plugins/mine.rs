@@ -31,6 +31,7 @@ pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf, bool)> {
     let file = mine.join(SOURCES);
     let mut marks: BTreeMap<String, Value> = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let source = from.display().to_string();
+    check_tree(&from, PLUGIN_LIMIT).with_context(|| from.display().to_string())?;
     if dest.exists() {
         let mark = marks.get(&m.id);
         // This folder's copy as copied — or the same files as this folder now (nothing would be lost).
@@ -40,7 +41,6 @@ pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf, bool)> {
             bail!("My plugins already has a folder “{}” ({}) that isn't this folder's copy as copied (made or edited there) — move it away, or install it by its id", m.id, dest.display());
         }
     }
-    check_tree(&from, PLUGIN_LIMIT).with_context(|| from.display().to_string())?;
     let tmp = mine.join(format!(".new-{}-{}", m.id, std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     let hash = copy_tree(&from, &tmp).and_then(|()| tree_hash(&tmp));
@@ -53,6 +53,7 @@ pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf, bool)> {
     };
     // The old copy moved aside, the new one in its place, then the old one removed; on a failure, as it was.
     let old = mine.join(format!(".old-{}-{}", m.id, std::process::id()));
+    let _ = fs::remove_dir_all(&old);
     if dest.exists() {
         if let Err(e) = fs::rename(&dest, &old) {
             let _ = fs::remove_dir_all(&tmp);
