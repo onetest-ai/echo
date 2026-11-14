@@ -13,8 +13,7 @@ where new code goes); user-facing docs are `README.md` and `docs/install.md`.
 
 ## Working Rules
 
-Behavioural rules for every change (after Andrej Karpathy's guidelines). They bias toward caution over speed; for a
-trivial task, use judgment.
+Behavioural rules for every change; for a trivial task, use judgment.
 
 1. **Think before coding.** Don't assume, don't hide confusion, surface tradeoffs. State your assumptions; if several
    readings exist, present them instead of picking one silently; if a simpler approach exists, say so and push back
@@ -31,8 +30,7 @@ trivial task, use judgment.
    "refactor X" → tests pass before and after. For multi-step work, state a short plan with a
    check per step (`1. … → verify: …`), then loop until each check holds (for a review, the check is a reported list, not
    fixes). Here the final check is the gates in
-   `.ai-run/guides/quality-gates.md` (clippy, the Windows cross-check, tests, `scripts/check-mod.sh`, and the functional
-   cases of the areas touched).
+   `.ai-run/guides/quality-gates.md`.
 
 ## Guide Imports
 
@@ -78,7 +76,8 @@ by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the 
 | Echo plugins | build or extend Echo plugins | "add a ctx service", "add a capability", "add a slot", "test a plugin locally", "give a plugin a Today widget", "add a widget kind" | .ai-run/guides/plugins/echo-plugins.md | .ai-run/guides/plugins/plugin-authoring.md |
 | Integration | run Claude Code or change AI profiles | "start a new Claude job", "change routing variables", "test a sign-in" | .ai-run/guides/integrations/claude-code-runs.md | - |
 | Security | change what a run, plugin or page may do with untrusted text or paths | "let process-call use a new command", "render model output as HTML", "accept a path from a plugin" | .ai-run/guides/security/untrusted-text.md | - |
-| Standards | commit, branch or release | "write a commit message", "cut a release" | - | .ai-run/guides/standards/git-workflow.md |
+| Standards | commit, branch, PR, merge or release | "write a commit message", "cut a release" | .ai-run/guides/standards/git-workflow.md | - |
+| Threads and ledger | change threads, the ledger, people or Microsoft 365 sends | "change how a proposal is checked", "add a field a user can pin", "send a Teams message from a thread" | .ai-run/guides/development/threads-and-ledger.md | .ai-run/guides/security/untrusted-text.md |
 | Testing | write or run tests; plan any change in behaviour (its cases first) | "add a unit test", "add a window test", "plan a feature", "run the cases before a PR", "prepare a release test run" | .ai-run/guides/testing/testing.md | tests/app_profile.md |
 | Window | change the Echo window | "add a button that calls the app", "add a setting", "add a node test for app.js" | .ai-run/guides/window/window-ui.md | - |
 <!-- ai-run-init:task-classifier end -->
@@ -89,12 +88,12 @@ by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the 
 | Rule | Trigger | Action |
 |---|---|---|
 | Check Guides First | ANY task | Match request to category and load the P0 guide before searching broadly |
-| Test design in the plan | planning ANY change in behaviour — a feature, a fix, a removal (before the first line of code) | Load `.ai-run/guides/testing/testing.md` and `tests/app_profile.md`. The plan has a **Tests** part: the cases in `tests/cases/<area>/` to add, change and remove (they are the acceptance criteria; `run: agent` wherever the window or the CLI can show it) the scenarios in `tests/scenarios/` they go into, the features they check in the functional map (`tests/feature-map/areas/<area>.json`: new behaviour adds its rows), and the Rust or node tests that prove it — reconciling the features that change: their existing cases checked against the new behaviour, obsolete ones removed, duplicates merged (not the whole area). Write them before the code |
-| Functional gate | before calling a change or fix done, or opening its PR | Run the functional cases of what the change touched — the cases of its features in the map and of the flows through the changed code — with the quality gates; minutes, not an hour: no whole scenarios, no full regression. A FAIL stops it only when it is a regression (it passes on `main`); a failure with an open issue is listed with its number, a wrong case is fixed or listed. The PR lists the cases added, changed, removed and run, with their results — `.ai-run/guides/quality-gates.md` (functional) |
-| Full regression | merging a long-lived branch into `main`, or a release — only when the user decides | Every agent scenario, each FAIL checked against `main` (regression, an open issue, or a wrong case); a release also runs every `critical` case, agent and person-run — `.ai-run/guides/quality-gates.md` (functional) |
-| Reviews and merges | asked to review code or a PR; a PR ready to merge | A review reports its findings, each checked against the code (real, speculative, or not a bug) and ranked; it changes no code until the user decides what to fix. A PR is merged when the user says so (or has said in advance), not left open without asking |
+| Test design in the plan | planning ANY change in behaviour — a feature, a fix, a removal (before the first line of code) | Load `.ai-run/guides/testing/testing.md` and `tests/app_profile.md`; the plan has a **Tests** part, written before the code — testing R1 |
+| Functional gate | before calling a change or fix done, or opening its PR | Rebuild, then run the touched cases with the gates — `.ai-run/guides/quality-gates.md` R1–R4 |
+| Release test bar | a release, or merging a long-lived branch into `main` | `.ai-run/guides/quality-gates.md` R5 |
+| Reviews and merges | asked to review code or a PR; a PR ready to merge | `.ai-run/guides/standards/git-workflow.md` R8 (review) and R5 (merge) |
 | Git Operations | "commit" / "push" / "PR" / "MR" | Only then; load `.ai-run/guides/standards/git-workflow.md` |
-| Map before push | before pushing a branch, opening its PR or merging it | A branch that changes behaviour updates the functional map (`tests/feature-map/areas/<area>.json`: features added, changed, removed) and `python3 tests/tools/feature-map.py check` passes; the PR body has a `Map:` line from `python3 tests/tools/feature-map.py changes main` (or `Map: no behaviour change — <why>`). |
+| Map before push | before pushing a branch, opening its PR or merging it | Update the functional map; the PR's `Map:` line from `feature-map.py changes origin/main` — `.ai-run/guides/standards/git-workflow.md` R4, testing R6 |
 | Shell | ANY shell command | Use bash/Linux-compatible syntax |
 | A call's text goes only to its pinned AI profile; Claude Code starts through ai::claude_command | starting a Claude job or changing AI profiles | load `.ai-run/guides/integrations/claude-code-runs.md` |
 | Echo plugins (echo-plugin.json, main.js host half, client.js) follow the plugin guide, not the Claude Code plugin in plugin/ | building or extending Echo plugins, capabilities, slots or marketplaces | load `.ai-run/guides/plugins/echo-plugins.md` |
