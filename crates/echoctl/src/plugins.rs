@@ -1006,7 +1006,7 @@ pub fn removable(name: &str) -> Result<String> {
 pub fn installed_from(name: &str) -> Result<Vec<(String, String)>> {
     let r = Registry::load()?;
     let mut v: Vec<(String, String)> = r.installed.values().filter(|p| p.market == name).map(|p| (p.id.clone(), p.name.clone())).collect();
-    v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    v.sort_by_key(|p| p.1.to_lowercase());
     Ok(v)
 }
 
