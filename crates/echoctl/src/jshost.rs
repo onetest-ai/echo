@@ -23,6 +23,7 @@ use serde_json::{json, Value};
 use crate::{paths, plugins};
 
 mod test_hosts;
+mod service_async;
 mod widgets;
 pub mod work;
 
@@ -33,6 +34,7 @@ use widgets::widget_ask_now_on;
 pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
 use widgets::widget_store;
 
+use service_async::service_async;
 use test_hosts::test_host;
 #[cfg(test)]
 use test_hosts::test_host_in;
@@ -123,6 +125,9 @@ const PRELUDE: &str = r#"
       provide: (id, fn) => { commands['__widget:' + id] = (a) => fn(a || {}) },
       set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
       clear: (id) => call('widgets.clear', String(id)),
+      /** It read something new: Echo asks its provider again now — widget `id`'s, or each one's — every copy (Today's
+       *  and each dashboard's) with its own settings. Not heard from inside a provider; at most once in 10 s a widget. */
+      changed: (id) => call('widgets.changed', id === undefined || id === null ? null : String(id)),
     },
     /** Its items on Today → My work and in threads' Work (uses.work): `provide(({scope, thread}) => rows)` answers
      *  Echo's ask — scope "me" (My work) or "thread" (that thread's Work tab) — with [{id, title, kind, where?, url?,
@@ -536,6 +541,9 @@ pub fn event_each(name: &str, payload: &Value, each: &serde_json::Map<String, Va
     }
 }
 
+/// Events told only to the plugins their `each` names (not every plugin that hears them).
+const ADDRESSED: &[&str] = &["shared_changed"];
+
 /// This process is the app and runs the plugins' host: an event sent here reaches the plugins the user sees.
 pub fn hosts_here() -> bool {
     HOST.get().is_some() && APP.load(Ordering::Relaxed)
@@ -556,6 +564,8 @@ struct Current {
     /// Its work provider runs now (Echo's `__work` ask, until that slice ends): a `ctx.work.changed()` from it is not
     /// heard — the answer it is giving is the change (heard, every ask would ask again).
     providing: bool,
+    /// One of its widget providers runs now (`__widget:<id>`): a `ctx.widgets.changed()` from it is not heard.
+    widget: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -627,6 +637,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 p.calls.insert(n, reply);
                 set_current(&current, &plugin);
                 current.lock().unwrap().providing = command == "__work";
+                current.lock().unwrap().widget = command.starts_with("__widget:");
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -638,6 +649,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     })
                 });
                 current.lock().unwrap().providing = false;
+                current.lock().unwrap().widget = false;
             }
             Ok(Msg::Forget(plugin, n)) => {
                 if let Some(p) = plugins.get_mut(&plugin) {
@@ -654,7 +666,9 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             }
             Ok(Msg::EventEach(name, base, each)) => {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
-                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
+                // An event addressed to some plugins (`shared_changed`: its namespace's) reaches only those `each` names.
+                let to = |id: &str| !ADDRESSED.contains(&name.as_str()) || each.contains_key(id);
+                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name)) && to(id)) {
                     let mut payload = base.clone();
                     for (k, v) in each.get(id).and_then(Value::as_object).into_iter().flatten() {
                         payload[k] = v.clone();
@@ -680,7 +694,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
             // it — the app's alone, never a terminal's host.
             if APP.load(Ordering::Relaxed) {
-                plugins::thread_values::take_queued(event_each);
+                plugins::thread_values::take_queued(|event, payload, each| if event == widgets::WIDGETS_CHANGED { widgets::take_changed(each) } else { event_each(event, payload, each) });
             }
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
@@ -772,7 +786,8 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
         }
         return json!({"value": null}).to_string();
     }
-    if op == "work.changed" && current.lock().is_ok_and(|c| c.providing) {
+    // A provider's own answer is the change: heard, each ask would ask again.
+    if (op == "work.changed" && current.lock().is_ok_and(|c| c.providing)) || (op == "widgets.changed" && current.lock().is_ok_and(|c| c.widget)) {
         return json!({"value": null}).to_string();
     }
     match service(&id, op, &arg) {
@@ -1031,6 +1046,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None, None)?;
             Value::Null
         }
+        "widgets.changed" => {
+            widgets::widgets_changed(id, arg.as_str())?;
+            Value::Null
+        }
         "widgets.clear" => {
             widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None, None)?;
             Value::Null
@@ -1062,7 +1081,14 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 }
                 None => id.to_string(),
             };
-            plugins::thread_values::set(&store, &s(&arg[0]), &key, &arg[2])?;
+            let thread = s(&arg[0]);
+            // A shared key's change is the namespace's other plugins' news (`shared_changed`); the same value isn't.
+            // Not readable (a damaged file, which the set moves aside): taken as changed.
+            let before = plugins::shared::store_of(&key)?.map(|_| plugins::thread_values::get(&store, &thread, &key).ok());
+            plugins::thread_values::set(&store, &thread, &key, &arg[2])?;
+            if before.is_some_and(|b| b.as_ref() != Some(&arg[2])) {
+                plugins::shared::tell_changed(id, &key, Some(&thread));
+            }
             Value::Null
         }
         "threads.list" => {
@@ -1075,7 +1101,12 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "shared.get" => plugins::shared::get(&s(arg))?,
         "shared.set" => {
             read_only_here("changing files or settings")?;
-            plugins::shared::set(id, &s(&arg[0]), &arg[1])?;
+            let key = s(&arg[0]);
+            let before = plugins::shared::get(&key).ok();
+            plugins::shared::set(id, &key, &arg[1])?;
+            if before.as_ref() != Some(&arg[1]) {
+                plugins::shared::tell_changed(id, &key, None);
+            }
             Value::Null
         }
         "inbox.clear" => {
@@ -1305,155 +1336,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         o => bail!("Echo has no service “{o}”"),
     })
-}
-
-fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
-    match op {
-        // A script it declared (`uses.scripts`): a read-only routine's host runs only one marked readonly.
-        "scripts.run" => {
-            let args: Vec<String> = arg[2].as_array().into_iter().flatten().map(|a| a.as_str().map(str::to_owned).ok_or_else(|| anyhow!("a script's arguments are strings"))).collect::<Result<_>>()?;
-            let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
-            plugins::scripts::run(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &args, arg[3]["timeout"].as_u64(), read_only)
-        }
-        // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
-        "claude.run" => {
-            read_only_here("a Claude run")?;
-            // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
-            plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
-            let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
-            let (answer, model, usage) = crate::claudejob::run(&spec)?;
-            // What it changed and sent with Echo's CLI, for the plugin to show (a routine's outcome).
-            let actions = crate::notes::run_actions(&spec.run_dir.join("actions.jsonl"));
-            Ok(json!({"answer": answer, "model": model, "usage": usage, "actions": actions}))
-        }
-        // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
-        "signin.get" => {
-            let host = arg[0].as_str().unwrap_or("");
-            plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
-            read_only_here("reading your sign-in")?;
-            let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses).then_some(id);
-            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
-        }
-"http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
-        "system.pick_folder" => {
-            uses(id, "folders")?;
-            let name = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
-            let prompt: String = format!("{} — {}", name, arg.as_str().unwrap_or("Choose a folder")).chars().take(200).collect();
-            Ok(match crate::app::choose_folder(&prompt) {
-                Some(dir) => json!(crate::grants::grant(id, &dir)?.display().to_string()),
-                None => Value::Null,
-            })
-        }
-        "fs.read_many" => {
-            uses(id, "folders")?;
-            let root = arg[0].as_str().unwrap_or("").to_string();
-            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
-            let mut out = vec![];
-            for rel in arg[1].as_array().into_iter().flatten().take(5000) {
-                let text = crate::grants::resolve(id, &root, rel.as_str().unwrap_or("")).ok().and_then(|f| {
-                    use std::io::Read;
-                    let mut buf = vec![];
-                    std::fs::File::open(f).ok()?.take(max).read_to_end(&mut buf).ok()?;
-                    Some(String::from_utf8_lossy(&buf).into_owned())
-                });
-                out.push(json!(text));
-            }
-            Ok(json!(out))
-        }
-        "fs.walk" => {
-            uses(id, "folders")?;
-            let root = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), "")?;
-            let o = &arg[1];
-            let base = match o["path"].as_str().filter(|p| !p.is_empty()) {
-                Some(rel) => crate::grants::resolve(id, &root.display().to_string(), rel)?,
-                None => root.clone(),
-            };
-            let hidden = o["hidden"].as_bool().unwrap_or(false);
-            let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(20_000).min(100_000) as usize;
-            let exts: Vec<String> = o["ext"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|e| e.trim_start_matches('.').to_lowercase())).collect()).unwrap_or_default();
-            let mut out = vec![];
-            let mut stack = vec![base];
-            while let Some(dir) = stack.pop() {
-                // A folder swapped for a link since it was listed: not read.
-                if !dunce::canonicalize(&dir).is_ok_and(|real| real.starts_with(&root)) {
-                    continue;
-                }
-                let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-                for e in rd.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let Ok(t) = e.file_type() else { continue };
-                    // Links aren't followed: one could lead out of the folder.
-                    if t.is_symlink() || (!hidden && name.starts_with('.')) {
-                        continue;
-                    }
-                    let p = e.path();
-                    if t.is_dir() {
-                        stack.push(p);
-                    } else if exts.is_empty() || p.extension().is_some_and(|x| exts.contains(&x.to_string_lossy().to_lowercase())) {
-                        let m = e.metadata().ok();
-                        let rel = p.strip_prefix(&root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
-                        let mtime = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-                        out.push(json!({"path": rel, "size": m.map(|m| m.len()).unwrap_or(0), "mtime": mtime}));
-                        if out.len() >= max {
-                            return Ok(json!(out));
-                        }
-                    }
-                }
-            }
-            Ok(json!(out))
-        }
-        "claude.has_plugin" | "claude.install_plugin" => {
-            let spec = arg[0].as_str().unwrap_or("");
-            if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
-                bail!("“{spec}” isn't a Claude Code plugin (name@marketplace)");
-            }
-            // Only the channel plugin its install sheet named; installing (it changes the user's Claude Code) never from
-            // a read-only routine, and only into the default profile's.
-            may_touch_claude_plugin(id, spec)?;
-            let profile = if op == "claude.install_plugin" {
-                read_only_here("installing")?;
-                crate::ai::default_id()
-            } else {
-                Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id)
-            };
-            let ready = crate::ai::ready(&profile)?;
-            let args: Vec<String> = if op == "claude.has_plugin" { vec!["plugin".into(), "list".into(), "--json".into()] } else { vec!["plugin".into(), "install".into(), spec.into(), "--scope".into(), "user".into()] };
-            let out = crate::ai::claude_command(ready.profile(), &args, &paths::home(), false)?.wait_with_output()?;
-            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-            if op == "claude.has_plugin" {
-                // On and seen from the data folder (where Echo's sessions run): user scope, or this folder's project.
-                let list: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|_| anyhow!("Claude Code's plugin list can't be read"))?;
-                let home = dunce::canonicalize(paths::home()).unwrap_or_else(|_| paths::home());
-                let usable = list.iter().any(|x| {
-                    x["id"] == spec
-                        && x["enabled"] == true
-                        && (x["scope"] == "user" || x["projectPath"].as_str().and_then(|p| dunce::canonicalize(p).ok()).is_some_and(|p| p == home))
-                });
-                return Ok(json!(usable));
-            }
-            if !out.status.success() {
-                bail!("Claude Code couldn't install {spec}: {}", text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no reason given").trim());
-            }
-            Ok(Value::Null)
-        }
-        "deliver.send" => {
-            read_only_here("sending")?;
-            let kind = arg[0].as_str().unwrap_or("");
-            // Only the ways its install sheet named, or its own.
-            plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;
-            let m = &arg[1];
-            let s = |k: &str| m[k].as_str().map(str::to_owned);
-            let to: Vec<String> = m["mail_to"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
-            let (title, markdown, about, ai) = (s("title").unwrap_or_default(), s("markdown").unwrap_or_default(), s("about"), s("ai"));
-            crate::deliver::ready(kind)?;
-            let sent = crate::deliver::send(kind, &crate::deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to });
-            // Inside a routine's or Yolo's run (its plugin call): the send is the run's, noted for its outcome.
-            crate::notes::note("send", &format!("plugin {id}: deliver by {kind} “{}”", title.chars().take(120).collect::<String>()), sent.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
-            sent?;
-            Ok(Value::Null)
-        }
-        o => bail!("Echo has no service “{o}”"),
-    }
 }
 
 // ── the plugins' Today widgets (widgets.rs) ──
@@ -2767,6 +2649,156 @@ mod tests {
         assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
         APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_shared_value_changed_is_told_to_its_namespaces_other_plugins_once_it_changes() {
+        // #612: `shared_changed` {namespace, key, thread?, by} — to the namespace's plugins (its owner's source) that
+        // hear it, not the one that set it; the same value again is no news; from another process, by the app's queue.
+        let (_env, root) = paths::testenv::folders("jshost-shared-changed");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let main = r#"
+            export function apply(ctx) {
+              const heard = []
+              ctx.on('shared_changed', (p) => { heard.push(p) })
+              ctx.command('tset', (a) => ctx.threads.set(a.thread, a.key, a.value))
+              ctx.command('sset', (a) => ctx.shared.set(a.key, a.value))
+              ctx.command('heard', () => heard)
+            }
+        "#;
+        let market = |dir: &str, name: &str, ids: &[&str]| {
+            let mk = root.join(dir);
+            for id in ids {
+                let d = mk.join("plugins").join(id);
+                std::fs::create_dir_all(&d).unwrap();
+                std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"events": {"on": ["shared_changed"]}}}).to_string()).unwrap();
+                std::fs::write(d.join("main.js"), main).unwrap();
+            }
+            let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+            std::fs::write(mk.join("echo-marketplace.json"), json!({"name": name, "plugins": plugins}).to_string()).unwrap();
+            let m = plugins::market_add(mk.to_str().unwrap(), Some(dir)).unwrap();
+            plugins::refresh(&m).unwrap();
+            for id in ids {
+                let r = plugins::review(id, Some(&m)).unwrap();
+                plugins::install(id, Some(&m), &r.uses).unwrap();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        market("acme", "Acme", &["a", "b"]);
+        market("acme-copy", "Acme", &["c"]);
+        sync();
+        as_app();
+        let call_ok = |id: &str, cmd: &str, a: Value| (0..50).find_map(|_| call(id, cmd, &a).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        let heard = |id: &str| call_ok(id, "heard", json!({})).unwrap();
+        call_ok("a", "sset", json!({"key": "acme.watch", "value": ["ACME-1"]})).unwrap();
+        call_ok("a", "tset", json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI"]})).unwrap();
+        // The same value again, and a's own key (no dot): no news.
+        call_ok("a", "sset", json!({"key": "acme.watch", "value": ["ACME-1"]})).unwrap();
+        call_ok("a", "tset", json!({"thread": alpha, "key": "codes", "value": "mine"})).unwrap();
+        let want = json!([
+            {"namespace": "acme", "key": "acme.watch", "by": "a"},
+            {"namespace": "acme", "key": "acme.codes", "by": "a", "thread": alpha},
+        ]);
+        crate::paths::testenv::eventually("b hears both changes", || heard("b") == want);
+        assert_eq!(heard("a"), json!([]), "not the plugin that set it");
+        assert_eq!(heard("c"), json!([]), "another source calling itself Acme doesn't share it");
+        // Another process (a terminal's `plugin call`): queued for the app, to b and a only.
+        APP.store(false, Ordering::Relaxed);
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": []})).unwrap();
+        let mut got = vec![];
+        plugins::thread_values::take_queued(|e, p, each| got.push((e.to_string(), p.clone(), each.keys().cloned().collect::<Vec<_>>())));
+        assert_eq!(got, [("shared_changed".to_string(), json!({"namespace": "acme", "key": "acme.watch", "by": "b"}), vec!["a".to_string()])]);
+        // A damaged file: the set still moves it aside and goes on (what was there unread: taken as changed).
+        std::fs::write(plugins::data_dir("@acme").join("shared.json"), "not json").unwrap();
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": ["ACME-2"]})).unwrap();
+        assert_eq!(plugins::shared::get("acme.watch").unwrap(), json!(["ACME-2"]));
+        for id in ["a", "b", "c"] {
+            plugins::remove(id, true).unwrap();
+        }
+        sync();
+    }
+
+    #[test]
+    fn widgets_changed_asks_each_copy_again_with_its_own_settings_at_most_once_a_gap() {
+        // #612: `ctx.widgets.changed(id)` — Today's copy and a dashboard's asked again (each with its page's settings),
+        // a long `refresh` notwithstanding; changes within the gap asked once at its end; one from inside the provider
+        // isn't heard; from another process, marked due and queued for the app.
+        use crate::today_layout::{self as l, Page};
+        let (_env, root) = paths::testenv::folders("jshost-widgets-changed");
+        let mk = root.join("market");
+        let d = mk.join("plugins/pulse");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "open", "label": "Open", "kind": "stat", "refresh": 3600, "params": [{"key": "thread", "label": "Thread", "type": "thread"}]},
+            {"id": "all", "label": "All", "kind": "stat", "refresh": 3600},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "pulse", "name": "Pulse", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              let asks = 0
+              ctx.widgets.provide('open', ({ params }) => { asks++; ctx.widgets.changed('open'); return { value: asks, label: params.thread || '-' } })
+              ctx.command('changed', (a) => { ctx.widgets.changed(a.id); return 1 })
+              let all = 0
+              ctx.widgets.provide('all', () => ({ value: ++all }))
+              ctx.command('asks', () => asks)
+              ctx.command('all', () => all)
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "pulse", "source": "./plugins/pulse"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("pulse", Some(&name)).unwrap().uses;
+        plugins::install("pulse", Some(&name), &agreed).unwrap();
+        sync();
+        as_app();
+        let t = crate::projects::create("Aurora", None, None).unwrap();
+        let thread = Page::Thread(t.id.clone());
+        l::add("plugin:pulse:open", Some("M"), None).unwrap();
+        l::add_on(&thread, "plugin:pulse:open", Some("M"), None).unwrap();
+        let asks = || (0..50).find_map(|_| call("pulse", "asks", &json!({})).ok().or_else(|| { std::thread::sleep(Duration::from_millis(50)); None })).unwrap().as_u64().unwrap();
+        let value = |p: &Page| widget_last_on("pulse", "open", p).map(|l| (l["data"]["value"].as_u64().unwrap_or(0), l["data"]["label"].as_str().unwrap_or("").to_string()));
+        for p in [&Page::Today, &thread] {
+            widget_ask_now_on("pulse", "open", p);
+        }
+        widget_ask_now_on("pulse", "all", &Page::Today);
+        assert_eq!(asks(), 2, "each copy asked once; the provider's own changed() not heard");
+        let all = || call("pulse", "all", &json!({})).unwrap().as_u64().unwrap();
+        assert_eq!(all(), 1);
+        assert!(call("pulse", "changed", &json!({"id": "nope"})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
+        call("pulse", "changed", &json!({"id": "open"})).unwrap();
+        crate::paths::testenv::eventually("both copies asked again", || asks() == 4);
+        crate::paths::testenv::eventually("each answer kept", || value(&Page::Today).is_some_and(|v| v.0 >= 3) && value(&thread).is_some_and(|v| v.0 >= 3));
+        assert_eq!(value(&Page::Today).unwrap().1, "-", "Today's settings");
+        assert_eq!(value(&thread).unwrap().1, t.id, "the dashboard's own");
+        // With no id: every widget it declares. Twice more within open's gap: open asked once, at its end — nothing
+        // before it; `all` (not changed before) at once, then once more at the end of its own gap.
+        call("pulse", "changed", &json!({})).unwrap();
+        call("pulse", "changed", &json!({})).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(asks(), 4, "not before the gap's end");
+        crate::paths::testenv::eventually("all asked at once", || all() == 2);
+        crate::paths::testenv::eventually("asked at the gap's end", || asks() == 6 && all() == 3);
+        std::thread::sleep(Duration::from_millis(900));
+        assert_eq!((asks(), all()), (6, 3), "once: the second change in the gap, and the provider's own, add nothing");
+        // Another process: each copy marked due now, the ask left for the app.
+        APP.store(false, Ordering::Relaxed);
+        call("pulse", "changed", &json!({"id": "open"})).unwrap();
+        for p in [&Page::Today, &thread] {
+            assert_eq!(widget_last_on("pulse", "open", p).unwrap()["asked"], "1970-01-01T00:00:00Z", "{p:?} due");
+        }
+        let mut got = vec![];
+        plugins::thread_values::take_queued(|e, _, each| got.push((e.to_string(), Value::Object(each.clone()))));
+        assert_eq!(got, [(widgets::WIDGETS_CHANGED.to_string(), json!({"pulse": {"widget": "open"}}))]);
+        assert_eq!(asks(), 6, "not asked in this process");
+        plugins::remove("pulse", true).unwrap();
         sync();
     }
 

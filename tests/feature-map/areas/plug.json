@@ -270,7 +270,7 @@
   },
   {
    "id": "F-PLUG-29",
-   "feature": "Plugins of one marketplace share values under a key `<ns>.<name>` (`ns`: the marketplace's declared name in lower case, a space '-'): per thread with `ctx.threads.get/set/list` (one value for all of them, following the thread like a plugin's own: a deleted thread's shared values go, and each sharing plugin hears them in its `deleted` values) and for the computer with `ctx.shared.get/set` (null removes; a set creates it); every plugin reads any namespace, only plugins from the source that owns it set it (the earliest installed plugin's whose marketplace declares that name; another source with the same name only reads, and takes the name once the owner's plugins are removed); a namespace no installed marketplace has reads empty and refuses a set; a key without a dot stays the plugin's own; a namespace key that isn't lower case refused; 16 KB a value, 64 keys; removing a plugin leaves the values",
+   "feature": "Plugins of one marketplace share values under a key `<ns>.<name>` (`ns`: the marketplace's declared name in lower case, a space '-'): per thread with `ctx.threads.get/set/list` (one value for all of them, following the thread like a plugin's own: a deleted thread's shared values go, and each sharing plugin hears them in its `deleted` values) and for the computer with `ctx.shared.get/set` (null removes; a set creates it); every plugin reads any namespace, only plugins from the source that owns it set it (the earliest installed plugin's whose marketplace declares that name; another source with the same name only reads, and takes the name once the owner's plugins are removed); a namespace no installed marketplace has reads empty and refuses a set; a key without a dot stays the plugin's own; a namespace key that isn't lower case refused; 16 KB a value, 64 keys; removing a plugin leaves the values; a change of one (not the same value again) is heard by the namespace's other plugins that ask for it (`shared_changed` {namespace, key, thread?, by}, never the one that set it), from a terminal's `plugin call` too (the app takes it within a second, or at its next start)",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -336,6 +336,13 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-36",
+   "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

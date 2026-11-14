@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use super::{catalog, data_dir, Registry};
 use crate::paths;
@@ -193,6 +193,23 @@ pub fn set(plugin: &str, key: &str, value: &Value) -> Result<()> {
     std::fs::create_dir_all(data_dir(&store))?;
     paths::write_atomic(&data_dir(&store).join(FILE), serde_json::to_string_pretty(&all)?.as_bytes())?;
     Ok(())
+}
+
+/// `shared_changed` (#612): a value `by` set under `key` (for the computer, or for `thread`) changed — told to the other
+/// plugins sharing its namespace that hear it (`uses.events.on`), `{namespace, key, thread?, by}`; from another
+/// process, through the app's queue (`thread_values::tell`). Nobody else shares it: nothing is told.
+pub fn tell_changed(by: &str, key: &str, thread: Option<&str>) {
+    let Ok(Some(store)) = store_of(key) else { return };
+    let ns = store.trim_start_matches('@').to_string();
+    let to: Map<String, Value> = sharers(&ns).into_iter().filter(|p| p != by).map(|p| (p, json!({}))).collect();
+    if to.is_empty() {
+        return;
+    }
+    let mut payload = json!({"namespace": ns, "key": key, "by": by});
+    if let Some(t) = thread {
+        payload["thread"] = json!(t);
+    }
+    super::thread_values::tell("shared_changed", &payload, &to);
 }
 
 #[cfg(test)]

@@ -199,12 +199,12 @@ fn emit(event: &str, mut data: serde_json::Value) {
 }
 
 /// An event as a plugin hears it (`plugins::EVENTS`): a call by its folder's name (not its path), a meeting by its
-/// id, subject and start; None for one plugins don't hear.
+/// id, subject, start and threads (ids, #612); None for one plugins don't hear.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 fn for_plugins(event: &str, d: &serde_json::Value) -> Option<serde_json::Value> {
     let call = || d["dir"].as_str().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().into_owned());
     Some(match event {
-        "meeting_soon" => json!({"id": d["id"], "subject": d["subject"], "start": d["start"]}),
+        "meeting_soon" => json!({"id": d["id"], "subject": d["subject"], "start": d["start"], "threads": d["threads"].as_array().cloned().unwrap_or_default()}),
         "call_started" => json!({"app": d["app"]}),
         // `next_call`: Teams went straight on to another call (not a hang-up); the next call_started follows at once.
         "call_ended" => json!({"app": d["app"], "recording": d["recording"], "next_call": d["next_call"] == true}),
@@ -379,6 +379,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             // recorded is offered once that recording ends (still within the window).
             if armed.is_none() && rec.is_none() && announced.insert(key) {
                 let mut ev = meeting_summary(m);
+                ev["threads"] = json!(crate::projects::for_event(m).iter().filter_map(|c| c["id"].as_str().map(str::to_owned)).collect::<Vec<_>>());
                 // `ask` (config `scheduled`): the app asks with a dialog; `previous_notes`:
                 // recurring recap, for clients.
                 // A series set to never record isn't asked about.
@@ -1555,6 +1556,10 @@ mod tests {
         assert_eq!(p, json!({"call": "2026-11-06_100000-acme", "title": "Acme", "memo": false}));
         assert_eq!(for_plugins("transcribed", &json!({"dir": "/a/b/c", "ok": true, "error": "x"})).unwrap(), json!({"call": "c", "ok": true}));
         assert!(for_plugins("error", &json!({"message": "x"})).is_none(), "not one plugins hear");
+        // A meeting about to start names its threads when Echo knows them (#612); none known: [].
+        let soon = |d: serde_json::Value| for_plugins("meeting_soon", &d).unwrap()["threads"].clone();
+        assert_eq!(soon(json!({"id": "m1", "subject": "Acme sync", "start": "2026-11-14T10:00:00Z", "threads": ["acme-rollout"]})), json!(["acme-rollout"]));
+        assert_eq!(soon(json!({"id": "m1", "subject": "Acme sync", "start": "2026-11-14T10:00:00Z"})), json!([]));
     }
 
     #[test]

@@ -207,6 +207,118 @@ pub(super) fn widget_ask_now_on(plugin: &str, widget: &str, page: &crate::today_
     }
 }
 
+/// `ctx.widgets.changed` asks a widget at most this often: a plugin that says it all the time (a timer) is asked once
+/// a gap, the last of the gap's changes at its end.
+#[cfg(not(test))]
+const CHANGED_GAP: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const CHANGED_GAP: Duration = Duration::from_millis(400);
+/// Each widget's (`plugin:widget`) last `changed` ask, and whether one waits for the gap's end.
+static CHANGED: Mutex<std::collections::BTreeMap<String, (std::time::Instant, bool)>> = Mutex::new(std::collections::BTreeMap::new());
+
+/// `ctx.widgets.changed(id?)` (#612): the plugin read something new — its widget `id`'s (or every one it declares)
+/// copies, Today's and each dashboard's, are asked again, each with its own page's settings. Marked due first, so the
+/// next look asks even if this process ends; in the app asked now, from another process (a terminal's `plugin call`)
+/// by the app, which takes it from its queue within a second. At most once a `CHANGED_GAP` a widget.
+pub(super) fn widgets_changed(plugin: &str, widget: Option<&str>) -> Result<()> {
+    let declared: Vec<String> = plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).map(|(_, m)| m.widgets.iter().map(|w| w.id.clone()).collect()).unwrap_or_default();
+    let widgets = match widget {
+        Some(w) if !declared.iter().any(|d| d == w) => bail!("{w:?} isn't a widget this plugin declares (`widgets` in its manifest)"),
+        Some(w) => vec![w.to_string()],
+        None => declared,
+    };
+    if hosts_here() {
+        // Marked due only as it is asked (`ask_changed`): a change within the gap isn't asked by every look either.
+        for w in widgets {
+            ask_changed(plugin, &w);
+        }
+    } else {
+        for w in &widgets {
+            mark_due(plugin, w);
+        }
+        let each = serde_json::Map::from_iter([(plugin.to_string(), json!({"widget": widget}))]);
+        // Not queued (the app hasn't taken a full queue): it is asked anyway at the next look (marked due).
+        if let Err(e) = plugins::thread_values::queue(WIDGETS_CHANGED, &json!({}), &each) {
+            eprintln!("echoctl: the running app won't hear that {plugin}'s widgets changed: {e:#}");
+        }
+    }
+    Ok(())
+}
+
+/// Another process's queued `changed` (`{plugin: {widget}}`), as the app takes it — here, where the window reads: each
+/// widget named (or each the plugin declares) asked as `widgets_changed` would.
+pub(super) fn take_changed(each: &serde_json::Map<String, Value>) {
+    for (plugin, w) in each {
+        let ws = match w["widget"].as_str() {
+            Some(one) => vec![one.to_string()],
+            None => plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).map(|(_, m)| m.widgets.iter().map(|x| x.id.clone()).collect()).unwrap_or_default(),
+        };
+        for one in ws {
+            ask_changed(plugin, &one);
+        }
+    }
+}
+
+/// The queued `changed` of another process, as the app takes it (`take_queued`): not an event for the plugins.
+pub(super) const WIDGETS_CHANGED: &str = "__widgets_changed";
+
+/// Every kept copy of the widget marked as asked long ago (due at the next look), the pages they are on.
+fn mark_due(plugin: &str, widget: &str) -> Vec<crate::today_layout::Page> {
+    let f = widgets_file(plugin);
+    let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut all) = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice::<serde_json::Map<String, Value>>(&b).ok()) else { return vec![] };
+    let mut pages = vec![];
+    for (k, v) in all.iter_mut() {
+        let page = match k.split_once('@') {
+            None if k == widget => Some(crate::today_layout::Page::Today),
+            Some((w, p)) if w == widget => crate::today_layout::Page::parse(p).ok(),
+            _ => None,
+        };
+        if let Some(page) = page {
+            v["asked"] = json!("1970-01-01T00:00:00Z");
+            pages.push(page);
+        }
+    }
+    let _ = serde_json::to_string_pretty(&all).map(|t| paths::write_atomic(&f, t.as_bytes()));
+    pages
+}
+
+/// Ask each copy of the widget now — or, within `CHANGED_GAP` of the last time, once at the gap's end.
+pub(super) fn ask_changed(plugin: &str, widget: &str) {
+    let key = format!("{plugin}:{widget}");
+    let wait = {
+        let mut all = CHANGED.lock().unwrap_or_else(|e| e.into_inner());
+        // One reading of the time since (the gap may end between two); never zero, which would ask now and leave the
+        // pending mark set for good.
+        match all.get(&key).map(|(last, pending)| (last.elapsed(), *pending)) {
+            Some((_, true)) => return,
+            Some((since, false)) if since < CHANGED_GAP => {
+                all.entry(key.clone()).and_modify(|e| e.1 = true);
+                (CHANGED_GAP - since).max(Duration::from_millis(1))
+            }
+            _ => {
+                all.insert(key.clone(), (std::time::Instant::now(), false));
+                Duration::ZERO
+            }
+        }
+    };
+    let ask = |plugin: &str, widget: &str| {
+        for page in mark_due(plugin, widget) {
+            widget_ask_on(plugin, widget, &page);
+        }
+    };
+    if wait.is_zero() {
+        ask(plugin, widget);
+        return;
+    }
+    let (plugin, widget) = (plugin.to_string(), widget.to_string());
+    std::thread::spawn(move || {
+        std::thread::sleep(wait);
+        CHANGED.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (std::time::Instant::now(), false));
+        ask(&plugin, &widget);
+    });
+}
+
 // ── the plugins' Inbox items ──
 
 #[cfg(test)]

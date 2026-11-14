@@ -55,6 +55,7 @@ pub const EVENTS: &[(&str, &str)] = &[
     ("thread_synced", "a thread's work is updated from its calls and mail"),
     ("sources_changed", "Echo's sources (calls, mail, channels) change"),
     ("threads_changed", "a thread is renamed, merged or deleted"),
+    ("shared_changed", "a value its marketplace's plugins share changes"),
 ];
 
 pub(super) fn describe_events(v: &Value) -> Result<String> {
