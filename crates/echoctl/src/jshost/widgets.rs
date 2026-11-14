@@ -19,9 +19,9 @@ fn widget_key(widget: &str, page: &crate::today_layout::Page) -> String {
 }
 
 /// A widget's last data (`None`: cleared), or why its provider couldn't answer (the data before kept) — one the
-/// plugin declares, at most 64 KB; `size`: the size its provider was asked for. Given for Today (a `set` or a `clear`
+/// plugin declares, at most 64 KB; `size` and `params`: the size and settings its provider was asked with. Given for Today (a `set` or a `clear`
 /// from the plugin), it replaces every page's: the dashboards' own answers go, and they show it until asked again.
-pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::Page, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
+pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::Page, data: Option<&Value>, error: Option<&str>, size: Option<&str>, params: Option<&serde_json::Map<String, Value>>) -> Result<()> {
     // Its kind as declared now: an answer is kept with it, and one kept for another kind (the plugin changed it in an
     // update) is never drawn as this one (`widgets::plugin_data` asks again).
     let kind = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).and_then(|(_, m)| m.widgets.iter().find(|w| w.id == widget).map(|w| w.kind.clone()));
@@ -55,16 +55,30 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
             last["asked"] = json!(now);
         }
         (d, None) => {
-            // A `set` keeps the size its provider was last asked for (else Today would take it for a resize).
-            let kept = last.get("size").cloned();
+            // A `set` keeps the size and settings its provider was last asked with (else Today would take it for a
+            // change of them).
+            let kept = (last.get("size").cloned(), last.get("params").cloned());
             last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
-            if let Some(k) = kept {
+            if let Some(k) = kept.0 {
                 last["size"] = k;
+            }
+            if let Some(p) = kept.1 {
+                last["params"] = p;
             }
         }
     }
     if let Some(size) = size {
         last["size"] = json!(size);
+    }
+    // Asked with these settings (set again elsewhere — the CLI, Filters —: asked again). A failed ask for other
+    // settings than its data's: that data isn't this one's, so it goes (the error shows, no ask again until due).
+    if let Some(p) = params {
+        let p = Value::Object(p.clone());
+        if error.is_some_and(|e| !e.is_empty()) && last.get("params").is_some_and(|old| *old != p) {
+            last["data"] = Value::Null;
+            last["at"] = Value::Null;
+        }
+        last["params"] = p;
     }
     last["kind"] = json!(kind);
     // The plugin's own `set` / `clear` (no ask, no size): every copy — each dashboard's shows it, until its own next ask.
@@ -182,14 +196,14 @@ pub(super) fn widget_ask_now_on(plugin: &str, widget: &str, page: &crate::today_
     match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size }), Duration::from_secs(5)) {
         // Kept — or, refused (over 64 KB), why, its data before kept.
         Ok(v) => {
-            if let Err(e) = widget_store(plugin, widget, page, Some(&v), None, size) {
-                let _ = widget_store(plugin, widget, page, None, Some(&format!("{e:#}")), size);
+            if let Err(e) = widget_store(plugin, widget, page, Some(&v), None, size, Some(&params)) {
+                let _ = widget_store(plugin, widget, page, None, Some(&format!("{e:#}")), size, Some(&params));
             }
         }
         // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
         // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
-        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, page, None, Some(""), size)),
-        Err(e) => drop(widget_store(plugin, widget, page, None, Some(&format!("{e:#}")), size)),
+        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, page, None, Some(""), size, Some(&params))),
+        Err(e) => drop(widget_store(plugin, widget, page, None, Some(&format!("{e:#}")), size, Some(&params))),
     }
 }
 

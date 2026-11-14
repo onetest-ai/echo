@@ -1006,11 +1006,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "widgets.set" => {
-            widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None)?;
+            widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None, None)?;
             Value::Null
         }
         "widgets.clear" => {
-            widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None)?;
+            widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None, None)?;
             Value::Null
         }
         "work.provide" => {
@@ -1640,10 +1640,22 @@ mod tests {
             let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
             all["builds"]["kind"] = json!("table");
             std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
-            widgets::widget_store("ci", "builds", &crate::today_layout::Page::Today, None, Some(err), None).unwrap();
+            widgets::widget_store("ci", "builds", &crate::today_layout::Page::Today, None, Some(err), None, None).unwrap();
             let l = widget_last("ci", "builds").unwrap();
             assert_eq!((l["kind"].as_str(), l["data"].is_null()), (Some("list"), true), "{err:?}: {l}");
         }
+        // Asked with settings: kept with them. A failed ask with other settings: the data for the old ones goes (the
+        // error shows); a failed ask with the same: the data stays.
+        let page = crate::today_layout::Page::Today;
+        let with = |b: &str| json!({ "branch": b }).as_object().unwrap().clone();
+        let data = json!({"items": [{"title": "main #41 passed"}]});
+        widgets::widget_store("ci", "builds", &page, Some(&data), None, Some("M"), Some(&with("main"))).unwrap();
+        assert_eq!(widget_last("ci", "builds").unwrap()["params"]["branch"], "main");
+        widgets::widget_store("ci", "builds", &page, None, Some("timed out"), Some("M"), Some(&with("main"))).unwrap();
+        assert!(!widget_last("ci", "builds").unwrap()["data"].is_null(), "the same settings: kept");
+        widgets::widget_store("ci", "builds", &page, None, Some("timed out"), Some("M"), Some(&with("release"))).unwrap();
+        let l = widget_last("ci", "builds").unwrap();
+        assert_eq!((l["data"].is_null(), l["params"]["branch"].as_str(), l["error"].as_str()), (true, Some("release"), Some("timed out")), "{l}");
         plugins::remove("ci", false).unwrap();
         sync();
     }

@@ -105,6 +105,7 @@ pub fn core() -> Vec<Widget> {
     two(with(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
     two(w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true)),
     two(w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true)),
+    w(crate::today_layout::FILTERS, "Filters", "Filters", "one setting for every widget beside it that has it", "filters", &["S", "M", "L"], "hug", false),
     ]
 }
 
@@ -215,6 +216,7 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page,
         "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
         "glance" => glance_for(&crate::today_layout::params_on(page, id)),
         "calls" => calls_for(&crate::today_layout::params_on(page, id)),
+        "filters" => crate::today_layout::filters_on(page),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
     if let (Some((_, name)), true) = (&scope, matches!(w.kind.as_ref(), "day" | "next" | "work")) {
@@ -281,10 +283,15 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crat
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     // Resized since its provider was last asked: asked again for the new size.
     let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on(page, &format!("plugin:{plugin}:{widget}")).as_str()));
+    // Its settings changed since (`echoctl today set`, Filters): asked again with them (an answer kept before
+    // settings were noted: not).
+    let reset = last.as_ref().and_then(|l| l.get("params")).is_some_and(|p| *p != Value::Object(crate::today_layout::params_on(page, &format!("plugin:{plugin}:{widget}"))));
     // Not on Today (a preview): asked only when it never answered.
-    if if placed { stale || resized } else { last.is_none() } {
+    if if placed { stale || resized || reset } else { last.is_none() } {
         crate::jshost::widget_ask_on(plugin, widget, page);
     }
+    // An answer for other settings isn't drawn as this one's: its place held until it is asked again.
+    let last = if placed && reset { None } else { last };
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
     json!({"kind": w.kind, "label": label_for(w), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})

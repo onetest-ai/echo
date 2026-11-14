@@ -44,6 +44,7 @@ function dashboardView(head = '') {
     'core:tasks.glance': glanceView, 'core:tasks.done': doneView, 'core:calls.week': callsWeekView,
     'core:calendar.agenda': (v) => yourDayView(v, now), 'core:calendar.calendar': (v) => dayCalendarView(v, now), 'core:calendar.strip': (v) => dayStripView(v, now),
     'core:calendar.next': (v, z) => nextMeetingView(v.next, z, now), 'core:tasks.mine': (v) => myWorkView(v),
+    'core:filters': filtersView,
   }
   for (const [id, v] of Object.entries(d.core || {})) if (OWN[id]) parts[id] = OWN[id](v, sizeAt(id))
   // Placed but not answered with anything yet: its place kept while editing (to move it, or take it off).

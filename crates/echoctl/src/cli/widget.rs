@@ -110,6 +110,9 @@ pub enum TodayCmd {
     Height { widget: String, height: u8 },
     /// Set one of a widget's settings: `echoctl today set core:tasks.glance period month`
     Set { widget: String, key: String, value: String },
+    /// The settings the widgets here share (Filters), or set one on all of them: `echoctl today --client acme filter
+    /// thread acme-rollout` ("" for a thread or client: all)
+    Filter { key: Option<String>, value: Option<String> },
     /// Take a widget off Today
     Remove { widget: String },
     /// Today as it comes: Needs you now, the routines' cards, Your day beside My work
@@ -125,6 +128,17 @@ pub fn today(thread: Option<&str>, client: Option<&str>, board: Option<&str>, cm
         TodayCmd::Size { widget, size } => layout::resize_on(&page, &widget, &size)?,
         TodayCmd::Height { widget, height } => layout::set_height_on(&page, &widget, height)?,
         TodayCmd::Set { widget, key, value } => layout::set_param_on(&page, &widget, &key, &value)?,
+        TodayCmd::Filter { key: None, .. } => {
+            print_json(&layout::filters_on(&page)["filters"]);
+            return Ok(());
+        }
+        TodayCmd::Filter { key: Some(key), value } => {
+            let value = value.ok_or_else(|| anyhow::anyhow!("filter {key}: say the value (\"\" for all)"))?;
+            let set = layout::set_filter_on(&page, &key, &value)?;
+            // Each plugin widget among them is asked again when the page is next read (its settings changed).
+            print_json(&serde_json::json!({ "set": set }));
+            return Ok(());
+        }
         TodayCmd::Remove { widget } => layout::remove_on(&page, &widget)?,
         TodayCmd::Reset => layout::reset_on(&page)?,
     };

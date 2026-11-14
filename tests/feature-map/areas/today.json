@@ -228,6 +228,16 @@
    "cases": [
     "today/TC-049"
    ]
+  },
+  {
+   "id": "F-TODAY-31",
+   "feature": "Filters: Echo's own widget, on Today and on every dashboard, that gathers the settings of the widgets beside it (not those the page sets) — one control a setting they share (same key and type: a choice, on/off, a thread — on a client's page only its open threads —, a client), All for a thread or client; a choice set on every widget that takes it, Mixed while they differ; the widgets' own settings, kept with the page (on a dashboard of its own, on every page of that kind); a plugin widget among them asked again at once, its answer for other settings not shown meanwhile; `echoctl today [--thread|--client <id> [--board <id>]] filter [<key> <value>]` lists or sets the same, refusing a value none of them takes or a setting the page sets",
+   "priority": "high",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "today/TC-050"
+   ]
   }
  ]
 }
