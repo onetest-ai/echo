@@ -31,4 +31,4 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 5 | `echoctl widget show plugin:widget-demo:trend` | `kind` "chart", `data.type` "bar", five points |
 
 ## Notes
-- Each shape (chart types, progress, open, actions, escaping) is the node test `today-plugin-widgets.test.mjs`. An https link opens on its first click (plugin-authoring R17); with the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` it only goes to `<dir>/open.log`. Never click it without the variable set.
+- Each shape (chart types, progress, open, actions, escaping) is the node test `today-plugin-widgets.test.mjs`. An https link opens on its first click (plugin-authoring H17); with the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` it only goes to `<dir>/open.log`. Never click it without the variable set.
