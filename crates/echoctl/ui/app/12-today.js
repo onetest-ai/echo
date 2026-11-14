@@ -48,13 +48,23 @@ function drawToday(primary) {
 const TD_SCROLL_KEPT = 10 * 60000
 // The fade at the bottom of a list cut by its card (74-today.css `[data-more]::after`).
 const TD_FADE = 32
-/** A scroll of Today's Your day is the user's (touch, wheel, keys, its scrollbar, find in the page, a screen reader)
- *  unless it is where Today placed it (`drawToday`): that scroll's own event, or the browser keeping it in bounds. */
+/** A scroll of Today's Your day: the user's (`tdScrollIsUser`) starts their 10 minutes; once they have scrolled, every
+ *  scroll (back to where Today placed it too) is where they left it. */
 function tdUserScroll(r) {
-  if (S.view !== 'today' || r.scrollTop === r._placedTop) return
-  S.tdScrolledAt = Date.now()
-  S.tdUserTop = r.scrollTop
+  if (S.view !== 'today') return
+  const user = tdScrollIsUser(r.scrollTop, r._placedTop, r.scrollHeight - r.clientHeight)
+  if (user) S.tdScrolledAt = Date.now()
+  if (user || S.tdScrolledAt) S.tdUserTop = r.scrollTop
 }
+// ── Your day's scroll: the user's or Today's (no DOM: `today-scroll.test.mjs`) ─────────────────────────────────────
+/** Whether a scroll of Your day's list at `top` is the user's (touch, wheel, keys, its scrollbar, find in the page, a
+ *  screen reader), not Today's: where Today placed it (`placed`, read back), that scroll's own event; at the list's end
+ *  (`max`) above it, the browser keeping it in bounds once the list got taller without a redraw. */
+function tdScrollIsUser(top, placed, max) {
+  if (top === placed) return false
+  return !(placed != null && top < placed && Math.abs(top - max) <= 1)
+}
+// end of the day scroll block
 function todayView() {
   const d = S.today
   if (!d) return `<div class="skeleton" style="padding:22px">${'<i></i>'.repeat(8)}</div>`
