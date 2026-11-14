@@ -16,7 +16,7 @@ tags: [people, photos, microsoft-365]
 
 ## Preconditions
 - **Why a person:** it needs a real Microsoft 365 account and its sign-in in the browser; the photos are real people's, so nothing of them goes into a report (say "a photo shows", never whose)
-- Echo's dev build beside Echo (`.ai-run/guides/development/dev-workflow.md`) with its own config folder (`ECHOCTL_CONFIG_DIR`), signed in to Microsoft 365 (`echoctl calendar login`); the data folder has at least one recorded call with a colleague from the user's own mail domain who is in the people directory with that address, and one with someone from another domain
+- Echo's dev build beside Echo (`.ai-run/reference/development/dev-workflow.md`, A dev app beside Echo) with its own config folder (`ECHOCTL_CONFIG_DIR`), signed in to Microsoft 365 (`echoctl calendar login`); the data folder has at least one recorded call with a colleague from the user's own mail domain who is in the people directory with that address, and one with someone from another domain
 - Settings → About me has the user's own address (or the sign-in gives it)
 
 ## Steps

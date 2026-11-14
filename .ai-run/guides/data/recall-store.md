@@ -1,17 +1,20 @@
 # Recall Store
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: Recall SQLite store schema changes and profile-scoped access
+**Project**: Echo · **Scope**: Recall SQLite store schema changes and profile-scoped access
+
+**Reference**: `.ai-run/reference/data/recall-store.md` — how the store is built and reached (`ref: <section>`). It
+changes with the code; these rules change only by a `Rules:` PR.
 
 ## Recall store
 
 ### Rules
-- R1. Change the Recall (Brain) schema in `brain::store::open` additively: `CREATE ... IF NOT EXISTS`, new columns added inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, backfilled once. Evidence: `brain::store::open`
-- R2. Serve Recall data to a session or job through a `brain::access::Access` for its profile and scope; sources of other profiles answer "not found". Evidence: `brain::access::Access`
+- R1. Change the Recall (Brain) schema only additively, where the store is opened: a new column added once, in a transaction, and backfilled once. Evidence: `brain::store::open` (ref: Schema changes)
+- R2. Serve Recall data to a session or job only through an access scoped to its profile; sources of other profiles answer "not found". Evidence: `brain::access::Access` (ref: Access)
 - R3. Recall stays off until the user turns it on, after an update too; while off nothing is read, indexed or tagged. Evidence: `brain::enabled`
-- R4. Index mail and channel posts only as the quarantine reader's facts, each quote checked word for word against its message; never their text. Evidence: `brain::digest::check`
-- R5. Read a message only from the user, a colleague (Exchange `AuthAs: Internal`, a Teams author by directory id) or a sender trusted for all its threads' clients, outside mail passing DMARC or compauth; defer an author not yet looked up. Evidence: `brain::senders::Senders::mail`, `graph::mail_auth`
-- R6. The MCP server is read-only, and its tools (`mcp__echo__…`) are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS`
+- R4. Index mail and channel posts only as checked facts, each quote matched word for word against its message; never their text. Evidence: `brain::digest::check` (ref: Mail and channel posts)
+- R5. Read a message only from the user, a colleague or an authenticated sender trusted for all its threads' clients; defer an author not yet looked up. Evidence: `brain::senders::Senders::mail`, `graph::mail_auth` (ref: Mail and channel posts)
+- R6. The MCP server is read-only, and its tools are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS` (ref: Access)
 - R7. Keep chunk ids stable across syncs. Evidence: `brain::chunk::chunk_id`
-- R8. Every saved config writes `learned` (`[]` when empty); only a config without the key is migrated by `vocab::migrate`. Evidence: `config::learned_always`
+- R8. Every saved config writes the learned-vocabulary key, even empty; only a config without it is migrated. Evidence: `config::learned_always` (ref: Learned vocabulary in config)
 - R9. A closed thread's sources are archived, never dropped from the store. Evidence: `brain::store::archived_of`
 - R10. A sync that changes the store snapshots it first. Evidence: `brain::store::snapshot`
