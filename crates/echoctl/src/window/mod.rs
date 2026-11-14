@@ -442,6 +442,8 @@ fn state() -> Value {
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
         // A release's one-time banner, until answered (`announce.rs`).
         "announcement": crate::announce::current(),
+        // After an update, what the versions since the last one seen bring (`whats_new.rs`), until the page shows it.
+        "whats_new": crate::whats_new::pending(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
         "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },

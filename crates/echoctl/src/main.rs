@@ -97,6 +97,8 @@ mod terminal;
 #[cfg(feature = "tray")]
 mod window;
 mod update;
+#[cfg(feature = "tray")]
+mod whats_new;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

@@ -88,6 +88,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     if !paths::home_chosen() {
         first_run();
     }
+    // Decided once, at start: an Echo with no calls and no What's new seen has nothing to compare with.
+    #[cfg(feature = "tray")]
+    crate::whats_new::at_start();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?; // SIGINT + SIGTERM

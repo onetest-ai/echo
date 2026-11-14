@@ -1,0 +1,19 @@
+[
+  {
+    "version": "0.9.8",
+    "items": [
+      { "icon": "plugin", "title": "Plugins share a setting", "text": "Plugins from the same marketplace can share a value, like a project code, so you set it once for all of them.", "open": "settings/plugins" },
+      { "icon": "shield", "title": "Safer plugin installs", "text": "A plugin can add to your Claude Code only the one plugin its install sheet names, nothing else.", "open": "settings/plugins" },
+      { "icon": "thread", "title": "Widgets name the right page", "text": "A widget on a thread's Brief or a client's Overview now shows that thread or client in its header.", "open": "projects" }
+    ]
+  },
+  {
+    "version": "0.9.7",
+    "items": [
+      { "icon": "filter", "title": "One filter for a whole dashboard", "text": "Add Filters to Today and set the period, thread or client once for every widget beside it.", "open": "today" },
+      { "icon": "export", "title": "Export a dashboard", "text": "Export, beside ✎, saves the page as one HTML file that opens anywhere.", "open": "today" },
+      { "icon": "layout", "title": "Pages use the full width", "text": "Brief, Overview and dashboards now fill the window, and long text stays easy to read.", "open": "projects" },
+      { "icon": "link", "title": "Plugin links open on one click", "text": "A plugin's web link opens on the first click, and its address shows when you point at it." }
+    ]
+  }
+]
