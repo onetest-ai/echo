@@ -413,7 +413,7 @@ fn save(dir: &Path, r: &Run) {
 }
 
 /// The plugin this app ships: inside the bundle, next to the binary (Windows zip), or the
-/// repo's `plugin/` for a dev build; else wherever Claude Code installed it.
+/// repo's `plugin/` for a dev build (and in unit tests, always); else wherever Claude Code installed it.
 pub fn plugin_dir() -> Option<PathBuf> {
     // Tests: the repo's own plugin, never the one this computer's Claude Code has installed (a test binary sits in
     // `target/debug/deps/`, where none of the places below are; #604).
