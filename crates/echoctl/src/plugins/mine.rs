@@ -33,9 +33,11 @@ pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf, bool)> {
     let source = from.display().to_string();
     if dest.exists() {
         let mark = marks.get(&m.id);
-        let ours = mark.is_some_and(|k| k["from"] == source.as_str() && tree_hash(&dest).is_ok_and(|h| k["hash"] == h.as_str()));
+        // This folder's copy as copied — or the same files as this folder now (nothing would be lost).
+        let now = tree_hash(&dest).ok();
+        let ours = mark.is_some_and(|k| k["from"] == source.as_str() && now.as_deref().is_some_and(|h| k["hash"] == h)) || now.is_some_and(|h| tree_hash(&from).is_ok_and(|f| f == h));
         if !ours {
-            bail!("My plugins already has a folder “{}” ({}) that isn't this folder's copy — move it away, or install it by its id", m.id, dest.display());
+            bail!("My plugins already has a folder “{}” ({}) that isn't this folder's copy as copied (made or edited there) — move it away, or install it by its id", m.id, dest.display());
         }
     }
     check_tree(&from, PLUGIN_LIMIT).with_context(|| from.display().to_string())?;
@@ -49,20 +51,23 @@ pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf, bool)> {
             return Err(e);
         }
     };
-    // Marked before the swap: a mark for a copy not in place yet is harmless, a copy without its mark is refused next.
-    marks.insert(m.id.clone(), json!({"from": source, "hash": hash}));
-    paths::write_atomic(&file, serde_json::to_string_pretty(&marks)?.as_bytes())?;
-    // The old copy moved aside, the new one in its place, then the old one removed.
+    // The old copy moved aside, the new one in its place, then the old one removed; on a failure, as it was.
     let old = mine.join(format!(".old-{}-{}", m.id, std::process::id()));
     if dest.exists() {
-        fs::rename(&dest, &old)?;
+        if let Err(e) = fs::rename(&dest, &old) {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e).with_context(|| format!("replacing {}", dest.display()));
+        }
     }
     if let Err(e) = fs::rename(&tmp, &dest) {
         let _ = fs::rename(&old, &dest);
         let _ = fs::remove_dir_all(&tmp);
-        return Err(e.into());
+        return Err(e).with_context(|| format!("replacing {}", dest.display()));
     }
     let _ = fs::remove_dir_all(&old);
+    // Marked once in place (a copy left unmarked by a crash here is still ours: the same files as this folder).
+    marks.insert(m.id.clone(), json!({"from": source, "hash": hash}));
+    paths::write_atomic(&file, serde_json::to_string_pretty(&marks)?.as_bytes())?;
     refresh(MINE)?;
     Ok((m.id, dest, true))
 }
@@ -95,13 +100,17 @@ mod tests {
         // Another folder with that id: My plugins' folder isn't its copy — refused, nothing changed.
         let other = plugin(&root.join("other"), "pulse", "0.2.0");
         assert!(copy_into_mine(&other).unwrap_err().to_string().contains("isn't this folder's copy"));
+        // Its copy left unmarked (a crash before the mark): the same files as the folder, so still its own.
+        fs::remove_file(dunce::canonicalize(mine_dir()).unwrap().join(SOURCES)).unwrap();
+        assert!(copy_into_mine(&src).unwrap().2);
         assert!(fs::read_to_string(copy.join(MANIFEST)).unwrap().contains("0.1.0"));
         // The copy edited in My plugins: the next copy from its folder doesn't overwrite the edit.
         fs::write(copy.join("skills/README.md"), "edited here").unwrap();
-        assert!(copy_into_mine(&src).is_err());
+        assert!(copy_into_mine(&src).unwrap_err().to_string().contains("made or edited there"));
         assert_eq!(fs::read_to_string(copy.join("skills/README.md")).unwrap(), "edited here");
         // A folder the user made in My plugins is never replaced; given as the folder, nothing is copied.
         let own = plugin(&mine_dir(), "own", "0.1.0");
+        fs::write(own.join("skills/README.md"), "mine").unwrap();
         assert!(copy_into_mine(&plugin(&root.join("third"), "own", "0.1.0")).is_err());
         assert!(!copy_into_mine(&own).unwrap().2);
         // Not a folder, not a plugin, or one that holds the data folder; a copy on its way in isn't listed.
