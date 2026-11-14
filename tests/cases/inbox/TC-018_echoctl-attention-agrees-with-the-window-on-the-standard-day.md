@@ -17,7 +17,7 @@ tags: [inbox, cli]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
-- Load `{{base_url}}/` and wait until the Inbox has the blocking item "Sign in to Claude · out" (the "Blocking" chip counts 1), up to 120 seconds, reloading the page if it hasn't come after 60: the sign-in check of the AI profiles settles in the background and the window shows it at its next attention refresh, 25–90 s in all (#513); before it, the answer lists 24 open items and none blocking
+- Load `{{base_url}}/` and wait until the Inbox has the blocking item "Sign in to Claude · out" (the "Blocking" chip counts 1), within 10 seconds, no reload: the sign-in check of the AI profiles settles in the background and the window reads the Inbox again as soon as it does (#513); before it, the answer lists 24 open items and none blocking
 - Before any decision is taken in the window
 
 ## Test Data
@@ -53,4 +53,4 @@ The CLI and the window agree.
 
 ## Notes
 - Creates or changes nothing.
-- The sign-in item is in the CLI's answer only once the sign-in check has settled (after the window has loaded or about 10 seconds); before it settles, the answer has 24 open items and `urgent` 0.
+- `echoctl attention` checks each Claude profile's sign-in itself before it answers (a second or two), so its answer has the sign-in item whether or not the window has loaded (#513).

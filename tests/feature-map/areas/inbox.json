@@ -74,7 +74,7 @@
   },
   {
    "id": "F-INBOX-08",
-   "feature": "`echoctl attention` lists the same open and done items as JSON",
+   "feature": "`echoctl attention` lists the same open and done items as JSON, a profile to sign in to too (it checks each Claude profile's sign-in before it answers); the window's Inbox shows that item within seconds of its check settling",
    "priority": "medium",
    "check": "agent",
    "axes": [
