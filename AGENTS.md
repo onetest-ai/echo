@@ -75,6 +75,8 @@ with the code, in the same PR, checked by that PR's review; no `Rules:` PR.
 | Testing | .ai-run/reference/testing/testing.md | where tests live, the test environment, helpers, open log, feature-map.py, exemplars |
 | Testing | tests/app_profile.md | functional runs: test data, serving, selectors, recordings, scenarios, the case format |
 | Window | .ai-run/reference/window/window-ui.md | page actions and routes, IPC, assets, parts, tested-block markers, settings, rendering helpers |
+| Echo plugins | .ai-run/reference/plugins/plugin-api.md | the plugin API: manifest, `uses` and the sheet, host and client `ctx`, events, store, widgets and charts, work rows, scripts, `agent/`, testing hosts, publishing (`echoctl plugin guide` prints it) |
+| Echo plugins | .ai-run/reference/plugins/echo-host.md | Echo's side of plugins: store files and locks, script runs, sessions, the `.plugins` layout, dashboards' settings |
 
 ## What the guides are
 
@@ -89,13 +91,6 @@ A reference is not a guide: it holds facts — an API, its limits and numbers, f
 a file — under `.ai-run/reference/<area>/`. A rule points to the reference section it relies on; a reference holds no
 rules. A reference changes in the same PR as the code it describes and is checked by that PR's review, with no `Rules:`
 PR; when the code and a reference differ, the code wins and the reference is fixed.
-
-## References
-
-| Area | Reference Path | Holds |
-|---|---|---|
-| Echo plugins | .ai-run/reference/plugins/plugin-api.md | the plugin API: manifest, `uses` and the sheet, host and client `ctx`, events, store, widgets and charts, work rows, scripts, `agent/`, testing hosts, publishing (`echoctl plugin guide` prints it) |
-| Echo plugins | .ai-run/reference/plugins/echo-host.md | Echo's side of plugins: store files and locks, script runs, sessions, the `.plugins` layout, dashboards' settings |
 
 ## Task Classifier
 
