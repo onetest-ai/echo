@@ -48,6 +48,10 @@
     {
       "id": "fill-demo",
       "source": "./plugins/fill-demo"
+    },
+    {
+      "id": "pulse-demo",
+      "source": "./plugins/pulse-demo"
     }
   ]
 }

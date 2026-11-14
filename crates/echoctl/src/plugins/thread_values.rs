@@ -286,7 +286,7 @@ pub fn changed(thread: &str, change: Change) -> Result<()> {
         Change::Merged { into } => json!({"thread": thread, "born": was, "change": "merged", "into": into, "dropped": []}),
         Change::Deleted { .. } => json!({"thread": thread, "born": was, "change": "deleted", "values": {}}),
     };
-    tell(&payload, &each);
+    tell("threads_changed", &payload, &each);
     Ok(())
 }
 
@@ -343,29 +343,30 @@ fn queue_lock_path() -> Result<PathBuf> {
     Ok(paths::state_dir().join("plugin-events.lock"))
 }
 
-/// `threads_changed` to the plugins: the app's own host hears it now; another process's change (`echoctl project
-/// delete`, `echoctl plugin call`, `echoctl widget show`) waits in a file for the running app, which takes it within a
-/// second (`take_queued`) — or at its next start when it isn't running. A build without plugin hosts queues nothing:
-/// no app of its would take it.
-fn tell(payload: &Value, each: &Map<String, Value>) {
+/// An event to the plugins (`threads_changed`, `shared_changed`): the app's own host hears it now; another process's
+/// change (`echoctl project delete`, `echoctl plugin call`, `echoctl widget show`) waits in a file for the running
+/// app, which takes it within a second (`take_queued`) — or at its next start when it isn't running. A build without
+/// plugin hosts queues nothing: no app of its would take it.
+pub(crate) fn tell(event: &str, payload: &Value, each: &Map<String, Value>) {
     #[cfg(feature = "js")]
     {
         if crate::jshost::hosts_here() {
-            crate::jshost::event_each("threads_changed", payload, each);
+            crate::jshost::event_each(event, payload, each);
             return;
         }
-        if let Err(e) = queue(payload, each) {
-            eprintln!("echoctl: the running app won't hear that thread {}: {e:#}", payload["thread"].as_str().unwrap_or(""));
+        if let Err(e) = queue(event, payload, each) {
+            eprintln!("echoctl: the running app won't hear {event}: {e:#}");
         }
     }
     #[cfg(not(feature = "js"))]
-    let _ = (payload, each);
+    let _ = (event, payload, each);
 }
 
+/// One event for the running app, in the file it takes (`take_queued`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
-fn queue(payload: &Value, each: &Map<String, Value>) -> Result<()> {
+pub(crate) fn queue(event: &str, payload: &Value, each: &Map<String, Value>) -> Result<()> {
     use std::io::Write;
-    let line = json!({"event": "threads_changed", "payload": payload, "each": each}).to_string();
+    let line = json!({"event": event, "payload": payload, "each": each}).to_string();
     let _l = super::wait_lock_for(&queue_lock_path()?, "the plugins' events for the app", LOCK_WAIT)?;
     let p = queue_file();
     if std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) + line.len() as u64 > MAX_QUEUE {
@@ -586,8 +587,8 @@ mod tests {
     #[test]
     fn a_terminals_change_waits_for_the_app_and_is_heard_at_least_once() {
         let (_env, _root) = paths::testenv::folders("plugin-thread-values-queue");
-        queue(&json!({"thread": "alpha", "change": "deleted", "values": {}}), &Map::from_iter([("gh".to_string(), json!({"values": {"repos": 1}}))])).unwrap();
-        queue(&json!({"thread": "beta", "change": "renamed", "name": "B", "from": "Beta"}), &Map::new()).unwrap();
+        queue("threads_changed", &json!({"thread": "alpha", "change": "deleted", "values": {}}), &Map::from_iter([("gh".to_string(), json!({"values": {"repos": 1}}))])).unwrap();
+        queue("threads_changed", &json!({"thread": "beta", "change": "renamed", "name": "B", "from": "Beta"}), &Map::new()).unwrap();
         let got = taken();
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].0, "threads_changed");
@@ -598,18 +599,18 @@ mod tests {
         assert!(!queue_file().exists() && !taking_file().exists());
         // Left aside by a crash: handed on first, then what came after it.
         std::fs::write(taking_file(), format!("{}\n", json!({"event": "threads_changed", "payload": {"thread": "old"}}))).unwrap();
-        queue(&json!({"thread": "new"}), &Map::new()).unwrap();
+        queue("threads_changed", &json!({"thread": "new"}), &Map::new()).unwrap();
         assert_eq!(taken().iter().map(|h| h.1["thread"].clone()).collect::<Vec<_>>(), vec![json!("old")]);
         assert_eq!(taken().iter().map(|h| h.1["thread"].clone()).collect::<Vec<_>>(), vec![json!("new")]);
         // One that can't be read is left, never lost.
         std::fs::create_dir_all(taking_file()).unwrap();
-        queue(&json!({"thread": "later"}), &Map::new()).unwrap();
+        queue("threads_changed", &json!({"thread": "later"}), &Map::new()).unwrap();
         assert!(taken().is_empty());
         assert!(taking_file().is_dir() && queue_file().exists(), "both still there");
         std::fs::remove_dir(taking_file()).unwrap();
         assert_eq!(taken().len(), 1);
         // A busy lock: nothing taken this time, nothing lost.
-        queue(&json!({"thread": "busy"}), &Map::new()).unwrap();
+        queue("threads_changed", &json!({"thread": "busy"}), &Map::new()).unwrap();
         let held = crate::app::FileLock::try_take(&queue_lock_path().unwrap()).unwrap().unwrap();
         assert!(taken().is_empty());
         drop(held);
