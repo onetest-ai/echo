@@ -1321,7 +1321,9 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
-            Ok(json!({"answer": answer, "model": model, "usage": usage}))
+            // What it changed and sent with Echo's CLI, for the plugin to show (a routine's outcome).
+            let actions = crate::notes::run_actions(&spec.run_dir.join("actions.jsonl"));
+            Ok(json!({"answer": answer, "model": model, "usage": usage, "actions": actions}))
         }
         // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
         "signin.get" => {

@@ -114,21 +114,18 @@ pub(super) fn join_words(w: &[&str]) -> String {
     }
 }
 
-pub(super) fn describe_claude(v: &Value) -> Result<String> {
-    Ok(if v["skip"].as_bool() == Some(true) {
-        "Runs Claude Code on your AI profiles, with the permissions you pick — or with every permission check skipped".into()
-    } else {
-        "Runs Claude Code on your AI profiles, with the permissions you pick".into()
-    })
+/// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
+/// before that choice) is still taken and changes nothing.
+pub(super) fn describe_claude(_: &Value) -> Result<String> {
+    Ok("Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings".into())
 }
 
-/// May a plugin with these `uses` start a Claude Code run with `tools` (`claudejob::Spec`)? Only with `claude` on its
-/// install sheet; skipping every permission check only when the sheet said so too (`claude.skip`).
+/// May a plugin with these `uses` start a Claude Code run (`claudejob::Spec`)? Only with `claude` on its install sheet.
+/// What it may do there is the user's one choice, whatever `tools` it asks (`claudejob`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn may_run_claude(uses: &serde_json::Map<String, Value>, tools: &str) -> Result<()> {
-    let Some(c) = uses.get("claude") else { bail!("it didn't ask to run Claude Code when it was installed") };
-    if tools == "skip" && c["skip"].as_bool() != Some(true) {
-        bail!("it didn't ask to run Claude Code with permission checks skipped when it was installed");
+pub fn may_run_claude(uses: &serde_json::Map<String, Value>, _tools: &str) -> Result<()> {
+    if uses.get("claude").is_none() {
+        bail!("it didn't ask to run Claude Code when it was installed");
     }
     Ok(())
 }

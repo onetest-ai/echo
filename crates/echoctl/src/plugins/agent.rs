@@ -860,12 +860,6 @@ pub fn clis() -> Vec<String> {
     out
 }
 
-/// The skills laid out for enabled plugins, as Claude Code names them (`<prefix>-<name>`).
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn skill_names() -> Vec<String> {
-    laid_out().iter().flat_map(|(_, d)| skills_in(d)).collect()
-}
-
 /// Enabled plugins' declared scripts as the folder session runs them: the launcher at each one's path in
 /// `.plugins/<id>/.claude/skills/<prefix>-<skill>/`, by its full path (both slash forms on Windows).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]

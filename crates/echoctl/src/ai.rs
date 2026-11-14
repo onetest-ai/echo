@@ -924,7 +924,7 @@ d="$CLAUDE_CONFIG_DIR"
 case "$1 $2" in
 "--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
-"-p "*) printf '%s\n' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
+"-p "*) printf '%s\0' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
   case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
@@ -932,6 +932,7 @@ case "$1 $2" in
   fail) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
   hang) echo $$ > "$d/login.pid"; exec sleep 60 ;;
   esac ;;
+*) printf '%s\0' "$@" > "$d/session.args.new"; pwd > "$d/session.cwd"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/session.settings"; prev=$a; done; mv "$d/session.args.new" "$d/session.args" ;;
 esac
 "#,
         )

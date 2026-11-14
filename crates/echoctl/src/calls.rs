@@ -62,7 +62,7 @@ pub fn has_stamp(name: &str) -> bool {
 /// run Echo started, only that run's own call (`guard::own_call`): whatever its model asks for.
 pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     let dir = find_call(arg)?;
-    if crate::notes::headless() {
+    if crate::notes::run_limited() {
         return crate::guard::own_call(&dir, std::env::var_os(crate::guard::RUN_CALL).as_deref());
     }
     Ok(dir)

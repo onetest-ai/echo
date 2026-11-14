@@ -80,6 +80,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     // Yolo runs as the folder session (#590): this script needs its tools without prompts, so the user's choice is on.
     await page.goto(data.base + '/')
     await page.evaluate(() => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key: 'folder_skip_permissions', value: true }) }))
+    await page.waitForLoadState('networkidle')
 
     // 1: what the data folder and this checkout hold before; T005 open.
     const before = data.files()

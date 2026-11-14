@@ -18,7 +18,7 @@ tags: [today, yolo, mail, drafts, m365]
 ## Preconditions
 - A Microsoft 365 test account, the person's own, made for this test, nothing real in it (`<A>`); a second test address `<B>` to write to
 - Small data built right before the run: `tests/fixtures/make-data.sh <dir>`; `tests/fixtures/serve.sh up <dir> <port>`; account A signed in to the run's own config (Settings → Calendar & chat → connect Microsoft 365, as `calendar/TC-002`); Settings → General → Where drafts go left at "Echo's default" (its line: "Now: Microsoft 365 Drafts …")
-- Why it is a person's case: a real draft in a real mailbox (`m365::draft_text`), and Yolo runs Claude Code as the folder session, with "Claude in the window: no permission prompts" switched on for it, on a model of the person's choosing (this test data only)
+- Why it is a person's case: a real draft in a real mailbox (`m365::draft_text`), and Yolo runs Claude Code as the folder session, with "Claude acts on its own" switched on for it, on a model of the person's choosing (this test data only)
 - A task of Acme rollout whose doing is a mail: `target/debug/echoctl project ledger acme-rollout edit '{"op":"create","kind":"task","parent":"S001","title":"Ask <B> which training slots work","internal_owner":"Me"}'` (its id `<T>`)
 
 ## Steps

@@ -545,27 +545,12 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
         extra_env.extend(ch.env.iter().map(|(k, v)| (k.as_str(), v.clone())));
     }
     let exe = std::env::current_exe()?;
-    args.extend(folder_session_args(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder")?);
+    let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten();
+    args.extend(crate::folder_args::session(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder", model.as_deref(), false)?);
     let mut env = crate::folder_args::env(&p.id);
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
     open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
-}
-
-/// What a session in Echo's data folder runs with, after its own conversation's arguments: the model of a local
-/// profile, `folder_args::build` (its settings file `settings`), and the Brain (`who`: whose usage it counts). The
-/// folder session's, and — but for `-p` and its prompt — a routine's and a Yolo task's (`claudejob::run`).
-pub(crate) fn folder_session_args(p: &ai::Profile, exe: &Path, settings: &Path, who: &str) -> Result<Vec<String>> {
-    let mut args: Vec<String> = vec![];
-    if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
-        args.extend(["--model".into(), m]);
-    }
-    args.extend(crate::folder_args::build(p.kind.managed(), exe, settings)?);
-    // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
-    if let Some(f) = brain_mcp_config(exe, &["--profile".into(), p.id.clone(), "--who".into(), who.into()]) {
-        args.extend(["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo".into()]);
-    }
-    Ok(args)
 }
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
@@ -756,7 +741,7 @@ mod tests {
         let agreed = crate::plugins::review("kit", Some(&name)).unwrap().uses;
         crate::plugins::install("kit", Some(&name), &agreed).unwrap();
         let exe = Path::new("/Apps/Echo.app/echoctl");
-        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json")).unwrap();
+        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), false).unwrap();
         // No plugin's folder as a Claude Code plugin: its part waits in the data folder for Claude to Read it.
         let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
         let session = paths::config_dir().join("plugins/session");

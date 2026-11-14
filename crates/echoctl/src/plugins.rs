@@ -1493,13 +1493,16 @@ mod tests {
     #[test]
     fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
         let uses = |v: Value| v.as_object().cloned().unwrap();
-        // No `claude`: no run at all; `claude` without `skip`: any run but one with permission checks skipped.
+        // No `claude`: no run at all; with it any run — what it may do is the user's one choice, `skip` (from before
+        // that choice) taken and changing nothing, on the sheet too.
         assert!(may_run_claude(&uses(json!({})), "none").is_err());
         let plain = uses(json!({"claude": {}}));
-        assert!(may_run_claude(&plain, "read").is_ok() && may_run_claude(&plain, "folder").is_ok());
-        assert!(may_run_claude(&plain, "skip").is_err());
-        assert!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").is_ok());
-        assert!(describe_claude(&json!({"skip": true})).unwrap().contains("skipped"));
+        for tools in ["none", "read", "folder", "skip"] {
+            assert!(may_run_claude(&plain, tools).is_ok(), "{tools}");
+        }
+        let line = describe_claude(&json!({})).unwrap();
+        assert_eq!(describe_claude(&json!({"skip": true})).unwrap(), line);
+        assert!(line.contains("acting on its own or preparing and asking, as you set it in Settings"), "{line}");
         // Sends: the ways its sheet named, or its own way.
         let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
         assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());

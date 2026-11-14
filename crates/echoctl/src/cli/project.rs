@@ -348,7 +348,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
         ProjectCmd::Show { id } | ProjectCmd::People { id, refresh: false } => guard::run_thread().is_some_and(|t| &t == id),
         _ => false,
     };
-    if notes::headless() && !(reads && routine_reads()) && !own_thread_read {
+    if notes::run_limited() && !(reads && routine_reads()) && !own_thread_read {
         anyhow::bail!("projects can't be changed or listed from a run Echo started");
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -564,13 +564,14 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
 }
 
 /// Inside a read-only routine Echo started (`guard::RUN_MODE=routine`, set by the app, never by the
-/// run): the user's own prompt may read projects, clients and organisations.
+/// run), or a routine's run as the folder session (`notes::RUN_SESSION`): the user's own prompt may read projects,
+/// clients and organisations.
 fn routine_reads() -> bool {
-    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine")
+    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine") || notes::routine_session()
 }
 
 pub fn org_command(cmd: OrgCmd) -> Result<()> {
-    if notes::headless() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
+    if notes::run_limited() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
         anyhow::bail!("organisations can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -628,7 +629,7 @@ pub fn org_command(cmd: OrgCmd) -> Result<()> {
 }
 
 pub fn client_command(cmd: ClientCmd) -> Result<()> {
-    if notes::headless() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
+    if notes::run_limited() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
         anyhow::bail!("clients can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -712,8 +713,10 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     };
     // Yolo reads its own thread's work (the tree, the last sync's state).
     let own_thread_read = matches!(cmd, LedgerCmd::Tree | LedgerCmd::Status) && guard::run_thread().is_some_and(|t| t == id);
-    let allowed = own_task || own_thread_read || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
-    if notes::headless() && !allowed {
+    // A routine's run (as the folder session) edits a thread's work: Echo's own data, with or without prompts.
+    let routine_edit = matches!(cmd, LedgerCmd::Edit { .. }) && notes::routine_session();
+    let allowed = own_task || own_thread_read || routine_edit || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
+    if notes::run_limited() && !allowed {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
@@ -809,6 +812,40 @@ mod tests {
         let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
         assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
         assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
+    }
+
+    #[test]
+    fn a_routine_as_the_folder_session_reads_and_edits_echos_work_and_changes_the_rest_only_when_it_acts() {
+        let (_env, _) = crate::paths::testenv::folders("routine-session-cli");
+        let pilot = crate::projects::create("Pilot", None, None).unwrap();
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, crate::notes::RUN_SESSION, super::guard::RUN_TASK] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _unset = Unset;
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let edit = || super::ledger_command(&pilot.id, super::LedgerCmd::Edit { json: r#"{"op":"create","kind":"epic","title":"Pilot work"}"#.into() });
+        let show = || super::project_command(super::ProjectCmd::Show { id: pilot.id.clone() });
+        let create = || super::project_command(super::ProjectCmd::Create { name: "Another".into(), client: None, stage: None });
+        // Prepares and asks: reads and a thread's work, not the rest.
+        std::env::set_var(crate::notes::RUN_SESSION, "asks");
+        assert!(show().is_ok(), "it reads");
+        edit().unwrap();
+        assert!(create().is_err(), "a new thread isn't a thread's work");
+        // Acts on its own: as the folder session.
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        create().unwrap();
+        // Yolo, acting on its own, keeps its own task's limit.
+        std::env::set_var(super::guard::RUN_TASK, format!("{}/T001", pilot.id));
+        assert!(edit().unwrap_err().to_string().contains("only its own task"));
+        // Any other run Echo started (minutes, a sync): none of it.
+        std::env::remove_var(super::guard::RUN_TASK);
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        assert!(show().is_err() && edit().is_err());
     }
 
     #[test]

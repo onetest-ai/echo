@@ -13,9 +13,19 @@ use anyhow::Result;
 
 use crate::paths;
 
+/// Echo commands any of its sessions runs without a prompt (`Bash(<cli> <command> …)`): what reads Echo's data, and
+/// edits of Echo's own data — a thread's work, a mail left as a draft. Never a send, an install or a setting.
+pub const FREE_COMMANDS: [&str; 18] = [
+    "context", "attention", "prep", "previous", "status", "calendar events", "read", "project list", "project show", "project of",
+    "project tasks", "project people", "project ledger * tree", "project ledger * status", "client list", "org list",
+    // Echo's own data.
+    "project ledger * edit *", "compose",
+];
+
 /// The arguments, its settings file first (`--settings <settings>`, written here): `managed` — a profile of its own,
-/// given Echo's plugin (a profile on the user's own Claude Code has it installed already).
-pub fn build(managed: bool, exe: &Path, settings: &Path) -> Result<Vec<String>> {
+/// given Echo's plugin (a profile on the user's own Claude Code has it installed already); `unattended` — a routine's
+/// or Yolo's run, which gets the window's view hook only at its start (who the user is), not what the window shows.
+pub fn build(managed: bool, exe: &Path, settings: &Path, unattended: bool) -> Result<Vec<String>> {
     let mut args: Vec<String> = vec![];
     // What plugins add (never the user's own Claude Code): their part for Claude, laid out in the data folder
     // (`.plugins/<id>/`: loaded when Claude first reads a file there, as the core's SessionStart hook tells it), and the
@@ -42,6 +52,13 @@ pub fn build(managed: bool, exe: &Path, settings: &Path) -> Result<Vec<String>> 
             args.extend(["--allowedTools".into(), format!("Bash({cli} plugin call {id} {c}:*)")]);
         }
     }
+    // Echo's reads and its own data's edits, by Echo's own CLI (its plugin's launcher, `echoctl` on PATH).
+    for cli in crate::notes::plugin_dir().map(|d| crate::notes::run_clis(&d)).unwrap_or_else(|| vec!["echoctl".into()]) {
+        for c in FREE_COMMANDS {
+            // A pattern with `*` as it is (Claude Code's wildcards); a plain command and whatever follows it.
+            args.extend(["--allowedTools".into(), if c.contains('*') { format!("Bash({cli} {c})") } else { format!("Bash({cli} {c}:*)") }]);
+        }
+    }
     // Their declared scripts, by their launchers' full paths (`uses.scripts`): no prompt for them either.
     for s in crate::plugins::agent::scripts() {
         args.extend(["--allowedTools".into(), format!("Bash({s}:*)")]);
@@ -66,6 +83,11 @@ pub fn build(managed: bool, exe: &Path, settings: &Path) -> Result<Vec<String>> 
     // Its own settings file (the user's own settings apply as ever): what the window shows before each prompt and who
     // the user is, the OneDrive and `.plugins` checks before a write, and the core.
     let mut hooks = crate::view::hook_settings(exe);
+    if unattended {
+        if let Some(h) = hooks.as_object_mut() {
+            h.remove("UserPromptSubmit");
+        }
+    }
     hooks["PreToolUse"] = crate::view::onedrive_hook(exe);
     if let Some(a) = hooks["PreToolUse"].as_array_mut() {
         a.push(crate::plugins::agent::write_hook_entry(exe));
@@ -89,6 +111,26 @@ pub fn build(managed: bool, exe: &Path, settings: &Path) -> Result<Vec<String>> 
     Ok(args)
 }
 
+/// What a session in Echo's data folder runs with, after its own conversation's arguments: `model`, `build` (its
+/// settings file `settings`) and the Brain (`who`: whose usage it counts). The folder session's
+/// (`terminal::start_folder`), and — but for `-p`, its prompt and its model — a routine's and a Yolo task's
+/// (`claudejob::run`, `unattended`).
+pub fn session(p: &crate::ai::Profile, exe: &Path, settings: &Path, who: &str, model: Option<&str>, unattended: bool) -> Result<Vec<String>> {
+    let mut args: Vec<String> = vec![];
+    if let Some(m) = model {
+        args.extend(["--model".into(), m.to_string()]);
+    }
+    args.extend(build(p.kind.managed(), exe, settings, unattended)?);
+    // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
+    #[cfg(feature = "tray")]
+    if let Some(f) = crate::terminal::brain_mcp_config(exe, &["--profile".into(), p.id.clone(), "--who".into(), who.into()]) {
+        args.extend(["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo".into()]);
+    }
+    #[cfg(not(feature = "tray"))]
+    let _ = who;
+    Ok(args)
+}
+
 /// The user's choice to skip permission prompts in Echo's sessions (Settings → AI & minutes).
 pub fn skip_permissions() -> bool {
     crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions)
@@ -102,4 +144,39 @@ pub fn env(profile: &str) -> Vec<(&'static str, String)> {
 /// Where a run's own settings file goes (`build`): one per run, removed when it ends.
 pub fn run_settings() -> std::path::PathBuf {
     paths::config_dir().join("minutes-run").join(format!("job-{}-{}.json", std::process::id(), chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_plugin_not_laid_out_reaches_the_sessions_once_by_its_session_copy_and_a_laid_out_one_not_at_all() {
+        let (_env, root) = paths::testenv::folders("folder-args-unlaid");
+        let mk = root.join("market");
+        for (id, agent) in [("vaults", json!(null)), ("kit", json!({"prefix": "kit"}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            let mut m = json!({"id": id, "name": id, "version": "0.1.0", "uses": {"sessions": {"skills": true}}});
+            if !agent.is_null() {
+                m["agent"] = agent;
+            }
+            std::fs::write(d.join("echo-plugin.json"), m.to_string()).unwrap();
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "vaults", "source": "./plugins/vaults"}, {"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        for id in ["vaults", "kit"] {
+            let sheet = crate::plugins::review(id, Some(&name)).unwrap().uses;
+            crate::plugins::install(id, Some(&name), &sheet).unwrap();
+            crate::grants::set_session_skills(id, &json!([{"name": "notes", "description": "Notes.", "body": "Read them."}])).unwrap();
+        }
+        let args = build(false, Path::new("/Apps/Echo.app/echoctl"), &root.join("s.json"), true).unwrap();
+        let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
+        let copy = |id: &str| crate::grants::session_dir(id).display().to_string();
+        assert_eq!(dirs.iter().filter(|d| ***d == copy("vaults")).count(), 1, "no prefix: its session copy, once: {dirs:?}");
+        assert!(!dirs.iter().any(|d| **d == copy("kit")), "laid out in `.plugins`: not again: {dirs:?}");
+        assert!(crate::plugins::agent::folder("kit").join(".claude/skills/kit-notes").is_dir());
+    }
 }

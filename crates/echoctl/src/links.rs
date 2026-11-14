@@ -111,7 +111,7 @@ fn clock(s: u64) -> String {
 /// thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
     let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
-    if !crate::notes::headless() {
+    if !crate::notes::run_limited() {
         return Ok(dir);
     }
     match crate::guard::run_thread() {

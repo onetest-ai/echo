@@ -387,7 +387,6 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         session: true,
         task: Some(format!("{project}/{node}")),
         thread: Some(project.to_string()),
-        echo_plugin: true,
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
@@ -400,6 +399,8 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         };
         // Where its mail drafts are (#135): the outcome says so and links to a Microsoft 365 one.
         v["drafts"] = json!(crate::drafts::of_run(&spec.run_dir.join("drafts.jsonl"), crate::drafts::m365_draft_link));
+        // What it changed and sent with Echo's CLI (#590): listed in its outcome.
+        v["changes"] = json!(crate::notes::run_actions(&spec.run_dir.join("actions.jsonl")));
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
@@ -461,7 +462,6 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         session: true,
         task: None,
         thread: item["thread"].as_str().filter(|t| !t.is_empty()).map(str::to_owned),
-        echo_plugin: true,
     };
     let (id, item_id) = (id.to_string(), item_id.to_string());
     // The run names its item: Today keeps it out of Needs you now while the run works.
@@ -479,6 +479,8 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
             Err(e) => json!({"state": "failed", "say": format!("{title}: {e:#} — it is still in Needs you now")}),
         };
         v["drafts"] = json!(crate::drafts::of_run(&spec.run_dir.join("drafts.jsonl"), crate::drafts::m365_draft_link));
+        // What it changed and sent with Echo's CLI (#590): listed in its outcome.
+        v["changes"] = json!(crate::notes::run_actions(&spec.run_dir.join("actions.jsonl")));
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
@@ -585,7 +587,6 @@ pub fn wont_do(id: &str, item_id: &str, comment: &str) -> Result<()> {
         session: false,
         task: None,
         thread: None,
-        echo_plugin: false,
     };
     // Where a draft would go: the item's own chat or mail, kept here, never taken from the answer.
     let to = json!({"chat": item["chat"], "message": item["message"]});

@@ -71,7 +71,7 @@
   },
   {
    "id": "F-M365-08",
-   "feature": "A run Echo started (Yolo) may leave a mail draft in Microsoft 365 Drafts, never send, reply or post; its outcome names where each draft is and links to a Microsoft 365 one",
+   "feature": "A run Echo started (Yolo) may leave a mail draft in Microsoft 365 Drafts and, unless the user lets Claude act on its own (then a routine or Yolo sends as the folder session, each send listed in its outcome), never sends, replies or posts; its outcome names where each draft is and links to a Microsoft 365 one",
    "priority": "high",
    "check": "person",
    "axes": [

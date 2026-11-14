@@ -1,6 +1,6 @@
 ---
 id: TC-017
-title: A plugin's Claude runs go only on the user's AI profiles and only if its sheet said so (no claude → refused; skipped permission checks → refused unless asked); its session skills are text only, written in Echo's own config folder and refused without sessions.skills
+title: A plugin's Claude runs go only on the user's AI profiles and only if its sheet said so (no claude → refused; what a run may do is the user's one choice, `skip` asks nothing more); its session skills are text only, written in Echo's own config folder and refused without sessions.skills
 priority: high
 type: functional
 requirements: [F-PLUG-09]
@@ -54,10 +54,10 @@ cp "$M/plugins/acme-asker/main.js" "$M/plugins/acme-quiet/main.js"
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Read the sheet Acme asker showed: `echoctl plugin list` and find the installed `acme-asker` | Its `uses` has the lines `Runs Claude Code on your AI profiles, with the permissions you pick` (not the "or with every permission check skipped" form) and `Gives Claude in Echo skills of its own — text only, in Echo's sessions, not your Claude Code` |
+| 1 | Read the sheet Acme asker showed: `echoctl plugin list` and find the installed `acme-asker` | Its `uses` has the lines `Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings` (the user's one choice, not the plugin's) and `Gives Claude in Echo skills of its own — text only, in Echo's sessions, not your Claude Code` |
 | 2 | `echoctl plugin call acme-quiet run '{"tools":"none"}'` | JSON `{"error": "it didn't ask to run Claude Code when it was installed"}` — before any run started (it answers at once) |
-| 3 | `echoctl plugin call acme-asker run '{"tools":"skip"}'; ls "$D/ran-on"` | JSON `{"error": "it didn't ask to run Claude Code with permission checks skipped when it was installed"}` (it asked to run Claude, but not that); `ls` finds no `$D/ran-on`: neither refused run reached Claude Code (steps 2 and 3) |
-| 4 | `echoctl plugin call acme-asker run '{"tools":"none"}'; cat "$D/ran-on"` (a run its sheet allows) | The run is let through to Claude Code, on the data's fake: the answer is `{"error": …}` whose text does not contain `didn't ask` (the fake refuses the run itself: `test data: Claude Code is a fake here`); `$D/ran-on` holds one line, the folder of the profile **Claude · work**, the default: a path ending `/claude/work` |
+| 3 | `ls "$D/ran-on"` | No `$D/ran-on`: the refused run reached no Claude Code |
+| 4 | `echoctl plugin call acme-asker run '{"tools":"skip"}'; cat "$D/ran-on"` (a run its sheet allows; `skip` asks nothing more: what it may do is the user's one choice) | The run is let through to Claude Code, on the data's fake: the answer is `{"error": …}` whose text does not contain `didn't ask` (the fake refuses the run itself: `test data: Claude Code is a fake here`); `$D/ran-on` holds one line, the folder of the profile **Claude · work**, the default: a path ending `/claude/work` |
 | 5 | `echoctl plugin call acme-quiet skills '{"list":[{"name":"greeting-style","description":"How Acme greets people.","body":"Greet people by first name."}]}'` | JSON whose `error` contains `acme-quiet didn't ask for “sessions” when it was installed` |
 | 6 | `ls "$ECHOCTL_CONFIG_DIR/plugins/session"` | No `acme-quiet` entry (the refusal wrote nothing); `ls` may fail with "No such file or directory" when nothing is there yet |
 | 7 | `echoctl plugin call acme-asker skills '{"list":[{"name":"greeting-style","description":"How Acme greets people.","body":"Run !`date` first."}]}'` | JSON whose `error` contains `runs a command in Claude Code; a plugin's skill is text only` |
@@ -67,7 +67,7 @@ cp "$M/plugins/acme-asker/main.js" "$M/plugins/acme-quiet/main.js"
 | 11 | `echoctl plugin call acme-asker skills '{"list":[]}'`; then `ls "$ECHOCTL_CONFIG_DIR/plugins/session"` | The call answers `{"ok": true}`; the listing has no `acme-asker` entry (an empty list takes the skills away) |
 
 ## Expected Final State
-The run the sheet allowed went to the user's AI profile (the default one, Claude · work) and the runs it did not allow started nothing; neither plugin kept a skill beyond what its sheet said; nothing was written outside `$ECHOCTL_CONFIG_DIR/plugins/session/`.
+The run the sheet allowed went to the user's AI profile (the default one, Claude · work) and the run it did not allow started nothing; neither plugin kept a skill beyond what its sheet said; nothing was written outside `$ECHOCTL_CONFIG_DIR/plugins/session/`.
 
 ## Teardown
 - `echoctl plugin remove acme-asker --delete-data`; `echoctl plugin remove acme-quiet --delete-data`; `echoctl plugin marketplace remove acme-local`

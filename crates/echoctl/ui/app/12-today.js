@@ -816,7 +816,9 @@ function todayAskBar() {
   if (!a || a.state === 'working') return '<div class="td-askbar" role="status" aria-label="Yolo"><span class="set-sub">Yolo: Claude is on it…</span></div>'
   // Its mail drafts (#135): where each is, a Microsoft 365 one linked (only an https link).
   const drafts = (a.drafts || []).map((d) => `<br><span class="set-sub">${esc(draftLine(d))}</span>${d.where === 'm365' && /^https:\/\/outlook\.(office|office365|live)\.com\//i.test(d.url || '') ? ` <a class="wp-link" href="${esc(d.url)}" data-ext title="Open it in Outlook">Open the draft ↗</a>` : ''}`).join('')
-  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+  // What it changed and sent with Echo's CLI (#590), each by its command.
+  const changes = (a.changes || []).filter((c) => c.kind !== 'draft').map((c) => `<br><span class="set-sub">${c.kind === 'send' ? 'Sent' : 'Changed'}: <code>echoctl ${esc(c.command || '')}</code></span>`).join('')
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}" role="status" aria-label="Yolo"><span class="grow">${esc(a.say || '')}${drafts}${changes}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
 /** Settings → General → Where drafts go: Microsoft 365 Drafts, the default mail app, or an app named here. */
