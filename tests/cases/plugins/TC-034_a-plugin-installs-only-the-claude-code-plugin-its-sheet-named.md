@@ -27,7 +27,7 @@ tags: [plugins, claude-code, permissions, security]
 |---|--------|----------------|
 | 1 | `$E plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `$E plugin install chan-demo --yes` | The sheet lists "Lets you reach your Claude · Echo folder session through Telegram while it is open in Echo, and installs Claude Code's telegram@claude-plugins-official plugin for it"; "Installed Channel demo 0.1.0" |
 | 2 | `$E plugin call chan-demo install '{"spec":"evil@somewhere"}' 2>&1 \|\| true` | Refused: "chan-demo may ask about or install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “evil@somewhere”"; nothing installed in Claude Code (the refusal comes before it runs) |
-| 3 | `ECHOCTL_RUN_MODE=routine $E plugin call chan-demo install '{"spec":"telegram@claude-plugins-official"}' 2>&1 \|\| true` | Refused: "installing isn't allowed in a read-only routine" |
+| 3 | `ECHOCTL_RUN_MODE=routine $E plugin call chan-demo install '{"spec":"telegram@claude-plugins-official"}' 2>&1 \|\| true` | Refused: "installing isn't allowed while Claude prepares and asks" |
 
 ## Expected Final State
 chan-demo installed; nothing installed in any Claude Code.
