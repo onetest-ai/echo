@@ -137,6 +137,20 @@
    "priority": "medium",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-TASK-15",
+   "feature": "Yolo runs: one list of every Yolo run — on a task and on an item of Needs you now — newest first, opened from My work's header and ⌘K (#yolo); each run shows when it started and how long it took, the task (a link opening its details beside the list) or the Needs you now item, its thread, its state (working, done, didn't do it — it ended changing, sending and drafting nothing —, failed), Claude's one line, what it changed and sent with Echo's CLI (a refused command as tried), its mail drafts, the permissions it ran with (acted on its own, prepared and asked) and its log; runs older than 90 days drop off",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TASK-16",
+   "feature": "Yolo runs' filters, in one row above the list: state, task or item, thread, a date range (from, to), changed or sent something, and a search over what Claude said and the task's title; they add up, a count says how many of all show, Clear resets them, and none matching says so",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

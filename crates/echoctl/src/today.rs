@@ -390,6 +390,9 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
+    // Its record on Yolo runs (#603), beside its files.
+    crate::yolo::prune();
+    crate::yolo::record(&id, &json!({"title": title, "project": project, "node": node, "thread": project, "started": Local::now().to_rfc3339(), "state": "working"}));
     std::thread::spawn(move || {
         // As the folder session: the user's skills as they are now among what it gets (off the window's thread).
         let out = crate::claudejob::run(&spec);
@@ -404,6 +407,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
+        crate::yolo::record(&id, &json!({"state": v["state"], "say": v["say"], "drafts": v["drafts"], "ended": v["at"]}));
         save_ask(v);
     });
     Ok(())
@@ -466,6 +470,8 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
     let (id, item_id) = (id.to_string(), item_id.to_string());
     // The run names its item: Today keeps it out of Needs you now while the run works.
     save_ask(json!({"id": id, "state": "working", "title": title, "item": item_id, "at": Local::now().to_rfc3339()}));
+    crate::yolo::prune();
+    crate::yolo::record(&id, &json!({"title": title, "item": item_id, "thread": spec.thread, "started": Local::now().to_rfc3339(), "state": "working"}));
     std::thread::spawn(move || {
         let out = crate::claudejob::run(&spec);
         let mut v = match out {
@@ -484,6 +490,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
+        crate::yolo::record(&id, &json!({"state": v["state"], "say": v["say"], "drafts": v["drafts"], "ended": v["at"]}));
         save_ask(v);
     });
     Ok(())

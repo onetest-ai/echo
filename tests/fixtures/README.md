@@ -147,8 +147,8 @@ exactly, and costs nothing. `serve.sh down` stops the server; with `make_data.py
   (`model_server.py`'s docstring). The default (`VIRTUAL_SCRIPT` in `make_data.py`) writes minutes the way process-call
   does: `echoctl context`, Read the transcript, Write `notes.md` and the run's action list, `echoctl actions --apply`.
   A case that needs other answers copies one from `tests/fixtures/model-scripts/` (`guard-probe.json`: a model that
-  tries to leave its call; `prep-summary.json`, `yolo-task.json`, `thread-sync.json`: a meeting's prep, Yolo on a task and
-  a thread's sync on the `standard` set, S-33) before its run.
+  tries to leave its call; `prep-summary.json`, `yolo-task.json`, `yolo-asks.json`, `yolo-runs.json`, `thread-sync.json`: a meeting's prep, Yolo on a
+  task (and on an item of Needs you now, for Yolo runs) and a thread's sync on the `standard` set, S-33) before its run.
 - **The log** is `<dir>/model/model-log.jsonl`, one line per request: the system prompt, the messages (tool results
   included), the tool names offered, the rule and step that answered. A case checks there what Echo gave the model and
   what it was told back.

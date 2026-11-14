@@ -60,6 +60,7 @@ mod today;
 mod today_layout;
 mod boards;
 mod widgets;
+mod yolo;
 mod teams_transcript;
 mod view;
 mod vocab;
