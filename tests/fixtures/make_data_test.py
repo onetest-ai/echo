@@ -28,6 +28,10 @@ class Binary(unittest.TestCase):
             self.assertEqual(md.Data("unused", "small").bin, "/somewhere/echoctl")
 
 
+BIN = md.Data("unused", "standard").bin
+
+
+@unittest.skipUnless(os.access(BIN, os.X_OK), f"no {BIN}: build first (cargo build -p echoctl) to check builds as of other times")
 class OtherClocks(unittest.TestCase):
     def test_the_standard_set_builds_and_passes_its_own_checks_as_of_any_hour_and_day(self):
         """--now at the day's first and last hours, midday, yesterday and tomorrow: whatever the real clock reads."""
