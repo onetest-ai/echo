@@ -17,7 +17,7 @@ The file is a list of entries, newest first:
 - `title`: a few words, at most 40 characters, no full stop.
 - `text`: one sentence, at most 160 characters, ending with a full stop (no ". " inside, so no "e.g.").
 - `open` (optional): where "Show me" takes the user: a window route (`today`, `calls`, `calendar`, `calendar/day`,
-  `calendar/week`, `tasks`, `projects`, `found`, `settings`, `settings/<section>`) or an `echo://` link.
+  `calendar/week`, `tasks`, `projects`, `found`, `yolo`, `settings`, `settings/<section>`) or an `echo://` link.
 
 ## Words
 

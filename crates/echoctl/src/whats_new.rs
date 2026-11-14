@@ -142,7 +142,7 @@ fn place(open: &str) -> bool {
     }
     let mut parts = open.split('/');
     match (parts.next(), parts.next(), parts.next()) {
-        (Some("today" | "calls" | "tasks" | "projects" | "found" | "calendar" | "settings"), None, None) => true,
+        (Some("today" | "calls" | "tasks" | "projects" | "found" | "calendar" | "settings" | "yolo"), None, None) => true,
         (Some("calendar"), Some("day" | "week"), None) => true,
         (Some("settings"), Some(s), None) => settings_sections().contains(&s.to_string()),
         _ => false,
