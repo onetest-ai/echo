@@ -56,6 +56,20 @@ fn chosen_home() -> Option<PathBuf> {
     Some(dunce::simplified(&p.home).to_path_buf())
 }
 
+/// The user's Downloads folder (the window's exports go there): `ECHOCTL_DOWNLOADS` in its place when set (the test
+/// data's env sets it), and on test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) without it the data folder's own `Downloads`,
+/// never the user's.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn downloads_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("ECHOCTL_DOWNLOADS").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d);
+    }
+    if std::env::var_os("ECHOCTL_TEST_OPEN_LOG_ONLY").is_some_and(|v| !v.is_empty()) {
+        return home().join("Downloads");
+    }
+    dirs::download_dir().unwrap_or_else(|| user_home().join("Downloads"))
+}
+
 /// The data folder: calls + state.
 pub fn home() -> PathBuf {
     std::env::var_os("ECHOCTL_HOME").map(PathBuf::from).or_else(chosen_home).unwrap_or_else(config_dir)

@@ -28,6 +28,7 @@ use crate::{calls, paths, watch};
 mod assets;
 mod call;
 mod calendar;
+mod export;
 mod settings;
 mod threads;
 mod today;
@@ -558,6 +559,9 @@ pub fn handle(msg: &str) -> Handled {
         return r;
     }
     if let Some(r) = terminals::handle(&v) {
+        return r;
+    }
+    if let Some(r) = export::handle(&v) {
         return r;
     }
     #[cfg(feature = "brain")]

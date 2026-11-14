@@ -679,7 +679,9 @@ def setup_env(d, stale_plugin=True, test_market=True):
              # here, as the stand-in logs it, instead of opening anything — on any OS (`app::open_log_only`).
              "ECHOCTL_TEST_OPEN_LOG": f"{b}/open.log",
              # A development build writes a mail draft's mailto: link here instead of opening a mail app (`drafts::open`, any OS).
-             "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log"}
+             "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log",
+             # The window's Export as HTML saves here, never into the user's Downloads (`paths::downloads_dir`).
+             "ECHOCTL_DOWNLOADS": f"{b}/downloads"}
     d.env.update(extra)
     with open(f"{b}/env", "a") as f:
         f.write(f"export PATH={sh(b + '/bin')}:\"$PATH\" " + " ".join(f"{k}={sh(v)}" for k, v in extra.items() if k != "PATH") + "\n")

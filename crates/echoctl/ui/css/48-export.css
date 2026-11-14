@@ -1,0 +1,3 @@
+/* Export as HTML (48-export.js): ⤓ beside a page's ✎. */
+.td-head .ex-btn { margin-left: auto; }
+.td-head .ex-btn + .td-edit-btn { margin-left: 0; }

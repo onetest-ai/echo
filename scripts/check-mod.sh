@@ -96,6 +96,8 @@ node crates/echoctl/ui/today-choices.test.mjs
 node crates/echoctl/ui/today-popover.test.mjs
 # A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).
 node crates/echoctl/ui/today-plugin-widgets.test.mjs
+# A dashboard exported as HTML: the file and its data tables (the export file block).
+node crates/echoctl/ui/export.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
 # make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418).
