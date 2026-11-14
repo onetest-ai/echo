@@ -10,8 +10,10 @@ assert.ok(a >= 0 && b > a, 'the plugin widget block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 // The app's drawn chevron (10-shell.js), as the window has it.
 const chevAt = src.indexOf('const CHEV = '), CHEV = new Function(`${src.slice(chevAt, src.indexOf('\n', chevAt))}\nreturn CHEV`)()
-const draw = new Function('esc', 'CHEV', `${src.slice(a, b)}\nreturn pluginWidgetHtml`)(esc, CHEV)
-const failedView = new Function('esc', 'CHEV', `${src.slice(a, b)}\nreturn pluginWidgetFailed`)(esc, CHEV)
+// An outside link's host (the work rows block's `linkHost`, one script with this one in the window).
+const hostAt = src.indexOf('const linkHost = '), linkHost = new Function(`${src.slice(hostAt, src.indexOf('\n', hostAt))}\nreturn linkHost`)()
+const draw = new Function('esc', 'CHEV', 'linkHost', `${src.slice(a, b)}\nreturn pluginWidgetHtml`)(esc, CHEV, linkHost)
+const failedView = new Function('esc', 'CHEV', 'linkHost', `${src.slice(a, b)}\nreturn pluginWidgetFailed`)(esc, CHEV, linkHost)
 const tests = []
 const test = (name, f) => tests.push([name, f])
 const refused = (kind, data, why) => assert.throws(() => draw(kind, data, 'M'), (e) => e.message.includes(why), `${kind}: ${why}`)
@@ -185,7 +187,7 @@ test("a chart's text is escaped wherever it shows", () => {
   for (const out of [h, d]) assert.ok(!out.includes('<img'), 'no tag from the plugin')
 })
 
-test("a stat's progress; any kind's open (echo:// a link, https a button that asks) and actions (its plugin's commands)", () => {
+test("a stat's progress; any kind's open (echo:// a link, https a button that opens it) and actions (its plugin's commands)", () => {
   assert.match(draw('stat', { value: '$500', progress: { used: 300, of: 800 } }, 'M'), /width:37\.5%/)
   assert.match(draw('stat', { value: 1, open: 'echo://task/acme/T1' }, 'M'), /<a class="link-btn" href="echo:\/\/task\/acme\/T1">Open<\/a>/)
   const https = draw('stat', { value: 1, open: 'https://ci.example/run/1' }, 'M')
@@ -231,9 +233,9 @@ test('a table at M leaves out the columns hidden at M; at L it has them', () => 
   assert.ok(draw('table', table, 'L').includes('>Why<'))
 })
 
-test("a table row's link is on its first text cell (https asks first, echo:// opens in Echo, anything else is text); its details show when opened", () => {
+test("a table row's link is on its first text cell (https opens in the browser, echo:// opens in Echo, anything else is text); its details show when opened", () => {
   const h = draw('table', table, 'M')
-  assert.match(h, /<td class="k-text" title="P-1"><button type="button" class="link-btn" data-pw-open="https:\/\/staffing\.acme\.example\/p\/1">P-1<\/button><\/td>/)
+  assert.match(h, /<td class="k-text" title="P-1"><button type="button" class="link-btn" data-pw-open="https:\/\/staffing\.acme\.example\/p\/1" title="Open in the browser \(staffing\.acme\.example\)">P-1<\/button><\/td>/)
   assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">P-9<\/a>/)
   const evil = draw('table', { columns: [{ key: 'a', label: 'A' }], rows: [{ id: 1, link: 'javascript:alert(1)', cells: { a: 'x' } }] }, 'M')
   assert.ok(!evil.includes('javascript') && evil.includes('<td class="k-text" title="x">x</td>'))
@@ -263,10 +265,10 @@ test('a table with no rows says its empty text; its text is escaped; wrong data 
   refused('table', { columns: cols, rows: [{ id: 1, detail: Array(7).fill({ text: 'x' }) }] }, "row 1's detail is a list of 6 lines at most")
 })
 
-test("a stats item's link: Details › (echo:// in Echo, https asks first, anything else none)", () => {
+test("a stats item's link: Details › (echo:// in Echo, https opens in the browser, anything else none)", () => {
   const h = draw('stats', { items: [{ label: 'critical', value: 4, link: 'echo://thread/acme' }, { label: 'high', value: 8, link: 'https://staffing.acme.example/?u=high' }, { label: 'x', value: 1, link: 'javascript:x' }] }, 'M')
   assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">Details ›<\/a>/)
-  assert.match(h, /data-pw-open="https:\/\/staffing\.acme\.example\/\?u=high">Details ›/)
+  assert.match(h, /data-pw-open="https:\/\/staffing\.acme\.example\/\?u=high" title="Open in the browser \(staffing\.acme\.example\)">Details ›/)
   assert.equal((h.match(/Details ›/g) || []).length, 2)
 })
 

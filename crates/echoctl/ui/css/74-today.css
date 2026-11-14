@@ -337,7 +337,6 @@
 .pc-spark polygon { fill: var(--chart-1); fill-opacity: 0.12; }
 .pc-spark i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--chart-1); box-shadow: 0 0 0 2px var(--surface); }
 .pw-foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 8px; }
-.pw-ask { margin-top: 6px; }
 /* A widget two rows high: it in its columns, the lines beside it in the others; as tall as they are. */
 .td-pair { display: grid; gap: 16px; align-items: stretch; }
 .td-tall { min-height: 280px; contain: size; display: flex; flex-direction: column; min-width: 0; }

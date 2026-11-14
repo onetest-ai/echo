@@ -1144,7 +1144,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     for (const card of x.cards) await expect(today.widget(card.title)).toHaveCount(0)
   })
 
-  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link asked before it leaves Echo, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
+  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link opened on the first click, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
     const w = data.text.widgets
     const x = w.plugin
     const t = x.trend
@@ -1179,14 +1179,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(await today.dotColour(x.widgets.ci)).toBe(await today.themeColour(w.plugin.badColour))
       await expect(today.widgetSays(x.widgets.ci, x.ci.failed)).toBeVisible()
       await expect(today.widgetButton(x.widgets.ci, x.ci.rerun)).toBeVisible()
-      // Open: nothing leaves Echo, the question under it; Cancel takes it away.
+      // Open: its host in the tooltip; one click opens it (only into open.log here), nothing asked first.
+      expect(data.env.ECHOCTL_TEST_OPEN_LOG_ONLY, 'never a real browser: the data\'s env sends links to open.log').toBe('1')
+      await expect(today.widgetButton(x.widgets.ci, x.ci.openLink)).toHaveAttribute('title', x.ci.openTitle)
       await today.widgetButton(x.widgets.ci, x.ci.openLink).click()
-      await expect(today.widgetMatch(x.widgets.ci, x.ci.askStart)).toBeVisible()
-      await expect(today.widget(x.widgets.ci)).toContainText(x.ci.ask)
-      expect(opened()).toBe(before)
-      await today.widgetButton(x.widgets.ci, x.ci.cancel).click()
+      await expect.poll(opened).toBe(before + x.ci.url + '\n')
       await expect(today.widgetMatch(x.widgets.ci, x.ci.askStart)).toHaveCount(0)
-      expect(opened()).toBe(before)
       // Re-run: the plugin's command runs, CI is green, no Re-run.
       await today.widgetButton(x.widgets.ci, x.ci.rerun).click()
       await expect(today.widgetSays(x.widgets.ci, x.ci.green)).toBeVisible()

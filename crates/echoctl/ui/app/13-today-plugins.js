@@ -13,16 +13,17 @@ function pluginWidgetHtml(kind, data, size, opened = []) {
   const tone = (t) => (TONES.includes(t) ? ` tone-${t}` : '')
   // A link only to Echo's own places; anything else is shown as text.
   const linked = (text, link) => (typeof link === 'string' && /^echo:\/\/[a-z]+\//.test(link) ? `<a class="link-btn" href="${esc(link)}">${esc(text)}</a>` : esc(text))
-  // A link of a row or an item: echo:// opens in Echo, https asks first (`data-pw-open`); anything else: none ('').
+  // A link of a row or an item: echo:// opens in Echo, https in the browser (`data-pw-open`, its host in the tooltip);
+  // anything else: none ('').
   const outLink = (text, link) => typeof link === 'string' && /^echo:\/\/[a-z]+\//.test(link) ? `<a class="link-btn" href="${esc(link)}">${esc(text)}</a>`
-    : typeof link === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(link) ? `<button type="button" class="link-btn" data-pw-open="${esc(link)}">${esc(text)}</button>` : ''
+    : typeof link === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(link) ? `<button type="button" class="link-btn" data-pw-open="${esc(link)}" title="${esc(`Open in the browser (${linkHost(link)})`)}">${esc(text)}</button>` : ''
   const num = (v, what) => { const n = typeof v === 'number' || (typeof v === 'string' && v.trim()) ? Number(v) : NaN; if (!Number.isFinite(n)) throw new Error(`${what} is not a number`); return n }
-  // Any kind may say where it opens (`open`: echo:// in Echo, https after a confirm) and up to 3 actions (its plugin's
+  // Any kind may say where it opens (`open`: echo:// in Echo, https in the browser) and up to 3 actions (its plugin's
   // commands, run on a click).
   const foot = () => {
     const bits = []
     if (typeof d.open === 'string' && /^echo:\/\/[a-z]+\//.test(d.open)) bits.push(`<a class="link-btn" href="${esc(d.open)}">Open</a>`)
-    else if (typeof d.open === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(d.open)) bits.push(`<button type="button" class="link-btn" data-pw-open="${esc(d.open)}">Open</button>`)
+    else if (typeof d.open === 'string' && /^https:\/\/[^\s"<>\\]+$/.test(d.open)) bits.push(`<button type="button" class="link-btn" data-pw-open="${esc(d.open)}" title="${esc(`Open in the browser (${linkHost(d.open)})`)}">Open</button>`)
     if (Array.isArray(d.actions)) for (const [i, a] of d.actions.slice(0, 3).entries()) {
       if (!a || typeof a.command !== 'string' || !a.command) throw new Error(`action ${i + 1} needs a command`)
       bits.push(`<button type="button" class="btn sm" data-pw-cmd="${esc(a.command)}" data-pw-args="${esc(JSON.stringify(a.args ?? {}))}">${esc(str(a.label, `action ${i + 1}'s label`, 40) || a.command)}</button>`)
@@ -381,18 +382,11 @@ function pluginWidgetView(id, w, size) {
   // A table says how many rows it has, and the plugin's note, beside its label.
   const d = w.data || {}
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
-  // An outside link asked for here: its host said before it opens (a second click on Open) — the one question on the
-  // page, a work row's or a widget's (`linkAsked`; it lapses after 30 s).
-  const armed = linkAsked(S, 'wrOpen', Date.now())
-  // A table row's or a stats item's link has no "Open" to name: the click is on the link itself.
-  const again = w.kind === 'table' || w.kind === 'stats' ? 'Click it again' : 'Click Open again'
-  const ask = armed && armed.where === `pw:${tdPageKey()}|${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, again, 'data-pw-open-no="1"') : ''
-  return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}${ask}</section>`
+  return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}</section>`
 }
 
 // A plugin widget's actions and its outside link, on Today and on a thread's or client's dashboard: an action runs its
-// plugin's command (the user's click), then the page is read again; an https link asks once in the widget ("Open
-// <host>?") before it leaves Echo.
+// plugin's command (the user's click), then the page is read again; an https link opens in the browser on the click.
 document.addEventListener('click', async (e) => {
   if (!tdHere() || !e.target.closest) return
   const sec = e.target.closest('[data-pw]')
@@ -416,7 +410,6 @@ document.addEventListener('click', async (e) => {
   if (act) {
     e.preventDefault()
     act.disabled = true
-    S.wrOpen = null
     let args = {}
     try { args = JSON.parse(act.dataset.pwArgs || '{}') } catch { /* none */ }
     // The call answers {value} or {error}: a refused or failing command says so.
@@ -429,16 +422,6 @@ document.addEventListener('click', async (e) => {
   const open = e.target.closest('[data-pw-open]')
   if (open) {
     e.preventDefault()
-    const url = open.dataset.pwOpen
-    // The keyboard stays on this widget's Open (the line redrawn).
-    const back = () => setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
-    if (linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${tdPageKey()}|${sec.dataset.pw}`)) send({ cmd: 'open_url', url })
-    render()
-    return back()
-  }
-  if (e.target.closest('[data-pw-open-no]')) {
-    S.wrOpen = null
-    render()
-    setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
+    send({ cmd: 'open_url', url: open.dataset.pwOpen })
   }
 })
