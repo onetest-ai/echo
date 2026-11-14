@@ -17,7 +17,7 @@ tags: [plugins, cli, authoring]
 
 ## Preconditions
 - `E=target/debug/echoctl`, built right before the run. No test data and **no** `<dir>/env`: the command reads only the folders it is given; every step runs it in an empty environment (`env -i HOME=/nonexistent PATH=/usr/bin:/bin`), so it can reach no data folder or settings
-- The fixtures: `tests/fixtures/plugins/plugins/agent-demo` (a clean plugin with an `agent/` part), `tests/fixtures/plugin-check/agent-hidden` (`agent/guides/.claude/skills/evil/SKILL.md` and `agent/skills/ok/.claude/skills/evil2/SKILL.md`, inert: they say they do nothing) and `tests/fixtures/plugin-check/agent-broken` (each file breaks one rule: skills but no `agent.prefix`, no `agent/CLAUDE.md`, `agent/notes.md` and `agent/rules/style.txt` where they can't be, a skill folder `lookup` whose `SKILL.md` says `name: search`, a widget of kind `gauge`, `${CLAUDE_PLUGIN_ROOT}` in its window half `client.js`)
+- The fixtures: `tests/fixtures/plugins/plugins/agent-demo` (a clean plugin with an `agent/` part), `tests/fixtures/plugin-check/agent-hidden` (`agent/guides/.claude/skills/evil/SKILL.md` and `agent/skills/ok/.claude/skills/evil2/SKILL.md`, inert: they say they do nothing), `tests/fixtures/plugin-check/agent-double` (prefix `kb`, skills `kb-x` and `x`) and `tests/fixtures/plugin-check/agent-broken` (each file breaks one rule: skills but no `agent.prefix`, no `agent/CLAUDE.md`, `agent/notes.md` and `agent/rules/style.txt` where they can't be, a skill folder `lookup` whose `SKILL.md` says `name: search`, a widget of kind `gauge`, `${CLAUDE_PLUGIN_ROOT}` in its window half `client.js`)
 
 **Changes:** nothing
 
@@ -30,6 +30,7 @@ tags: [plugins, cli, authoring]
 | 3 | `env -i HOME=/nonexistent PATH=/usr/bin:/bin $E plugin check --json tests/fixtures/plugin-check/agent-broken tests/fixtures/plugins/plugins/agent-demo; echo "exit $?"` | JSON: `ok` false; `problems` the seven of step 2, each `{id: "agent-broken", file, what}`; `plugins` `[{id: "agent-broken", ok: false, …}, {id: "agent-demo", ok: true, …}]`; `exit 1` |
 | 4 | `env -i HOME=/nonexistent PATH=/usr/bin:/bin $E plugin check tests/fixtures/plugins/plugins/*; echo "exit $?"` | One `…: ok` line per test plugin, each by its id (agent-demo, chan-demo, chart-demo, hang-demo, share-a, share-b, signin-demo, table-demo, thread-demo, widget-demo, work-demo); `exit 0` |
 | 4a | `env -i HOME=/nonexistent PATH=/usr/bin:/bin $E plugin check tests/fixtures/plugin-check/agent-hidden; echo "exit $?"` | `agent-hidden (…): 2 problems`: `agent/skills/ok/.claude: a .claude folder: Claude Code would load what is in it unchecked` and `agent/guides/.claude: a .claude folder: …` (skills hidden in nested `.claude/` folders, which Claude Code would load unchecked); `exit 1` |
+| 4b | `env -i HOME=/nonexistent PATH=/usr/bin:/bin $E plugin check tests/fixtures/plugin-check/agent-double; echo "exit $?"` | `agent-double (…): 1 problem`: `echo-plugin.json: agent-double's skills “kb-x” and “x” would both be laid out as “kb-x”` (its prefix is `kb`: what an install refuses, check says); `exit 1` |
 | 5 | `ls /nonexistent` | Fails ("No such file or directory"): nothing was written anywhere for the checks |
 
 ## Expected Final State

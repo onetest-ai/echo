@@ -140,7 +140,7 @@ pub(super) fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)
             // A `.claude` folder in it (skills, settings) would reach Claude Code unchecked; `agent/` is walked whole by
             // `problems`.
             if let Some(h) = (!rel.starts_with("agent/")).then(|| claude_dir_in(&d)).flatten() {
-                bail!("skill “{rel}”: {h} is a .claude folder — Claude Code would load what is in it unchecked");
+                bail!("skill “{rel}”: it holds a .claude folder ({h}) — Claude Code would load what is in it unchecked");
             }
             Ok((name, d))
         })();
@@ -418,7 +418,8 @@ fn prefix_users(r: &super::Registry) -> Vec<(String, String, String)> {
     r.installed
         .values()
         .filter_map(|p| {
-            let source = markets.iter().find(|(m, _)| m.name == p.market).map(|(m, _)| m.source.clone())?;
+            // The source it was installed from holds the prefix — also once that marketplace is removed.
+            let source = p.source.clone().or_else(|| markets.iter().find(|(m, _)| m.name == p.market).map(|(m, _)| m.source.clone())).unwrap_or_else(|| p.market.clone());
             let prefix = prefix_of(&super::read_manifest(&super::plugin_dir(p)).ok()?)?;
             Some((p.id.clone(), source, prefix))
         })
@@ -437,7 +438,8 @@ pub fn claim_prefix(id: &str, market: &str, prefix: &str, bind: bool) -> Result<
     fs::create_dir_all(path.parent().expect("a parent"))?;
     let _l = super::wait_lock_for(&path.with_extension("lock"), "the plugins' prefixes", std::time::Duration::from_secs(5))?;
     let r = super::Registry::load()?;
-    let mine = source_of(&r, market).unwrap_or_else(|| market.to_string());
+    // Its own source: as recorded when it was installed from that marketplace, else that marketplace's now.
+    let mine = r.installed.get(id).filter(|p| p.market == market).and_then(|p| p.source.clone()).or_else(|| source_of(&r, market)).unwrap_or_else(|| market.to_string());
     let users: Vec<_> = prefix_users(&r).into_iter().filter(|(i, _, x)| i != id && x == prefix).collect();
     let mut held: serde_json::Map<String, Value> = fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     // Its holder while a plugin of that source using it is installed, else the source of one that uses it.
@@ -483,15 +485,22 @@ fn laid_out_names(q: &str, prefix: &str, package: &[String]) -> Vec<(String, Str
     package.iter().cloned().chain(crate::grants::runtime_skill_dirs(q, package).into_iter().map(|(n, _)| n)).map(|n| (skill_name(prefix, &n), n)).collect()
 }
 
-/// Plugin `id`'s skills `names` (package and runtime, with `prefix`) laid out under names of their own: two of its own
-/// alike (`x` and `<prefix>-x`), or one another enabled plugin lays out (a plugin of the same source, same prefix).
-pub fn clash(id: &str, prefix: &str, names: &[String]) -> Result<()> {
-    let mine: Vec<(String, String)> = names.iter().map(|n| (skill_name(prefix, n), n.clone())).collect();
+/// Two of plugin `id`'s skills `names` laid out alike with `prefix` (`x` and `<prefix>-x`): refused (`plugin check` too).
+pub fn own_clash(id: &str, prefix: &str, names: &[String]) -> Result<()> {
+    let mine: Vec<(String, &String)> = names.iter().map(|n| (skill_name(prefix, n), n)).collect();
     for (i, (full, n)) in mine.iter().enumerate() {
         if let Some((_, other)) = mine[..i].iter().find(|(f, _)| f == full) {
             bail!("{id}'s skills “{other}” and “{n}” would both be laid out as “{full}”");
         }
     }
+    Ok(())
+}
+
+/// Plugin `id`'s skills `names` (package and runtime, with `prefix`) laid out under names of their own: two of its own
+/// alike (`x` and `<prefix>-x`), or one another enabled plugin lays out (a plugin of the same source, same prefix).
+pub fn clash(id: &str, prefix: &str, names: &[String]) -> Result<()> {
+    own_clash(id, prefix, names)?;
+    let mine: Vec<(String, String)> = names.iter().map(|n| (skill_name(prefix, n), n.clone())).collect();
     for q in super::enabled().into_iter().filter(|q| q.id != id) {
         let Ok(m) = super::read_manifest(&super::plugin_dir(&q)) else { continue };
         let Some(qp) = prefix_of(&m) else { continue };
@@ -583,12 +592,32 @@ pub fn lay_out(id: &str) -> Result<()> {
 /// stays where Claude loads it), and says why.
 fn lay_out_within(id: &str, wait: std::time::Duration) -> Result<()> {
     let _lock = lock_for(id, wait)?;
+    lay_out_held(id)
+}
+
+/// `lay_out_locked`, failing closed: no folder, and why kept in its record (said once, shown in Settings → Plugins).
+fn lay_out_held(id: &str) -> Result<()> {
     let r = lay_out_locked(id);
     if let Err(e) = &r {
-        let _ = remove_locked(id);
-        eprintln!("plugin {id}: its part for Claude isn't laid out: {e:#}");
+        let why = format!("{e:#}");
+        let at = folder(id);
+        if at.exists() {
+            let _ = fs::remove_dir_all(&at);
+        }
+        if withheld(id).as_deref() != Some(why.as_str()) {
+            eprintln!("plugin {id}: its part for Claude isn't laid out: {why}");
+        }
+        let files = super::Registry::load().ok().and_then(|reg| reg.installed.get(id).map(|p| p.files.clone())).unwrap_or_default();
+        let f = record_file(id);
+        let _ = fs::create_dir_all(f.parent().expect("a parent"));
+        let _ = paths::write_atomic(&f, json!({"files": files, "at": fwd(&at), "echo": env!("CARGO_PKG_VERSION"), "withheld": why}).to_string().as_bytes());
     }
     r
+}
+
+/// Why plugin `id`'s part for Claude isn't laid out, when it isn't (its record).
+pub fn withheld(id: &str) -> Option<String> {
+    record(id)["withheld"].as_str().map(str::to_owned)
 }
 
 fn lay_out_locked(id: &str) -> Result<()> {
@@ -606,7 +635,7 @@ fn lay_out_locked(id: &str) -> Result<()> {
     let runtime_skills = crate::grants::runtime_skill_dirs(id, &names);
     let prefix = prefix_of(&m).unwrap_or_default();
     if (!package.is_empty() || !runtime_skills.is_empty()) && !valid_prefix(&prefix) {
-        bail!("its skills need “agent.prefix” in its manifest");
+        bail!("it has no “agent.prefix” in its manifest: its skills reach routines and Yolo, not the folder session, until it names one");
     }
     // Never two skill folders of one name in `.plugins/`: another plugin's laid out already wins.
     for e in fs::read_dir(root()).into_iter().flatten().flatten().filter(|e| e.file_name() != std::ffi::OsStr::new(id) && !e.file_name().to_string_lossy().starts_with('.')) {
@@ -717,21 +746,28 @@ pub fn remove(id: &str) {
 fn current(p: &super::Installed) -> bool {
     let r = record(&p.id);
     let at = folder(&p.id);
-    r["files"] == p.files.as_str() && r["at"] == fwd(&at).as_str() && r["echo"] == env!("CARGO_PKG_VERSION") && at.is_dir() && super::tree_hash(&at).is_ok_and(|h| r["content"] == h.as_str())
+    let same = r["files"] == p.files.as_str() && r["at"] == fwd(&at).as_str() && r["echo"] == env!("CARGO_PKG_VERSION");
+    // Withheld for a reason that still holds: nothing to lay out (and no folder may be there).
+    if same && r["withheld"].is_string() {
+        return !at.exists();
+    }
+    same && at.is_dir() && super::tree_hash(&at).is_ok_and(|h| r["content"] == h.as_str())
 }
 
 /// At start (Echo's, a folder session's): a folder in `.plugins/` that isn't an installed plugin switched on goes, and
 /// each one laid out from other installed files, by another Echo or changed since is laid out again. Nothing goes when
 /// what is installed can't be read; only folders, and only those there before it was read.
 pub fn sync_all() {
-    sync_within(None)
+    sync_within(None);
 }
 
 /// The same, done by `until` (the core's hook): a busy folder is left as it is and nothing waits past it.
-fn sync_within(until: Option<std::time::Instant>) {
+/// The plugins whose folders it couldn't check (busy): their rows stay out of the core this time.
+fn sync_within(until: Option<std::time::Instant>) -> Vec<String> {
+    let mut unchecked = vec![];
     let wait = || until.map(|u| u.saturating_duration_since(std::time::Instant::now())).unwrap_or(PATIENT);
     let since = std::time::SystemTime::now();
-    let Ok(reg) = super::Registry::load() else { return };
+    let Ok(reg) = super::Registry::load() else { return unchecked };
     let on: Vec<super::Installed> = reg.installed.into_values().filter(|p| p.enabled).collect();
     let ids: Vec<&str> = on.iter().map(|p| p.id.as_str()).collect();
     for e in fs::read_dir(root()).into_iter().flatten().flatten() {
@@ -765,14 +801,16 @@ fn sync_within(until: Option<std::time::Instant>) {
     }
     for p in &on {
         if !current(p) {
-            if until.is_some() && wait().is_zero() {
-                break;
-            }
-            if let Err(e) = lay_out_within(&p.id, wait()) {
-                eprintln!("plugin {}: its part for Claude can't be laid out: {e:#}", p.id);
-            }
+            // Busy (another writer), or out of time: not checked, so not offered to Claude this time.
+            let Ok(_l) = lock_for(&p.id, wait()) else {
+                eprintln!("plugin {}: its folder for Claude couldn't be checked (busy): left out of this session's core", p.id);
+                unchecked.push(p.id.clone());
+                continue;
+            };
+            let _ = lay_out_held(&p.id);
         }
     }
+    unchecked
 }
 
 /// Enabled plugins' laid-out folders.
@@ -1034,14 +1072,19 @@ pub fn core() -> String {
 /// `echoctl core --hook`: each plugin's folder laid out again first when it isn't what Echo wrote, then the core as a
 /// SessionStart hook's answer. Never fails the session: whatever goes wrong, it answers what it can (exit 0).
 pub fn hook() -> i32 {
-    let out = std::panic::catch_unwind(|| {
-        sync_within(Some(std::time::Instant::now() + HOOK_WAIT));
-        json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": core()}}).to_string()
-    });
+    let out = std::panic::catch_unwind(|| json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": hook_core()}}).to_string());
     if let Ok(o) = out {
         println!("{o}");
     }
     0
+}
+
+/// The hook's core: each folder checked (laid out again if changed) within `HOOK_WAIT`; one it couldn't check (busy)
+/// has no row this time, so Claude isn't sent to a folder nobody verified.
+fn hook_core() -> String {
+    let unchecked = sync_within(Some(std::time::Instant::now() + HOOK_WAIT));
+    let rows: Vec<Row> = rows().into_iter().filter(|r| !unchecked.iter().any(|id| r.read.starts_with(&format!(".plugins/{id}/")))).collect();
+    render(&paths::home(), &rows)
 }
 
 /// The folder session's SessionStart hook that gives it the core (at its start, a resume, a compaction, a /clear).
@@ -1268,6 +1311,16 @@ mod tests {
         write(&super::super::plugin_dir(&p).join("echo-plugin.json"), &json!({"id": "acme-kit", "name": "acme-kit", "version": "0.1.0", "skills": ["skills/notes"], "agent": {"prefix": "ep"}}).to_string());
         super::super::forget_read("acme-kit");
         assert!(super::super::set_enabled("acme-kit", true).unwrap_err().to_string().contains("its skills prefix “ep” is held by"));
+        // Its own runtime skills are checked when it is switched on: set while the other was off, they'd clash now.
+        offer_in(&root, "epam", "extra", "ep", &["only"]);
+        install_from(&root, "epam", "extra").unwrap();
+        super::super::set_enabled("delivery", false).unwrap();
+        crate::grants::set_session_skills("extra", &json!([{"name": "risks", "description": "x", "body": "y"}])).unwrap();
+        super::super::set_enabled("extra", false).unwrap();
+        super::super::set_enabled("delivery", true).unwrap();
+        let e = super::super::set_enabled("extra", true).unwrap_err().to_string();
+        assert!(e.contains("extra's skill “risks” would be laid out as “ep-risks”, which delivery's skill “risks” already is"), "{e}");
+        super::super::remove("extra", true).unwrap();
         // Its source's plugins gone, the prefix is free.
         for id in ["staffing", "delivery", "acme-kit"] {
             super::super::remove(id, true).unwrap();
@@ -1275,6 +1328,43 @@ mod tests {
         offer_in(&root, "acme", "acme-kit", "ep", &["notes"]);
         install_from(&root, "acme", "acme-kit").unwrap();
         assert!(folder("acme-kit").join(".claude/skills/ep-notes").is_dir());
+    }
+
+    #[test]
+    fn a_removed_marketplace_still_holds_the_prefix_of_its_installed_plugin() {
+        let (_env, root) = paths::testenv::folders("agent-prefix-removed-market");
+        offer_in(&root, "ma", "pa", "ab", &["x"]);
+        offer_in(&root, "mb", "pb", "ab", &["y"]);
+        install_from(&root, "ma", "pa").unwrap();
+        super::super::market_remove(&super::super::market_named("ma").unwrap()).unwrap();
+        // Its plugin is still installed: the prefix stays its source's.
+        let e = install_from(&root, "mb", "pb").unwrap_err().to_string();
+        assert!(e.contains("its skills prefix “ab” is held by pa"), "{e}");
+        super::super::set_enabled("pa", false).unwrap();
+        super::super::set_enabled("pa", true).unwrap();
+        assert!(folder("pa").join(".claude/skills/ab-x").is_dir());
+        // Removed, it lets the prefix go.
+        super::super::remove("pa", true).unwrap();
+        install_from(&root, "mb", "pb").unwrap();
+    }
+
+    #[test]
+    fn a_plugin_without_a_prefix_keeps_its_runtime_skills_for_routines_and_says_why_the_folder_session_has_none() {
+        let (_env, root) = paths::testenv::folders("agent-no-prefix");
+        offer(&root, "vaults", json!({"id": "vaults", "name": "Vaults", "version": "0.7.0", "uses": {"sessions": {"skills": true}}}), |_| {});
+        install(&root, "vaults");
+        crate::grants::set_session_skills("vaults", &json!([{"name": "work", "description": "The Work vault.", "body": "Read it."}])).unwrap();
+        // Its session copy (routines, Yolo) as before; no folder for the folder session, and why — in Settings too.
+        assert!(crate::grants::session_dir("vaults").join("skills/work/SKILL.md").is_file());
+        assert!(!folder("vaults").exists());
+        let why = withheld("vaults").unwrap();
+        assert!(why.contains("no “agent.prefix”"), "{why}");
+        assert_eq!(super::super::snapshot()["installed"][0]["claude_problem"].as_str(), Some(why.as_str()));
+        // Said once: at start it isn't tried again while nothing changed.
+        let p = super::super::Registry::load().unwrap().installed["vaults"].clone();
+        assert!(current(&p));
+        sync_all();
+        assert_eq!(withheld("vaults").as_deref(), Some(why.as_str()));
     }
 
     #[test]
@@ -1300,11 +1390,6 @@ mod tests {
         let t = fs::read_to_string(dir.join(".claude/skills/vlt-work/SKILL.md")).unwrap();
         assert!(t.starts_with("---\nname: vlt-work\ndescription: \"The Work vault.\"\n---"), "{t}");
         assert!(fs::read_to_string(dir.join("CLAUDE.md")).unwrap().contains("`vlt-find`, `vlt-work`"));
-        // A plugin without a prefix sets no runtime skills.
-        offer(&root, "noprefix", json!({"id": "noprefix", "name": "No prefix", "version": "0.1.0", "uses": {"sessions": {"skills": true}}}), |_| {});
-        install(&root, "noprefix");
-        let e = crate::grants::set_session_skills("noprefix", &json!([{"name": "x", "description": "x", "body": "y"}])).unwrap_err().to_string();
-        assert!(e.contains("has no “agent.prefix”"), "{e}");
         crate::grants::set_session_skills("vaults", &json!([])).unwrap();
         assert!(!dir.join(".claude/skills/vlt-work").exists() && dir.join(".claude/skills/vlt-find").is_dir());
     }
@@ -1342,13 +1427,19 @@ mod tests {
             ("echo-plugin.json: agent.prefix is 2–4 of a–z and 0–9", Box::new(|d: &Path| write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "agent": {"summary": "x", "prefix": "abcde"}}).to_string()))),
             ("echo-plugin.json: agent.prefix is 2–4 of a–z and 0–9", Box::new(|d: &Path| write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "agent": {"summary": "x", "prefix": "a-b"}}).to_string()))),
             ("echo-plugin.json: agent.prefix is 2–4 of a–z and 0–9", Box::new(|d: &Path| write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "agent": {"summary": "x", "prefix": "echo"}}).to_string()))),
+            // Two of its skills laid out alike: what an install refuses, check says.
+            ("echo-plugin.json: kit's skills “kb-x” and “x” would both be laid out as “kb-x”", Box::new(|d: &Path| {
+                skill(&d.join("skills/kb-x"), "kb-x");
+                skill(&d.join("skills/x"), "x");
+                write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "skills": ["skills/kb-x", "skills/x"], "agent": {"summary": "x", "prefix": "kb"}}).to_string());
+            })),
             // A `.claude` folder anywhere, in any case: Claude Code would load it unchecked.
             ("agent/guides/.claude: a .claude folder", Box::new(|d: &Path| skill(&d.join("agent/guides/.claude/skills/evil"), "evil"))),
             ("agent/skills/ok/.CLAUDE: a .claude folder", Box::new(|d: &Path| {
                 skill(&d.join("agent/skills/ok"), "ok");
                 skill(&d.join("agent/skills/ok/.CLAUDE/skills/evil2"), "evil2");
             })),
-            ("skills/old/SKILL.md: skill “skills/old”: .claude is a .claude folder", Box::new(|d: &Path| {
+            ("skills/old/SKILL.md: skill “skills/old”: it holds a .claude folder (.claude)", Box::new(|d: &Path| {
                 skill(&d.join("skills/old"), "old");
                 skill(&d.join("skills/old/.claude/skills/evil3"), "evil3");
                 write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "skills": ["skills/old"], "agent": {"summary": "x"}}).to_string());
@@ -1457,9 +1548,11 @@ mod tests {
         write(&folder("kit").join("planted.md"), "x");
         let held = lock("kit").unwrap();
         let t = std::time::Instant::now();
-        assert_eq!(hook(), 0);
+        let core = hook_core();
         assert!(t.elapsed() < std::time::Duration::from_secs(6), "{:?}", t.elapsed());
         assert!(folder("kit").join("planted.md").is_file(), "busy: left as it is");
+        assert!(!core.contains(".plugins/kit/"), "a folder it couldn't check isn't offered: {core}");
+        assert_eq!(hook(), 0);
         drop(held);
         assert_eq!(hook(), 0);
         assert!(!folder("kit").join("planted.md").exists(), "free again: laid out again");

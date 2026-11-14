@@ -384,6 +384,12 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     let skills_ok = skill_problems.is_empty();
     part.extend(skill_problems);
     m.skill_names = skills.iter().map(|(n, _)| n.clone()).collect();
+    // Two of its own skills laid out alike (`x` and `<prefix>-x`): as an install would refuse it.
+    if let Some(p) = agent::prefix_of(&m).filter(|p| agent::valid_prefix(p)) {
+        if let Err(e) = agent::own_clash(&m.id, &p, &m.skill_names) {
+            part.push(Problem { file: man.into(), what: format!("{e:#}") });
+        }
+    }
     // Its skills are named with its prefix in Echo's sessions.
     if !skills.is_empty() && agent::prefix_of(&m).is_none() {
         part.push(Problem { file: man.into(), what: "it has skills: “agent.prefix” (2–4 of a–z, 0–9) names them in Echo's sessions".into() });
@@ -632,6 +638,10 @@ pub struct Installed {
     pub installed_at: String,
     /// The permission sheet the user agreed to.
     pub uses: Vec<String>,
+    /// Its marketplace's source when it was installed (`owner/repo`, a URL, a folder): what holds its skills prefix,
+    /// even once that marketplace is removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1118,7 +1128,9 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     }
     // An update keeps when it was first installed (a namespace's owner is the earliest: `shared`).
     let first = before.as_ref().filter(|b| b.market == mk).map_or_else(|| chrono::Local::now().to_rfc3339(), |b| b.installed_at.clone());
+    let source = Registry::load().ok().and_then(|r| r.market(&mk).map(|m| m.source.clone()));
     let rec = Installed {
+        source,
         id: id.into(),
         name: rv.name,
         version: rv.version.clone(),
@@ -1160,9 +1172,7 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         eprintln!("plugin {id}: its skills can't be copied: {e:#}");
     }
     // Its part for Claude in Echo's folder session, in the data folder (`.plugins/<id>/`).
-    if let Err(e) = agent::lay_out(id) {
-        eprintln!("plugin {id}: its part for Claude can't be laid out: {e:#}");
-    }
+    let _ = agent::lay_out(id);
     changed();
     Ok(rec)
 }
@@ -1212,7 +1222,10 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
         if let Ok(m) = read_manifest(&plugin_dir(&p)) {
             if let Some(prefix) = agent::prefix_of(&m) {
                 agent::claim_prefix(id, &p.market, &prefix, true)?;
-                agent::clash(id, &prefix, &m.skill_names)?;
+                // Its package skills and the runtime ones its host half set before.
+                let mut names = m.skill_names.clone();
+                names.extend(crate::grants::runtime_skill_dirs(id, &m.skill_names).into_iter().map(|(n, _)| n));
+                agent::clash(id, &prefix, &names)?;
             }
         }
     }
@@ -1223,9 +1236,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
     })?;
     // Its part for Claude goes with it, and comes back with it.
     if on {
-        if let Err(e) = agent::lay_out(id) {
-            eprintln!("plugin {id}: its part for Claude can't be laid out: {e:#}");
-        }
+        let _ = agent::lay_out(id);
     } else {
         agent::remove(id);
     }
@@ -1308,7 +1319,7 @@ pub fn snapshot() -> Value {
         .values()
         .map(|p| {
             let m = read_manifest(&plugin_dir(p)).ok();
-            let m_part = m.as_ref().and_then(|m| m.part_problems.first().cloned());
+            let m_part = m.as_ref().and_then(|m| m.part_problems.first().cloned()).or_else(|| agent::withheld(&p.id));
             let m_prefix = m.as_ref().and_then(agent::prefix_of);
             let summary = m.as_ref().map(|m| m.summary.clone()).unwrap_or_default();
             let client = m.as_ref().and_then(|m| m.client.clone());

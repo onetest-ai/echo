@@ -256,8 +256,9 @@ pub(crate) fn runtime_skill_dirs(id: &str, package: &[String]) -> Vec<(String, P
 /// package skills (`copy_package_skills`) stay beside them; a name is never both.
 pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     let list = skills.as_array().ok_or_else(|| anyhow!("skills are a list"))?;
-    // Named with its prefix in Echo's sessions: none, no skills (taking them away needs none).
-    let prefix = if list.is_empty() { String::new() } else { crate::plugins::agent::installed_prefix(id)? };
+    // Named with its prefix in Echo's sessions. Without one (a plugin from before prefixes) its session copy still
+    // updates — routines and Yolo use it —; the folder session just doesn't get them (`agent::lay_out` says why).
+    let prefix = if list.is_empty() { None } else { crate::plugins::agent::installed_prefix(id).ok() };
     if list.len() > crate::plugins::MAX_SKILLS {
         bail!("at most {} skills", crate::plugins::MAX_SKILLS);
     }
@@ -269,7 +270,9 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
         if !crate::plugins::valid_skill_name(name) {
             bail!("a skill's name is a few lowercase words with dashes");
         }
-        crate::plugins::agent::check_skill_length(&prefix, name).map_err(|e| anyhow!("skill {name}: {e}"))?;
+        if let Some(p) = &prefix {
+            crate::plugins::agent::check_skill_length(p, name).map_err(|e| anyhow!("skill {name}: {e}"))?;
+        }
         if description.is_empty() || description.chars().count() > 1024 || description.contains(['\n', '\r']) {
             bail!("skill {name}: a description of one line, up to 1024 characters");
         }
@@ -291,8 +294,8 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     }
     // No name another enabled plugin lays out (`<prefix>-<name>`).
     let all: Vec<String> = package.iter().cloned().chain(files.iter().map(|(n, _)| n.clone())).collect();
-    if !files.is_empty() {
-        crate::plugins::agent::clash(id, &prefix, &all)?;
+    if let Some(p) = prefix.as_ref().filter(|_| !files.is_empty()) {
+        crate::plugins::agent::clash(id, p, &all)?;
     }
     let counted = package.len().saturating_sub(agent_skill_count(&dir));
     if files.len() + counted > crate::plugins::MAX_SKILLS {
@@ -318,9 +321,8 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
     }
     drop(_lock);
     // The folder session finds them in the plugin's folder in the data folder too.
-    if let Err(e) = crate::plugins::agent::lay_out(id) {
-        eprintln!("plugin {id}: its part for Claude can't be laid out: {e:#}");
-    }
+    // Its own reason, if it isn't, said once by `lay_out` and kept for Settings.
+    let _ = crate::plugins::agent::lay_out(id);
     Ok(())
 }
 
