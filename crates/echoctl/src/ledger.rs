@@ -56,6 +56,11 @@ const MAX_LINKS: usize = 10;
 const MAX_DESC: usize = 4000;
 const MAX_AGENT_DESC: usize = 1200;
 const AGENT_OPS: [&str; 10] = ["create", "status", "revise", "ac_met", "link", "waiting", "answer", "suggest_move", "suggest_merge", "note"];
+/// An event made by hand: the user's (`human`), or a routine's or Yolo's run (`run`), applied as the user's would be.
+pub(crate) fn by_hand(e: &Value) -> bool {
+    e["by"] == "human" || e["by"] == "run"
+}
+
 const HUMAN_OPS: [&str; 13] = ["edit", "ac_add", "ac_set", "link", "unlink", "merge", "delete", "accept", "reject", "undo", "create", "xref", "unxref"];
 /// A link to an item in another thread (#20): one piece of work raised in both (`same`), or this one waits
 /// on that one (`depends_on`; the other side records `blocks`).
@@ -717,14 +722,14 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
     for e in evs {
         let evid = e["evidence"].as_str();
         if let Some(c) = evid {
-            if pos.get(c).map(|p| *p as i64 > lim).unwrap_or(e["by"] != "human") {
+            if pos.get(c).map(|p| *p as i64 > lim).unwrap_or(!by_hand(e)) {
                 continue;
             }
         }
         if e["mid"].as_str().is_some_and(|m| undone.contains(m)) {
             continue;
         }
-        let human = e["by"] == "human";
+        let human = by_hand(e);
         match e["type"].as_str().unwrap_or("") {
             "create" => {
                 let mut x = node_of(e);

@@ -177,6 +177,13 @@ pub enum ProjectCmd {
     },
     /// Move a project to the trash (its calls are untouched)
     Delete { id: String },
+    /// A thread's work as `ledger <id> tree` gives it, or one edit of it as `ledger <id> edit <json>` makes it (the shape
+    /// Echo's sessions may run without a prompt)
+    Work {
+        id: String,
+        /// One edit (JSON); none: the tree
+        json: Option<String>,
+    },
     /// The project's work ledger: stories, tasks, decisions, risks, questions from its calls
     Ledger {
         id: String,
@@ -339,6 +346,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     use projects::{Member, Rule, Stage, Term};
     if let ProjectCmd::Ledger { id, cmd } = cmd {
         return ledger_command(&id, cmd);
+    }
+    if let ProjectCmd::Work { id, json } = cmd {
+        return ledger_command(&id, json.map_or(LedgerCmd::Tree, |json| LedgerCmd::Edit { json }));
     }
     // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
     // routine (the user's own prompt) may read them.
@@ -554,7 +564,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                 print_json(&serde_json::json!(projects::found()?));
             }
         }
-        ProjectCmd::Ledger { .. } => unreachable!(),
+        ProjectCmd::Ledger { .. } | ProjectCmd::Work { .. } => unreachable!(),
         ProjectCmd::Delete { id } => {
             projects::delete(&id)?;
             println!("{id} moved to the trash");
@@ -785,6 +795,12 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Status => print_json(&projectsync::state(id)),
         LedgerCmd::Edit { json } => {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+            // A routine or Yolo preparing and asking (the user's choice off) changes items, never takes one away or
+            // moves it to another thread.
+            let op = body["op"].as_str().unwrap_or("");
+            if notes::run_asks() && matches!(op, "delete" | "merge" | "xref" | "unxref") {
+                anyhow::bail!("a run that prepares and asks doesn't {op} an item: say what the user should do");
+            }
             print_json(&ledger::human_event(id, &body)?)
         }
     }
@@ -831,13 +847,22 @@ mod tests {
         let edit = || super::ledger_command(&pilot.id, super::LedgerCmd::Edit { json: r#"{"op":"create","kind":"epic","title":"Pilot work"}"#.into() });
         let show = || super::project_command(super::ProjectCmd::Show { id: pilot.id.clone() });
         let create = || super::project_command(super::ProjectCmd::Create { name: "Another".into(), client: None, stage: None });
-        // Prepares and asks: reads and a thread's work, not the rest.
+        // Prepares and asks: reads and a thread's work, not the rest — and of the work never a removal or a move away.
         std::env::set_var(crate::notes::RUN_SESSION, "asks");
         assert!(show().is_ok(), "it reads");
         edit().unwrap();
+        let tree = crate::ledger::tree(&pilot.id).unwrap();
+        let epic = tree["nodes"].as_object().unwrap().keys().next_back().unwrap().clone();
+        let delete = || super::ledger_command(&pilot.id, super::LedgerCmd::Edit { json: serde_json::json!({"op": "delete", "node": epic}).to_string() });
+        assert!(delete().unwrap_err().to_string().contains("doesn't delete an item"));
         assert!(create().is_err(), "a new thread isn't a thread's work");
+        // Its edits are Echo's run's, not the user's.
+        let evs = std::fs::read_to_string(crate::paths::home().join("projects").join(&pilot.id).join("ledger/events.jsonl")).unwrap();
+        assert!(evs.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).any(|e| e["by"] == "run"), "{evs}");
+        assert!(!evs.contains("\"by\":\"human\""), "{evs}");
         // Acts on its own: as the folder session.
         std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        delete().unwrap();
         create().unwrap();
         // Yolo, acting on its own, keeps its own task's limit.
         std::env::set_var(super::guard::RUN_TASK, format!("{}/T001", pilot.id));

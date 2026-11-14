@@ -134,8 +134,9 @@ fn preamble(acts: Option<bool>, cli: &str) -> String {
         ),
         Some(false) => format!(
             "Echo's CLI is {cli}; what was said and who people are: the `echo` MCP tools. You may read Echo's data and edit its own \
-             data (a thread's work: `project ledger <thread> edit`) without asking. Nothing is sent: leave a mail as a draft with \
-             `compose`. Anything else that would need the user's yes can't be done here: say what you didn't do and why."
+             data (a thread's work: `project work <thread> '<edit JSON>'`, its tree: `project work <thread>`) without asking; a \
+             plugin's commands only read, and only its scripts marked readonly run. Nothing is sent: leave a mail as a draft with \
+             `compose --to … --subject … --body '…'`. Anything else that would need the user's yes can't be done here: say what you didn't do and why."
         ),
     };
     format!(
@@ -205,10 +206,15 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         // A routine or Yolo: the folder session's arguments, but for `-p` and its prompt.
         Some(acts) => {
             let f = crate::folder_args::run_settings();
-            a.extend(crate::folder_args::session(profile, &exe, &f, "routine", model.as_deref(), true)?);
+            a.extend(crate::folder_args::session(profile, &exe, &f, "routine", model.as_deref(), crate::folder_args::Who::Run { acts })?);
             let mut env = crate::folder_args::env(&profile.id);
             env.push((notes::RUN_SESSION, if acts { "acts" } else { "asks" }.into()));
             env.push((notes::RUN_ACTIONS, actions.display().to_string()));
+            // Preparing and asking: a plugin's commands it runs read and change nothing, and only its readonly scripts
+            // run (`jshost::read_only_here`, `echoctl plugin script`).
+            if !acts {
+                env.push((guard::RUN_MODE, "routine".into()));
+            }
             (Some(f), env)
         }
         // No tools at all: what it reads is in its prompt.
@@ -242,7 +248,10 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     }
     // What it changed and sent with Echo's CLI, in its log too.
     for x in notes::run_actions(&actions) {
-        let _ = writeln!(log, "{}  {}: echoctl {}", x["at"].as_str().unwrap_or(""), x["kind"].as_str().unwrap_or(""), x["command"].as_str().unwrap_or(""));
+        let line: String = format!("{}: echoctl {}{}", x["kind"].as_str().unwrap_or(""), x["command"].as_str().unwrap_or(""), x["outcome"].as_str().map(|o| format!(" → {o}")).unwrap_or_default());
+        // One line each: its words as they are, line breaks and control characters shown, not obeyed.
+        let line: String = line.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+        let _ = writeln!(log, "{}  {line}", x["at"].as_str().unwrap_or(""));
     }
     let (answer, result) = out?;
     let _ = fs::write(spec.run_dir.join("answer.md"), &answer);
@@ -304,12 +313,12 @@ mod tests {
         assert!(!routine.contains(&"--tools".to_string()) && !routine.contains(&"--dangerously-skip-permissions".to_string()), "{routine:?}");
         // Echo's reads and its own data's edits without a prompt; never a send.
         let cli = crate::notes::plugin_dir().map(|d| crate::notes::run_clis(&d)[0].clone()).unwrap();
-        for rule in [format!("Bash({cli} status:*)"), format!("Bash({cli} project show:*)"), format!("Bash({cli} project ledger * edit *)"), format!("Bash({cli} compose:*)")] {
+        for rule in [format!("Bash({cli} status:*)"), format!("Bash({cli} project show:*)"), format!("Bash({cli} project work:*)"), format!("Bash({cli} compose:*)")] {
             assert!(routine.contains(&rule), "{rule}: {routine:?}");
         }
         assert!(!routine.iter().any(|a| a.contains(" m365")), "no send without a prompt");
         let env = file("p.env");
-        assert!(env.contains("ECHOCTL_TERMINAL=1") && env.contains("ECHOCTL_SESSION_PROFILE=work") && env.contains("ECHOCTL_RUN_SESSION=asks") && !env.contains("ECHOCTL_RUN_MODE="), "{env}");
+        assert!(env.contains("ECHOCTL_TERMINAL=1") && env.contains("ECHOCTL_SESSION_PROFILE=work") && env.contains("ECHOCTL_RUN_SESSION=asks") && env.contains("ECHOCTL_RUN_MODE=routine"), "preparing and asking: a plugin's commands only read: {env}");
         let settings: Value = serde_json::from_str(&file("p.settings")).unwrap();
         let commands = |s: &Value, k: &str| s["hooks"][k].as_array().into_iter().flatten().flat_map(|h| h["hooks"].as_array().unwrap().iter().map(|c| c["command"].as_str().unwrap().to_string())).collect::<Vec<_>>();
         assert!(commands(&settings, "SessionStart").iter().any(|c| c.ends_with(" core --hook")) && commands(&settings, "SessionStart").iter().any(|c| c.ends_with(" view-hook")));
@@ -331,7 +340,7 @@ mod tests {
         set_acts(true);
         let yolo = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Skip, run_dir: root.join("yolo/1"), timeout: Duration::from_secs(60), session: true, task: None, thread: None };
         let _ = run(&yolo);
-        assert!(lines("p.args").contains(&"--dangerously-skip-permissions".to_string()) && file("p.env").contains("ECHOCTL_RUN_SESSION=acts"));
+        assert!(lines("p.args").contains(&"--dangerously-skip-permissions".to_string()) && file("p.env").contains("ECHOCTL_RUN_SESSION=acts") && !file("p.env").contains("ECHOCTL_RUN_MODE="));
         set_acts(false);
         let _ = run(&yolo);
         assert!(!lines("p.args").contains(&"--dangerously-skip-permissions".to_string()));

@@ -158,7 +158,20 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Script { id, skill, script, args } => {
             // In a read-only routine only a script marked readonly runs.
             let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
-            let v = crate::plugins::scripts::run(&id, &skill, &script, &args, None, read_only)?;
+            let argv: Vec<String> = std::env::args().skip(1).collect();
+            let v = match crate::plugins::scripts::run(&id, &skill, &script, &args, None, read_only) {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::notes::note_action(&argv, Some(&format!("failed: {e:#}")));
+                    return Err(e);
+                }
+            };
+            // It exits below with the script's own status: noted now, inside a routine's or Yolo's run.
+            crate::notes::note_action(&argv, Some(&match v["status"].as_i64() {
+                Some(0) => "exit 0".to_string(),
+                Some(s) => format!("exit {s}"),
+                None => "stopped".to_string(),
+            }));
             use std::io::Write;
             let _ = std::io::stdout().write_all(v["stdout"].as_str().unwrap_or("").as_bytes());
             let _ = std::io::stderr().write_all(v["stderr"].as_str().unwrap_or("").as_bytes());

@@ -9,7 +9,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
 use crate::config::Config;
@@ -77,8 +77,8 @@ pub fn mailto(to: &[String], cc: &[String], subject: &str, body: &str) -> String
 
 /// `echoctl compose`: the draft where the user wants it (`chosen`); a Microsoft 365 draft that can't be made opens in
 /// the default mail app instead, and says why. Never sends. Returns what was done (`{draft, where, url?, note?}`).
-pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path, ai: Option<&str>) -> Result<Value> {
-    let mut body = fs::read_to_string(body_file).with_context(|| format!("reading {}", body_file.display()))?;
+pub fn compose(to: &[String], cc: &[String], subject: &str, body: &str, ai: Option<&str>) -> Result<Value> {
+    let mut body = body.to_string();
     // A model wrote it: the draft says so, wherever it goes (`deliver::ai_notice`).
     if let Some(m) = ai.map(str::trim).filter(|m| !m.is_empty()) {
         body = format!("{}\n\n{}", body.trim_end(), crate::deliver::ai_notice(m));
@@ -228,20 +228,19 @@ mod tests {
         // The default mail app, as test data catches it; the run's outcome learns where the draft is.
         Config { drafts: Some("mail-app".into()), ..Default::default() }.save().unwrap();
         let (log, run) = (root.join("mail-drafts.log"), root.join("drafts.jsonl"));
-        let body = root.join("body.txt");
-        fs::write(&body, "Hi Kim,\nwhich slots work?").unwrap();
+        let body = "Hi Kim,\nwhich slots work?";
         let _vars = Vars::set(&[("ECHOCTL_TEST_MAIL_DRAFTS", &log), (RUN_DRAFTS, &run)]);
-        let v = compose(&["kim@acme.example".into()], &[], "Training slots?", &body, Some("sonnet")).unwrap();
+        let v = compose(&["kim@acme.example".into()], &[], "Training slots?", body, Some("sonnet")).unwrap();
         assert!(fs::read_to_string(&log).unwrap().contains("Written%20by%20AI%20%28Claude%2C%20sonnet%29"), "a model's draft says so");
         assert_eq!((v["where"].as_str(), v["draft"].as_bool()), (Some("mail-app"), Some(true)));
         assert!(fs::read_to_string(&log).unwrap().starts_with("mailto:kim@acme.example?subject=Training%20slots%3F"));
         // A chosen app gets the same link.
         Config { drafts: Some("app:Spark".into()), ..Default::default() }.save().unwrap();
-        compose(&["kim@acme.example".into()], &[], "Again", &body, None).unwrap();
+        compose(&["kim@acme.example".into()], &[], "Again", body, None).unwrap();
         assert!(fs::read_to_string(&log).unwrap().lines().nth(1).unwrap().starts_with("[Spark] mailto:"));
         // Microsoft 365 chosen, not signed in: the mail app instead, and the outcome says why.
         Config { drafts: Some("m365".into()), ..Default::default() }.save().unwrap();
-        let v = compose(&["kim@acme.example".into()], &[], "Third", &body, None).unwrap();
+        let v = compose(&["kim@acme.example".into()], &[], "Third", body, None).unwrap();
         assert_eq!(v["where"], "mail-app");
         assert!(v["note"].as_str().unwrap().contains("not in Microsoft 365 Drafts"), "{v}");
         let noted = of_run(&run, |_| None);

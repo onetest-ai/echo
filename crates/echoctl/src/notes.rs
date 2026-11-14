@@ -147,6 +147,16 @@ pub fn run_acts() -> bool {
     headless() && std::env::var(RUN_SESSION).is_ok_and(|v| v == "acts")
 }
 
+/// Inside a routine's or Yolo's run, as the folder session (whatever the user's choice).
+pub fn session_run() -> bool {
+    headless() && std::env::var_os(RUN_SESSION).is_some()
+}
+
+/// Inside a routine's or Yolo's run that prepares and asks (the user's choice off).
+pub fn run_asks() -> bool {
+    session_run() && !run_acts()
+}
+
 /// Inside a routine's run (no Yolo task or thread of its own), as the folder session.
 pub fn routine_session() -> bool {
     headless() && std::env::var_os(RUN_SESSION).is_some() && std::env::var_os(crate::guard::RUN_TASK).is_none() && std::env::var_os(crate::guard::RUN_THREAD).is_none()
@@ -172,6 +182,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
     match first {
         "m365" => (argv.iter().any(|a| a == "--yes") && argv.iter().any(|a| matches!(a.as_str(), "send" | "reply" | "post" | "upload"))).then_some("send"),
         "compose" => Some("draft"),
+        "deliver" if second == "send" => Some("send"),
         "calendar" | "agenda" | "needs" | "widget" | "today" if matches!(second, "" | "events" | "list" | "show") => None,
         "prep" if !argv.iter().any(|a| a == "--write") => None,
         "project" if matches!(second, "list" | "show" | "of" | "tasks" | "people" | "found") => None,
@@ -183,12 +194,21 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
     }
 }
 
-/// Note what command `argv` changed or sent, inside an unattended run that keeps such a list (`RUN_ACTIONS`).
-pub fn note_action(argv: &[String]) {
-    let Some(f) = std::env::var_os(RUN_ACTIONS).filter(|_| headless()) else { return };
+/// Note what command `argv` changed or sent, inside an unattended run that keeps such a list (`RUN_ACTIONS`), with its
+/// `outcome` when it wasn't plain success (it failed, a script's exit status).
+pub fn note_action(argv: &[String], outcome: Option<&str>) {
     let Some(kind) = action_kind(argv) else { return };
-    let line: String = argv.join(" ").chars().take(400).collect();
-    let v = serde_json::json!({"at": chrono::Local::now().to_rfc3339(), "kind": kind, "command": line});
+    note(kind, &argv.join(" "), outcome);
+}
+
+/// Note one change or send (`kind`: `change`, `send`, `draft`) a run made, by what made it (`what`).
+pub fn note(kind: &str, what: &str, outcome: Option<&str>) {
+    let Some(f) = std::env::var_os(RUN_ACTIONS).filter(|_| headless()) else { return };
+    let line: String = what.chars().take(400).collect();
+    let mut v = serde_json::json!({"at": chrono::Local::now().to_rfc3339(), "kind": kind, "command": line});
+    if let Some(o) = outcome {
+        v["outcome"] = serde_json::json!(o.chars().take(300).collect::<String>());
+    }
     if let Ok(mut out) = fs::OpenOptions::new().create(true).append(true).open(f) {
         let _ = writeln!(out, "{v}");
     }
@@ -1480,6 +1500,8 @@ mod tests {
         assert_eq!(k("compose --to kim@acme.example --subject Slots --body-file m.md"), Some("draft"));
         assert_eq!(k("project ledger pilot edit {}"), Some("change"));
         assert_eq!(k("project create Another"), Some("change"));
+        assert_eq!(k("deliver send --title x"), Some("send"));
+        assert_eq!(k("plugin script kit staffing scripts/read.sh -- ACME-1"), Some("change"));
         for read in ["project ledger pilot tree", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
             assert_eq!(k(read), None, "{read}");
         }
@@ -1487,12 +1509,14 @@ mod tests {
         let f = root.join("actions.jsonl");
         std::env::set_var(HEADLESS, "1");
         std::env::set_var(RUN_ACTIONS, &f);
-        note_action(&["project".into(), "ledger".into(), "pilot".into(), "edit".into(), "{}".into()]);
-        note_action(&["status".into()]);
+        note_action(&["project".into(), "ledger".into(), "pilot".into(), "edit".into(), "{}".into()], None);
+        note_action(&["status".into()], None);
+        note_action(&["project".into(), "create".into(), "X".into()], Some("failed: refused"));
         std::env::remove_var(RUN_ACTIONS);
         std::env::remove_var(HEADLESS);
         let got = run_actions(&f);
-        assert_eq!(got.len(), 1);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1]["outcome"], "failed: refused", "a change that failed is noted, with how");
         assert_eq!((got[0]["kind"].as_str(), got[0]["command"].as_str()), (Some("change"), Some("project ledger pilot edit {}")));
     }
 

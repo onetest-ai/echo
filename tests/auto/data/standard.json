@@ -5448,5 +5448,31 @@
         "more": 2
       }
     }
+  },
+  "yoloAsks": {
+    "script": "yolo-asks.json",
+    "thread": "globex-pilot",
+    "task": "T009",
+    "ask": "ask-asks-1",
+    "say": "Drafted the welcome mail to Kim Park (virtual model); sending it was refused. Left for you: send the draft.",
+    "used": "prepares and asks",
+    "toolResults": [
+      false,
+      true,
+      false,
+      false
+    ],
+    "draft": "mailto:kim@globex.example?subject=Welcome%20to%20the%20Globex%20pilot",
+    "actions": [
+      [
+        "draft",
+        "compose --to kim@globex.example"
+      ],
+      [
+        "change",
+        "project work globex-pilot"
+      ]
+    ],
+    "state": "done"
   }
 }

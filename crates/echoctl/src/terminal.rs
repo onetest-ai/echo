@@ -546,7 +546,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     }
     let exe = std::env::current_exe()?;
     let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten();
-    args.extend(crate::folder_args::session(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder", model.as_deref(), false)?);
+    args.extend(crate::folder_args::session(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder", model.as_deref(), crate::folder_args::Who::Folder)?);
     let mut env = crate::folder_args::env(&p.id);
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
@@ -741,7 +741,7 @@ mod tests {
         let agreed = crate::plugins::review("kit", Some(&name)).unwrap().uses;
         crate::plugins::install("kit", Some(&name), &agreed).unwrap();
         let exe = Path::new("/Apps/Echo.app/echoctl");
-        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), false).unwrap();
+        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), crate::folder_args::Who::Folder).unwrap();
         // No plugin's folder as a Claude Code plugin: its part waits in the data folder for Claude to Read it.
         let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
         let session = paths::config_dir().join("plugins/session");

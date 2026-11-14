@@ -14,6 +14,13 @@ const data = useData(test, { set: 'standard', ai: 'virtual' })
 /** The lines of a run's log. */
 const lines = (text) => text.split('\n').filter(Boolean)
 
+/** "Claude acts on its own" on or off, through the served window's own IPC (the page loaded first). */
+async function setActs(page, on) {
+  await page.goto(data.base + '/')
+  await page.evaluate((v) => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key: 'folder_skip_permissions', value: v }) }), on)
+  await page.waitForLoadState('networkidle')
+}
+
 scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", () => {
   test("1 · prep --write sends the meeting's facts in one request and writes the prep with the model's In short and its picks, shown in the window", covers('prep/TC-015', 'F-PREP-05'), async ({ page }) => {
     const { prep: p, virtualModel: vm } = data.set
@@ -78,9 +85,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     data.model.use(y.script)
     data.model.clear()
     // Yolo runs as the folder session (#590): this script needs its tools without prompts, so the user's choice is on.
-    await page.goto(data.base + '/')
-    await page.evaluate(() => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key: 'folder_skip_permissions', value: true }) }))
-    await page.waitForLoadState('networkidle')
+    await setActs(page, true)
 
     // 1: what the data folder and this checkout hold before; T005 open.
     const before = data.files()
@@ -173,10 +178,13 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await expect(work.status).toHaveText(fill(w.status, { state: y.states.at(-1) }))
     await expect(work.value(w.owner)).toHaveText(y.task.owner)
     await expect(work.description).toBeVisible()
+    // The run's two state changes: Echo's run's, not yours, each with its undo.
     for (const k of [0, 1]) {
-      await expect(work.history.nth(k)).toContainText(fill(w.youSet, { field: w.fields.state }))
+      await expect(work.history.nth(k)).toContainText(fill(w.runSet, { field: w.fields.state }))
       await expect(work.history.nth(k).getByRole('button', { name: w.undo, exact: true })).toBeVisible()
     }
+    // The choice back off, as the data had it.
+    await setActs(page, false)
   })
 
   test("3 · Sync now reads the thread's new call into its work under the guard, verifies it in a fresh run, and keeps the fields the user set", covers('work/TC-028', 'F-THR-20', 'F-WORK-16', 'F-CC-04'), async ({ page }) => {
@@ -306,5 +314,36 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await expect(work.history.nth(0)).toContainText(s.reassign.effect)
     await expect(work.history.nth(0)).toContainText(w.keptYours)
     await expect(work.history.nth(1)).toContainText(fill(w.youSet, { field: w.fields.internal_owner }))
+  })
+
+  test('4 · With the choice off, Yolo prepares and asks: its send refused, its mail drafted, its task closed as Echo\'s run', covers('tasks/TC-031', 'F-PLUG-35', 'F-M365-08'), async ({ page }) => {
+    const a = data.set.yoloAsks
+    const c = data.text.claude
+    data.model.use(a.script)
+    data.model.clear()
+    await setActs(page, false)
+    const drafted = data.exists(data.dir, c.drafts) ? lines(data.read(data.dir, c.drafts)).length : 0
+    // Yolo on T009, as the page sends it.
+    await page.evaluate((x) => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'task_yolo', ask: x.ask, project: x.thread, node: x.task, skill: '', text: '' }) }), a)
+    const ask = () => (data.exists(data.home, c.asks) ? data.json(data.home, c.asks) : []).find((x) => x.id === a.ask)
+    await expect.poll(() => ask()?.state, { timeout: 60_000, intervals: [1_000] }).toBe('done')
+    expect(ask().say).toBe(a.say)
+    // The send never reached Echo (Claude Code refused it: nothing allowed it without a prompt); the draft did.
+    expect(data.model.toolResults(0).map(Boolean)).toEqual(a.toolResults)
+    const drafts = lines(data.read(data.dir, c.drafts))
+    expect(drafts).toHaveLength(drafted + 1)
+    expect(drafts.at(-1).startsWith(a.draft)).toBe(true)
+    // Its record: what it asked, how it ran; what it changed and drafted, no send.
+    const dir = path.join(data.env.ECHOCTL_CONFIG_DIR, c.yoloFolder, a.ask)
+    expect(data.json(dir, 'permissions.json').used).toContain(a.used)
+    const actions = lines(data.read(dir, 'actions.jsonl')).map((l) => JSON.parse(l))
+    expect(actions.map((x) => x.kind)).toEqual(a.actions.map(([k]) => k))
+    a.actions.forEach(([, cmd], i) => expect(actions[i].command.startsWith(cmd)).toBe(true))
+    expect(actions.some((x) => x.kind === 'send')).toBe(false)
+    expect(ask().changes.map((x) => x.kind)).toEqual(a.actions.map(([k]) => k))
+    // The task closed, by Echo's run.
+    expect(data.ledger(a.thread, 'tree').nodes[a.task].state).toBe(a.state)
+    const last = lines(data.read(data.home, 'projects', a.thread, data.text.work.ledger)).map((l) => JSON.parse(l)).at(-1)
+    expect(last).toMatchObject({ by: 'run', op: 'edit', node: a.task, set: { state: a.state } })
   })
 })

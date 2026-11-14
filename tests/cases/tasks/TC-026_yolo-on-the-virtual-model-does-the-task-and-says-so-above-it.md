@@ -45,12 +45,15 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | 8 | Run the List with `<name>` = `after`, `diff <dir>/list-before.txt <dir>/list-after.txt`, and the events of `globex-pilot` added after step 1 | Inside `<dir>` only: `config/yolo/ask-…/` (`prompt.md`, `log.txt`, `answer.md`, `drafts.jsonl`: the run's one draft, `permissions.json`, `actions.jsonl`: what it changed and sent with Echo's CLI), `config/my-skills/…`, `config/minutes-run/echo-mcp-….json`, `config/claude/ollama/…` (the profile's Claude Code folder) and `config/claude/*.lock`, `home/.echo/task-asks.json`(+ lock), the window's state files (`config/window-view.json`, `config/window-view-sent.json` (the view hook's start, as the folder session's), `home/.echo/attention.json`, `home/recall/…`), `home/training-slots-mail.md` (the run's mail), `mail-drafts.log`, `model/model-log.jsonl`, `home/projects/globex-pilot/ledger/events.jsonl`; two new ledger events, both `"op":"edit","node":"T005"`, `set` `{"state":"in_progress"}` then `{"state":"done"}`; no other thread's files changed. No file written outside `<dir>` (the log's paths are all in it) |
 | 9 | Run `git status --short` and compare with `<dir>/list-git.txt` | The same lines (the run changed nothing in this checkout) |
 | 10 | Click the bar's "×" (`[data-today-askoff]`) | The bar is gone; My work · this week no longer lists "Book the training slots" (it is done) |
-| 11 | Navigate to `{{base_url}}/#project/globex-pilot/work` and click the card T005 (`[data-pj="node"][data-node="T005"]`) | Details: Status "done", Owner "Alex Chen", "No description"; History starts with two "you set state" with "undo" (the run's two state changes: see Notes), then what the data had |
+| 11 | Navigate to `{{base_url}}/#project/globex-pilot/work` and click the card T005 (`[data-pj="node"][data-node="T005"]`) | Details: Status "done", Owner "Alex Chen", "No description"; History starts with two "Echo's run set state" with "undo" (the run's two state changes, made by Echo's run, not you: see Notes), then what the data had |
 
 ## Expected Final State
 Yolo ran on the thread's (the default) profile, the virtual model; its outcome is above My work, only T005's state changed, nothing was sent; the mail is a draft.
 
+## Teardown
+- Switch "Claude acts on its own" back off (Settings → AI & minutes, or `settings_set folder_skip_permissions false` over the served window's IPC), as the data had it
+
 ## Notes
-- The run's ledger edits go through `echoctl project ledger … edit` and are recorded as the user's ("you set state" with "undo" in History).
+- The run's ledger edits go through `echoctl project ledger … edit` and are recorded as Echo's run's (`"by": "run"`; "Echo's run set state" with "undo" in History), applied as the user's would be.
 - `log.txt` ends with "Finished: ok · 1s · $…" — Claude Code's own price for its token count, though the model is local and free (as on a real local model), and a harmless `[claude-code:unrecognized_model]` line on stderr.
 - The real-model counterpart (2026-11-07, the network test server: 6 min 44 s; on this Mac's Ollama the run hit Yolo's 20-minute limit) did the same kinds of steps on its own: read the task, tried `m365 mail send` (refused), staged the mail with `compose`, had a `create` and description edits refused, closed T005; it also wrote a file in `/tmp`. Here the steps are scripted, so every refusal is checked each run.

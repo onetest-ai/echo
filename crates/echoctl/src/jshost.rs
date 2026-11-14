@@ -1445,7 +1445,10 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let to: Vec<String> = m["mail_to"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
             let (title, markdown, about, ai) = (s("title").unwrap_or_default(), s("markdown").unwrap_or_default(), s("about"), s("ai"));
             crate::deliver::ready(kind)?;
-            crate::deliver::send(kind, &crate::deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to })?;
+            let sent = crate::deliver::send(kind, &crate::deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to });
+            // Inside a routine's or Yolo's run (its plugin call): the send is the run's, noted for its outcome.
+            crate::notes::note("send", &format!("plugin {id}: deliver by {kind} “{}”", title.chars().take(120).collect::<String>()), sent.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+            sent?;
             Ok(Value::Null)
         }
         o => bail!("Echo has no service “{o}”"),
@@ -2619,6 +2622,43 @@ mod tests {
         plugins::remove("vaults", true).unwrap();
         sync();
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_routine_preparing_and_asking_runs_no_plugin_command_that_sends_and_one_acting_on_its_own_does() {
+        let (_env, root) = paths::testenv::folders("jshost-run-sends");
+        let mk = root.join("market");
+        let d = mk.join("plugins/notifier");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "notifier", "name": "Notifier", "version": "0.1.0", "main": "main.js", "uses": {"deliver": {"to": ["teams"]}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('send', async () => { try { await ctx.deliver.send('teams', { title: 'Hi', markdown: 'Hi' }); return { ok: true } } catch (e) { return { error: String(e.message || e) } } }) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "notifier", "source": "./plugins/notifier"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("notifier", Some(&name)).unwrap().uses;
+        plugins::install("notifier", Some(&name), &sheet).unwrap();
+        sync();
+        let send = || {
+            (0..50)
+                .find_map(|_| match call("notifier", "send", &json!({})) {
+                    Ok(v) => Some(v["error"].as_str().unwrap_or("").to_string()),
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        // Preparing and asking (Echo set the read-only marker for its run): refused before anything is sent.
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = send();
+        std::env::remove_var(crate::guard::RUN_MODE);
+        assert!(refused.contains("isn't allowed in a read-only routine"), "{refused}");
+        // Acting on its own (no marker): the send goes on — here it stops only for want of a Teams sign-in.
+        let tried = send();
+        assert!(!tried.contains("read-only routine"), "{tried}");
+        plugins::remove("notifier", true).unwrap();
+        sync();
     }
 
     #[test]

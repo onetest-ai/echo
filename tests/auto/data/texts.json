@@ -139,7 +139,8 @@
       "toReview": "--warn"
     },
     "statusWord": "● {word}",
-    "callsToRead": "\\d+ calls? to read"
+    "callsToRead": "\\d+ calls? to read",
+    "runSet": "Echo's run set {field}"
   },
   "prep": {
     "inShort": "In short",

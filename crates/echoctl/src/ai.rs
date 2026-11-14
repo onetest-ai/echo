@@ -501,6 +501,10 @@ const PARENT_SESSION: &[&str] = &[
     "CLAUDE_PID",
     "CLAUDE_EFFORT",
     "AI_AGENT",
+    // A routine's or Yolo's own marks: a run started from inside one is no such run unless its caller says so
+    // (`claudejob` sets them on purpose).
+    crate::notes::RUN_SESSION,
+    crate::notes::RUN_ACTIONS,
 ];
 
 /// The command for Claude Code with profile `p` (built, not started; tested).
@@ -1267,6 +1271,21 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn a_run_started_inside_a_routine_is_no_routine_unless_its_caller_says_so() {
+        let (_env, root) = crate::paths::testenv::folders("ai-nested-run");
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        std::env::set_var(crate::notes::RUN_ACTIONS, root.join("actions.jsonl"));
+        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let c = build_command(&p, Path::new("/bin/echo"), &["-p".into()], &root, false, false);
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        std::env::remove_var(crate::notes::RUN_ACTIONS);
+        let removed: Vec<String> = c.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        for k in [crate::notes::RUN_SESSION, crate::notes::RUN_ACTIONS] {
+            assert!(removed.iter().any(|r| r == k), "{k}: {removed:?}");
+        }
+    }
+
     #[test]
     fn the_login_shell_command_starts_claude_with_the_profiles_routing() {
         let (_env, root) = crate::paths::testenv::folders("ai-shell-command");
