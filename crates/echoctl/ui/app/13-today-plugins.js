@@ -385,7 +385,7 @@ function pluginWidgetView(id, w, size) {
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
   // Declared `fill`: as tall as its line, its body scrolling inside the card under the header (window-ui R10).
   const fill = w.height === 'fill'
-  return `<section class="td-sec pw-sec k-${esc(w.kind)}${fill ? ' pw-fills' : ''}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${fill ? `<div class="pw-fill">${body}</div>` : body}</section>`
+  return `<section class="td-sec pw-sec k-${esc(w.kind)}${fill ? ' pw-fills' : ''}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${fill ? `<div class="pw-fill" data-keep-scroll>${body}</div>` : body}</section>`
 }
 
 // A plugin widget's actions and its outside link, on Today and on a thread's or client's dashboard: an action runs its

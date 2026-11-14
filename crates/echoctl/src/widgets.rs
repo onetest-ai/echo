@@ -457,10 +457,17 @@ mod tests {
         assert_eq!(v["error"], "mix-demo didn't answer __widget:hang within 5 s");
         let v = plugin_data("mix-demo", "none", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["error"].is_null()), (Some(true), Some(false), true), "{v}");
-        // Its declared height goes with its data: Today lays a `fill` widget out as tall as its line (#523).
-        assert_eq!(v["height"], "hug");
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_plugin_widgets_data_carries_its_declared_height() {
+        // Today lays a `fill` widget out as tall as its line, like Your day (#523).
+        let (_env, _) = crate::paths::testenv::folders("widgets-plugin-height");
+        let mut wd = w("plugin:mix-demo:tall", "plugins", "Tall", "x", "table", &["M", "L"], "hug", false);
+        assert_eq!(plugin_data("mix-demo", "tall", &wd, true, &crate::today_layout::Page::Today)["height"], "hug");
         wd.height = "fill".into();
-        assert_eq!(plugin_data("mix-demo", "hang", &wd, true, &crate::today_layout::Page::Today)["height"], "fill");
+        assert_eq!(plugin_data("mix-demo", "tall", &wd, true, &crate::today_layout::Page::Today)["height"], "fill");
     }
 
     #[test]
