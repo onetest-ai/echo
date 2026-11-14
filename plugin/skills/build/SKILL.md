@@ -69,6 +69,7 @@ Ask for a `uses` line (network hosts, folders, Claude…) only when the widget n
   to say where; `echoctl today` lists what is there).
 - On a thread's or client's dashboard: the same with `--thread <thread id>` or `--client <client id>`
   (`echoctl project list`, `echoctl client list` give the ids).
+- On a dashboard of its own beside every thread's Brief (every client's Overview), e.g. "a Staffing dashboard for my clients": `echoctl dashboard add --client Staffing` (it prints its id), then the same with `--client <a client id> --board <its id>` — its layout is every client's, each showing its own
 - A setting: `echoctl today set plugin:<id>:<widget> <key> <value>` (with `--thread` / `--client` for a dashboard).
 
 Say where it is and how to change it: Edit on Today or ✎ on the dashboard; or ask you again.

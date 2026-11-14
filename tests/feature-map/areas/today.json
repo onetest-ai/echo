@@ -206,6 +206,16 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-29",
+   "feature": "Dashboards of their own beside every thread's Brief and every client's Overview (which stay the first, each page's own): + after the tabs names a new one (on every thread / client, last); its tab shows its name, 'On every client, each showing its own', its widgets edited as a dashboard's (✎), its layout shared by every page of that kind, each widget showing the page it is on; its ⋯ renames it (its link stays), moves it left or right, removes it from every page (asked first); `echoctl dashboard list / add / rename / move / remove --thread|--client` and `echoctl today --thread|--client <id> --board <id> …` do the same; one made elsewhere shows in an open window within seconds",
+   "priority": "high",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "today/TC-048"
+   ]
   }
  ]
 }

@@ -7,8 +7,14 @@
  *  tab: no dashboard, and edit mode waits there). */
 function dashPageKey() {
   if (S.view !== 'projects' || S.pj.found) return null
-  if (S.pj.client) return (S.pj.ctab || 'overview') === 'overview' ? `client:${S.pj.client}` : null
-  return S.pj.sel && (!S.pj.tab || S.pj.tab === 'brief') ? `thread:${S.pj.sel}` : null
+  // One of its own dashboards (47-boards.js): `<page>/<board>`.
+  const board = (kind, tab) => { const b = typeof boardOfTab === 'function' && boardOfTab(kind, tab); return b ? `/${b.id}` : null }
+  // A dashboard tab that isn't there (removed, an old link) shows the Brief (the Overview), as the page draws it.
+  const own = (t) => t.startsWith('b-')
+  if (S.pj.client) { const t = S.pj.ctab || 'overview', b = board('client', t); return t === 'overview' || (own(t) && !b) ? `client:${S.pj.client}` : b ? `client:${S.pj.client}${b}` : null }
+  if (!S.pj.sel) return null
+  const t = S.pj.tab || 'brief', b = board('thread', t)
+  return t === 'brief' || (own(t) && !b) ? `thread:${S.pj.sel}` : b ? `thread:${S.pj.sel}${b}` : null
 }
 
 /** The page's dashboard: its layout, the widgets it offers, its widgets' data (editing: every offered one's, previewed). */
