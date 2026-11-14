@@ -1,6 +1,6 @@
 ---
 id: TC-017
-title: The tray menu's "What's new…" opens Echo's window on Today with What's new over it, whether the window was closed or open
+title: The tray menu's "What's new…" opens Echo's window on Today with What's new over it, or shows it over the view an open window is on
 priority: low
 type: functional
 requirements: [F-LIFE-12]
@@ -24,8 +24,8 @@ tags: [lifecycle, whats-new, tray]
 |---|---|---|
 | 1 | Open the tray menu | "What's new…" stands after "Check for updates…" (or "Update to …") |
 | 2 | Click "What's new…" | Echo's window opens on Today with the dialog "What's new in Echo" over it: every version's items, newest first |
-| 3 | Click "Got it"; go to Calls; open the tray menu and click "What's new…" again | The window comes to the front on Today with the dialog |
-| 4 | Press Escape | The dialog closes; Today stays |
+| 3 | Click "Got it"; go to Calls; open the tray menu and click "What's new…" again | The window comes to the front with the dialog over Calls (the view it was on, as ⌘K) |
+| 4 | Press Escape | The dialog closes; Calls stays |
 
 ## Expected Final State
 The tray's What's new opened the window at it, closed or open; nothing else changed.

@@ -28,7 +28,7 @@ tags: [lifecycle, whats-new, palette, settings]
 | 5 | Click "Got it" | The dialog closes |
 | 6 | Navigate to `{{base_url}}/#settings/general` | The row "Echo V" (the running version) has a button "What's new" beside "Check for updates" |
 | 7 | Click "What's new" | The same dialog opens; press Escape: it closes, Settings stays |
-| 8 | Navigate to `{{base_url}}/#whats-new` (the place the tray's "What's new…" opens) | Today, with the same dialog over it; the address is `#today` |
+| 8 | Navigate to `{{base_url}}/#whats-new` (where the tray's "What's new…" opens a closed window) | Today, with the same dialog over it; the address is `#today` |
 | 9 | Press Escape, reload the page (`location.reload()`), wait 3 s | The dialog is gone and doesn't come back: the address is Today's |
 
 ## Expected Final State

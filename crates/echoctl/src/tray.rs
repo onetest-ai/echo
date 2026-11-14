@@ -192,8 +192,6 @@ fn sign_in_line(p: &crate::ai::Profile, st: Option<&crate::signin::SignInState>)
 }
 
 const UPCOMING_MAX: usize = 6;
-/// The menu's What's new: the window's own place for it (`route` in the window script shows it over Today).
-const WHATS_NEW: &str = "#whats-new";
 const RECENT_MAX: usize = 5;
 
 fn load_model(health: &[(String, String, Option<String>)]) -> Model {
@@ -375,7 +373,7 @@ enum Action {
     Update,
     EditProfile,
     AddNote,
-    /// Open the Echo window (at a call, by folder name; an echo:// link; or a place of its own, `#whats-new`).
+    /// Open the Echo window (at a call, by folder name; an echo:// link; or with What's new, `window::WHATS_NEW`).
     OpenWindow(Option<String>),
     CalendarLogin,
     PhotosLogin,
@@ -625,7 +623,7 @@ fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &m
         Some(w) => {
             match call {
                 Some(l) if l.starts_with("echo://") => w.open_link(l),
-                Some(r) if r.starts_with('#') => w.go(r),
+                Some(crate::window::WHATS_NEW) => w.whats_new(),
                 Some(c) => w.show_call(c),
                 None => {}
             }
@@ -983,8 +981,10 @@ mod tests {
 
     #[test]
     fn the_menus_whats_new_opens_a_place_the_window_routes() {
-        assert!(WHATS_NEW.starts_with('#'), "a place of the window's own, never taken for a call's folder");
-        let routes = include_str!("../ui/app/08-data.js");
-        assert!(routes.contains(&format!("h === '{}'", &WHATS_NEW[1..])), "the window's route() opens {WHATS_NEW}");
+        let w = crate::window::WHATS_NEW;
+        assert!(w.starts_with('#'), "a place of the window's own, never taken for a call's folder");
+        let script = format!("{}{}", include_str!("../ui/app/08-data.js"), include_str!("../ui/app/99-refresh.js"));
+        assert!(script.contains(&format!("h === '{}'", &w[1..])), "a new window's route() opens {w}");
+        assert!(script.contains("whatsNew()"), "an open window's page has window.echo.whatsNew");
     }
 }

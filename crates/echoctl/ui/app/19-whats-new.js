@@ -51,7 +51,7 @@ async function whatsNewOpen() {
 }
 
 /** The keyboard goes into the dialog (it is modal): to Got it, once it is drawn. */
-const whatsNewFocus = () => setTimeout(() => { const b = document.querySelector('.wn .btn.primary'); if (b) b.focus() })
+const whatsNewFocus = () => setTimeout(() => { const b = document.querySelector('.wn .td-dialog-a [data-wn-close]'); if (b) b.focus() })
 
 /** Show me: closes it and opens the item's place. */
 function whatsNewGo(open) {

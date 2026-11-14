@@ -315,7 +315,7 @@ impl Ui {
             Some(v) => self.item(&format!("Update to {v}…"), true, Some(Action::Update)),
             None => self.item("Check for updates…", true, Some(Action::CheckUpdates)),
         };
-        let news = self.item("What's new…", true, Some(Action::OpenWindow(Some(WHATS_NEW.into()))));
+        let news = self.item("What's new…", true, Some(Action::OpenWindow(Some(crate::window::WHATS_NEW.into()))));
         let _ = menu.append_items(&[&up, &news, &sep()]);
         // Quit: stops the watcher (a recording in progress is finished and saved first).
         self.quit = self.item("Quit Echo", true, Some(Action::Quit));

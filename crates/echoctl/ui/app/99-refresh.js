@@ -103,6 +103,8 @@ window.echo = {
     else render()
   },
   openCall(name) { go(`call/${name}/minutes`) },
+  /** The tray's What's new, in an open window: over the view it is on, as ⌘K opens it. */
+  whatsNew() { return whatsNewOpen() },
   /** Windows, Echo's own title bar: the window was maximised or restored. */
   maximized(on) { if (S.maximized !== on) { S.maximized = on; render() } },
   /** Windows: Echo's own title bar as saved (after a load, or a switch whose save failed: the switch goes back). */
