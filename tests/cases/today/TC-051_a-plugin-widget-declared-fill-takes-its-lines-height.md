@@ -29,12 +29,13 @@ tags: [today, widgets, plugins, layout]
 | 3 | Scroll with the wheel over the table's rows to their end | The rows scroll inside the card to "Row 60"; the header "LONG TABLE 60" and the column names NAME and COUNT stay at the card's top; the page itself doesn't move |
 | 4 | Resize the browser to 1440 × 1100; reload | The card grows with the window: its bottom again about 24 px above the status bar |
 | 5 | Back to 1440 × 900. `target/debug/echoctl today add plugin:widget-demo:open --size S --after plugin:fill-demo:rows`; `target/debug/echoctl today add plugin:widget-demo:sprint --size M`; reload | Long table (narrowed to two columns) and "OPEN TICKETS" (one column) on one line, both cards ending at the same height; "SPRINT" under them, as tall as its three numbers (a hug widget), the bottom of the view; Long table's rows still scroll inside; the page has no scrollbar |
-| 5a | `target/debug/echoctl today --client acme add plugin:fill-demo:rows --size L`; open `{{base_url}}/#client/acme/overview` | On a client's Overview (a dashboard: its lines as tall as their widgets) the table keeps its cap: its card stops at about 60% of the window and its rows scroll inside it, not 60 rows down the page. `target/debug/echoctl today --client acme remove plugin:fill-demo:rows` |
+| 5a | `target/debug/echoctl today --client acme add plugin:fill-demo:rows --size L`; open `{{base_url}}/#client/acme/overview` (reload once if its placeholder stays: #598) | On a client's Overview (a dashboard: its lines as tall as their widgets) the table keeps its cap: its card stops at about 60% of the window and its rows scroll inside it, not 60 rows down the page. `target/debug/echoctl today --client acme remove plugin:fill-demo:rows` |
 | 6 | `target/debug/echoctl today reset`; `target/debug/echoctl plugin remove fill-demo`; `target/debug/echoctl plugin remove widget-demo` | Today as it comes |
 
 ## Teardown
 - `target/debug/echoctl plugin marketplace remove test-plugins`; `tests/fixtures/serve.sh down <dir>`; close the browser tab
 
 ## Notes
+- `fill-demo`'s table has a client setting only so a client's Overview can take it (step 5a).
 - That a plugin widget's data carries its declared height is in the Rust test `widgets::a_plugin_widgets_data_carries_its_declared_height`.
 - Found as #523: Today read only its three core fill widgets, so a plugin's `fill` widget hugged its content (a table stopped at about 60% of the window, TC-042).
