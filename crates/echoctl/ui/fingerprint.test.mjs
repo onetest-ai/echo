@@ -18,4 +18,8 @@ assert.notEqual(loaded, before, 'the Inbox loaded: the screen changes (its badge
 // #121: an item's reason changed (a run failed again): the open panel shows the new one.
 NY.data = { open: [{ key: 'minutes:1', why: 'new reason' }], done: [] }
 assert.notEqual(fingerprint(), loaded, 'an item changed: the screen changes (the open panel)')
+// #598: a dashboard's widget answered (the poll read it again): the screen shows it.
+const dash = fingerprint()
+S.dash = { page: 'client:acme', plugins: { 'plugin:table-demo:roles': { pending: false, data: { rows: [] } } } }
+assert.notEqual(fingerprint(), dash, "a dashboard's data changed: the screen changes")
 console.log('fingerprint: ok')

@@ -32,6 +32,8 @@ async function loadDashboard() {
 /** As on Today (`todayWaitForPlugins`): a plugin's widget not answered yet holds its place, and the page is read again
  *  while one waits — 0.5, 1, 2, 4, then every 8 s, a minute in all — until it answers or its ask fails (#598). */
 function dashWaitForPlugins(page) {
+  // A page left while its read was on its way: the wait is the page shown's, not that one's.
+  if (dashPageKey() !== page) return
   const waiting = !!S.dash && S.dash.page === page && Object.values(S.dash.plugins || {}).some((w) => w && w.pending)
   clearTimeout(S.dashWaitTimer)
   if (S.dashWaitPage !== page) { S.dashWaitPage = page; S.dashWaitTry = 0 }
