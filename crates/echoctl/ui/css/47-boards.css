@@ -3,7 +3,14 @@
 .tab.bd-plus:hover { color: var(--text); }
 .bd-new { display: inline-flex; align-items: center; padding: 0 6px; }
 .bd-new input, .bd-rename { font: inherit; font-size: 13px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); width: 170px; }
-.bd-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
-.bd-head h3 { margin: 0; font-size: 15px; }
-.bd-head .set-sub { flex: 1; }
+.bdh { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.bdh h3 { margin: 0; font-size: 15px; }
+.bdh .set-sub { flex: 1; }
 .bd-rename { font-size: 15px; font-weight: 600; width: 240px; }
+/* On the dashboard's ✎ line: ✎ beside ⋯ (⋯ last), a remove question below them. */
+.dash-h.bdh { flex-wrap: wrap; justify-content: flex-start; }
+.bdh .pj-more { order: 1; }
+.bdh .notice { order: 2; flex-basis: 100%; margin: 0; }
+.dash .dash-h.bdh { margin: 0; }
+/* The Brief's and Overview's text kept to a readable line in the pane's full width. */
+.pj-pane.wide .me-doc, .pj-pane.wide .me-edit textarea { max-width: 100ch; }

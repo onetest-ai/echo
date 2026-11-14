@@ -17,7 +17,7 @@ export class ClientsPage extends AppPage {
     this.claudeAbout = this.main.getByRole('button', { name: /^Claude about / })
     // Overview: About the client, edited in place.
     this.editAbout = this.main.getByRole('button', { name: 'Edit', exact: true })
-    // About folds: its head opens or folds it.
+    // A client's About and a thread's What it is fold: its head opens or folds it.
     this.aboutFold = this.main.locator('[data-pj="about-fold"]')
     this.aboutBox = this.main.getByRole('textbox', { name: 'About the client (Markdown)' })
     // Calls: a row a call.

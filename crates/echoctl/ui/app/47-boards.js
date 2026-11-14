@@ -26,7 +26,7 @@ function boardTabRow(kind, tabs, active, attr) {
   return tabs.map(([t, label], i) => `<button class="tab" role="tab" data-pj="${attr}" data-tab-id="${esc(t)}" aria-selected="${active === t}">${label}</button>${i === n - 1 ? boardPlus(kind) : ''}`).join('')
 }
 
-/** A board's page: its name with ⋯ (rename, move, remove), then its widgets. */
+/** A board's page: its name with ⋯ (rename, move, remove) and ✎, then its widgets. */
 function boardPage(kind, b) {
   const all = boardsOf(kind), at = all.findIndex((x) => x.id === b.id)
   const name = S.boardRename === b.id
@@ -34,7 +34,9 @@ function boardPage(kind, b) {
     : `<h3>${esc(b.name)}</h3>`
   const menu = `<span class="pj-add-wrap pj-more"><button class="icon-btn" data-board-menu="1" aria-haspopup="menu" aria-expanded="${!!S.boardMenu}" aria-label="Dashboard actions" title="Dashboard actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.boardMenu ? `<div class="menu" role="menu"><button class="menu-item" role="menuitem" data-board-do="rename">Rename</button><button class="menu-item" role="menuitem" data-board-do="left"${at <= 0 ? ' disabled' : ''}>Move left</button><button class="menu-item" role="menuitem" data-board-do="right"${at >= all.length - 1 ? ' disabled' : ''}>Move right</button><div class="menu-sep" role="separator"></div><button class="menu-item danger" role="menuitem" data-board-do="remove-ask">Remove…</button></div>` : ''}</span>`
   const ask = S.boardRemove === b.id ? `<div class="notice"><span class="grow">Remove <b>${esc(b.name)}</b> from every ${KIND_WORD[kind]}? Its widgets go with it.</span><button class="btn ghost" data-board-do="remove-cancel">Cancel</button><button class="btn danger" data-board-do="remove">Remove</button></div>` : ''
-  return `<div class="bd-head">${name}<span class="set-sub">On every ${KIND_WORD[kind]}, each showing its own</span>${menu}</div>${ask}${dashboardView()}`
+  // On one line with the dashboard's ✎ (its own line until the dashboard is read).
+  const head = `${name}<span class="set-sub">On every ${KIND_WORD[kind]}, each showing its own</span>${menu}${ask}`
+  return dashboardView(head) || `<div class="bdh">${head}</div>`
 }
 
 /** Send a board operation, then read the boards (and the page) again; `then` with them. */

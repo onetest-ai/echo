@@ -29,8 +29,8 @@ async function loadDashboard() {
 }
 
 /** The band on top of a thread's Brief or a client's Overview: its widgets in their rows (S 1, M 2, L 3 of 3 columns);
- *  ✎ edits it. Nothing placed: only ✎, saying what it adds. */
-function dashboardView() {
+ *  ✎ edits it. Nothing placed: only ✎, saying what it adds. `head`: a board's name and ⋯, on ✎'s line. */
+function dashboardView(head = '') {
   const page = dashPageKey(), d = S.dash
   if (!page || !d || d.page !== page) return ''
   const editing = S.dashEdit === page
@@ -66,5 +66,5 @@ function dashboardView() {
   const empty = editing && !rows.length ? `<div class="tw-end dash-none" data-tw-end="1">Nothing here yet: Add a widget puts one that shows this ${whose}.</div>` : ''
   // A meeting's card and menu from Your day (as on Today: `todayDetail`, Calendar's menu).
   const card = `${todayDetail(now)}${S.cal.ctx && S.tdCal ? eventMenu(S.tdCal, now) : ''}`
-  return `<section class="dash${editing ? ' td-editing' : ''}${rows.length || editing ? '' : ' bare'}" aria-label="Dashboard"><div class="dash-h">${acts}</div>${rows.map(line).join('')}${empty}${editing && rows.length ? todayEditEnd() : ''}${card}</section>`
+  return `<section class="dash${editing ? ' td-editing' : ''}${rows.length || editing ? '' : ' bare'}" aria-label="Dashboard"><div class="dash-h${head ? ' bdh' : ''}">${head}${acts}</div>${rows.map(line).join('')}${empty}${editing && rows.length ? todayEditEnd() : ''}${card}</section>`
 }

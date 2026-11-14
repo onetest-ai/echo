@@ -24,7 +24,7 @@ tags: [today, widgets, dashboards, threads, clients]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Open `{{base_url}}/#client/acme/overview` | Tabs: Overview, +, Calls, Tasks, People, Profile; Overview selected and as before |
-| 2 | Click +; type "Staffing"; Enter | A tab "Staffing" after Overview, selected; the hash `#client/acme/b-staffing`; the page: "Staffing", "On every client, each showing its own", ⋯, and the dashboard's ✎ |
+| 2 | Click +; type "Staffing"; Enter | A tab "Staffing" after Overview, selected; the hash `#client/acme/b-staffing`; the page: "Staffing", "On every client, each showing its own", and on that same line the dashboard's ✎ with ⋯ last (no line of its own for ✎); the page runs the pane's full width |
 | 3 | Click ✎; in Add a widget add "Roles to fill"; Done | "Roles to fill" on the page, its note "client acme" |
 | 4 | Open `{{base_url}}/#client/globex/b-staffing` | Globex has the tab "Staffing" too, with "Roles to fill" and its note "client globex" (one layout, each client's data) |
 | 5 | `target/debug/echoctl dashboard add --client Delivery`; wait about 10 seconds | A tab "Delivery" after Staffing, without a reload |
