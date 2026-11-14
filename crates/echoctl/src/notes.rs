@@ -413,8 +413,13 @@ fn save(dir: &Path, r: &Run) {
 }
 
 /// The plugin this app ships: inside the bundle, next to the binary (Windows zip), or the
-/// repo's `plugin/` for a dev build; else wherever Claude Code installed it.
+/// repo's `plugin/` for a dev build (and in unit tests, always); else wherever Claude Code installed it.
 pub fn plugin_dir() -> Option<PathBuf> {
+    // Tests: the repo's own plugin, never the one this computer's Claude Code has installed (a test binary sits in
+    // `target/debug/deps/`, where none of the places below are; #604).
+    if cfg!(test) {
+        return dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin")).ok();
+    }
     let exe = std::env::current_exe().ok().and_then(|e| dunce::canonicalize(e).ok())?;
     let near = [
         exe.parent().and_then(Path::parent).map(|c| c.join("Resources/plugin")), // Echo.app/Contents/MacOS/echoctl
