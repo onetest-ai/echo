@@ -304,14 +304,24 @@ fn script_path() -> std::ffi::OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
+/// What a script doesn't get of Echo's environment: Echo's and Claude Code's own (keys, profiles' values, run scopes) —
+/// but test data's guard it does (`ECHOCTL_TEST_OPEN_LOG_ONLY`, `ECHOCTL_TEST_OPEN_LOG`), so a program it starts that
+/// opens a page (a sign-in's browser) only logs it there, as Echo does.
+fn withheld(key: &str) -> bool {
+    let up = key.to_ascii_uppercase();
+    if up == "ECHOCTL_TEST_OPEN_LOG_ONLY" || up == "ECHOCTL_TEST_OPEN_LOG" {
+        return false;
+    }
+    up.starts_with("CLAUDE") || up.starts_with("ANTHROPIC") || up.starts_with("ECHOCTL")
+}
+
 fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit: Duration, group: &Path) -> Result<Value> {
     let mut c = command_for(file)?.no_window();
     c.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // The user's environment, without what is Echo's or Claude Code's (keys, profiles' values, run scopes).
     for (k, _) in std::env::vars_os() {
         let k = k.to_string_lossy().to_string();
-        let up = k.to_ascii_uppercase();
-        if up.starts_with("CLAUDE") || up.starts_with("ANTHROPIC") || up.starts_with("ECHOCTL") {
+        if withheld(&k) {
             c.env_remove(&k);
         }
     }
@@ -423,6 +433,17 @@ mod tests {
         ] {
             assert!(declared(&uses(bad.clone())).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_script_gets_test_datas_open_guard_but_nothing_else_of_echos_or_claudes() {
+        for k in ["ECHOCTL_TEST_OPEN_LOG_ONLY", "ECHOCTL_TEST_OPEN_LOG"] {
+            assert!(!withheld(k), "{k}");
+        }
+        for k in ["ECHOCTL_HOME", "ECHOCTL_CONFIG", "ECHOCTL_TEST_OPEN_LOG_ONLYX", "echoctl_secret", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ClaudeCode"] {
+            assert!(withheld(k), "{k}");
+        }
+        assert!(!withheld("HOME") && !withheld("PATH"));
     }
 
     #[test]
