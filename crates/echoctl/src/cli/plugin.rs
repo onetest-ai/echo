@@ -77,7 +77,8 @@ pub enum PluginCmd {
     /// and their data, host and window halves, testing, publishing
     Guide,
     /// Debug builds: queue an event (`meeting_soon`, …) with a JSON payload, as Echo would tell it, for the running app
-    /// or a served window to deliver to the plugins that hear it — testing a plugin on test data
+    /// or a served window to deliver to the plugins that hear it — testing a plugin on test data (after `. <dir>/env`:
+    /// without it, it goes to the Echo you use)
     #[command(hide = !cfg!(debug_assertions))]
     Emit {
         event: String,
@@ -263,7 +264,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Emit { event, payload } => {
             let payload: serde_json::Value = serde_json::from_str(payload.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the payload isn't JSON: {e}"))?;
             plugins::thread_values::emit(&event, &payload, cfg!(debug_assertions))?;
-            println!("Queued {event} for the running app");
+            println!("Queued {event}: the running app takes it within a second, or at its next start");
         }
         PluginCmd::Guide => print!("{GUIDE}"),
         PluginCmd::Marketplace { cmd } => match cmd {
