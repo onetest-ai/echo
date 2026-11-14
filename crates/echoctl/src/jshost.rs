@@ -694,7 +694,6 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
             // it — the app's alone, never a terminal's host.
             if APP.load(Ordering::Relaxed) {
-                // Another process's `ctx.widgets.changed()` is asked here, where the window reads; the rest are events.
                 plugins::thread_values::take_queued(|event, payload, each| if event == widgets::WIDGETS_CHANGED { widgets::take_changed(each) } else { event_each(event, payload, each) });
             }
             let now = chrono::Utc::now().timestamp_millis() as f64;

@@ -245,8 +245,8 @@ pub(super) fn widgets_changed(plugin: &str, widget: Option<&str>) -> Result<()> 
     Ok(())
 }
 
-/// Another process's queued `changed` (`{plugin: {widget}}`), as the app takes it: each widget named (or each the
-/// plugin declares) asked as `widgets_changed` would.
+/// Another process's queued `changed` (`{plugin: {widget}}`), as the app takes it — here, where the window reads: each
+/// widget named (or each the plugin declares) asked as `widgets_changed` would.
 pub(super) fn take_changed(each: &serde_json::Map<String, Value>) {
     for (plugin, w) in each {
         let ws = match w["widget"].as_str() {
@@ -288,12 +288,13 @@ pub(super) fn ask_changed(plugin: &str, widget: &str) {
     let key = format!("{plugin}:{widget}");
     let wait = {
         let mut all = CHANGED.lock().unwrap_or_else(|e| e.into_inner());
-        match all.get_mut(&key) {
+        // One reading of the time since (the gap may end between two); never zero, which would ask now and leave the
+        // pending mark set for good.
+        match all.get(&key).map(|(last, pending)| (last.elapsed(), *pending)) {
             Some((_, true)) => return,
-            Some((last, pending)) if last.elapsed() < CHANGED_GAP => {
-                *pending = true;
-                // One reading: the gap may end between two.
-                CHANGED_GAP.saturating_sub(last.elapsed()).max(Duration::from_millis(1))
+            Some((since, false)) if since < CHANGED_GAP => {
+                all.entry(key.clone()).and_modify(|e| e.1 = true);
+                (CHANGED_GAP - since).max(Duration::from_millis(1))
             }
             _ => {
                 all.insert(key.clone(), (std::time::Instant::now(), false));
