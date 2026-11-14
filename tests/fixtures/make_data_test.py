@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """make_data.py's own checks: the binary it builds the data with (#418), and builds as of other times (--now, #550)."""
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -45,9 +46,40 @@ class OtherClocks(unittest.TestCase):
                                     "--now", t.isoformat(timespec="minutes")], capture_output=True, text=True)
                 return t, r.returncode, (r.stderr or r.stdout).strip()[-400:]
             with ThreadPoolExecutor(len(times)) as pool:
-                for t, code, out in pool.map(build, times):
-                    with self.subTest(now=t.isoformat(timespec="minutes")):
-                        self.assertEqual(code, 0, out)
+                built = list(pool.map(build, times))
+            for t, code, out in built:
+                with self.subTest(now=t.isoformat(timespec="minutes")):
+                    self.assertEqual(code, 0, out)
+            # The day keeps its shape at any hour: the same meetings to come at once (The day's choices, S-24 stage 48),
+            # none joined by one squeezed in late in the evening.
+            shapes = {t.isoformat(timespec="minutes"): at_once(os.path.join(tmp, t.strftime("%Y%m%d%H%M")), t) for t, code, _ in built if code == 0}
+            first = next(iter(shapes.values()), None)
+            for t, shape in shapes.items():
+                with self.subTest(shape_at=t):
+                    self.assertEqual(shape, first)
+
+
+def at_once(base, now):
+    """The accepted meetings still to come at `now` in clusters of ones at once, as The day's choices groups them
+    (app.js dayChoices): each cluster's subjects, sorted."""
+    with open(os.path.join(base, "home", ".echo", "agenda.json"), encoding="utf-8") as f:
+        agenda = json.load(f)
+    t = lambda s: datetime.fromisoformat(s).astimezone()
+    now = now.astimezone()
+    going = sorted((m for m in agenda if m.get("response") not in ("notResponded", "tentativelyAccepted", "declined") and t(m.get("end") or m["start"]) > now),
+                   key=lambda m: (t(m["start"]), -(t(m.get("end") or m["start"]) - t(m["start"]))))
+    out, cur, end = [], [], None
+    for m in going:
+        if cur and t(m["start"]) >= end:
+            out.append(sorted(cur))
+            cur = []
+        if not cur:
+            end = t(m.get("end") or m["start"])
+        cur.append(m["subject"])
+        end = max(end, t(m.get("end") or m["start"]))
+    if cur:
+        out.append(sorted(cur))
+    return out
 
 
 if __name__ == "__main__":

@@ -1916,6 +1916,11 @@ MEETING_TITLES = ["Acme design review", "Globex office hours", "Umbrella pricing
                   "Initech town hall", "Acme go-live check", "Globex sponsor update", "Umbrella contract call", "Initech guild", "Acme demo", "Globex design review"]
 
 
+def to_come(now):
+    """When every meeting still to come starts: 37 minutes after the build. They run 25 or 30 minutes."""
+    return (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
+
+
 def prep_id(event):
     import hashlib
     return hashlib.sha256(event.encode()).hexdigest()[:16]
@@ -1929,7 +1934,7 @@ def build_agenda(d, H):
     at = day_clock(now)
     # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
     # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:50: they end by 23:57).
-    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
+    soon = to_come(now)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -2023,7 +2028,7 @@ def build_agenda(d, H):
         # is squeezed earlier, it is laid back into the free time 21–36 minutes after the build (the free invite then
         # folds under it).
         h_start, h_end = now + timedelta(minutes=72), now + timedelta(minutes=96)
-        if h_end > at(1.75):
+        if h_end > invite_times(now, at)["ev-zoom-pricing"][0]:
             h_start, h_end = (now + timedelta(minutes=21)).replace(second=0, microsecond=0) + timedelta(minutes=1), soon
         events.append({"id": "ev-hostile", "subject": H.text(place, "Meeting", kind="html", one_line=True, where="agenda subject"), "start": iso(h_start), "end": iso(h_end),
                        "organizer": {"name": H.text(place, "", kind="rtl", one_line=True, where="agenda organizer"), "email": "org@umbrella.example"},
@@ -2093,6 +2098,19 @@ OTHER_APP_INVITES = [
 ]
 
 
+def invite_times(now, at):
+    """The Zoom and Meet invites' times: at their hours after the build (`at`), one after the other; but never before the
+    meetings to come are over (`to_come` + 30 minutes), or they would be at once with them (The day's choices, S-24
+    stage 48). Built late, when `at` squeezes them back into that time, they share what is left of the day up to 23:59
+    instead, in order and shorter (a minute each at 22:50)."""
+    times = {i: (at(h), at(h + 0.5)) for i, _, h, *_ in OTHER_APP_INVITES}
+    after = to_come(now) + timedelta(minutes=30)
+    if all(start >= after for start, _ in times.values()):
+        return times
+    slot = (now.replace(hour=23, minute=59, second=0, microsecond=0) - after) / len(OTHER_APP_INVITES)
+    return {i: (after + k * slot, after + (k + 1) * slot) for k, (i, *_) in enumerate(OTHER_APP_INVITES)}
+
+
 def other_app_invites(d, at):
     """Today's Zoom and Google Meet invites (OTHER_APP_INVITES) through `echoctl agenda sync` (calendar::convert), with a
     calendar command that prints them for that one sync: the agenda meetings Echo makes of them. A sync that drops one, or
@@ -2103,7 +2121,7 @@ def other_app_invites(d, at):
     the invite's own times back."""
     utc = lambda t: {"dateTime": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.0000000"), "timeZone": "UTC"}
     utc_iso = lambda t: t.astimezone(timezone.utc).replace(microsecond=0).isoformat()
-    when = {i: (at(h), at(h + 0.5)) for i, _, h, *_ in OTHER_APP_INVITES}
+    when = invite_times(d.now, at)
     # A minute or two ahead, but never past 23:59: a sync started just before midnight still sees it today.
     now = datetime.now().astimezone().replace(microsecond=0)
     real = min(now + timedelta(minutes=2), now.replace(hour=23, minute=59, second=0))
@@ -2534,7 +2552,8 @@ def main():
         sys.exit(f"{base} already holds test data: give an empty folder")
     d = Data(base, a.set)
     # Today holds calls hours ago and meetings hours ahead, relative to now.
-    # The meetings to come start 37 minutes after the build and run 30: after 22:50 they would end tomorrow. Before
+    # The meetings to come start 37 minutes after the build and run 30, and the Zoom and Meet invites need a minute each
+    # after them (`invite_times`): after 22:50 they would end tomorrow, out of Today. Before
     # 06:00 there is too little of the day behind (calls 6 hours ago would be yesterday's).
     late = (d.now.hour, d.now.minute) > (22, 50)
     if d.now.hour < 6 or late:
