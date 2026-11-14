@@ -327,8 +327,12 @@ fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit:
         }
     }
     c.env("PATH", script_path()).env("ECHO_PLUGIN_SCRIPT", "1").env("ECHO_PLUGIN_CACHE", cache);
-    // An `echoctl` it starts (the plugin's `scripts/echoctl`) is this Echo, on its data and config folders (#569).
-    c.env("ECHOCTL_HOME", crate::paths::home()).env("ECHOCTL_CONFIG_DIR", crate::paths::config_dir());
+    // An `echoctl` it starts (the plugin's `scripts/echoctl`) is this Echo, on its data and config folders (#569); the
+    // data folder only once one is chosen, so before setup it doesn't look done.
+    if crate::paths::home_source() != "default" {
+        c.env("ECHOCTL_HOME", crate::paths::home());
+    }
+    c.env("ECHOCTL_CONFIG_DIR", crate::paths::config_dir());
     if let Ok(exe) = std::env::current_exe() {
         c.env("ECHOCTL_BIN", exe);
     }
@@ -467,6 +471,11 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let want = format!("{}|{}|{}|none", crate::paths::home().display(), crate::paths::config_dir().display(), exe.display());
         assert_eq!(out["stdout"], want, "{out}");
+        // Before setup (no data folder chosen) it gets no data folder: its echoctl sees setup isn't done.
+        std::env::remove_var("ECHOCTL_HOME");
+        assert_eq!(crate::paths::home_source(), "default");
+        let out = spawn_and_wait(&f, &[], &root, &root, Duration::from_secs(10), &root.join("group")).unwrap();
+        assert_eq!(out["stdout"], format!("|{}|{}|none", crate::paths::config_dir().display(), exe.display()), "{out}");
     }
 
     #[test]
