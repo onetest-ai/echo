@@ -66,7 +66,7 @@
   },
   {
    "id": "F-PLUG-07",
-   "feature": "Marketplaces lists the built-in one (not removable) and added ones with how many plugins and when read, Read again, ⋯ hide / show its plugins, Remove; Add a marketplace (owner/repo, git address or folder, optional name)",
+   "feature": "Marketplaces lists the built-in one (not removable) and added ones with how many plugins and when read, Read again, ⋯ hide / show its plugins, Remove… (asked first: with plugins installed from it, it names them and removes them with it — 'Remove, keep their data' or 'Remove with their data' — each as a plugin's Remove does; their skills prefixes and shared namespaces let go, shared values kept); Add a marketplace (owner/repo, git address or folder, optional name)",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -95,7 +95,7 @@
   },
   {
    "id": "F-PLUG-10",
-   "feature": "`echoctl plugin list` gives installed, offered and marketplaces as JSON; `echoctl plugin marketplace list` each marketplace with its plugins (id, name, version, featured, installed: true from it, false from another, null), a hidden one's too; `echoctl plugin marketplace update / remove / hide / show <name>` and `install --from <name>` take a marketplace by its name in any case or by its source (owner/repo, URL, folder), and one not found is named with the marketplaces there are",
+   "feature": "`echoctl plugin list` gives installed, offered and marketplaces as JSON; `echoctl plugin marketplace list` each marketplace with its plugins (id, name, version, featured, installed: true from it, false from another, null), a hidden one's too; `echoctl plugin marketplace update / remove / hide / show <name>` (`remove` lists the plugins installed from it and removes them with it: `--yes` needed when there are any, `--delete-data` deletes their data) and `install --from <name>` take a marketplace by its name in any case or by its source (owner/repo, URL, folder), and one not found is named with the marketplaces there are",
    "priority": "medium",
    "check": "agent",
    "axes": [

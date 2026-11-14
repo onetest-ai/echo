@@ -41,6 +41,8 @@ mod settings;
 pub use settings::*;
 mod sources;
 use sources::*;
+mod snapshot;
+pub use snapshot::snapshot;
 pub mod mine;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
@@ -989,13 +991,33 @@ pub fn market_add(source: &str, name: Option<&str>) -> Result<String> {
     Ok(name)
 }
 
-/// Remove a marketplace the user added (its installed plugins stay, without updates).
-pub fn market_remove(name: &str) -> Result<()> {
+/// Marketplace `name` may be removed — an added one (the built-in one is only hidden, My plugins stays): its source.
+pub fn removable(name: &str) -> Result<String> {
     if name == BUILT_IN_NAME {
         bail!("the built-in marketplace can be hidden, not removed");
     }
     if name == MINE {
         bail!("My plugins is always there: it is your own folder of plugins");
+    }
+    Registry::load()?.markets.into_iter().find(|m| m.name == name).map(|m| m.source).ok_or_else(|| anyhow!("no marketplace “{name}”"))
+}
+
+/// The plugins installed from marketplace `name`: (id, name), by name.
+pub fn installed_from(name: &str) -> Result<Vec<(String, String)>> {
+    let r = Registry::load()?;
+    let mut v: Vec<(String, String)> = r.installed.values().filter(|p| p.market == name).map(|p| (p.id.clone(), p.name.clone())).collect();
+    v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    Ok(v)
+}
+
+/// Remove marketplace `name` and the plugins installed from it (#616) — each as `remove` does, its data kept or not,
+/// before the marketplace goes (its namespace's owner is read from it) — then release the skills prefixes and shared
+/// namespaces its source held that no installed plugin of it uses. The ids removed. The built-in one is only hidden; My plugins stays.
+pub fn market_remove(name: &str, keep_data: bool) -> Result<Vec<String>> {
+    let source = removable(name)?;
+    let ids: Vec<String> = installed_from(name)?.into_iter().map(|(id, _)| id).collect();
+    for id in &ids {
+        remove(id, keep_data)?;
     }
     Registry::update(|r| {
         let n = r.markets.len();
@@ -1006,7 +1028,9 @@ pub fn market_remove(name: &str) -> Result<()> {
         Ok(())
     })?;
     let _ = fs::remove_dir_all(market_dir(name));
-    Ok(())
+    agent::release_prefixes(&source);
+    shared::release_namespaces(&source);
+    Ok(ids)
 }
 
 pub fn market_hide(name: &str, hidden: bool) -> Result<()> {
@@ -1293,71 +1317,6 @@ fn review_json(r: &Review) -> Value {
     json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked})
 }
 
-/// Settings → Plugins: installed, offered, marketplaces, and what runs.
-pub fn snapshot() -> Value {
-    let r = match Registry::load() {
-        Ok(r) => r,
-        Err(e) => return json!({"error": format!("{e:#}")}),
-    };
-    let mut markets = vec![];
-    let mut discover = vec![];
-    for (m, built_in) in r.all_markets() {
-        let c = catalog(&m.name);
-        // What it offers (`echoctl plugin marketplace list`, #589): installed true from it, false from another one.
-        let offers: Vec<Value> = c.as_ref().map(|c| c.plugins.iter().map(|o| json!({
-            "id": o.id, "name": o.manifest.as_ref().map_or(o.id.as_str(), |mf| mf.name.as_str()),
-            "version": o.manifest.as_ref().map(|mf| mf.version.clone()), "featured": o.featured,
-            "installed": r.installed.get(&o.id).map(|p| p.market == m.name), "error": o.error,
-        })).collect()).unwrap_or_default();
-        markets.push(json!({
-            "name": m.name, "source": m.source, "built_in": built_in, "hidden": m.hidden,
-            "fetched_at": c.as_ref().map(|c| c.fetched_at.clone()), "commit": c.as_ref().map(|c| c.commit.clone()),
-            "error": c.as_ref().and_then(|c| c.error.clone()), "count": c.as_ref().map(|c| c.plugins.len()).unwrap_or(0),
-            "title": c.as_ref().map(|c| c.name.clone()).filter(|n| !n.is_empty()), "plugins": offers,
-        }));
-        if m.hidden {
-            continue;
-        }
-        for o in c.map(|c| c.plugins).unwrap_or_default() {
-            let (name, version, summary, uses, why) = match &o.manifest {
-                Some(mf) => (mf.name.clone(), mf.version.clone(), mf.summary.clone(), sheet(mf).unwrap_or_default(), why_not(mf)),
-                None => (o.id.clone(), String::new(), String::new(), vec![], o.error.clone()),
-            };
-            discover.push(json!({
-                "id": o.id, "name": name, "version": version, "summary": summary, "market": m.name, "built_in": built_in,
-                "categories": o.categories, "featured": o.featured, "featured_at": o.featured_at, "uses": uses, "why_not": why,
-                "installed": r.installed.get(&o.id).map(|p| p.market == m.name),
-            }));
-        }
-    }
-    let installed: Vec<Value> = r
-        .installed
-        .values()
-        .map(|p| {
-            let m = read_manifest(&plugin_dir(p)).ok();
-            let m_part = m.as_ref().and_then(|m| m.part_problems.first().cloned()).or_else(|| agent::withheld(&p.id));
-            let m_prefix = m.as_ref().and_then(agent::prefix_of);
-            let summary = m.as_ref().map(|m| m.summary.clone()).unwrap_or_default();
-            let client = m.as_ref().and_then(|m| m.client.clone());
-            let caps: Vec<String> = m.map(|m| m.uses.keys().cloned().collect()).unwrap_or_default();
-            json!({
-                "id": p.id, "name": p.name, "version": p.version, "market": p.market, "enabled": p.enabled, "summary": summary, "caps": caps, "client": client,
-                "commit": p.commit, "installed_at": p.installed_at, "uses": p.uses,
-                "market_gone": r.market(&p.market).is_none(),
-                "update": update_for(p).map(|u| review_json(&u)),
-                "settings": settings_view(&p.id).unwrap_or_default(),
-                "claude_problem": m_part,
-                "prefix": m_prefix,
-            })
-        })
-        .collect();
-    json!({
-        "installed": installed, "discover": discover, "markets": markets,
-        "busy": BUSY.lock().map(|b| b.clone()).unwrap_or_default(),
-        "errors": ERRORS.lock().map(|b| b.clone()).unwrap_or_default(),
-    })
-}
-
 /// The review sheet for the window (`plugin_review`), as JSON.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn review_value(id: &str, market: Option<&str>) -> Value {
@@ -1397,7 +1356,7 @@ pub fn page_op(v: &Value) -> Result<()> {
             }
         }
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
-        "market_remove" => market_remove(&s("name")),
+        "market_remove" => market_remove(&s("name"), v["keep_data"].as_bool().unwrap_or(true)).map(|_| ()),
         "market_add" => {
             let src = s("source");
             let name = market_add(&src, Some(&s("name")).filter(|n| !n.is_empty()).map(String::as_str))?;
@@ -1753,7 +1712,7 @@ mod tests {
         let (_env, root) = paths::testenv::folders("plugins-mine");
         // Always listed, never removed or hidden; its folder made when read.
         assert!(Registry::load().unwrap().all_markets().iter().any(|(m, built)| m.name == MINE && *built));
-        assert!(market_remove(MINE).is_err() && market_hide(MINE, true).is_err());
+        assert!(market_remove(MINE, true).is_err() && market_hide(MINE, true).is_err());
         let d = plugin(&paths::home(), "standup", "0.1.0", json!({}));
         fs::create_dir_all(mine_dir().join("notes-only")).unwrap(); // no manifest: not a plugin
         let c = refresh(MINE).unwrap();
@@ -1878,8 +1837,53 @@ mod tests {
         assert_eq!(snap["markets"][2]["name"], "acme");
         remove("demo", false).unwrap();
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
-        market_remove("acme").unwrap();
-        assert!(market_remove(BUILT_IN_NAME).is_err());
+        assert_eq!(market_remove("acme", true).unwrap(), Vec::<String>::new(), "nothing installed from it");
+        assert!(market_remove(BUILT_IN_NAME, true).is_err());
+    }
+
+    #[test]
+    fn removing_a_marketplace_removes_its_plugins_and_releases_what_they_held() {
+        // #616: its installed plugins go with it (data kept or not), then the prefixes and namespaces their source held.
+        let (_env, root) = paths::testenv::folders("plugins-market-remove");
+        let mk = root.join("market");
+        plugin(&mk, "demo", "0.1.0", json!({}));
+        plugin(&mk, "later", "0.1.0", json!({}));
+        market(&mk, &["demo", "later"]);
+        let add = |n: &str| {
+            let name = market_add(mk.to_str().unwrap(), Some(n)).unwrap();
+            refresh(&name).unwrap();
+            name
+        };
+        let put = |name: &str, id: &str| {
+            let rv = review(id, Some(name)).unwrap();
+            install(id, Some(name), &rv.uses).unwrap();
+        };
+        let name = add("acme");
+        put(&name, "demo");
+        put(&name, "later");
+        shared::bind_all();
+        let held = |f: &str| fs::read_to_string(plugins_dir().join(f)).unwrap_or_default();
+        assert!(held("namespaces.json").contains("\"test\""), "its namespace bound: {}", held("namespaces.json"));
+        let src = Registry::load().unwrap().markets.iter().find(|m| m.name == name).unwrap().source.clone();
+        fs::write(plugins_dir().join("prefixes.json"), json!({"kit": src, "other": "someone/else"}).to_string()).unwrap();
+        fs::create_dir_all(data_dir("demo")).unwrap();
+        fs::write(data_dir("demo").join("mine.json"), "1").unwrap();
+        assert_eq!(installed_from(&name).unwrap(), [("demo".to_string(), "Plugin demo".to_string()), ("later".to_string(), "Plugin later".to_string())]);
+        assert_eq!(market_remove(&name, true).unwrap(), ["demo", "later"]);
+        let r = Registry::load().unwrap();
+        assert!(r.installed.is_empty() && !r.markets.iter().any(|m| m.name == name), "the plugins and the marketplace gone");
+        assert!(data_dir("demo").join("mine.json").exists(), "data kept");
+        assert!(!held("prefixes.json").contains("kit") && !held("namespaces.json").contains("\"test\""), "released");
+        assert!(held("prefixes.json").contains("someone/else"), "another source's prefix left as it was");
+        // Data deleted on asking; a marketplace with nothing installed from it removed as before; others refused.
+        let name = add("acme-again");
+        put(&name, "demo");
+        assert_eq!(market_remove(&name, false).unwrap(), ["demo"]);
+        assert!(!data_dir("demo").exists(), "data deleted");
+        assert!(market_remove("nope", true).unwrap_err().to_string().contains("no marketplace"));
+        // Never removable: asked before anything is listed or removed (the CLI's --yes).
+        assert!(removable(BUILT_IN_NAME).unwrap_err().to_string().contains("hidden, not removed"));
+        assert!(removable(MINE).unwrap_err().to_string().contains("always there"));
     }
 
     #[test]
@@ -1982,7 +1986,7 @@ mod tests {
         assert!(e.contains("no marketplace “globex”") && e.contains("Acme"), "names the ones there are: {e}");
         // The built-in one, said in another case, is found — and still can't be removed.
         assert_eq!(market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), BUILT_IN_NAME);
-        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap()).is_err());
+        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), true).is_err());
         // Two whose names differ only in case (a hand-edited plugins.json): the exact one, else neither.
         Registry::update(|r| {
             r.markets.push(Market { name: "ACME".into(), source: "acme/plugins".into(), hidden: false });

@@ -84,7 +84,15 @@ pub enum MarketCmd {
         #[arg(long)]
         name: Option<String>,
     },
-    Remove { name: String },
+    /// Remove a marketplace and the plugins installed from it (listed; --yes when there are any; their data kept
+    /// unless --delete-data)
+    Remove {
+        name: String,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        delete_data: bool,
+    },
     /// Leave a marketplace out of Discover (the built-in one can't be removed, only hidden)
     Hide { name: String },
     Show { name: String },
@@ -248,7 +256,25 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                     None => println!("Added {n}: {} plugins", c.plugins.len()),
                 }
             }
-            MarketCmd::Remove { name } => market_remove(&market_named(&name)?)?,
+            MarketCmd::Remove { name, yes, delete_data } => {
+                let name = market_named(&name)?;
+                // Refused first (the built-in one, My plugins): never asks for a --yes it would then refuse.
+                removable(&name)?;
+                let plugins = installed_from(&name)?;
+                if !plugins.is_empty() {
+                    let list: Vec<String> = plugins.iter().map(|(id, n)| format!("{n} ({id})")).collect();
+                    println!("Removing {name} removes the plugins installed from it: {}", list.join(", "));
+                    if !yes {
+                        anyhow::bail!("run again with --yes to remove them with it (their data is kept; --delete-data deletes it)");
+                    }
+                }
+                let gone = market_remove(&name, !delete_data)?;
+                if gone.is_empty() {
+                    println!("Removed {name}");
+                } else {
+                    println!("Removed {name} and the plugins installed from it: {}{}", gone.join(", "), if delete_data { " (their data deleted)" } else { "" });
+                }
+            }
             MarketCmd::Hide { name } => market_hide(&market_named(&name)?, true)?,
             MarketCmd::Show { name } => market_hide(&market_named(&name)?, false)?,
             MarketCmd::Update { name } => match name {
