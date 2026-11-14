@@ -41,6 +41,7 @@ mod settings;
 pub use settings::*;
 mod sources;
 use sources::*;
+pub mod mine;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -927,7 +928,7 @@ fn mine_catalog(dir: &Path) -> Result<String> {
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.path().join(MANIFEST).is_file())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !e.file_name().to_string_lossy().starts_with('.') && e.path().join(MANIFEST).is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     ids.sort();
