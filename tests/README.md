@@ -16,21 +16,29 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 | `fixtures/recordings.py prepare` / `copy <name>` | The known conversations captured (file-fed) and transcribed **once per build**; copies for each scenario |
 | `fixtures/call.py start <conv>` / `end` | A call fed from files for the run's app: no device opened, no sound played |
 | `fixtures/wait.py <seconds> <condition>` | Wait for the run's app state, an event or a file, with a timeout (no fixed `sleep`) |
-| `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, pointed at this folder |
+| `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, inside this folder (`.claude/`, `.agents/`, git-ignored) |
+| `.mcp.json` | The Playwright MCP the agents drive the window with |
+| `CLAUDE.md` | What a session started here gets: QA sessions start in this folder |
 | `agent-rules.sh` | Echo's own rules on top of the installed agents (times per stage, …); run by `install.sh` and by `fixtures/serve.sh up`, so no run starts without them |
 | `reports/` | Run reports and screenshots (git-ignored) |
 
 ## Running
 
-1. Once per machine: `tests/install.sh`, then restart Claude Code in the repo (it loads the agents and Playwright MCP).
+1. Once per machine: `tests/install.sh`. QA sessions start in this folder (`cd tests && claude`): only a session
+   started here loads the agents, their hooks and the Playwright MCP (`CLAUDE.md`). Paths in the cases, the scenarios
+   and `app_profile.md` are from the repo root: the agents give every tool absolute paths. Such a session reads
+   `tests/.claude/settings.json` (the installer's hooks), **not** the repo root's `.claude/settings.json`: permissions
+   or plugins a run needs (the Echo plugin, an allowed command) go in `tests/.claude/settings.local.json` (this
+   machine) or in your user settings (`~/.claude/settings.json`).
 2. `cargo build`; for the recording scenarios (S-14, S-17, S-18, S-19, S-21) also `tests/fixtures/recordings.py prepare`
    once (about 1.5 minutes: file-fed captures, no device and no sound, then the transcriptions; kept until the app
    changes). Recording tests open no microphone and play nothing (`app_profile.md` → "Recording with file-fed calls");
    the few device checks are the live check, by a person.
-3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it scenarios, e.g.
-   "run tests/scenarios". Per scenario it serves the window on fresh data, one runner goes through its stages (the
-   browser stays open between scenarios), and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting
-   scenarios and their stages, each stage's time and the five slowest; `run: person` cases are listed for a person.
+3. Start Claude Code in `tests/` with the lead as the active agent (`cd tests && claude --agent test-run-lead`) and
+   give it scenarios, e.g. "run every scenario in scenarios/" (or one: "run scenarios/S-01_….md"). Per scenario it
+   serves the window on fresh data, one runner goes through its stages (the browser stays open between scenarios),
+   and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting scenarios and their stages, each stage's time
+   and the five slowest; `run: person` cases are listed for a person.
 
 Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case"; then put each agent case
 into a scenario (`app_profile.md` → "Scenarios"). A scenario reuses assets: one data build, one call or model run per
