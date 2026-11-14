@@ -72,6 +72,11 @@ impl EchoWindow {
         let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.openLink({})", json!(link)));
     }
 
+    /// What's new over the view the window is on (as ⌘K opens it).
+    pub fn whats_new(&self) {
+        let _ = self.webview.evaluate_script("window.echo && window.echo.whatsNew()");
+    }
+
     /// Show a call (`name` = its folder name).
     pub fn show_call(&self, name: &str) {
         let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.openCall({})", json!(name)));
@@ -145,6 +150,10 @@ fn exe_icon(size: u32) -> Option<tao::window::Icon> {
     tao::window::Icon::from_rgba(img.into_raw(), size, size).ok()
 }
 
+/// The tray's What's new, as the start of a window (`open`): the window's place for it (`route` in the window script
+/// shows it over Today).
+pub const WHATS_NEW: &str = "#whats-new";
+
 /// Open the window. `ipc` receives each message the page posts (JSON text).
 pub fn open<T: 'static>(
     target: &EventLoopWindowTarget<T>,
@@ -186,6 +195,8 @@ pub fn open<T: 'static>(
     let url = match start_call {
         // An echo:// link: the page routes it as it loads (`#link=…`).
         Some(c) if c.starts_with("echo://") => format!("{}#link={}", base_url(), urlencode(c)),
+        // The tray's What's new: the window opens on Today with it.
+        Some(WHATS_NEW) => format!("{}{WHATS_NEW}", base_url()),
         Some(c) => format!("{}#call/{}", base_url(), urlencode(c)),
         None => base_url().to_string(),
     };

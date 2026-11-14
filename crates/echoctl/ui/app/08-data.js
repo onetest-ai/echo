@@ -244,6 +244,8 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); replaceUrl('#settings/plugins') } return }
   if (h === 'tasks') { S.view = 'tasks'; return }
+  // The tray's What's new: over Today, the address left on Today (a reload doesn't open it again).
+  if (h === 'whats-new') { replaceUrl('#today'); S.view = 'today'; setTimeout(whatsNewOpen); return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
   // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).

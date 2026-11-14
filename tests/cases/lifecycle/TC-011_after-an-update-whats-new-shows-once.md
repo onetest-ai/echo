@@ -33,7 +33,7 @@ tags: [lifecycle, whats-new, update]
 |---|---|---|
 | 1 | Run `target/debug/echoctl --version` and `cat "$ECHOCTL_CONFIG_DIR/whats-new-seen.json"` | "echoctl V"; the file holds a `version` older than V |
 | 2 | Load `{{base_url}}/`; in `browser_evaluate` run `async () => (await (await fetch('api/whats-new')).json())` | JSON `{version: V, entries: [...]}`, `entries[0].version` is V |
-| 3 | Snapshot the page | A dialog "What's new in Echo V" over the window: one item per item of `entries[0]`, in its order, each with an icon, its title in bold and its one sentence; a "Show me" button on each item that has `open`; a "Close" (×) button and "Got it". No other version's items, no version headers |
+| 3 | Snapshot the page | A dialog "What's new in Echo V" over the window: one item per item of `entries[0]`, in its order, each with an icon, its title in bold and its one sentence; a "Show me" button on each item that has `open`, each a primary button (`button[aria-label^="Show me"]` has the class `primary`); a "Close" (×) button and "Got it". No other version's items, no version headers. The keyboard is on "Got it" (`document.activeElement.textContent` is "Got it") |
 | 4 | Run `cat "$ECHOCTL_CONFIG_DIR/whats-new-seen.json"` | `version` is now V: shown, it counts as seen |
 | 5 | Click "Got it" | The dialog is gone; the window (Today) is as before |
 | 6 | Reload the page (`location.reload()`), wait for "Your day" and 3 s more; snapshot | No "What's new" dialog |

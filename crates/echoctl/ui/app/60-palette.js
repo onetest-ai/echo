@@ -131,7 +131,11 @@ function paletteOpen() {
   paletteDraw()
   $('#pal-q').focus()
 }
-function paletteClose() { PAL.open = false; const el = $('#palette'); if (el) el.remove() }
+function paletteClose() {
+  PAL.open = false; const el = $('#palette'); if (el) el.remove()
+  // Opened over What's new: the keyboard goes back into that dialog.
+  if (S.wn) whatsNewFocus()
+}
 function paletteDraw() {
   const t = PAL.target
   $('#pal-target').innerHTML = t ? `<button class="pal-chip" data-pal-untarget title="Act on Echo itself instead">On: ${esc(t.label.length > 32 ? t.label.slice(0, 31) + '…' : t.label)} ×</button>` : ''

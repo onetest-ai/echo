@@ -34,7 +34,7 @@ function whatsNewDialog() {
   const entries = S.wn
   if (!entries || !entries.length) return ''
   const one = entries.length === 1
-  const item = (i) => `<li class="wn-item"><span class="wn-ic">${ICON(WN_ICONS[i.icon] || WN_ICONS.sparkle)}</span><div class="wn-t"><b>${esc(i.title)}</b><p>${esc(i.text)}</p></div>${i.open ? `<button class="btn ghost wn-go" data-wn-go="${esc(i.open)}" aria-label="Show me: ${esc(i.title)}">Show me</button>` : ''}</li>`
+  const item = (i) => `<li class="wn-item"><span class="wn-ic">${ICON(WN_ICONS[i.icon] || WN_ICONS.sparkle)}</span><div class="wn-t"><b>${esc(i.title)}</b><p>${esc(i.text)}</p></div>${i.open ? `<button class="btn primary wn-go" data-wn-go="${esc(i.open)}" aria-label="Show me: ${esc(i.title)}">Show me</button>` : ''}</li>`
   const body = entries.map((e) => `${one ? '' : `<h4 class="wn-ver">Echo ${esc(e.version)}</h4>`}<ul class="wn-items">${e.items.map(item).join('')}</ul>`).join('')
   return `<div class="td-modal"><div class="td-dialog wn" role="dialog" aria-modal="true" aria-labelledby="wn-h">
     <div class="wn-head"><h3 id="wn-h">${esc(WhatsNew.heading(entries))}</h3><button class="icon-btn" data-wn-close aria-label="Close">×</button></div>
@@ -45,13 +45,15 @@ function whatsNewDialog() {
 
 /** What's new again (⌘K, Settings → General): every version's entry. */
 async function whatsNewOpen() {
+  // The tray's What's new while the palette is open: the palette goes, or it would keep its Escape over the dialog.
+  if (PAL.open) paletteClose()
   try { const r = await get('api/whats-new'); S.wn = r.entries || [] } catch { S.wn = null }
   render()
   whatsNewFocus()
 }
 
 /** The keyboard goes into the dialog (it is modal): to Got it, once it is drawn. */
-const whatsNewFocus = () => setTimeout(() => { const b = document.querySelector('.wn .btn.primary'); if (b) b.focus() })
+const whatsNewFocus = () => setTimeout(() => { const b = document.querySelector('.wn .td-dialog-a [data-wn-close]'); if (b) b.focus() })
 
 /** Show me: closes it and opens the item's place. */
 function whatsNewGo(open) {

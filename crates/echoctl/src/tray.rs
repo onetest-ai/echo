@@ -373,7 +373,7 @@ enum Action {
     Update,
     EditProfile,
     AddNote,
-    /// Open the Echo window (at a call, by folder name).
+    /// Open the Echo window (at a call, by folder name; an echo:// link; or with What's new, `window::WHATS_NEW`).
     OpenWindow(Option<String>),
     CalendarLogin,
     PhotosLogin,
@@ -623,6 +623,7 @@ fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &m
         Some(w) => {
             match call {
                 Some(l) if l.starts_with("echo://") => w.open_link(l),
+                Some(crate::window::WHATS_NEW) => w.whats_new(),
                 Some(c) => w.show_call(c),
                 None => {}
             }
@@ -976,5 +977,14 @@ mod tests {
         assert!(matches!(l.answered(2, None), Step::Ask(_)));
         assert!(matches!(l.close_now(), Step::CloseWindow));
         assert!(matches!(l.decided(Err("no dialog".into())), Step::Stay(Then::Quit, why) if why.contains("couldn't ask")));
+    }
+
+    #[test]
+    fn the_menus_whats_new_opens_a_place_the_window_routes() {
+        let w = crate::window::WHATS_NEW;
+        assert!(w.starts_with('#'), "a place of the window's own, never taken for a call's folder");
+        let script = format!("{}{}", include_str!("../ui/app/08-data.js"), include_str!("../ui/app/99-refresh.js"));
+        assert!(script.contains(&format!("h === '{}'", &w[1..])), "a new window's route() opens {w}");
+        assert!(script.contains("whatsNew()"), "an open window's page has window.echo.whatsNew");
     }
 }

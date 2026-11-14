@@ -1,6 +1,6 @@
 ---
 id: S-34
-title: What's new after an update: once per version, skipped versions grouped, Show me, again from ⌘K and Settings, nothing on a fresh install
+title: What's new after an update: once per version, skipped versions grouped, Show me, again from ⌘K, Settings and the tray, nothing on a fresh install
 run: agent
 data: small
 cases:
@@ -10,6 +10,7 @@ cases:
   - tests/cases/lifecycle/TC-012_skipped-versions-show-grouped-newest-first.md
   - tests/cases/lifecycle/TC-013_show-me-opens-the-items-place.md
   - tests/cases/lifecycle/TC-015_a-fresh-install-shows-no-whats-new.md
+  - tests/cases/lifecycle/TC-017_the-trays-whats-new-opens-the-window-with-it.md
 ---
 
 # S-34: What's new after an update
@@ -39,6 +40,7 @@ What's new opens by itself at the window's next load once the last version seen 
 | 4 | `lifecycle/TC-012_skipped-versions-show-grouped-newest-first.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
 | 5 | `lifecycle/TC-013_show-me-opens-the-items-place.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
 | 6 | `lifecycle/TC-015_a-fresh-install-shows-no-whats-new.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py none`; then its Preconditions' CLI (the calls to the trash) before its first load — last: it empties the calls |
+| 7 | `lifecycle/TC-017_the-trays-whats-new-opens-the-window-with-it.md` | — | **person** (the tray) |
 
 ## Notes
 - One data build: the last version seen is the only thing that changes between stages, and the fixture sets it in the run's config folder.
