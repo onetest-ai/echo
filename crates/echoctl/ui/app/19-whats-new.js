@@ -30,7 +30,7 @@ const WhatsNew = {
 /** The dialog (`S.wn`: the entries it shows); opened by itself once when the app has something new (marked seen then). */
 function whatsNewDialog() {
   const p = S.state && S.state.whats_new
-  if (WhatsNew.due(p, S.wnShown)) { S.wnShown = p.entries[0].version; S.wn = p.entries; send({ cmd: 'whats_new_seen' }) }
+  if (WhatsNew.due(p, S.wnShown)) { S.wnShown = p.entries[0].version; S.wn = p.entries; send({ cmd: 'whats_new_seen' }); whatsNewFocus() }
   const entries = S.wn
   if (!entries || !entries.length) return ''
   const one = entries.length === 1
@@ -46,8 +46,12 @@ function whatsNewDialog() {
 /** What's new again (⌘K, Settings → General): every version's entry. */
 async function whatsNewOpen() {
   try { const r = await get('api/whats-new'); S.wn = r.entries || [] } catch { S.wn = null }
-  return render()
+  render()
+  whatsNewFocus()
 }
+
+/** The keyboard goes into the dialog (it is modal): to Got it, once it is drawn. */
+const whatsNewFocus = () => setTimeout(() => { const b = document.querySelector('.wn .btn.primary'); if (b) b.focus() })
 
 /** Show me: closes it and opens the item's place. */
 function whatsNewGo(open) {

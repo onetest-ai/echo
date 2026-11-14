@@ -16,6 +16,8 @@ cases:
 
 **Story:** Sam updates Echo: the first window says what this version brings, once. Someone who skipped versions sees each one's, newest first; "Show me" takes them there; anyone can read it again from ⌘K or Settings. On a fresh install there is nothing to say.
 
+**Data:** `small`: `tests/fixtures/serve.sh up <dir> <port>` (the running version seen, as all test data); each stage sets the last version seen with `tests/fixtures/whats_new_seen.py` after `. <dir>/env`.
+
 **Length:** about 5 minutes.
 
 ## Assets
@@ -33,11 +35,11 @@ What's new opens by itself at the window's next load once the last version seen 
 |---|------|------------|-----------|
 | 1 | `lifecycle/TC-014_whats-new-from-the-palette-and-settings.md` | — | — (the lead's data: the running version seen) |
 | 2 | `lifecycle/TC-011_after-an-update-whats-new-shows-once.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py previous` |
-| 3 | `lifecycle/TC-016_an-update-from-before-whats-new-shows-this-versions-items.md` | — | Navigate to `about:blank`; run `python3 tests/fixtures/whats_new_seen.py none` |
-| 4 | `lifecycle/TC-012_skipped-versions-show-grouped-newest-first.md` | — | Navigate to `about:blank`; run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
-| 5 | `lifecycle/TC-013_show-me-opens-the-items-place.md` | — | Navigate to `about:blank`; run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
-| 6 | `lifecycle/TC-015_a-fresh-install-shows-no-whats-new.md` | — | Navigate to `about:blank`; run `python3 tests/fixtures/whats_new_seen.py none`; then its Preconditions' CLI (the calls to the trash) before its first load — last: it empties the calls |
+| 3 | `lifecycle/TC-016_an-update-from-before-whats-new-shows-this-versions-items.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py none` |
+| 4 | `lifecycle/TC-012_skipped-versions-show-grouped-newest-first.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
+| 5 | `lifecycle/TC-013_show-me-opens-the-items-place.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py 0.0.1` |
+| 6 | `lifecycle/TC-015_a-fresh-install-shows-no-whats-new.md` | — | Navigate to `about:blank`; after `. <dir>/env` run `python3 tests/fixtures/whats_new_seen.py none`; then its Preconditions' CLI (the calls to the trash) before its first load — last: it empties the calls |
 
 ## Notes
 - One data build: the last version seen is the only thing that changes between stages, and the fixture sets it in the run's config folder.
-- A real fresh install starts with its own version seen in the app's first run (`app::first_run`); stage 6 checks the window's side: no calls and nothing seen shows nothing and writes nothing.
+- The app, at its start, marks a data folder with no calls and nothing seen as seen (`whats_new::at_start`, Rust); stage 6 checks the window's side: no calls and nothing seen shows nothing and writes nothing.

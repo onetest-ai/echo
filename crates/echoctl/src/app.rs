@@ -87,12 +87,10 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     record_app_path();
     if !paths::home_chosen() {
         first_run();
-        // A fresh install has no What's new to show: this version counts as seen.
-        #[cfg(feature = "tray")]
-        if let Err(e) = crate::whats_new::mark_seen() {
-            eprintln!("what's new: {e:#}");
-        }
     }
+    // Decided once, at start: an Echo with no calls and no What's new seen has nothing to compare with.
+    #[cfg(feature = "tray")]
+    crate::whats_new::at_start();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?; // SIGINT + SIGTERM

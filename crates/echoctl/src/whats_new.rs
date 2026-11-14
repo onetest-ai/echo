@@ -59,16 +59,26 @@ fn seen() -> Option<String> {
     serde_json::from_slice::<Seen>(&std::fs::read(seen_file()).ok()?).ok().map(|s| s.version)
 }
 
-/// The running version counts as seen: shown, or a fresh install's (`app::first_run`).
+/// The running version counts as seen: shown, or a fresh install's (`at_start`).
 pub fn mark_seen() -> Result<()> {
     std::fs::create_dir_all(paths::config_dir())?;
     paths::write_atomic(&seen_file(), &serde_json::to_vec_pretty(&Seen { version: VERSION.into() })?)?;
     Ok(())
 }
 
+/// At the app's start: nothing seen and no calls (a fresh install, or an Echo never used before What's new existed) —
+/// this version counts as seen, so the first call recorded later doesn't bring What's new up in the middle of it.
+pub fn at_start() {
+    if seen().is_none() && crate::calls::all_calls().is_empty() {
+        if let Err(e) = mark_seen() {
+            eprintln!("what's new: {e:#}");
+        }
+    }
+}
+
 /// What the window shows now (`{version, entries}`), or null. Nothing seen yet: with calls, Echo was in use before What's
-/// new existed, and the running version's entry shows; without any, there is nothing to compare with (a fresh install
-/// starts seen, `app::first_run`).
+/// new existed, and the running version's entry shows; without any, there is nothing to compare with (`at_start` marks
+/// that seen).
 pub fn pending() -> Value {
     let all = entries();
     let show = match seen() {
@@ -216,8 +226,8 @@ mod tests {
         // Nothing seen and no calls: nothing to compare with, and asking writes nothing (the window asks every few seconds).
         assert!(pending().is_null());
         assert_eq!(seen(), None);
-        // A fresh install starts seen (`app::first_run`): nothing.
-        mark_seen().unwrap();
+        // The app's start marks it seen; a call recorded later brings nothing up.
+        at_start();
         assert_eq!(seen().as_deref(), Some(VERSION));
         assert!(pending().is_null());
         // An update: the versions since the last seen; once shown (seen), nothing.
@@ -234,6 +244,8 @@ mod tests {
         let call = root.join("home/calls/2026-11-01_100000_acme-sync");
         std::fs::create_dir_all(&call).unwrap();
         std::fs::write(call.join("meta.json"), "{}").unwrap();
+        at_start();
+        assert_eq!(seen(), None, "with calls, the start leaves it to the window");
         let p = pending();
         assert_eq!(p["entries"].as_array().map(Vec::len), Some(1));
         assert_eq!(p["entries"][0]["version"], VERSION);

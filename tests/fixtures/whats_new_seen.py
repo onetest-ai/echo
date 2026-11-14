@@ -40,7 +40,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     config, home = os.environ.get("ECHOCTL_CONFIG_DIR"), os.environ.get("ECHOCTL_HOME")
-    if not config or not home or os.path.commonpath([config, home]) in ("/", os.path.expanduser("~")):
+    # Only a test data folder (make_data.py): its home/ and config/ side by side under one folder with its manifest.
+    base = os.path.dirname(os.path.abspath(config or "")) if config else ""
+    if not (config and home and base and os.path.dirname(os.path.abspath(home)) == base
+            and os.path.exists(os.path.join(base, "manifest.json"))):
         sys.exit("run it after `. <dir>/env` (ECHOCTL_CONFIG_DIR and ECHOCTL_HOME of the run's test data)")
     bin = os.environ.get("ECHOCTL_BIN") or os.path.join(ROOT, "target", "debug", "echoctl.exe" if os.name == "nt" else "echoctl")
     write(config, bin, sys.argv[1])

@@ -25,7 +25,7 @@ tags: [lifecycle, whats-new]
 |---|---|---|
 | 1 | Load `{{base_url}}/`; in `browser_evaluate` run `async () => (await (await fetch('api/whats-new')).json()).entries.flatMap((e) => e.items).filter((i) => i.open).map((i) => [i.title, i.open])` | The items with a place; pick the first whose `open` starts with `settings` (else the first): its TITLE and OPEN |
 | 2 | In the dialog, click "Show me" on the item TITLE (`button[aria-label="Show me: TITLE"]`) | The dialog closes; the URL ends `#OPEN`; that place shows (for `settings/plugins`: Settings with the Plugins section) |
-| 3 | Reload `{{base_url}}/`, wait 3 s | No dialog |
+| 3 | Reload the page (`location.reload()`), wait 3 s | No dialog |
 | 4 | Press `ControlOrMeta+k`, type `What's new`, press Enter; click "Show me" on an item whose `open` is another place (e.g. `today`, `projects`) | The dialog closes; that place shows |
 
 ## Expected Final State

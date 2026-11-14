@@ -26,7 +26,7 @@ tags: [lifecycle, whats-new, update]
 | 2 | Load `{{base_url}}/`; in `browser_evaluate` read `api/whats-new` (`version`, `entries[0].version`) | Both are the running version V |
 | 3 | Snapshot | A dialog "What's new in Echo V" with `entries[0]`'s items only: no older version's items, no version headers |
 | 4 | Click "Got it"; run `cat "$ECHOCTL_CONFIG_DIR/whats-new-seen.json"` | The dialog closes; `version` V |
-| 5 | Reload `{{base_url}}/`, wait 3 s | No dialog |
+| 5 | Reload the page (`location.reload()`), wait 3 s | No dialog |
 
 ## Expected Final State
 The user who updated from a version without What's new saw this version's items once.
