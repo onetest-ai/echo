@@ -178,8 +178,7 @@ function myWorkView(w) {
   // The plugins' items for you (`ctx.work.provide`) among them, by the same date order; each with its plugin's icon.
   for (const r of w.plugins || []) tasks.push([r, 'plugin', ''])
   tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
-  const ask = linkAsked(S, 'wrOpen', Date.now())
-  const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t), ask) : card(t, kind, who))
+  const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t)) : card(t, kind, who))
   // Yolo's bar is Today's (it reads Today's asks), not a dashboard's.
   const asks = S.view === 'today'
   return cards2.length || (asks && S.todayAskId) ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${asks ? todayAskBar() : ''}<div class="td-tasks">${cards2.join('')}</div></section>` : ''

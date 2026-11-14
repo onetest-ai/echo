@@ -2386,9 +2386,9 @@
         "green": "main is green",
         "openLink": "Open",
         "rerun": "Re-run",
-        "ask": "Open ci.example in the browser? Click Open again · Cancel",
-        "cancel": "Cancel",
-        "askStart": "Open ci.example in the browser?"
+        "openTitle": "Open in the browser (ci.example)",
+        "url": "https://ci.example/run/42",
+        "askStart": "in the browser?"
       },
       "broken": "Couldn't draw this — a stat needs value",
       "sprint": [
