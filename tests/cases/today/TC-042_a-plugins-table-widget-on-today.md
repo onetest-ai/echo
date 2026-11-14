@@ -1,6 +1,6 @@
 ---
 id: TC-042
-title: A plugin's table widget on Today — column names in small caps that stay put while its rows scroll inside the card, rows under their group's header with a count, pills, short dates, numbers at the end, a column hidden at M, a row's details on ▸, its link (https asks first), its text escaped; data it can't draw says why; stats items' "Details ›"
+title: A plugin's table widget on Today — column names in small caps that stay put while its rows scroll inside the card, rows under their group's header with a count, pills, short dates, numbers at the end, a column hidden at M, a row's details on ▸, its link (https opens on the first click), its text escaped; data it can't draw says why; stats items' "Details ›"
 priority: high
 type: functional
 requirements: [F-TODAY-27]

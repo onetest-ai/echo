@@ -1144,7 +1144,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     for (const card of x.cards) await expect(today.widget(card.title)).toHaveCount(0)
   })
 
-  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link asked before it leaves Echo, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
+  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link opened on the first click, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
     const w = data.text.widgets
     const x = w.plugin
     const t = x.trend

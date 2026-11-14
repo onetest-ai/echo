@@ -8,7 +8,7 @@ function workRowIcon(r) {
   return r.icon ? `<img class="wr-ic" src="${esc(r.icon)}" alt="${esc(from)}" title="${esc(from)}" width="12" height="12">`
     : `<span class="wr-ic wr-letter" title="${esc(from)}" role="img" aria-label="${esc(from)}">${esc(String(r.source_name || r.source || '?').trim().charAt(0).toUpperCase())}</span>`
 }
-/** An outside page's host, as the question names it. */
+/** An outside page's host, as its link's tooltip names it. */
 const linkHost = (url) => { try { return new URL(url).host } catch { return 'the link' } }
 /** A plugin's work row. */
 function workRowHtml(r, due, acts) {
