@@ -23,3 +23,9 @@
 .wp-val.unset { white-space: nowrap; }
 .wp-val.unset u { margin-left: 2px; }
 
+
+/* A client's About: an accordion (folded by default); its head the fold, Edit beside it. */
+.about-fold { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding: 2px 0; color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.about-fold .chev { width: 12px; height: 12px; color: var(--text-2); }
+.about-fold:hover .chev { color: var(--text); }
+.about-acc:not(.open) .set-row { border-bottom: 0; }
