@@ -540,10 +540,10 @@ pub fn view(fresh: bool) -> Value {
     v
 }
 
-/// The same for the CLI, read only: a terminal's process sees neither the app's sign-in checks nor
-/// its update check, so it never writes the record (what it can't see would look done).
+/// The same for the CLI, read only: a terminal's process sees neither the app's sign-in checks (it makes its own,
+/// 8 s at most) nor its update check, so it never writes the record (what it can't see would look done).
 pub fn peek() -> Value {
-    crate::signin::check_all_now();
+    crate::signin::check_all_now(Duration::from_secs(8));
     let got = collect();
     let mut rec = read(&file());
     let open = fold(&mut rec, &got, chrono::Utc::now());

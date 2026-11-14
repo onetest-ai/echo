@@ -712,13 +712,16 @@ pub fn refresh(p: &Profile, force: bool) {
 }
 
 /// Each Claude profile's sign-in checked now and waited for, side by side: `echoctl attention`'s process has no
-/// background check to wait for, so without it the list never had its sign-in item (#513).
-pub fn check_all_now() {
+/// background check to wait for, so without it the list never had its sign-in item (#513). At most `within`: a check
+/// still going then is stopped (nothing learned, the item kept as it was) — it holds the profile's shared lease, which
+/// a sign-in waits 10 s for.
+pub fn check_all_now(within: Duration) {
     let Ok(s) = ai::Settings::load() else { return };
+    let t = Instant::now();
     std::thread::scope(|sc| {
         for p in s.profiles.iter().filter(|p| p.kind.signs_in()) {
             sc.spawn(move || {
-                let _ = ai::observe(p, &|| false);
+                let _ = ai::observe(p, &|| t.elapsed() >= within);
             });
         }
     });
@@ -1203,10 +1206,12 @@ mod tests {
         let _fake = fake::install(&root);
         let p = fake::profile("w", None, fake::SIGNED_OUT);
         crate::attention::cache_for_test(serde_json::json!({"open": []}));
+        let g = crate::attention::generation();
         assert_eq!(st(&p), "unknown", "nothing known yet: a check starts");
         until("signed out", || st(&p) == "signed_out");
         until("threads ended", idle);
-        assert!(!crate::attention::cached(), "the Inbox's last answer is dropped: the window reads it again (#513)");
+        assert!(!crate::attention::cached(), "the Inbox's last answer is dropped");
+        assert!(crate::attention::generation() > g, "the window's state says so: it reads the Inbox again (#513)");
         // Checked again and found the same: the Inbox keeps its answer.
         crate::attention::cache_for_test(serde_json::json!({"open": []}));
         refresh(&p, true);
@@ -1221,9 +1226,17 @@ mod tests {
         reset();
         let _fake = fake::install(&root);
         let p = fake::profile("w", None, fake::SIGNED_OUT);
-        check_all_now();
+        check_all_now(Duration::from_secs(8));
         assert_eq!(st(&p), "signed_out");
         assert!(idle(), "no check left running");
+        // A check that takes too long is stopped at the limit: nothing learned, nothing waited for past it.
+        let v = fake::profile("v", None, fake::SIGNED_OUT);
+        fs::write(fake::file(&v, "stall"), "").unwrap();
+        let t = Instant::now();
+        check_all_now(Duration::from_millis(500));
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert!(ai::observation("v").is_none(), "a stopped check publishes nothing");
+        until("threads ended", idle);
     }
 
     #[test]

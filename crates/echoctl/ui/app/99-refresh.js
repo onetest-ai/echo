@@ -21,7 +21,9 @@ async function tick() {
   const inbox = S.state && S.state.attention
   const moved = inbox != null && S.inboxSeen != null && inbox !== S.inboxSeen
   if (inbox != null) S.inboxSeen = inbox
-  if (moved || ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
+  // Moved: a fresh read, not one already on its way (it may have left before the change).
+  if (moved) await loadAttention(true)
+  else if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); await loadBoards(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   // Today open a while: read again every minute (the plugins' work rows and widgets are asked again in the background).
