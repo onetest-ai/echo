@@ -5,8 +5,10 @@ async function tick() {
   if (document.hidden) return
   ticks++
   const before = JSON.stringify(S.state)
+  const plugins = S.state && S.state.plugins
   await loadState()
   const changed = JSON.stringify(S.state) !== before
+  if (plugins && S.state && S.state.plugins && S.state.plugins !== plugins) await pluginsChanged()
   if (changed || ticks % 3 === 0) await loadCalls()
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
   if (ticks % 15 === 0 && [...Terms.values()].some((e) => e.id != null && !e.exited)) await loadPtyInfo() // Restart to update

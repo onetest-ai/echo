@@ -262,7 +262,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
     }
     // Requests left by a previous run (a timed-out quit, say) must not act on this one.
-    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request", "memo.request", "quit.asking", "quit.cancelled"] {
+    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request", "memo.request", "plugins.request", "quit.asking", "quit.cancelled"] {
         let _ = fs::remove_file(file(f));
     }
     let detects_calls = audio::app_in_call(app).is_some();
@@ -628,6 +628,12 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             if age > ARM_EXPIRES && !waiting_for(waits_other.as_deref(), a, now) && take_arm(&a.id) {
                 emit("arm_expired", json!({ "title": a.title }));
             }
+        }
+
+        // `echoctl plugin install / update / enable / disable / remove` from a terminal: the host halves follow.
+        #[cfg(feature = "js")]
+        if fs::remove_file(file("plugins.request")).is_ok() {
+            crate::jshost::sync();
         }
 
         // The window switched the AI profile of the call being recorded (this loop owns meta.json).

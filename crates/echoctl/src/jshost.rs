@@ -414,6 +414,11 @@ pub fn as_app() {
     APP.store(true, Ordering::Relaxed);
 }
 
+/// Whether this process is the app (`as_app`).
+pub fn is_app() -> bool {
+    APP.load(Ordering::Relaxed)
+}
+
 fn host() -> &'static Host {
     HOST.get_or_init(|| {
         let (tx, rx) = channel();
@@ -425,7 +430,21 @@ fn host() -> &'static Host {
 
 /// Load every enabled plugin's host half (the app at start, and after an install or a switch).
 pub fn sync() {
+    if let Ok(mut s) = SYNCED.lock() {
+        *s = plugins::stamp();
+    }
     sync_some(None)
+}
+
+/// What was installed and on at the last `sync` (`plugins::stamp`).
+static SYNCED: Mutex<String> = Mutex::new(String::new());
+
+/// The app's host halves load again when what is installed and on changed since (a CLI change the watcher hasn't
+/// taken, or a served window with no watcher).
+pub fn follow(stamp: &str) {
+    if is_app() && SYNCED.lock().map(|s| *s != stamp).unwrap_or(false) {
+        sync();
+    }
 }
 
 /// Load (or reload) plugin `id` only, leaving the others as they are: a terminal's `echoctl plugin call` runs no other

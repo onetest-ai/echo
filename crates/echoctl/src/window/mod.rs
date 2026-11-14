@@ -417,8 +417,13 @@ fn read_json(p: &Path) -> Value {
 
 fn state() -> Value {
     let w = watch::running_watcher();
+    let plugins = crate::plugins::stamp();
+    #[cfg(feature = "js")]
+    crate::jshost::follow(&plugins);
     json!({
         "version": env!("CARGO_PKG_VERSION"),
+        // What is installed and on: the window's plugin parts follow its change.
+        "plugins": plugins,
         "recording": w.as_ref().and_then(|w| w.recording.clone()),
         "recording_memo": w.as_ref().is_some_and(|w| w.memo),
         // The recording call's language, which the pill changes (`call_language::change`).
