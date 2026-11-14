@@ -417,8 +417,22 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widget(n.yourDay)).toHaveCount(0)
       await today.activity(todayIs).click()
       await onNow()
+      // Scrolled on Today, then a thread's dashboard with Your day (a list of its own, and a scroll there), then straight
+      // to Today: on now. (The thread's day fits its card, so the scroll there is the list's scroll event, sent.)
+      const thread = data.set.needs.chatThread.id
+      expect(data.cli('today', '--thread', thread, 'add', id.agenda).code).toBe(0)
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      await page.evaluate((h) => { location.hash = h }, `#project/${thread}/brief`)
+      await expect(today.widget(n.yourDay)).toBeVisible()
+      await today.onWidget(n.yourDay, (el) => el.querySelector('.td-rows').dispatchEvent(new Event('scroll')))
+      await today.activity(todayIs).click()
+      await expect(today.editToday.or(today.done).first()).toBeVisible()
+      await onNow()
     } finally {
       data.cli('today', 'reset')
+      data.cli('today', '--thread', data.set.needs.chatThread.id, 'reset')
     }
     expect(layout()).toEqual(w.default)
   })

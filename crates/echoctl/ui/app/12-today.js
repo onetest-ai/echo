@@ -2,8 +2,7 @@
 function drawToday(primary) {
   // Your day's list is placed on now on every draw, unless the user scrolled it in the last 10 minutes: then where they
   // put it (`tdUserScroll`). Not a kept offset of Today's own: its rows reflow when Today's columns change width, and
-  // the offset would leave now out of view. Today drawn anew (opened again) starts on now.
-  if (!$('.td-rows')) S.tdScrolledAt = 0
+  // the offset would leave now out of view. Today opened again starts on now (`renderNow` clears it in another view).
   const keep = S.tdScrolledAt && Date.now() - S.tdScrolledAt < TD_SCROLL_KEPT ? S.tdUserTop : null
   // The page kept where it was scrolled when Today is drawn again (a meeting's card opening or closing redraws it).
   const page = $('.td'), pageTop = page ? page.scrollTop : 0
@@ -35,11 +34,9 @@ function drawToday(primary) {
         const whole = [...r.children].map(at).filter((y) => y <= max && y >= shown)
         to = whole.length ? Math.max(...whole) : max
       }
-      // Today's own scroll, not the user's (`tdUserScroll`): its scroll event comes a frame or two later.
-      r._placed = { h: r.scrollHeight, c: r.clientHeight }
-      tdPlacing++
-      requestAnimationFrame(() => requestAnimationFrame(() => tdPlacing--))
       r.scrollTop = Math.max(0, to)
+      // Where it is now (as the browser has it): a scroll event that finds it there is this one's, not the user's.
+      r._placedTop = r.scrollTop
     }
     place()
     // Again once Today's layout has settled (a held column takes its height a moment later, #368): a list not yet
@@ -51,14 +48,10 @@ function drawToday(primary) {
 const TD_SCROLL_KEPT = 10 * 60000
 // The fade at the bottom of a list cut by its card (74-today.css `[data-more]::after`).
 const TD_FADE = 32
-let tdPlacing = 0
-/** A scroll of Your day's list is the user's (touch, wheel, keys, its scrollbar, find in the page, a screen reader)
- *  unless Today placed it a frame or two before, or its size changed since it was placed (the browser keeping it
- *  inside a list that got shorter). */
+/** A scroll of Today's Your day is the user's (touch, wheel, keys, its scrollbar, find in the page, a screen reader)
+ *  unless it is where Today placed it (`drawToday`): that scroll's own event, or the browser keeping it in bounds. */
 function tdUserScroll(r) {
-  const p = r._placed
-  if (tdPlacing) return
-  if (p && (p.h !== r.scrollHeight || p.c !== r.clientHeight)) { r._placed = { h: r.scrollHeight, c: r.clientHeight }; return }
+  if (S.view !== 'today' || r.scrollTop === r._placedTop) return
   S.tdScrolledAt = Date.now()
   S.tdUserTop = r.scrollTop
 }
