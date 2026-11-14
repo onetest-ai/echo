@@ -995,6 +995,8 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
+    // Each namespace's owner kept from now on: a later removal or update never hands one over (`shared`).
+    shared::bind_all();
     // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
     // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
     let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
@@ -1067,6 +1069,8 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
+    // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
+    shared::bind_all();
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(installed_dir(id));

@@ -76,15 +76,19 @@ fn bindings() -> std::path::PathBuf {
     super::plugins_dir().join("namespaces.json")
 }
 
+fn read_bindings() -> Map<String, Value> {
+    std::fs::read(bindings()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
 /// The source that owns `ns` (bound now when it wasn't, or its owner's plugins are all gone).
 fn owner(all: &[(String, String, String)], ns: &str) -> Option<String> {
-    let read = || -> Map<String, Value> { std::fs::read(bindings()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default() };
-    let now = pick(read().get(ns).and_then(Value::as_str), all, ns);
-    if read().get(ns).and_then(Value::as_str) != now.as_deref() {
-        // Under the registry's lock: two processes binding at once agree.
+    let was = read_bindings().get(ns).and_then(Value::as_str).map(str::to_owned);
+    let now = pick(was.as_deref(), all, ns);
+    if was != now {
+        // Under the namespaces' own lock: two processes binding at once agree.
         let path = bindings();
         if let Ok(_l) = super::wait_lock_for(&path.with_extension("lock"), "the plugins' namespaces", LOCK_WAIT) {
-            let mut b = read();
+            let mut b = read_bindings();
             let now = pick(b.get(ns).and_then(Value::as_str), all, ns);
             match &now {
                 Some(src) => drop(b.insert(ns.to_string(), Value::String(src.clone()))),
@@ -95,6 +99,18 @@ fn owner(all: &[(String, String, String)], ns: &str) -> Option<String> {
         }
     }
     now
+}
+
+/// Every namespace installed now bound to its owner: after an install and before a removal, so the owner is kept
+/// whether or not a plugin read a shared value meanwhile.
+pub fn bind_all() {
+    let all = members();
+    let mut seen = std::collections::BTreeSet::new();
+    for (_, _, ns) in &all {
+        if !ns.is_empty() && seen.insert(ns.clone()) {
+            owner(&all, ns);
+        }
+    }
 }
 
 /// The plugins that share `ns` (those from its owner's source).

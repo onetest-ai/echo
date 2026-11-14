@@ -2630,14 +2630,23 @@ mod tests {
             std::fs::write(mk.join("echo-marketplace.json"), json!({"name": name, "plugins": plugins}).to_string()).unwrap();
             let m = plugins::market_add(mk.to_str().unwrap(), Some(dir)).unwrap();
             plugins::refresh(&m).unwrap();
-            for id in ids {
-                let r = plugins::review(id, Some(&m)).unwrap();
-                plugins::install(id, Some(&m), &r.uses).unwrap();
-            }
+        };
+        let install = |id: &str, m: &str| {
+            let r = plugins::review(id, Some(m)).unwrap();
+            plugins::install(id, Some(m), &r.uses).unwrap();
+            std::thread::sleep(Duration::from_millis(5)); // each its own install time
         };
         market("acme", "Acme", &["a", "b"]);
         market("acme-copy", "Acme", &["c"]);
         market("other", "Other", &["d"]);
+        // a, then the copy's c, then b: before any value is read or set, a removed and put back — b keeps the name for
+        // Acme, never the copy (installed before b).
+        install("a", "acme");
+        install("c", "acme-copy");
+        install("b", "acme");
+        install("d", "other");
+        plugins::remove("a", true).unwrap();
+        install("a", "acme");
         sync();
         let call_ok = |id: &str, cmd: &str, a: Value| (0..50).find_map(|_| call(id, cmd, &a).ok().or_else(|| {
             std::thread::sleep(Duration::from_millis(50));
