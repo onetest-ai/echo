@@ -113,6 +113,20 @@ pub fn bind_all() {
     }
 }
 
+/// The namespaces bound to `source` that no installed plugin of it declares any more let go (its marketplace removed
+/// with its plugins, #616); other sources' bindings are left as they are, and the shared values themselves stay.
+pub fn release_namespaces(source: &str) {
+    let path = bindings();
+    let Ok(_l) = super::wait_lock_for(&path.with_extension("lock"), "the plugins' namespaces", LOCK_WAIT) else { return };
+    let all = members();
+    let mut b = read_bindings();
+    let n = b.len();
+    b.retain(|ns, src| src.as_str() != Some(source) || all.iter().any(|(_, s, x)| x == ns && s == source));
+    if b.len() != n {
+        let _ = serde_json::to_vec_pretty(&b).map(|t| paths::write_atomic(&path, &t));
+    }
+}
+
 /// The plugins that share `ns` (those from its owner's source).
 pub fn sharers(ns: &str) -> Vec<String> {
     let all = members();

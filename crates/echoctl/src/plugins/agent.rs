@@ -473,6 +473,21 @@ pub fn claim_prefix(id: &str, market: &str, prefix: &str, bind: bool) -> Result<
     Ok(())
 }
 
+/// The prefixes `source` held that no installed plugin of it uses any more let go (its marketplace removed with its
+/// plugins, #616); other sources' are left as they are.
+pub fn release_prefixes(source: &str) {
+    let path = prefixes_file();
+    let Ok(_l) = super::wait_lock_for(&path.with_extension("lock"), "the plugins' prefixes", std::time::Duration::from_secs(5)) else { return };
+    let Ok(r) = super::Registry::load() else { return };
+    let users = prefix_users(&r);
+    let Some(mut held) = fs::read(&path).ok().and_then(|b| serde_json::from_slice::<serde_json::Map<String, Value>>(&b).ok()) else { return };
+    let n = held.len();
+    held.retain(|prefix, src| src.as_str() != Some(source) || users.iter().any(|(_, s, x)| x == prefix && s == source));
+    if held.len() != n {
+        let _ = serde_json::to_vec_pretty(&held).map(|t| paths::write_atomic(&path, &t));
+    }
+}
+
 /// What Echo laid out for plugin `id`, outside the folder: `{files, at, echo, content}` — the installed files' hash,
 /// the folder's path, this Echo's version and the hash of what was written.
 fn record_file(id: &str) -> PathBuf {
@@ -1366,21 +1381,19 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_marketplace_still_holds_the_prefix_of_its_installed_plugin() {
+    fn a_removed_marketplace_takes_its_plugin_and_lets_its_prefix_go() {
+        // #616: removing the marketplace removes its installed plugin, and the prefix it held is free for another source.
         let (_env, root) = paths::testenv::folders("agent-prefix-removed-market");
         offer_in(&root, "ma", "pa", "ab", &["x"]);
         offer_in(&root, "mb", "pb", "ab", &["y"]);
         install_from(&root, "ma", "pa").unwrap();
-        super::super::market_remove(&super::super::market_named("ma").unwrap()).unwrap();
-        // Its plugin is still installed: the prefix stays its source's.
         let e = install_from(&root, "mb", "pb").unwrap_err().to_string();
         assert!(e.contains("its skills prefix “ab” is held by pa"), "{e}");
-        super::super::set_enabled("pa", false).unwrap();
-        super::super::set_enabled("pa", true).unwrap();
-        assert!(folder("pa").join(".claude/skills/ab-x").is_dir());
-        // Removed, it lets the prefix go.
-        super::super::remove("pa", true).unwrap();
+        assert_eq!(super::super::market_remove(&super::super::market_named("ma").unwrap(), true).unwrap(), ["pa"]);
+        assert!(!folder("pa").exists(), "its folder for Claude gone with it");
+        assert!(!fs::read_to_string(prefixes_file()).unwrap_or_default().contains("\"ab\""), "released");
         install_from(&root, "mb", "pb").unwrap();
+        assert!(folder("pb").join(".claude/skills/ab-y").is_dir());
     }
 
     #[test]

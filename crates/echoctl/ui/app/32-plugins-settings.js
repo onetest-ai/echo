@@ -160,11 +160,19 @@ function plMarkets(p) {
     const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
     // My plugins: the user's own folder — no menu (never hidden or removed), a word on what goes there.
     const mine = m.name === 'my-plugins'
-    const menu = mine ? '' : S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
+    const menu = mine ? '' : S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mask-remove="${esc(m.name)}">Remove…</button>`}</div>` : ''
     const label = mine ? 'My plugins' : m.name
+    // Removing it removes the plugins installed from it (#616): asked first, naming them, their data kept or not.
+    // Every plugin installed from it, whether its catalog still lists it or not: all of them go (`installed_from`).
+    const ours = (p.installed || []).filter((x) => x.market === m.name).sort((a, b) => a.name.localeCompare(b.name))
+    const names = ours.map((x) => x.name).join(', ')
+    const danger = 'style="background:var(--danger);border-color:var(--danger)"'
+    const ask = S.plMRemove !== m.name ? '' : ours.length
+      ? `<div class="confirm"><span>Remove ${esc(m.name)}? Its ${ours.length} installed plugin${ours.length === 1 ? '' : 's'} go${ours.length === 1 ? 'es' : ''} with it: ${esc(names)}.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn" data-pl-mremove="${esc(m.name)}" data-keep="1">Remove, keep their data</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="0">Remove with their data</button></div>`
+      : `<div class="confirm"><span>Remove ${esc(m.name)}? Its plugins leave Discover.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="1">Remove</button></div>`
     const what = mine ? '<div class="pl-s">Your own plugins and widgets, a folder each — ask Claude to make one (the build skill).</div>' : ''
     return `<div class="pl-mrow" role="group" aria-label="${esc(label)}">${plTile({ id: m.name, name: label })}<div class="pl-txt"><div class="pl-n">${esc(label)}${!mine && m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div>${what}<div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
-      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>${mine ? '' : `<span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span>`}</div>`
+      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>${mine ? '' : `<span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span>`}</div>${ask}`
   })
   const add = `<section class="pl-add"><b>Add a marketplace</b>
     <div class="pl-addrow"><input class="set-in" id="pl-msrc" placeholder="owner/repo, a git address, or a folder" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="Name (optional)" aria-label="Name" spellcheck="false"><button class="btn primary" data-pl-madd>Add</button></div>
@@ -174,12 +182,12 @@ function plMarkets(p) {
 }
 // The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-mask-remove],[data-pl-mremove-cancel],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
   if (!t) { if (S.plMenu) { S.plMenu = null; render() } return }
   const d = t.dataset
   // The sheet's backdrop closes it; a click inside the sheet doesn't.
   if ('plSheetCancel' in d && t.classList.contains('pl-scrim') && e.target.closest('.pl-sheet')) return
-  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; return render() }
+  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; S.plRemove = null; S.plMRemove = null; return render() }
   if (d.plEnable) { e.stopPropagation(); return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' }) }
   if (d.plSel) { S.plSel = d.plSel; S.plRemove = null; return render() }
   if (d.plCat != null && t.classList.contains('pl-cat')) { S.plCat = d.plCat; return render() }
@@ -205,7 +213,9 @@ document.addEventListener('click', (e) => {
   if (d.plRemove) { S.plRemove = null; return pluginOp('remove', { id: d.plRemove, keep_data: d.keep === '1' }) }
   if (d.plMrefresh) return pluginOp('market_refresh', { name: d.plMrefresh })
   if (d.plMhide) return pluginOp('market_hide', { name: d.plMhide, hidden: d.hidden === 'true' })
-  if (d.plMremove) return pluginOp('market_remove', { name: d.plMremove })
+  if (d.plMaskRemove) { S.plMRemove = d.plMaskRemove; S.plMenu = null; return render() }
+  if ('plMremoveCancel' in d) { S.plMRemove = null; return render() }
+  if (d.plMremove) { S.plMRemove = null; return pluginOp('market_remove', { name: d.plMremove, keep_data: d.keep !== '0' }) }
   if ('plMadd' in d) {
     const source = ($('#pl-msrc') || {}).value || '', name = ($('#pl-mname') || {}).value || ''
     if (source.trim()) pluginOp('market_add', { source: source.trim(), name: name.trim() })

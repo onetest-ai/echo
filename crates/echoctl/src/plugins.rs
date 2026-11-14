@@ -991,13 +991,33 @@ pub fn market_add(source: &str, name: Option<&str>) -> Result<String> {
     Ok(name)
 }
 
-/// Remove a marketplace the user added (its installed plugins stay, without updates).
-pub fn market_remove(name: &str) -> Result<()> {
+/// Marketplace `name` may be removed — an added one (the built-in one is only hidden, My plugins stays): its source.
+pub fn removable(name: &str) -> Result<String> {
     if name == BUILT_IN_NAME {
         bail!("the built-in marketplace can be hidden, not removed");
     }
     if name == MINE {
         bail!("My plugins is always there: it is your own folder of plugins");
+    }
+    Registry::load()?.markets.into_iter().find(|m| m.name == name).map(|m| m.source).ok_or_else(|| anyhow!("no marketplace “{name}”"))
+}
+
+/// The plugins installed from marketplace `name`: (id, name), by name.
+pub fn installed_from(name: &str) -> Result<Vec<(String, String)>> {
+    let r = Registry::load()?;
+    let mut v: Vec<(String, String)> = r.installed.values().filter(|p| p.market == name).map(|p| (p.id.clone(), p.name.clone())).collect();
+    v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    Ok(v)
+}
+
+/// Remove marketplace `name` and the plugins installed from it (#616) — each as `remove` does, its data kept or not,
+/// before the marketplace goes (its namespace's owner is read from it) — then release the skills prefixes and shared
+/// namespaces no installed plugin of a source holds. The ids removed. The built-in one is only hidden; My plugins stays.
+pub fn market_remove(name: &str, keep_data: bool) -> Result<Vec<String>> {
+    let source = removable(name)?;
+    let ids: Vec<String> = installed_from(name)?.into_iter().map(|(id, _)| id).collect();
+    for id in &ids {
+        remove(id, keep_data)?;
     }
     Registry::update(|r| {
         let n = r.markets.len();
@@ -1008,7 +1028,9 @@ pub fn market_remove(name: &str) -> Result<()> {
         Ok(())
     })?;
     let _ = fs::remove_dir_all(market_dir(name));
-    Ok(())
+    agent::release_prefixes(&source);
+    shared::release_namespaces(&source);
+    Ok(ids)
 }
 
 pub fn market_hide(name: &str, hidden: bool) -> Result<()> {
@@ -1334,7 +1356,7 @@ pub fn page_op(v: &Value) -> Result<()> {
             }
         }
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
-        "market_remove" => market_remove(&s("name")),
+        "market_remove" => market_remove(&s("name"), v["keep_data"].as_bool().unwrap_or(true)).map(|_| ()),
         "market_add" => {
             let src = s("source");
             let name = market_add(&src, Some(&s("name")).filter(|n| !n.is_empty()).map(String::as_str))?;
@@ -1690,7 +1712,7 @@ mod tests {
         let (_env, root) = paths::testenv::folders("plugins-mine");
         // Always listed, never removed or hidden; its folder made when read.
         assert!(Registry::load().unwrap().all_markets().iter().any(|(m, built)| m.name == MINE && *built));
-        assert!(market_remove(MINE).is_err() && market_hide(MINE, true).is_err());
+        assert!(market_remove(MINE, true).is_err() && market_hide(MINE, true).is_err());
         let d = plugin(&paths::home(), "standup", "0.1.0", json!({}));
         fs::create_dir_all(mine_dir().join("notes-only")).unwrap(); // no manifest: not a plugin
         let c = refresh(MINE).unwrap();
@@ -1815,8 +1837,53 @@ mod tests {
         assert_eq!(snap["markets"][2]["name"], "acme");
         remove("demo", false).unwrap();
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
-        market_remove("acme").unwrap();
-        assert!(market_remove(BUILT_IN_NAME).is_err());
+        assert_eq!(market_remove("acme", true).unwrap(), Vec::<String>::new(), "nothing installed from it");
+        assert!(market_remove(BUILT_IN_NAME, true).is_err());
+    }
+
+    #[test]
+    fn removing_a_marketplace_removes_its_plugins_and_releases_what_they_held() {
+        // #616: its installed plugins go with it (data kept or not), then the prefixes and namespaces their source held.
+        let (_env, root) = paths::testenv::folders("plugins-market-remove");
+        let mk = root.join("market");
+        plugin(&mk, "demo", "0.1.0", json!({}));
+        plugin(&mk, "later", "0.1.0", json!({}));
+        market(&mk, &["demo", "later"]);
+        let add = |n: &str| {
+            let name = market_add(mk.to_str().unwrap(), Some(n)).unwrap();
+            refresh(&name).unwrap();
+            name
+        };
+        let put = |name: &str, id: &str| {
+            let rv = review(id, Some(name)).unwrap();
+            install(id, Some(name), &rv.uses).unwrap();
+        };
+        let name = add("acme");
+        put(&name, "demo");
+        put(&name, "later");
+        shared::bind_all();
+        let held = |f: &str| fs::read_to_string(plugins_dir().join(f)).unwrap_or_default();
+        assert!(held("namespaces.json").contains("\"test\""), "its namespace bound: {}", held("namespaces.json"));
+        let src = Registry::load().unwrap().markets.iter().find(|m| m.name == name).unwrap().source.clone();
+        fs::write(plugins_dir().join("prefixes.json"), json!({"kit": src, "other": "someone/else"}).to_string()).unwrap();
+        fs::create_dir_all(data_dir("demo")).unwrap();
+        fs::write(data_dir("demo").join("mine.json"), "1").unwrap();
+        assert_eq!(installed_from(&name).unwrap(), [("demo".to_string(), "Plugin demo".to_string()), ("later".to_string(), "Plugin later".to_string())]);
+        assert_eq!(market_remove(&name, true).unwrap(), ["demo", "later"]);
+        let r = Registry::load().unwrap();
+        assert!(r.installed.is_empty() && !r.markets.iter().any(|m| m.name == name), "the plugins and the marketplace gone");
+        assert!(data_dir("demo").join("mine.json").exists(), "data kept");
+        assert!(!held("prefixes.json").contains("kit") && !held("namespaces.json").contains("\"test\""), "released");
+        assert!(held("prefixes.json").contains("someone/else"), "another source's prefix left as it was");
+        // Data deleted on asking; a marketplace with nothing installed from it removed as before; others refused.
+        let name = add("acme-again");
+        put(&name, "demo");
+        assert_eq!(market_remove(&name, false).unwrap(), ["demo"]);
+        assert!(!data_dir("demo").exists(), "data deleted");
+        assert!(market_remove("nope", true).unwrap_err().to_string().contains("no marketplace"));
+        // Never removable: asked before anything is listed or removed (the CLI's --yes).
+        assert!(removable(BUILT_IN_NAME).unwrap_err().to_string().contains("hidden, not removed"));
+        assert!(removable(MINE).unwrap_err().to_string().contains("always there"));
     }
 
     #[test]
@@ -1919,7 +1986,7 @@ mod tests {
         assert!(e.contains("no marketplace “globex”") && e.contains("Acme"), "names the ones there are: {e}");
         // The built-in one, said in another case, is found — and still can't be removed.
         assert_eq!(market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), BUILT_IN_NAME);
-        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap()).is_err());
+        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), true).is_err());
         // Two whose names differ only in case (a hand-edited plugins.json): the exact one, else neither.
         Registry::update(|r| {
             r.markets.push(Market { name: "ACME".into(), source: "acme/plugins".into(), hidden: false });

@@ -642,6 +642,8 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await expect(plugins.menuItem(t.hide)).toBeVisible()
     await expect(plugins.menuItem(t.remove)).toBeVisible()
     await plugins.menuItem(t.remove).click()
+    // Asked first (#616): nothing installed from it, so a plain Remove.
+    await page.getByRole('button', { name: t.removeMarket, exact: true }).click()
     await expect(row).toHaveCount(0)
     await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}2`)
     expect(pluginList().markets.map((x) => x.name)).toEqual([m.builtIn.name, 'my-plugins'])
