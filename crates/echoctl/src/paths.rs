@@ -161,12 +161,20 @@ pub mod testenv {
     use std::sync::{Mutex, MutexGuard};
 
     static LOCK: Mutex<()> = Mutex::new(());
+    /// This computer's user home as the test process started (read under the lock, before any test changed it).
+    static REAL_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+    /// The real user home: what no test may reach (its `.claude` above all).
+    pub fn real_home() -> PathBuf {
+        let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        REAL_HOME.get_or_init(super::user_home).clone()
+    }
 
     /// Held by a test: on drop the variables are restored and the folder removed.
     pub struct Env {
         _lock: MutexGuard<'static, ()>,
         root: PathBuf,
-        before: [(&'static str, Option<std::ffi::OsString>); 2],
+        before: [(&'static str, Option<std::ffi::OsString>); 4],
     }
 
     impl Drop for Env {
@@ -196,17 +204,22 @@ pub mod testenv {
     }
 
     /// A fresh `<tmp>/echo-test-<name>-<pid>` with `home/` (ECHOCTL_HOME) and `config/`
-    /// (ECHOCTL_CONFIG_DIR), until the returned guard drops.
+    /// (ECHOCTL_CONFIG_DIR), until the returned guard drops. The user's own home and Claude Code folder are its
+    /// `user/` and `user/.claude` (HOME, CLAUDE_CONFIG_DIR): no test reads this computer's Claude Code setup.
     pub fn folders(name: &str) -> (Env, PathBuf) {
         let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        REAL_HOME.get_or_init(super::user_home);
         crate::livenotes::forget_all();
         let root = std::env::temp_dir().join(format!("echo-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("home/calls")).unwrap();
         std::fs::create_dir_all(root.join("config")).unwrap();
-        let before = ["ECHOCTL_HOME", "ECHOCTL_CONFIG_DIR"].map(|k| (k, std::env::var_os(k)));
+        std::fs::create_dir_all(root.join("user/.claude")).unwrap();
+        let before = ["ECHOCTL_HOME", "ECHOCTL_CONFIG_DIR", "HOME", "CLAUDE_CONFIG_DIR"].map(|k| (k, std::env::var_os(k)));
         std::env::set_var("ECHOCTL_HOME", root.join("home"));
         std::env::set_var("ECHOCTL_CONFIG_DIR", root.join("config"));
+        std::env::set_var("HOME", root.join("user"));
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.join("user/.claude"));
         (Env { _lock: lock, root: root.clone(), before }, root)
     }
 }

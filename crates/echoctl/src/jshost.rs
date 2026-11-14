@@ -838,11 +838,12 @@ fn may_touch_claude_plugin(id: &str, spec: &str) -> Result<()> {
     Ok(())
 }
 
-/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
+/// A plugin command run while Claude prepares and asks — a read-only routine's, or a routine's or Yolo's run with the
+/// user's choice "Claude acts on its own" off (`echoctl plugin call`, its environment inherited): it reads, it changes
 /// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
 fn read_only_here(what: &str) -> Result<()> {
     if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
-        bail!("{what} isn't allowed in a read-only routine");
+        bail!("{what} isn't allowed while Claude prepares and asks");
     }
     Ok(())
 }
@@ -2037,7 +2038,7 @@ mod tests {
             std::env::set_var(crate::guard::RUN_MODE, "routine");
             for command in ["get", "fresh"] {
                 match call("gh-ish", command, &json!({"host": "signin-jshost.example"})) {
-                    Err(e) => assert!(e.to_string().contains("isn't allowed in a read-only routine"), "{e}"),
+                    Err(e) => assert!(e.to_string().contains("isn't allowed while Claude prepares and asks"), "{e}"),
                     Ok(_) => panic!("a read-only routine was handed a sign-in"),
                 }
             }
@@ -2151,7 +2152,7 @@ mod tests {
             std::env::set_var(crate::guard::RUN_MODE, "routine");
             for command in ["keep", "forget"] {
                 let e = call("keeper", command, &token).unwrap_err().to_string();
-                assert!(e.contains("isn't allowed in a read-only routine"), "{command}: {e}");
+                assert!(e.contains("isn't allowed while Claude prepares and asks"), "{command}: {e}");
             }
         }
         // Installed again from its marketplace: its sign-in stays. A version that no longer says `keep`, or the same id
@@ -2549,7 +2550,7 @@ mod tests {
         std::env::set_var(crate::guard::RUN_MODE, "routine");
         let refused = call("chan", "install", &json!({"spec": "telegram@claude-plugins-official"}));
         std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("read-only routine"));
+        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
         plugins::remove("chan", true).unwrap();
         sync();
     }
@@ -2617,7 +2618,7 @@ mod tests {
         let refused = call("vaults", "set", &json!({"entries": []}));
         std::env::remove_var(crate::guard::RUN_MODE);
         let refused = refused.map(|v| v["error"].as_str().unwrap_or("").to_string()).unwrap_or_else(|e| e.to_string());
-        assert!(refused.contains("read-only routine"), "{refused}");
+        assert!(refused.contains("while Claude prepares and asks"), "{refused}");
         assert!(dir.join("work/CLAUDE.md").is_file());
         plugins::remove("vaults", true).unwrap();
         sync();
@@ -2653,10 +2654,10 @@ mod tests {
         std::env::set_var(crate::guard::RUN_MODE, "routine");
         let refused = send();
         std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.contains("isn't allowed in a read-only routine"), "{refused}");
+        assert!(refused.contains("isn't allowed while Claude prepares and asks"), "{refused}");
         // Acting on its own (no marker): the send goes on — here it stops only for want of a Teams sign-in.
         let tried = send();
-        assert!(!tried.contains("read-only routine"), "{tried}");
+        assert!(!tried.contains("while Claude prepares and asks"), "{tried}");
         plugins::remove("notifier", true).unwrap();
         sync();
     }
@@ -2714,7 +2715,7 @@ mod tests {
         let refused = call("repos", "map", &json!({"thread": beta, "repos": ["acme-test/web"]}));
         let read = call("repos", "get", &json!({"thread": alpha}));
         std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("read-only routine"));
+        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
         assert_eq!(read.unwrap(), json!(["acme-test/api"]));
         // A host that isn't the app's (this one, until it is marked): it hears nothing and takes nothing queued.
         let born = |id: &str| json!(crate::projects::load(id).unwrap().stages[0].at);

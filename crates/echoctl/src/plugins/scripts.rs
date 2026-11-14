@@ -224,7 +224,7 @@ pub fn run(id: &str, skill: &str, script: &str, args: &[String], timeout: Option
     let script = script.trim_start_matches("./");
     let s = declared(&m.uses)?.into_iter().find(|s| s.skill == skill && s.script == script).ok_or_else(|| anyhow!("{id} didn't declare the script “{skill}/{script}” when it was installed"))?;
     if read_only && !s.readonly {
-        bail!("{} isn't marked readonly: a read-only routine doesn't run it", s.name());
+        bail!("{} isn't marked readonly: it doesn't run while Claude prepares and asks", s.name());
     }
     let limit = match timeout {
         None => s.timeout,
