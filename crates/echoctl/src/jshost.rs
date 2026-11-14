@@ -157,9 +157,9 @@ const PRELUDE: &str = r#"
     },
     claude: {
       run: (opts) => later('claude.run', opts),
-      /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? */
+      /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
       hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
-      /** Install it there (user scope of that profile's Claude Code): only the one `uses.channel.plugin` names. */
+      /** Install it (user scope of the default profile's Claude Code): only the one `uses.channel.plugin` names. */
       installPlugin: (spec, profile) => later('claude.install_plugin', [spec, profile || '']),
     },
     /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
@@ -827,6 +827,16 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
 
 /// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
 /// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
+/// `ctx.claude.hasPlugin` / `installPlugin`: only for the Claude Code plugin the plugin's manifest names as its channel
+/// (`uses.channel.plugin`, what its install sheet shows).
+fn may_touch_claude_plugin(id: &str, spec: &str) -> Result<()> {
+    let named = plugins::read_manifest(&package_dir(id)?)?.uses.get("channel").and_then(|c| c["plugin"].as_str()).map(str::to_owned);
+    if named.as_deref() != Some(spec) {
+        bail!("{id} may install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “{spec}”");
+    }
+    Ok(())
+}
+
 fn read_only_here(what: &str) -> Result<()> {
     if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
         bail!("{what} isn't allowed in a read-only routine");
@@ -1386,16 +1396,15 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
                 bail!("“{spec}” isn't a Claude Code plugin (name@marketplace)");
             }
-            // Installing changes the user's Claude Code: only the channel plugin its install sheet named (`uses.channel`),
-            // never from a read-only routine.
-            if op == "claude.install_plugin" {
+            // Only the channel plugin its install sheet named; installing (it changes the user's Claude Code) never from
+            // a read-only routine, and only into the default profile's.
+            may_touch_claude_plugin(id, spec)?;
+            let profile = if op == "claude.install_plugin" {
                 read_only_here("installing")?;
-                let named = plugins::read_manifest(&package_dir(id)?)?.uses.get("channel").and_then(|c| c["plugin"].as_str()).map(str::to_owned);
-                if named.as_deref() != Some(spec) {
-                    bail!("{id} may install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “{spec}”");
-                }
-            }
-            let profile = Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id);
+                crate::ai::default_id()
+            } else {
+                Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id)
+            };
             let ready = crate::ai::ready(&profile)?;
             let args: Vec<String> = if op == "claude.has_plugin" { vec!["plugin".into(), "list".into(), "--json".into()] } else { vec!["plugin".into(), "install".into(), spec.into(), "--scope".into(), "user".into()] };
             let out = crate::ai::claude_command(ready.profile(), &args, &paths::home(), false)?.wait_with_output()?;
@@ -2509,7 +2518,7 @@ mod tests {
         let d = mk.join("plugins/chan");
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "chan", "name": "Chan", "version": "0.1.0", "main": "main.js", "uses": {"channel": {"plugin": "telegram@claude-plugins-official"}}}).to_string()).unwrap();
-        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('install', (a) => ctx.claude.installPlugin(a.spec)) }").unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('install', (a) => ctx.claude.installPlugin(a.spec)); ctx.command('has', (a) => ctx.claude.hasPlugin(a.spec)) }").unwrap();
         std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "chan", "source": "./plugins/chan"}]}).to_string()).unwrap();
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
@@ -2522,6 +2531,8 @@ mod tests {
             _ => { std::thread::sleep(Duration::from_millis(50)); None }
         }).unwrap();
         assert!(err.contains("may install only the Claude Code plugin its install sheet named"), "{err}");
+        assert!(may_touch_claude_plugin("chan", "telegram@claude-plugins-official").is_ok(), "the named one passes the gate");
+        assert!(call("chan", "has", &json!({"spec": "evil@somewhere"})).unwrap_err().to_string().contains("may install only"), "nor asked about another");
         std::env::set_var(crate::guard::RUN_MODE, "routine");
         let refused = call("chan", "install", &json!({"spec": "telegram@claude-plugins-official"}));
         std::env::remove_var(crate::guard::RUN_MODE);
