@@ -208,7 +208,7 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
         bail!("“channel” must name a channel plugin of claude-plugins-official, e.g. telegram@claude-plugins-official");
     };
     let shown: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
-    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo"))
+    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo, and installs Claude Code's {p} plugin for it"))
 }
 
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {

@@ -36,6 +36,10 @@
     {
       "id": "share-b",
       "source": "./plugins/share-b"
+    },
+    {
+      "id": "chan-demo",
+      "source": "./plugins/chan-demo"
     }
   ]
 }

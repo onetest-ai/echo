@@ -279,6 +279,18 @@
    "cases": [
     "plugins/TC-033"
    ]
+  },
+  {
+   "id": "F-PLUG-30",
+   "feature": "A plugin installs a Claude Code plugin into the user's Claude Code (`ctx.claude.installPlugin(spec)`) only when it is the channel plugin its manifest names (`uses.channel.plugin`, a claude-plugins-official one) — its install sheet says so ('…, and installs Claude Code's <spec> plugin for it') — and never from a read-only routine; any other spec is refused before Claude Code is run",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ],
+   "cases": [
+    "plugins/TC-034"
+   ]
   }
  ]
 }
