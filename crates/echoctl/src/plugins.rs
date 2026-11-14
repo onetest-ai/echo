@@ -159,6 +159,9 @@ impl ParamDef {
     }
 }
 
+/// The widgets one plugin may declare.
+const MAX_WIDGETS: usize = 24;
+
 /// A widget's settings, checked: plain unique keys, labels, a type Echo knows, a choice's options, a default it takes.
 pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
     let mut keys = std::collections::HashSet::new();
@@ -290,8 +293,8 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     let mut ids = std::collections::HashSet::new();
-    if m.widgets.len() > 12 {
-        bail!("it declares more than 12 widgets");
+    if m.widgets.len() > MAX_WIDGETS {
+        bail!("it declares more than {MAX_WIDGETS} widgets");
     }
     for w in &m.widgets {
         if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
