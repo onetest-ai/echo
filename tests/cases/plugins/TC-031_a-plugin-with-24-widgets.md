@@ -17,9 +17,18 @@ tags: [plugins, widgets, manifest]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first; CLI steps after `. <dir>/env` (`E=target/debug/echoctl`); the browser 1440 × 900
-- In My plugins' folder (`$E plugin mine` names it) a folder `many` made by:
-  `python3 -c 'import json,sys; d=sys.argv[1]; n=int(sys.argv[2]); open(d+"/echo-plugin.json","w").write(json.dumps({"id":"many","name":"Many widgets","version":"0.1.0","summary":"A test","main":"main.js","widgets":[{"id":f"w{i}","label":f"Widget {i}","about":f"number {i}","kind":"stat","sizes":["S","M"]} for i in range(n)]}))' <folder>/many 24`
-  and `<folder>/many/main.js` holding `export function apply(ctx) { for (let i = 0; i < 24; i++) ctx.widgets.provide(`w${i}`, () => ({ value: i, label: 'items' })) }`
+- In My plugins' folder (`$E plugin mine` names it; `<folder>` below) a folder `many` made by:
+
+  ```sh
+  mkdir -p <folder>/many
+  python3 -c 'import json,sys; d=sys.argv[1]; n=int(sys.argv[2]); open(d+"/echo-plugin.json","w").write(json.dumps({"id":"many","name":"Many widgets","version":"0.1.0","summary":"A test","main":"main.js","widgets":[{"id":f"w{i}","label":f"Widget {i}","about":f"number {i}","kind":"stat","sizes":["S","M"]} for i in range(n)]}))' <folder>/many 24
+  ```
+
+  and `<folder>/many/main.js` holding:
+
+  ```js
+  export function apply(ctx) { for (let i = 0; i < 24; i++) ctx.widgets.provide(`w${i}`, () => ({ value: i, label: 'items' })) }
+  ```
 
 ## Steps
 
