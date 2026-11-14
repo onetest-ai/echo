@@ -562,6 +562,31 @@ impl Registry {
     }
 }
 
+/// The marketplace a person means on the command line: its name in any case, or its source (`owner/repo`, a URL, a
+/// folder); none or several → why, with the names there are.
+pub fn market_named(said: &str) -> Result<String> {
+    let said = said.trim();
+    let all: Vec<Market> = Registry::load()?.all_markets().into_iter().map(|(m, _)| m).collect();
+    if let Some(m) = all.iter().find(|m| m.name == said) {
+        return Ok(m.name.clone());
+    }
+    // A folder only when what was said is one (as `market add` reads it), never a name that happens to be a subfolder.
+    let folder = match parse_source(said) {
+        Ok(Source::Local(p)) => Some(p),
+        _ => None,
+    };
+    let same_folder = |src: &str| folder.as_ref().is_some_and(|f| dunce::canonicalize(src).is_ok_and(|s| &s == f));
+    let hits: Vec<&Market> = all.iter().filter(|m| m.name.eq_ignore_ascii_case(said) || m.source == said || same_folder(&m.source)).collect();
+    match hits.as_slice() {
+        [m] => Ok(m.name.clone()),
+        _ => {
+            let names: Vec<&str> = all.iter().map(|m| m.name.as_str()).collect();
+            let what = if hits.is_empty() { "no marketplace" } else { "more than one marketplace is" };
+            bail!("{what} “{said}” — the marketplaces: {}", names.join(", "))
+        }
+    }
+}
+
 /// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's). Echo's shared JSON files use it too.
 pub(crate) fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
     wait_lock_for(path, "plugins", std::time::Duration::from_secs(30))
@@ -1863,4 +1888,32 @@ mod tests {
         assert!(with(json!(["S", "M"])).unwrap_err().to_string().contains("is a table: it takes sizes M and L"));
         assert!(with(json!(["M"])).is_ok(), "M alone");
     }
+
+    #[test]
+    fn a_marketplace_is_found_by_its_name_in_any_case_or_by_its_source() {
+        let (_env, root) = paths::testenv::folders("plugins-market-named");
+        let mk = root.join("market");
+        fs::create_dir_all(&mk).unwrap();
+        fs::write(mk.join("echo-marketplace.json"), json!({"name": "Acme", "plugins": []}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("Acme")).unwrap();
+        assert_eq!(market_named("Acme").unwrap(), name);
+        assert_eq!(market_named("acme").unwrap(), name, "any case");
+        assert_eq!(market_named(mk.to_str().unwrap()).unwrap(), name, "its folder");
+        assert_eq!(market_named(&format!(" {} ", mk.display())).unwrap(), name, "its folder, spaces around");
+        let e = market_named("globex").unwrap_err().to_string();
+        assert!(e.contains("no marketplace “globex”") && e.contains("Acme"), "names the ones there are: {e}");
+        // The built-in one, said in another case, is found — and still can't be removed.
+        assert_eq!(market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), BUILT_IN_NAME);
+        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap()).is_err());
+        // Two whose names differ only in case (a hand-edited plugins.json): the exact one, else neither.
+        Registry::update(|r| {
+            r.markets.push(Market { name: "ACME".into(), source: "acme/plugins".into(), hidden: false });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(market_named("ACME").unwrap(), "ACME");
+        assert!(market_named("acme").unwrap_err().to_string().contains("more than one"));
+        assert_eq!(market_named("acme/plugins").unwrap(), "ACME", "by its owner/repo");
+    }
+
 }
