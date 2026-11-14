@@ -2086,9 +2086,18 @@ OTHER_APP_INVITES = [
 def other_app_invites(d, at):
     """Today's Zoom and Google Meet invites (OTHER_APP_INVITES) through `echoctl agenda sync` (calendar::convert), with a
     calendar command that prints them for that one sync: the agenda meetings Echo makes of them. A sync that drops one, or
-    takes another link, stops the build."""
+    takes another link, stops the build.
+
+    The sync keeps only meetings of the real today not yet over, by the real clock, while the data's clock is d.now
+    (`--now`, #550): each invite goes to the sync starting at the real now (two minutes ahead, before 23:59), its length kept, and the meeting it makes gets
+    the invite's own times back."""
     utc = lambda t: {"dateTime": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.0000000"), "timeZone": "UTC"}
-    graph = [{"id": i, "subject": s, "isOnlineMeeting": False, "start": utc(at(h)), "end": utc(at(h + 0.5)), "isAllDay": False, "isCancelled": False,
+    utc_iso = lambda t: t.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    when = {i: (at(h), at(h + 0.5)) for i, _, h, *_ in OTHER_APP_INVITES}
+    # A minute or two ahead, but never past 23:59: a sync started just before midnight still sees it today.
+    now = datetime.now().astimezone().replace(microsecond=0)
+    real = min(now + timedelta(minutes=2), now.replace(hour=23, minute=59, second=0))
+    graph = [{"id": i, "subject": s, "isOnlineMeeting": False, "start": utc(real), "end": utc(real + (when[i][1] - when[i][0])), "isAllDay": False, "isCancelled": False,
               "organizer": {"emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}, "responseStatus": {"response": "accepted"},
               "attendees": [{"type": "required", "status": {"response": "accepted"}, "emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}],
               "location": {"displayName": ""}, "bodyPreview": body} for i, s, h, who, _, _, body in OTHER_APP_INVITES]
@@ -2105,6 +2114,7 @@ def other_app_invites(d, at):
     for i, s, _, _, app, link, _ in OTHER_APP_INVITES:
         if got.get(i, {}).get("join_url") != link:
             raise SystemExit(f"the calendar sync didn't keep the {app} invite {s!r} with its link {link} (got {got.get(i)})")
+        got[i]["start"], got[i]["end"] = map(utc_iso, when[i])
         d.axis(f"meeting.flags={app} link only in the body", f"agenda {i}")
     return [got[i] for i, *_ in OTHER_APP_INVITES]
 

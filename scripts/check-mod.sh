@@ -102,7 +102,7 @@ node crates/echoctl/ui/today-plugin-widgets.test.mjs
 node crates/echoctl/ui/export.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
-# make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418).
+# make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418), and as of any --now (#550).
 python3 tests/fixtures/make_data_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
