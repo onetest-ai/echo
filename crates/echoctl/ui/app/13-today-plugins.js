@@ -81,9 +81,9 @@ function pluginWidgetHtml(kind, data, size, opened = []) {
   throw new Error(`Echo doesn't draw the kind ${kind}`)
 }
 
-/** A table widget's body: its columns (text, number, pill, date; `hide: "M"` left out below L), its rows under their
- *  group's header in the groups' order (the rest last), a row's link on its first text cell, its details under it when
- *  `opened` names it. Throws with what is wrong. */
+/** A table widget's body: its columns (text, number, pill, date — "Nov 15", "Jan 5, 2027" in another year; `hide: "M"`
+ *  left out below L), its rows under their group's header in the groups' order (the rest last), a row's link on its
+ *  first text cell, its details under it when `opened` names it. Throws with what is wrong. */
 function pluginTableHtml(d, size, opened, { str, outLink }) {
   const TONES = ['good', 'warn', 'bad', 'muted']
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -125,7 +125,8 @@ function pluginTableHtml(d, size, opened, { str, outLink }) {
     if (col.kind === 'date') {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
       if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) throw new Error(`${what} isn't a date (YYYY-MM-DD)`)
-      return { html: `<time datetime="${esc(text)}">${MON[+m[2] - 1]} ${+m[3]}</time>`, text, t }
+      const year = +m[1] === new Date().getFullYear() ? '' : `, ${+m[1]}`
+      return { html: `<time datetime="${esc(text)}">${MON[+m[2] - 1]} ${+m[3]}${year}</time>`, text, t }
     }
     if (col.kind === 'pill') return { html: `<span class="pw-pill${t}">${esc(text)}</span>`, text, t: '' }
     return { html: esc(text), text, t }
