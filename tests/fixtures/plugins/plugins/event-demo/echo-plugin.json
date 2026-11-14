@@ -1,0 +1,8 @@
+{
+  "id": "event-demo",
+  "name": "Event demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: keeps the meeting_soon events it hears (tests/cases/plugins/TC-045).",
+  "main": "main.js",
+  "uses": { "events": { "on": ["meeting_soon"] } }
+}

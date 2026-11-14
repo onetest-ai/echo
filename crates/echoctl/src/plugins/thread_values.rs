@@ -362,6 +362,22 @@ pub(crate) fn tell(event: &str, payload: &Value, each: &Map<String, Value>) {
     let _ = (event, payload, each);
 }
 
+/// `echoctl plugin emit <event> <json>` (#621): an event as Echo would tell it, queued for the running app (or a
+/// served window) to deliver to the plugins that hear it — so a case can send one on test data. Only in a debug build
+/// (`debug`), only an event Echo has (`plugins::EVENTS`), the payload a JSON object passed as given.
+pub fn emit(event: &str, payload: &Value, debug: bool) -> Result<()> {
+    if !debug {
+        bail!("plugin emit is for testing plugins: only a debug build (cargo build) has it");
+    }
+    if !super::EVENTS.iter().any(|(e, _)| *e == event) {
+        bail!("Echo has no event “{event}” ({})", super::EVENTS.iter().map(|(e, _)| *e).collect::<Vec<_>>().join(", "));
+    }
+    if !payload.is_object() {
+        bail!("the payload is a JSON object");
+    }
+    queue(event, payload, &Map::new())
+}
+
 /// One event for the running app, in the file it takes (`take_queued`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub(crate) fn queue(event: &str, payload: &Value, each: &Map<String, Value>) -> Result<()> {
@@ -434,6 +450,20 @@ mod tests {
         let mut got = vec![];
         take_queued(|e, p, each| got.push((e.to_string(), p.clone(), each.clone())));
         got
+    }
+
+    #[test]
+    fn plugin_emit_queues_an_event_echo_has_only_in_a_debug_build() {
+        // #621: `echoctl plugin emit` — refused in a release build, for an event Echo hasn't, for a payload that isn't
+        // an object; otherwise queued as given, for the app to deliver to the plugins that hear it.
+        let (_env, _root) = paths::testenv::folders("plugin-emit");
+        let soon = json!({"id": "m1", "subject": "Acme sync", "start": "2026-11-14T10:00:00Z", "threads": ["acme-rollout"]});
+        assert!(emit("meeting_soon", &soon, false).unwrap_err().to_string().contains("only a debug build"));
+        assert!(emit("lunch_time", &soon, true).unwrap_err().to_string().contains("no event “lunch_time”"));
+        assert!(emit("meeting_soon", &json!(["x"]), true).unwrap_err().to_string().contains("a JSON object"));
+        assert!(taken().is_empty(), "nothing queued by a refusal");
+        emit("meeting_soon", &soon, true).unwrap();
+        assert_eq!(taken(), [("meeting_soon".to_string(), soon, Map::new())]);
     }
 
     #[test]
