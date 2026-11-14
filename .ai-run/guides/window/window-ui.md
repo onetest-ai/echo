@@ -14,7 +14,7 @@
 - R7. A setting is saved as the value shown through `window::settings::settings_set`, never toggled from a stored one; a flow that needs a dialog, sign-in or download runs the tray's `Action` by name through `window::settings_action`. Evidence: `window::settings::settings_set`
 - R8. Replace a region of the page only when its HTML changed (`render`/`patch`), and update a focused editor in place. Evidence: `patch` (window script)
 - R9. A palette action runs as its button's click (`press`), never its own copy of the code. Evidence: `press` (window script)
-- R10. One scroll per card, never the page: the view's head stays put, each card scrolls inside with a least height and is never squeezed. Evidence: `ui/css/`
+- R10. One scroll per card, never the page: the view's head stays put, each card scrolls inside with a least height and is never squeezed. Evidence: `.tp-list > .set-card` (window styles)
 - R11. Never write `my-notes.md` when its text is unchanged; a save that meets an outside change keeps the other version as a file beside it. Evidence: `calls::save_my_notes`
 - R12. One leave (close, quit, update) at a time, and the page saves first. Evidence: `tray::Leaving`
 - R13. An Inbox item becomes Done only when its source was read. Evidence: `attention::view`

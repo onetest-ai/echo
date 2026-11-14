@@ -36,8 +36,10 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    tries them. A case or scenario that is `run: agent` but needs the user for a moment (a macOS prompt, a password,
    System Settings, a logout) lists those moments in `user_steps:`, and its steps say "**The user does:** …".
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
-7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
-   per scenario, and **the browser stays open** from one runner to the next — never close the browser while a run goes on.
+7. **A full run executes scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
+   per scenario. The functional gate runs a touched case inside its scenario with only the scenario's prelude and the
+   stages it depends on, never the whole scenario (`.ai-run/guides/quality-gates.md` R2). In both, **the browser stays
+   open** from one runner to the next — never close the browser while a run goes on.
    **Clean up after yourself:** when a scenario (or a one-off check) is done, close its tab and stop its server
    (`serve.sh down <dir>`); at the end of a run only one blank tab is left and no test server runs (the user's own
    ports never touched).
@@ -500,7 +502,7 @@ table above — a case that needs more adds it in its Preconditions with the `ec
 
 A **case** is one behaviour (the unit of coverage, `tests/cases/`). A **scenario** is a user's journey that chains
 cases in one run (`tests/scenarios/S-NN_<slug>.md`): its frontmatter lists the case files in order (`cases:`), and its
-**Stages** table gives each stage's case, the stages it depends on, and any glue step before it. Agent runs execute
+**Stages** table gives each stage's case, the stages it depends on, and any glue step before it. Full agent runs execute
 scenarios: far fewer runners than cases, and the cases meet each other the way a user meets them.
 
 **Running one (the runner):**
