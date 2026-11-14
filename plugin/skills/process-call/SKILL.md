@@ -70,14 +70,17 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
   write then ("Not scheduled").
 - One exception to that: a section whose words say when it applies ("only when…") is left out
   when that doesn't hold.
-- No other `##` section, apart from the two below: the user's headings (`user_headings`) become
-  `###` topics inside the section they belong in (the one the template's words name for them, if
-  any). If every section was left out (each says "only when…" and none holds), they go under one
-  `## Notes` section: the user's notes are never dropped.
+- No other `##` section, apart from On screen, In the chat and Notes as said below. The user's
+  headings (`user_headings`) become `###` topics inside the section they belong in: the one the
+  template's words name for them, else the one whose subject they share.
+- If every section was left out (each says "only when…" and none holds), the minutes get one
+  `## Notes` section: the user's notes (`user_notes`), their headings as `###` topics, or
+  `_None recorded._` when they wrote none. The user's notes are never dropped.
 - No heading cap (`heading_budget` is null): never merge or drop a section to fit.
 - On screen and In the chat go into the template's own section for each (which heading is which:
-  step 4, "Shared screens"); a template without one gets it after its last section, as for any
-  template.
+  step 4, "Shared screens"). If that section says when it applies and that doesn't hold, it is
+  left out and nothing takes its place. A template without one gets it after its last section,
+  as for any template.
 
 ## 3b. Meeting type (before you write)
 `context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
@@ -171,7 +174,7 @@ folder) lists them all, one JSON line each — Read it; its `file` is relative t
 (`frames/42m10s.jpg` → Read `<dir>/frames/42m10s.jpg`). Look at the frames with Read: the sample, and on a longer call
 also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section (a fixed template's own, step 3): one bullet per
-meaningful frame, `[mm:ss]`, the frame's file name as plain text (`05m07s.jpg`, not a link) and what it showed, only facts visible in the image: describe what
+meaningful frame, `[mm:ss]`, the frame's file name without its folder, as plain text (`05m07s.jpg`, not a path or a link) and what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
 should show; if you can't tell, write "shared screen" and nothing more. A frame's `shared_by`
 says whose screen it was, not who presented it. Skip frames that are just video tiles or the
