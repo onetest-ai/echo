@@ -41,6 +41,7 @@ mod settings;
 pub use settings::*;
 mod sources;
 use sources::*;
+pub mod mine;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -927,58 +928,12 @@ fn mine_catalog(dir: &Path) -> Result<String> {
         .into_iter()
         .flatten()
         .flatten()
-        // Not a folder install's copy on its way in (`.new-…`).
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !e.file_name().to_string_lossy().starts_with('.') && e.path().join(MANIFEST).is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     ids.sort();
     let plugins: Vec<Value> = ids.iter().map(|id| json!({"id": id, "source": format!("./{id}")})).collect();
     Ok(json!({"name": "My plugins", "plugins": plugins}).to_string())
-}
-
-/// Where each folder install's copy in My plugins came from: id → the source folder (#589).
-const MINE_SOURCES: &str = ".sources.json";
-
-/// `echoctl plugin install <folder>` (#589): the plugin in `from` copied into My plugins as `plugins/<its id>` (where
-/// it came from kept in `.sources.json` there) and My plugins read again; its id, and where the copy is. Installing it
-/// is then My plugins' install: the sheet, and a copy there changed is its update. Refused without a data folder
-/// chosen, for a folder that isn't a plugin, and when My plugins has a folder of that id that didn't come from this
-/// one (the user's own: never overwritten).
-pub fn copy_into_mine(from: &Path) -> Result<(String, PathBuf)> {
-    if !paths::home_chosen() {
-        bail!("choose Echo's data folder first (Settings → Data): a plugin from a folder goes into My plugins, in it");
-    }
-    let from = from.canonicalize().map_err(|_| anyhow!("{} isn't a folder", from.display()))?;
-    if !from.is_dir() {
-        bail!("{} isn't a folder", from.display());
-    }
-    let m = read_package(&from).with_context(|| format!("{} isn't a plugin", from.display()))?;
-    let mine = mine_dir();
-    fs::create_dir_all(&mine)?;
-    let dest = mine.join(&m.id);
-    // My plugins' own folder: nothing to copy.
-    if dest.canonicalize().is_ok_and(|d| d == from) {
-        refresh(MINE)?;
-        return Ok((m.id, dest));
-    }
-    let marks_file = mine.join(MINE_SOURCES);
-    let mut marks: BTreeMap<String, String> = fs::read(&marks_file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let source = from.display().to_string();
-    if dest.exists() && marks.get(&m.id) != Some(&source) {
-        bail!("My plugins already has a folder “{}” ({}) that wasn't copied from {source} — move it away, or install it by its id", m.id, dest.display());
-    }
-    check_tree(&from, PLUGIN_LIMIT)?;
-    let tmp = mine.join(format!(".new-{}-{}", m.id, std::process::id()));
-    let _ = fs::remove_dir_all(&tmp);
-    copy_tree(&from, &tmp)?;
-    if dest.exists() {
-        fs::remove_dir_all(&dest)?;
-    }
-    fs::rename(&tmp, &dest)?;
-    marks.insert(m.id.clone(), source);
-    paths::write_atomic(&marks_file, serde_json::to_string_pretty(&marks)?.as_bytes())?;
-    refresh(MINE)?;
-    Ok((m.id, dest))
 }
 
 /// A catalog read by this Echo within `STALE_SECS`.
@@ -1791,38 +1746,6 @@ mod tests {
         }
         assert!(inside(&d, "../x").is_err());
         assert!(inside(&d, "/etc").is_err());
-    }
-
-    #[test]
-    fn a_plugin_folder_is_copied_into_my_plugins_and_installed_from_there() {
-        // `echoctl plugin install <folder>` (#589).
-        let (_env, root) = paths::testenv::folders("plugins-from-folder");
-        let src = plugin(&root.join("src"), "pulse", "0.1.0", json!({}));
-        let (id, copy) = copy_into_mine(&src).unwrap();
-        assert_eq!((id.as_str(), copy.as_path()), ("pulse", mine_dir().join("pulse").as_path()));
-        let rv = review("pulse", Some(MINE)).unwrap();
-        assert_eq!(install("pulse", Some(MINE), &rv.uses).unwrap().market, MINE, "installed from My plugins' copy");
-        // The same folder again: copied over; its change is the installed plugin's update.
-        fs::write(src.join("skills/README.md"), "changed").unwrap();
-        copy_into_mine(&src).unwrap();
-        assert_eq!(fs::read_to_string(copy.join("skills/README.md")).unwrap(), "changed");
-        assert!(update_for(&Registry::load().unwrap().installed["pulse"]).is_some());
-        // Another folder with that id: My plugins' folder isn't its copy — refused, nothing changed.
-        let other = plugin(&root.join("other"), "pulse", "0.2.0", json!({}));
-        assert!(copy_into_mine(&other).unwrap_err().to_string().contains("wasn't copied from"));
-        assert!(fs::read_to_string(copy.join(MANIFEST)).unwrap().contains("0.1.0"));
-        // A folder the user made in My plugins is never replaced; installing it from there copies nothing.
-        plugin(&paths::home(), "own", "0.1.0", json!({}));
-        assert!(copy_into_mine(&plugin(&root.join("third"), "own", "0.1.0", json!({}))).is_err());
-        assert_eq!(copy_into_mine(&mine_dir().join("own")).unwrap().0, "own");
-        // Not a plugin; a copy on its way in isn't listed.
-        assert!(copy_into_mine(&root.join("nowhere")).is_err());
-        assert!(copy_into_mine(&root.join("src")).unwrap_err().to_string().contains("isn't a plugin"));
-        plugin(&paths::home(), ".new-own-1", "0.1.0", json!({}));
-        assert!(!refresh(MINE).unwrap().plugins.iter().any(|o| o.id.starts_with('.')));
-        // No data folder chosen: no My plugins to copy into.
-        std::env::remove_var("ECHOCTL_HOME");
-        assert!(copy_into_mine(&src).unwrap_err().to_string().contains("data folder"));
     }
 
     #[test]

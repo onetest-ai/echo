@@ -12,10 +12,10 @@ use crate::plugins;
 pub enum PluginCmd {
     /// Installed plugins, what the marketplaces offer, and the marketplaces (JSON)
     List,
-    /// Install a plugin (shows what it uses; --yes agrees). A folder (a path, or `.`) is copied into My plugins first,
-    /// then installed from there; the same folder again is its update
+    /// Install a plugin (shows what it uses; --yes agrees). A folder (a path: `./pulse`, `.`) is copied into My plugins
+    /// first, then installed from there; the same folder again is its update
     Install {
-        /// A plugin's id, or a folder with a plugin
+        /// A plugin's id, or a path to a folder with a plugin
         id: String,
         /// The marketplace, when more than one offers it
         #[arg(long)]
@@ -118,14 +118,17 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Install { id, from, yes } => {
             refuse_in_run()?;
             let mut from = from.map(|f| market_named(&f)).transpose()?;
-            // A folder: copied into My plugins, installed from there (#589). An id never has a `/`.
+            // A folder (a path: `./pulse`, `/…`, `.`): copied into My plugins, installed from there (#589). A bare name is
+            // always an id.
             let folder = std::path::Path::new(&id);
-            let id = if id.contains('/') || id.contains('\\') || id == "." || id == ".." || folder.join("echo-plugin.json").is_file() {
+            let id = if id.contains('/') || id.contains('\\') || id == "." || id == ".." {
                 if from.as_deref().is_some_and(|f| f != MINE) {
                     anyhow::bail!("a folder installs from My plugins, not from {}", from.unwrap_or_default());
                 }
-                let (id, copy) = copy_into_mine(folder)?;
-                println!("Copied {} into My plugins ({})", folder.display(), copy.display());
+                let (id, copy, copied) = plugins::mine::copy_into_mine(folder)?;
+                if copied {
+                    println!("Copied {} into My plugins ({})", dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf()).display(), copy.display());
+                }
                 from = Some(MINE.to_string());
                 id
             } else {
