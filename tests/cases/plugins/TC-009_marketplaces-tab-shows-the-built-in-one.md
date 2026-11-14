@@ -24,7 +24,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/plugins` and click the tab "Marketplaces" | The tab reads "Marketplaces" with the count `1`; the text "Where plugins come from." shows |
+| 1 | Navigate to `{{base_url}}/#settings/plugins` and click the tab "Marketplaces" | The tab reads "Marketplaces" with the count `2`; the text "Where plugins come from." shows |
 | 2 | Read the row | "onetest" with the tag "built in" and the source `onetest-ai/echo-plugins`; a button "Read again" (not pressed) and a button "⋯" |
 | 3 | Click "⋯" on the row | A menu with one item "Hide its plugins from Discover"; no "Remove" item |
 | 4 | Click the heading "Plugins" outside the menu | The menu closes |

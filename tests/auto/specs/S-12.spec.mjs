@@ -392,7 +392,8 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await plugins.openPlugins()
     await expect(plugins.pluginTab(t.installed)).toHaveAccessibleName(t.installed)
     await expect(plugins.pluginTab(t.discover)).toHaveAccessibleName(t.discover)
-    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}1`)
+    // Echo's own and My plugins (F-PLUG-26).
+    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}2`)
     await expect(plugins.pluginTab(t.discover)).toHaveAttribute('aria-selected', 'true')
     await plugins.pluginTab(t.installed).click()
     await expect(plugins.pluginTab(t.installed)).toHaveAttribute('aria-selected', 'true')
@@ -405,7 +406,7 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     const { builtIn } = data.set.s12.market
     const plugins = new PluginsPage(page, data)
     await plugins.openPlugins(t.markets)
-    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}1`)
+    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}2`)
     await expect(plugins.saysPart(t.marketsLine)).toBeVisible()
     const row = plugins.market(builtIn.name)
     await expect(plugins.in(row, t.builtIn)).toBeVisible()
@@ -429,8 +430,10 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     const list = pluginList()
     expect(Object.keys(list).sort()).toEqual(t.cliKeys)
     expect(list.installed).toEqual([])
-    expect(list.markets).toHaveLength(1)
+    // Echo's own, then My plugins (F-PLUG-26).
+    expect(list.markets).toHaveLength(2)
     expect(list.markets[0]).toMatchObject({ name: builtIn.name, source: builtIn.source, built_in: true, hidden: false })
+    expect(list.markets[1]).toMatchObject({ name: 'my-plugins', built_in: true, hidden: false })
   })
 
   test('22 · Add a marketplace from a folder lists it with its plugin count', covers('plugins/TC-010', 'F-PLUG-07'), async ({ page }) => {
@@ -441,12 +444,12 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await plugins.source.fill(market())
     await plugins.marketName.fill(m.name)
     await plugins.addMarket.click()
-    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}2`)
+    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}3`)
     const row = plugins.market(m.name)
     await expect(plugins.in(row, fs.realpathSync(market()))).toBeVisible()
     await expect(plugins.in(row, fill(t.read, { n: 1 }))).toBeVisible()
     const markets = pluginList().markets
-    expect(markets.map((x) => x.name)).toEqual([m.builtIn.name, m.name])
+    expect(markets.map((x) => x.name)).toEqual([m.builtIn.name, 'my-plugins', m.name])
     expect(markets.find((x) => x.name === m.name)).toMatchObject({ count: 1, built_in: false })
     await plugins.buttonIn(row, t.readAgain).click()
     await expect(plugins.in(row, fill(t.read, { n: 1 }))).toBeVisible()
@@ -640,7 +643,7 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await expect(plugins.menuItem(t.remove)).toBeVisible()
     await plugins.menuItem(t.remove).click()
     await expect(row).toHaveCount(0)
-    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}1`)
-    expect(pluginList().markets.map((x) => x.name)).toEqual([m.builtIn.name])
+    await expect(plugins.pluginTab(t.markets)).toHaveAccessibleName(`${t.markets}2`)
+    expect(pluginList().markets.map((x) => x.name)).toEqual([m.builtIn.name, 'my-plugins'])
   })
 })

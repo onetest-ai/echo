@@ -1348,11 +1348,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.taskTitle).toHaveValue(n.mailTitle)
     await today.taskTitle.fill(t.title)
     await today.taskThread.selectOption({ label: t.thread.name })
-    // A minute on, Today is drawn again (its line "now" moves): its content is replaced, the dialog isn't.
-    const content = await today.main.elementHandle()
+    // A minute on, Today is drawn again (its line "now" moves): the widgets whose content moved are replaced (only
+    // those, #549), the dialog isn't.
+    const widgets = await page.locator('[data-wkey]').elementHandles()
     const button = await today.addToTasks.elementHandle()
     await today.minutePasses()
-    await expect.poll(() => content.evaluate((el) => el.isConnected)).toBe(false)
+    await expect.poll(async () => (await Promise.all(widgets.map((w) => w.evaluate((el) => el.isConnected)))).some((c) => !c)).toBe(true)
     expect(await button.evaluate((el) => el.isConnected)).toBe(true)
     await expect(today.taskTitle).toHaveValue(t.title)
     await expect(today.taskThread).toHaveValue(t.thread.id)
