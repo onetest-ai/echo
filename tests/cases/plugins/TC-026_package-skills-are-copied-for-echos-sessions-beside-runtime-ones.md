@@ -43,7 +43,7 @@ EOF
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `echoctl plugin install acme-kit --yes`; then `echoctl plugin list` and find the installed `acme-kit` | The install succeeds; its `uses` has the line `Gives Claude in Echo the skill “staffing” from its package — in Echo's sessions, not your Claude Code` |
+| 1 | `echoctl plugin install acme-kit --yes`; then `echoctl plugin list` and find the installed `acme-kit` | The install succeeds; its `uses` has the line `Tells Claude in Echo how to work with it (a skill), loaded only when you work with it` |
 | 2 | `diff "$K/skills/staffing/SKILL.md" "$S/skills/staffing/SKILL.md" && diff "$K/skills/staffing/references/fields.md" "$S/skills/staffing/references/fields.md" && echo same`; `cat "$S/.claude-plugin/plugin.json"` | `same` (the folder is copied as the package ships it, before the plugin's code ever ran); the JSON has `"name": "echo-acme-kit"`; `$S` is inside Echo's own config folder (`$ECHOCTL_CONFIG_DIR`) |
 | 3 | `echoctl plugin call acme-kit skills '{"list":[{"name":"staffing","description":"Mine.","body":"Do it my way."}]}'` | JSON whose `error` contains `the plugin's package has a skill of that name`; `cat "$S/skills/staffing/SKILL.md"` still prints the package's text (`Ask for the project code first.`) |
 | 4 | `echoctl plugin call acme-kit skills '{"list":[{"name":"greeting-style","description":"How Acme greets people.","body":"Greet people by first name."}]}'`; then `ls "$S/skills"` | JSON `{"ok": true}`; the listing is `greeting-style` and `staffing` (the runtime skill beside the package's) |
@@ -59,5 +59,5 @@ Acme kit is removed and its session folder is gone; while it was installed, its 
 - `echoctl plugin marketplace remove acme-local`; remove the scratch folder's `market` directory (`rm -r "$M"`) and `<dir>`'s parent when the run is over
 
 ## Notes
-- That Echo's sessions (a routine, the folder session) load this folder (`--plugin-dir`) and name the skill `echo-acme-kit:staffing` — and that a copy older than the installed files is copied again before a session starts, and that a switched-off plugin gives none — is the Rust test `jshost::a_plugins_package_skill_reaches_the_sessions_beside_its_runtime_skills`.
+- That a routine loads this folder (`--plugin-dir`; the folder session gets it laid out in the data folder instead, TC-035) and names the skill `echo-acme-kit:staffing` — and that a copy older than the installed files is copied again before a session starts, and that a switched-off plugin gives none — is the Rust test `jshost::a_plugins_package_skill_reaches_the_sessions_beside_its_runtime_skills`.
 - Step 6's `hooks:` stands for anything beyond `name` and `description` a Claude Code skill could carry (hooks, allowed tools, a model): Echo refuses the version whole.

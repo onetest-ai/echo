@@ -102,6 +102,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::prep::start_scheduler();
     // Today → Needs you now: Teams and mail of the last day, every 5 minutes (`needs.rs`).
     crate::needs::start_scheduler();
+    // What plugins tell Claude, in the data folder (`.plugins/`): as installed and on now.
+    crate::plugins::agent::sync_all();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
     {

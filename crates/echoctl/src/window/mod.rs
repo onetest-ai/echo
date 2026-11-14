@@ -596,6 +596,7 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
     let app = false;
     #[cfg(feature = "js")]
     if app {
+        crate::plugins::agent::sync_all();
         crate::jshost::as_app();
         crate::jshost::sync();
     }

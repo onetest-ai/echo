@@ -325,6 +325,12 @@ enum Cmd {
     /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
     /// a thread, a client, a person, a mail's facts. Read-only
     Read { link: String },
+    /// What Claude in Echo's folder session starts with (Markdown): who Echo is, its rules, About me in short and
+    /// the plugins with a guide to Read first; --hook: as a SessionStart hook's JSON
+    Core {
+        #[arg(long)]
+        hook: bool,
+    },
     /// Input bundle for writing a call's notes (JSON): sizes, languages, attendees, gate
     Context {
         #[arg(default_value = "latest")]
@@ -718,6 +724,14 @@ fn main() -> Result<()> {
         Cmd::Mcp { profile, client, thread, call, who } => cli::brain::mcp(profile, client, thread, call, who),
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);
+            Ok(())
+        }
+        Cmd::Core { hook } => {
+            if hook {
+                println!("{}", plugins::agent::hook_json());
+            } else {
+                print!("{}", plugins::agent::core());
+            }
             Ok(())
         }
         Cmd::Context { call } => calls::context(&call),

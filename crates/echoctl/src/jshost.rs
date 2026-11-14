@@ -174,6 +174,9 @@ const PRELUDE: &str = r#"
     },
     /** A line for Claude when a client or thread is open in the window: [{client | thread, text}] (replaces all). */
     view: { hints: (list) => call('view.hints', list || []) },
+    /** Its part for Claude in Echo (the manifest's `agent`): {summary?, entries: [{name, summary, guide}]} — each
+     *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
+    agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
      *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
@@ -1144,6 +1147,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             uses_flag(id, "sessions", "read")?;
             let dirs: Vec<String> = arg.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
             crate::grants::set_session_read(id, &dirs)?;
+            Value::Null
+        }
+        "agent.set" => {
+            read_only_here("changing files or settings")?;
+            plugins::agent::set_runtime(id, arg)?;
             Value::Null
         }
         "view.hints" => {
@@ -2542,6 +2550,76 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_gives_claude_guides_at_run_time_and_never_from_a_read_only_routine() {
+        let (_env, root) = paths::testenv::folders("jshost-agent-set");
+        let mk = root.join("market");
+        let d = mk.join("plugins/vaults");
+        std::fs::create_dir_all(d.join("agent")).unwrap();
+        std::fs::write(d.join("agent/CLAUDE.md"), "# Vaults\n").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "agent": {"summary": "Your notes vaults"}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('set', (a) => { try { ctx.agent.set(a); return { ok: true } } catch (e) { return { error: String(e.message || e) } } }) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "vaults", "source": "./plugins/vaults"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("vaults", Some(&name)).unwrap().uses;
+        plugins::install("vaults", Some(&name), &agreed).unwrap();
+        sync();
+        let set = |v: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("vaults", "set", &v) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        let dir = plugins::agent::folder("vaults");
+        let v = set(json!({"summary": "Two vaults: Work and Home", "entries": [
+            {"name": "work", "summary": "The Work vault", "guide": "# Work\nAt ${CLAUDE_PLUGIN_ROOT}/work."},
+            {"name": "home", "summary": "The Home vault", "guide": "# Home"},
+        ]}));
+        assert_eq!(v["ok"], true, "{v}");
+        assert_eq!(std::fs::read_to_string(dir.join("work/CLAUDE.md")).unwrap(), format!("# Work\nAt {}/work.", dir.display().to_string().replace('\\', "/")));
+        let rows = plugins::agent::rows();
+        assert_eq!(rows.iter().map(|r| (r.what.as_str(), r.read.as_str())).collect::<Vec<_>>(), [
+            ("Two vaults: Work and Home", ".plugins/vaults/CLAUDE.md"),
+            ("The Work vault", ".plugins/vaults/work/CLAUDE.md"),
+            ("The Home vault", ".plugins/vaults/home/CLAUDE.md"),
+        ]);
+        // The whole set each time: an entry no longer given goes; the manifest's summary is back without one.
+        assert_eq!(set(json!({"entries": [{"name": "work", "summary": "The Work vault", "guide": "# Work"}]}))["ok"], true);
+        assert!(!dir.join("home").exists() && dir.join("work/CLAUDE.md").is_file());
+        assert_eq!(plugins::agent::rows()[0].what, "Your notes vaults");
+        // Its names, sizes and shape are checked; nothing changes then.
+        for (bad, why) in [
+            (json!({"entries": [{"name": "Work Vault", "summary": "x", "guide": "y"}]}), "lowercase words"),
+            (json!({"entries": [{"name": "scripts", "summary": "x", "guide": "y"}]}), "not guides or scripts"),
+            (json!({"entries": [{"name": "w", "summary": "x".repeat(201), "guide": "y"}]}), "1–200"),
+            (json!({"entries": [{"name": "w", "summary": "x", "guide": "y".repeat(16 * 1024 + 1)}]}), "16 KB"),
+            (json!({"entries": (0..21).map(|i| json!({"name": format!("v{i}"), "summary": "x", "guide": "y"})).collect::<Vec<_>>()}), "at most 20"),
+            (json!({"hooks": "x"}), "has no “hooks”"),
+        ] {
+            let e = set(bad)["error"].as_str().unwrap_or("").to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        assert!(dir.join("work/CLAUDE.md").is_file());
+        // A read-only routine sets nothing.
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = call("vaults", "set", &json!({"entries": []}));
+        std::env::remove_var(crate::guard::RUN_MODE);
+        let refused = refused.map(|v| v["error"].as_str().unwrap_or("").to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(refused.contains("read-only routine"), "{refused}");
+        assert!(dir.join("work/CLAUDE.md").is_file());
+        plugins::remove("vaults", true).unwrap();
+        sync();
+        assert!(!dir.exists());
+    }
+
+    #[test]
     fn a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes() {
         let (_env, root) = paths::testenv::folders("jshost-threads");
         let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
@@ -3027,7 +3105,7 @@ mod tests {
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
-        assert!(agreed.iter().any(|l| l == "Gives Claude in Echo the skill “staffing” from its package — in Echo's sessions, not your Claude Code"), "{agreed:?}");
+        assert!(agreed.iter().any(|l| l == "Tells Claude in Echo how to work with it (a skill), loaded only when you work with it"), "{agreed:?}");
         plugins::install("kit", Some(&name), &agreed).unwrap();
         // Copied at install, before its host half ever ran: the folder as the package ships it, in Echo's config folder.
         let sp = crate::grants::session_plugins();

@@ -40,6 +40,10 @@
     {
       "id": "chan-demo",
       "source": "./plugins/chan-demo"
+    },
+    {
+      "id": "agent-demo",
+      "source": "./plugins/agent-demo"
     }
   ]
 }

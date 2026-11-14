@@ -55,6 +55,15 @@ pub enum PluginCmd {
     },
     /// My plugins: the folder your own plugins go in (made if missing), and what Echo reads there (JSON)
     Mine,
+    /// Check plugin package folders as an install would (manifest, uses, widgets, skills, scripts, agent/), for plugin
+    /// authors: each problem by file; exit 1 when there is one. Needs no data folder, nothing installed, no network
+    Check {
+        #[arg(required = true)]
+        folders: Vec<std::path::PathBuf>,
+        /// JSON: {ok, problems: [{id, file, what}], plugins: [{id, folder, ok}]}
+        #[arg(long)]
+        json: bool,
+    },
     /// The plugin authoring rules (Markdown), as this Echo has them: manifest, widgets and their data, host and window
     /// halves, testing, publishing
     Guide,
@@ -171,6 +180,31 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             let c = refresh(MINE)?;
             let plugins: Vec<serde_json::Value> = c.plugins.iter().map(|o| serde_json::json!({"id": o.id, "version": o.manifest.as_ref().map(|m| m.version.clone()), "error": o.error})).collect();
             print_json(&serde_json::json!({"folder": mine_dir(), "plugins": plugins, "error": c.error}));
+        }
+        PluginCmd::Check { folders, json } => {
+            let mut all = vec![];
+            let mut each = vec![];
+            for f in &folders {
+                let (id, problems) = agent::check_folder(f);
+                if !json {
+                    if problems.is_empty() {
+                        println!("{id} ({}): ok", f.display());
+                    } else {
+                        println!("{id} ({}): {} problem{}", f.display(), problems.len(), if problems.len() == 1 { "" } else { "s" });
+                        for p in &problems {
+                            println!("  - {}{}", if p.file.is_empty() { String::new() } else { format!("{}: ", p.file) }, p.what);
+                        }
+                    }
+                }
+                each.push(serde_json::json!({"id": id, "folder": f, "ok": problems.is_empty()}));
+                all.extend(problems.into_iter().map(|p| serde_json::json!({"id": id, "file": p.file, "what": p.what})));
+            }
+            if json {
+                print_json(&serde_json::json!({"ok": all.is_empty(), "problems": all, "plugins": each}));
+            }
+            if !all.is_empty() {
+                std::process::exit(1);
+            }
         }
         PluginCmd::Guide => print!("{}", include_str!("../../../../.ai-run/guides/plugins/plugin-authoring.md")),
         PluginCmd::Marketplace { cmd } => match cmd {

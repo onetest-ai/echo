@@ -53,13 +53,24 @@ A chart: `kind: "chart"` and data `{type, points, series?, headline?}` (the guid
 client's dashboard: `params: [{key: "thread", label: "Thread", type: "thread"}]` (or `client`); read it from `params`.
 Ask for a `uses` line (network hosts, folders, Claude…) only when the widget needs it — each is a line the user agrees to.
 
+Its part for Claude in Echo — every plugin you make has one: `"agent": {"summary": "<one line: what it gives Claude and
+when to turn to it>"}` in `echo-plugin.json`, and `agent/CLAUDE.md` (8 KB at most): what the plugin gives Claude, when
+to use it, its commands (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl plugin call <id> <command>`, each named in
+`uses.sessions.commands`) and its widgets. Echo lays it out in the data folder's `.plugins/<id>/` and lists it in the
+core every session of Echo's folder starts with; Claude reads it only when it works with the plugin. Add, only when
+the plugin needs them: a skill for a fixed procedure in `agent/skills/<name>/SKILL.md` (frontmatter `name` and a
+one-line `description` only), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
+names. `echoctl plugin check` names any limit you break.
+
 ## 4. Check, install
 
-1. `echoctl plugin mine` — your plugin is listed with no `error` (else fix what it says). (No data folder chosen yet:
+1. `echoctl plugin check <folder>/<id>` — Echo's checks of the package, as an install does them: fix every problem it
+   names and run it again until it says `ok` (exit 0). Never offer an install or an update before that.
+2. `echoctl plugin mine` — your plugin is listed with no `error` (else fix what it says). (No data folder chosen yet:
    it says so — the user picks one in Settings first.)
-2. `echoctl plugin install <id> --from my-plugins` — without `--yes`: Echo prints what it asks (the sheet). Tell the user
+3. `echoctl plugin install <id> --from my-plugins` — without `--yes`: Echo prints what it asks (the sheet). Tell the user
    those lines in your own words and ask; only after their yes, run it again with `--yes`.
-3. `echoctl widget show plugin:<id>:<widget>` — the data Echo gets from your provider; fix the plugin until it has no
+4. `echoctl widget show plugin:<id>:<widget>` — the data Echo gets from your provider; fix the plugin until it has no
    `error` and shows what the user wanted. (A change → `echoctl plugin update <id>`; when it asks for something new,
    it stops and prints it — `--yes` only after the user's yes.) If Echo wasn't running, it picks the plugin up when it starts.
 
@@ -77,5 +88,6 @@ Say where it is and how to change it: Edit on Today or ✎ on the dashboard; or 
 
 ## Changing it later
 
-Edit the files in `<folder>/<id>/`, then `echoctl plugin update <id>` (asking for something new: the user's yes, `--yes`), then
+Edit the files in `<folder>/<id>/` — keep `agent/CLAUDE.md` and `agent.summary` true to what it does now —, run
+`echoctl plugin check <folder>/<id>` until it says `ok`, then `echoctl plugin update <id>` (asking for something new: the user's yes, `--yes`), then
 `echoctl widget show …` again. Removing: `echoctl plugin remove <id>`; the folder stays until the user deletes it.
