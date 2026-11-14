@@ -978,6 +978,8 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     if let Ok(m) = read_manifest(&dest) {
         scripts::mark_runnable(&dest, &m);
     }
+    // An update keeps when it was first installed (a namespace's owner is the earliest: `shared`).
+    let first = before.as_ref().filter(|b| b.market == mk).map_or_else(|| chrono::Local::now().to_rfc3339(), |b| b.installed_at.clone());
     let rec = Installed {
         id: id.into(),
         name: rv.name,
@@ -986,7 +988,7 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         commit: rv.commit,
         files: hash,
         enabled: before.as_ref().is_none_or(|b| b.enabled),
-        installed_at: chrono::Local::now().to_rfc3339(),
+        installed_at: first,
         uses: rv.uses,
     };
     Registry::update(|r| {

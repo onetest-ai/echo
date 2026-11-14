@@ -36,7 +36,8 @@ tags: [plugins, threads, host-half, shared]
 | 7 | `$E plugin call share-b sget '{"key":"test-plugins.watch"}'`; `$E plugin call share-b sset '{"key":"test-plugins.watch","value":["ACME-1"]}'`; `sget` from share-a and share-c | `null` first; then `["ACME-1"]` from both |
 | 8 | `$E plugin call share-c sset '{"key":"test-plugins.watch","value":[]}' 2>&1 \|\| true` | Refused as in step 4 |
 | 9 | `$E project delete alpha`; wait 3 s; `$E plugin call share-a heard`; `$E plugin call share-b heard`; `$E plugin call share-c heard`; `$E plugin call share-a tlist '{"key":"test-plugins.codes"}'` | share-a heard `deleted` for alpha with `values` `{"codes": "mine", "test-plugins.codes": ["ACME-1", "ACME-2"]}`; share-b with `{"test-plugins.codes": ["ACME-1", "ACME-2"]}`; share-c with `{}`; `tlist` `[]` |
-| 10 | `$E plugin remove share-a --delete-data`; `$E plugin remove share-b --delete-data`; `$E plugin call share-c sget '{"key":"test-plugins.watch"}'`; `$E plugin call share-c sset '{"key":"test-plugins.watch","value":[]}'` | `["ACME-1"]` (removing the plugins left it); the set now passes: the copy owns the name |
+| 9a | `$E plugin remove share-a --delete-data`; `$E plugin call share-b sset '{"key":"test-plugins.watch","value":["ACME-1"]}'`; `$E plugin call share-c sset '{"key":"test-plugins.watch","value":[]}' 2>&1 \|\| true` | share-b's set passes; share-c's is refused as in step 4: one of the owner's plugins left keeps the name |
+| 10 | `$E plugin remove share-b --delete-data`; `$E plugin call share-c sget '{"key":"test-plugins.watch"}'`; `$E plugin call share-c sset '{"key":"test-plugins.watch","value":[]}'` | `["ACME-1"]` (removing the plugins left it); the set now passes: the copy owns the name |
 
 ## Expected Final State
 share-c installed from `copy`; `test-plugins.watch` is `[]`; Alpha in the trash.

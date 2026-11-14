@@ -2683,8 +2683,12 @@ mod tests {
         assert_eq!(heard("b").unwrap()[0]["values"], json!({"acme.codes": ["NWB-PAI", "ACME-2"]}));
         assert_eq!(call("c", "heard", &json!({})).unwrap()[0]["values"], json!({}), "same name, another source: not its values");
         assert_eq!(call("d", "tlist", &json!({"key": "acme.codes"})).unwrap(), json!([]));
-        // The owner's plugins removed: the copy takes the name; the value for the computer stays.
+        // One of the owner's plugins removed: the other keeps the name, the copy still only reads.
         plugins::remove("a", true).unwrap();
+        sync();
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        assert!(call("c", "sset", &json!({"key": "acme.watch", "value": []})).is_err(), "not the copy's while b is there");
+        // The owner's plugins all removed: the copy takes the name; the value for the computer stays.
         plugins::remove("b", true).unwrap();
         sync();
         assert_eq!(call_ok("c", "sget", json!({"key": "acme.watch"})).unwrap(), json!(["NWB-PAI"]), "left by the removed plugins");

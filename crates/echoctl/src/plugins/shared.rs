@@ -28,30 +28,73 @@ pub fn namespace(name: &str) -> String {
 /// The store a shared key lives in (`@<ns>`), or none for a plugin's own key (no dot).
 pub fn store_of(key: &str) -> Result<Option<String>> {
     let Some((ns, name)) = key.split_once('.') else { return Ok(None) };
+    if key.chars().count() > 80 {
+        bail!("a shared key is 80 characters at most");
+    }
     if ns.is_empty() || name.is_empty() || namespace(ns) != ns {
         bail!("a shared key is <namespace>.<name>, the namespace a marketplace's name in lower case (“{key}”)");
     }
     Ok(Some(format!("@{ns}")))
 }
 
-/// The installed plugins with their marketplace's source and namespace, the earliest installed first.
+/// The installed plugins with their marketplace's source and namespace, the earliest installed first (each
+/// marketplace's catalog read once).
 fn members() -> Vec<(String, String, String)> {
     let Ok(r) = Registry::load() else { return vec![] };
     let markets = r.all_markets();
+    let mut names: std::collections::HashMap<String, Option<(String, String)>> = Default::default();
     let mut v: Vec<_> = r.installed.values().collect();
-    v.sort_by(|a, b| a.installed_at.cmp(&b.installed_at).then(a.id.cmp(&b.id)));
+    let at = |t: &str| chrono::DateTime::parse_from_rfc3339(t).map(|d| d.timestamp_micros()).unwrap_or(i64::MAX);
+    v.sort_by(|a, b| at(&a.installed_at).cmp(&at(&b.installed_at)).then(a.id.cmp(&b.id)));
     v.into_iter()
         .filter_map(|p| {
-            let m = markets.iter().find(|(m, _)| m.name == p.market)?;
-            let declared = catalog(&p.market).map(|c| c.name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| p.market.clone());
-            Some((p.id.clone(), m.0.source.clone(), namespace(&declared)))
+            let (source, ns) = names
+                .entry(p.market.clone())
+                .or_insert_with(|| {
+                    let (m, _) = markets.iter().find(|(m, _)| m.name == p.market)?;
+                    let declared = catalog(&p.market).map(|c| c.name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| p.market.clone());
+                    Some((m.source.clone(), namespace(&declared)))
+                })
+                .clone()?;
+            Some((p.id.clone(), source, ns))
         })
         .collect()
 }
 
-/// The source that owns `ns`: that of the earliest installed plugin whose marketplace declares it.
-fn owner(all: &[(String, String, String)], ns: &str) -> Option<String> {
+/// Which source owns `ns`: the one it is bound to while a plugin of that source declaring it is installed, else the
+/// source of the earliest installed plugin that declares it (none: nobody).
+fn pick(bound: Option<&str>, all: &[(String, String, String)], ns: &str) -> Option<String> {
+    if let Some(b) = bound.filter(|b| all.iter().any(|(_, s, n)| s == b && n == ns)) {
+        return Some(b.to_string());
+    }
     all.iter().find(|(_, _, n)| n == ns).map(|(_, s, _)| s.clone())
+}
+
+/// The namespaces' owners, kept so that an update (a new install time) or a partial removal never hands one over:
+/// `<config dir>/plugins/namespaces.json`, `{ns: source}`.
+fn bindings() -> std::path::PathBuf {
+    super::plugins_dir().join("namespaces.json")
+}
+
+/// The source that owns `ns` (bound now when it wasn't, or its owner's plugins are all gone).
+fn owner(all: &[(String, String, String)], ns: &str) -> Option<String> {
+    let read = || -> Map<String, Value> { std::fs::read(bindings()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default() };
+    let now = pick(read().get(ns).and_then(Value::as_str), all, ns);
+    if read().get(ns).and_then(Value::as_str) != now.as_deref() {
+        // Under the registry's lock: two processes binding at once agree.
+        let path = bindings();
+        if let Ok(_l) = super::wait_lock_for(&path.with_extension("lock"), "the plugins' namespaces", LOCK_WAIT) {
+            let mut b = read();
+            let now = pick(b.get(ns).and_then(Value::as_str), all, ns);
+            match &now {
+                Some(src) => drop(b.insert(ns.to_string(), Value::String(src.clone()))),
+                None => drop(b.remove(ns)),
+            }
+            let _ = serde_json::to_vec_pretty(&b).map(|t| paths::write_atomic(&path, &t));
+            return now;
+        }
+    }
+    now
 }
 
 /// The plugins that share `ns` (those from its owner's source).
@@ -107,9 +150,6 @@ pub fn get(key: &str) -> Result<Value> {
 /// `ctx.shared.set(key, value)` by `plugin` (null removes it): its namespace's, 16 KB, 64 keys at most.
 pub fn set(plugin: &str, key: &str, value: &Value) -> Result<()> {
     let Some(store) = store_of(key)? else { bail!("ctx.shared takes a key <namespace>.<name>") };
-    if key.chars().count() > 80 {
-        bail!("a shared key is 80 characters at most");
-    }
     if value.to_string().len() > MAX_VALUE {
         bail!("a shared value is 16 KB at most");
     }
@@ -118,7 +158,7 @@ pub fn set(plugin: &str, key: &str, value: &Value) -> Result<()> {
     let mut all = match read(&store) {
         Ok(a) => a,
         // Not JSON: moved aside, never written over.
-        Err(e) if data_dir(&store).join(FILE).is_file() => {
+        Err(e) if std::fs::read_to_string(data_dir(&store).join(FILE)).is_ok() => {
             let aside = paths::unused(&data_dir(&store), &format!("{FILE}.bad-{}", chrono::Utc::now().format("%Y%m%d%H%M%S")), "");
             std::fs::rename(data_dir(&store).join(FILE), &aside)?;
             eprintln!("echoctl: {e:#} — moved aside to {}", aside.display());
@@ -144,6 +184,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_namespace_stays_with_its_source_while_one_of_its_plugins_is_installed() {
+        let m = |id: &str, src: &str, ns: &str| (id.to_string(), src.to_string(), ns.to_string());
+        // Earliest first: b (Acme), c (a copy also calling itself Acme), a (Acme, updated: a later install time).
+        let all = vec![m("c", "copy", "acme"), m("b", "acme-src", "acme"), m("a", "acme-src", "acme"), m("d", "other", "other")];
+        assert_eq!(pick(None, &all, "acme").as_deref(), Some("copy"), "unbound: the earliest");
+        assert_eq!(pick(Some("acme-src"), &all, "acme").as_deref(), Some("acme-src"), "bound: kept whatever the order");
+        let left = vec![m("c", "copy", "acme"), m("d", "other", "other")];
+        assert_eq!(pick(Some("acme-src"), &left, "acme").as_deref(), Some("copy"), "its plugins all gone: the next");
+        assert_eq!(pick(Some("acme-src"), &left, "nobody"), None);
+        assert_eq!(pick(Some("other"), &all, "acme").as_deref(), Some("copy"), "a source that doesn't declare it isn't bound to it");
+    }
+
+    #[test]
     fn a_marketplace_name_is_its_namespace_and_a_dotted_key_its_store() {
         assert_eq!(namespace("EPAM"), "epam");
         assert_eq!(namespace(" My plugins "), "my-plugins");
@@ -151,6 +204,7 @@ mod tests {
         assert_eq!(store_of("repos").unwrap(), None, "no dot: the plugin's own");
         assert_eq!(store_of("epam.project_codes").unwrap().as_deref(), Some("@epam"));
         assert_eq!(store_of("my-plugins.a.b").unwrap().as_deref(), Some("@my-plugins"));
+        assert!(store_of(&format!("epam.{}", "x".repeat(80))).is_err(), "80 characters at most");
         for bad in ["EPAM.x", ".x", "epam.", "e pam.x", "../x.y"] {
             assert!(store_of(bad).is_err(), "{bad}");
         }
