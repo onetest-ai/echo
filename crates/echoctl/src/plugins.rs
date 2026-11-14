@@ -380,8 +380,9 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     // their scripts. Noted apart (`part_problems`).
     let mut part = agent::problems(dir, &m);
     let agent_ok = part.is_empty();
-    let (skills, skill_problems) = agent::skill_problems(dir, &m);
-    let skills_ok = skill_problems.is_empty();
+    let (skills, skill_problems, unread) = agent::skill_problems(dir, &m);
+    // A skill it can't read just now isn't checked further (its scripts, the sheet's hash): no rule is broken.
+    let skills_ok = skill_problems.is_empty() && unread.is_empty();
     part.extend(skill_problems);
     m.skill_names = skills.iter().map(|(n, _)| n.clone()).collect();
     // Two of its own skills laid out alike (`x` and `<prefix>-x`): as an install would refuse it.
@@ -521,11 +522,15 @@ pub const MAX_SKILLS: usize = 10;
 /// `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line `description`, and no `!` command
 /// anywhere in it (Claude Code runs one when the skill loads).
 pub fn package_skills(dir: &Path, m: &Manifest) -> Result<Vec<(String, PathBuf)>> {
-    let (skills, problems) = agent::skill_problems(dir, m);
-    match problems.into_iter().next() {
-        Some(p) => bail!("{}", p.what),
-        None => Ok(skills),
+    let (skills, problems, unread) = agent::skill_problems(dir, m);
+    if let Some(p) = problems.into_iter().next() {
+        bail!("{}", p.what);
     }
+    // One it can't read just now: an error, not a rule broken (`agent::lay_out` tries again).
+    if let Some(u) = unread.into_iter().next() {
+        bail!("{u}");
+    }
+    Ok(skills)
 }
 
 /// A skill's name: lowercase words with dashes, up to 40 characters.

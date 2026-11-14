@@ -115,11 +115,12 @@ pub fn digest(dir: &Path, m: &Manifest) -> Option<String> {
 }
 
 /// The package skills that pass, and the problems of the others.
-pub(super) fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)>, Vec<Problem>) {
-    let (mut out, mut problems): (Vec<(String, PathBuf)>, Vec<Problem>) = (vec![], vec![]);
+/// Also the skills it couldn't read just now (permissions, a busy file): no rule broken, tried again later.
+pub(super) fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)>, Vec<Problem>, Vec<String>) {
+    let (mut out, mut problems, mut unread): (Vec<(String, PathBuf)>, Vec<Problem>, Vec<String>) = (vec![], vec![], vec![]);
     if m.skills.len() > super::MAX_SKILLS {
         problems.push(Problem { file: MANIFEST.into(), what: format!("it ships more than {} skills", super::MAX_SKILLS) });
-        return (out, problems);
+        return (out, problems, unread);
     }
     let mut folders: Vec<(String, Result<PathBuf>)> = m.skills.iter().map(|rel| (rel.clone(), super::inside_plugin_dir(dir, rel))).collect();
     if has_guide(m) {
@@ -135,7 +136,11 @@ pub(super) fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)
             if let Some(p) = prefix_of(m).filter(|p| valid_prefix(p)) {
                 check_skill_length(&p, &name).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
             }
-            let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
+            let text = match fs::read_to_string(d.join("SKILL.md")) {
+                Ok(t) => t,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!("skill “{rel}” has no SKILL.md"),
+                Err(e) => return Err(anyhow::Error::new(Unread(format!("skill “{rel}”: its SKILL.md can't be read: {e}")))),
+            };
             super::check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
             // A `.claude` folder in it (skills, settings) would reach Claude Code unchecked; `agent/` is walked whole by
             // `problems`.
@@ -146,11 +151,24 @@ pub(super) fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)
         })();
         match r {
             Ok(s) => out.push(s),
+            Err(e) if e.downcast_ref::<Unread>().is_some() => unread.push(format!("{e:#}")),
             Err(e) => problems.push(Problem { file: format!("{}/SKILL.md", rel.trim_end_matches('/')), what: format!("{e:#}") }),
         }
     }
-    (out, problems)
+    (out, problems, unread)
 }
+
+/// A file that can't be read just now: not a rule the package breaks.
+#[derive(Debug)]
+struct Unread(String);
+
+impl std::fmt::Display for Unread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Unread {}
 
 /// Every problem of its part for Claude (`agent` in the manifest, the folder `agent/`). Its skills' `SKILL.md` are
 /// checked with its other package skills (`plugins::package_skills`).
@@ -1400,6 +1418,17 @@ mod tests {
         fs::set_permissions(&refs, fs::Permissions::from_mode(0o755)).unwrap();
         sync_all();
         assert!(folder("kit").join(".claude/skills/kit-old/refs/a.md").is_file() && withheld("kit").is_none());
+        // A skill of agent/ it can't read: no "has no SKILL.md", not final; laid out once it can be read.
+        let t = super::super::plugin_dir(&p).join("agent/skills/staffing");
+        fs::set_permissions(&t, fs::Permissions::from_mode(0o000)).unwrap();
+        super::super::forget_read("kit");
+        let e = lay_out("kit").unwrap_err().to_string();
+        assert!(e.contains("can't be read") && !e.contains("has no SKILL.md"), "{e}");
+        assert!(record("kit")["final"] == false && !folder("kit").exists(), "{} {}", record("kit"), folder("kit").exists());
+        fs::set_permissions(&t, fs::Permissions::from_mode(0o755)).unwrap();
+        super::super::forget_read("kit");
+        sync_all();
+        assert!(folder("kit").join(".claude/skills/kit-staffing/SKILL.md").is_file() && withheld("kit").is_none());
         super::super::remove("kit", true).unwrap();
         // A name another plugin lays out: withheld while it is there, laid out once it is gone.
         offer_in(&root, "epam", "first", "ep", &["one"]);
