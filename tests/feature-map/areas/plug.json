@@ -339,7 +339,7 @@
   },
   {
    "id": "F-PLUG-36",
-   "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered",
+   "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered; in a debug build `echoctl plugin emit <event> <json>` queues one as Echo would tell it, for the running app (or a served window) to deliver — refused in a release build, for an event Echo hasn't, and for a payload that isn't a JSON object",
    "priority": "high",
    "check": "agent",
    "axes": []
