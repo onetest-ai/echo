@@ -141,6 +141,14 @@ const PRELUDE: &str = r#"
       set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
       list: (key) => call('threads.list', String(key)),
     },
+    /** Values the plugins of its marketplace share, one for the computer: get(key) → the value or null, set(key, value)
+     *  (null removes it; created when it isn't there). `key` is `<ns>.<name>`, `ns` the marketplace's declared name in
+     *  lower case; every plugin reads it, only its marketplace's plugins set it. ctx.threads takes such a key too: one
+     *  value per thread for all of them. */
+    shared: {
+      get: (key) => call('shared.get', String(key)),
+      set: (key, value) => call('shared.set', [String(key), value === undefined ? null : value]),
+    },
     profiles: () => call('profiles'),
     /** Its package skills' scripts declared in uses.scripts: run(skill, script, args, {timeout}) → {status, stdout,
      *  stderr, truncated?, timed_out?} — no shell, args a list of strings, timeout at most the declared one. */
@@ -1022,13 +1030,40 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             work::changed(id);
             Value::Null
         }
-        "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1]))?,
+        // A key `<ns>.<name>` is the namespace's, shared (`plugins::shared`); one without a dot the plugin's own.
+        "threads.get" => {
+            let key = s(&arg[1]);
+            match plugins::shared::store_of(&key)? {
+                Some(st) if !plugins::shared::owned(&st) => Value::Null,
+                st => plugins::thread_values::get(&st.unwrap_or_else(|| id.to_string()), &s(&arg[0]), &key)?,
+            }
+        }
         "threads.set" => {
             read_only_here("changing files or settings")?;
-            plugins::thread_values::set(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
+            let key = s(&arg[1]);
+            let store = match plugins::shared::store_of(&key)? {
+                Some(st) => {
+                    plugins::shared::may_set(id, &st)?;
+                    st
+                }
+                None => id.to_string(),
+            };
+            plugins::thread_values::set(&store, &s(&arg[0]), &key, &arg[2])?;
             Value::Null
         }
-        "threads.list" => plugins::thread_values::list(id, &s(arg))?,
+        "threads.list" => {
+            let key = s(arg);
+            match plugins::shared::store_of(&key)? {
+                Some(st) if !plugins::shared::owned(&st) => json!([]),
+                st => plugins::thread_values::list(&st.unwrap_or_else(|| id.to_string()), &key)?,
+            }
+        }
+        "shared.get" => plugins::shared::get(&s(arg))?,
+        "shared.set" => {
+            read_only_here("changing files or settings")?;
+            plugins::shared::set(id, &s(&arg[0]), &arg[1])?;
+            Value::Null
+        }
         "inbox.clear" => {
             inbox_set(id, &s(arg), None)?;
             Value::Null
@@ -2563,6 +2598,101 @@ mod tests {
         assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
         APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_marketplaces_plugins_share_values_under_its_name_and_only_they_set_them() {
+        let (_env, root) = paths::testenv::folders("jshost-shared");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let main = r#"
+            export function apply(ctx) {
+              const heard = []
+              ctx.on('threads_changed', (p) => { heard.push(p) })
+              ctx.command('tset', (a) => ctx.threads.set(a.thread, a.key, a.value))
+              ctx.command('tget', (a) => ctx.threads.get(a.thread, a.key))
+              ctx.command('tlist', (a) => ctx.threads.list(a.key))
+              ctx.command('sset', (a) => ctx.shared.set(a.key, a.value))
+              ctx.command('sget', (a) => ctx.shared.get(a.key))
+              ctx.command('heard', () => heard)
+            }
+        "#;
+        // Two marketplaces that call themselves "Acme" (a, b in the first; c in its copy) and one called "Other" (d).
+        let market = |dir: &str, name: &str, ids: &[&str]| {
+            let mk = root.join(dir);
+            for id in ids {
+                let d = mk.join("plugins").join(id);
+                std::fs::create_dir_all(&d).unwrap();
+                std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"events": {"on": ["threads_changed"]}}}).to_string()).unwrap();
+                std::fs::write(d.join("main.js"), main).unwrap();
+            }
+            let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+            std::fs::write(mk.join("echo-marketplace.json"), json!({"name": name, "plugins": plugins}).to_string()).unwrap();
+            let m = plugins::market_add(mk.to_str().unwrap(), Some(dir)).unwrap();
+            plugins::refresh(&m).unwrap();
+            for id in ids {
+                let r = plugins::review(id, Some(&m)).unwrap();
+                plugins::install(id, Some(&m), &r.uses).unwrap();
+            }
+        };
+        market("acme", "Acme", &["a", "b"]);
+        market("acme-copy", "Acme", &["c"]);
+        market("other", "Other", &["d"]);
+        sync();
+        let call_ok = |id: &str, cmd: &str, a: Value| (0..50).find_map(|_| call(id, cmd, &a).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        // Per thread: a sets it, b reads the same value, any plugin reads it; c (same name, another source) and d can't set it.
+        call_ok("a", "tset", json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI"]})).unwrap();
+        for id in ["a", "b", "c", "d"] {
+            assert_eq!(call_ok(id, "tget", json!({"thread": alpha, "key": "acme.codes"})).unwrap(), json!(["NWB-PAI"]), "{id} reads it");
+        }
+        assert_eq!(call("b", "tlist", &json!({"key": "acme.codes"})).unwrap(), json!([{"thread": alpha, "value": ["NWB-PAI"]}]));
+        call("b", "tset", &json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI", "ACME-2"]})).unwrap();
+        assert_eq!(call("a", "tget", &json!({"thread": alpha, "key": "acme.codes"})).unwrap(), json!(["NWB-PAI", "ACME-2"]), "one value");
+        for id in ["c", "d"] {
+            let err = call(id, "tset", &json!({"thread": alpha, "key": "acme.codes", "value": 1})).unwrap_err().to_string();
+            assert!(err.contains("only the plugins of the marketplace that owns “acme”"), "{id}: {err}");
+        }
+        assert!(call("d", "tset", &json!({"thread": alpha, "key": "nobody.x", "value": 1})).unwrap_err().to_string().contains("no installed marketplace is named “nobody”"));
+        assert_eq!(call("d", "tget", &json!({"thread": alpha, "key": "nobody.x"})).unwrap(), Value::Null, "nobody's namespace reads empty");
+        assert_eq!(call("d", "sget", &json!({"key": "nobody.x"})).unwrap(), Value::Null);
+        assert!(call("a", "tset", &json!({"thread": alpha, "key": "Acme.x", "value": 1})).unwrap_err().to_string().contains("<namespace>.<name>"));
+        // A key without a dot stays each plugin's own.
+        call("a", "tset", &json!({"thread": alpha, "key": "codes", "value": "a's"})).unwrap();
+        assert_eq!(call("b", "tget", &json!({"thread": alpha, "key": "codes"})).unwrap(), Value::Null);
+        // One for the computer: created by a set, read by all, set only by the owner's plugins; a plain key refused.
+        assert_eq!(call("b", "sget", &json!({"key": "acme.watch"})).unwrap(), Value::Null);
+        call("b", "sset", &json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        assert_eq!(call("d", "sget", &json!({"key": "acme.watch"})).unwrap(), json!(["NWB-PAI"]));
+        assert!(call("c", "sset", &json!({"key": "acme.watch", "value": []})).is_err());
+        assert!(call("a", "sset", &json!({"key": "watch", "value": []})).unwrap_err().to_string().contains("<namespace>.<name>"));
+        assert!(call("a", "sset", &json!({"key": "acme.big", "value": "x".repeat(17 * 1024)})).unwrap_err().to_string().contains("16 KB"));
+        call("a", "sset", &json!({"key": "acme.watch", "value": null})).unwrap();
+        assert_eq!(call("b", "sget", &json!({"key": "acme.watch"})).unwrap(), Value::Null, "null removes it");
+        call("a", "sset", &json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        // The thread deleted: its shared values go; a and b each hear them with their own, c and d don't.
+        as_app();
+        crate::projects::delete(&alpha).unwrap();
+        let heard = |id: &str| (0..60).find_map(|_| {
+            let v = call(id, "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| !a.is_empty()) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard("a").unwrap()[0]["values"], json!({"codes": "a's", "acme.codes": ["NWB-PAI", "ACME-2"]}));
+        assert_eq!(heard("b").unwrap()[0]["values"], json!({"acme.codes": ["NWB-PAI", "ACME-2"]}));
+        assert_eq!(call("c", "heard", &json!({})).unwrap()[0]["values"], json!({}), "same name, another source: not its values");
+        assert_eq!(call("d", "tlist", &json!({"key": "acme.codes"})).unwrap(), json!([]));
+        // The owner's plugins removed: the copy takes the name; the value for the computer stays.
+        plugins::remove("a", true).unwrap();
+        plugins::remove("b", true).unwrap();
+        sync();
+        assert_eq!(call_ok("c", "sget", json!({"key": "acme.watch"})).unwrap(), json!(["NWB-PAI"]), "left by the removed plugins");
+        call("c", "sset", &json!({"key": "acme.watch", "value": []})).unwrap();
+        APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
+        for id in ["c", "d"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 

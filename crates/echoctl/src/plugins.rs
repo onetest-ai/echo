@@ -35,6 +35,7 @@ use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
 pub mod scripts;
+pub mod shared;
 mod sources;
 use sources::*;
 pub(crate) use sources::copy_tree;

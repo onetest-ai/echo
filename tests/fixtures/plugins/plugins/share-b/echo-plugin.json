@@ -1,0 +1,8 @@
+{
+  "id": "share-b",
+  "name": "Share B",
+  "version": "0.1.0",
+  "summary": "A test plugin: values shared with the other plugins of its marketplace (tests/cases/plugins/TC-033).",
+  "main": "main.js",
+  "uses": { "events": { "on": ["threads_changed"] } }
+}
