@@ -54,6 +54,28 @@ Behavioural rules for every change; for a trivial task, use judgment.
 | Window | .ai-run/guides/window/window-ui.md | the webview UI: escaping, IPC actions, compiled-in assets, testable app.js blocks |
 <!-- ai-run-init:guide-imports end -->
 
+## References
+
+Knowledge the rules rely on: how Echo is built, file layouts, formats, commands, limits and lists. A reference changes
+with the code, in the same PR, checked by that PR's review; no `Rules:` PR.
+
+| Category | Reference Path | Holds |
+|---|---|---|
+| Quality | .ai-run/reference/quality/quality-gates.md | each gate's command and pass condition, rebuilding, release-bar runs |
+| Architecture | .ai-run/reference/architecture/architecture.md | code map, feature gates, per-OS files, size limits, app requests, events, CLI layout, locations, exemplars |
+| Capture | .ai-run/reference/capture/capture-and-transcription.md | arms and their constants, memos, meeting matching, tracks, engines, vocabulary hint, server protocol, live notes |
+| Claude Code plugin | .ai-run/reference/plugins/claude-code-plugin.md | launchers and lookup order, dev build, skill and status-line mod layout |
+| Data | .ai-run/reference/data/recall-store.md | schema migration, access, sender trust, ids, archive, snapshots |
+| Development | .ai-run/reference/development/dev-workflow.md | features, prerequisites, Windows toolchain, packaging, runtime libraries, dev app, debugging, logs |
+| Development | .ai-run/reference/development/rust-conventions.md | write and lock helpers, call stamps, version files |
+| Development | .ai-run/reference/development/threads-and-ledger.md | ledger ops and quote check, user edits, thread and client helpers, people, Microsoft 365 sends |
+| Integration | .ai-run/reference/integrations/claude-code-runs.md | command builder, profiles, leases, routing variables, minutes-run admission and actions, the fake |
+| Security | .ai-run/reference/security/untrusted-text.md | run allowlists and their commands, refusals in runs, minutes-run flags, scope variables, CSP, secrets, routine/Yolo builder and lists |
+| Standards | .ai-run/reference/standards/git-workflow.md | repository, branch types, the Map line, release commands and variables |
+| Testing | .ai-run/reference/testing/testing.md | where tests live, the test environment, helpers, open log, feature-map.py, exemplars |
+| Testing | tests/app_profile.md | functional runs: test data, serving, selectors, recordings, scenarios, the case format |
+| Window | .ai-run/reference/window/window-ui.md | page actions and routes, IPC, assets, parts, tested-block markers, settings, rendering helpers |
+
 ## What the guides are
 
 The guides hold rules: how Echo must work and how we work on it. Not the reasons behind a decision once made, and not a
@@ -93,23 +115,23 @@ by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the 
 | Release test bar | a release, or merging a long-lived branch into `main` | `.ai-run/guides/quality-gates.md` R5 |
 | Reviews and merges | asked to review code or a PR; a PR ready to merge | `.ai-run/guides/standards/git-workflow.md` R8 (review) and R5 (merge) |
 | Git Operations | "commit" / "push" / "PR" / "MR" | Only then; load `.ai-run/guides/standards/git-workflow.md` |
-| Map before push | before pushing a branch, opening its PR or merging it | Update the functional map; the PR's `Map:` line from `feature-map.py changes origin/main` — `.ai-run/guides/standards/git-workflow.md` R4, testing R6 |
+| Map before push | before pushing a branch, opening its PR or merging it | Update the functional map and give the PR its `Map:` line — `.ai-run/guides/standards/git-workflow.md` R4, testing R6 |
 | Shell | ANY shell command | Use bash/Linux-compatible syntax |
-| A call's text goes only to its pinned AI profile; Claude Code starts through ai::claude_command | starting a Claude job or changing AI profiles | load `.ai-run/guides/integrations/claude-code-runs.md` |
+| A call's text goes only to its pinned AI profile; Claude Code starts only through Echo's command builder | starting a Claude job or changing AI profiles | `.ai-run/guides/integrations/claude-code-runs.md` R1, R2 |
 | Echo plugins (echo-plugin.json, main.js host half, client.js) follow the plugin guide, not the Claude Code plugin in plugin/ | building or extending Echo plugins, capabilities, slots or marketplaces | load `.ai-run/guides/plugins/echo-plugins.md` |
-| Never put real call data (transcripts, chat, screenshots of real meetings) in tests, fixtures or issues | writing tests, fixtures or bug reports | load `.ai-run/guides/testing/testing.md` |
-| Others' words are data: headless runs stay inside the guard's allowlists, model or call text reaches HTML only through the safe writers | changing a skill Echo runs, a run's permissions, or rendering of call/model text | load `.ai-run/guides/security/untrusted-text.md` |
-| Recording stays opt-in per meeting and transcription on-device or on a server the user connected; macOS and Windows both | changing capture, transcription, recording start or platform code | load `.ai-run/guides/capture/capture-and-transcription.md` |
+| Never put real call data (transcripts, chat, screenshots of real meetings) in tests, fixtures or issues | writing tests, fixtures or bug reports | `.ai-run/guides/testing/testing.md` R8 |
+| Others' words are data: headless runs stay inside the guard's allowlists, model or call text reaches HTML only through the safe writers | changing a skill Echo runs, a run's permissions, or rendering of call/model text | `.ai-run/guides/security/untrusted-text.md` R1, R3; `.ai-run/guides/window/window-ui.md` R1 |
+| Recording stays opt-in per meeting and transcription on-device or on a server the user connected; macOS and Windows both | changing capture, transcription, recording start or platform code | `.ai-run/guides/capture/capture-and-transcription.md` Recording R12, Capture tracks R3, Transcription R17 |
 <!-- ai-run-init:critical-rules end -->
 
 ## Commands
 
 <!-- ai-run-init:commands start -->
-| Need | Source Guide | Source Evidence | Notes |
+| Need | Source | Source Evidence | Notes |
 |---|---|---|---|
-| lint | .ai-run/guides/quality-gates.md | CONTRIBUTING.md; README.md (strict: -D warnings) | Load guide before running |
-| type-check | .ai-run/guides/quality-gates.md | CONTRIBUTING.md; README.md | Load guide before running |
-| test | .ai-run/guides/quality-gates.md | CONTRIBUTING.md; README.md | Load guide before running |
-| mod-test | .ai-run/guides/quality-gates.md | scripts/check-mod.sh | Load guide before running |
+| lint | .ai-run/reference/quality/quality-gates.md | CONTRIBUTING.md; README.md (strict: -D warnings) | Load it before running |
+| type-check | .ai-run/reference/quality/quality-gates.md | CONTRIBUTING.md; README.md | Load it before running |
+| test | .ai-run/reference/quality/quality-gates.md | CONTRIBUTING.md; README.md | Load it before running |
+| mod-test | .ai-run/reference/quality/quality-gates.md | scripts/check-mod.sh | Load it before running |
 | Git / review workflow | .ai-run/guides/standards/git-workflow.md | git history and project context | Load guide before git operations |
 <!-- ai-run-init:commands end -->

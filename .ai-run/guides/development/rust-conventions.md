@@ -1,19 +1,16 @@
 # Rust Conventions
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: atomic writes, meta.json and state-file locking, call stamps, version bump
+**Project**: Echo · **Scope**: atomic writes, meta.json and state-file locking, call stamps, version bump
+
+**Reference**: `.ai-run/reference/development/rust-conventions.md` — the helpers and files these rules rely on
+(`ref: <section>`). It changes with the code; these rules change only by a `Rules:` PR.
 
 ## Files, locks and releases
 
 ### Rules
-- R1. A file another thread or process may read is replaced with `paths::write_atomic`, never `fs::write`. Evidence: `paths::write_atomic`
-- R2. An existing call's `meta.json` changes through `calls::update_meta`; code that keeps its own copy holds `calls::lock_meta` while writing. Evidence: `calls::update_meta`
+- R1. A file another thread or process may read is replaced atomically, never written in place. Evidence: `paths::write_atomic` (ref: Writes and locks)
+- R2. An existing call's `meta.json` changes only through its update helper or under its lock. Evidence: `calls::update_meta` (ref: Writes and locks)
 - R3. A shared JSON state file changes through its `update` helper: lock, re-read inside the lock, write atomically. Evidence: `plugins::Registry.update`
-- R4. Cross-process locks are `app::FileLock` (`try_take` / `try_take_shared`). Evidence: `app::FileLock`
-- R5. A call is named by its folder stamp (`calls::stamp_of`) across renames and found with `calls::by_stamp`, which returns `None` when two folders share a stamp. Evidence: `calls::by_stamp`
-- R6. A release bumps the version in `Cargo.toml` `[workspace.package]`, `Cargo.lock` and `plugin/.claude-plugin/plugin.json` together, in one `Echo X.Y.Z` commit and never inside a feature PR. Evidence: `Cargo.toml::version`
-
-### Read first
-| When you are | Exemplar |
-|---|---|
-| changing a call's metadata | `calls::update_meta` |
-| adding a JSON settings or registry file | `plugins::Registry.update` |
+- R4. Cross-process locks are `app::FileLock`. Evidence: `app::FileLock`
+- R5. A call is named by its folder stamp across renames, and a stamp two folders share finds neither. Evidence: `calls::by_stamp` (ref: Call stamps)
+- R6. A release bumps every version file together, in one `Echo X.Y.Z` commit and never inside a feature PR. Evidence: `Cargo.toml::version` (ref: Version files)

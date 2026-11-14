@@ -1,16 +1,19 @@
 # Threads and Ledger
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: threads, clients and the work ledger: evidence-checked proposals, user edits pinned, Microsoft 365 sends
+**Project**: Echo · **Scope**: threads, clients and the work ledger: evidence-checked proposals, user edits pinned, Microsoft 365 sends
+
+**Reference**: `.ai-run/reference/development/threads-and-ledger.md` — how the ledger, threads, people and sends are
+built (`ref: <section>`). It changes with the code; these rules change only by a `Rules:` PR.
 
 ## Threads, ledger and Microsoft 365 sends
 
 ### Rules
-- R1. An agent's proposal to the work ledger counts only through `ledger::apply`, which refuses a quote that is not one contiguous span (≥ 3 normalised words) of its evidence item (`ledger::quote_in`); status changes also need the verifier's `supports`. Evidence: `ledger::quote_in`
-- R2. Record the user's own edit through `ledger::human_event`: it pins the field, and an agent's later evidence lands in history without changing it; every such edit can be undone. Evidence: `ledger::human_event`
-- R3. Change a thread (project) through `projects::update` (projects lock, load, `check`, write) and a client through `projects::update_client`. Evidence: `projects::update`
-- R4. A Microsoft 365 command that sends, replies, posts or uploads returns `{sent: false, would}` without `--yes` and calls `m365::not_in_run` before it sends (refused when `ECHOCTL_HEADLESS` is set, but for a routine's or Yolo's run acting on its own: `untrusted-text.md` R21). Evidence: `m365::mail_send`
+- R1. An agent's proposal to the work ledger counts only through `ledger::apply`, each change quoting its evidence word for word; a status change also needs the verifier's support. Evidence: `ledger::quote_in` (ref: Proposals and evidence)
+- R2. The user's own edit pins its field: an agent's later evidence lands in history without changing it, and every such edit can be undone. Evidence: `ledger::human_event` (ref: The user's edits)
+- R3. Change a thread (project) or a client only through its update helper. Evidence: `projects::update` (ref: Threads and clients)
+- R4. A Microsoft 365 send, reply, post or upload happens only with the user's explicit yes and never from a run, but for a routine's or Yolo's run acting on its own (`untrusted-text.md` R21). Evidence: `m365::mail_send` (ref: Microsoft 365 sends)
 - R5. A call's threads are computed from rules, pins and exclusions, never stored in the call; a suggestion never assigns a call to a thread. Evidence: `projects::calls_of`, `projects::suggest`
-- R6. Closing a question or risk goes through op `answer`, verified, never a `description` edit; a near-duplicate is `suggest_merge`, never merged automatically. Evidence: `ledger::apply`
+- R6. Closing a question or risk is an answer, verified, never a description edit; a near-duplicate is suggested for merging, never merged automatically. Evidence: `ledger::apply` (ref: Proposals and evidence)
 - R7. The verify step runs in a fresh process, apart from the extractor. Evidence: `projectsync::run`
 - R8. Mail and chat reach a thread's sync only from the user, colleagues and trusted, authenticated senders. Evidence: `ledger::mail_sync`, `ledger::chat_sync`
 - R9. Nothing about a person changes without the user: suggestions need the quote check and the user's yes; a field or role the user set is never overwritten (by Microsoft 365 or a proposal), it becomes a question. Evidence: `people::decide`, `people::refresh_m365`
