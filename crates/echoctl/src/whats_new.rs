@@ -38,11 +38,11 @@ struct Seen {
     version: String,
 }
 
-/// Every entry up to the running version, newest first (a later one, written ahead, waits for its release).
+/// Every entry up to the running version, newest first as the file has them (a later one, written ahead, waits for its
+/// release).
 fn entries() -> Vec<Entry> {
     let mut all: Vec<Entry> = serde_json::from_str(SOURCE).unwrap_or_default();
     all.retain(|e| !crate::update::newer(&e.version, VERSION));
-    all.sort_by(|a, b| if crate::update::newer(&a.version, &b.version) { std::cmp::Ordering::Less } else if crate::update::newer(&b.version, &a.version) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal });
     all
 }
 
@@ -59,7 +59,7 @@ fn seen() -> Option<String> {
     serde_json::from_slice::<Seen>(&std::fs::read(seen_file()).ok()?).ok().map(|s| s.version)
 }
 
-/// The running version counts as seen: shown, or a fresh install's.
+/// The running version counts as seen: shown, or a fresh install's (`app::first_run`).
 pub fn mark_seen() -> Result<()> {
     std::fs::create_dir_all(paths::config_dir())?;
     paths::write_atomic(&seen_file(), &serde_json::to_vec_pretty(&Seen { version: VERSION.into() })?)?;
@@ -67,15 +67,13 @@ pub fn mark_seen() -> Result<()> {
 }
 
 /// What the window shows now (`{version, entries}`), or null. Nothing seen yet: with calls, Echo was in use before What's
-/// new existed, and the running version's entry shows; without any, it is a fresh install, which starts seen.
+/// new existed, and the running version's entry shows; without any, there is nothing to compare with (a fresh install
+/// starts seen, `app::first_run`).
 pub fn pending() -> Value {
     let all = entries();
     let show = match seen() {
         Some(v) => since(&all, &v),
-        None if crate::calls::all_calls().is_empty() => {
-            let _ = mark_seen();
-            vec![]
-        }
+        None if crate::calls::all_calls().is_empty() => vec![],
         None => all.into_iter().take_while(|e| e.version == VERSION).collect(),
     };
     if show.is_empty() {
@@ -89,8 +87,8 @@ pub fn all() -> Value {
     json!({ "version": VERSION, "entries": entries() })
 }
 
-#[cfg(test)]
 /// What's wrong with the entries (`WHATS-NEW.md`'s rules), one line each.
+#[cfg(test)]
 fn problems(all: &[Entry]) -> Vec<String> {
     let mut out = vec![];
     for e in all {
@@ -119,16 +117,15 @@ fn problems(all: &[Entry]) -> Vec<String> {
     out
 }
 
+/// One sentence: it ends with a full stop and has no other sentence end (". ", "! ", "? ") inside.
 #[cfg(test)]
-/// One sentence: it ends with . ! or ? and has no other sentence end inside.
 fn one_sentence(s: &str) -> bool {
     let s = s.trim();
-    let end = |c: char| matches!(c, '.' | '!' | '?');
-    s.ends_with(end) && !s[..s.len() - 1].split(end).skip(1).any(|rest| rest.starts_with(' '))
+    s.ends_with('.') && ![". ", "! ", "? "].iter().any(|end| s[..s.len() - 1].contains(end))
 }
 
-#[cfg(test)]
 /// A place "Show me" can open: a window route the window routes (`route` in the window script), or an echo:// link.
+#[cfg(test)]
 fn place(open: &str) -> bool {
     if open.starts_with("echo://") {
         return crate::links::Link::parse(open).is_some();
@@ -142,8 +139,8 @@ fn place(open: &str) -> bool {
     }
 }
 
-#[cfg(test)]
 /// Settings' sections, as the window lists them (`SETTINGS_SECTIONS`).
+#[cfg(test)]
 fn settings_sections() -> Vec<String> {
     let js = include_str!("../ui/app/30-settings.js");
     let list = js.split("const SETTINGS_SECTIONS = [").nth(1).and_then(|r| r.split("\n]").next()).unwrap_or("");
@@ -216,9 +213,13 @@ mod tests {
     #[test]
     fn whats_new_shows_once_per_version_and_never_on_a_fresh_install() {
         let (_env, root) = crate::paths::testenv::folders("whats-new");
-        // A fresh install: nothing seen, no calls: nothing, and this version counts as seen.
+        // Nothing seen and no calls: nothing to compare with, and asking writes nothing (the window asks every few seconds).
         assert!(pending().is_null());
+        assert_eq!(seen(), None);
+        // A fresh install starts seen (`app::first_run`): nothing.
+        mark_seen().unwrap();
         assert_eq!(seen().as_deref(), Some(VERSION));
+        assert!(pending().is_null());
         // An update: the versions since the last seen; once shown (seen), nothing.
         let older = entries().last().map(|e| e.version.clone()).unwrap();
         std::fs::write(seen_file(), r#"{"version": "0.0.1"}"#).unwrap();

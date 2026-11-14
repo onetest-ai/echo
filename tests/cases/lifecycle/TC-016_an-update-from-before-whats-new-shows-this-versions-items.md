@@ -16,6 +16,7 @@ tags: [lifecycle, whats-new, update]
 
 ## Preconditions
 - Test data built with no What's new seen at all: `tests/fixtures/serve.sh up <dir> <port> --whats-new-seen none`; it holds calls (an Echo in use); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
+- In S-34 (stage glue): the page taken away (`about:blank`), then `python3 tests/fixtures/whats_new_seen.py none` after `. <dir>/env`. On its own: the `serve.sh up` flag above. Either way, `{{base_url}}` is not loaded before the step that loads it: its first load shows What's new and counts it as seen
 
 ## Steps
 

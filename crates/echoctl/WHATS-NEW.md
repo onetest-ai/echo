@@ -15,7 +15,7 @@ The file is a list of entries, newest first:
 - `icon`: one of `whats_new::ICONS` (`sparkle`, `filter`, `export`, `layout`, `link`, `plugin`, `shield`, `thread`,
   `calendar`, `record`, `fix`). A new icon is added there and in the window's `WN_ICONS`.
 - `title`: a few words, at most 40 characters, no full stop.
-- `text`: one sentence, at most 160 characters, ending with a full stop.
+- `text`: one sentence, at most 160 characters, ending with a full stop (no ". " inside, so no "e.g.").
 - `open` (optional): where "Show me" takes the user: a window route (`today`, `calls`, `calendar`, `calendar/day`,
   `calendar/week`, `tasks`, `projects`, `found`, `settings`, `settings/<section>`) or an `echo://` link.
 

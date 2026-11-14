@@ -59,7 +59,8 @@ function whatsNewGo(open) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !S.wn) return
+  // The palette over it takes its own Escape first.
+  if (e.key !== 'Escape' || !S.wn || PAL.open) return
   e.preventDefault(); e.stopImmediatePropagation()
   S.wn = null
   render()

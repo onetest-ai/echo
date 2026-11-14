@@ -16,6 +16,7 @@ tags: [lifecycle, whats-new]
 
 ## Preconditions
 - Test data built as an update from a very old version: `tests/fixtures/serve.sh up <dir> <port> --whats-new-seen 0.0.1`; the window is served at `{{base_url}}`
+- In S-34 (stage glue): the page taken away (`about:blank`), then `python3 tests/fixtures/whats_new_seen.py 0.0.1` after `. <dir>/env`. On its own: the `serve.sh up` flag above. Either way, `{{base_url}}` is not loaded before the step that loads it: its first load shows What's new and counts it as seen
 - An item's place is its `open`: a window route (`settings/plugins` → the URL ends `#settings/plugins`) or an `echo://` link
 
 ## Steps

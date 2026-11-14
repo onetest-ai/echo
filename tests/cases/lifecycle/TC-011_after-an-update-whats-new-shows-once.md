@@ -15,7 +15,8 @@ tags: [lifecycle, whats-new, update]
 **Module:** Lifecycle | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Test data built as an update from the version before this one: `tests/fixtures/serve.sh up <dir> <port> --whats-new-seen previous` (the last version seen is the one before the newest in What's new); the window is served at `{{base_url}}`; every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
+- Test data built as an update from the version before this one: `tests/fixtures/serve.sh up <dir> <port> --whats-new-seen previous` (the last version seen is the entry before this build's in What's new); the window is served at `{{base_url}}`; every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
+- In S-34 (stage glue): the page taken away (`about:blank`), then `python3 tests/fixtures/whats_new_seen.py previous` after `. <dir>/env`. On its own: the `serve.sh up` flag above. Either way, `{{base_url}}` is not loaded before the step that loads it: its first load shows What's new and counts it as seen
 - The dialog is `[role="dialog"]` named "What's new…"; its items are `.wn-item`
 - The newest entry is the running version's (a release can't ship without it): read both from the page in step 2
 
