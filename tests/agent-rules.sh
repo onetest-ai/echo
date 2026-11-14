@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Echo's own rules on top of the installed manual-qa agents (.claude/agents/, git-ignored): added once, kept across a
+# Echo's own rules on top of the installed manual-qa agents (tests/.claude/agents/, git-ignored): added once, kept across a
 # reinstall of the bundle. Run by tests/install.sh and by tests/fixtures/serve.sh up, so a run never starts without them.
 set -euo pipefail
-cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/tests"
 add() { # <agent> <marker> <rule>
   local f=".claude/agents/$1/RULES.md"
   [ -f "$f" ] || return 0

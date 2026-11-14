@@ -19,6 +19,9 @@ CLAUDE.local.md
 
 # local agent skills (installed per machine)
 /.agents/
+# the manual-qa team (tests/install.sh, per machine)
+/tests/.claude/
+/tests/.agents/
 /skills-lock.json
 future/
 
@@ -36,6 +39,7 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 # functional test reports and screenshots (made-up data, but kept per machine)
 /tests/reports/
 /.playwright-mcp/
+/tests/.playwright-mcp/
 __pycache__/
 /tests/tools/testcall/build/
 /tests/fixtures/ai.local.json

@@ -12,6 +12,10 @@ the user opts in to, transcribes them on the computer, and has Claude Code write
 (vanilla JS, `crates/echoctl/ui/`) shown in a webview — and the same page can be served on localhost, which is how an
 agent tests it. This file is given to every manual-qa role; where it differs from a role's own rules, **this wins**.
 
+The agents and the Playwright MCP are installed in `tests/` (`tests/install.sh`) and load only in a session started
+there (`cd tests && claude`). Paths in this file, the cases and the scenarios are from the repo root (`tests/fixtures/…`,
+`target/debug/echoctl`): every Bash call starts there, `cd "$(git rev-parse --show-toplevel)"` first.
+
 ## Rules
 
 1. **Made-up data only.** Every run builds its own data folder with `tests/fixtures/make-data.sh <empty dir>`:
@@ -345,7 +349,7 @@ reads none of it.
   config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `echoctl model use
   large-v3-turbo-q5_0`). No TestCall, BlackHole, ffmpeg or permission: several runs can record on one Mac at once,
   each in its own data folder.
-- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
+- **Prelude** (each Bash call is a fresh shell): `cd "$(git rev-parse --show-toplevel)"; . <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
 - **A call recorded by `echoctl capture`** (no app running): `$C start acme-sync; target/debug/echoctl capture
   --seconds 38 --title "<title>"`. The last line `capture` prints is the call folder. `capture` reads the feeds
   whether or not a call is on; with one on, it starts at the call's clock.
