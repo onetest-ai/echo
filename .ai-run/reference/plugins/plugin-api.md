@@ -68,7 +68,7 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   user for a decision; `ctx.inbox.clear(key)` takes it away. Evidence: `attention::inbox_items`
 - `ctx.markdown(md)` renders Markdown to safe HTML in the host half. Evidence: `jshost::PRELUDE`
 - In a terminal (`ctx.terminal` true: `echoctl plugin call`, `deliver`, `widget show`, `work show`) only the plugin asked is loaded
-  (`deliver`: all of them); skip start-up work there. Evidence: `plugins::session_commands`, `jshost::no_timers`
+  (`work show`: the plugins that give work rows; `deliver`: all of them); skip start-up work there. Evidence: `plugins::session_commands`, `jshost::no_timers`
 
 ## Events
 
