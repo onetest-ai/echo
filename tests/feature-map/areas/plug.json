@@ -142,7 +142,7 @@
   },
   {
    "id": "F-PLUG-15",
-   "feature": "A plugin may name commands of its own in `uses.sessions.commands`; the sheet says 'lets Claude in Echo run its commands … without asking', and Echo's sessions (the folder session, and routines and Yolo, which run as it does) may run `echoctl plugin call <id> <command>` for exactly those, without a prompt — any other plugin command stays refused; its skills reach the CLI at `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; a command a read-only routine runs this way changes nothing (no folder writes, Claude runs, sends or requests but GET)",
+   "feature": "A plugin may name commands of its own in `uses.sessions.commands`; the sheet says 'lets Claude in Echo run its commands … without asking', and Echo's sessions (the folder session, and routines and Yolo, which run as it does) may run `echoctl plugin call <id> <command>` for exactly those, without a prompt — any other plugin command stays refused; its skills reach the CLI at `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; a command run this way while Claude prepares and asks (a routine's or Yolo's run) changes nothing (no folder writes, Claude runs, sends or requests but GET)",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -160,7 +160,7 @@
   },
   {
    "id": "F-PLUG-17",
-   "feature": "With `uses.folders.write` (the sheet: 'Reads and changes the … you pick … it may write, move and delete files in them') a plugin may `ctx.fs.write` (atomic), `ctx.fs.move` (never over another file) and `ctx.fs.remove` (a file or an empty folder) inside the folders the user gave it — never through a link, never outside, never a hidden file or folder, never in a read-only routine; without it, it only reads. No plugin is given a folder that is or holds Echo's own (its settings, the data folder's .echo)",
+   "feature": "With `uses.folders.write` (the sheet: 'Reads and changes the … you pick … it may write, move and delete files in them') a plugin may `ctx.fs.write` (atomic), `ctx.fs.move` (never over another file) and `ctx.fs.remove` (a file or an empty folder) inside the folders the user gave it — never through a link, never outside, never a hidden file or folder, never while Claude prepares and asks; without it, it only reads. No plugin is given a folder that is or holds Echo's own (its settings, the data folder's .echo)",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -178,7 +178,7 @@
   },
   {
    "id": "F-PLUG-19",
-   "feature": "A plugin adds a row to each thread's Profile under its Sources (client slot `thread.profile`: {id, label, render(thread), after(box, thread)}, thread = {id, name, client}); one that throws is left out and the Profile still draws; switched off or removed, its row leaves every thread. Its host half keeps values per thread with `ctx.threads.get/set/list` (JSON ≤ 16 KB, 64 keys a thread, 4 MB a plugin, null removes, refused for a thread there isn't and in a read-only routine; `threads.json` not writable or removable through `ctx.store`, nor the store itself; changed under one lock across processes; a file over 4 MB from before the cap still loses values); a deleted thread's values are dropped and a thread id used again inherits none; with `threads_changed` in `uses.events.on` (sheet: 'Knows when a thread is renamed, merged or deleted') it hears {thread, born, change: renamed + name, from | merged + into, dropped | deleted + values (its own)}, from the window or a terminal (queued for the app alone, at least once; a queued change of an id that has another thread by then dropped); `after` runs once per box drawn afresh",
+   "feature": "A plugin adds a row to each thread's Profile under its Sources (client slot `thread.profile`: {id, label, render(thread), after(box, thread)}, thread = {id, name, client}); one that throws is left out and the Profile still draws; switched off or removed, its row leaves every thread. Its host half keeps values per thread with `ctx.threads.get/set/list` (JSON ≤ 16 KB, 64 keys a thread, 4 MB a plugin, null removes, refused for a thread there isn't and while Claude prepares and asks; `threads.json` not writable or removable through `ctx.store`, nor the store itself; changed under one lock across processes; a file over 4 MB from before the cap still loses values); a deleted thread's values are dropped and a thread id used again inherits none; with `threads_changed` in `uses.events.on` (sheet: 'Knows when a thread is renamed, merged or deleted') it hears {thread, born, change: renamed + name, from | merged + into, dropped | deleted + values (its own)}, from the window or a terminal (queued for the app alone, at least once; a queued change of an id that has another thread by then dropped); `after` runs once per box drawn afresh",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -198,7 +198,7 @@
   },
   {
    "id": "F-PLUG-21",
-   "feature": "With `uses.signin.hosts` (1–4 plain host names, each once, no addresses; the sheet: 'Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to') a plugin's host half gets the password or token saved for a named host with `ctx.signin.get(host)`: the GitHub CLI's token (`gh auth token`) first, else what git's credential helper keeps (`git credential fill`; for a self-hosted git maybe the user's own password), `{token, from, user?}`, or null when neither has one — Echo asks nobody for a password (the system's keychain may ask once to allow it), each program runs from an empty folder without Echo's git / GitHub CLI environment, 10 s at most with what it started stopped, one lookup per host at a time kept a minute then dropped from memory (`ctx.signin.get(host, {fresh: true})` asks again and keeps that answer); never in a read-only routine, any other host refused; `ctx.signin.sources(host)` says which of the two programs are here without reading one. It grants no network: the plugin names its API host in `network.hosts`",
+   "feature": "With `uses.signin.hosts` (1–4 plain host names, each once, no addresses; the sheet: 'Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to') a plugin's host half gets the password or token saved for a named host with `ctx.signin.get(host)`: the GitHub CLI's token (`gh auth token`) first, else what git's credential helper keeps (`git credential fill`; for a self-hosted git maybe the user's own password), `{token, from, user?}`, or null when neither has one — Echo asks nobody for a password (the system's keychain may ask once to allow it), each program runs from an empty folder without Echo's git / GitHub CLI environment, 10 s at most with what it started stopped, one lookup per host at a time kept a minute then dropped from memory (`ctx.signin.get(host, {fresh: true})` asks again and keeps that answer); never while Claude prepares and asks, any other host refused; `ctx.signin.sources(host)` says which of the two programs are here without reading one. It grants no network: the plugin names its API host in `network.hosts`",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -207,7 +207,7 @@
   },
   {
    "id": "F-PLUG-22",
-   "feature": "With `uses.signin.keep: true` (the sheet adds 'it may sign you in to github.com itself and have Echo keep that sign-in for it') a plugin that made a sign-in itself — whatever the service and however it got it; Echo doesn't look inside — has Echo keep it: `ctx.signin.keep(host, token)` (a host of its `signin.hosts`; one line, 8 KB at most) writes `<config dir>/signin/<plugin>/<host>.json` (0600), outside every plugin's store — that plugin's own: `ctx.signin.get(host)` hands it back first as `{token, from: 'echo'}` to that plugin only (its sheet said `keep`), no other plugin reads, replaces or forgets it, and it is deleted when the plugin is removed (its data kept or not); `ctx.signin.forget(host)` deletes it (true: there was one); keeping and forgetting refused without `keep` and in a read-only routine",
+   "feature": "With `uses.signin.keep: true` (the sheet adds 'it may sign you in to github.com itself and have Echo keep that sign-in for it') a plugin that made a sign-in itself — whatever the service and however it got it; Echo doesn't look inside — has Echo keep it: `ctx.signin.keep(host, token)` (a host of its `signin.hosts`; one line, 8 KB at most) writes `<config dir>/signin/<plugin>/<host>.json` (0600), outside every plugin's store — that plugin's own: `ctx.signin.get(host)` hands it back first as `{token, from: 'echo'}` to that plugin only (its sheet said `keep`), no other plugin reads, replaces or forgets it, and it is deleted when the plugin is removed (its data kept or not); `ctx.signin.forget(host)` deletes it (true: there was one); keeping and forgetting refused without `keep` and while Claude prepares and asks",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -282,7 +282,7 @@
   },
   {
    "id": "F-PLUG-30",
-   "feature": "A plugin installs a Claude Code plugin into the user's Claude Code (`ctx.claude.installPlugin(spec)`) only when it is the channel plugin its manifest names (`uses.channel.plugin`, a claude-plugins-official one) — its install sheet says so ('…, and installs Claude Code's <spec> plugin for it') — into the default AI profile's Claude Code, never from a read-only routine; `ctx.claude.hasPlugin` asks only about that one too; any other spec is refused before Claude Code is run",
+   "feature": "A plugin installs a Claude Code plugin into the user's Claude Code (`ctx.claude.installPlugin(spec)`) only when it is the channel plugin its manifest names (`uses.channel.plugin`, a claude-plugins-official one) — its install sheet says so ('…, and installs Claude Code's <spec> plugin for it') — into the default AI profile's Claude Code, never while Claude prepares and asks; `ctx.claude.hasPlugin` asks only about that one too; any other spec is refused before Claude Code is run",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -312,7 +312,7 @@
   },
   {
    "id": "F-PLUG-33",
-   "feature": "A plugin with an `agent` part gives Claude guides at run time with `ctx.agent.set({summary?, entries: [{name, summary, guide}]})` (the whole set each call): `name` a–z 0–9 `-` up to 40, not `guides` or `scripts`; at most 20; `summary` 1–200 characters; `guide` Markdown ≤ 16 KB. Each is written to `.plugins/<id>/<name>/CLAUDE.md` and is a row of the core; entries not given again go; `summary` replaces the manifest's in the core. Refused in a read-only routine and for a plugin without `agent`",
+   "feature": "A plugin with an `agent` part gives Claude guides at run time with `ctx.agent.set({summary?, entries: [{name, summary, guide}]})` (the whole set each call): `name` a–z 0–9 `-` up to 40, not `guides` or `scripts`; at most 20; `summary` 1–200 characters; `guide` Markdown ≤ 16 KB. Each is written to `.plugins/<id>/<name>/CLAUDE.md` and is a row of the core; entries not given again go; `summary` replaces the manifest's in the core. Refused while Claude prepares and asks and for a plugin without `agent`",
    "priority": "high",
    "check": "agent",
    "axes": [

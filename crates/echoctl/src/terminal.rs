@@ -691,9 +691,8 @@ mod tests {
     fn a_test_never_reaches_this_computers_own_claude_code_folder() {
         // testenv points the user's home and Claude Code folder into its own (#604's follow-up): every place Echo
         // looks for the user's Claude Code setup is inside the test's folder, never the real `~/.claude`.
-        let real = crate::paths::testenv::real_home().join(".claude");
         let (_env, root) = crate::paths::testenv::folders("own-claude-folder");
-        let inside = |p: &std::path::Path| assert!(p.starts_with(&root) && !p.starts_with(&real), "{} reaches outside the test", p.display());
+        let inside = |p: &std::path::Path| assert!(p.starts_with(&root), "{} reaches outside the test", p.display());
         inside(&own_claude_folder());
         inside(&crate::paths::user_home().join(".claude"));
         // Claude Code's install record read from there: an Echo plugin recorded in the test's folder is the one found.
