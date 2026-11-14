@@ -886,6 +886,38 @@ mod tests {
     }
 
     #[test]
+    fn a_calls_faces_are_who_joined_when_teams_listed_them_else_the_invite() {
+        let (_env, _root) = crate::paths::testenv::folders("window-calls-joined");
+        let invite = json!({"organizer": {"name": "Omar Haddad", "email": "omar@acme.example"}, "attendees": [{"name": "Ivan Petrov", "email": "ivan@acme.example"}]});
+        for (name, log) in [("2026-10-20_100000-review", true), ("2026-10-21_100000-sync", false), ("2026-10-22_100000-alone", true)] {
+            let d = crate::paths::calls_dir().join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), json!({"title": name, "started_at": "2026-10-20T10:00:00+02:00", "ended_at": "2026-10-20T10:30:00+02:00"}).to_string()).unwrap();
+            fs::write(d.join("meeting.json"), invite.to_string()).unwrap();
+            let lines: &[&str] = if name.ends_with("alone") {
+                // The user alone in the call: their own tile and row; the invitees "No response".
+                &[r#"{"v":2}"#, r#"{"t":0.5,"k":"tile:Sam Rivera","n":"Sam Rivera","me":true,"add":["a"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:0","n":"Sam Rivera","add":["t:unmuted"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:1","n":"Omar Haddad","add":["t:no response"],"del":[]}"#]
+            } else {
+                &[r#"{"v":2}"#, r#"{"t":0.5,"k":"roster:1","n":"Haddad, Omar (Acme)","add":["t:unmuted"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:2","n":"Ivan Petrov","add":["t:no response"],"del":[]}"#,
+                  r#"{"t":9.0,"k":"roster:3","n":"Gomez, Rita (Acme)","add":["t:muted"],"del":[]}"#]
+            };
+            if log {
+                fs::write(d.join(crate::meeting::UI_LOG), lines.join("\n")).unwrap();
+            }
+        }
+        let people = |v: &Value, name: &str| v["calls"].as_array().unwrap().iter().find(|c| c["name"] == name).unwrap()["people"].clone();
+        let page = calls_page("");
+        // Ivan was invited and never came; Rita came uninvited; Omar by the invite's name.
+        assert_eq!(people(&page, "2026-10-20_100000-review"), json!(["Omar Haddad", "Rita Gomez"]));
+        assert_eq!(people(&page, "2026-10-21_100000-sync"), json!(["Omar Haddad", "Ivan Petrov"]), "no participants list: the invite");
+        assert_eq!(people(&page, "2026-10-22_100000-alone"), json!([]), "nobody else joined: no faces, not the invite");
+        assert_eq!(call_detail(&crate::paths::calls_dir().join("2026-10-20_100000-review"))["people"], json!(["Omar Haddad", "Rita Gomez"]), "the header: the same");
+    }
+
+    #[test]
     fn a_client_route_without_an_id_is_a_404_not_a_panic() {
         let (_env, _root) = crate::paths::testenv::folders("window-client-no-id");
         let get = |path: &str| respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request")).status().as_u16();

@@ -440,6 +440,8 @@ def write_call(d, c):
                 fh.write(PNG)
             lines.append(json.dumps({"t": t, "file": f, "change": 1.0, "shared_by": c.get("shared_by")}))
         d.write(f"{p}/frames.jsonl", "\n".join(lines) + "\n")
+    if c.get("ui_log"):  # what Echo read of Teams' call window while recording (`ax::SpeakingLog`): tiles and the participants list
+        d.write(f"{p}/speaking.jsonl", "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in c["ui_log"]))
     if c.get("my_notes") is not None:
         if c["my_notes"] is False:  # unreadable: a folder where the file should be
             os.makedirs(f"{p}/my-notes.md")
@@ -1084,7 +1086,15 @@ def build_calls(d, H):
          thread_by="people globex-pilot")
     call("acme-security-review", day(1, 11), 40, "Acme security review", [p["omar"], p["ivan"]], LONG_TALK, ("transcript", "failed", "tried"), ("call", "one", "guess"),
          run={"state": "failed", "profile": "work", "model": "sonnet", "started_at": iso(day(1, 12)), "finished_at": iso(day(1, 12, 1)),
-              "message": "Claude Code exited with an error (exit 1)", "pid": None, "session_id": None}, pin=["acme-rollout"])
+              "message": "Claude Code exited with an error (exit 1)", "pid": None, "session_id": None}, pin=["acme-rollout"],
+         # Teams' participants list, read during the call: Omar came, Ivan was invited and never did, Rita came uninvited
+         # (written as the directory has her: "Last, First (Org)"); the user by their own tile and row.
+         ui_log=[{"v": 2}, {"t": 0.5, "k": "tile:Sam Rivera", "n": "Sam Rivera", "me": True, "add": ["tile"], "del": []},
+                 {"t": 0.5, "k": "tile:Omar Haddad", "n": "Omar Haddad", "add": ["tile", "t:muted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:sam", "n": "Sam Rivera", "add": ["t:unmuted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:omar", "n": "Omar Haddad", "add": ["t:muted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:ivan", "n": "Ivan Petrov", "add": ["t:in a meeting", "t:no response"], "del": []},
+                 {"t": 240.0, "k": "roster:8:orgid:rita", "n": "Gomez, Rita (Acme)", "add": ["t:unmuted"], "del": []}])
     call("vandelay-vendor", day(1, 16), 30, "Vendor call with Vandelay", [p["kai"]], LONG_TALK, ("transcript", "needs_login", "tried"), ("call", "none", "guess"),
          ai_profile="out", run={"state": "needs_login", "profile": "out", "model": None, "started_at": None, "finished_at": None, "message": "Sign in to Claude (out) first", "pid": None, "session_id": None})
     # This week.

@@ -571,6 +571,10 @@ impl UiRecorder {
     pub fn poll(&mut self) -> bool {
         use std::io::Write;
         if self.bytes > UI_LOG_MAX_BYTES {
+            // The reader stops for good: the participants list misses the rest of the call.
+            if let Some(log) = self.speaking.as_mut() {
+                log.cap();
+            }
             return false;
         }
         let t = self.t0.elapsed().as_secs_f64();

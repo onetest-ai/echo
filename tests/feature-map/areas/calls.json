@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-CALLS-01",
-   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first, in the app's one order of calls (undated calls are the oldest: last in the list, never `latest` or the tray's newest); each row shows time, length, the first two people (+N; the invite's people but the user and who declined, by their weight in the call's threads: influence, interest, calls together) and thread icons",
+   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first, in the app's one order of calls (undated calls are the oldest: last in the list, never `latest` or the tray's newest); each row shows time, length, the first two people (+N; the call's people but the user — who joined, else the invite's but who declined: F-CALLS-19 — by their weight in the call's threads: influence, interest, calls together) and thread icons",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -46,7 +46,7 @@
   },
   {
    "id": "F-CALLS-05",
-   "feature": "A call's header shows title, weekday date and time, length, the kind-of-meeting chip, up to 6 people (\"and N more\"; the invite's but the user and who declined, by their weight in the call's threads), \"Memo\" or \"from Teams transcript\"",
+   "feature": "A call's header shows title, weekday date and time, length, the kind-of-meeting chip, up to 6 people (\"and N more\"; the same people as the row, F-CALLS-19, by their weight in the call's threads), \"Memo\" or \"from Teams transcript\"",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -174,6 +174,15 @@
    "axes": [
     "call.status",
     "call.run"
+   ]
+  },
+  {
+   "id": "F-CALLS-19",
+   "feature": "A recorded Teams call whose participants list Echo read during the call (Read the Teams window on, the list opened) has who joined as its people, kept in its meta.json: someone invited who never joined is left out, someone who joined without an invite is shown; Teams' names are matched to the invite's and the people directory's (\"Gomez, Rita (Acme)\" is Rita Gomez); without a participants list (window read off, Google Meet, a memo) the invite's people stay",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.people"
    ]
   }
  ]
