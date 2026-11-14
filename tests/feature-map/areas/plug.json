@@ -151,7 +151,7 @@
   },
   {
    "id": "F-PLUG-16",
-   "feature": "`echoctl plugin call <id> …` loads only that plugin (no other plugin's start-up code runs in the terminal), and the plugin sees `ctx.terminal` true there (false in the app)",
+   "feature": "`echoctl plugin call <id> …` loads only that plugin (no other plugin's start-up code runs in the terminal), and the plugin sees `ctx.terminal` true there (false in the app); so do `echoctl widget show plugin:…` and `echoctl work show`, which load a plugin only to answer",
    "priority": "medium",
    "check": "agent",
    "axes": [

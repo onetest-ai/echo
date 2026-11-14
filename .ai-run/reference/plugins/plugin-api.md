@@ -59,15 +59,16 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
 - `ctx.command(name, fn)`: `fn` takes JSON arguments, may be `async`, returns JSON and throws an `Error` to fail. A
   window-called command has 30 s. More than 5 s of JavaScript between awaits is interrupted; bulk file reads go through
   `ctx.fs.readMany` / `ctx.fs.walk`, which run off that slice. Evidence: `jshost::CALL_TIMEOUT`, `jshost::SLICE`
-- `ctx.every(seconds, fn)`: periodic work, 10 s minimum; there are no timers in `echoctl plugin call` or
-  `echoctl deliver`. Evidence: `jshost::no_timers`
+- `ctx.every(seconds, fn)`: periodic work, 10 s minimum; there are no timers in `echoctl plugin call`,
+  `echoctl deliver`, `echoctl widget show` or `echoctl work show`. Evidence: `jshost::no_timers`
 - Memory: 64 MB shared by all host halves. Evidence: `jshost::set_memory_limit`
 - `ctx.sessions.skills`, `ctx.sessions.read` and `ctx.view.hints` are each set as the whole set (`[]` removes it) and
   are not kept across loads: set them from `apply` on every load. Evidence: `grants::drop_plugin`
 - `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 chars) asks the
   user for a decision; `ctx.inbox.clear(key)` takes it away. Evidence: `attention::inbox_items`
 - `ctx.markdown(md)` renders Markdown to safe HTML in the host half. Evidence: `jshost::PRELUDE`
-- In a terminal (`ctx.terminal`) only this plugin is loaded. Evidence: `plugins::session_commands`
+- In a terminal (`ctx.terminal` true: `echoctl plugin call`, `deliver`, `widget show`, `work show`) only the plugin asked is loaded
+  (`deliver`: all of them); skip start-up work there. Evidence: `plugins::session_commands`, `jshost::no_timers`
 
 ## Events
 

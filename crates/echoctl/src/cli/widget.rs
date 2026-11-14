@@ -23,6 +23,8 @@ pub fn widget(cmd: WidgetCmd) -> Result<()> {
             // A plugin's widget: its provider asked now, waited for (its author sees the answer it gives).
             #[cfg(feature = "js")]
             if let Some((plugin, widget)) = id.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                // A terminal's host: it answers this and ends, so the plugin skips its start-up work (`ctx.terminal`).
+                crate::jshost::no_timers();
                 crate::jshost::widget_ask_now(plugin, widget);
             }
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -51,7 +53,11 @@ pub fn work(cmd: WorkCmd) -> Result<()> {
                 crate::projects::load(t)?;
             }
             #[cfg(feature = "js")]
-            print_json(&crate::jshost::work::show(thread.as_deref()));
+            {
+                // A terminal's host (see `widget show`).
+                crate::jshost::no_timers();
+                print_json(&crate::jshost::work::show(thread.as_deref()));
+            }
             #[cfg(not(feature = "js"))]
             anyhow::bail!("this build runs no plugins");
         }
