@@ -258,8 +258,9 @@ document.addEventListener('click', (e) => {
 const twHover = (id) => {
   if ((S.tdHover || null) === (id || null)) return
   const a = document.activeElement
-  // The keyboard on the preview's sizes: the preview stays (a size pressed is that widget's).
-  if (a && a.closest && a.closest('.tw-pick')) return
+  // The keyboard on the preview's sizes: the preview stays (a size pressed is that widget's). Not a size the mouse
+  // clicked: WebView2 gives a clicked button the focus, which would hold the preview still (#527).
+  if (a && a.closest && a.closest('.tw-pick') && a.matches(':focus-visible')) return
   S.tdHover = id || null
   const back = a && a.closest && a.closest('.tw-panel') && ['twAdd', 'twPart'].find((k) => a.dataset && a.dataset[k])
   const sel = back && `.tw-panel [data-${back.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}="${CSS.escape(a.dataset[back])}"]`
