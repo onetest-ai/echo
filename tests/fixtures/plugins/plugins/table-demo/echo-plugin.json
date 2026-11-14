@@ -1,8 +1,8 @@
 {
   "id": "table-demo",
   "name": "Table demo",
-  "version": "0.2.0",
-  "summary": "A test plugin: a table widget (groups, pills, dates, numbers, a row's details, links) and stats with links and a count set to a thread or a client (tests/cases/today/TC-042, TC-044).",
+  "version": "0.3.0",
+  "summary": "A test plugin: a table widget (groups, pills, dates, numbers, details, links), stats with links, a count and a table for a thread or a client with a link, details and an action (tests/cases/today/TC-042, TC-044).",
   "main": "main.js",
   "widgets": [
     {
@@ -46,6 +46,28 @@
       "sizes": [
         "S",
         "M"
+      ],
+      "params": [
+        {
+          "key": "thread",
+          "label": "Thread",
+          "type": "thread"
+        },
+        {
+          "key": "client",
+          "label": "Client",
+          "type": "client"
+        }
+      ]
+    },
+    {
+      "id": "roles",
+      "label": "Roles to fill",
+      "about": "A thread's or a client's positions: details, a link, an action",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
       ],
       "params": [
         {

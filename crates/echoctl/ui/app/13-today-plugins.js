@@ -151,7 +151,7 @@ function pluginTableHtml(d, size, opened, { str, outLink }) {
   const line = (r) => {
     const shown = open.has(r.id) && r.detail.length > 0
     const chev = !details ? '' : r.detail.length
-      ? `<td class="pw-tc"><button type="button" class="pw-chev" data-pw-row="${esc(r.id)}" aria-expanded="${shown}" aria-label="${shown ? 'Hide details' : 'Show details'}">${shown ? '▾' : '▸'}</button></td>` : '<td class="pw-tc"></td>'
+      ? `<td class="pw-tc"><button type="button" class="pw-chev" data-pw-row="${esc(r.id)}" aria-expanded="${shown}" aria-label="${shown ? 'Hide details' : 'Show details'}">${CHEV(shown)}</button></td>` : '<td class="pw-tc"></td>'
     const tds = r.drawn.map((x, j) => {
       const html = (j === linkAt && x.text && outLink(x.text, r.link)) || x.html
       // A text cell keeps to one line, cut with … when narrow; its whole text on hover.
@@ -365,7 +365,7 @@ function pluginWidgetView(id, w, size) {
       const theme = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       Plugins.drawing = true
       try { body = `<div class="pw-page">${String(draw({ data: w.data, size, theme }) ?? '')}</div>` } finally { Plugins.drawing = false }
-    } else body = pluginWidgetHtml(w.kind, w.data, size, (S.pwRows && S.pwRows[id]) || [])
+    } else body = pluginWidgetHtml(w.kind, w.data, size, (S.pwRows && S.pwRows[`${tdPageKey()}|${id}`]) || [])
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   // When its data came: plugins answer on their own schedule, so the time says how fresh it is (a day's other date
   // named); after a failed ask, since when it hasn't changed, and why.
@@ -390,10 +390,11 @@ function pluginWidgetView(id, w, size) {
   return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}${ask}</section>`
 }
 
-// A plugin widget's actions and its outside link: an action runs its plugin's command (the user's click), then Today is
-// read again; an https link asks once in the widget ("Open <host>?") before it leaves Echo.
+// A plugin widget's actions and its outside link, on Today and on a thread's or client's dashboard: an action runs its
+// plugin's command (the user's click), then the page is read again; an https link asks once in the widget ("Open
+// <host>?") before it leaves Echo.
 document.addEventListener('click', async (e) => {
-  if (S.view !== 'today' || !e.target.closest) return
+  if (!tdHere() || !e.target.closest) return
   const sec = e.target.closest('[data-pw]')
   if (!sec) return
   const plugin = (sec.dataset.pw.split(':')[1] || '')
@@ -401,10 +402,12 @@ document.addEventListener('click', async (e) => {
   const row = e.target.closest('[data-pw-row]')
   if (row) {
     e.preventDefault()
-    const open = new Set(((S.pwRows || {})[sec.dataset.pw]) || [])
+    // Each page its own (the same widget on Today and on a dashboard opens its rows apart).
+    const rk = `${tdPageKey()}|${sec.dataset.pw}`
+    const open = new Set(((S.pwRows || {})[rk]) || [])
     if (open.has(row.dataset.pwRow)) open.delete(row.dataset.pwRow)
     else open.add(row.dataset.pwRow)
-    S.pwRows = { ...(S.pwRows || {}), [sec.dataset.pw]: [...open] }
+    S.pwRows = { ...(S.pwRows || {}), [rk]: [...open] }
     render()
     setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-row="${CSS.escape(row.dataset.pwRow)}"]`); if (b) b.focus() })
     return
@@ -421,7 +424,7 @@ document.addEventListener('click', async (e) => {
       const r = await get(`api/plugin/${encodeURIComponent(plugin)}/call/${encodeURIComponent(act.dataset.pwCmd)}?args=${encodeURIComponent(JSON.stringify(args))}`)
       if (r && r.error) window.echo.notice(`${act.textContent}: ${r.error}`)
     } catch (x) { window.echo.notice(`${act.textContent}: ${x.message || x}`) }
-    return loadToday().then(render)
+    return (S.view === 'today' ? loadToday() : loadDashboard()).then(render)
   }
   const open = e.target.closest('[data-pw-open]')
   if (open) {
