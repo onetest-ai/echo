@@ -45,6 +45,8 @@ function whatsNewDialog() {
 
 /** What's new again (⌘K, Settings → General): every version's entry. */
 async function whatsNewOpen() {
+  // The tray's What's new while the palette is open: the palette goes, or it would keep its Escape over the dialog.
+  if (PAL.open) paletteClose()
   try { const r = await get('api/whats-new'); S.wn = r.entries || [] } catch { S.wn = null }
   render()
   whatsNewFocus()

@@ -150,11 +150,11 @@ fn exe_icon(size: u32) -> Option<tao::window::Icon> {
     tao::window::Icon::from_rgba(img.into_raw(), size, size).ok()
 }
 
-/// Open the window. `ipc` receives each message the page posts (JSON text).
 /// The tray's What's new, as the start of a window (`open`): the window's place for it (`route` in the window script
 /// shows it over Today).
 pub const WHATS_NEW: &str = "#whats-new";
 
+/// Open the window. `ipc` receives each message the page posts (JSON text).
 pub fn open<T: 'static>(
     target: &EventLoopWindowTarget<T>,
     start_call: Option<&str>,
