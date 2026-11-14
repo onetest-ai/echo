@@ -17,6 +17,7 @@ tags: [plugins, sessions, skills, scripts, permissions, untrusted-text, guard]
 
 ## Preconditions
 - Fresh standard test data with the fake Claude Code: `python3 tests/fixtures/make_data.py <dir> --set standard --ai fake` (an empty `<dir>`); CLI steps run in Bash after `. <dir>/env`; `D="$(dirname "$ECHOCTL_HOME")"`; `echoctl` is `target/debug/echoctl` inside the repository (Echo finds its own plugin from there), built right before the run. No window step
+- The plugin's launchers (`$R`, the session's scripts) run this build, not an Echo installed on the computer: `export ECHOCTL_BIN="$PWD/target/debug/echoctl"` (an absolute path; without it a launcher stops with "echoctl app is not installed")
 - **A fake `claude` that writes down what Echo starts it with**, in front of the data's fake (never a real account): `mv "$D/bin/claude" "$D/bin/claude.fake"`, then write `$D/bin/claude` (`chmod +x`):
   ```sh
   #!/bin/sh
