@@ -72,6 +72,11 @@ impl EchoWindow {
         let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.openLink({})", json!(link)));
     }
 
+    /// Go to a place of the window's own (`#whats-new`).
+    pub fn go(&self, route: &str) {
+        let _ = self.webview.evaluate_script(&format!("location.hash = {}", json!(route)));
+    }
+
     /// Show a call (`name` = its folder name).
     pub fn show_call(&self, name: &str) {
         let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.openCall({})", json!(name)));
@@ -186,6 +191,8 @@ pub fn open<T: 'static>(
     let url = match start_call {
         // An echo:// link: the page routes it as it loads (`#link=…`).
         Some(c) if c.starts_with("echo://") => format!("{}#link={}", base_url(), urlencode(c)),
+        // A place of the window's own (`#whats-new`: the tray's What's new).
+        Some(r) if r.starts_with('#') => format!("{}{r}", base_url()),
         Some(c) => format!("{}#call/{}", base_url(), urlencode(c)),
         None => base_url().to_string(),
     };

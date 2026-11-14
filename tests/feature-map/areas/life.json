@@ -90,7 +90,7 @@
   },
   {
    "id": "F-LIFE-12",
-   "feature": "What's new is reachable again from ⌘K (\"What's new\") and Settings → General, beside Echo's version: every version's items, newest first",
+   "feature": "What's new is reachable again from ⌘K (\"What's new\"), Settings → General, beside Echo's version, and the tray menu (\"What's new…\", which opens the window on Today with it): every version's items, newest first",
    "priority": "low",
    "check": "agent",
    "axes": []
