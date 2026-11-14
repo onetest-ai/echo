@@ -31,6 +31,9 @@ Behavioural rules for every change; for a trivial task, use judgment.
    check per step (`1. … → verify: …`), then loop until each check holds (for a review, the check is a reported list, not
    fixes). Here the final check is the gates in
    `.ai-run/guides/quality-gates.md`.
+5. **Right model for a subagent.** Give a subagent the cheapest model that reliably fits, by the decision tree in
+   `.ai-run/reference/standards/subagent-models.md`; security, permissions, design and their reviews always go on the
+   strongest model, and when unsure, one level up.
 
 ## Guide Imports
 
@@ -72,6 +75,7 @@ with the code, in the same PR, checked by that PR's review; no `Rules:` PR.
 | Integration | .ai-run/reference/integrations/claude-code-runs.md | command builder, profiles, leases, routing variables, minutes-run admission and actions, the fake |
 | Security | .ai-run/reference/security/untrusted-text.md | run allowlists and their commands, refusals in runs, minutes-run flags, scope variables, CSP, secrets, routine/Yolo builder and lists |
 | Standards | .ai-run/reference/standards/git-workflow.md | repository, branch types, the Map line, release commands and variables |
+| Standards | .ai-run/reference/standards/subagent-models.md | the subagent model decision tree, the current model per class, review and escalation, the task history behind it |
 | Testing | .ai-run/reference/testing/testing.md | where tests live, the test environment, helpers, open log, feature-map.py, exemplars |
 | Testing | tests/app_profile.md | functional runs: test data, serving, selectors, recordings, scenarios, the case format |
 | Window | .ai-run/reference/window/window-ui.md | page actions and routes, IPC, assets, parts, tested-block markers, settings, rendering helpers |
