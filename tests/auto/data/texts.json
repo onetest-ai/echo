@@ -2085,6 +2085,24 @@
           "L"
         ],
         "temporal": true
+      },
+      {
+        "about": "one setting for every widget beside it that has it",
+        "height": "hug",
+        "heights": [
+          1
+        ],
+        "id": "core:filters",
+        "kind": "filters",
+        "label": "Filters",
+        "params": [],
+        "part": "Filters",
+        "sizes": [
+          "S",
+          "M",
+          "L"
+        ],
+        "temporal": false
       }
     ],
     "default": [
@@ -2241,7 +2259,8 @@
         "Tasks",
         "Calls",
         "Needs you",
-        "Routines"
+        "Routines",
+        "Filters"
       ],
       "onlyWhile": " — shows only while it has something",
       "moves": {

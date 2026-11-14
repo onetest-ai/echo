@@ -179,6 +179,14 @@ function exportClone(root) {
     if (el.scrollHeight <= el.clientHeight + 1) return
     if (/auto|scroll/.test(getComputedStyle(el).overflowY)) Object.assign(now[i].style, { maxHeight: 'none', height: 'auto', overflow: 'visible' })
   })
+  // A choice (Filters): what it is set to, as text.
+  was.forEach((el, i) => {
+    if (el.tagName !== 'SELECT') return
+    const v = document.createElement('b')
+    v.className = 'ex-choice'
+    v.textContent = (el.selectedOptions[0] && el.selectedOptions[0].textContent) || ''
+    now[i].replaceWith(v)
+  })
   copy.querySelectorAll('.td-head, .dash-h, .bdh, aside.detail, .menu, [role="menu"], script, style, iframe, frame, frameset, object, embed, applet, meta, base, link, form, foreignObject, input, textarea, select, .td-edit-acts, .skeleton').forEach((x) => x.remove())
   const https = (u) => (/^https:\/\/[^\s"<>\\]+$/.test(u || '') ? u : '')
   const as = (el, tag) => {
