@@ -216,11 +216,18 @@ const table = {
   ],
 }
 
-test('a table: its columns (a pill, a short date, a number at the end), rows under their group in the groups\' order, the rest last', () => {
+test("a table's date: \"Nov 15\" this year, with its year in another (#588)", () => {
+  const y = new Date().getFullYear()
+  const h = draw('table', { columns: [{ key: 'd', label: 'D', kind: 'date' }], rows: [{ id: 1, cells: { d: `${y}-11-15` } }, { id: 2, cells: { d: `${y + 1}-12-19` } }, { id: 3, cells: { d: `${y - 1}-01-05` } }] }, 'M')
+  assert.match(h, new RegExp(`<time datetime="${y}-11-15">Nov 15</time>`), 'this year: no year')
+  assert.match(h, new RegExp(`<time datetime="${y + 1}-12-19">Dec 19, ${y + 1}</time>`), 'next year: its year')
+  assert.match(h, new RegExp(`<time datetime="${y - 1}-01-05">Jan 5, ${y - 1}</time>`), 'last year: its year')
+})
+
+test('a table: its columns (a pill, a date, a number at the end), rows under their group in the groups\' order, the rest last', () => {
   const h = draw('table', table, 'L')
   assert.match(h, /<th scope="col" class="k-pill">Urgency<\/th>/)
   assert.match(h, /<span class="pw-pill tone-bad">Critical<\/span>/)
-  assert.match(h, /<time datetime="2026-11-15">Nov 15<\/time>/)
   assert.match(h, /<td class="k-number">3<\/td>/)
   const at = (t) => h.indexOf(t)
   assert.ok(at('NWB · Northwind') < at('P-1') && at('P-1') < at('CTL · Contoso') && at('CTL · Contoso') < at('P-3') && at('P-3') < at('Other') && at('Other') < at('P-9'), 'groups in their order, the rest last')
