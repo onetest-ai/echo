@@ -110,6 +110,10 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             if !plugins.is_empty() {
                 v["plugins"] = json!(plugins);
             }
+            // Filters, only when it is on Today: the settings Today's widgets share.
+            if wants(crate::today_layout::FILTERS) {
+                v["filters"] = crate::today_layout::filters_on(&crate::today_layout::Page::Today);
+            }
             // Recorded this week, only when it is on Today.
             if wants("core:calls.week") {
                 v["calls_week"] = crate::widgets::calls_for(&crate::today_layout::params_of("core:calls.week"));
@@ -253,6 +257,19 @@ fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> 
                 crate::jshost::widget_ask_on(plugin, widget, &page);
             }
             Ok(items)
+        }
+        // Filters: one setting on every widget here that has it, each plugin widget among them asked again at once.
+        "filter" => {
+            let set = l::set_filter_on(&page, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
+            #[cfg(feature = "js")]
+            for w in &set {
+                if let Some((plugin, widget)) = w.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                    crate::jshost::widget_ask_on(plugin, widget, &page);
+                }
+            }
+            #[cfg(not(feature = "js"))]
+            let _ = set;
+            Ok(l::load_on(&page))
         }
         "size" => l::resize_on(&page, w, v["size"].as_str().unwrap_or("")),
         "height" => l::set_height_on(&page, w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),

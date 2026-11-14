@@ -56,7 +56,7 @@ pub enum Side {
 }
 
 /// The widgets Today draws now; the others' views come with the layout steps (#315).
-pub const DRAWN: &[&str] = &["core:needs.now", "core:routines.cards", "core:calendar.agenda", "core:tasks.mine", "core:calendar.next", "core:calendar.calendar", "core:calendar.strip", "core:calendar.choices", "core:tasks.glance", "core:tasks.done", "core:calls.week"];
+pub const DRAWN: &[&str] = &["core:needs.now", "core:routines.cards", "core:calendar.agenda", "core:tasks.mine", "core:calendar.next", "core:calendar.calendar", "core:calendar.strip", "core:calendar.choices", "core:tasks.glance", "core:tasks.done", "core:calls.week", FILTERS];
 
 const MAX_BYTES: usize = 16 * 1024;
 
@@ -168,9 +168,10 @@ impl Page {
     }
 
     /// Whether this page offers `w`: Today every widget; a thread's dashboard one with a `thread` setting, a client's
-    /// one with a `client` setting.
+    /// one with a `client` setting; every page Filters.
     pub fn offers(&self, w: &widgets::Widget) -> bool {
         match self.base() {
+            _ if w.id == FILTERS => true,
             Page::Thread(_) => w.params.iter().any(|p| p.kind == "thread"),
             Page::Client(_) => w.params.iter().any(|p| p.kind == "client"),
             _ => true,
@@ -470,6 +471,109 @@ pub fn params_on(page: &Page, widget: &str) -> serde_json::Map<String, serde_jso
     out
 }
 
+/// Echo's Filters widget: one control a setting the widgets beside it share.
+pub const FILTERS: &str = "core:filters";
+
+/// The settings the widgets on a page share, for Filters: by key and type (a choice's options gathered), each with
+/// the widgets that have it, its value when they agree (a thread or client unset: "") or `mixed`, and what it may be
+/// set to (a thread: the page's open threads; a client: every client). Settings the page sets aren't among them.
+pub fn filters_on(page: &Page) -> serde_json::Value {
+    use serde_json::{json, Value};
+    let mut out: Vec<Value> = vec![];
+    for i in load_on(page).into_iter().filter(|i| i.widget != FILTERS) {
+        let Ok(w) = widgets::find(&i.widget) else { continue };
+        let fixed = page.fixed(&w);
+        let set = params_on(page, &i.widget);
+        for p in w.params.iter().filter(|p| !fixed.contains_key(&p.key)) {
+            let now = set.get(&p.key).cloned().unwrap_or_else(|| if matches!(p.kind.as_str(), "thread" | "client") { json!("") } else { Value::Null });
+            match out.iter_mut().find(|f| f["key"] == p.key.as_str() && f["type"] == p.kind.as_str()) {
+                Some(f) => {
+                    f["widgets"].as_array_mut().expect("a list").push(json!(i.widget));
+                    if f["value"] != now {
+                        f["mixed"] = json!(true);
+                    }
+                    for o in &p.options {
+                        let opts = f["options"].as_array_mut().expect("a list");
+                        if !opts.iter().any(|x| x["id"] == o.as_str()) {
+                            opts.push(json!({"id": o, "name": o}));
+                        }
+                    }
+                }
+                None => {
+                    let options: Vec<Value> = match p.kind.as_str() {
+                        "choice" => p.options.iter().map(|o| json!({"id": o, "name": o})).collect(),
+                        "thread" => crate::projects::list().into_iter().filter(|t| !t.stage.closed() && page.holds_thread(&t.id)).map(|t| json!({"id": t.id, "name": t.name})).collect(),
+                        "client" => crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name})).collect(),
+                        _ => vec![],
+                    };
+                    out.push(json!({"key": p.key, "label": p.label, "type": p.kind, "options": options, "value": now, "mixed": false, "widgets": [i.widget]}));
+                }
+            }
+        }
+    }
+    for f in &mut out {
+        if f["mixed"] == true {
+            f["value"] = Value::Null;
+        }
+    }
+    json!({ "filters": out })
+}
+
+/// Set one setting on every widget on a page that has it (Filters, `echoctl today filter`): `value` as
+/// [`set_param_on`] takes it; a choice only on those that take it. Refused when the page sets it, or none takes it.
+/// The widgets set, in one change.
+pub fn set_filter_on(page: &Page, key: &str, value: &str) -> Result<Vec<String>> {
+    use serde_json::Value;
+    let items = load_on(page);
+    let (mut set, mut page_sets, mut has, mut options) = (vec![], false, false, Vec::<String>::new());
+    for i in items.iter().filter(|i| i.widget != FILTERS) {
+        let Ok(w) = widgets::find(&i.widget) else { continue };
+        let Some(def) = w.params.iter().find(|p| p.key == key) else { continue };
+        for o in &def.options {
+            if !options.contains(o) {
+                options.push(o.clone());
+            }
+        }
+        if page.fixed(&w).contains_key(key) {
+            page_sets = true;
+            continue;
+        }
+        has = true;
+        // A thread or a client set to nothing: unset.
+        let v = if value.is_empty() && matches!(def.kind.as_str(), "thread" | "client") {
+            None
+        } else {
+            let v = if def.kind == "bool" { Value::Bool(matches!(value, "true" | "yes" | "on")) } else { Value::String(value.to_string()) };
+            if !def.takes(&v) || (def.kind == "thread" && !page.holds_thread(value)) {
+                continue;
+            }
+            Some(v)
+        };
+        set.push((i.widget.clone(), v));
+    }
+    if set.is_empty() {
+        if page_sets && !has {
+            bail!("{key} is this page's: it isn't set here");
+        }
+        if !has {
+            bail!("no widget {} has a setting {key:?}", page.on());
+        }
+        bail!("no widget {} takes {key} {value:?}{}", page.on(), if options.is_empty() { String::new() } else { format!(" ({})", options.join(", ")) });
+    }
+    change(page, |mut items| {
+        for (widget, v) in &set {
+            if let Some(i) = items.iter_mut().find(|i| &i.widget == widget) {
+                match v {
+                    Some(v) => i.params.insert(key.into(), v.clone()),
+                    None => i.params.remove(key),
+                };
+            }
+        }
+        Ok(items)
+    })?;
+    Ok(set.into_iter().map(|(w, _)| w).collect())
+}
+
 /// A dashboard's layout, the same on every thread (client).
 fn board_file(kind: crate::boards::Kind, board: &str) -> PathBuf {
     paths::config_dir().join("dashboards").join("boards").join(format!("{}-{board}.json", kind.name()))
@@ -662,5 +766,52 @@ mod tests {
         assert_eq!(show(&move_to("core:tasks.mine", Some(("core:needs.now", Side::Above))).unwrap()), "| core:calendar.agenda | core:calendar.next | core:tasks.mine | core:needs.now core:routines.cards | core:calendar.choices", "a row of its own just above Needs");
         assert_eq!(load()[2].widget, "core:tasks.mine", "kept on disk");
         assert_eq!(reset().unwrap(), default_items());
+    }
+
+    #[test]
+    fn filters_gather_the_settings_the_widgets_share_and_set_each_on_all_of_them() {
+        let (_env, _) = paths::testenv::folders("today-layout-filters");
+        let acme = crate::projects::add_client("Acme", &[], false).unwrap();
+        let rollout = crate::projects::create("Acme rollout", Some(&acme.id), None).unwrap().id;
+        let elsewhere = crate::projects::create("Elsewhere", None, None).unwrap().id;
+        let page = Page::Client(acme.id.clone());
+        for w in ["core:tasks.done", "core:tasks.glance", "core:calls.week", FILTERS] {
+            add_on(&page, w, None, None).unwrap();
+        }
+        let f = filters_on(&page);
+        let by = |key: &str| f["filters"].as_array().unwrap().iter().find(|x| x["key"] == key).cloned().unwrap_or_default();
+        let keys: Vec<&str> = f["filters"].as_array().unwrap().iter().filter_map(|x| x["key"].as_str()).collect();
+        assert_eq!(keys, ["period", "thread"], "the page's own client isn't one; Filters itself has none");
+        assert_eq!((by("period")["value"].as_str(), by("period")["widgets"].as_array().map(Vec::len)), (Some("week"), Some(2)));
+        assert_eq!((by("thread")["value"].as_str(), by("thread")["widgets"].as_array().map(Vec::len)), (Some(""), Some(2)), "unset: all");
+        let thread = by("thread");
+        let opts: Vec<&str> = thread["options"].as_array().unwrap().iter().filter_map(|o| o["id"].as_str()).collect();
+        assert_eq!(opts, [rollout.as_str()], "only the client's open threads");
+        // Set on every widget that has it, in one change.
+        assert_eq!(set_filter_on(&page, "thread", &rollout).unwrap(), ["core:tasks.done", "core:calls.week"]);
+        assert_eq!(params_on(&page, "core:calls.week")["thread"], rollout.as_str());
+        assert_eq!(set_filter_on(&page, "period", "month").unwrap().len(), 2);
+        // One widget set apart: mixed.
+        set_param_on(&page, "core:tasks.done", "period", "week").unwrap();
+        assert_eq!((by_of(&page, "period")["mixed"].as_bool(), by_of(&page, "period")["value"].is_null()), (Some(true), true));
+        // Refused: a value none takes, another client's thread, a setting the page sets, one nobody has.
+        let err = |r: Result<Vec<String>>| r.unwrap_err().to_string();
+        assert!(err(set_filter_on(&page, "period", "year")).contains("no widget on this dashboard takes period \"year\" (week, month)"));
+        assert!(err(set_filter_on(&page, "thread", &elsewhere)).contains("takes thread"));
+        assert!(err(set_filter_on(&page, "client", "x")).contains("client is this page's"));
+        assert!(err(set_filter_on(&page, "colour", "red")).contains("has a setting \"colour\""));
+        assert_eq!(params_on(&page, "core:tasks.done")["period"], "week", "nothing changed by a refusal");
+        // "" for a thread: unset on all of them.
+        set_filter_on(&page, "thread", "").unwrap();
+        assert!(!params_on(&page, "core:calls.week").contains_key("thread"));
+        // Today sets nothing: its client is a filter there too.
+        add_on(&Page::Today, "core:calls.week", None, None).unwrap();
+        let today: Vec<String> = filters_on(&Page::Today)["filters"].as_array().unwrap().iter().filter_map(|x| x["key"].as_str().map(String::from)).collect();
+        assert!(today.contains(&"client".to_string()), "{today:?}");
+        assert!(Page::Thread(rollout.clone()).offers(&widgets::find(FILTERS).unwrap()), "every page offers Filters");
+    }
+
+    fn by_of(page: &Page, key: &str) -> serde_json::Value {
+        filters_on(page)["filters"].as_array().unwrap().iter().find(|x| x["key"] == key).cloned().unwrap_or_default()
     }
 }
