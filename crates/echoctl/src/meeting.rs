@@ -156,6 +156,30 @@ impl MeetingContext {
         }
     }
 
+    /// The meeting as it went: the people who joined (`participants`) in place of the invite's, who declined among
+    /// them if they came. Each is named by the invite when invited, else by the people directory when it knows one
+    /// person by that name, else by their name as Teams showed it, read as a name ("Lee, Dana (Partner)" → "Dana
+    /// Lee"); the organiser stays the organiser only if they came.
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+    pub fn as_joined(&self, names: &[String], directory: &[crate::people::Person]) -> MeetingContext {
+        use crate::people::{display, norm};
+        let invited: Vec<&Person> = self.organizer.iter().chain(&self.attendees).chain(&self.declined).collect();
+        let named = |raw: &String| {
+            let n = norm(raw);
+            if let Some(p) = invited.iter().find(|p| norm(&p.name) == n) {
+                return (*p).clone();
+            }
+            let mut known = directory.iter().filter(|d| std::iter::once(&d.name).chain(&d.aliases).any(|a| norm(a) == n));
+            match (known.next(), known.next()) {
+                (Some(d), None) => Person { name: display(&d.name), email: d.emails.first().cloned().or_else(|| d.id.contains('@').then(|| d.id.clone())) },
+                _ => Person { name: display(raw), email: None },
+            }
+        };
+        let came: Vec<Person> = names.iter().map(named).collect();
+        let organizer = self.organizer.clone().filter(|o| came.contains(o));
+        MeetingContext { attendees: came.into_iter().filter(|p| Some(p) != organizer.as_ref()).collect(), organizer, declined: vec![], ..self.clone() }
+    }
+
     /// Everyone on the invite, organizer first, de-duplicated.
     pub fn people(&self) -> Vec<&str> {
         let mut out: Vec<&str> = vec![];
@@ -167,6 +191,84 @@ impl MeetingContext {
         }
         out
     }
+}
+
+/// What Echo read of the call window while recording (`ax::SpeakingLog`): per tile or participants-list row, the
+/// tokens added and removed.
+#[cfg_attr(not(any(feature = "tray", feature = "transcribe")), allow(dead_code))]
+pub const UI_LOG: &str = "speaking.jsonl";
+
+/// A participants-list row's tokens say the person is in the call (muted or unmuted); invitees who never joined are
+/// listed too ("No response").
+#[cfg_attr(not(any(feature = "tray", feature = "transcribe")), allow(dead_code))]
+pub fn in_call(tokens: &std::collections::BTreeSet<String>) -> bool {
+    tokens.contains("t:muted") || tokens.contains("t:unmuted")
+}
+
+/// Who was in the meeting (but the user), from the call window's log: everyone shown on a video tile or in the
+/// participants list as in the call, as Teams named them, first seen first. None without a participants list that
+/// showed someone in the call: the window read off, a Google Meet call, the list never opened.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn joined(dir: &Path, me: Option<&str>) -> Option<Vec<String>> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = fs::read_to_string(dir.join(UI_LOG)).ok()?;
+    // Per element, in the order first seen: its name, the user's own tile, in the call at some point.
+    let mut seen: Vec<(String, String, bool, bool)> = vec![];
+    let mut now: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Some(k) = v["k"].as_str() else { continue };
+        if v["gone"] == true {
+            now.remove(k);
+            continue;
+        }
+        let set = now.entry(k.to_string()).or_default();
+        let strs = |key: &str| v[key].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect::<Vec<_>>();
+        for d in strs("del") {
+            set.remove(&d);
+        }
+        set.extend(strs("add"));
+        let i = seen.iter().position(|e| e.0 == k).unwrap_or_else(|| {
+            seen.push((k.to_string(), String::new(), false, false));
+            seen.len() - 1
+        });
+        let e = &mut seen[i];
+        if let Some(n) = v["n"].as_str() {
+            e.1 = n.to_string();
+        }
+        e.2 |= v["me"] == true;
+        e.3 |= k.starts_with("tile:") || (k.starts_with("roster:") && in_call(set));
+    }
+    if !seen.iter().any(|e| e.0.starts_with("roster:") && e.3) {
+        return None;
+    }
+    let mine: BTreeSet<String> = seen.iter().filter(|e| e.2).map(|e| crate::people::norm(&e.1)).chain(me.map(crate::people::norm)).collect();
+    let mut names = BTreeSet::new();
+    Some(seen.into_iter().filter(|e| e.3 && !e.2).map(|e| e.1).filter(|n| {
+        let k = crate::people::norm(n);
+        !k.is_empty() && !mine.contains(&k) && names.insert(k)
+    }).collect())
+}
+
+/// Who was in a recorded call but the user, as Teams named them: `participants` in its `meta.json`, recorded from the
+/// call window's log (`joined`) the first time it is asked after the call ended. Empty without a participants list:
+/// the invite stands for them.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn participants(dir: &Path) -> Vec<String> {
+    let names = |m: &serde_json::Value| m["participants"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect::<Vec<_>>();
+    let meta = crate::calls::read_json(&dir.join("meta.json"));
+    if meta.get("participants").is_some() || meta["ended_at"].is_null() || !dir.join(UI_LOG).exists() {
+        return names(&meta);
+    }
+    let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| m.name);
+    let found = joined(dir, me.as_deref()).unwrap_or_default();
+    if let Err(e) = crate::calls::update_meta(dir, |m| {
+        m["participants"] = serde_json::json!(found);
+        Ok(())
+    }) {
+        eprintln!("recording who joined {}: {e:#}", dir.display());
+    }
+    found
 }
 
 /// `echoctl meeting attach`: add or replace a call's meeting context.
@@ -225,5 +327,86 @@ mod tests {
         assert!(teams.is_in(Teams) && !teams.is_in(Meet));
         assert!(with(None).is_in(Teams) && with(None).is_in(Meet), "no link: either");
         assert!(with(Some("https://teams.example/ev-1")).is_in(Meet), "no app known: either");
+    }
+
+    /// A call window's log as `ax::SpeakingLog` writes it: the user's tile, a remote tile, and the participants list
+    /// with one who came muted, one "Last, First (Org)" who came, one invited who never did, and the user's own row.
+    const LOG: &[&str] = &[
+        r#"{"t":0.5,"k":"tile:Sam Rivera","n":"Sam Rivera","me":true,"add":["a"],"del":[]}"#,
+        r#"{"t":0.5,"k":"tile:Omar Haddad","n":"Omar Haddad","add":["a","t:muted"],"del":[]}"#,
+        r#"{"t":4.0,"k":"roster:8:orgid:omar","n":"Omar Haddad","add":["t:unmuted"],"del":[]}"#,
+        r#"{"t":4.0,"k":"roster:8:orgid:ivan","n":"Ivan Petrov","add":["t:in a meeting","t:no response"],"del":[]}"#,
+        r#"{"t":4.0,"k":"roster:8:orgid:sam","n":"Sam Rivera (You)","add":["t:unmuted"],"del":[]}"#,
+        r#"{"t":60.0,"k":"roster:8:orgid:rita","n":"Gomez, Rita (Acme)","add":["t:muted"],"del":[]}"#,
+        r#"{"t":90.0,"k":"roster:8:orgid:rita","gone":true}"#,
+    ];
+
+    #[test]
+    fn who_joined_is_who_the_participants_list_showed_in_the_call() {
+        let dir = std::env::temp_dir().join(format!("echo-joined-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(joined(&dir, None), None, "no log: the window wasn't read");
+        fs::write(dir.join(UI_LOG), LOG.join("\n")).unwrap();
+        // Ivan never came; the user is left out by their tile and their row; Rita came and left.
+        assert_eq!(joined(&dir, None).unwrap(), ["Omar Haddad", "Gomez, Rita (Acme)"]);
+        assert_eq!(joined(&dir, Some("Rita Gomez")).unwrap(), ["Omar Haddad"], "the user by their configured name, in any form");
+        // Tiles only (the participants list never opened): a tile shows only some of who came, so nothing is said.
+        fs::write(dir.join(UI_LOG), LOG[..2].join("\n")).unwrap();
+        assert_eq!(joined(&dir, None), None);
+        // A list where nobody shows as in the call (another language's labels): nothing either.
+        fs::write(dir.join(UI_LOG), [LOG[1], LOG[3]].join("\n")).unwrap();
+        assert_eq!(joined(&dir, None), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_people_who_came_are_named_by_the_invite_then_the_directory() {
+        let invite = MeetingContext {
+            organizer: Some(p("Dana Lee", "dana@acme.example")),
+            attendees: vec![p("Omar Haddad", "omar@acme.example"), p("Ivan Petrov", "ivan@acme.example")],
+            declined: vec![p("Yuki Tanaka", "yuki@acme.example")],
+            subject: Some("Acme security review".into()),
+            ..Default::default()
+        };
+        let dir_person = |id: &str, name: &str| crate::people::Person { id: id.into(), name: name.into(), emails: vec![id.into()], ..Default::default() };
+        let directory = [dir_person("rita@acme.example", "Rita Gomez"), dir_person("kim@globex.example", "Kim Park"), dir_person("kim.park@initech.example", "Park, Kim")];
+        let came: Vec<String> = ["Haddad, Omar (Acme)", "Gomez, Rita (Acme)", "Tanaka, Yuki", "Kim Park", "Nina Brooks (Guest)"].map(String::from).to_vec();
+        let m = invite.as_joined(&came, &directory);
+        let who: Vec<(&str, Option<&str>)> = m.attendees.iter().map(|x| (x.name.as_str(), x.email.as_deref())).collect();
+        assert_eq!(who, [
+            ("Omar Haddad", Some("omar@acme.example")),  // the invite's, though Teams wrote it "Last, First (Org)"
+            ("Rita Gomez", Some("rita@acme.example")),   // not invited: the directory knows her
+            ("Yuki Tanaka", Some("yuki@acme.example")),  // declined, came all the same
+            ("Kim Park", None),                          // two Kim Parks in the directory: not guessed
+            ("Nina Brooks", None),                       // known nowhere: her name, read as a name
+        ]);
+        assert_eq!(m.organizer, None, "Dana organised it and never came");
+        assert!(m.declined.is_empty() && m.subject == invite.subject);
+        let m = invite.as_joined(&["Lee, Dana (Partner)".to_string()], &[]);
+        assert_eq!((m.organizer, m.attendees.len()), (Some(p("Dana Lee", "dana@acme.example")), 0), "the organiser came: still the organiser, once");
+    }
+
+    #[test]
+    fn who_joined_is_recorded_in_meta_once_the_call_ended() {
+        let (_env, root) = crate::paths::testenv::folders("meeting-participants");
+        let dir = root.join("home/calls/2026-10-20_100000-review");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(UI_LOG), LOG.join("\n")).unwrap();
+        fs::write(dir.join("meta.json"), r#"{"title":"Review","started_at":"2026-10-20T10:00:00+02:00","ended_at":null}"#).unwrap();
+        assert!(participants(&dir).is_empty(), "still recording: nothing yet");
+        assert!(!fs::read_to_string(dir.join("meta.json")).unwrap().contains("participants"));
+        fs::write(dir.join("meta.json"), r#"{"title":"Review","started_at":"2026-10-20T10:00:00+02:00","ended_at":"2026-10-20T10:30:00+02:00"}"#).unwrap();
+        assert_eq!(participants(&dir), ["Omar Haddad", "Gomez, Rita (Acme)"]);
+        let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json")).unwrap()).unwrap();
+        assert_eq!((meta["participants"].clone(), meta["title"].clone()), (serde_json::json!(["Omar Haddad", "Gomez, Rita (Acme)"]), serde_json::json!("Review")));
+        // Recorded once: the log isn't read again.
+        fs::remove_file(dir.join(UI_LOG)).unwrap();
+        assert_eq!(participants(&dir).len(), 2);
+        // A call whose window wasn't read: its meta untouched, nobody.
+        let other = root.join("home/calls/2026-10-21_100000-meet");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("meta.json"), r#"{"ended_at":"2026-10-21T10:30:00+02:00"}"#).unwrap();
+        assert!(participants(&other).is_empty());
+        assert!(!fs::read_to_string(other.join("meta.json")).unwrap().contains("participants"));
     }
 }

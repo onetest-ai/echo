@@ -15,7 +15,7 @@ use std::path::Path;
 
 use crate::transcribe::Segment;
 
-pub const FILE: &str = "speaking.jsonl";
+pub const FILE: &str = crate::meeting::UI_LOG;
 
 /// Teams' own speaking marker as of 2026-10: the speaker's video tile gets a child element with
 /// this class (the ring around the tile), whatever the UI language and without the
@@ -396,7 +396,7 @@ pub fn sole_remote(dir: &Path, me: Option<&str>) -> Option<String> {
     let tracks = load(dir);
     let mine: BTreeSet<String> = tracks.values().filter(|t| t.me).map(|t| t.name.to_lowercase()).chain(me.map(str::to_lowercase)).collect();
     let present = |k: &str, t: &Track| {
-        k.starts_with("tile:") || t.states.iter().any(|(_, s)| s.contains("t:muted") || s.contains("t:unmuted"))
+        k.starts_with("tile:") || t.states.iter().any(|(_, s)| crate::meeting::in_call(s))
     };
     let others: BTreeSet<&str> = tracks.iter().filter(|(k, t)| !t.me && !mine.contains(&t.name.to_lowercase()) && present(k, t)).map(|(_, t)| t.name.as_str()).collect();
     match others.into_iter().collect::<Vec<_>>().as_slice() {

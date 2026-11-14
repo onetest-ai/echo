@@ -67,27 +67,40 @@ pub(super) fn calls_page(q: &str) -> Value {
     let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
     let next = (start + page.len() < dirs.len()).then(|| page.last().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).flatten();
     // A thread's people are read once for the whole page.
-    let mut known = std::collections::HashMap::new();
+    let mut known = Known::default();
     json!({ "calls": page.into_iter().map(|d| summary(d, &mut known)).collect::<Vec<_>>(), "next": next, "total": total })
 }
 
-/// A thread's people (the People view's), by thread id, read once a page.
-type Known = std::collections::HashMap<String, Vec<Value>>;
+/// What a page of calls reads once: a thread's people (the People view's) by thread id, and the people directory.
+#[derive(Default)]
+struct Known {
+    threads: std::collections::HashMap<String, Vec<Value>>,
+    directory: Option<Vec<crate::people::Person>>,
+}
 
-/// The faces of a call's row: its invite's people but the user, those who came first by their weight in the call's
-/// threads (`prep::weighed`: influence, interest, calls together), who declined left out. A call with no invite (a memo,
-/// one Echo found nobody for): none.
+/// The faces of a call's row: its people but the user, those who came first by their weight in the call's threads
+/// (`prep::weighed`: influence, interest, calls together). Its people are who joined when Echo read Teams' participants
+/// list while recording (`meeting::participants`, matched to the invite and the directory: `as_joined`), else the
+/// invite's but who declined. A call with neither (a memo, one Echo found nobody for): none.
 fn faces(dir: &Path, known: &mut Known) -> Vec<String> {
+    let joined = crate::meeting::participants(dir);
     let m = match crate::meeting::MeetingContext::load(dir) {
-        Ok(Some(m)) => m,
-        Ok(None) => return vec![],
+        Ok(m) => m,
         // One Echo didn't write and can't read as a meeting (a hand-made file): its names as they stand.
-        Err(_) => return people(dir),
+        Err(_) if joined.is_empty() => return people(dir),
+        Err(_) => None,
+    };
+    let m = if !joined.is_empty() {
+        let directory = known.directory.get_or_insert_with(|| crate::people::directory().unwrap_or_default());
+        m.unwrap_or_default().as_joined(&joined, directory)
+    } else {
+        let Some(m) = m else { return vec![] };
+        m
     };
     let threads: Vec<String> = crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| p.id).collect();
     let today = chrono::Local::now().date_naive();
     crate::prep::weighed(&m, &threads, |id| {
-        known.entry(id.to_string()).or_insert_with(|| crate::people::of_thread(id, today).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default()).clone()
+        known.threads.entry(id.to_string()).or_insert_with(|| crate::people::of_thread(id, today).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default()).clone()
     })
     .into_iter()
     .filter(|x| x["answer"] != "declined")
@@ -96,7 +109,7 @@ fn faces(dir: &Path, known: &mut Known) -> Vec<String> {
 }
 
 pub(super) fn call_summary(dir: &Path) -> Value {
-    summary(dir, &mut Known::new())
+    summary(dir, &mut Known::default())
 }
 
 fn summary(dir: &Path, known: &mut Known) -> Value {

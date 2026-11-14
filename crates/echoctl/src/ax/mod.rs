@@ -160,6 +160,21 @@ fn subtree_classes(n: &UiNode, depth: usize, out: &mut std::collections::BTreeSe
     }
 }
 
+/// The words a participants-list row says after a name (English): never the first name of a "Last, First" name.
+const ROSTER_STATES: &[&str] = &["muted", "unmuted", "organizer", "presenter", "attendee", "guest", "external", "available", "away", "busy", "offline"];
+
+/// A participants-list row's label → (the name, how many of its parts the name takes): "Priya Nair, Unmuted"; a
+/// directory's "Lee, Dana (Partner), Muted" or "Lee, Dana, Muted" keeps both parts of the name.
+fn roster_name(label: &str) -> (String, usize) {
+    let parts: Vec<&str> = label.split(", ").map(str::trim).collect();
+    let capital = |p: &str| p.chars().next().is_some_and(char::is_uppercase);
+    match parts.as_slice() {
+        [last, first, ..] if !last.contains(' ') && capital(last) && capital(first)
+            && (first.contains('(') || !first.contains(' ') && !ROSTER_STATES.contains(&first.to_lowercase().as_str())) => (format!("{last}, {first}"), 2),
+        _ => (parts.first().copied().unwrap_or("").to_string(), 1),
+    }
+}
+
 /// Teams' participants list item id (Teams' HTML; any language).
 const ROSTER_ITEM: &str = "calling-roster-item-";
 
@@ -174,11 +189,11 @@ pub fn participants(root: &UiNode) -> Vec<Participant> {
         let role = n.role.to_lowercase();
         if n.id.starts_with(ROSTER_ITEM) {
             let label = if n.label.is_empty() { chain.last().map(|p| p.label.as_str()).unwrap_or("") } else { &n.label };
-            let name = label.split(", ").next().unwrap_or("").trim().to_string();
+            let (name, rest) = roster_name(label);
             if !name.is_empty() {
                 let mut tokens = Default::default();
                 subtree_classes(n, 0, &mut tokens);
-                tokens.extend(label.split(", ").skip(1).map(|p| format!("t:{}", p.trim().to_lowercase())));
+                tokens.extend(label.split(", ").skip(rest).map(|p| format!("t:{}", p.trim().to_lowercase())));
                 out.push(Participant { key: format!("roster:{}", &n.id[ROSTER_ITEM.len()..]), name, me: false, tokens });
             }
         } else if role.contains("menuitem") || role.contains("image") {
@@ -466,6 +481,17 @@ mod tests {
         assert!(p[0].tokens.contains("ring") && p[0].tokens.contains("lit") && p[0].tokens.contains("t:muted"));
         assert_eq!(p[4].key, "roster:8:orgid:abc");
         assert!(p[4].tokens.contains("___speaking") && p[4].tokens.contains("t:unmuted"));
+    }
+
+    #[test]
+    fn a_roster_row_keeps_a_last_first_name_whole() {
+        assert_eq!(roster_name("Priya Nair, Unmuted"), ("Priya Nair".into(), 1));
+        assert_eq!(roster_name("Lee, Dana (Partner), Muted"), ("Lee, Dana (Partner)".into(), 2));
+        assert_eq!(roster_name("Lee, Dana, In a meeting, No response"), ("Lee, Dana".into(), 2));
+        assert_eq!(roster_name("Priya, Unmuted"), ("Priya".into(), 1));
+        let row = UiNode { role: "AXGroup".into(), id: "calling-roster-item-9:orgid:lee".into(), label: "Lee, Dana (Partner), Muted".into(), ..Default::default() };
+        let p = participants(&UiNode { kids: vec![row], ..Default::default() });
+        assert_eq!((p[0].name.as_str(), p[0].tokens.contains("t:muted"), p[0].tokens.contains("t:dana (partner)")), ("Lee, Dana (Partner)", true, false));
     }
 
     #[test]
