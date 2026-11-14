@@ -8,6 +8,13 @@ use super::print_json;
 use crate::jshost;
 use crate::plugins;
 
+/// What `echoctl plugin guide` prints: the authoring rules, then the API reference they point to.
+const GUIDE: &str = concat!(
+    include_str!("../../../../.ai-run/guides/plugins/plugin-authoring.md"),
+    "\n",
+    include_str!("../../../../.ai-run/reference/plugins/plugin-api.md"),
+);
+
 #[derive(Subcommand)]
 pub enum PluginCmd {
     /// Installed plugins, what the marketplaces offer, and the marketplaces (JSON)
@@ -66,8 +73,8 @@ pub enum PluginCmd {
         #[arg(long)]
         json: bool,
     },
-    /// The plugin authoring rules (Markdown), as this Echo has them: manifest, widgets and their data, host and window
-    /// halves, testing, publishing
+    /// The plugin authoring rules, then the plugin API reference (Markdown), as this Echo has them: manifest, widgets
+    /// and their data, host and window halves, testing, publishing
     Guide,
     /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
     Marketplace {
@@ -237,7 +244,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
-        PluginCmd::Guide => print!("{}", include_str!("../../../../.ai-run/guides/plugins/plugin-authoring.md")),
+        PluginCmd::Guide => print!("{GUIDE}"),
         PluginCmd::Marketplace { cmd } => match cmd {
             MarketCmd::List => print_json(&snapshot()["markets"]),
             MarketCmd::Add { source, name } => {
@@ -263,4 +270,14 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         },
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_guide_gives_the_authoring_rules_then_the_api_reference() {
+        let rules = super::GUIDE.find("# Plugin Authoring").expect("the rules");
+        let api = super::GUIDE.find("# Echo Plugin API").expect("the reference");
+        assert!(rules < api);
+    }
 }

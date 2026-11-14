@@ -253,7 +253,7 @@
   },
   {
    "id": "F-PLUG-27",
-   "feature": "The build skill (Claude Code plugin) makes the user's own plugin or widget in My plugins by Echo's plugin authoring rules (`echoctl plugin guide` prints them, as this Echo has them), gives it a part for Claude (`agent.summary` and `agent/CLAUDE.md`, with skills, rules or guides under `agent/` when it needs them), runs `echoctl plugin check` on it and fixes what it names before offering an install or update, checks its data with `echoctl widget show`, installs it after the user's yes on the sheet, and places it on Today or a thread's or client's dashboard (`echoctl today … --thread / --client`)",
+   "feature": "The build skill (Claude Code plugin) makes the user's own plugin or widget in My plugins by Echo's plugin authoring rules and API reference (`echoctl plugin guide` prints both, as this Echo has them), gives it a part for Claude (`agent.summary` and `agent/CLAUDE.md`, with skills, rules or guides under `agent/` when it needs them), runs `echoctl plugin check` on it and fixes what it names before offering an install or update, checks its data with `echoctl widget show`, installs it after the user's yes on the sheet, and places it on Today or a thread's or client's dashboard (`echoctl today … --thread / --client`)",
    "priority": "medium",
    "check": "agent",
    "axes": []

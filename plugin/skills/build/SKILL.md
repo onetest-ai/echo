@@ -22,9 +22,10 @@ changes, and where it goes: Today, or one thread's or client's dashboard (a widg
 
 ## 2. The rules
 
-`echoctl plugin guide` prints Echo's plugin authoring rules (the manifest, `uses` and the permission sheet,
-the widget kinds and their data — `stat`, `stats`, `chart` of every type, `list`, `status`, `card`, `table` —
-the host half's `ctx`, settings, secrets). Read the parts you need before writing; follow them exactly. Never
+`echoctl plugin guide` prints Echo's plugin authoring rules, then the plugin API reference they point to (the
+manifest, `uses` and the permission sheet, the widget kinds and their data — `stat`, `stats`, `chart` of every type,
+`list`, `status`, `card`, `table` — the host half's `ctx`, settings, secrets). Read the rules and the parts of the
+reference you need before writing; follow them exactly. Never
 put a secret (token, password) in a file: declare a setting of type `secret` and let the user fill it in Settings.
 
 ## 3. The plugin
@@ -49,7 +50,7 @@ export function apply(ctx) {
 }
 ```
 
-A chart: `kind: "chart"` and data `{type, points, series?, headline?}` (the guide's R26). A widget for a thread's or
+A chart: `kind: "chart"` and data `{type, points, series?, headline?}` (the reference's Charts). A widget for a thread's or
 client's dashboard: `params: [{key: "thread", label: "Thread", type: "thread"}]` (or `client`); read it from `params`.
 Ask for a `uses` line (network hosts, folders, Claude…) only when the widget needs it — each is a line the user agrees to.
 
