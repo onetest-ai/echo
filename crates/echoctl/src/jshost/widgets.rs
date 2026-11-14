@@ -22,10 +22,12 @@ fn widget_key(widget: &str, page: &crate::today_layout::Page) -> String {
 /// plugin declares, at most 64 KB; `size`: the size its provider was asked for. Given for Today (a `set` or a `clear`
 /// from the plugin), it replaces every page's: the dashboards' own answers go, and they show it until asked again.
 pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::Page, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
-    let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
-    if !declared {
+    // Its kind as declared now: an answer is kept with it, and one kept for another kind (the plugin changed it in an
+    // update) is never drawn as this one (`widgets::plugin_data` asks again).
+    let kind = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).and_then(|(_, m)| m.widgets.iter().find(|w| w.id == widget).map(|w| w.kind.clone()));
+    let Some(kind) = kind else {
         bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
-    }
+    };
     if data.is_some_and(|d| d.to_string().len() > 64 * 1024) {
         bail!("a widget's data is 64 KB at most");
     }
@@ -59,6 +61,7 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     if let Some(size) = size {
         last["size"] = json!(size);
     }
+    last["kind"] = json!(kind);
     // The plugin's own `set` / `clear` (no ask, no size): every copy — each dashboard's shows it, until its own next ask.
     if *page == crate::today_layout::Page::Today && error.is_none() && size.is_none() {
         let mine = format!("{widget}@");
@@ -66,6 +69,7 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
             v["data"] = last["data"].clone();
             v["at"] = last["at"].clone();
             v["asked"] = last["asked"].clone();
+            v["kind"] = last["kind"].clone();
             // As on Today: what the plugin set replaces a failed ask's error.
             if let Some(o) = v.as_object_mut() {
                 o.remove("error");
