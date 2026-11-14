@@ -383,7 +383,9 @@ function pluginWidgetView(id, w, size) {
   // A table says how many rows it has, and the plugin's note, beside its label.
   const d = w.data || {}
   const count = w.kind === 'table' && Array.isArray(d.rows) && !body.includes('Couldn\'t draw this') ? ` <span class="mono pw-n">${d.rows.length}</span>${typeof d.note === 'string' && d.note ? `<span class="pw-hnote">· ${esc(d.note.slice(0, 120))}</span>` : ''}` : ''
-  return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}</section>`
+  // Declared `fill`: as tall as its line, its body scrolling inside the card under the header (window-ui R10).
+  const fill = w.height === 'fill'
+  return `<section class="td-sec pw-sec k-${esc(w.kind)}${fill ? ' pw-fills' : ''}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${fill ? `<div class="pw-fill">${body}</div>` : body}</section>`
 }
 
 // A plugin widget's actions and its outside link, on Today and on a thread's or client's dashboard: an action runs its

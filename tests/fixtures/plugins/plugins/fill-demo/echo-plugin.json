@@ -1,0 +1,20 @@
+{
+  "id": "fill-demo",
+  "name": "Fill demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a table that declares height fill, longer than the window (today/TC-051).",
+  "main": "main.js",
+  "widgets": [
+    {
+      "id": "rows",
+      "label": "Long table",
+      "about": "Sixty rows, as tall as its line",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "height": "fill"
+    }
+  ]
+}

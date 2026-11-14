@@ -40,4 +40,4 @@ tags: [today, widgets, plugins, untrusted-text]
 
 ## Notes
 - Each shape (columns, groups and their order, hide at M, pills, dates, numbers, links, details, escaping, every refusal, stats links) is the node test `today-plugin-widgets.test.mjs`; a table refused at size S is the Rust test `plugins::a_table_widget_takes_sizes_m_and_l`.
-- Where Today places an L widget (a full row, or beside Your day) is Today's layout (`today/TC-021`), not the table's. A plugin widget's declared `height: "fill"` isn't honoured by Today yet (#523): the table caps its own scroll area instead.
+- Where Today places an L widget (a full row, or beside Your day) is Today's layout (`today/TC-021`), not the table's. `staffing` hugs its content (no `height`), so the table caps its own scroll area; a table declared `fill` takes its line's height instead (TC-051).

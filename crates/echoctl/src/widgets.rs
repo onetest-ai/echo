@@ -240,7 +240,7 @@ fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page,
 /// for the plugin: Today draws the last answer at once.
 #[cfg(not(feature = "js"))]
 fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, page: &crate::today_layout::Page) -> Value {
-    json!({"kind": w.kind, "label": label_for(w, page), "data": null, "empty": true})
+    json!({"kind": w.kind, "label": label_for(w, page), "height": w.height, "data": null, "empty": true})
 }
 
 /// Its label on Today: one set to a thread or a client (a setting of type `thread` / `client`) names it — "GitHub at
@@ -295,7 +295,7 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crat
     let last = if placed && reset { None } else { last };
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
-    json!({"kind": w.kind, "label": label_for(w, page), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
+    json!({"kind": w.kind, "label": label_for(w, page), "height": w.height, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
@@ -457,6 +457,10 @@ mod tests {
         assert_eq!(v["error"], "mix-demo didn't answer __widget:hang within 5 s");
         let v = plugin_data("mix-demo", "none", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["error"].is_null()), (Some(true), Some(false), true), "{v}");
+        // Its declared height goes with its data: Today lays a `fill` widget out as tall as its line (#523).
+        assert_eq!(v["height"], "hug");
+        wd.height = "fill".into();
+        assert_eq!(plugin_data("mix-demo", "hang", &wd, true, &crate::today_layout::Page::Today)["height"], "fill");
     }
 
     #[test]
