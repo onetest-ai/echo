@@ -419,7 +419,9 @@ fn state() -> Value {
     let w = watch::running_watcher();
     let plugins = crate::plugins::stamp();
     #[cfg(feature = "js")]
-    crate::jshost::follow(&plugins);
+    if let Some(s) = &plugins {
+        crate::jshost::follow(s);
+    }
     json!({
         "version": env!("CARGO_PKG_VERSION"),
         // What is installed and on: the window's plugin parts follow its change.

@@ -1367,21 +1367,22 @@ fn changed() {
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 /// What is installed and on, as one short stamp: the window loads its plugins' client halves again when it changes.
-pub fn stamp() -> String {
+/// None when it can't be read just now (nothing follows a read that failed).
+pub fn stamp() -> Option<String> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    if let Ok(r) = Registry::load() {
-        for p in r.installed.values() {
-            (&p.id, &p.commit, &p.files, p.enabled).hash(&mut h);
-        }
+    for p in Registry::load().ok()?.installed.values() {
+        (&p.id, &p.commit, &p.files, p.enabled).hash(&mut h);
     }
-    format!("{:x}", h.finish())
+    Some(format!("{:x}", h.finish()))
 }
 
 /// The host halves follow what is installed and on (`jshost::sync`).
 fn reload() {
     #[cfg(feature = "js")]
-    crate::jshost::sync();
+    if let Some(s) = stamp() {
+        crate::jshost::follow(&s);
+    }
 }
 
 /// One background job per key; its error kept for the page until the next try.

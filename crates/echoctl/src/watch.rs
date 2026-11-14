@@ -632,8 +632,8 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
 
         // `echoctl plugin install / update / enable / disable / remove` from a terminal: the host halves follow.
         #[cfg(feature = "js")]
-        if fs::remove_file(file("plugins.request")).is_ok() {
-            crate::jshost::sync();
+        if let (true, Some(s)) = (fs::remove_file(file("plugins.request")).is_ok(), crate::plugins::stamp()) {
+            crate::jshost::follow(&s);
         }
 
         // The window switched the AI profile of the call being recorded (this loop owns meta.json).

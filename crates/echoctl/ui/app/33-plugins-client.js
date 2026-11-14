@@ -130,7 +130,13 @@ function pluginCtx(id) {
   }
 }
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
-async function loadPluginClients(snapshot) {
+// One load at a time: a later one (a fresher list) waits for the one running, never applying a half twice.
+let pluginLoads = Promise.resolve()
+function loadPluginClients(snapshot) {
+  pluginLoads = pluginLoads.then(() => loadPluginClientsNow(snapshot), () => loadPluginClientsNow(snapshot))
+  return pluginLoads
+}
+async function loadPluginClientsNow(snapshot) {
   let p = snapshot
   if (!p) try { p = await get('api/plugins') } catch { return }
   const want = (p.installed || []).filter((x) => x.enabled && x.client)

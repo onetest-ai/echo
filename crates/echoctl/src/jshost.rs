@@ -430,8 +430,8 @@ fn host() -> &'static Host {
 
 /// Load every enabled plugin's host half (the app at start, and after an install or a switch).
 pub fn sync() {
-    if let Ok(mut s) = SYNCED.lock() {
-        *s = plugins::stamp();
+    if let (Ok(mut s), Some(now)) = (SYNCED.lock(), plugins::stamp()) {
+        *s = now;
     }
     sync_some(None)
 }
@@ -439,12 +439,20 @@ pub fn sync() {
 /// What was installed and on at the last `sync` (`plugins::stamp`).
 static SYNCED: Mutex<String> = Mutex::new(String::new());
 
-/// The app's host halves load again when what is installed and on changed since (a CLI change the watcher hasn't
-/// taken, or a served window with no watcher).
+/// The app's host halves load again when what is installed and on changed since the last sync — once per change,
+/// whoever notices it first (the window's state, the watcher's `plugins.request`, the page's own operation).
 pub fn follow(stamp: &str) {
-    if is_app() && SYNCED.lock().map(|s| *s != stamp).unwrap_or(false) {
-        sync();
+    if !is_app() {
+        return;
     }
+    {
+        let Ok(mut s) = SYNCED.lock() else { return };
+        if *s == stamp {
+            return;
+        }
+        *s = stamp.to_string();
+    }
+    sync_some(None)
 }
 
 /// Load (or reload) plugin `id` only, leaving the others as they are: a terminal's `echoctl plugin call` runs no other
