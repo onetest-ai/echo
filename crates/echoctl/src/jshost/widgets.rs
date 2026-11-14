@@ -39,6 +39,11 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let key = widget_key(widget, page);
     let mut last = all.get(&key).cloned().unwrap_or_else(|| json!({"data": null}));
+    // Kept for another kind: its data goes (a failed ask, or a widget with no provider, keeps nothing to misdraw).
+    if last["kind"].as_str().is_some_and(|k| k != kind) {
+        last["data"] = Value::Null;
+        last["at"] = Value::Null;
+    }
     match (data, error) {
         (_, Some("")) => {
             last["asked"] = json!(now);
@@ -101,7 +106,8 @@ pub fn widget_last_on(plugin: &str, widget: &str, page: &crate::today_layout::Pa
     let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
     let mut own = all.get(&widget_key(widget, page)).cloned()?;
     if *page != crate::today_layout::Page::Today && own["unasked"] == true && own["data"].is_null() {
-        if let Some(base) = all.get(widget) {
+        // Today's, unless it was kept for another kind than this one's.
+        if let Some(base) = all.get(widget).filter(|b| b["kind"].is_null() || own["kind"].is_null() || b["kind"] == own["kind"]) {
             own["data"] = base["data"].clone();
             own["at"] = base["at"].clone();
         }

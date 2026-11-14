@@ -1635,6 +1635,15 @@ mod tests {
             None
         }));
         assert_eq!(again.unwrap()["data"]["items"][0]["title"], "main #41 passed", "asked again at once");
+        // Its ask failing (or a widget with no provider): the other kind's data goes, never stamped as this one.
+        for err in ["timed out", ""] {
+            let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+            all["builds"]["kind"] = json!("table");
+            std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
+            widgets::widget_store("ci", "builds", &crate::today_layout::Page::Today, None, Some(err), None).unwrap();
+            let l = widget_last("ci", "builds").unwrap();
+            assert_eq!((l["kind"].as_str(), l["data"].is_null()), (Some("list"), true), "{err:?}: {l}");
+        }
         plugins::remove("ci", false).unwrap();
         sync();
     }
