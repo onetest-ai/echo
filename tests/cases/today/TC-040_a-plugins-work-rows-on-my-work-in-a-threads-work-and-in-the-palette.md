@@ -46,5 +46,5 @@ Work demo is removed; My work and the threads' Work tabs hold only Echo's own ta
 - `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- A row's title opens its https page in the browser (the app's `open_url`) on its first click, as a plugin widget's link (plugin-authoring R17). With the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` set (`<dir>/env`) the app never opens it, on any OS: the URL is appended to `<dir>/open.log` (`ECHOCTL_TEST_OPEN_LOG`) — the case checks that line. Never run step 4 or 5 without the variable set.
+- A row's title opens its https page in the browser (the app's `open_url`) on its first click, as a plugin widget's link (plugin-authoring H17). With the test data's `ECHOCTL_TEST_OPEN_LOG_ONLY` set (`<dir>/env`) the app never opens it, on any OS: the URL is appended to `<dir>/open.log` (`ECHOCTL_TEST_OPEN_LOG`) — the case checks that line. Never run step 4 or 5 without the variable set.
 - Today, open, reads itself again every minute; a thread's Work tab every 10 s.
