@@ -204,11 +204,11 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
     let p = v["plugin"].as_str().unwrap_or("");
     // Claude Code's own channel plugins only, from Anthropic's marketplace (an org allowlist would
     // refuse any other anyway).
-    let Some(name) = p.strip_suffix("@claude-plugins-official").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else {
+    let Some(name) = p.strip_suffix("@claude-plugins-official").filter(|n| n.split('-').all(|w| !w.is_empty()) && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else {
         bail!("“channel” must name a channel plugin of claude-plugins-official, e.g. telegram@claude-plugins-official");
     };
     let shown: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
-    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo"))
+    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo, and installs Claude Code's {p} plugin for it"))
 }
 
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {
@@ -383,4 +383,17 @@ pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
 /// The capabilities a manifest uses that this Echo doesn't implement yet.
 pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
     uses.keys().filter(|k| CAPABILITIES.iter().find(|c| c.id == k.as_str()).is_none_or(|c| !c.ready)).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {
+        assert!(describe_channel(&serde_json::json!({"plugin": "telegram@claude-plugins-official"})).unwrap().contains("Telegram"));
+        for bad in ["telegram-@claude-plugins-official", "-x@claude-plugins-official", "a--b@claude-plugins-official", "@claude-plugins-official", "x@other"] {
+            assert!(describe_channel(&serde_json::json!({"plugin": bad})).is_err(), "{bad}");
+        }
+    }
 }
