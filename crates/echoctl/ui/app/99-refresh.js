@@ -7,6 +7,10 @@ async function tick() {
   const before = JSON.stringify(S.state)
   await loadState()
   const changed = JSON.stringify(S.state) !== before
+  // Against the last stamp read (a tick whose read failed has none and changes nothing).
+  const plugins = S.state && S.state.plugins
+  if (plugins && S.pluginsSeen && plugins !== S.pluginsSeen) await pluginsChanged()
+  if (plugins) S.pluginsSeen = plugins
   if (changed || ticks % 3 === 0) await loadCalls()
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
   if (ticks % 15 === 0 && [...Terms.values()].some((e) => e.id != null && !e.exited)) await loadPtyInfo() // Restart to update

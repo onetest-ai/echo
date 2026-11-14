@@ -254,6 +254,16 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-28",
+   "feature": "A plugin installed, updated, switched on or off, or removed while Echo runs — in the window or by `echoctl plugin` in a terminal — reaches the running app and the open window without a restart: its host half loads again, the window loads its new client half once in place of the old (the old one's listeners, styles, settings section and slots go), and its widgets are offered in Add a widget (read again each time editing opens) and drawn on the page",
+   "priority": "high",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "plugins/TC-029"
+   ]
   }
  ]
 }

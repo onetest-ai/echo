@@ -982,6 +982,7 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     if let Err(e) = crate::grants::copy_package_skills(id) {
         eprintln!("plugin {id}: its skills can't be copied: {e:#}");
     }
+    changed();
     Ok(rec)
 }
 
@@ -1030,6 +1031,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
         p.enabled = on;
         Ok(())
     })
+    .inspect(|_| changed())
 }
 
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
@@ -1046,6 +1048,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = fs::remove_file(addresses_file(id));
         thread_values::forget(id);
     }
+    changed();
     Ok(())
 }
 
@@ -1353,10 +1356,33 @@ pub fn page_op(v: &Value) -> Result<()> {
     }
 }
 
+/// Installed, updated, switched on or off, or removed outside the app (`echoctl plugin …`): the running app's host
+/// halves follow (a `plugins.request` its watcher takes); in the app its own `reload` does.
+fn changed() {
+    #[cfg(feature = "js")]
+    if !crate::jshost::is_app() && crate::watch::running_watcher().is_some() {
+        let _ = fs::write(paths::state_dir().join("plugins.request"), b"");
+    }
+}
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+/// What is installed and on, as one short stamp: the window loads its plugins' client halves again when it changes.
+/// None when it can't be read just now (nothing follows a read that failed).
+pub fn stamp() -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in Registry::load().ok()?.installed.values() {
+        (&p.id, &p.commit, &p.files, p.enabled).hash(&mut h);
+    }
+    Some(format!("{:x}", h.finish()))
+}
+
 /// The host halves follow what is installed and on (`jshost::sync`).
 fn reload() {
     #[cfg(feature = "js")]
-    crate::jshost::sync();
+    if let Some(s) = stamp() {
+        crate::jshost::follow(&s);
+    }
 }
 
 /// One background job per key; its error kept for the page until the next try.

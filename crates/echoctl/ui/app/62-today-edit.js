@@ -152,7 +152,8 @@ async function todayEditOpen(page) {
   // As the right panel was, for Done to put it back.
   const was = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay).right
   S.tdEditWas = { open: !!(was && was.shown), active: was && was.active, overlay: S.overlay }
-  if (!S.tdCatalog) { try { S.tdCatalog = await get('api/widgets') } catch (e) { S.tdCatalog = [] } }
+  // Read again on each opening: a plugin installed, updated or switched off since brings or takes its widgets.
+  try { S.tdCatalog = await get('api/widgets') } catch (e) { S.tdCatalog = S.tdCatalog || [] }
   if (!S.tdPick) S.tdPick = (twCatalog()[0] || {}).id
   const known = panelViews()
   // At a narrow width the panel would cover the widgets' controls: it waits for "Add a widget" in the head (#395).

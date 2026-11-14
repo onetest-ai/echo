@@ -414,6 +414,11 @@ pub fn as_app() {
     APP.store(true, Ordering::Relaxed);
 }
 
+/// Whether this process is the app (`as_app`).
+pub fn is_app() -> bool {
+    APP.load(Ordering::Relaxed)
+}
+
 fn host() -> &'static Host {
     HOST.get_or_init(|| {
         let (tx, rx) = channel();
@@ -425,6 +430,28 @@ fn host() -> &'static Host {
 
 /// Load every enabled plugin's host half (the app at start, and after an install or a switch).
 pub fn sync() {
+    if let (Ok(mut s), Some(now)) = (SYNCED.lock(), plugins::stamp()) {
+        *s = now;
+    }
+    sync_some(None)
+}
+
+/// What was installed and on at the last `sync` (`plugins::stamp`).
+static SYNCED: Mutex<String> = Mutex::new(String::new());
+
+/// The app's host halves load again when what is installed and on changed since the last sync — once per change,
+/// whoever notices it first (the window's state, the watcher's `plugins.request`, the page's own operation).
+pub fn follow(stamp: &str) {
+    if !is_app() {
+        return;
+    }
+    {
+        let Ok(mut s) = SYNCED.lock() else { return };
+        if *s == stamp {
+            return;
+        }
+        *s = stamp.to_string();
+    }
     sync_some(None)
 }
 

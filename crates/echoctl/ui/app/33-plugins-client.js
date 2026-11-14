@@ -130,19 +130,27 @@ function pluginCtx(id) {
   }
 }
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
-async function loadPluginClients(snapshot) {
+// One load at a time: a later one (a fresher list) waits for the one running, never applying a half twice.
+let pluginLoads = Promise.resolve()
+function loadPluginClients(snapshot) {
+  pluginLoads = pluginLoads.then(() => loadPluginClientsNow(snapshot), () => loadPluginClientsNow(snapshot))
+  return pluginLoads
+}
+async function loadPluginClientsNow(snapshot) {
   let p = snapshot
   if (!p) try { p = await get('api/plugins') } catch { return }
   const want = (p.installed || []).filter((x) => x.enabled && x.client)
   // Drawn again only when a client half came or went (nothing changed: nothing to draw).
   let changed = false
-  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && x.version === Plugins.loaded[id])) { unloadPlugin(id); changed = true }
+  // An update changes its commit (a local plugin's, with its files), its version not always: the new half replaces the old.
+  const key = (x) => `${x.version}@${x.commit || ''}`
+  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && key(x) === Plugins.loaded[id])) { unloadPlugin(id); changed = true }
   for (const x of want) {
     if (Plugins.loaded[x.id]) continue
     changed = true
-    Plugins.loaded[x.id] = x.version
+    Plugins.loaded[x.id] = key(x)
     try {
-      const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(x.version)}`, location.href).href)
+      const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(key(x))}`, location.href).href)
       if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
       await m.apply(pluginCtx(x.id))
       Plugins.applied[x.id] = true
@@ -150,6 +158,15 @@ async function loadPluginClients(snapshot) {
     } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
   }
   if (changed) render()
+}
+// A plugin installed, updated, switched on or off, or removed (here or in a terminal; `state.plugins` changed): its
+// client half, its widgets in Add a widget and on the page.
+async function pluginsChanged() {
+  await loadPluginClients()
+  if (S.tdEdit) { try { S.tdCatalog = await get('api/widgets') } catch { /* app restarting */ } }
+  if (S.view === 'today') await loadToday()
+  if (S.dash) await loadDashboard()
+  render()
 }
 function unloadPlugin(id) {
   for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)
