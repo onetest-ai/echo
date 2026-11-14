@@ -1,161 +1,49 @@
 # Plugin Authoring
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: writing, testing, publishing and updating a third-party Echo plugin: manifest, host and client halves, marketplace
+**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: the rules for writing, testing, publishing and updating a third-party Echo plugin
 
-Rule ids carry their section: M (Manifest), H (Host half), C (Client half), P (Publishing).
+The API these rules rely on — the manifest, `uses`, `ctx`, events, widgets, scripts, limits — is the reference
+`.ai-run/reference/plugins/plugin-api.md` ("API § <section>" below); `echoctl plugin guide` prints it after these rules.
 
-## Manifest
-
-### Rules
-- M1. Ship a plugin as one folder with `echo-plugin.json` at its root: required `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60) and `version` (`X.Y.Z[-pre]`); optional `echo` (`>=X.Y.Z`, the Echo it needs), `summary` (≤ 240), `uses`, `settings`, `main`, `client`, `widgets`, `skills` and `icon` (an `.svg` in the plugin folder, named with a–z 0–9 `.` `_` `-` `/` only, ≤ 16 KB, shown only as an image beside its work rows and ⌘K entries). Evidence: `plugins::read_manifest`, `plugins::valid_id`
-- M2. Point `main` and `client` at a `.js`/`.mjs` inside the plugin folder; read any other file it ships with `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
-- M3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
-- M4. Name in `uses` only capabilities Echo knows, in their shapes; never `brain_source` or `export`. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`
-
-  | Key | Shape and use |
-  |---|---|
-  | `claude` | runs Claude (H7); the sheet: "Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings"; `{"skip": true}` is accepted and changes nothing |
-  | `schedule` | works on its own on a schedule while Echo runs |
-  | `events.on` | the events it hears (H4): `meeting_soon`, `call_started`, `call_ended`, `recording_started`, `recording_stopped`, `transcribed`, `minutes_written`, `thread_synced`, `sources_changed`, `threads_changed` (`plugins::EVENTS`) |
-  | `deliver.to` | where it sends to the user |
-  | `deliver_provider.kinds` | the delivery kinds it provides (H8) |
-  | `network.hosts`, `network.hosts_from` | the `https://` hosts it fetches (H6); string settings without a default whose addresses the user lists |
-  | `channel.plugin` | the Claude Code plugin it installs (H29) |
-  | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions (H11); its commands Claude in Echo may run (H20) |
-  | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (H10) |
-  | `files.read` | other apps' files, each named in full, read with `ctx.system.readFile(entry)` |
-  | `scripts` | the scripts of its package skills Echo may run (M8) |
-  | `echo.read`, `echo.write` | Echo's data it reads (H9); `["dictionary"]` to add to the dictionary |
-  | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (H23) |
-  | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (H24) |
-  | `work` | `{}`: its items on My work and in threads' Work (H22) |
-- M5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
-- M6. Declare each Today widget in `widgets` as `{id, label, about?, kind, sizes?, heights?, height?, refresh?, params?}`: `id` unique (a–z 0–9 `-`), `label` 1–40, `about` ≤ 120, `kind` `stat`, `stats`, `chart`, `list`, `status`, `card`, `table` or `page` (a page needs a `client`), `sizes` of `S` `M` `L` each once (default `["M"]`; a `table` only `M` and `L`), `heights` of `1` `2` each once, with `1` (default `[1]`: the rows of Today's grid it may take), `height` `hug` (default) or `fill`, `refresh` ≥ 60 s; at most 24, and only with a `main` to give their data. Its settings in `params`, 6 at most, as `{key, label, type, options?, default?}`: `key` unique (a–z 0–9 `-` `_`), `label` 1–40, `type` `choice` (1–12 `options`, each 1–40 chars), `bool`, `thread` or `client` (each of these two once at most), a `default` only a value it takes. Evidence: `plugins::check_params`
-- M7. Ship a skill Claude uses as it is (fixed instructions, references, scripts) as a package skill: a folder in the plugin (`skills/<name>/SKILL.md`, with `scripts/` and `references/` beside it as you need) named in `skills` (at most 10, with your runtime skills); the folder's name a–z 0–9 `-`, ≤ 40 chars, once; `SKILL.md`'s frontmatter only `name` (the folder's name) and `description` (one line, ≤ 1024 chars), no `!` commands anywhere. Give skills whose text you build at run time with `ctx.sessions.skills` (H11); one name is never both. Package skills need no `uses.sessions` (the sheet names them from `skills`); the folder session, routines and Yolo name each `<prefix>-<name>` (M12) through `.plugins`; a plugin not laid out keeps `echo-<id>:<name>` from its `--plugin-dir` copy — use that form where a prompt or a routine names it. Evidence: `plugins::package_skills`, `grants::copy_package_skills`
-- M8. Declare each script Echo may run in `uses.scripts: [{skill, script, readonly?, timeout?}]`, 1–20 a plugin, each once: `skill` one of your package skills; `script` a file in that skill's folder, as a relative path of plain names (letters, digits, `.` `_` `-`, none starting with a dot), ≤ 200 chars; `readonly: true` only for one that changes nothing (only such a script runs in a routine's or Yolo's run preparing and asking); `timeout` the seconds it may take, 1–3600, 300 by default (the sheet names one over 300). Evidence: `plugins::scripts::declared`
-- M9. Start a script with a shebang (`#!/usr/bin/env node`; on Windows a `.ps1` runs with PowerShell, another script with the interpreter its shebang names) and name in `summary` or the skill what it needs on the computer: Echo ships no interpreter, and a missing one fails the run with its message. A script's PATH is the app's plus the usual program folders (Homebrew, `~/.local/bin`, nvm's newest version): a tool installed elsewhere is looked up by the script or set by the user, never assumed. Evidence: `plugins::scripts::run`
-- M10. In `SKILL.md` name a script by its path alone, relative to the skill (`scripts/read.mjs <args>`), never through an interpreter (`node scripts/read.mjs`): in Echo's sessions that path is Echo's launcher of it, allowed only on its own by its full path (in a routine's or Yolo's run preparing and asking only a `readonly` one). A session's run is bounded by Claude Code's Bash time (10 min at most): run long work from the host half (H26). Evidence: `plugins::scripts::wrapper`
-- M11. Treat a script's arguments as untrusted (in a routine the model picks them, from mail or call text): check their shape (an id, a code), never hand them to a shell, never use one as a path outside its skill folder or `ECHO_PLUGIN_CACHE`. Echo passes at most 100, each ≤ 32 KB with no NUL. Evidence: `plugins::scripts::run`
-- M12. Tell Claude in Echo how to work with your plugin in an `agent/` folder, with `"agent": {"summary": "…", "prefix": "…"}` in the manifest — `summary` one line, ≤ 200 chars, the row Echo's core gives your plugin; `prefix` 2–4 chars `[a-z0-9]`, no `-`, required when it has skills (a plugin with skills and no guide declares only `"agent": {"prefix": …}`, and Echo writes its CLAUDE.md; `summary` needs the `agent/` folder): your skills are `<prefix>-<name>` (not doubled when the name starts with it); a prefix belongs to one marketplace source (its plugins may share it), `echo` is reserved, and a prefix another source holds or a laid-out name another enabled plugin uses is refused. `agent/CLAUDE.md` (required, ≤ 8 KB): what the plugin gives Claude, when to turn to it, its commands (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl plugin call <id> <cmd>`), skills and guides — a guide named as "Read guides/x.md", never `@`-imported; `agent/skills/<name>/SKILL.md` (≤ 20, as M7; in the folder session, routines and Yolo a skill is `<prefix>-<name>`, through `.plugins`, ≤ 64 chars — name it so in your CLAUDE.md), `agent/rules/*.md` (≤ 10, ≤ 4 KB each), `agent/guides/**/*.md` (≤ 50, ≤ 64 KB each), ≤ 1 MB in all, and no folder named `.claude` anywhere in it or in a skill folder (other dot files are left out); `${CLAUDE_PLUGIN_ROOT}` in them is the folder Echo lays them out in. Claude reads them only when it works with your plugin: put reference in guides and procedures in skills, never in the summary. A plugin whose agent skill declares a script sets `"echo"` to the version that ships `agent`. Check the package with `echoctl plugin check <folder>` (exit 0, or each problem named; `--json`) before publishing. Evidence: `plugins::agent::problems`, `plugins::agent::check_folder`
-
-## Host half
-
-### Rules
-- H1. Export `apply(ctx)` from the host half and register its commands, timers, event handlers and delivery ways inside it. Evidence: `jshost::load`
-- H2. Write a command as `ctx.command(name, fn)`: `fn` takes JSON arguments, may be `async`, returns JSON and throws an `Error` to fail; keep a window-called command under 30 s. Run no more than 5 s of JavaScript between awaits, or it is interrupted; read files in bulk through `ctx.fs.readMany` / `ctx.fs.walk`. Evidence: `jshost::CALL_TIMEOUT`, `jshost::SLICE`
-- H3. Use `ctx.every(seconds, fn)` for periodic work (10 s minimum); never rely on timers in `echoctl plugin call` or `echoctl deliver`. Evidence: `jshost::no_timers`
-- H4. Name each event in `uses.events.on` (M4) and subscribe with `ctx.on(event, fn)`; read a call's words with `ctx.echo.read('source', id)`, never from a payload. Events are not replayed — except `threads_changed` from another process (`echoctl project delete`, a terminal's `plugin call`), which waits for the running app (heard within about a second, or at its next start), at least once; a queued `renamed` or `deleted` of an id that by then belongs to a new thread is dropped. Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`
-- H5. Keep a plugin's own state with `ctx.store.read/write/list/remove/path`, by relative path only, a name at the store's top level plain ASCII (letters, digits, `-` `_` `.`). Evidence: `plugins::data_dir`, `jshost::not_echos`
-- H6. Check `status` in the `{status, body}` that `ctx.http.fetch(url, {method, headers, body, save?})` resolves: any HTTP answer resolves, a redirect too (never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. Evidence: `jshost::fetch`, `jshost::curl_head`
-
-  | Rejected | When |
-  |---|---|
-  | the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`) |
-  | the method | other than `GET`, `POST`, `PUT`, `PATCH` or `DELETE` |
-  | a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
-  | a write | a method other than `GET`, or `save`, in a routine's or Yolo's run preparing and asking |
-  | the request | the host can't be reached, the 60 s or the 10 MB passed |
-- H7. Run Claude with `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})` only with `claude` in `uses`; refused in a routine's or Yolo's run preparing and asking. It runs as the folder session, by the user's one choice (acting on its own or preparing and asking, `untrusted-text.md` R20–R22); only `tools: "none"` changes that (no tools: give what it needs in the prompt), any other value is accepted, kept in the run's record and changes nothing, as `"claude": {"skip": true}` does. Its result lists the changes and sends it made (`actions`). Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
-- H8. Provide a delivery kind with `ctx.deliver.provide(kind, {label, send(msg)})` only for a kind in `uses.deliver_provider.kinds` (never `teams` or `mail`), and call `ctx.deliver.ready(kind, true)` once it can send. Evidence: `jshost::provider_ready`, `plugins::may_send`
-- H9. Call `ctx.echo.read(kind, arg)` only for kinds in `uses.echo.read` (`clients`, `threads`, `people`, `dictionary`, `sources`, `source`; `calls` is named on the sheet but not served yet), and `ctx.echo.dictionary.add(...)` only under `uses.echo.write: ["dictionary"]`. Evidence: `plugins::ECHO_READS`, `share::dictionary_add`
-- H10. Get a folder with `await ctx.system.pickFolder(prompt)` (needs `uses.folders`) and read it as `(root, relative path)`, bulk reads through `ctx.fs.readMany/walk`; with `folders.write` change it with `ctx.fs.write/move/remove` (never through a link, never over another file); in a debug build answer the picker with `ECHOCTL_PICK_FOLDER=<dir>`. Evidence: `app::choose_folder`
-- H11. Set `ctx.sessions.skills`, `ctx.sessions.read` and `ctx.view.hints` from `apply` on every load, each as the whole set (`[]` removes it). Evidence: `grants::drop_plugin`
-- H12. Ask the user for a decision with `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 chars), and `ctx.inbox.clear(key)` once it is settled. Evidence: `attention::inbox_items`
-- H13. Bundle the host half into one file with no `import` of other files; the client half may import its own modules. Evidence: `window::plugins::plugin_file`
-- H14. Keep large data in the store, not in JavaScript memory (64 MB shared by all host halves). Evidence: `jshost::set_memory_limit`
-- H15. Give a widget's data with `ctx.widgets.provide(id, ({size}) => data)` — Echo asks it in the background, answered within 5 s, again after `refresh` — or push it with `ctx.widgets.set(id, data)` and take the widget off Today and every dashboard with `ctx.widgets.clear(id)`; only ids the manifest declares, 64 KB of data at most; work that needs Claude runs as a job whose result you `set`. A widget with settings (`params`) gets its data only by `provide`: each copy — on Today or a dashboard — is asked with its own settings, and a `set` would replace them all with one (`set` and `clear` reach every copy); new data reaches it when Echo asks again (`refresh`). Data from an earlier read of yours (a timer's fetch, your store) says when that read was with `asOf` (an ISO date and time) in it: Today shows that time, not when you answered (one ahead of now, or not a time, is not believed). Evidence: `jshost::widget_ask`, `pluginWidgetView` (window script)
-- H16. Shape a widget's data by its kind. Text is plain (Echo escapes it); a text field given as anything but a string or a number is refused, text past its limit cut; put what must be seen first. `tone` is `good`, `warn` or `bad` (a table's cell and a chart's series also `muted`). A list's or card's `link` goes only to `echo://`; a table row's and a `stats` item's `link` also to `https://`, opened as H17 says. Check it with `echoctl widget show plugin:<id>:<widget>`. Evidence: `pluginWidgetHtml`, `pluginTableHtml` (window script)
-
-  | Kind | Fields | At S / M / L | Characters kept | Refused |
-  |---|---|---|---|---|
-  | `stat` | `{value, unit?, label?, tone?, note?, progress?: {used, of}}` | `note` hidden at S | value 24, unit 12, label 80, note 200 | no `value`; `used` or `of` not a number |
-  | `stats` | `{items: [{label, value, tone?, trend?, link?}]}`; `trend`: numbers, the last 30 drawn as a sparkline under the value (none with fewer than 2) | first 2 / 4 / 6 items | value 24, label 60 | `items` not a list; a `trend` not a list of numbers |
-  | `chart` | H27 | H27 | H27 | H27 |
-  | `list` | `{items: [{title, sub?, link?}], empty?}` | first 3 / 5 / 10 items | title 200, sub 200 | `items` not a list |
-  | `status` | `{state, title, text?}`, `state` `ok`, `warn` or `bad` | the same | title 80, text 300 | another `state` |
-  | `card` | `{title?, text?, link?}` | the same | title 120, text 2000 | neither `title` nor `text` |
-  | `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill` or `date`; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns; a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
-  | `page` | yours, drawn by your client half (C3) | your draw gets `size` | yours | — |
-- H17. Give any widget but a `page` (which draws its own) `open` (an `echo://` place, or an `https://` page) and up to 3 `actions: [{label, command, args}]` (label ≤ 40 chars) — each runs your host half's `ctx.command(command)` with `args` on the user's click, then Today reads your widgets again; answer by `ctx.widgets.set` what changed. A plugin's `https://` link — a widget's `open`, a table row's or a `stats` item's `link`, a work row's `url` (H22), its ⌘K entry — opens in the browser on the user's first click, nothing asked; its host shows in the link's tooltip. Evidence: `pluginWidgetHtml`, `workRowOpen` (window script)
-- H18. Read a widget's settings from the `params` your provider gets (`ctx.widgets.provide(id, ({params}) => …)`): its defaults, then what the user set in Today's edit mode, with `echoctl today set`, or for every widget of the page at once with Echo's Filters widget or `echoctl today filter`; on a dashboard Echo sets its `thread` / `client` setting (`echo-plugins.md` R21). Echo asks again when one changes — until then an answer given for other settings isn't shown — and never gives a value the setting doesn't take. Name a setting people slice by as other widgets do (`thread`, `client`, or a choice with the same key and options), so one filter reaches them all. Evidence: `today_layout::params_on`
-- H19. Save audio or a picture with `ctx.http.fetch(url, {save: "<store path>"})` and show it from `/plugin/<id>/store/<path>`; put what you can lose under `cache/` (Echo removes it after 7 days) and remove the rest yourself with `ctx.store.remove`. Evidence: `jshost::sweep_store`
-- H20. Name a skill's Echo CLI `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`, and list in `uses.sessions.commands` the commands of yours it runs (`plugin call <id> <command>`); in a terminal (`ctx.terminal`) only your plugin is loaded, so skip start-up work there. Evidence: `plugins::session_commands`
-- H21. Keep what belongs to a thread (its repositories, its project) with `ctx.threads.set(thread, key, value)` — `key` 1–80 chars, `value` JSON of 16 KB at most, 64 keys a thread, 4 MB a plugin in all; `null` removes it; refused in a routine's or Yolo's run preparing and asking and for a thread that doesn't exist — and read it with `ctx.threads.get(thread, key)` (null when none) and `ctx.threads.list(key)` (`[{thread, value}]`, threads gone left out); no grant, never your own thread keys in the store. A key with a dot is shared (H28). A `threads.json` that isn't JSON makes `get` and `list` fail and is moved aside as `threads.json.bad-<time>` at the next change; a thread id used again inherits nothing. Hear a thread change with `threads_changed` in `uses.events.on` (from another process too, H4): `{thread, born, change: 'renamed', name, from}`, `{thread, born, change: 'merged', into, dropped}` (each key `into` lacks is moved to it; `dropped`: yours that didn't fit in its 64) or `{thread, born, change: 'deleted', values}` (your own values, removed: clean what you keep elsewhere); `born` tells this thread from a later one with its id. Evidence: `plugins::thread_values::changed`
-- H22. Give the user's items tracked outside Echo (a review asked of them, an issue assigned) with `ctx.work.provide(({scope, thread}) => rows)` under `uses.work`: `scope` `"me"` (Today → My work) or `"thread"` (that thread's Work tab, `thread` its id); 200 rows at most, one wrong row refusing the answer; text plain (Echo escapes it). Act on rows with `task.actions` (C5): Echo's Close and Claude stay off them. Echo asks in the background (5 s) and draws the last answer; it asks again when the answer is a minute old or after `ctx.work.changed()`, a scope at most every 10 s (a `changed()` said sooner is asked once its time is up; one from inside `provide` is ignored). A provider that fails or is slow keeps its last good rows, marked "not updated", for 24 h after that answer, with a line in Settings → Plugins naming where. A thread's rows go when it is deleted or merged; a thread's scope not asked for in 30 days goes. Check it with `echoctl work show [--thread <id>]`. Evidence: `jshost::work::check_rows`
-
-  | Field | Shape |
-  |---|---|
-  | `id` | text, 1–200 chars, unique |
-  | `title` | text, 1–300 chars |
-  | `kind` | text, 1–30 chars |
-  | `where` | optional text, ≤ 120 chars |
-  | `url` | optional `https://` address, ≤ 2000 chars, no spaces, quotes, `<`, `>` or `\` (opened as H17) |
-  | `due` | optional `YYYY-MM-DD` |
-  | `late` | optional `true` or `false` |
-  | `thread` | optional thread id, ≤ 60 chars; on a "me" row it also puts the row in that thread's Work |
-- H23. Use the sign-in saved on this computer, never a token the user pastes: name the host in `uses.signin.hosts` (and its API host in `network.hosts`: the sign-in grants no network) and `await ctx.signin.get(host)` → `{token, from: "gh" | "git", user?}` (the GitHub CLI's token, else what git's credential helper keeps — for a self-hosted git maybe the user's own password) or `null`; refused in a routine's or Yolo's run preparing and asking. After the token was refused (HTTP 401), not on every call, ask again with `ctx.signin.get(host, {fresh: true})`. `ctx.signin.sources(host)` → `{gh, git}` says which programs are here, no sign-in read, so your section can say how to sign in (`gh auth login`). Keep the token in memory and send it only to that host's API — never to the store, the window or a log. Evidence: `plugins::signin::get`, `plugins::may_use_signin`
-- H24. Without a saved sign-in, sign the user in yourself — however the service does it (a device code, a browser sign-in), with your own client id and scopes, checked by you — and have Echo keep it: `uses.signin.keep: true`, then `ctx.signin.keep(host, token)` (one line, 8 KB at most); `ctx.signin.get(host)` hands it back first as `{token, from: "echo"}`, to your plugin only; `ctx.signin.forget(host)` signs out. It goes when your plugin is removed; the same id from another marketplace, or a version that no longer says `keep`, starts without it; keep and forget are refused in a routine's or Yolo's run preparing and asking. After a 401 on an `"echo"` sign-in, `{fresh: true}` gives the same one: offer to sign out and in again. Evidence: `plugins::signin::keep`
-- H25. Test against made-up services, never the real ones: in a development build `ECHOCTL_TEST_HOSTS="<host>=http://127.0.0.1:<port>,…"` (or `http://localhost:<port>`, an optional path after it) sends `ctx.http.fetch("https://<host>/<path>")` for a host your manifest names in `network.hosts` to `<base>/<path>` (`save:` downloads too), never through a proxy; the grant is checked on the real host first, and an address the user listed (`network.hosts_from`) is reached as it is. It fails closed: while it is set, one wrong entry (malformed, or not a local address) fails every request, and a named host it doesn't map is refused ("isn't mapped in ECHOCTL_TEST_HOSTS"). Curl sends the fake `Host: 127.0.0.1:<port>`: serve hosts it must tell apart on different ports. A release build never reads it. Made-up `gh` / `git` first on `PATH` (`gh.cmd` / `git.cmd` on Windows) answer `ctx.signin.get` in any build (`tests/app_profile.md` → Plugins against fake services). Evidence: `jshost::test_hosts::test_host`
-- H26. Run a script of yours from the host half with `await ctx.scripts.run(skill, script, args, {timeout})` → `{status, stdout, stderr, truncated?, timed_out?}`: `args` a list of strings (no shell, M11), `timeout` in seconds up to the script's declared one (its default), never more, stdout and stderr 1 MB each (what is past it cut, with `truncated: true`; on a timeout or a kill `status` is `null`, with `timed_out: true` on a timeout), a second run of the same script while one runs refused ("already running"). It runs in its copied skill folder, without stdin, with the user's environment minus Echo's secrets and every `CLAUDE*` / `ANTHROPIC*` key, plus `ECHO_PLUGIN_SCRIPT=1` (nobody is there to answer a prompt: fail with a message instead of starting a sign-in) and `ECHO_PLUGIN_CACHE` (your store's `cache/`: write large output there as a file and print its name). The run is async: your host half keeps answering its commands, widgets and work while it runs, and it doesn't count against their limits. For data on a schedule (a fetch for a widget), run it from `ctx.every` and keep what it prints with `ctx.store` — no Claude run in between; a skill's script in a session hands its result to you with `plugin call <id> <command> '<json>'`. Evidence: `plugins::scripts::run`
-- H27. Shape a `chart`'s data as `{type, points, series?, unit?, note?, percent?, center?, headline?}`; values are numbers up to 10^15 (larger is refused). All series share one y-axis and the `unit`: never mix units in one chart. Evidence: `pluginChartHtml` (window script)
-
-  | `type` | Draws | Points drawn | Series | Negative values |
-  |---|---|---|---|---|
-  | `line` | a line | the last 60 | 1–6 | below zero |
-  | `area` | a filled line | the last 60 | 1–6 | refused |
-  | `bar` | upright bars | the last 24 | 1–6 | below zero |
-  | `stacked` | upright stacked bars | the last 24 | 1–6 | refused |
-  | `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
-  | `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
-  | `pie`, `donut` | slices | all read; up to 6 drawn in the given order, those under 3% and past the 6th folded into one Other after them (all zero: "Nothing to show yet") | one | refused |
-  | `funnel` | stages | the first 8 in the given order, each with its share of the one before | one | refused |
-
-  | Field | Shape |
-  |---|---|
-  | `points` | one series: `[{label, value}]`; several: `[{label, values: {<key>: number}}]` — a point without `values` refused, a missing key drawn as 0; label 40 chars |
-  | `series` | `[{key, label, tone?}]`, keys unique, 6 at most (more refused; more than one on a `pie`, `donut` or `funnel` refused); `tone` (`good`, `warn`, `bad`, `muted`) colours it by that meaning |
-  | `unit` | ≤ 12 chars |
-  | `note` | hidden at S |
-  | `percent` | `true`: each point as shares of 100% on `stacked` and `stacked-bars` (ignored elsewhere) |
-  | `center` | `{value, label?}` in a `donut`'s hole (ignored elsewhere); value 12, label 24 chars |
-  | `headline` | `{value, label?, change?: {by, than?, good?}}` above the chart: `value` text or a number (24 chars), `label` 60 chars; `by` a number up to 10^15 (larger refused), shown without its sign after an arrow (↑ above zero, ↓ below, → at zero) with the `unit`; `than` (40 chars) shown after "vs"; `good: true` shows the change in tone `good`, `false` in `bad`, absent neutral |
-- H28. Share a value with the other plugins of your marketplace under a key `<ns>.<name>`: `ns` is your marketplace's declared `name` (`echo-marketplace.json`) in lower case, letters, digits and `-` (`EPAM` → `epam.project_codes`) — per thread with `ctx.threads.get/set/list` as H21 (one value for every plugin; it follows the thread the same way; a `deleted` `threads_changed` gives each plugin of the namespace's source its removed shared values too), or one for the computer with `ctx.shared.get(key)` (null when none) and `ctx.shared.set(key, value)` (`null` removes it). A set creates it when it isn't there. Every plugin reads any namespace, so never a secret there; only plugins from the marketplace source that owns `ns` set it — the source of the earliest installed plugin whose marketplace declares that name (another source with the same name only reads; when the owner's plugins are all removed, the next takes it); a namespace no marketplace owns reads null and refuses a set. Removing a plugin leaves the values. Limits as H21, counted per namespace, with 64 keys for the computer too. Validate what you read: another plugin wrote it. Evidence: `plugins::shared`
-- H29. Install the channel plugin your manifest names (`uses.channel.plugin`) into the user's Claude Code with `ctx.claude.installPlugin(spec)` — the default AI profile's; the sheet says it installs it — after asking `ctx.claude.hasPlugin(spec)`; both take only that spec, and an install in a routine's or Yolo's run preparing and asking is refused. Evidence: `capabilities::describe_channel`
-- H30. Give what changes at run time (one entry per vault, per watched project) with `ctx.agent.set({summary?, entries: [{name, summary, guide}]})` — needs `agent` in the manifest; `name` as a skill name, ≤ 20 entries, `summary` ≤ 200 chars (it replaces the manifest's when given), `guide` Markdown ≤ 16 KB; each entry is a row in Echo's core and a `CLAUDE.md` Claude reads before working with it; entries not given again are removed; refused in a routine's or Yolo's run preparing and asking. Evidence: `plugins::agent::set_runtime`
-
-### Constraints
-| Do not | Do instead | Evidence |
-|---|---|---|
-| Write `settings.json`, `inbox.json`, `widgets.json`, `threads.json` or `work.json` with `ctx.store.write`, or remove `settings.json`, `threads.json`, `work.json` or the store folder itself with `ctx.store.remove` (Echo refuses those) | Use `ctx.settings.set`, `ctx.inbox.set` / `clear`, `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered, kept by Echo | `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file` |
-
-### Read first
-| When you are | Exemplar | Tests |
-|---|---|---|
-| writing a first host half | `jshost::a_host_half_gets_echos_services_and_answers_commands` | exemplar is a test |
-| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test |
-| adding Today widgets | `jshost::a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set` | exemplar is a test; a plugin with one widget of each kind: `tests/fixtures/plugins` |
-| giving work rows | `jshost::a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it` | exemplar is a test |
-| keeping values per thread | `jshost::a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes` | exemplar is a test |
-| using the user's sign-in, or testing against fake services | `jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine` | `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests` |
-
-## Client half
-
-### Rules
-- C1. Export `apply(ctx)` from the client half and add to the window only through `ctx`: `call(command, args)` (your host half's commands), `listen`, `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of your panels), `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw` (C3), `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`, `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`); Echo takes out what you added when the plugin unloads. The slots are `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the last two change with Knowledge's rework). Put text on the clipboard only with `ctx.ui.copy(text)`, on the user's click or key (without the page's user activation, or where the engine can't tell, it throws), 10,000 characters at most (the rest cut). Evidence: `pluginCtx`, `SLOTS`, `loadPluginClients` (window script)
-- C2. Escape every text you put in HTML with `ctx.ui.esc`; render Markdown in the host half with `ctx.markdown(md)` and hand the HTML back through `ctx.call`. Evidence: `pluginCtx` (window script), `jshost::PRELUDE`
-- C3. Draw a `page` widget with `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` from `data` only (its host half gives it by `provide` / `set`): the same data must give the same HTML, and the draw neither calls `ctx.render` nor keeps state in the page. Evidence: `pluginWidgetView` (window script)
-- C4. Add a row to each thread's Profile with `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (draw from what you have; a `ctx.render()` inside it is ignored), `after` runs once per box drawn afresh (fetch there, then `ctx.render()`), one row per id, and one that throws is left out, the Profile drawn without it. Evidence: `threadSlotRows`, `threadSlotAfter` (window script)
-- C5. Act on your work rows with `ctx.slots.add('task.actions', {…, when: (t) => t.kind === 'plugin' && t.source === ctx.id, run(t)})`: `t.row` is the row, each row its own target; an item without `when` stays on Echo's tasks; after `run`, Echo reads the rows again. Evidence: `slotFor` (window script)
-
-## Publishing
-
-### Rules
-- P1. Host a marketplace as a folder or git repository with `echo-marketplace.json` at its root (`{name, featured, plugins: [{id, source, categories}]}`), each entry's manifest `id` equal to its `id`. Evidence: `plugins::CatalogEntry`
-- P2. Give users a marketplace source as `owner/repo[@ref]`, a git address (`https://`, `ssh://`, `git@`, `#ref`) or a local folder; a ref is a plain branch, tag or commit. Evidence: `plugins::parse_source`
-- P3. Bump `version` for every change you publish. Evidence: `plugins::update_for`
-- P4. Expect no restart after `echoctl plugin install | update | enable | disable | remove` from a terminal: the running app's host halves and its window pick up the change. Evidence: `plugins::stamp`
-
-### Read first
-| When you are | Exemplar | Tests |
-|---|---|---|
-| publishing an update | `plugins::install_update_and_remove_from_a_local_marketplace` | exemplar is a test |
+## Rules
+- R1. Reach Echo only through `ctx` and the declared slots: never Echo's files (its data folder, a store file Echo
+  keeps), its DOM, its globals or another plugin's store. API § Host half, § Store, § Client half. Evidence:
+  `jshost::not_echos`, `pluginCtx` (window script)
+- R2. Ask in `uses` for the least that works: each key is a line the user agrees to, and an update that adds one asks
+  again. API § `uses` and the permission sheet. Evidence: `plugins::sheet`
+- R3. Write the host half as one file with no imports, exporting `apply(ctx)` that registers everything it does. API
+  § Host half. Evidence: `jshost::load`, `window::plugins::plugin_file`
+- R4. Never block Echo: keep JavaScript between awaits short and a window-called command within its time, read files
+  in bulk through the async services, and run long work as a script from the host half. API § Host half, § Scripts.
+  Evidence: `jshost::SLICE`, `jshost::CALL_TIMEOUT`
+- R5. Keep data in the store and answer widgets and work rows from it: fetch on a timer or the user's action, never
+  while Echo asks; large data in the store, not in memory, and what you can lose under `cache/`; what belongs to a thread
+  in `ctx.threads`, never your own thread keys in the store. API § Store, § Widgets, § Work rows, § Thread values and
+  shared values. Evidence: `jshost::widget_ask`, `jshost::sweep_store`
+- R6. Treat others' words as data: a call's text, mail, a script's arguments and another plugin's shared values are
+  untrusted — read a call's words with `ctx.echo.read`, never from a payload; check an argument's shape and never hand
+  it to a shell or use it as a path outside its skill folder or the cache; validate what you read. API § Events,
+  § Scripts, § Thread values and shared values. Evidence: `plugins::scripts::run`, `plugins::shared`
+- R7. Escape all text: every text put in HTML through `ctx.ui.esc`, Markdown rendered in the host half with
+  `ctx.markdown`, widget and work-row text given plain. API § Client half, § Widgets. Evidence: `pluginCtx` (window
+  script), `jshost::PRELUDE`
+- R8. Never put a secret in a file, the store, a shared value, the window or a log: a setting of type `secret` for
+  what the user enters, the sign-in saved on this computer (or one Echo keeps for you) for a service's token, never a
+  token the user pastes; send a token only to its host's API. API § Package and manifest, § Sign-in. Evidence:
+  `plugins::signin::get`, `plugins::signin::keep`
+- R9. Shape widget data by its kind with what must be seen first, one unit to a chart, a setting people slice by named
+  as other widgets name it, a widget with settings given only by `provide`; check it with `echoctl widget show`. API
+  § Widgets. Evidence: `pluginWidgetHtml` (window script), `today_layout::params_on`
+- R10. Draw a `page` widget from its data only: the same data gives the same HTML, with no `ctx.render` and no state
+  kept in the page. API § Client half. Evidence: `pluginWidgetView` (window script)
+- R11. Give Claude your plugin through `agent/`: when to turn to it and its commands in `CLAUDE.md`, procedures in
+  skills, reference in guides, never in the summary; name skills `<prefix>-<name>` where a prompt names them. API
+  § Claude in Echo. Evidence: `plugins::agent::problems`
+- R12. Ship a script with a shebang, name what it needs on the computer, call it in `SKILL.md` by its path alone, and
+  mark it `readonly` only when it changes nothing. API § Scripts. Evidence: `plugins::scripts::declared`,
+  `plugins::scripts::wrapper`
+- R13. Test against made-up services, never the real ones: `ECHOCTL_TEST_HOSTS` for the network, made-up `gh` / `git`
+  for sign-ins. API § Testing against made-up services. Evidence: `jshost::test_hosts::test_host`
+- R14. Run `echoctl plugin check <folder>` until it exits 0 before installing, updating or publishing, and bump
+  `version` for every change you publish. API § Package and manifest, § Publishing. Evidence:
+  `plugins::agent::check_folder`, `plugins::update_for`

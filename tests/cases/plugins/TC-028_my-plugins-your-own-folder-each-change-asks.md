@@ -32,7 +32,7 @@ tags: [plugins, widgets, self-service, security]
 | 8 | Change `main.js`'s value to 5 (same version); `$E plugin update team-pulse` | Updated (0.1.0 again: nothing new asked, no `--yes` needed); `$E widget show plugin:team-pulse:open` says 5 |
 | 8a | Add `"uses":{"network":{"hosts":["api.example.com"]}}` to its manifest; `$E plugin update team-pulse` | The sheet printed with the new network line ("Talks to api.example.com … (new)"), refused without `--yes` |
 | 8b | Make a folder `Bad_Name` with a manifest in My plugins; `$E plugin mine` | Listed with "its folder name isn't a plugin id…" |
-| 9 | `$E plugin guide` | Echo's plugin authoring rules (Markdown: Manifest, Host half, Client half, Publishing) |
+| 9 | `$E plugin guide` | Echo's plugin authoring rules (Markdown: "# Plugin Authoring", its Rules), then the plugin API reference ("# Echo Plugin API": Package and manifest, Host half, Widgets, Client half, Publishing…) |
 | 10 | `ECHOCTL_HEADLESS=1 $E plugin install team-pulse --from my-plugins --yes` | Refused: "plugins are installed and updated by you, not from inside a run Echo started" |
 | 11 | `$E today --thread acme-rollout reset`; `$E plugin remove team-pulse` | The folder `team-pulse` still in My plugins (yours to delete) |
 
