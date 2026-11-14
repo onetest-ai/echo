@@ -22,6 +22,8 @@ CLAUDE.local.md
 # the manual-qa team (tests/install.sh, per machine)
 /tests/.claude/
 /tests/.agents/
+# a repo-root path resolved from tests/ by mistake
+/tests/tests/
 /skills-lock.json
 future/
 

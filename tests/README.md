@@ -25,16 +25,20 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 ## Running
 
 1. Once per machine: `tests/install.sh`. QA sessions start in this folder (`cd tests && claude`): only a session
-   started here loads the agents, their hooks and the Playwright MCP (`CLAUDE.md`).
+   started here loads the agents, their hooks and the Playwright MCP (`CLAUDE.md`). Paths in the cases, the scenarios
+   and `app_profile.md` are from the repo root: the agents give every tool absolute paths. Such a session reads
+   `tests/.claude/settings.json` (the installer's hooks), **not** the repo root's `.claude/settings.json`: permissions
+   or plugins a run needs (the Echo plugin, an allowed command) go in `tests/.claude/settings.local.json` (this
+   machine) or in your user settings (`~/.claude/settings.json`).
 2. `cargo build`; for the recording scenarios (S-14, S-17, S-18, S-19, S-21) also `tests/fixtures/recordings.py prepare`
    once (about 1.5 minutes: file-fed captures, no device and no sound, then the transcriptions; kept until the app
    changes). Recording tests open no microphone and play nothing (`app_profile.md` → "Recording with file-fed calls");
    the few device checks are the live check, by a person.
 3. Start Claude Code in `tests/` with the lead as the active agent (`cd tests && claude --agent test-run-lead`) and
-   give it scenarios, e.g. "run tests/scenarios". Per scenario it serves the window on fresh data, one runner goes
-   through its stages (the browser stays open between scenarios), and the report goes to
-   `tests/reports/RUN-<date>-NNN.md`, counting scenarios and their stages, each stage's time and the five slowest;
-   `run: person` cases are listed for a person.
+   give it scenarios, e.g. "run every scenario in scenarios/" (or one: "run scenarios/S-01_….md"). Per scenario it
+   serves the window on fresh data, one runner goes through its stages (the browser stays open between scenarios),
+   and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting scenarios and their stages, each stage's time
+   and the five slowest; `run: person` cases are listed for a person.
 
 Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case"; then put each agent case
 into a scenario (`app_profile.md` → "Scenarios"). A scenario reuses assets: one data build, one call or model run per

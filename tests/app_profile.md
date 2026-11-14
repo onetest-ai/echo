@@ -13,8 +13,11 @@ the user opts in to, transcribes them on the computer, and has Claude Code write
 agent tests it. This file is given to every manual-qa role; where it differs from a role's own rules, **this wins**.
 
 The agents and the Playwright MCP are installed in `tests/` (`tests/install.sh`) and load only in a session started
-there (`cd tests && claude`). Paths in this file, the cases and the scenarios are from the repo root (`tests/fixtures/…`,
-`target/debug/echoctl`): every Bash call starts there, `cd "$(git rev-parse --show-toplevel)"` first.
+there (`cd tests && claude`), so a relative path given to a tool resolves from `tests/`. Paths in this file, the
+cases and the scenarios are from the repo root (`tests/fixtures/…`, `tests/cases/…`, `target/debug/echoctl`): every
+tool gets them **absolute**, the repo root in front (Read, Glob, Grep, Write, Edit, the Playwright MCP's `filename`:
+`<repo root>/tests/reports/screenshots/…`), and every Bash call starts at the root, `cd "$(git rev-parse
+--show-toplevel)"` first. The installed agents' own paths are absolute already (`tests/install.sh`).
 
 ## Rules
 
