@@ -694,22 +694,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
             // it — the app's alone, never a terminal's host.
             if APP.load(Ordering::Relaxed) {
-                plugins::thread_values::take_queued(|event, payload, each| {
-                    // Another process's `ctx.widgets.changed()`: asked here, where the window reads.
-                    if event == widgets::WIDGETS_CHANGED {
-                        for (plugin, w) in each {
-                            let ws = match w["widget"].as_str() {
-                                Some(one) => vec![one.to_string()],
-                                None => plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).map(|(_, m)| m.widgets.iter().map(|x| x.id.clone()).collect()).unwrap_or_default(),
-                            };
-                            for one in ws {
-                                widgets::ask_changed(plugin, &one);
-                            }
-                        }
-                    } else {
-                        event_each(event, payload, each);
-                    }
-                });
+                // Another process's `ctx.widgets.changed()` is asked here, where the window reads; the rest are events.
+                plugins::thread_values::take_queued(|event, payload, each| if event == widgets::WIDGETS_CHANGED { widgets::take_changed(each) } else { event_each(event, payload, each) });
             }
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
@@ -1098,9 +1084,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             };
             let thread = s(&arg[0]);
             // A shared key's change is the namespace's other plugins' news (`shared_changed`); the same value isn't.
-            let before = plugins::shared::store_of(&key)?.map(|_| plugins::thread_values::get(&store, &thread, &key)).transpose()?;
+            // Not readable (a damaged file, which the set moves aside): taken as changed.
+            let before = plugins::shared::store_of(&key)?.map(|_| plugins::thread_values::get(&store, &thread, &key).ok());
             plugins::thread_values::set(&store, &thread, &key, &arg[2])?;
-            if before.is_some_and(|b| b != arg[2]) {
+            if before.is_some_and(|b| b.as_ref() != Some(&arg[2])) {
                 plugins::shared::tell_changed(id, &key, Some(&thread));
             }
             Value::Null
@@ -1116,9 +1103,9 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "shared.set" => {
             read_only_here("changing files or settings")?;
             let key = s(&arg[0]);
-            let before = plugins::shared::get(&key)?;
+            let before = plugins::shared::get(&key).ok();
             plugins::shared::set(id, &key, &arg[1])?;
-            if before != arg[1] {
+            if before.as_ref() != Some(&arg[1]) {
                 plugins::shared::tell_changed(id, &key, None);
             }
             Value::Null
@@ -2726,6 +2713,14 @@ mod tests {
         let mut got = vec![];
         plugins::thread_values::take_queued(|e, p, each| got.push((e.to_string(), p.clone(), each.keys().cloned().collect::<Vec<_>>())));
         assert_eq!(got, [("shared_changed".to_string(), json!({"namespace": "acme", "key": "acme.watch", "by": "b"}), vec!["a".to_string()])]);
+        // A damaged file: the set still moves it aside and goes on (what was there unread: taken as changed).
+        std::fs::write(plugins::data_dir("@acme").join("shared.json"), "not json").unwrap();
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": ["ACME-2"]})).unwrap();
+        assert_eq!(plugins::shared::get("acme.watch").unwrap(), json!(["ACME-2"]));
+        for id in ["a", "b", "c"] {
+            plugins::remove(id, true).unwrap();
+        }
+        sync();
     }
 
     #[test]
@@ -2804,6 +2799,8 @@ mod tests {
         plugins::thread_values::take_queued(|e, _, each| got.push((e.to_string(), Value::Object(each.clone()))));
         assert_eq!(got, [(widgets::WIDGETS_CHANGED.to_string(), json!({"pulse": {"widget": "open"}}))]);
         assert_eq!(asks(), 6, "not asked in this process");
+        plugins::remove("pulse", true).unwrap();
+        sync();
     }
 
     #[test]

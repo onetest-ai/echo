@@ -227,18 +227,36 @@ pub(super) fn widgets_changed(plugin: &str, widget: Option<&str>) -> Result<()> 
         Some(w) => vec![w.to_string()],
         None => declared,
     };
-    for w in &widgets {
-        mark_due(plugin, w);
-    }
     if hosts_here() {
+        // Marked due only as it is asked (`ask_changed`): a change within the gap isn't asked by every look either.
         for w in widgets {
             ask_changed(plugin, &w);
         }
     } else {
+        for w in &widgets {
+            mark_due(plugin, w);
+        }
         let each = serde_json::Map::from_iter([(plugin.to_string(), json!({"widget": widget}))]);
-        plugins::thread_values::queue(WIDGETS_CHANGED, &json!({}), &each)?;
+        // Not queued (the app hasn't taken a full queue): it is asked anyway at the next look (marked due).
+        if let Err(e) = plugins::thread_values::queue(WIDGETS_CHANGED, &json!({}), &each) {
+            eprintln!("echoctl: the running app won't hear that {plugin}'s widgets changed: {e:#}");
+        }
     }
     Ok(())
+}
+
+/// Another process's queued `changed` (`{plugin: {widget}}`), as the app takes it: each widget named (or each the
+/// plugin declares) asked as `widgets_changed` would.
+pub(super) fn take_changed(each: &serde_json::Map<String, Value>) {
+    for (plugin, w) in each {
+        let ws = match w["widget"].as_str() {
+            Some(one) => vec![one.to_string()],
+            None => plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).map(|(_, m)| m.widgets.iter().map(|x| x.id.clone()).collect()).unwrap_or_default(),
+        };
+        for one in ws {
+            ask_changed(plugin, &one);
+        }
+    }
 }
 
 /// The queued `changed` of another process, as the app takes it (`take_queued`): not an event for the plugins.
@@ -274,7 +292,8 @@ pub(super) fn ask_changed(plugin: &str, widget: &str) {
             Some((_, true)) => return,
             Some((last, pending)) if last.elapsed() < CHANGED_GAP => {
                 *pending = true;
-                CHANGED_GAP - last.elapsed()
+                // One reading: the gap may end between two.
+                CHANGED_GAP.saturating_sub(last.elapsed()).max(Duration::from_millis(1))
             }
             _ => {
                 all.insert(key.clone(), (std::time::Instant::now(), false));

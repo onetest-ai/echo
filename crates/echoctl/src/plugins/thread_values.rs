@@ -355,7 +355,7 @@ pub(crate) fn tell(event: &str, payload: &Value, each: &Map<String, Value>) {
             return;
         }
         if let Err(e) = queue(event, payload, each) {
-            eprintln!("echoctl: the running app won't hear {event}: {e:#}");
+            eprintln!("echoctl: the running app won't hear {event} ({}): {e:#}", payload["thread"].as_str().or(payload["key"].as_str()).unwrap_or(""));
         }
     }
     #[cfg(not(feature = "js"))]
