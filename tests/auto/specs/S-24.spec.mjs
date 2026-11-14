@@ -376,8 +376,63 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await page.setViewportSize(w.sizes.wide)
       await today.reloadToday()
       await threeColumns()
+      // Late in the evening, whenever the run is (the window's clock at 23:45, the line now at or near the list's end):
+      // Your day still shows now, and again after a task's Details came and went (its rows reflow at each width).
+      const late = new Date()
+      late.setHours(23, 45, 0, 0)
+      await page.clock.setFixedTime(late)
+      await today.reloadToday()
+      const detailsComeAndGo = async (check) => {
+        await today.openTaskCard(first)
+        await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+        await expect.poll(async () => (await today.hold()).width).not.toBeCloseTo(wide.width, 0)
+        await check()
+        await today.closePanel(today.rightPanel).click()
+        await expect.poll(async () => (await today.hold()).width).toBeCloseTo(wide.width, 0)
+        await check()
+      }
+      const onNow = () => expect.poll(() => today.nowInView()).toBe(true)
+      await onNow()
+      await detailsComeAndGo(onNow)
+      // Scrolled by the user (to its top, away from now): kept while a task's Details come and go; 11 minutes later the
+      // next draw puts it back on now.
+      const yd = await today.box(n.yourDay)
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      expect(await today.nowInView()).toBe(false)
+      await detailsComeAndGo(async () => expect((await today.inner(n.yourDay)).top).toBe(0))
+      await page.clock.setFixedTime(new Date(+late + 11 * 60_000))
+      await today.openTaskCard(first)
+      await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+      await onNow()
+      await today.closePanel(today.rightPanel).click()
+      await onNow()
+      // Scrolled again, then Today left for Calls and opened again: on now.
+      const [todayIs, callsIs] = data.text.shell.activities
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      await today.activity(callsIs).click()
+      await expect(today.widget(n.yourDay)).toHaveCount(0)
+      await today.activity(todayIs).click()
+      await onNow()
+      // Scrolled on Today, then a thread's dashboard with Your day (a list of its own, and a scroll there), then straight
+      // to Today: on now. (The thread's day fits its card, so the scroll there is the list's scroll event, sent.)
+      const thread = data.set.needs.chatThread.id
+      expect(data.cli('today', '--thread', thread, 'add', id.agenda).code).toBe(0)
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      await page.evaluate((h) => { location.hash = h }, `#project/${thread}/brief`)
+      await expect(today.widget(n.yourDay)).toBeVisible()
+      await today.onWidget(n.yourDay, (el) => el.querySelector('.td-rows').dispatchEvent(new Event('scroll')))
+      await today.activity(todayIs).click()
+      await expect(today.editToday.or(today.done).first()).toBeVisible()
+      await onNow()
     } finally {
       data.cli('today', 'reset')
+      data.cli('today', '--thread', data.set.needs.chatThread.id, 'reset')
     }
     expect(layout()).toEqual(w.default)
   })

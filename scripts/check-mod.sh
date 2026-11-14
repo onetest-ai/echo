@@ -96,6 +96,8 @@ node crates/echoctl/ui/today-calendar.test.mjs
 node crates/echoctl/ui/today-edit.test.mjs
 # The day's choices: overlaps you accepted, what Echo suggests, invites to answer (dayChoices).
 node crates/echoctl/ui/today-choices.test.mjs
+# Your day's scroll: the user's or Today's own placing it (tdScrollIsUser).
+node crates/echoctl/ui/today-scroll.test.mjs
 # A meeting of Your day opened as Calendar's popover: which one, beside which of its forms (tdFormOf, tdPick).
 node crates/echoctl/ui/today-popover.test.mjs
 # A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).

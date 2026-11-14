@@ -136,6 +136,8 @@ function renderNow() {
   const key = `${S.view}|${S.selected}|${S.tab}`
   const entering = key !== lastKey
   lastKey = key
+  // Your day's place the user scrolled to is Today's only: in another view it is forgotten, and Today opens on now.
+  if (S.view !== 'today') S.tdScrolledAt = 0
   const focused = document.activeElement
   const focus = focused && focused.id
   const caret = focus && focused.selectionStart

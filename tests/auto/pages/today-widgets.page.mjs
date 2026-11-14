@@ -152,7 +152,8 @@ export class TodayWidgetsPage extends TodayPage {
     await this.page.mouse.wheel(0, dy)
   }
 
-  /** Whether the line now of Your day's list is in view inside the list (it opens on now). */
+  /** Whether the line now of Your day's list is in view inside the list (it opens on now), clear of the fade at its
+   *  bottom while there is more below. */
   async nowInView() {
     // The line and the list read in one step (`onWidget`), never from two drawings of Your day.
     await this.nowLine.waitFor()
@@ -161,7 +162,8 @@ export class TodayWidgetsPage extends TodayPage {
       const line = list && [...el.querySelectorAll('[role="separator"]')].find((x) => /^Now /.test(x.getAttribute('aria-label') || ''))
       if (!list || !line) return false
       const [a, b] = [line.getBoundingClientRect(), list.getBoundingClientRect()]
-      return a.height > 0 && b.height > 0 && a.y >= b.y - 1 && a.y + a.height <= b.y + b.height + 1
+      const fade = list.hasAttribute('data-more') ? 32 : 0
+      return a.height > 0 && b.height > 0 && a.y >= b.y - 1 && a.y + a.height <= b.y + b.height - fade + 1
     })
   }
 
