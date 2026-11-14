@@ -368,7 +368,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
     let tree = crate::ledger::tree(project)?;
     let n = tree["nodes"].get(node).cloned().ok_or_else(|| anyhow::anyhow!("no such task"))?;
     // Both name folders: an id like `ask-1762412345678`, a skill's id as Claude Code takes it.
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !crate::yolo::valid_id(id) {
         anyhow::bail!("a bad run id");
     }
     if !skill.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
@@ -390,7 +390,11 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
+    // Its record on Yolo runs (#603), beside its files: by this Echo (`pid`, `echo`: its stamp), which the run lives in.
+    crate::yolo::record(&id, &json!({"title": title, "project": project, "node": node, "thread": project, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id(), "echo": crate::yolo::instance()}));
     std::thread::spawn(move || {
+        // Runs older than Yolo runs keeps go (off the window's thread).
+        crate::yolo::prune();
         // As the folder session: the user's skills as they are now among what it gets (off the window's thread).
         let out = crate::claudejob::run(&spec);
         let mut v = match out {
@@ -404,6 +408,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
+        crate::yolo::record(&id, &json!({"state": v["state"], "say": v["say"], "drafts": v["drafts"], "ended": v["at"]}));
         save_ask(v);
     });
     Ok(())
@@ -442,7 +447,7 @@ fn yolo_needs_prompt(item_id: &str, thread: Option<&str>, skill: &str, words: &s
 /// the run finished: a failed one leaves it in Needs you now. The outcome lands in `task-asks.json` by `id`.
 #[cfg(feature = "js")]
 pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<()> {
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !crate::yolo::valid_id(id) {
         anyhow::bail!("a bad run id");
     }
     if !skill.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
@@ -466,7 +471,10 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
     let (id, item_id) = (id.to_string(), item_id.to_string());
     // The run names its item: Today keeps it out of Needs you now while the run works.
     save_ask(json!({"id": id, "state": "working", "title": title, "item": item_id, "at": Local::now().to_rfc3339()}));
+    let subject: String = item["line"].as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(80).collect();
+    crate::yolo::record(&id, &json!({"title": title, "subject": subject, "item": item_id, "thread": spec.thread, "started": Local::now().to_rfc3339(), "state": "working", "pid": std::process::id(), "echo": crate::yolo::instance()}));
     std::thread::spawn(move || {
+        crate::yolo::prune();
         let out = crate::claudejob::run(&spec);
         let mut v = match out {
             Ok((answer, _, _)) => {
@@ -484,6 +492,7 @@ pub fn yolo_needs(id: &str, item_id: &str, skill: &str, words: &str) -> Result<(
         v["id"] = json!(id);
         v["title"] = json!(title);
         v["at"] = json!(Local::now().to_rfc3339());
+        crate::yolo::record(&id, &json!({"state": v["state"], "say": v["say"], "drafts": v["drafts"], "ended": v["at"]}));
         save_ask(v);
     });
     Ok(())

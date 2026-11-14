@@ -183,7 +183,7 @@ function myWorkView(w) {
   const cards2 = tasks.map(([t, kind, who]) => kind === 'plugin' ? workRowHtml(t, dueChip(t), workRowActs(t)) : card(t, kind, who))
   // Yolo's bar is Today's (it reads Today's asks), not a dashboard's.
   const asks = S.view === 'today'
-  return cards2.length || (asks && S.todayAskId) ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-go="tasks">Tasks</button></h2>${asks ? todayAskBar() : ''}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
+  return cards2.length || (asks && S.todayAskId) ? `<section class="td-sec" aria-label="My work · this week"><h2>My work · this week${w.scope ? ` · ${esc(w.scope)}` : ''} <button class="link-btn" data-yolo-runs title="What Claude did on its own">Yolo runs</button><button class="link-btn" data-go="tasks">Tasks</button></h2>${asks ? todayAskBar() : ''}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
 }
 
 /** A widget's markup marked by its id (`data-wkey` on its first element), so a redraw replaces it alone (`patchKeyed`). */

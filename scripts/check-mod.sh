@@ -81,6 +81,8 @@ node crates/echoctl/ui/whats-new.test.mjs
 node crates/echoctl/ui/sent-mail.test.mjs
 # Where mail drafts go: the setting's line and a run's draft as its outcome says it (draftsNow, draftLine, #135).
 node crates/echoctl/ui/drafts.test.mjs
+# Yolo runs: which runs the filters let through, their choices, and the list's words (the yolo runs block).
+node crates/echoctl/ui/yolo-runs.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
