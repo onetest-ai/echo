@@ -386,7 +386,7 @@ function pluginWidgetView(id, w, size) {
   const armed = linkAsked(S, 'wrOpen', Date.now())
   // A table row's or a stats item's link has no "Open" to name: the click is on the link itself.
   const again = w.kind === 'table' || w.kind === 'stats' ? 'Click it again' : 'Click Open again'
-  const ask = armed && armed.where === `pw:${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, again, 'data-pw-open-no="1"') : ''
+  const ask = armed && armed.where === `pw:${tdPageKey()}|${id}` && body.includes(`data-pw-open="${esc(armed.url)}"`) ? linkAskLine(armed.url, again, 'data-pw-open-no="1"') : ''
   return `<section class="td-sec pw-sec k-${esc(w.kind)}" aria-label="${esc(w.label)}" data-pw="${esc(id)}"><h2>${esc(w.label)}${count} ${stale}</h2>${body}${ask}</section>`
 }
 
@@ -432,7 +432,7 @@ document.addEventListener('click', async (e) => {
     const url = open.dataset.pwOpen
     // The keyboard stays on this widget's Open (the line redrawn).
     const back = () => setTimeout(() => { const b = document.querySelector(`[data-pw="${CSS.escape(sec.dataset.pw)}"] [data-pw-open]`); if (b) b.focus() })
-    if (linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${sec.dataset.pw}`)) send({ cmd: 'open_url', url })
+    if (linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${tdPageKey()}|${sec.dataset.pw}`)) send({ cmd: 'open_url', url })
     render()
     return back()
   }

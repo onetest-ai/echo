@@ -54,7 +54,7 @@ assert.match(linkAskLine('https://ci.example/run/1', 'Click Open again', 'data-p
 
 // The widget's question (13-today-plugins.js) is the same one: no state of its own, nothing changed while drawing.
 const widgets = readFileSync(new URL('./app/13-today-plugins.js', import.meta.url), 'utf8')
-assert.ok(!widgets.includes('S.pwOpen') && widgets.includes("linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${sec.dataset.pw}`)") && widgets.includes("linkAsked(S, 'wrOpen', Date.now())"), "a widget's link asks through linkAskStep / linkAsked")
+assert.ok(!widgets.includes('S.pwOpen') && widgets.includes("linkAskStep(S, 'wrOpen', url, Date.now(), `pw:${tdPageKey()}|${sec.dataset.pw}`)") && widgets.includes("linkAsked(S, 'wrOpen', Date.now())"), "a widget's link asks through linkAskStep / linkAsked")
 
 // The window's half around it (13-today-work.js): a title's click and its ⌘K entry ask, then open — never at once.
 const part = readFileSync(new URL('./app/13-today-work.js', import.meta.url), 'utf8')
