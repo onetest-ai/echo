@@ -307,13 +307,29 @@ fn script_path() -> std::ffi::OsString {
 /// What a script doesn't get of Echo's environment: Echo's and Claude Code's own (keys, profiles' values, run scopes) —
 /// but test data's guard it does (`ECHOCTL_TEST_OPEN_LOG_ONLY`, `ECHOCTL_TEST_OPEN_LOG`), so a program it starts that
 /// opens a page (a sign-in's browser) only logs it there, as Echo does. Echo's data and config folders and its binary
-/// are set anew (`spawn_and_wait`).
+/// are set anew, and inside a routine or Yolo the run's markers (`spawn_and_wait`, `run_markers`).
 fn withheld(key: &str) -> bool {
     let up = key.to_ascii_uppercase();
     if up == "ECHOCTL_TEST_OPEN_LOG_ONLY" || up == "ECHOCTL_TEST_OPEN_LOG" {
         return false;
     }
     up.starts_with("CLAUDE") || up.starts_with("ANTHROPIC") || up.starts_with("ECHOCTL")
+}
+
+/// Inside a routine's or Yolo's run, the run's markers, for an `echoctl` the script starts to be limited and recorded
+/// as the run is (with the headless marker those limits read); none outside one.
+fn run_markers() -> Vec<(&'static str, std::ffi::OsString)> {
+    use crate::{guard, notes};
+    let mut m: Vec<_> = [notes::RUN_SESSION, guard::RUN_MODE, notes::RUN_ACTIONS, guard::RUN_TASK, guard::RUN_THREAD]
+        .into_iter()
+        .filter_map(|k| std::env::var_os(k).map(|v| (k, v)))
+        .collect();
+    if !m.is_empty() {
+        if let Some(v) = std::env::var_os(notes::HEADLESS) {
+            m.push((notes::HEADLESS, v));
+        }
+    }
+    m
 }
 
 fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit: Duration, group: &Path) -> Result<Value> {
@@ -335,6 +351,9 @@ fn spawn_and_wait(file: &Path, args: &[String], cwd: &Path, cache: &Path, limit:
     c.env("ECHOCTL_CONFIG_DIR", crate::paths::config_dir());
     if let Ok(exe) = std::env::current_exe() {
         c.env("ECHOCTL_BIN", exe);
+    }
+    for (k, v) in run_markers() {
+        c.env(k, v);
     }
     #[cfg(unix)]
     {
@@ -476,6 +495,37 @@ mod tests {
         assert_eq!(crate::paths::home_source(), "default");
         let out = spawn_and_wait(&f, &[], &root, &root, Duration::from_secs(10), &root.join("group")).unwrap();
         assert_eq!(out["stdout"], format!("|{}|{}|none", crate::paths::config_dir().display(), exe.display()), "{out}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_script_in_a_routine_or_yolo_gets_the_runs_markers_and_outside_one_none() {
+        use crate::{guard, notes};
+        let (_env, root) = crate::paths::testenv::folders("scripts-run-markers");
+        let f = root.join("env.sh");
+        std::fs::write(&f, "#!/bin/sh\nenv | grep -E '^ECHOCTL_(RUN_|HEADLESS)' | sort\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let keys = [notes::HEADLESS, notes::RUN_SESSION, guard::RUN_MODE, notes::RUN_ACTIONS, guard::RUN_TASK, guard::RUN_THREAD];
+        let run = || spawn_and_wait(&f, &[], &root, &root, Duration::from_secs(10), &root.join("group")).unwrap()["stdout"].as_str().unwrap().to_string();
+        // Outside a routine or Yolo: none (a minutes run's headless marker alone isn't passed either).
+        std::env::set_var(notes::HEADLESS, "1");
+        let outside = run();
+        let vals = ["1", "asks", "routine", "/tmp/run/actions.jsonl", "pilot/T005", "pilot"];
+        for (k, v) in keys.iter().zip(vals) {
+            std::env::set_var(k, v);
+        }
+        let inside = run();
+        for k in keys {
+            std::env::remove_var(k);
+        }
+        assert_eq!(outside, "", "{outside}");
+        let want: Vec<String> = {
+            let mut w: Vec<String> = keys.iter().zip(vals).map(|(k, v)| format!("{k}={v}")).collect();
+            w.sort();
+            w
+        };
+        assert_eq!(inside.lines().collect::<Vec<_>>(), want, "{inside}");
     }
 
     #[test]
