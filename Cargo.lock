@@ -847,6 +847,7 @@ dependencies = [
  "clap",
  "cpal",
  "ctrlc",
+ "dirs",
  "dunce",
  "embed-resource",
  "getrandom 0.3.4",

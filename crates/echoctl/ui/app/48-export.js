@@ -92,7 +92,7 @@ function exportHtml({ title, at, css, body, data }) {
   const sections = data.map((w) => `<section class="ex-w"><h3>${esc(w.label)}</h3>${w.tables.length ? w.tables.map(exportTableHtml).join('') : '<p class="set-sub">Drawn above; no data to list.</p>'}</section>`).join('')
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">
 <title>${esc(`${title} — Echo`)}</title>
 <style>${style(css)}</style>
 <style>${EXPORT_CSS}</style>
@@ -179,7 +179,7 @@ function exportClone(root) {
     if (el.scrollHeight <= el.clientHeight + 1) return
     if (/auto|scroll/.test(getComputedStyle(el).overflowY)) Object.assign(now[i].style, { maxHeight: 'none', height: 'auto', overflow: 'visible' })
   })
-  copy.querySelectorAll('.td-head, .dash-h, .bdh, aside.detail, .menu, [role="menu"], script, style, iframe, input, textarea, select, .td-edit-acts, .skeleton').forEach((x) => x.remove())
+  copy.querySelectorAll('.td-head, .dash-h, .bdh, aside.detail, .menu, [role="menu"], script, style, iframe, frame, frameset, object, embed, applet, meta, base, link, form, foreignObject, input, textarea, select, .td-edit-acts, .skeleton').forEach((x) => x.remove())
   const https = (u) => (/^https:\/\/[^\s"<>\\]+$/.test(u || '') ? u : '')
   const as = (el, tag) => {
     const n = document.createElement(tag)

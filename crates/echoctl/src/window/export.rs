@@ -40,13 +40,26 @@ fn file_stem(title: &str, at: chrono::NaiveDateTime) -> String {
 fn save(dir: &Path, title: &str, html: &str, at: chrono::NaiveDateTime) -> anyhow::Result<PathBuf> {
     anyhow::ensure!(!html.trim().is_empty(), "the page sent nothing to save");
     anyhow::ensure!(html.len() <= MAX_BYTES, "it is over {} MB", MAX_BYTES >> 20);
-    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    // macOS asks the user whether Echo may use Downloads; a no says where to allow it, not a raw error.
+    let denied = |e: &std::io::Error| e.kind() == std::io::ErrorKind::PermissionDenied;
+    let allow = "Echo isn't allowed to use Downloads — allow it in System Settings → Privacy & Security → Files and Folders";
+    if let Err(e) = fs::create_dir_all(dir) {
+        if denied(&e) {
+            anyhow::bail!("{allow}");
+        }
+        return Err(e).with_context(|| format!("creating {}", dir.display()));
+    }
     let stem = file_stem(title, at);
     let path = (1..1000)
         .map(|n| dir.join(if n == 1 { format!("{stem}.html") } else { format!("{stem} ({n}).html") }))
         .find(|p| !p.exists())
         .context("every name for it is taken")?;
-    crate::paths::write_atomic(&path, html.as_bytes()).with_context(|| format!("writing {}", path.display()))?;
+    if let Err(e) = crate::paths::write_atomic(&path, html.as_bytes()) {
+        if denied(&e) {
+            anyhow::bail!("{allow}");
+        }
+        return Err(e).with_context(|| format!("writing {}", path.display()));
+    }
     Ok(path)
 }
 

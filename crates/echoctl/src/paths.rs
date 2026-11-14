@@ -67,7 +67,7 @@ pub fn downloads_dir() -> PathBuf {
     if std::env::var_os("ECHOCTL_TEST_OPEN_LOG_ONLY").is_some_and(|v| !v.is_empty()) {
         return home().join("Downloads");
     }
-    user_home().join("Downloads")
+    dirs::download_dir().unwrap_or_else(|| user_home().join("Downloads"))
 }
 
 /// The data folder: calls + state.

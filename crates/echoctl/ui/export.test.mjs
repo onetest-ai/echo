@@ -19,7 +19,7 @@ test('the file: its title, when, the widgets, Echo\'s styles; a CSP that lets no
   assert.match(h, /<h1>Acme · Overview<\/h1><span class="set-sub">Snapshot of Saturday<\/span>/)
   assert.match(h, /<style>:root \{ --accent: #8b62ff; \}<\/style>/)
   assert.match(h, /<div class="ex-view"><section class="td-sec">W<\/section><\/div>/)
-  assert.match(h, /content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"/)
+  assert.match(h, /content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"/)
   assert.doesNotMatch(h, /<script/i)
   assert.match(h, /No widgets on this page\./)
 })
