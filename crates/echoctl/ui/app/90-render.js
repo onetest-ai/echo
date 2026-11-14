@@ -252,8 +252,9 @@ function placeDetail() {
 
 // ── fingerprint: what the screen depends on ──────────────────────────────────────────────────
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
-// (the Inbox too: its badge and open panel; the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, NY.data, Math.floor(Date.now() / 60000)])
+// (the Inbox too: its badge and open panel; a thread's or client's dashboard: its widgets' answers, #598; the minute
+// too: the pill's "meeting soon" comes and goes with the clock)
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, S.dash, NY.data, Math.floor(Date.now() / 60000)])
 // end of the fingerprint block
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.

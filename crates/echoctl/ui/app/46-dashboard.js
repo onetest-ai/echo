@@ -26,6 +26,25 @@ async function loadDashboard() {
     const d = await get(`api/dashboard?page=${encodeURIComponent(page)}${all ? '&all=1' : ''}`)
     if (dashPageKey() === page && !d.error) S.dash = d
   } catch { /* app restarting */ }
+  dashWaitForPlugins(page)
+}
+
+/** As on Today (`todayWaitForPlugins`): a plugin's widget not answered yet holds its place, and the page is read again
+ *  while one waits — 0.5, 1, 2, 4, then every 8 s, a minute in all — until it answers or its ask fails (#598). */
+function dashWaitForPlugins(page) {
+  // A page left while its read was on its way: the wait is the page shown's, not that one's.
+  if (dashPageKey() !== page) return
+  const waiting = !!S.dash && S.dash.page === page && Object.values(S.dash.plugins || {}).some((w) => w && w.pending)
+  clearTimeout(S.dashWaitTimer)
+  if (S.dashWaitPage !== page) { S.dashWaitPage = page; S.dashWaitTry = 0 }
+  if (!waiting) { S.dashWaitTry = 0; return }
+  const n = S.dashWaitTry = (S.dashWaitTry || 0) + 1
+  if (n > 11) return
+  S.dashWaitTimer = setTimeout(async () => {
+    if (dashPageKey() !== page) return
+    await loadDashboard()
+    render()
+  }, Math.min(8000, 500 * 2 ** (n - 1)))
 }
 
 /** The band on top of a thread's Brief or a client's Overview: its widgets in their rows (S 1, M 2, L 3 of 3 columns);
