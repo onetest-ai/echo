@@ -155,7 +155,7 @@
       "done"
     ],
     "changes": [
-      "^config/yolo/ask-[^/]+/(prompt\\.md|log\\.txt|answer\\.md|drafts\\.jsonl|permissions\\.json|actions\\.jsonl)$",
+      "^config/yolo/ask-[^/]+/(prompt\\.md|log\\.txt|answer\\.md|drafts\\.jsonl|permissions\\.json|actions\\.jsonl|run\\.json)$",
       "^config/my-skills/",
       "^config/minutes-run/echo-mcp-[^/]+\\.json$",
       "^config/claude/ollama/",
