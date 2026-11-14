@@ -253,7 +253,7 @@ impl Scope {
         if matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
             let raw = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str());
             if let Ok(p) = resolve(raw) {
-                if plugins_context(&p) {
+                if crate::plugins::agent::inside_root(&p) {
                     return Err(format!("{} is what a plugin tells Claude: only Echo writes there", p.display()));
                 }
             }
@@ -551,13 +551,6 @@ fn resolve(p: Option<&str>) -> Result<PathBuf, String> {
         rest.push(last);
         base = parent;
     }
-}
-
-/// Whether `p` (resolved) is in the data folder's `.plugins/`, where Echo lays out what plugins tell Claude.
-fn plugins_context(p: &Path) -> bool {
-    let home = crate::paths::home();
-    let root = dunce::canonicalize(&home).unwrap_or(home).join(".plugins");
-    p.starts_with(&root) || p.components().zip(root.components()).all(|(a, b)| a.as_os_str().eq_ignore_ascii_case(b.as_os_str())) && p.components().count() >= root.components().count()
 }
 
 /// Windows: Git Bash's `/c/Users/…` is `C:\Users\…`. Elsewhere the path as it is.

@@ -59,8 +59,9 @@ to use it, its commands (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl plugin call <id>
 `uses.sessions.commands`) and its widgets. Echo lays it out in the data folder's `.plugins/<id>/` and lists it in the
 core every session of Echo's folder starts with; Claude reads it only when it works with the plugin. Add, only when
 the plugin needs them: a skill for a fixed procedure in `agent/skills/<name>/SKILL.md` (frontmatter `name` and a
-one-line `description` only), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
-names. `echoctl plugin check` names any limit you break.
+one-line `description` only; Claude in Echo sees it as `<id>-<name>`, so name it that way in `CLAUDE.md`), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
+names. Nothing hidden (no dot-named file or folder) anywhere in `agent/` or a skill folder. `echoctl plugin check`
+names any limit you break.
 
 ## 4. Check, install
 

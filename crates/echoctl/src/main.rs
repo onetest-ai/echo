@@ -325,8 +325,8 @@ enum Cmd {
     /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
     /// a thread, a client, a person, a mail's facts. Read-only
     Read { link: String },
-    /// What Claude in Echo's folder session starts with (Markdown): who Echo is, its rules, About me in short and
-    /// the plugins with a guide to Read first; --hook: as a SessionStart hook's JSON
+    /// What Claude in Echo's folder session starts with (Markdown): who Echo is, its rules and the plugins with a guide
+    /// to Read first; --hook: as a SessionStart hook's JSON (each plugin's folder laid out again first if it changed)
     Core {
         #[arg(long)]
         hook: bool,
@@ -462,6 +462,10 @@ enum Cmd {
     /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
     #[command(hide = true)]
     ViewHook,
+    /// (internal) The folder session and Yolo's runs ask it before a write: never into `.plugins/`, which Echo lays out
+    /// from the installed plugins; exit 2 refuses it
+    #[command(hide = true)]
+    PluginsHook,
     /// (internal) Echo's Claude terminals ask it before a write: never a folder here that OneDrive keeps online but
     /// doesn't sync to this computer (`onedrive.rs`); exit 2 refuses it
     #[command(hide = true)]
@@ -728,12 +732,12 @@ fn main() -> Result<()> {
         }
         Cmd::Core { hook } => {
             if hook {
-                println!("{}", plugins::agent::hook_json());
-            } else {
-                print!("{}", plugins::agent::core());
+                std::process::exit(plugins::agent::hook());
             }
+            print!("{}", plugins::agent::core());
             Ok(())
         }
+        Cmd::PluginsHook => std::process::exit(plugins::agent::write_hook()),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Classify => cli::calls::classify(),

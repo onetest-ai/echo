@@ -3105,7 +3105,7 @@ mod tests {
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
-        assert!(agreed.iter().any(|l| l == "Tells Claude in Echo how to work with it (a skill), loaded only when you work with it"), "{agreed:?}");
+        assert!(agreed.iter().any(|l| l.starts_with("Tells Claude in Echo how to work with it (the skill “staffing”), loaded only when you work with it (its files: ")), "{agreed:?}");
         plugins::install("kit", Some(&name), &agreed).unwrap();
         // Copied at install, before its host half ever ran: the folder as the package ships it, in Echo's config folder.
         let sp = crate::grants::session_plugins();
@@ -3137,10 +3137,13 @@ mod tests {
         assert!(set(json!([{"name": "staffing", "description": "Mine.", "body": "x"}])).unwrap_err().contains("package has a skill of that name"));
         set(json!([])).unwrap();
         assert_eq!(crate::grants::skill_names(&crate::grants::session_plugins()), vec!["echo-kit:staffing".to_string()]);
-        // An update copies the new version's folder; a copy older than the installed files is copied again.
+        // An update copies the new version's folder (a changed skill asks again); a copy older than the installed files
+        // is copied again.
         write("0.2.0", "Read it again.");
         plugins::refresh(&name).unwrap();
-        plugins::update("kit", &[]).unwrap().unwrap();
+        let again = plugins::review("kit", Some(&name)).unwrap().new_uses;
+        assert!(again.len() == 1 && again[0].starts_with("Tells Claude in Echo"), "{again:?}");
+        plugins::update("kit", &again).unwrap().unwrap();
         let sp = crate::grants::session_plugins();
         assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it again."));
         std::fs::write(sp[0].join("skills/staffing/SKILL.md"), "stale").unwrap();

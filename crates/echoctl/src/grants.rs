@@ -431,7 +431,7 @@ pub fn session_plugins() -> Vec<PathBuf> {
     let mut out = vec![];
     for p in crate::plugins::enabled() {
         let dir = session_dir(&p.id);
-        let package = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)).is_ok_and(|m| m.skill_count > 0);
+        let package = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)).is_ok_and(|m| !m.skill_names.is_empty());
         if (package || dir.join(PACKAGE_MARK).is_file()) && package_mark(&dir).0 != p.files {
             if let Err(e) = copy_package_skills(&p.id) {
                 eprintln!("plugin {}: its skills can't be copied: {e:#}", p.id);

@@ -235,6 +235,14 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             settings_file = Some(f);
         }
         Tools::Folder | Tools::Skip => {
+            // Unguarded, yet never a write where Echo lays out what plugins tell Claude (`.plugins/`): a hook runs even
+            // with every permission check skipped.
+            let folder = paths::config_dir().join("minutes-run");
+            fs::create_dir_all(&folder)?;
+            let f = folder.join(format!("job-{}-{}.json", std::process::id(), Local::now().timestamp_millis()));
+            fs::write(&f, serde_json::to_vec_pretty(&unguarded_settings(&exe))?)?;
+            a.extend(["--settings".into(), f.display().to_string()]);
+            settings_file = Some(f);
             if let Some(b) = &brain {
                 a.extend(["--mcp-config".into(), b.clone(), "--allowedTools".into(), "mcp__echo".into()]);
             }
@@ -274,9 +282,23 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     Ok((answer, model.unwrap_or_default(), usage(&result)))
 }
 
+/// The settings of a run without Echo's guard (`folder`, `skip`): only the hook that keeps writes out of `.plugins/`.
+fn unguarded_settings(exe: &Path) -> serde_json::Value {
+    serde_json::json!({"hooks": {"PreToolUse": [crate::plugins::agent::write_hook_entry(exe)]}})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_run_without_the_guard_still_writes_nothing_where_plugins_tell_claude() {
+        let v = unguarded_settings(Path::new("/Apps/Echo.app/echoctl"));
+        let h = &v["hooks"]["PreToolUse"][0];
+        assert_eq!(h["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash");
+        assert_eq!(h["hooks"][0]["command"], "'/Apps/Echo.app/echoctl' plugins-hook");
+    }
 
     #[test]
     fn a_spec_stays_in_the_plugins_store() {

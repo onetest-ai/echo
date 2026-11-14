@@ -115,17 +115,13 @@ pub struct Manifest {
     /// Its part for Claude in Echo: `{"summary": "<one line>"}`, with the folder `agent/` in its package (`agent.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Value>,
-    /// The hash of its `agent/` folder (`agent::problems`): on the sheet, so a change asks again. Always Echo's, as
-    /// `scripts_digest`.
+    /// The hash of what its package tells Claude — its `agent/` folder and its package skills' folders: on the sheet,
+    /// so a version changing any of it asks again. Always Echo's, as `scripts_digest`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_digest: Option<String>,
-    /// How many skills its package gives Claude in Echo (the manifest's `skills` and `agent/skills/`). Always Echo's.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub skill_count: usize,
-}
-
-fn is_zero(n: &usize) -> bool {
-    *n == 0
+    /// The skills its package gives Claude in Echo (the manifest's `skills` and `agent/skills/`), by name. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_names: Vec<String>,
 }
 
 /// A problem with a plugin package: the file it is in (relative to the package) and what is wrong.
@@ -280,11 +276,34 @@ fn needs_echo(req: &str) -> Result<String> {
 /// Read and check a manifest: its fields, settings and capability values (`describe`), its skills, scripts, widgets
 /// and its part for Claude (`agent/`). Refused with the first problem `problems` finds.
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
+    // An installed copy changes only by an install, which forgets it here: read and walked once, not on each look.
+    let installed = dir.starts_with(plugins_dir().join("installed"));
+    let stamp = fs::metadata(dir.join(MANIFEST)).and_then(|m| m.modified()).ok();
+    if installed {
+        if let Some((_, m)) = READ.lock().ok().and_then(|c| c.get(dir).cloned()).filter(|(s, _)| *s == stamp) {
+            return Ok(m);
+        }
+    }
     let (m, problems) = check_package(dir)?;
     if let Some(p) = problems.into_iter().next() {
         bail!("{}", p.what);
     }
+    if installed {
+        if let Ok(mut c) = READ.lock() {
+            c.insert(dir.to_path_buf(), (stamp, m.clone()));
+        }
+    }
     Ok(m)
+}
+
+/// Installed copies' manifests as read (`read_manifest`), by folder, with the manifest's time then.
+static READ: Mutex<BTreeMap<PathBuf, (Option<std::time::SystemTime>, Manifest)>> = Mutex::new(BTreeMap::new());
+
+/// An installed copy replaced or removed: read it again next time.
+fn forget_read(id: &str) {
+    if let Ok(mut c) = READ.lock() {
+        c.retain(|d, _| !d.starts_with(installed_dir(id)));
+    }
 }
 
 /// Read a manifest and find every problem of its package (`echoctl plugin check` shows them all; an install refuses
@@ -339,13 +358,14 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     }
     put(man, describe(&m.uses).map(|_| ()));
     // Its part for Claude in Echo (`agent` and `agent/`); the skills of `agent/skills/` with its other package skills.
-    let (digest, problems) = agent::problems(dir, &m);
-    out_extend(&mut put, problems);
-    m.agent_digest = digest;
+    let agent_problems = agent::problems(dir, &m);
+    let agent_ok = agent_problems.is_empty();
+    out_extend(&mut put, agent_problems);
     let (skills, skill_problems) = skill_problems(dir, &m);
     let skills_ok = skill_problems.is_empty();
     out_extend(&mut put, skill_problems);
-    m.skill_count = skills.len();
+    m.skill_names = skills.iter().map(|(n, _)| n.clone()).collect();
+    m.agent_digest = (agent_ok && skills_ok).then(|| agent::digest(dir, &m)).flatten();
     m.scripts_digest = None;
     if skills_ok {
         match scripts::check(dir, &m) {
@@ -504,6 +524,11 @@ fn skill_problems(dir: &Path, m: &Manifest) -> (Vec<(String, PathBuf)>, Vec<Prob
             }
             let text = fs::read_to_string(d.join("SKILL.md")).map_err(|_| anyhow!("skill “{rel}” has no SKILL.md"))?;
             check_skill_md(&name, &text).map_err(|e| anyhow!("skill “{rel}”: {e}"))?;
+            // A hidden file or folder (`.claude/skills/…` inside it) would reach Claude Code unchecked; `agent/` is
+            // walked whole by `agent::problems`.
+            if let Some(h) = (!rel.starts_with("agent/")).then(|| agent::hidden_in(&d)).flatten() {
+                bail!("skill “{rel}”: {h} is hidden — a skill folder holds no hidden file or folder");
+            }
             Ok((name, d))
         })();
         match r {
@@ -563,17 +588,18 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
             l.push_str(&format!(" (their files: {d})"));
         }
     }
-    // Its part for Claude in Echo — its guide (`agent/`) and its package skills —, counted; with a guide, the hash of
-    // its `agent/` folder: a version changing any of it asks again.
-    if m.agent.is_some() || m.skill_count > 0 {
+    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
+    // a version changing any of it asks again.
+    if m.agent.is_some() || !m.skill_names.is_empty() {
         let mut what = vec![];
         if m.agent.is_some() {
             what.push("a guide".to_string());
         }
-        match m.skill_count {
+        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
+        match names.len() {
             0 => {}
-            1 => what.push("a skill".into()),
-            n => what.push(format!("{n} skills")),
+            1 => what.push(format!("the skill {}", names[0])),
+            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
         }
         let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
         lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
@@ -588,7 +614,7 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
 }
 
 /// Why this Echo can't install it (`None` = it can).
-fn why_not(m: &Manifest) -> Option<String> {
+pub(crate) fn why_not(m: &Manifest) -> Option<String> {
     let here = env!("CARGO_PKG_VERSION");
     if let Some(v) = m.echo.as_deref().and_then(|r| needs_echo(r).ok()) {
         if crate::update::newer(&v, here) {
@@ -1093,6 +1119,7 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(&dest);
+    forget_read(id);
     fs::rename(&tmp, &dest)?;
     if let Ok(m) = read_manifest(&dest) {
         scripts::mark_runnable(&dest, &m);
@@ -1206,6 +1233,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(installed_dir(id));
+    forget_read(id);
     crate::grants::remove_plugin(id);
     agent::remove(id);
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
@@ -1507,7 +1535,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_count: 0 };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1822,9 +1850,10 @@ mod tests {
         skill("two", "---\nname: two\ndescription: Another one.\n---\nText.\n");
         let m = with(json!(["skills/read-staffing", "./skills/two/"])).unwrap();
         assert_eq!(package_skills(&d, &m).unwrap().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["read-staffing", "two"]);
-        assert_eq!(sheet(&m).unwrap(), ["Tells Claude in Echo how to work with it (2 skills), loaded only when you work with it"]);
+        let line = sheet(&m).unwrap();
+        assert!(line.len() == 1 && line[0].starts_with("Tells Claude in Echo how to work with it (the skills “read-staffing” and “two”), loaded only when you work with it (its files: "), "{line:?}");
         let one = with(json!(["skills/two"])).unwrap();
-        assert_eq!(sheet(&one).unwrap(), ["Tells Claude in Echo how to work with it (a skill), loaded only when you work with it"]);
+        assert!(sheet(&one).unwrap()[0].starts_with("Tells Claude in Echo how to work with it (the skill “two”), loaded only when you work with it (its files: "));
         // Each refused, with why.
         skill("hooked", "---\nname: hooked\ndescription: x\nhooks: evil\n---\n");
         skill("renamed", "---\nname: other\ndescription: x\n---\n");

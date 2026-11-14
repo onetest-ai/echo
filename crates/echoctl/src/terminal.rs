@@ -615,7 +615,14 @@ fn folder_plugin_args(managed: bool, exe: &Path) -> Result<Vec<String>> {
     let settings = folder.join("session-folder.json");
     let mut hooks = crate::view::hook_settings(exe);
     hooks["PreToolUse"] = crate::view::onedrive_hook(exe);
+    // Nothing written where Echo lays out what plugins tell Claude (`.plugins/`).
+    if let Some(a) = hooks["PreToolUse"].as_array_mut() {
+        a.push(crate::plugins::agent::write_hook_entry(exe));
+    }
     // The core (`echoctl core`): who Echo is, its rules, the plugins' guides to Read first — again on a resume.
+    if !hooks["SessionStart"].is_array() {
+        hooks["SessionStart"] = serde_json::json!([]);
+    }
     if let Some(a) = hooks["SessionStart"].as_array_mut() {
         a.push(crate::plugins::agent::hook_entry(exe));
     }
@@ -818,7 +825,7 @@ mod tests {
         let session = paths::config_dir().join("plugins/session");
         assert!(dirs.iter().all(|d| !Path::new(d).starts_with(&session) && !Path::new(d).starts_with(paths::home())), "{dirs:?}");
         // Its script stays allowed, by its launcher's path there.
-        let script = crate::plugins::agent::folder("kit").join(".claude/skills/staffing/scripts/read.sh");
+        let script = crate::plugins::agent::folder("kit").join(".claude/skills/kit-staffing/scripts/read.sh");
         assert!(args.contains(&format!("Bash({}:*)", script.display())), "{args:?}");
         // The settings file: the window's hooks, and the core's SessionStart hook.
         assert_eq!(args[0], "--settings");
@@ -826,6 +833,9 @@ mod tests {
         let starts: Vec<String> = v["hooks"]["SessionStart"].as_array().unwrap().iter().map(|h| h["hooks"][0]["command"].as_str().unwrap().to_string()).collect();
         assert_eq!(starts, ["'/Apps/Echo.app/echoctl' view-hook", "'/Apps/Echo.app/echoctl' core --hook"]);
         assert_eq!(v["hooks"]["SessionStart"][1]["matcher"], "startup|resume|compact|clear");
+        // Before a write: the OneDrive check, and none into `.plugins/`.
+        let pre: Vec<String> = v["hooks"]["PreToolUse"].as_array().unwrap().iter().map(|h| h["hooks"][0]["command"].as_str().unwrap().to_string()).collect();
+        assert_eq!(pre, ["'/Apps/Echo.app/echoctl' onedrive-hook", "'/Apps/Echo.app/echoctl' plugins-hook"]);
         crate::plugins::remove("kit", true).unwrap();
     }
 
