@@ -1089,7 +1089,7 @@ def build_calls(d, H):
               "message": "Claude Code exited with an error (exit 1)", "pid": None, "session_id": None}, pin=["acme-rollout"],
          # Teams' participants list, read during the call: Omar came, Ivan was invited and never did, Rita came uninvited
          # (written as the directory has her: "Last, First (Org)"); the user by their own tile and row.
-         ui_log=[{"t": 0.5, "k": "tile:Sam Rivera", "n": "Sam Rivera", "me": True, "add": ["tile"], "del": []},
+         ui_log=[{"v": 2}, {"t": 0.5, "k": "tile:Sam Rivera", "n": "Sam Rivera", "me": True, "add": ["tile"], "del": []},
                  {"t": 0.5, "k": "tile:Omar Haddad", "n": "Omar Haddad", "add": ["tile", "t:muted"], "del": []},
                  {"t": 3.0, "k": "roster:8:orgid:sam", "n": "Sam Rivera", "add": ["t:unmuted"], "del": []},
                  {"t": 3.0, "k": "roster:8:orgid:omar", "n": "Omar Haddad", "add": ["t:muted"], "del": []},

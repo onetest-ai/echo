@@ -160,17 +160,31 @@ fn subtree_classes(n: &UiNode, depth: usize, out: &mut std::collections::BTreeSe
     }
 }
 
-/// The words a participants-list row says after a name (English): never the first name of a "Last, First" name.
-const ROSTER_STATES: &[&str] = &["muted", "unmuted", "organizer", "presenter", "attendee", "guest", "external", "available", "away", "busy", "offline"];
+/// What a participants-list row says after a name (English): never part of a name.
+const ROSTER_STATES: &[&str] = &[
+    "muted", "unmuted", "organizer", "organiser", "presenter", "presenting", "attendee", "guest", "external", "available", "away",
+    "busy", "offline", "in a meeting", "in a call", "no response", "do not disturb", "be right back", "out of office", "hand raised",
+];
+/// A surname's first word that makes a two-word name a surname alone ("Van Dyke, Anna").
+const SURNAME_PARTICLES: &[&str] = &["van", "von", "de", "da", "del", "della", "der", "di", "du", "la", "le", "st", "st.", "mac", "al", "el", "ten", "ter"];
 
-/// A participants-list row's label → (the name, how many of its parts the name takes): "Priya Nair, Unmuted"; a
-/// directory's "Lee, Dana (Partner), Muted" or "Lee, Dana, Muted" keeps both parts of the name.
+/// A participants-list row's label → (the name, how many of its parts the name takes). The name is the first part,
+/// with the next when the first is a surname alone and the next a first name: "Lee, Dana (Partner), Muted", "Van Dyke,
+/// Anna, Muted", "Lee, Anna Maria, Muted". After a complete name ("Priya Nair, Presenting") the next part is a state,
+/// known or not.
 fn roster_name(label: &str) -> (String, usize) {
     let parts: Vec<&str> = label.split(", ").map(str::trim).collect();
-    let capital = |p: &str| p.chars().next().is_some_and(char::is_uppercase);
+    let words_ok = |s: &str, n: std::ops::RangeInclusive<usize>| {
+        let w: Vec<&str> = s.split_whitespace().collect();
+        n.contains(&w.len()) && w.iter().all(|w| w.chars().next().is_some_and(char::is_uppercase) && w.chars().all(|c| c.is_alphabetic() || "-'.".contains(c)))
+    };
+    let complete = |s: &str| is_person_name(s) && !s.split_whitespace().next().is_some_and(|w| SURNAME_PARTICLES.contains(&w.to_lowercase().as_str()));
+    let first_name = |s: &str| {
+        let core = s.split(" (").next().unwrap_or("").trim();
+        words_ok(core, 1..=3) && (s.contains('(') || !ROSTER_STATES.contains(&s.to_lowercase().as_str()))
+    };
     match parts.as_slice() {
-        [last, first, ..] if !last.contains(' ') && capital(last) && capital(first)
-            && (first.contains('(') || !first.contains(' ') && !ROSTER_STATES.contains(&first.to_lowercase().as_str())) => (format!("{last}, {first}"), 2),
+        [last, first, ..] if words_ok(last, 1..=3) && !complete(last) && first_name(first) => (format!("{last}, {first}"), 2),
         _ => (parts.first().copied().unwrap_or("").to_string(), 1),
     }
 }
@@ -231,17 +245,29 @@ pub struct SpeakingLog {
     out: std::fs::File,
     bytes: u64,
     prev: std::collections::BTreeMap<String, Participant>,
+    capped: bool,
 }
 
 impl SpeakingLog {
     pub fn open(dir: &std::path::Path) -> Option<Self> {
-        let out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("speaking.jsonl")).ok()?;
-        Some(SpeakingLog { out, bytes: 0, prev: Default::default() })
+        use std::io::Write;
+        let mut out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("speaking.jsonl")).ok()?;
+        // A new log says which reader wrote it: rows of older logs were named by another splitter ("Lee" for "Lee,
+        // Dana (Partner)"), which `meeting::joined` must not trust.
+        if out.metadata().is_ok_and(|m| m.len() == 0) {
+            let _ = writeln!(out, "{}", serde_json::json!({ "v": crate::meeting::UI_LOG_VERSION }));
+        }
+        Some(SpeakingLog { out, bytes: 0, prev: Default::default(), capped: false })
     }
 
     pub fn record(&mut self, t: f64, now: Vec<Participant>) {
         use std::io::Write;
         if self.bytes > UI_LOG_MAX_BYTES {
+            // Said once: the rest of the call isn't in the log (`meeting::joined` takes the list as incomplete).
+            if !self.capped {
+                self.capped = true;
+                let _ = writeln!(self.out, "{}", serde_json::json!({ "capped": true }));
+            }
             return;
         }
         let t = (t * 100.0).round() / 100.0;
@@ -489,6 +515,13 @@ mod tests {
         assert_eq!(roster_name("Lee, Dana (Partner), Muted"), ("Lee, Dana (Partner)".into(), 2));
         assert_eq!(roster_name("Lee, Dana, In a meeting, No response"), ("Lee, Dana".into(), 2));
         assert_eq!(roster_name("Priya, Unmuted"), ("Priya".into(), 1));
+        assert_eq!(roster_name("Priya, In a meeting"), ("Priya".into(), 1));
+        assert_eq!(roster_name("Van Dyke, Anna (Acme), Muted"), ("Van Dyke, Anna (Acme)".into(), 2));
+        assert_eq!(roster_name("Van Dyke, Anna, Muted"), ("Van Dyke, Anna".into(), 2));
+        assert_eq!(roster_name("Lee, Anna Maria, Muted"), ("Lee, Anna Maria".into(), 2));
+        // After a complete name an unknown word is a state, not a first name.
+        assert_eq!(roster_name("Priya Nair, Presenting, Muted"), ("Priya Nair".into(), 1));
+        assert_eq!(roster_name("Priya Nair, Sharing, Muted"), ("Priya Nair".into(), 1));
         let row = UiNode { role: "AXGroup".into(), id: "calling-roster-item-9:orgid:lee".into(), label: "Lee, Dana (Partner), Muted".into(), ..Default::default() };
         let p = participants(&UiNode { kids: vec![row], ..Default::default() });
         assert_eq!((p[0].name.as_str(), p[0].tokens.contains("t:muted"), p[0].tokens.contains("t:dana (partner)")), ("Lee, Dana (Partner)", true, false));

@@ -41,14 +41,14 @@ auto: [tests/auto/specs/S-23.spec.mjs]
 
 # S-23: A busy day of calls and minutes in every state
 
-**Story:** Sam opens a day with 56 calls in every state and goes through them: the list's icons and clock, the countdown and Not yet, the prep tabs, the minutes frames, a failed run over minutes and without, a run waiting for a sign-in, the calls Echo leaves alone, one due now, one that failed or has audio only, the headers of a memo and a Teams import, the tabs and a call being transcribed, what moved, chat, screens and kept live notes; then a memo's threads, Try again against the fake Claude Code, and finally a deleted and a restored call.
+**Story:** Sam opens a day with 56 calls in every state and goes through them: the list's icons and clock, the countdown and Not yet, the prep tabs, the minutes frames, a failed run over minutes and without, a run waiting for a sign-in, the calls Echo leaves alone, one due now, one that failed or has audio only, the headers of a memo and a Teams import, the tabs and a call being transcribed, what moved, chat, screens and kept live notes; then a memo's threads, Try again against the fake Claude Code, a deleted and a restored call, and finally the faces of a call whose Teams participants list Echo read: who joined, not who was invited.
 
 ## Assets
 
 | Asset | Made by | Used by stages |
 |---|---|---|
 | Standard data, built right before the run | `serve.sh up <dir> <port> --set standard` | all |
-| The Calls list | stage 1, step 1 (the only navigation to `#calls`) | 2–29: every later stage clicks its rows; only stage 25 opens a call by URL, and stage 29 reloads (a check) |
+| The Calls list | stage 1, step 1 (the only navigation to `#calls`) | 2–30: every later stage clicks its rows; only stage 25 opens a call by URL, and stage 29 reloads (a check) |
 | Globex standup's countdown ("Minutes in N min", 15 minutes after the build) | the data | 2–5 |
 | Globex standup moved by "15 minutes more" | stage 4, step 2 | 5: its steps 3–5 ("Until I say", then "Write them automatically again") are stage 4's teardown and check that it is undone |
 | Globex standup open | stage 3, step 1 | 4, 5, 6 |

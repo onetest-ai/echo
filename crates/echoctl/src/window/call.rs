@@ -80,22 +80,24 @@ struct Known {
 
 /// The faces of a call's row: its people but the user, those who came first by their weight in the call's threads
 /// (`prep::weighed`: influence, interest, calls together). Its people are who joined when Echo read Teams' participants
-/// list while recording (`meeting::participants`, matched to the invite and the directory: `as_joined`), else the
-/// invite's but who declined. A call with neither (a memo, one Echo found nobody for): none.
-fn faces(dir: &Path, known: &mut Known) -> Vec<String> {
-    let joined = crate::meeting::participants(dir);
+/// list while recording (`meeting::participants`, matched by name to the invite and the directory: `as_joined`),
+/// else the invite's but who declined. A call with neither (a memo, one Echo found nobody for): none.
+fn faces(dir: &Path, meta: &Value, known: &mut Known) -> Vec<String> {
+    let joined = crate::meeting::participants(dir, meta);
     let m = match crate::meeting::MeetingContext::load(dir) {
         Ok(m) => m,
         // One Echo didn't write and can't read as a meeting (a hand-made file): its names as they stand.
-        Err(_) if joined.is_empty() => return people(dir),
+        Err(_) if joined.is_none() => return people(dir),
         Err(_) => None,
     };
-    let m = if !joined.is_empty() {
-        let directory = known.directory.get_or_insert_with(|| crate::people::directory().unwrap_or_default());
-        m.unwrap_or_default().as_joined(&joined, directory)
-    } else {
-        let Some(m) = m else { return vec![] };
-        m
+    // Who joined, nobody else included (the user alone: no faces); else the invite.
+    let m = match (joined, m) {
+        (Some(j), m) => {
+            let directory = known.directory.get_or_insert_with(|| crate::people::directory().unwrap_or_default());
+            m.unwrap_or_default().as_joined(&j, directory)
+        }
+        (None, Some(m)) => m,
+        (None, None) => return vec![],
     };
     let threads: Vec<String> = crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| p.id).collect();
     let today = chrono::Local::now().date_naive();
@@ -125,7 +127,7 @@ fn summary(dir: &Path, known: &mut Known) -> Value {
         "started_at": meta["started_at"],
         "minutes": minutes(&meta),
         "status": status(dir, recording.as_deref()),
-        "people": faces(dir, known),
+        "people": faces(dir, &meta, known),
         "frames": dir.join("frames.jsonl").exists(),
         "chat": dir.join("chat.json").exists(),
         "imported": crate::teams_transcript::imported(&meta),
