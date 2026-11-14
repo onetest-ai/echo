@@ -1,5 +1,5 @@
 ---
-id: TC-038
+id: TC-039
 title: An `echoctl` a plugin's script starts through the plugin's `scripts/echoctl` is the Echo that ran the script, on its data and config folders — on test data, the test data, never the real data folder
 priority: high
 type: functional
@@ -11,7 +11,7 @@ data: standard
 tags: [plugins, scripts, test-safety]
 ---
 
-# TC-038: A plugin script's echoctl works on the data Echo runs on
+# TC-039: A plugin script's echoctl works on the data Echo runs on
 
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 

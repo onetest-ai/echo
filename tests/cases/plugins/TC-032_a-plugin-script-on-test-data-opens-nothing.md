@@ -35,7 +35,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-signin --yes` | "Installed Acme sign-in 0.1.0" |
-| 2 | `L=$(wc -l < "$D/open.log" 2>/dev/null \|\| echo 0)`; `echoctl plugin call acme-signin signin` | `"status": 0`; `stdout` starts `guard=1 home=` and the test data's folder, `$ECHOCTL_HOME` (the guard and Echo's data folder reach the script: an `echoctl` it starts is `plugins/TC-038`) |
+| 2 | `L=$(wc -l < "$D/open.log" 2>/dev/null \|\| echo 0)`; `echoctl plugin call acme-signin signin` | `"status": 0`; `stdout` starts `guard=1 home=` and the test data's folder, `$ECHOCTL_HOME` (the guard and Echo's data folder reach the script: an `echoctl` it starts is `plugins/TC-039`) |
 | 3 | `tail -n +$((L+1)) "$D/open.log"` | One new line: `https://signin.acme.example/device`; no browser window opened |
 
 ## Expected Final State
