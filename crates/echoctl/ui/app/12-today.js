@@ -1,7 +1,10 @@
 /** Draws the Today view in the primary area (`renderNow`). */
 function drawToday(primary) {
-  // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep.
-  const rows = $('.td-rows'), keep = rows && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
+  // A list that couldn't scroll yet (a held column still taking its height) has no place of its own to keep, nor one
+  // the user never scrolled: it is placed on now again (its rows reflow when Today's columns change width, and a kept
+  // offset would leave now out of view).
+  const rows = $('.td-rows')
+  const keep = rows && rows._scrolled && rows.scrollHeight > rows.clientHeight ? rows.scrollTop : null
   // The page kept where it was scrolled when Today is drawn again (a meeting's card opening or closing redraws it).
   const page = $('.td'), pageTop = page ? page.scrollTop : 0
   // Widget by widget: a redraw replaces only the widgets whose markup changed.
@@ -26,10 +29,16 @@ function drawToday(primary) {
       if (!r.isConnected) return
       const top0 = r.getBoundingClientRect().top - r.scrollTop, at = (el) => el.getBoundingClientRect().top - top0
       let to = keep != null ? keep : from ? at(from) : 0
-      // Late in the day the list can't scroll that far: the nearest whole row above, the rest faded at the bottom.
+      // Late in the day the list can't scroll that far: the nearest whole row above that still shows the line now, the
+      // rest faded at the bottom; with no such row, the list's end.
       const max = r.scrollHeight - r.clientHeight
-      if (keep == null && to > max) to = Math.max(0, ...[...r.children].map(at).filter((y) => y <= max))
+      if (keep == null && to > max) {
+        const shown = now ? at(now) + now.offsetHeight - r.clientHeight : 0
+        const whole = [...r.children].map(at).filter((y) => y <= max && y >= shown)
+        to = whole.length ? Math.max(...whole) : max
+      }
       r.scrollTop = Math.max(0, to)
+      r._scrolled = keep != null
     }
     place()
     // Again once Today's layout has settled (a held column takes its height a moment later, #368): a list not yet
@@ -37,6 +46,12 @@ function drawToday(primary) {
     setTimeout(place)
   }
 }
+// Your day's list scrolled by the user (the wheel, a key, its scrollbar), not by Today placing it on now: where it is
+// scrolled is then kept when Today is drawn again.
+for (const ev of ['wheel', 'keydown', 'pointerdown']) document.addEventListener(ev, (e) => {
+  const r = e.target.closest && e.target.closest('.td-rows')
+  if (r && (ev !== 'pointerdown' || e.target === r)) r._scrolled = true
+}, { passive: true })
 function todayView() {
   const d = S.today
   if (!d) return `<div class="skeleton" style="padding:22px">${'<i></i>'.repeat(8)}</div>`

@@ -376,6 +376,19 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await page.setViewportSize(w.sizes.wide)
       await today.reloadToday()
       await threeColumns()
+      // Late in the evening, whenever the run is (the window's clock at 23:59, the line now at the list's end): Your day
+      // still shows now, and again after a task's Details came and went (its rows reflow at each width).
+      const late = new Date()
+      late.setHours(23, 59, 0, 0)
+      await page.clock.setFixedTime(late)
+      await today.reloadToday()
+      await expect.poll(() => today.nowInView()).toBe(true)
+      await today.openTaskCard(first)
+      await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+      await expect.poll(() => today.nowInView()).toBe(true)
+      await today.closePanel(today.rightPanel).click()
+      await expect.poll(async () => (await today.hold()).width).toBeCloseTo(wide.width, 0)
+      await expect.poll(() => today.nowInView()).toBe(true)
     } finally {
       data.cli('today', 'reset')
     }

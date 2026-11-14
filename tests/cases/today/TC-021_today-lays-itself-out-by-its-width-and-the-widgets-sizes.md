@@ -26,7 +26,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 |---|--------|----------------|
 | 1 | Open `{{base_url}}/#today` | 3 columns: Your day holds the first (`.td-side` columns `1fr 2fr`), its column as tall as what is beside it, the list itself in view as Today scrolls (sticky, the view's height at most), opened on now and scrolling inside; beside it Next meeting and Needs you now side by side, then The day's choices across both, then My work |
 | 2 | Click My work's first card | Its Details open on the right; Today narrows to 2 columns: Your day keeps the first (`1fr 1fr`), still on now (or where you scrolled it), everything else in the second, one under another in the same order |
-| 3 | Close the right panel (its ×) | Back to step 1's widths, nothing moved |
+| 3 | Close the right panel (its ×) | Back to step 1's widths, nothing moved; Your day still on now (its lines reflow at the narrower width), unless you scrolled it |
 | 4 | `target/debug/echoctl today size core:calendar.agenda M`; reload | Your day at M no longer holds a column: it is a row of its own two columns wide (its size: the third column stays empty), then Next and Needs you now, the choices, My work; `today size core:calendar.agenda S` puts it back |
 | 5 | Resize the browser window to 700 × 1000 | Today one column: Your day as the strip (the day in one bar) on top, then Next meeting, Needs you now, the choices, My work, each across, in that order |
 | 6 | Back to 1440 × 1000 at 900 px high; `target/debug/echoctl today move core:tasks.mine --before core:needs.now`, `today size core:tasks.mine M`; reload | My work in Next meeting's row, beside it (Needs you now wraps to the next line). When its list is longer than its card (it depends on the data and the height), a fade at its bottom shows there is more and goes when scrolled to the end; when it fits, there is no fade |
@@ -38,3 +38,4 @@ Today as it comes.
 
 ## Notes
 - Columns come from Today's own width: fold under 340 px a column, unfold only at 380 (no jumping while a panel is dragged) — Workbench `TodayLayoutRules`, `TodayPanels`, `TodayResponsive`; the node test `today-layout.test.mjs` holds the table.
+- Late in the evening (the line now at or near the end of Your day's list) steps 1–3 hold as well: the line now stays in view. The autotest checks it with the window's clock set to 23:59.
