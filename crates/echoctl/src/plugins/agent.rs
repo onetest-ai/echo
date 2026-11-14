@@ -610,10 +610,26 @@ fn lay_out_held(id: &str) -> Result<()> {
         let files = super::Registry::load().ok().and_then(|reg| reg.installed.get(id).map(|p| p.files.clone())).unwrap_or_default();
         let f = record_file(id);
         let _ = fs::create_dir_all(f.parent().expect("a parent"));
-        let _ = paths::write_atomic(&f, json!({"files": files, "at": fwd(&at), "echo": env!("CARGO_PKG_VERSION"), "withheld": why}).to_string().as_bytes());
+        // A rule its package breaks holds until the package changes; anything else (a file it can't read, a name
+        // another plugin lays out) is tried again at the next start or hook.
+        let fixed = e.downcast_ref::<RuleProblem>().is_some();
+        let _ = paths::write_atomic(&f, json!({"files": files, "at": fwd(&at), "echo": env!("CARGO_PKG_VERSION"), "withheld": why, "final": fixed}).to_string().as_bytes());
     }
     r
 }
+
+/// A rule the plugin's own package breaks (no prefix, a `.claude` folder, a limit, two of its skills alike): its part
+/// stays withheld until the package changes.
+#[derive(Debug)]
+struct RuleProblem(String);
+
+impl std::fmt::Display for RuleProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RuleProblem {}
 
 /// Why plugin `id`'s part for Claude isn't laid out, when it isn't (its record).
 pub fn withheld(id: &str) -> Option<String> {
@@ -628,14 +644,14 @@ fn lay_out_locked(id: &str) -> Result<()> {
     let m = super::read_manifest(&pdir)?;
     // A rule its installed copy predates: the plugin runs, Claude gets none of its part.
     if let Some(why) = m.part_problems.first() {
-        bail!("{why}");
+        return Err(anyhow::Error::new(RuleProblem(why.clone())));
     }
     let package = super::package_skills(&pdir, &m)?;
     let names: Vec<String> = package.iter().map(|(n, _)| n.clone()).collect();
     let runtime_skills = crate::grants::runtime_skill_dirs(id, &names);
     let prefix = prefix_of(&m).unwrap_or_default();
     if (!package.is_empty() || !runtime_skills.is_empty()) && !valid_prefix(&prefix) {
-        bail!("it has no “agent.prefix” in its manifest: its skills reach routines and Yolo, not the folder session, until it names one");
+        return Err(anyhow::Error::new(RuleProblem("it has no “agent.prefix” in its manifest: its skills reach routines and Yolo, not the folder session, until it names one".into())));
     }
     // Never two skill folders of one name in `.plugins/`: another plugin's laid out already wins.
     for e in fs::read_dir(root()).into_iter().flatten().flatten().filter(|e| e.file_name() != std::ffi::OsStr::new(id) && !e.file_name().to_string_lossy().starts_with('.')) {
@@ -749,7 +765,7 @@ fn current(p: &super::Installed) -> bool {
     let same = r["files"] == p.files.as_str() && r["at"] == fwd(&at).as_str() && r["echo"] == env!("CARGO_PKG_VERSION");
     // Withheld for a reason that still holds: nothing to lay out (and no folder may be there).
     if same && r["withheld"].is_string() {
-        return !at.exists();
+        return r["final"] == true && !at.exists();
     }
     same && at.is_dir() && super::tree_hash(&at).is_ok_and(|h| r["content"] == h.as_str())
 }
@@ -1365,6 +1381,47 @@ mod tests {
         assert!(current(&p));
         sync_all();
         assert_eq!(withheld("vaults").as_deref(), Some(why.as_str()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_passing_failure_is_laid_out_again_at_the_next_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_env, root) = paths::testenv::folders("agent-retry");
+        // A skill folder it can't read: withheld, then laid out once it can be read again.
+        kit(&root, "0.1.0", GUIDE);
+        install(&root, "kit");
+        let p = super::super::Registry::load().unwrap().installed["kit"].clone();
+        let refs = super::super::plugin_dir(&p).join("skills/old/refs");
+        write(&refs.join("a.md"), "x");
+        fs::set_permissions(&refs, fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(lay_out("kit").is_err() && !folder("kit").exists());
+        assert!(record("kit")["final"] == false, "{}", record("kit"));
+        fs::set_permissions(&refs, fs::Permissions::from_mode(0o755)).unwrap();
+        sync_all();
+        assert!(folder("kit").join(".claude/skills/kit-old/refs/a.md").is_file() && withheld("kit").is_none());
+        super::super::remove("kit", true).unwrap();
+        // A name another plugin lays out: withheld while it is there, laid out once it is gone.
+        offer_in(&root, "epam", "first", "ep", &["one"]);
+        offer_in(&root, "epam", "second", "ep", &["two"]);
+        install_from(&root, "epam", "first").unwrap();
+        install_from(&root, "epam", "second").unwrap();
+        // `first`'s folder already has the name `second` would lay out (as if it got there past the checks).
+        write(&folder("first").join(".claude/skills/ep-two/SKILL.md"), "x");
+        assert!(lay_out("second").unwrap_err().to_string().contains("lays out already"));
+        assert!(record("second")["final"] == false);
+        super::super::remove("first", true).unwrap();
+        sync_all();
+        assert!(folder("second").join(".claude/skills/ep-two").is_dir() && withheld("second").is_none());
+        // A rule its package breaks stays withheld: not tried again at each start.
+        let rule = record_file("second");
+        let mut r = record("second");
+        r["withheld"] = json!("a rule");
+        r["final"] = json!(true);
+        fs::remove_dir_all(folder("second")).unwrap();
+        fs::write(&rule, r.to_string()).unwrap();
+        sync_all();
+        assert!(!folder("second").exists() && withheld("second").as_deref() == Some("a rule"));
     }
 
     #[test]
