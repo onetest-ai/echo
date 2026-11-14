@@ -1012,7 +1012,7 @@ pub fn installed_from(name: &str) -> Result<Vec<(String, String)>> {
 
 /// Remove marketplace `name` and the plugins installed from it (#616) — each as `remove` does, its data kept or not,
 /// before the marketplace goes (its namespace's owner is read from it) — then release the skills prefixes and shared
-/// namespaces no installed plugin of a source holds. The ids removed. The built-in one is only hidden; My plugins stays.
+/// namespaces its source held that no installed plugin of it uses. The ids removed. The built-in one is only hidden; My plugins stays.
 pub fn market_remove(name: &str, keep_data: bool) -> Result<Vec<String>> {
     let source = removable(name)?;
     let ids: Vec<String> = installed_from(name)?.into_iter().map(|(id, _)| id).collect();
