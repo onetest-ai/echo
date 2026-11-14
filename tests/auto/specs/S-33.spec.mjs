@@ -328,7 +328,8 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const ask = () => (data.exists(data.home, c.asks) ? data.json(data.home, c.asks) : []).find((x) => x.id === a.ask)
     await expect.poll(() => ask()?.state, { timeout: 60_000, intervals: [1_000] }).toBe('done')
     expect(ask().say).toBe(a.say)
-    // The send never reached Echo (Claude Code refused it: nothing allowed it without a prompt); the draft did.
+    // The send never reached Echo (Claude Code refused it: nothing allowed it without a prompt); the draft did. Another
+    // thread's work was refused: Yolo reads its own task's thread only, the user's choice on or off.
     expect(data.model.toolResults(0).map(Boolean)).toEqual(a.toolResults)
     const drafts = lines(data.read(data.dir, c.drafts))
     expect(drafts).toHaveLength(drafted + 1)

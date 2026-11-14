@@ -202,14 +202,16 @@ const modeData = (n) => {
   const m = n.mode
   if (!m || m.mode !== 'claude') return ''
   const p = m.prompt || ''
-  return ` data-skill="${esc(m.skill || '')}"${m.prompt_by === 'you' ? ` data-prompt="${esc(p)}"` : ` data-hint="${esc(p)}"`}`
+  // Set by a routine's or Yolo's run (#590): not the user's, so a hint — and said to be the run's.
+  const run = m.prompt_by === 'run' || m.skill_by === 'run' || m.by === 'run'
+  return ` data-skill="${esc(m.skill_by === 'run' ? '' : m.skill || '')}"${m.prompt_by === 'you' ? ` data-prompt="${esc(p)}"` : ` data-hint="${esc(p)}"`}${run ? ` data-hint-by="run" data-hint-skill="${esc(m.skill_by === 'run' ? m.skill || '' : '')}"` : ''}`
 }
 /** The task's details: who does it (a switch of two icons, named in their label and tooltip; a click keeps the user's choice on the task), and its how — or what
  *  Claude hands back — written by Echo's guess or by hand (`edit`: the details' own field editor). */
 function modeRows(project, n, val) {
   const m = n.who_does || {}, guess = m.by === 'guess'
   const seg = (k, mark, label) => `<button class="md-seg${m.mode === k ? ' on' : ''}${m.mode === k && guess ? ' guess' : ''}" data-mode-set="${k}" data-project="${esc(project)}" data-node="${esc(n.id)}" aria-pressed="${m.mode === k}" aria-label="${label}" title="${label}">${ICON(mark)}</button>`
-  const rows = [['Who does it', `<span class="md-segs" role="group" aria-label="Who does it">${seg('claude', CLAUDE_MARK, 'Claude can')}${seg('manual', HAND_MARK, 'By hand')}</span>${guess ? ' <span class="set-sub">Echo\'s guess</span>' : ''}`]]
+  const rows = [['Who does it', `<span class="md-segs" role="group" aria-label="Who does it">${seg('claude', CLAUDE_MARK, 'Claude can')}${seg('manual', HAND_MARK, 'By hand')}</span>${guess ? ' <span class="set-sub">Echo\'s guess</span>' : m.by === 'run' ? ' <span class="set-sub">Set by Echo\'s run</span>' : ''}`]]
   if (m.mode === 'manual') rows.push(['How', val('how', m.how, 'not said', `<input class="wp-in" data-ledger-set="how" value="${esc(m.how || '')}" maxlength="200" aria-label="How" autofocus>`)])
   if (m.mode === 'claude') rows.push(['Claude hands back', val('prompt', m.prompt, 'not said', `<textarea class="wp-in" data-ledger-set="prompt" rows="3" maxlength="600" aria-label="What Claude hands back" autofocus>${esc(m.prompt || '')}</textarea>`)])
   return rows

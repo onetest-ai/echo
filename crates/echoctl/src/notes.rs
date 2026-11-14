@@ -187,6 +187,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "prep" if !argv.iter().any(|a| a == "--write") => None,
         "project" if matches!(second, "list" | "show" | "of" | "tasks" | "people" | "found") => None,
         "project" if second == "ledger" && matches!(w.get(3).copied(), Some("tree" | "status" | "pending" | "context" | "list")) => None,
+        "project" if second == "work" && w.len() < 4 => None,
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
@@ -215,6 +216,7 @@ pub fn note(kind: &str, what: &str, outcome: Option<&str>) {
 }
 
 /// The changes and sends a run noted (`note_action`), oldest first.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn run_actions(file: &Path) -> Vec<serde_json::Value> {
     fs::read_to_string(file).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
@@ -1499,10 +1501,11 @@ mod tests {
         assert_eq!(k("m365 mail send --to kim@acme.example --subject Slots --body-file m.md"), None, "a preview sends nothing");
         assert_eq!(k("compose --to kim@acme.example --subject Slots --body-file m.md"), Some("draft"));
         assert_eq!(k("project ledger pilot edit {}"), Some("change"));
+        assert_eq!(k("project work pilot {}"), Some("change"));
         assert_eq!(k("project create Another"), Some("change"));
         assert_eq!(k("deliver send --title x"), Some("send"));
         assert_eq!(k("plugin script kit staffing scripts/read.sh -- ACME-1"), Some("change"));
-        for read in ["project ledger pilot tree", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
+        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
             assert_eq!(k(read), None, "{read}");
         }
         let (_env, root) = crate::paths::testenv::folders("notes-run-actions");

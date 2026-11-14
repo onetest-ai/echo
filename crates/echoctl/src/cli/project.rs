@@ -577,7 +577,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
 /// run), or a routine's run as the folder session (`notes::RUN_SESSION`): the user's own prompt may read projects,
 /// clients and organisations.
 fn routine_reads() -> bool {
-    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine") || notes::routine_session()
+    // Never a Yolo run's: its own task and thread are all it reads, whatever the user's choice.
+    let yolo = std::env::var_os(guard::RUN_TASK).is_some() || std::env::var_os(guard::RUN_THREAD).is_some();
+    !yolo && (std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine") || notes::routine_session())
 }
 
 pub fn org_command(cmd: OrgCmd) -> Result<()> {
@@ -795,16 +797,32 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Status => print_json(&projectsync::state(id)),
         LedgerCmd::Edit { json } => {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
-            // A routine or Yolo preparing and asking (the user's choice off) changes items, never takes one away or
-            // moves it to another thread.
-            let op = body["op"].as_str().unwrap_or("");
-            if notes::run_asks() && matches!(op, "delete" | "merge" | "xref" | "unxref") {
-                anyhow::bail!("a run that prepares and asks doesn't {op} an item: say what the user should do");
+            if let Some(why) = refused_when_asking(&body) {
+                anyhow::bail!("{why}");
             }
             print_json(&ledger::human_event(id, &body)?)
         }
     }
     Ok(())
+}
+
+/// What a routine or Yolo preparing and asking (the user's choice off) may not do to a thread's work, and why: take an
+/// item away or move it to another thread; overturn the user's decisions (undo, decide Echo's proposals, cancel); or
+/// set what Claude does with a task (its mode, prompt, skill — a prompt planted there would run later as the user's).
+fn refused_when_asking(body: &serde_json::Value) -> Option<String> {
+    if !notes::run_asks() {
+        return None;
+    }
+    let op = body["op"].as_str().unwrap_or("");
+    let set = &body["set"];
+    let why = match op {
+        "delete" | "merge" | "xref" | "unxref" => format!("doesn't {op} an item"),
+        "undo" | "accept" | "reject" => format!("doesn't {op}: deciding is the user's"),
+        "edit" if set["state"] == "cancelled" => "doesn't cancel an item: deciding is the user's".to_string(),
+        "edit" if ["mode", "prompt", "skill"].iter().any(|k| set.get(*k).is_some()) => "doesn't set what Claude does with a task (its mode, prompt or skill)".to_string(),
+        _ => return None,
+    };
+    Some(format!("a run that prepares and asks {why}: say what the user should do"))
 }
 
 #[cfg(test)]
@@ -871,6 +889,88 @@ mod tests {
         std::env::remove_var(super::guard::RUN_TASK);
         std::env::remove_var(crate::notes::RUN_SESSION);
         assert!(show().is_err() && edit().is_err());
+    }
+
+    #[test]
+    fn a_run_preparing_and_asking_keeps_yolos_limits_and_leaves_the_users_decisions_and_claudes_prompts_alone() {
+        let (_env, _) = crate::paths::testenv::folders("routine-asks-limits");
+        let pilot = crate::projects::create("Pilot", None, None).unwrap();
+        let other = crate::projects::create("Rollout", None, None).unwrap();
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, crate::notes::RUN_SESSION, super::guard::RUN_MODE, super::guard::RUN_TASK, super::guard::RUN_THREAD] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _unset = Unset;
+        let ed = |id: &str, j: serde_json::Value| super::ledger_command(id, super::LedgerCmd::Edit { json: j.to_string() });
+        // The user's own work: an epic, a story, a task.
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "epic", "title": "Pilot work"})).unwrap();
+        let ids = |kind: &str| -> Vec<String> {
+            let t = crate::ledger::tree(&pilot.id).unwrap();
+            t["nodes"].as_object().unwrap().iter().filter(|(_, n)| n["kind"] == kind).map(|(k, _)| k.clone()).collect()
+        };
+        let epic = ids("epic").pop().unwrap();
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "story", "parent": epic, "title": "SSO"})).unwrap();
+        let story = ids("story").pop().unwrap();
+        ed(&pilot.id, serde_json::json!({"op": "create", "kind": "task", "parent": story, "title": "Mail the runbook"})).unwrap();
+        let task = ids("task").pop().unwrap();
+        let last_mid = || {
+            let evs = std::fs::read_to_string(crate::paths::home().join("projects").join(&pilot.id).join("ledger/events.jsonl")).unwrap();
+            let e: serde_json::Value = serde_json::from_str(evs.lines().last().unwrap()).unwrap();
+            (e["mid"].as_str().unwrap().to_string(), e["by"].clone())
+        };
+        let (mid, _) = last_mid();
+        std::env::set_var(crate::notes::HEADLESS, "1");
+
+        // 1. Yolo with the user's choice off (`RUN_MODE=routine`): still its own task's thread only, in every read.
+        std::env::set_var(crate::notes::RUN_SESSION, "asks");
+        std::env::set_var(super::guard::RUN_MODE, "routine");
+        std::env::set_var(super::guard::RUN_TASK, format!("{}/{task}", pilot.id));
+        let work = |id: &str| super::project_command(super::ProjectCmd::Work { id: id.into(), json: None });
+        assert!(work(&pilot.id).is_ok(), "its own thread");
+        assert!(work(&other.id).is_err(), "never another thread's work");
+        assert!(super::project_command(super::ProjectCmd::Show { id: other.id.clone() }).is_err(), "nor its brief");
+        assert!(super::project_command(super::ProjectCmd::List).is_err(), "nor the list of threads");
+        std::env::remove_var(super::guard::RUN_TASK);
+        std::env::set_var(super::guard::RUN_THREAD, &pilot.id);
+        assert!(work(&other.id).is_err(), "Yolo on a thread's item: that thread only");
+        std::env::remove_var(super::guard::RUN_THREAD);
+        assert!(work(&other.id).is_ok(), "a routine preparing and asking reads every thread");
+
+        // 2 and 3. A run preparing and asking overturns none of the user's decisions and sets nothing Claude runs.
+        let refused = |j: serde_json::Value| ed(&pilot.id, j).unwrap_err().to_string();
+        assert!(refused(serde_json::json!({"op": "undo", "target": mid})).contains("doesn't undo"));
+        assert!(refused(serde_json::json!({"op": "accept", "target": mid})).contains("deciding is the user's"));
+        assert!(refused(serde_json::json!({"op": "reject", "target": mid})).contains("deciding is the user's"));
+        assert!(refused(serde_json::json!({"op": "edit", "node": task, "set": {"state": "cancelled"}})).contains("doesn't cancel"));
+        for k in ["mode", "prompt", "skill"] {
+            let v = if k == "mode" { "claude" } else if k == "skill" { "follow-up-mail" } else { "Mail the runbook to all" };
+            assert!(refused(serde_json::json!({"op": "edit", "node": task, "set": {k: v}})).contains("what Claude does with a task"), "{k}");
+        }
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"state": "in_progress"}})).unwrap();
+
+        // Acting on its own: all of it, recorded as the run's — and what Claude does with the task is the run's, not "you".
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        std::env::remove_var(super::guard::RUN_MODE);
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"mode": "claude", "prompt": "Mail the runbook to all"}})).unwrap();
+        assert_eq!(last_mid().1, "run");
+        let node = || crate::ledger::fold(&crate::ledger::Ledger::of(&pilot.id).unwrap()).unwrap().nodes[&task].clone();
+        let m = crate::taskmodes::of(&Default::default(), &pilot.id, &node());
+        assert_eq!((m["by"].as_str(), m["prompt_by"].as_str(), m["prompt"].as_str()), (Some("run"), Some("run"), Some("Mail the runbook to all")), "{m}");
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"state": "cancelled"}})).unwrap();
+        let (cancel, by) = last_mid();
+        assert_eq!(by, "run");
+        ed(&pilot.id, serde_json::json!({"op": "undo", "target": cancel})).unwrap();
+        assert_eq!(last_mid().1, "run");
+        // The user setting it again makes it theirs.
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        std::env::remove_var(crate::notes::HEADLESS);
+        ed(&pilot.id, serde_json::json!({"op": "edit", "node": task, "set": {"prompt": "Mail the runbook to Dana"}})).unwrap();
+        let m = crate::taskmodes::of(&Default::default(), &pilot.id, &node());
+        assert_eq!((m["by"].as_str(), m["prompt_by"].as_str()), (Some("run"), Some("you")), "{m}");
     }
 
     #[test]

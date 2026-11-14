@@ -448,6 +448,10 @@ pub struct Node {
     pub due_history: Vec<Value>,
     pub history: Vec<Value>,
     pub pinned: Vec<String>,
+    /// The fields a routine's or Yolo's run set last (`by: run`): applied as the user's, but not theirs — what Claude does
+    /// with the task (`taskmodes::of`) says so.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_run: Vec<String>,
     pub suggestions: Vec<Value>,
     pub merged_into: Option<String>,
     pub waiting_for: Option<Value>,
@@ -567,6 +571,7 @@ fn node_of(e: &Value) -> Node {
         due_history: vec![],
         history: vec![],
         pinned: vec![],
+        by_run: vec![],
         suggestions: vec![],
         merged_into: None,
         waiting_for: None,
@@ -906,6 +911,14 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                                     set_field(x, k, &w, true);
                                 } else {
                                     set_field(x, k, v, true);
+                                }
+                                // Who set it last: a run, or the user.
+                                if e["by"] == "run" {
+                                    if !x.by_run.contains(k) {
+                                        x.by_run.push(k.clone());
+                                    }
+                                } else {
+                                    x.by_run.retain(|f| f != k);
                                 }
                             }
                         }

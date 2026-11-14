@@ -6,6 +6,7 @@
    {"tool": "Bash", "input": {"command": "{cli} read echo://task/globex-pilot/T009", "description": "Read the task"}},
    {"tool": "Bash", "input": {"command": "{cli} m365 mail send --to kim@globex.example --subject 'Welcome to the Globex pilot' --file welcome.md --yes", "description": "Send the mail"}},
    {"tool": "Bash", "input": {"command": "{cli} compose --to kim@globex.example --subject 'Welcome to the Globex pilot' --body 'Hi Kim, welcome to the Globex pilot.'", "description": "Draft the mail instead"}},
+   {"tool": "Bash", "input": {"command": "{cli} project work acme-rollout", "description": "Read another thread's work"}},
    {"tool": "Bash", "input": {"command": "{cli} project work globex-pilot '{\"op\":\"edit\",\"node\":\"T009\",\"set\":{\"state\":\"done\"}}'", "description": "Close the task"}},
    {"text": "Drafted the welcome mail to Kim Park (virtual model); sending it was refused. Left for you: send the draft."}]}
 ]}
