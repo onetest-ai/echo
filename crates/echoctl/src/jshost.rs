@@ -2738,7 +2738,10 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/pulse");
         std::fs::create_dir_all(&d).unwrap();
-        let widgets = json!([{"id": "open", "label": "Open", "kind": "stat", "refresh": 3600, "params": [{"key": "thread", "label": "Thread", "type": "thread"}]}]);
+        let widgets = json!([
+            {"id": "open", "label": "Open", "kind": "stat", "refresh": 3600, "params": [{"key": "thread", "label": "Thread", "type": "thread"}]},
+            {"id": "all", "label": "All", "kind": "stat", "refresh": 3600},
+        ]);
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "pulse", "name": "Pulse", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
@@ -2747,7 +2750,10 @@ mod tests {
               let asks = 0
               ctx.widgets.provide('open', ({ params }) => { asks++; ctx.widgets.changed('open'); return { value: asks, label: params.thread || '-' } })
               ctx.command('changed', (a) => { ctx.widgets.changed(a.id); return 1 })
+              let all = 0
+              ctx.widgets.provide('all', () => ({ value: ++all }))
               ctx.command('asks', () => asks)
+              ctx.command('all', () => all)
             }
             "#,
         )
@@ -2768,21 +2774,26 @@ mod tests {
         for p in [&Page::Today, &thread] {
             widget_ask_now_on("pulse", "open", p);
         }
+        widget_ask_now_on("pulse", "all", &Page::Today);
         assert_eq!(asks(), 2, "each copy asked once; the provider's own changed() not heard");
+        let all = || call("pulse", "all", &json!({})).unwrap().as_u64().unwrap();
+        assert_eq!(all(), 1);
         assert!(call("pulse", "changed", &json!({"id": "nope"})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
         call("pulse", "changed", &json!({"id": "open"})).unwrap();
         crate::paths::testenv::eventually("both copies asked again", || asks() == 4);
         crate::paths::testenv::eventually("each answer kept", || value(&Page::Today).is_some_and(|v| v.0 >= 3) && value(&thread).is_some_and(|v| v.0 >= 3));
         assert_eq!(value(&Page::Today).unwrap().1, "-", "Today's settings");
         assert_eq!(value(&thread).unwrap().1, t.id, "the dashboard's own");
-        // Twice more within the gap: asked once, at its end — nothing before it.
+        // With no id: every widget it declares. Twice more within open's gap: open asked once, at its end — nothing
+        // before it; `all` (not changed before) at once, then once more at the end of its own gap.
         call("pulse", "changed", &json!({})).unwrap();
         call("pulse", "changed", &json!({})).unwrap();
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(asks(), 4, "not before the gap's end");
-        crate::paths::testenv::eventually("asked at the gap's end", || asks() == 6);
+        crate::paths::testenv::eventually("all asked at once", || all() == 2);
+        crate::paths::testenv::eventually("asked at the gap's end", || asks() == 6 && all() == 3);
         std::thread::sleep(Duration::from_millis(900));
-        assert_eq!(asks(), 6, "once: the second change in the gap, and the provider's own, add nothing");
+        assert_eq!((asks(), all()), (6, 3), "once: the second change in the gap, and the provider's own, add nothing");
         // Another process: each copy marked due now, the ask left for the app.
         APP.store(false, Ordering::Relaxed);
         call("pulse", "changed", &json!({"id": "open"})).unwrap();
