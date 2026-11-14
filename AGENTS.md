@@ -45,8 +45,8 @@ Behavioural rules for every change; for a trivial task, use judgment.
 | Development | .ai-run/guides/development/dev-workflow.md | day-to-day build, run and debug: features, prerequisites, dev app beside Echo, UI review, runtimes, packaging |
 | Development | .ai-run/guides/development/rust-conventions.md | atomic writes, meta.json and state-file locking, call stamps, version bump |
 | Development | .ai-run/guides/development/threads-and-ledger.md | threads, clients and the work ledger: evidence-checked proposals, user edits pinned, Microsoft 365 sends |
-| Echo plugins | .ai-run/guides/plugins/echo-plugins.md | plugin manifest, host half services, grants, client-half ctx and slots, Today widget kinds, marketplaces |
-| Echo plugins | .ai-run/guides/plugins/plugin-authoring.md | writing, testing, publishing and updating a third-party Echo plugin: manifest, host and client halves, Today widgets, marketplace |
+| Echo plugins | .ai-run/guides/plugins/echo-plugins.md | rules for Echo's side of plugins: capabilities, host services, grants, client-half ctx and slots, widget kinds, scripts, marketplaces |
+| Echo plugins | .ai-run/guides/plugins/plugin-authoring.md | rules for writing, testing, publishing and updating a third-party Echo plugin |
 | Integration | .ai-run/guides/integrations/claude-code-runs.md | starting Claude Code on AI profiles, strict routing, leases, the fake in tests |
 | Security | .ai-run/guides/security/untrusted-text.md | headless-run guard, run allowlists, safe Markdown, path checks |
 | Standards | .ai-run/guides/standards/git-workflow.md | commit, branch, PR and release conventions |
@@ -62,6 +62,18 @@ is answered in GitHub: the issue and its PR carry the reasoning and the alternat
 question is researched in closed issues and PRs (`gh issue list --state closed --search …`, `gh pr view`), never
 written into a guide or a code comment. A guide changes only when a rule changes, in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
 by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the guides.
+
+A reference is not a guide: it holds facts — an API, its limits and numbers, formats, payloads, what Echo does with
+a file — under `.ai-run/reference/<area>/`. A rule points to the reference section it relies on; a reference holds no
+rules. A reference changes in the same PR as the code it describes and is checked by that PR's review, with no `Rules:`
+PR; when the code and a reference differ, the code wins and the reference is fixed.
+
+## References
+
+| Area | Reference Path | Holds |
+|---|---|---|
+| Echo plugins | .ai-run/reference/plugins/plugin-api.md | the plugin API: manifest, `uses` and the sheet, host and client `ctx`, events, store, widgets and charts, work rows, scripts, `agent/`, testing hosts, publishing (`echoctl plugin guide` prints it) |
+| Echo plugins | .ai-run/reference/plugins/echo-host.md | Echo's side of plugins: store files and locks, script runs, sessions, the `.plugins` layout, dashboards' settings |
 
 ## Task Classifier
 
