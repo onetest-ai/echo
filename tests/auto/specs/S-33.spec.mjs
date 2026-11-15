@@ -87,7 +87,11 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     // Yolo runs as the folder session (#590): this script needs its tools without prompts, so the user's choice is on.
     await setActs(page, true)
 
-    // 1: what the data folder and this checkout hold before; T005 open.
+    // 1: T005 due today (the user's edit; on a Sunday its "tomorrow" is next week, off Today's My work), then what the
+    // data folder and this checkout hold before; T005 open.
+    const now = new Date()
+    const due = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, '0')).join('-')
+    data.ledger(y.thread.id, 'edit', JSON.stringify({ op: 'edit', node: y.task.id, set: { due } })) // throws unless exit 0
     const before = data.files()
     const git = gitStatus()
     expect(data.ledger(y.thread.id, 'tree').nodes[y.task.id].state).toBe(y.task.state)
