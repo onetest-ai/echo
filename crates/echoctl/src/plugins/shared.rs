@@ -141,13 +141,15 @@ pub fn owned(store: &str) -> bool {
 
 /// `plugin` may set values of the store `@<ns>`: it comes from the source that owns `ns`.
 pub fn may_set(plugin: &str, store: &str) -> Result<()> {
-    let ns = store.trim_start_matches('@');
-    let all = members();
-    let Some(src) = owner(&all, ns) else { bail!("no installed marketplace is named “{ns}”: its values can't be set") };
+    check_set(&members(), plugin, store.trim_start_matches('@'))
+}
+
+fn check_set(all: &[(String, String, String)], plugin: &str, ns: &str) -> Result<()> {
+    let Some(src) = owner(all, ns) else { bail!("no installed marketplace is named “{ns}”: its values can't be set") };
     if all.iter().any(|(id, s, n)| id == plugin && *s == src && n == ns) {
         return Ok(());
     }
-    Err(anyhow!("only the plugins of the marketplace that owns “{ns}” ({src}) set its values"))
+    Err(anyhow!("only the plugins of the marketplace that owns “{ns}” ({}) set its values", super::sources::without_credentials(&src)))
 }
 
 fn lock(store: &str) -> Result<crate::app::FileLock> {
@@ -241,6 +243,13 @@ mod tests {
         assert_eq!(pick(Some("acme-src"), &left, "acme").as_deref(), Some("copy"), "its plugins all gone: the next");
         assert_eq!(pick(Some("acme-src"), &left, "nobody"), None);
         assert_eq!(pick(Some("other"), &all, "acme").as_deref(), Some("copy"), "a source that doesn't declare it isn't bound to it");
+    }
+
+    #[test]
+    fn a_refusal_names_the_owning_source_without_its_credentials() {
+        let all = vec![("a".to_string(), "https://me:tok@git.example.com/g/r.git".to_string(), "acme".to_string()), ("b".to_string(), "other".to_string(), "other".to_string())];
+        let e = check_set(&all, "b", "acme").unwrap_err().to_string();
+        assert!(e.contains("(https://git.example.com/g/r.git)") && !e.contains("tok") && !e.contains("me:"), "{e}");
     }
 
     #[test]

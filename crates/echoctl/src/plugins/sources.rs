@@ -31,7 +31,7 @@ pub(super) fn parse_source(s: &str) -> Result<Source> {
             None => (s, None),
         };
         if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            bail!("“{s}” isn't a git address");
+            bail!("“{}” isn't a git address", without_credentials(s));
         }
         if let Some(r) = r.filter(|r| !plain_ref(r)) {
             bail!("“{r}” isn't a plain branch, tag or commit");
@@ -54,7 +54,7 @@ pub(super) fn parse_source(s: &str) -> Result<Source> {
     let ok = |p: &str| !p.is_empty() && p.len() <= 100 && !p.starts_with('.') && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
     match repo.split_once('/') {
         Some((o, n)) if ok(o) && ok(n) => {}
-        _ => bail!("“{s}” isn't owner/repo, a git address (https://…) or a folder"),
+        _ => bail!("“{}” isn't owner/repo, a git address (https://…) or a folder", without_credentials(s)),
     }
     if let Some(r) = r.filter(|r| !plain_ref(r)) {
         bail!("“{r}” isn't a plain branch, tag or commit");
@@ -137,11 +137,18 @@ pub(super) fn git_fetch(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
 /// name on an ssh address stays).
 pub(super) fn without_credentials(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
-    let ssh = scheme.eq_ignore_ascii_case("ssh");
-    // The last `@`, unless it only belongs to the path (`host/@user/repo`): a password may hold a `/`.
-    match rest.rfind('@').filter(|&i| rest[..i].contains(':') || !rest[..i].contains('/')) {
+    // The userinfo ends at the last `@` before the path starts. A password may hold a `/`: then the
+    // last `@` of all, when what is before it reads `user:password` and not `host:port/path`.
+    let authority = rest.find('/').unwrap_or(rest.len());
+    let at = rest[..authority].rfind('@').or_else(|| {
+        let i = rest.rfind('@')?;
+        let (_, after_colon) = rest[..i].split_once(':')?;
+        let word = after_colon.split('/').next().unwrap_or("");
+        (!word.chars().all(|c| c.is_ascii_digit())).then_some(i)
+    });
+    match at {
         Some(i) => {
-            let user = if ssh { rest[..i].split(':').next().unwrap_or("") } else { "" };
+            let user = if scheme.eq_ignore_ascii_case("ssh") { rest[..i].split(':').next().unwrap_or("") } else { "" };
             let at = if user.is_empty() { String::new() } else { format!("{user}@") };
             format!("{scheme}://{at}{}", &rest[i + 1..])
         }
@@ -163,7 +170,7 @@ fn git_failure(url: &str, git_ref: Option<&str>, stderr: Option<&str>) -> String
     let (host, ssh) = match shown.split_once("://") {
         Some((scheme, rest)) => {
             let auth = rest.split('/').next().unwrap_or(rest);
-            let host = auth.rsplit('@').next().unwrap_or(auth);
+            let host = auth.rsplit('@').next().unwrap_or(auth); // `shown` has no password; an ssh user stays
             (host.split(':').next().unwrap_or(host).to_string(), scheme.eq_ignore_ascii_case("ssh"))
         }
         None => match url.split_once(':').filter(|(h, _)| h.contains('@')) {
@@ -386,6 +393,16 @@ mod git_failure_tests {
         assert!(m.contains("it asks to sign in"), "{m}");
         let m = say("https://example.com/r.git", None, "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun\n");
         assert!(m.contains("git isn't installed.\nRun `xcode-select --install`"), "{m}");
+    }
+
+    #[test]
+    fn an_at_in_the_path_is_not_the_end_of_the_userinfo() {
+        use super::without_credentials as w;
+        assert_eq!(w("https://TOKEN@git.example.com/@team/r.git"), "https://git.example.com/@team/r.git");
+        assert_eq!(w("https://me:tok@git.example.com/@team/r.git"), "https://git.example.com/@team/r.git");
+        assert_eq!(w("https://git.example.com:8443/@me/r.git"), "https://git.example.com:8443/@me/r.git");
+        let m = say("https://me:tok@git.example.com/@team/r.git", None, "fatal: Authentication failed\n");
+        assert!(m.contains("from git.example.com: it asks to sign in.") && !m.contains("tok"), "{m}");
     }
 
     #[test]
