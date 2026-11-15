@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.9.9",
+    "items": [
+      { "icon": "plugin", "title": "Claude knows your plugins", "text": "Claude in Echo now sees which plugins you have and reads each one's guide only when it works with it.", "open": "settings/plugins" },
+      { "icon": "sparkle", "title": "Routines and Yolo act like you", "text": "Routines and Yolo now get the same knowledge and permissions as your Claude session, set by one choice in Settings.", "open": "settings" },
+      { "icon": "sparkle", "title": "See what Yolo did", "text": "Yolo runs lists every run with what it changed, sent or drafted, so you can check what Claude did on its own.", "open": "yolo" },
+      { "icon": "record", "title": "Calls show who really came", "text": "A recorded Teams call now shows the people who were in the meeting, not everyone who was invited.", "open": "calls" },
+      { "icon": "sparkle", "title": "What's new after each update", "text": "After an update Echo shows what changed, and you can open it again from the menu bar, ⌘K or Settings.", "open": "settings" },
+      { "icon": "fix", "title": "Smaller fixes", "text": "Dates in another year show the year, plugin widgets fill their row, and Sign in to Claude shows at once." }
+    ]
+  },
+  {
     "version": "0.9.8",
     "items": [
       { "icon": "plugin", "title": "Plugins share a setting", "text": "Plugins from the same marketplace can share a value, like a project code, so you set it once for all of them.", "open": "settings/plugins" },
