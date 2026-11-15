@@ -122,7 +122,7 @@ pub(super) fn git_fetch(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
     if let Some(r) = git_ref {
         c.args(["--branch", r]);
     }
-    c.arg("--").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0");
+    c.arg("--").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0").env("GCM_INTERACTIVE", "never");
     let out = c.output().map_err(|_| anyhow!(git_failure(url, git_ref, None)))?;
     if !out.status.success() {
         bail!("{}", git_failure(url, git_ref, Some(&String::from_utf8_lossy(&out.stderr))));
@@ -133,26 +133,42 @@ pub(super) fn git_fetch(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
     Ok(sha)
 }
 
+/// An address as it may be shown: without the user name and password typed into it (a git user
+/// name on an ssh address stays).
+pub(super) fn without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+    let ssh = scheme.eq_ignore_ascii_case("ssh");
+    // The last `@`, unless it only belongs to the path (`host/@user/repo`): a password may hold a `/`.
+    match rest.rfind('@').filter(|&i| rest[..i].contains(':') || !rest[..i].contains('/')) {
+        Some(i) => {
+            let user = if ssh { rest[..i].split(':').next().unwrap_or("") } else { "" };
+            let at = if user.is_empty() { String::new() } else { format!("{user}@") };
+            format!("{scheme}://{at}{}", &rest[i + 1..])
+        }
+        None => url.to_string(),
+    }
+}
+
 /// What a failed `git clone` of `url` (at `git_ref`) tells the user, in Echo's words: what happened,
-/// what to do about it, then git's last line as the detail. `stderr` is None when git didn't start.
+/// what to do about it, then git's own line as the detail. `stderr` is None when git didn't start.
 /// The address is shown without any credentials typed into it.
 fn git_failure(url: &str, git_ref: Option<&str>, stderr: Option<&str>) -> String {
+    let install = "Install git, then try again.";
     let Some(stderr) = stderr else {
-        return "Echo couldn't get the marketplace: git isn't installed.\nInstall git, then try again.".into();
+        return format!("Echo couldn't get the marketplace: git isn't installed.\n{install}");
     };
-    let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("failed").trim();
-    let (shown, host, ssh) = match url.split_once("://") {
+    let lines = || stderr.lines().rev().map(str::trim).filter(|l| !l.is_empty());
+    let last = lines().find(|l| ["fatal:", "error:", "ERROR:", "remote:"].iter().any(|p| l.starts_with(p))).or_else(|| lines().next()).unwrap_or("failed");
+    let shown = without_credentials(url);
+    let (host, ssh) = match shown.split_once("://") {
         Some((scheme, rest)) => {
-            let (auth, path) = rest.split_once('/').unwrap_or((rest, ""));
-            let (userinfo, host) = auth.rsplit_once('@').map_or(("", auth), |(u, h)| (u, h));
-            let ssh = scheme.eq_ignore_ascii_case("ssh");
-            let user = if ssh { userinfo.split(':').next().unwrap_or("") } else { "" };
-            let at = if user.is_empty() { String::new() } else { format!("{user}@") };
-            (format!("{scheme}://{at}{host}/{path}"), host.split(':').next().unwrap_or(host).to_string(), ssh)
+            let auth = rest.split('/').next().unwrap_or(rest);
+            let host = auth.rsplit('@').next().unwrap_or(auth);
+            (host.split(':').next().unwrap_or(host).to_string(), scheme.eq_ignore_ascii_case("ssh"))
         }
         None => match url.split_once(':').filter(|(h, _)| h.contains('@')) {
-            Some((h, _)) => (url.to_string(), h.rsplit('@').next().unwrap_or(h).to_string(), true),
-            None => (url.to_string(), url.to_string(), false),
+            Some((h, _)) => (h.rsplit('@').next().unwrap_or(h).to_string(), true),
+            None => (url.to_string(), false),
         },
     };
     let low = stderr.to_lowercase();
@@ -163,11 +179,15 @@ fn git_failure(url: &str, git_ref: Option<&str>, stderr: Option<&str>) -> String
     } else {
         format!("Sign in to {host} once in a terminal: run `git clone {shown}` there. Once it works without asking (the login stays in the system's credential store), try again.")
     };
-    let (what, todo) = if has(&["could not read username", "could not read password", "terminal prompts disabled", "authentication failed", "http basic: access denied", "permission denied (publickey", "returned error: 401", "returned error: 403"]) {
+    let (what, todo) = if has(&["host key verification failed"]) {
+        (format!("{host} isn't a known host yet"), format!("Run `ssh -T git@{host}` once in a terminal and accept the host key, then try again."))
+    } else if has(&["invalid active developer path", "xcode-select"]) {
+        ("git isn't installed".to_string(), "Run `xcode-select --install` in a terminal, then try again.".to_string())
+    } else if has(&["could not read username", "could not read password", "terminal prompts disabled", "authentication failed", "http basic: access denied", "permission denied (publickey", "returned error: 401", "returned error: 403", "forbidden"]) {
         (if ssh { "the SSH key wasn't accepted" } else { "it asks to sign in" }.to_string(), sign_in)
     } else if has(&["remote branch", "couldn't find remote ref"]) {
         (format!("no branch or tag {} there", git_ref.unwrap_or("with that name")), "Check the name after # in the address, then try again.".to_string())
-    } else if has(&["repository not found", "does not appear to be a git repository"]) || (low.contains("not found") && low.contains("repository")) {
+    } else if has(&["repository not found", "does not appear to be a git repository", "could not be found or you don't have permission"]) || (low.contains("not found") && low.contains("repository")) {
         ("no repository at this address, or it's private and needs a sign-in".to_string(), format!("If it's private: {}", sign_in[..1].to_lowercase() + &sign_in[1..]))
     } else if has(&["could not resolve host", "could not resolve hostname", "failed to connect", "connection timed out", "network is unreachable", "connection refused", "no route to host"]) {
         (format!("can't reach {host}"), "Check the address and the network, then try again.".to_string())
@@ -342,6 +362,39 @@ mod git_failure_tests {
             assert!(m.contains(&format!("`git clone {url}`")), "{m}");
             assert!(m.ends_with("\ngit said: fatal: Could not read from remote repository."), "{m}");
         }
+    }
+
+    #[test]
+    fn over_ssh_gits_line_is_the_fatal_one_not_the_closing_hint() {
+        let e = "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n";
+        let m = say("git@git.example.com:g/r.git", None, e);
+        assert!(m.ends_with("\ngit said: fatal: Could not read from remote repository."), "{m}");
+        assert!(m.contains("no repository at this address, or it's private"), "{m}");
+    }
+
+    #[test]
+    fn an_unknown_host_key_says_to_accept_it_once() {
+        let m = say("git@git.example.com:g/r.git", None, "Host key verification failed.\nfatal: Could not read from remote repository.\n");
+        assert!(m.starts_with("Echo couldn't get the marketplace from git.example.com: git.example.com isn't a known host yet.\nRun `ssh -T git@git.example.com` once in a terminal and accept the host key, then try again.\n"), "{m}");
+    }
+
+    #[test]
+    fn gitlab_ssh_not_found_bitbucket_forbidden_and_a_missing_xcode_git() {
+        let m = say("git@git.example.com:g/r.git", None, "GitLab: The project you were looking for could not be found or you don't have permission to view it.\nfatal: Could not read from remote repository.\n");
+        assert!(m.contains("no repository at this address, or it's private"), "{m}");
+        let m = say("https://bb.example.com/g/r.git", None, "fatal: unable to access 'https://bb.example.com/g/r.git/': The requested URL returned error: 403\nremote: Forbidden\n");
+        assert!(m.contains("it asks to sign in"), "{m}");
+        let m = say("https://example.com/r.git", None, "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun\n");
+        assert!(m.contains("git isn't installed.\nRun `xcode-select --install`"), "{m}");
+    }
+
+    #[test]
+    fn a_password_with_a_slash_is_not_shown_either() {
+        assert_eq!(super::without_credentials("https://me:ab/cd@git.example.com/g/r.git"), "https://git.example.com/g/r.git");
+        assert_eq!(super::without_credentials("https://git.example.com/@me/r.git"), "https://git.example.com/@me/r.git");
+        assert_eq!(super::without_credentials("owner/repo"), "owner/repo");
+        let m = say("https://me:ab/cd@git.example.com/g/r.git", None, "fatal: Authentication failed\n");
+        assert!(!m.contains("ab/cd") && !m.contains("me:"), "{m}");
     }
 
     #[test]
