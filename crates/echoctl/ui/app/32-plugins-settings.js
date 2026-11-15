@@ -156,7 +156,7 @@ function plSheet(sh) {
 function plMarkets(p) {
   const rows = p.markets.map((m) => {
     const busy = plBusy(p, `market:${m.name}`)
-    const state = busy ? esc(busy) : m.error ? `<span class="error">Can’t be read: ${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
+    const state = busy ? esc(busy) : m.error ? '' : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
     const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
     // My plugins: the user's own folder — no menu (never hidden or removed), a word on what goes there.
     const mine = m.name === 'my-plugins'
@@ -171,14 +171,14 @@ function plMarkets(p) {
       ? `<div class="confirm"><span>Remove ${esc(m.name)}? Its ${ours.length} installed plugin${ours.length === 1 ? '' : 's'} go${ours.length === 1 ? 'es' : ''} with it: ${esc(names)}.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn" data-pl-mremove="${esc(m.name)}" data-keep="1">Remove, keep their data</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="0">Remove with their data</button></div>`
       : `<div class="confirm"><span>Remove ${esc(m.name)}? Its plugins leave Discover.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="1">Remove</button></div>`
     const what = mine ? '<div class="pl-s">Your own plugins and widgets, a folder each — ask Claude to make one (the build skill).</div>' : ''
-    return `<div class="pl-mrow" role="group" aria-label="${esc(label)}">${plTile({ id: m.name, name: label })}<div class="pl-txt"><div class="pl-n">${esc(label)}${!mine && m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div>${what}<div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
+    return `<div class="pl-mrow" role="group" aria-label="${esc(label)}">${plTile({ id: m.name, name: label })}<div class="pl-txt"><div class="pl-n">${esc(label)}${!mine && m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div>${what}<div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div>${m.error && !busy ? `<div class="error pl-msg">${esc(m.error)}</div>` : ''}</div>
       <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>${mine ? '' : `<span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span>`}</div>${ask}`
   })
   const add = `<section class="pl-add"><b>Add a marketplace</b>
     <div class="pl-addrow"><input class="set-in" id="pl-msrc" placeholder="owner/repo, a git address, or a folder" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="Name (optional)" aria-label="Name" spellcheck="false"><button class="btn primary" data-pl-madd>Add</button></div>
     <div class="set-sub">It needs <code>echo-marketplace.json</code> at its root. Private repositories use your own git sign-in. Plugins from it say who listed them when you install.</div></section>`
   return `<p class="set-sub">Where plugins come from. Echo’s own is built in; add your team’s or company’s catalog — a GitHub repository, any git address, or a folder.</p>
-    <section class="pl-list pl-mlist">${rows.join('')}</section>${Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('')}${add}`
+    <section class="pl-list pl-mlist">${rows.join('')}</section>${Object.keys(p.errors || {}).filter((k) => k.startsWith('market:') && !p.markets.some((m) => `market:${m.name}` === k && m.error)).map((k) => plErr(p, k)).join('')}${add}`
 }
 // The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
 document.addEventListener('click', (e) => {
@@ -231,7 +231,7 @@ document.addEventListener('input', (e) => {
 })
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
-const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
+const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error pl-msg">${esc(p.errors[key])}</div>` : ''
 async function loadDeliver() {
   try { S.deliver = await get('api/deliver') } catch { /* app restarting */ }
 }

@@ -19,7 +19,7 @@ pub fn snapshot() -> Value {
             "installed": r.installed.get(&o.id).map(|p| p.market == m.name), "error": o.error,
         })).collect()).unwrap_or_default();
         markets.push(json!({
-            "name": m.name, "source": m.source, "built_in": built_in, "hidden": m.hidden,
+            "name": m.name, "source": super::sources::without_credentials(&m.source), "built_in": built_in, "hidden": m.hidden,
             "fetched_at": c.as_ref().map(|c| c.fetched_at.clone()), "commit": c.as_ref().map(|c| c.commit.clone()),
             "error": c.as_ref().and_then(|c| c.error.clone()), "count": c.as_ref().map(|c| c.plugins.len()).unwrap_or(0),
             "title": c.as_ref().map(|c| c.name.clone()).filter(|n| !n.is_empty()), "plugins": offers,

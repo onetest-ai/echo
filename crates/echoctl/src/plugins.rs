@@ -726,7 +726,7 @@ pub fn market_named(said: &str) -> Result<String> {
         _ => None,
     };
     let same_folder = |src: &str| folder.as_ref().is_some_and(|f| dunce::canonicalize(src).is_ok_and(|s| &s == f));
-    let hits: Vec<&Market> = all.iter().filter(|m| m.name.eq_ignore_ascii_case(said) || m.source == said || same_folder(&m.source)).collect();
+    let hits: Vec<&Market> = all.iter().filter(|m| m.name.eq_ignore_ascii_case(said) || m.source == said || sources::without_credentials(&m.source) == said || same_folder(&m.source)).collect();
     match hits.as_slice() {
         [m] => Ok(m.name.clone()),
         _ => {
@@ -972,7 +972,7 @@ pub fn market_add(source: &str, name: Option<&str>) -> Result<String> {
     };
     let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| match &src {
         Source::Github { repo, .. } => repo.split('/').next().unwrap_or(repo).to_string(),
-        Source::Git { url, .. } => url.trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("git").to_string(),
+        Source::Git { url, .. } => sources::without_credentials(url).trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("git").to_string(),
         Source::Local(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "local".into()),
     });
     if name.chars().count() > 40 || name.chars().any(char::is_control) {

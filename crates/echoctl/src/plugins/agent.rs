@@ -464,7 +464,7 @@ pub fn claim_prefix(id: &str, market: &str, prefix: &str, bind: bool) -> Result<
     let holder = held.get(prefix).and_then(Value::as_str).map(str::to_owned).filter(|h| users.iter().any(|(_, s, _)| s == h)).or_else(|| users.first().map(|(_, s, _)| s.clone()));
     if let Some(h) = holder.filter(|h| *h != mine) {
         let who: Vec<&str> = users.iter().filter(|(_, s, _)| *s == h).map(|(i, _, _)| i.as_str()).collect();
-        bail!("its skills prefix “{prefix}” is held by {} (from {h}): a plugin of another marketplace needs its own", who.join(", "));
+        bail!("its skills prefix “{prefix}” is held by {} (from {}): a plugin of another marketplace needs its own", who.join(", "), super::sources::without_credentials(&h));
     }
     if bind && held.get(prefix).and_then(Value::as_str) != Some(mine.as_str()) {
         held.insert(prefix.to_string(), Value::String(mine));
