@@ -98,6 +98,13 @@ authenticated senders.
   from now). A held sync ends `done` saying how many wait and when they're read (also under the other passes' reports
   when those ran). Sync now (`projectsync::run`, the window's and `ledger <id> run`)
   reads them at once.
+- Noise is set aside before a run, by rules only (`projectsync::noise_rule`; Echo keeps no mail headers): a mail whose
+  subject starts as an automatic reply (unless its text has an address: who covers is read), a delivery notice (or sent
+  by `mailer-daemon` / `postmaster`), or a calendar answer. Chat never. Set aside: marked processed `by: "filter"` with
+  `note` "set aside: <why>" (`ledger::set_aside`), marked read for people, listed in the sync's `set_aside`
+  (`[{id, title, why}]`, the Work tab's "N mails set aside", why on hover) and its message with how to read one again.
+  `echoctl project ledger <id> read-again --evidence <item>` (`ledger::read_again`, a processed item only; refused in
+  a run) queues it again `by: "user"`; the rules then leave it to the extract run (`ledger::asked_again`).
 
 ## People
 

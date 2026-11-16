@@ -12,6 +12,8 @@ cases:
   - tests/cases/tasks/TC-034_yolo-runs-shows-a-prepared-draft-not-a-send.md
   - tests/cases/tasks/TC-032_yolo-runs-lists-every-run-with-what-it-did.md
   - tests/cases/tasks/TC-033_yolo-runs-filters.md
+  - tests/cases/threads/TC-032_noise-mail-is-set-aside-with-why-and-read-again-on-your-word.md
+  - tests/cases/threads/TC-033_mail-with-work-and-a-reply-naming-who-covers-are-read-not-set-aside.md
 auto: [tests/auto/specs/S-33.spec.mjs]
 ---
 
@@ -33,6 +35,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | The sync script (`thread-sync.json`) and model run 3: Acme rollout's sync (extract with who's who, then verify) | stage 3's Preconditions and step 3 | 3 (status, run folder, tree, pinned fields, log, people, window) |
 | The asks script (`yolo-asks.json`) and model run 4: Yolo on Globex pilot's T009 with "Claude acts on its own" off | stage 4's Preconditions and step 1 | 4 (model log, drafts, record, ledger), 5 (its row on Yolo runs) |
 | The runs script (`yolo-runs.json`) and model runs 5–8: Yolo on Acme rollout's T010 and T016 (a failed run), Globex pilot's T001 and the Needs you now item "Mail to you" | stage 6's step 1 | 6 (the list, task link, log, ⌘K), 7 (filters) |
+| The sync script again and Acme rollout's syncs over made-up mail (an automatic reply set aside without a model run, then read again; a mail with work and a reply naming who covers, read) | stages 8 and 9 | 8, 9 |
 
 ## Stages
 
@@ -45,6 +48,8 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | 5 | `tasks/TC-034_yolo-runs-shows-a-prepared-draft-not-a-send.md` | 4 (its run) | — |
 | 6 | `tasks/TC-032_yolo-runs-lists-every-run-with-what-it-did.md` | — (its own runs; the list also holds stages 2 and 4's) | Write the runs script; clear `<dir>/model/model-log.jsonl` |
 | 7 | `tasks/TC-033_yolo-runs-filters.md` | 6 (its runs) | — |
+| 8 | `threads/TC-032_noise-mail-is-set-aside-with-why-and-read-again-on-your-word.md` | — (Acme rollout's queue emptied in its step 1) | Write the sync script; clear `<dir>/model/model-log.jsonl` |
+| 9 | `threads/TC-033_mail-with-work-and-a-reply-naming-who-covers-are-read-not-set-aside.md` | — (its step 1 empties the queue again) | Clear `<dir>/model/model-log.jsonl` |
 
 ## Teardown
 - `tests/fixtures/serve.sh down <dir>` (it stops the virtual model too)

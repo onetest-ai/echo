@@ -264,6 +264,15 @@
     "thread.sync",
     "thread.ai"
    ]
+  },
+  {
+   "id": "F-THR-28",
+   "feature": "Before a sync's model run, mail that is plainly no work by rules (an automatic reply naming nobody to write to, a delivery notice, a calendar answer) is set aside without a run: marked processed with why, said in the sync's message and as \"N mails set aside\" on the Work tab (why on hover); other mail and chat go to the extract run; `ledger <id> read-again --evidence <item>` has one read at the next sync, then never set aside again",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sync"
+   ]
   }
  ]
 }

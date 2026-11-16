@@ -234,6 +234,11 @@ pub enum LedgerCmd {
         #[arg(long)]
         done: Option<String>,
     },
+    /// Read a processed item again at the next sync (one set aside as noise too: then it isn't set aside again)
+    ReadAgain {
+        #[arg(long)]
+        evidence: String,
+    },
     /// Mark an evidence item processed (also when it changed nothing)
     Done {
         #[arg(long)]
@@ -816,6 +821,10 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
             ledger::mark_processed(id, &evidence, &note)?;
             print_json(&serde_json::json!({ "done": evidence }));
         }
+        LedgerCmd::ReadAgain { evidence } => {
+            ledger::read_again(id, &evidence)?;
+            print_json(&serde_json::json!({ "read_again": evidence, "pending": ledger::pending_count(id)? }));
+        }
         LedgerCmd::VerifyPrep { weak, out } => {
             // A run writes only into its own folder.
             if let (true, Some(f)) = (notes::headless(), &out) {
@@ -947,6 +956,9 @@ mod tests {
         for cmd in [super::LedgerCmd::Pending, super::LedgerCmd::Context, super::LedgerCmd::VerifyPrep { weak: false, out: None }, super::LedgerCmd::PeopleContext { items: vec![evid.into()] }] {
             assert!(super::ledger_command(&pilot.id, cmd).unwrap_err().to_string().contains("with the agent's steps"));
         }
+        // Reading an item again is the user's: a run never asks for it.
+        let again = super::ledger_command(&pilot.id, super::LedgerCmd::ReadAgain { evidence: evid.into() });
+        assert!(again.unwrap_err().to_string().contains("with the agent's steps"));
     }
 
     #[test]

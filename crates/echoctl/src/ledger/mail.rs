@@ -514,3 +514,26 @@ pub fn mark_processed(project: &str, evid: &str, note: &str) -> Result<()> {
     }
     l.append(&[json!({"type": "processed", "evidence": evid, "by": "agent", "note": note, "at": Local::now().to_rfc3339()})])
 }
+
+/// A mail the sync's noise rules found no work in: marked processed without an extract run, its reason kept.
+pub fn set_aside(project: &str, evid: &str, why: &str) -> Result<()> {
+    let l = Ledger::of(project)?;
+    l.append(&[json!({"type": "processed", "evidence": evid, "by": "filter", "note": format!("set aside: {why}"), "at": Local::now().to_rfc3339()})])
+}
+
+/// The user's "read it again": a processed item waits for the next sync, which reads it whatever the noise rules say.
+pub fn read_again(project: &str, evid: &str) -> Result<()> {
+    let l = Ledger::of(project)?;
+    if !l.evidence().contains_key(evid) {
+        bail!("unknown evidence {evid:?}");
+    }
+    if !processed(&l.events()?).contains(evid) {
+        bail!("{evid} isn't read yet: the next sync reads it");
+    }
+    l.append(&[json!({"type": "reprocess", "evidence": evid, "by": "user", "why": "you asked to read it again", "at": Local::now().to_rfc3339()})])
+}
+
+/// Whether the user's last word on an item is "read it again" (`read_again`): the noise rules leave it to the extract run.
+pub fn asked_again(events: &[Value], evid: &str) -> bool {
+    events.iter().rev().find(|e| e["evidence"] == evid && (e["type"] == "processed" || e["type"] == "reprocess")).is_some_and(|e| e["type"] == "reprocess" && e["by"] == "user")
+}

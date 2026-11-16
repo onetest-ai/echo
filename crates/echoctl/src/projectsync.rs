@@ -133,6 +133,22 @@ fn waits(n: usize, at: chrono::DateTime<Local>) -> String {
     format!("{n} mail or chat item{} wait{}: read at {} or once {BATCH_ITEMS} wait", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }, at.format("%H:%M"))
 }
 
+/// The sync message's lines for the mail its noise rules set aside: each with why, then how to read one again.
+fn aside_lines(id: &str, set_aside: &[(String, String)]) -> Vec<String> {
+    if set_aside.is_empty() {
+        return vec![];
+    }
+    let mut lines: Vec<String> = set_aside.iter().map(|(i, why)| format!("{i} set aside, no work in it: {why}.")).collect();
+    lines.push(format!("To read one again: echoctl project ledger {id} read-again --evidence <item>, then Sync now."));
+    lines
+}
+
+/// The mail its noise rules set aside, for the window: `[{id, title, why}]`.
+fn aside_view(id: &str, set_aside: &[(String, String)]) -> Value {
+    let ev = if set_aside.is_empty() { BTreeMap::new() } else { ledger::Ledger::of(id).map(|l| l.evidence()).unwrap_or_default() };
+    json!(set_aside.iter().map(|(i, why)| json!({"id": i, "title": ev.get(i).map(|e| e["title"].clone()), "why": why})).collect::<Vec<_>>())
+}
+
 /// Mail and chat are due a read: the first has waited `BATCH_WAIT`, or `BATCH_ITEMS` wait.
 fn batch_ready(w: &[(String, chrono::DateTime<Local>)], now: chrono::DateTime<Local>) -> bool {
     w.len() >= BATCH_ITEMS || w.first().is_some_and(|(_, t)| now.signed_duration_since(*t) >= BATCH_WAIT)
@@ -168,6 +184,20 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
             pending.clear();
         }
     }
+    // Noise first, by rules (no model): mail plainly no work is set aside without a run, its reason kept and said.
+    // Never an item the user asked to read again.
+    let events = ledger::Ledger::of(id)?.events()?;
+    let asked: Vec<String> = pending.iter().filter(|i| ledger::asked_again(&events, i)).cloned().collect();
+    let evidence = ledger::Ledger::of(id)?.evidence();
+    let mut set_aside: Vec<(String, String)> = vec![];
+    for i in pending.iter().filter(|i| mail_or_chat(i) && !asked.contains(i)) {
+        if let Some(why) = evidence.get(i).and_then(noise_rule) {
+            ledger::set_aside(id, i, why)?;
+            set_aside.push((i.clone(), why.to_string()));
+        }
+    }
+    pending.retain(|i| !set_aside.iter().any(|(s, _)| s == i));
+    mark_people_read(id, &set_aside.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>());
     pending.truncate(MAX_ITEMS);
     let claims = ledger::verify_count(id)?;
     // Who's who is read from the same items, and from items the work sync already read but people not yet (threads
@@ -202,9 +232,9 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     }
     mark_people_read(id, &taken.unreadable.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>());
     if items.is_empty() && claims == 0 {
-        let message = held.map(|(n, at)| waits(n, at)).into_iter().chain(said).collect::<Vec<_>>().join("\n");
+        let message = held.map(|(n, at)| waits(n, at)).into_iter().chain(said).chain(aside_lines(id, &set_aside)).collect::<Vec<_>>().join("\n");
         let message = if message.is_empty() { "nothing new".to_string() } else { message };
-        let v = json!({"state": "done", "at": started.to_rfc3339(), "message": message, "written": written.len(), "processed": 0});
+        let v = json!({"state": "done", "at": started.to_rfc3339(), "message": message, "written": written.len(), "processed": set_aside.len(), "set_aside": aside_view(id, &set_aside)});
         save_state(id, &v);
         // Announced as a sync that read the calls is (new mail or chat may have been written).
         #[cfg(feature = "js")]
@@ -254,15 +284,16 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         }
         let _ = fs::remove_file(&settings);
         let left = ledger::pending_count(id)?;
+        let aside = aside_lines(id, &set_aside).join("\n");
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
-                  "processed": before.saturating_sub(left), "left": left, "usage": used,
-                  "message": format!("{extract_report}\n{verify_report}\n{}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at)).unwrap_or_default()).trim().to_string()}))
+                  "processed": before.saturating_sub(left), "left": left, "usage": used, "set_aside": aside_view(id, &set_aside),
+                  "message": format!("{extract_report}\n{verify_report}\n{}\n{aside}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at)).unwrap_or_default()).trim().to_string()}))
     })();
     let v = match outcome {
         Ok(v) => v,
         Err(e) => {
             let signin = e.downcast_ref::<crate::ai::SignInNeeded>().map(|s| s.profile.clone());
-            json!({"state": "failed", "at": started.to_rfc3339(), "message": format!("{e:#}"), "needs_sign_in": signin, "usage": used})
+            json!({"state": "failed", "at": started.to_rfc3339(), "message": format!("{e:#}"), "needs_sign_in": signin, "usage": used, "set_aside": aside_view(id, &set_aside)})
         }
     };
     save_state(id, &v);
@@ -448,6 +479,30 @@ fn evidence_tag() -> Result<String> {
 /// An item's text in the run's evidence block.
 fn evidence_block(tag: &str, id: &str, text: &str) -> String {
     format!("<{tag} id=\"{id}\">\n{text}\n</{tag}>")
+}
+
+/// Mail that is plainly no work by its subject, and why (Echo keeps no mail headers; calendar invites and their answers
+/// never become items).
+const NOISE_SUBJECTS: &[(&[&str], &str)] = &[
+    (&["automatic reply:", "auto reply:", "autoreply:", "auto-reply:", "out of office:"], "an automatic reply"),
+    (&["undeliverable:", "undelivered mail", "delivery status notification", "mail delivery failed", "returned mail:", "delivery has failed", "message not delivered"], "a delivery notice"),
+    (&["accepted:", "declined:", "tentative:", "tentatively accepted:", "canceled:", "cancelled:", "meeting forward notification:", "new time proposed:"], "a calendar response"),
+];
+
+/// A mail that is plainly no work, and why, by rules only. An automatic reply naming someone to write to instead (an
+/// address in it) may say who covers for whom: the extract run reads it.
+fn noise_rule(item: &Value) -> Option<&'static str> {
+    if item["kind"] != "mail" {
+        return None;
+    }
+    let from = item["from"]["email"].as_str().unwrap_or("").to_lowercase();
+    if matches!(from.split('@').next(), Some("mailer-daemon" | "postmaster")) {
+        return Some("a delivery notice");
+    }
+    let subject = item["title"].as_str().unwrap_or("").trim().to_lowercase();
+    let why = NOISE_SUBJECTS.iter().find(|(prefixes, _)| prefixes.iter().any(|p| subject.starts_with(p)))?.1;
+    let names_someone = item["turns"].as_array().into_iter().flatten().any(|t| t["text"].as_str().is_some_and(|x| x.contains('@')));
+    (why != "an automatic reply" || !names_someone).then_some(why)
 }
 
 /// The extract run: its thread, folder and items in order, then the thread's work and people, then each item's text.
@@ -1089,6 +1144,84 @@ mod tests {
         let at = Local::now() - chrono::Duration::days(1);
         fs::write(dir.join(format!("{id}.json")), json!({"id": id, "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": "Acme rollout status"}).to_string()).unwrap();
         fs::write(dir.join(format!("{id}.md")), "Test mail, nothing real.").unwrap();
+    }
+
+    /// A mail item as `mail_sync` writes one: its kind, subject, sender and text.
+    fn mail_from(project: &str, id: &str, subject: &str, from: &str, text: &str) {
+        let at = Local::now() - chrono::Duration::days(1);
+        let item = json!({"id": id, "kind": "mail", "source": "mail", "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": subject,
+                          "from": {"name": "Dana Lee", "email": from}, "turns": [{"ts": "10:00:00", "speaker": "Dana Lee", "text": text}], "text": ""});
+        let dir = ledger_dir(project).join("evidence");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{id}.json")), item.to_string()).unwrap();
+        fs::write(dir.join(format!("{id}.md")), crate::evidence::render_md(&item)).unwrap();
+    }
+
+    #[test]
+    fn the_noise_rules_set_aside_only_plain_automatic_replies_delivery_notices_and_calendar_answers() {
+        let mail = |subject: &str, from: &str, text: &str| json!({"kind": "mail", "title": subject, "from": {"email": from}, "turns": [{"text": text}]});
+        assert_eq!(noise_rule(&mail("Automatic reply: Acme rollout", "dana@acme.example", "I am away until Monday.")), Some("an automatic reply"));
+        assert_eq!(noise_rule(&mail("Out of Office: plan", "dana@acme.example", "Back on Monday.")), Some("an automatic reply"));
+        assert_eq!(noise_rule(&mail("Automatic reply: Acme rollout", "dana@acme.example", "Away; for the rollout write to omar@acme.example.")), None, "it names who covers: read");
+        assert_eq!(noise_rule(&mail("Undeliverable: Acme rollout", "dana@acme.example", "Your message couldn't be delivered.")), Some("a delivery notice"));
+        assert_eq!(noise_rule(&mail("Acme rollout", "MAILER-DAEMON@acme.example", "Returned.")), Some("a delivery notice"));
+        assert_eq!(noise_rule(&mail("Accepted: Acme weekly sync", "dana@acme.example", "")), Some("a calendar response"));
+        assert_eq!(noise_rule(&mail("RE: Automatic reply: Acme rollout", "dana@acme.example", "Can you send the plan?")), None, "a reply to one is a person's");
+        assert_eq!(noise_rule(&mail("Acme rollout status", "dana@acme.example", "Thanks!")), None, "anything else: read");
+        assert_eq!(noise_rule(&json!({"kind": "chat", "title": "Automatic reply: chat", "turns": []})), None, "chat: never by rules");
+    }
+
+    /// The fake Claude Code for a thread pinned to its own profile: every run answers with a result and nothing more.
+    #[cfg(unix)]
+    fn pinned_fake(project: &str) -> crate::ai::Profile {
+        let prof = crate::ai::fake::profile("u", None, &crate::ai::fake::signed_in("pat@example.com"));
+        projects::update(project, |p| {
+            p.ai_profile = Some("u".into());
+            Ok(())
+        })
+        .unwrap();
+        let init = json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0"});
+        let result = json!({"type": "result", "result": "read", "is_error": false, "num_turns": 1, "usage": {"input_tokens": 10, "output_tokens": 2}});
+        fs::write(crate::ai::fake::file(&prof, "p.reply"), format!("{init}\n{result}")).unwrap();
+        prof
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sync_sets_noise_mail_aside_without_a_run_says_why_and_reads_it_when_asked_again() {
+        let (_env, root) = crate::paths::testenv::folders("sync-noise");
+        let _fake = crate::ai::fake::install(&root);
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        let prof = pinned_fake(&id);
+        mail_from(&id, "mail-ooo", "Automatic reply: Acme rollout status", "dana@acme.example", "I am out of the office until Monday.");
+        // Noise only: set aside, no model run.
+        let v = run(&id).unwrap();
+        assert_eq!(v["state"], "done");
+        assert_eq!(v["set_aside"], json!([{"id": "mail-ooo", "title": "Automatic reply: Acme rollout status", "why": "an automatic reply"}]));
+        assert_eq!(v["processed"], 1);
+        let m = v["message"].as_str().unwrap();
+        assert!(m.contains("mail-ooo set aside, no work in it: an automatic reply.") && m.contains(&format!("echoctl project ledger {id} read-again --evidence <item>")), "{m}");
+        assert!(!crate::ai::fake::file(&prof, "p.args").exists(), "no model run for noise");
+        let note = ledger::Ledger::of(&id).unwrap().events().unwrap().into_iter().find(|e| e["type"] == "processed").unwrap();
+        assert_eq!((note["by"].as_str(), note["note"].as_str()), (Some("filter"), Some("set aside: an automatic reply")));
+        assert!(read_people(&id).contains(&"mail-ooo".to_string()), "never read for people later either");
+        // Mail with work, and an automatic reply naming who covers: the extract run reads them, the noise isn't in it.
+        mail_from(&id, "mail-cover", "Automatic reply: Acme rollout plan", "dana@acme.example", "Away; for the rollout write to omar@acme.example.");
+        mail_from(&id, "mail-ask", "Acme rollout plan", "dana@acme.example", "Can you send the rollout plan by Friday?");
+        let v = run(&id).unwrap();
+        assert_eq!(v["set_aside"], json!([]), "{v}");
+        let turns = || fs::read_to_string(crate::ai::fake::file(&prof, "p.turns")).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()["message"]["content"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let first = turns()[0].clone();
+        assert!(first.contains("Can you send the rollout plan by Friday?") && first.contains("write to omar@acme.example"), "{first}");
+        assert!(!first.contains("mail-ooo"), "{first}");
+        // Read again on the user's word: back in the queue, and the rules leave it to the extract run.
+        assert!(ledger::read_again(&id, "mail-nope").is_err());
+        assert!(ledger::read_again(&id, "mail-ask").unwrap_err().to_string().contains("isn't read yet"), "the fake read nothing: still waiting");
+        ledger::read_again(&id, "mail-ooo").unwrap();
+        assert!(ledger::pending(&id).unwrap().iter().any(|x| x["id"] == "mail-ooo"));
+        let v = run(&id).unwrap();
+        assert_eq!(v["set_aside"], json!([]), "not set aside again: {v}");
+        assert!(turns().last().unwrap().contains("I am out of the office until Monday."), "read this time");
     }
 
     #[test]

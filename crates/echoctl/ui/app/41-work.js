@@ -318,9 +318,12 @@ function projectWork(p) {
   const all = Object.values(N).filter((n) => n.kind !== 'epic' && n.state !== 'merged' && n.state !== 'deleted')
   const sync = w.sync || {}
   const review = workToReview(w)
+  // Mail the last sync set aside as noise: how many, each with why on hover.
+  const aside = sync.set_aside || []
+  const asideText = aside.length ? `<span title="${esc(aside.map((a) => `${a.title || a.id}: ${a.why}`).join('\n'))}">${aside.length} mail${aside.length === 1 ? '' : 's'} set aside</span>` : ''
   const syncText = sync.state === 'running' ? `${esc((sync.message || 'reading calls').replace(/^reading/, 'Reading'))}…`
     : sync.state === 'failed' ? `<span class="error" title="${esc(sync.message || '')}">Sync failed</span>`
-    : [sync.at ? `Synced ${esc(hm(new Date(sync.finished_at || sync.at)))}` : 'Not synced yet', w.pending ? `${w.pending} call${w.pending === 1 ? '' : 's'} to read` : '', review.length ? `<span class="wk-warn">${review.length} to review</span>` : ''].filter(Boolean).join(' · ')
+    : [sync.at ? `Synced ${esc(hm(new Date(sync.finished_at || sync.at)))}` : 'Not synced yet', w.pending ? `${w.pending} call${w.pending === 1 ? '' : 's'} to read` : '', asideText, review.length ? `<span class="wk-warn">${review.length} to review</span>` : ''].filter(Boolean).join(' · ')
   const counts = Object.fromEntries(KIND_FILTERS.map(([k]) => [k, all.filter((n) => !k || n.kind === k).length]))
   const V = wv()
   const owners = workOwners(all, V, w.me || {})
