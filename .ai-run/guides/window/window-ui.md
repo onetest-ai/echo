@@ -17,7 +17,7 @@ rely on (`ref: <section>`). It changes with the code; these rules change only by
 - R7. A setting is saved as the value shown, never toggled from a stored one; a flow that needs a dialog, sign-in or download runs the tray's action by name. Evidence: `window::settings::settings_set` (ref: Settings)
 - R8. Replace a region of the page only when its HTML changed, and update a focused editor in place. Evidence: `patch` (window script) (ref: Rendering)
 - R9. A palette action runs as its button's click, never its own copy of the code. Evidence: `press` (window script)
-- R10. One scroll per card, never the page: the view's head stays put, each card scrolls inside with a least height and is never squeezed. Evidence: `.tp-list > .set-card` (window styles)
+- R10. One scroll per card, never the page: the view's head stays put, each card scrolls inside with a least height and is never squeezed — but a plugin's widget on Today or a dashboard never scrolls inside: what it doesn't hold folds behind "+N more", shown in place, and the wheel over it scrolls the page. Evidence: `.tp-list > .set-card` (window styles), `pluginFits` (window script)
 - R11. Never write the user's notes when their text is unchanged; a save that meets an outside change keeps the other version beside it. Evidence: `calls::save_my_notes`
 - R12. One leave (close, quit, update) at a time, and the page saves first. Evidence: `tray::Leaving`
 - R13. An Inbox item becomes Done only when its source was read. Evidence: `attention::view`
