@@ -727,7 +727,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/knowledge.js", "/assets/knowledge.css", "/api/kn", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/plugins", "/api/deliver", "/api/sessions", "/api/ptys"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/knowledge.js", "/api/kn", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/plugins", "/api/deliver", "/api/sessions", "/api/ptys"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
@@ -884,6 +884,8 @@ mod tests {
         assert!(get_json("/api/kn/twin/page?path=..%2F..%2Fx.md")["error"].is_string(), "a bad path is an error, not a page");
         let js = respond(&Request::builder().uri("echo://localhost/assets/knowledge.js").body(Vec::new()).unwrap());
         assert_eq!(js.status(), 200);
+        assert!(!String::from_utf8_lossy(js.body()).contains("knIngestReview"), "feature UI belongs to the installed plugin");
+        assert!(!assets::index_html().contains("assets/knowledge.css"));
         assert!(assets::index_html().find("assets/knowledge.js").unwrap() < assets::index_html().find("assets/app.js").unwrap(), "Knowledge's script loads before app.js");
         let img = respond(&Request::builder().uri("echo://localhost/api/kn/twin/asset?path=knowledge%2Fnope.png").body(Vec::new()).unwrap());
         assert_eq!(img.status(), 404);

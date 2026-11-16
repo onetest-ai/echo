@@ -31,6 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | Key | Shape and use |
 |---|---|
 | `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings"; `{"skip": true}` is accepted and changes nothing |
+| `knowledge` | `{}`: a client of Echo's native Knowledge engine: connected vaults, edits, minutes export, source import and guarded vault AI workflows (§ Native Knowledge) |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -128,6 +129,29 @@ plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence
 - `ctx.claude.installPlugin(spec)` installs the channel plugin the manifest names (`uses.channel.plugin`) into the
   default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec; an
   install in a routine's or Yolo's run preparing and asking is refused. Evidence: `capabilities::describe_channel`
+
+## Native Knowledge
+
+- With `uses.knowledge: {}`, `await ctx.knowledge.read(path)` reads a native JSON view: `api/kn` or
+  `api/kn/<vault>/<view>?<query>`. Agent views are explicitly limited to tree, page, find, graph, checks, health
+  (including finding detail), history and version. Mail/chat searches, calls, previews, UI jobs, settings and
+  terminal-resume routes are refused before dispatch, including encoded paths. Paths and page content are validated
+  by the existing vault engine. Every request checks the enabled plugin and its manifest.
+- The client half gets `ctx.knowledge` only when the installed snapshot declares that capability. `read(path)`
+  also supports the vault's terminal-resume view and the call attachment picker. `send(action)` sends the native
+  vault UI's actions; their existing file, source, profile and guard checks still apply. `register(view)` installs
+  one owned renderer for the legacy Knowledge routes, call chips/actions, palette, overlay and terminal view.
+- `context()` returns detached selected-call/Knowledge metadata, thread choices (`id/name/group`), client choices
+  (`id/name`), Recall availability and the current notice; `profiles()` returns only profile id/name/kind and minutes
+  model labels; `tabs()` returns other Knowledge tabs. `closeCallMenu()` and `refreshCall()` keep call UI state in Echo. The `terminal` methods
+  (`get/input/open/start/restart/view/saved`) expose vault-terminal operations, not Echo's mutable terminal registry.
+  `input(key, data)` resolves only the current live vault terminal; generic `send` refuses raw `pty_input` actions.
+- The Knowledge plugin supplies all seven tabs and its styles. Echo retains its native registry, receipts, files,
+  safe renderer, Git and guarded conversation/ingest/health engine. Disabling, updating or removing the client
+  stops native vault runs and terminals, including when changed from another process. Native automatic exports
+  start only while a plugin with Knowledge access is enabled; explicit legacy CLI commands remain available.
+- Existing `#kn`, `echo://page` links and native `/api/kn` routes remain compatibility entry points. The installed
+  package does not own or delete the native registry or user vaults. This is a native-backed client extraction.
 
 ## Delivery
 
@@ -364,6 +388,9 @@ Evidence: `jshost::work::check_rows`
   `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`,
   `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`). Echo takes out what a plugin
   added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
+- `onUnload(fn)` registers cleanup (timers, graph observers); `listenWindow(type, fn, options)` owns a window
+  listener like `listen` owns a document listener. `ui.patch(element, html)` uses Echo's focus-preserving patcher.
+  `await ui.stylesheet(path)` loads a CSS file inside the package, versioned and removed with that client.
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or

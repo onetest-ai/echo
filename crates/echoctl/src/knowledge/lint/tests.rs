@@ -560,3 +560,29 @@ fn a_check_its_echo_left_running_failed() {
 fn page_sha(text: &str) -> String {
     crate::knowledge::page::sha(text.as_bytes())
 }
+
+#[cfg(unix)]
+#[test]
+fn an_applied_ai_insertion_is_not_offered_again() {
+    let (_env, root) = paths::testenv::folders("kn-lint-insertion-once");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    let old = "# Northwind Retail\n";
+    let new = "# Northwind Retail\n\n> Summary: a made-up retail client.\n";
+    let raw = json!({"kind": "missing_summary", "title": "Northwind needs a summary",
+        "pages": [{"path": CLIENT, "quote": "A made-up retail client."}],
+        "fix": {"path": CLIENT, "old": old, "new": new}});
+    script(&p, "lint.jsonl", &[init(), findings(&p, 1, json!([raw])), result()]);
+    ran(&v);
+    let listed = ai_listed(&v);
+    assert_eq!(listed.len(), 1);
+    let key = listed[0]["key"].as_str().unwrap();
+    let fx = health::fix(&v, key, None).unwrap();
+    assert_eq!(health::apply(&v, &[fx]).unwrap().written, [CLIENT]);
+    assert_eq!(read(&v.root, CLIENT).matches(new).count(), 1);
+    assert!(ai_listed(&v).is_empty(), "an applied insertion cannot be offered a second time");
+    assert!(health::fix(&v, key, None).is_err());
+    fixture::write(&v.root, CLIENT, CLIENT_TEXT);
+    assert_eq!(ai_listed(&v).len(), 1, "removing the inserted summary makes the original finding relevant again");
+}

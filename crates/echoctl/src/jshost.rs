@@ -160,6 +160,7 @@ const PRELUDE: &str = r#"
     scripts: {
       run: (skill, script, args, opts) => later('scripts.run', [String(skill), String(script), (args || []).map(String), opts || {}]),
     },
+    knowledge: { read: (path) => later('knowledge.read', String(path)) },
     claude: {
       run: (opts) => later('claude.run', opts),
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
@@ -478,6 +479,7 @@ pub fn sync_only(id: &str) {
 }
 
 fn sync_some(only: Option<&str>) {
+    plugins::knowledge::sync_lifecycle();
     let want: BTreeMap<String, PathBuf> = plugins::enabled()
         .into_iter()
         .filter(|p| only.is_none_or(|o| o == p.id))

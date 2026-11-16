@@ -3,6 +3,20 @@
 use super::*;
 
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
+    if let Some(rest) = path.strip_prefix("/api/kn-plugin/") {
+        let result = (|| -> anyhow::Result<Response<Cow<'static, [u8]>>> {
+            let (id, op) = rest.split_once('/').ok_or_else(|| anyhow::anyhow!("no such Knowledge service"))?;
+            crate::plugins::knowledge::authorize(id)?;
+            anyhow::ensure!(op == "read", "no such Knowledge service");
+            let route = query_param(req.uri().query().unwrap_or(""), "path").unwrap_or_default();
+            if route.starts_with("api/calls?") {
+                let request = Request::builder().uri(format!("/{route}")).body(Vec::new())?;
+                return call::route("/api/calls", &request).ok_or_else(|| anyhow::anyhow!("no calls view"));
+            }
+            Ok(json_reply(crate::plugins::knowledge::client_read(id, &route)?))
+        })();
+        return Some(result.unwrap_or_else(|e| json_reply(json!({"error": format!("{e:#}")}))));
+    }
     Some(match path {
         // Knowledge (spec K4–K9): the vaults, a vault's tree, pages, graph, checks, history, images; the folder picked.
         "/api/kn" => json_reply(crate::knowledge::api::state()),
@@ -18,6 +32,11 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
 }
 
 pub(super) fn handle(v: &Value) -> Option<Handled> {
+    if v["cmd"].as_str().is_some_and(|c| c.starts_with("kn_")) {
+        if let Some(id) = v["plugin"].as_str() {
+            if let Err(e) = crate::plugins::knowledge::authorize(id) { return Some(notice(&format!("{e:#}"))); }
+        }
+    }
     Some(match v["cmd"].as_str().unwrap_or("") {
         // Knowledge: the system's folder dialog (the page polls `/api/kn/pick`), a file shown in Finder / Explorer or
         // opened in Obsidian, and every other `kn_*` action as a job the page polls (`/api/kn/jobs`).

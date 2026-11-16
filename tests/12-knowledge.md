@@ -300,7 +300,8 @@ Use a made-up vault with a few broken links and pages missing from the index (th
 - The score rises and Home's card follows. Before the first AI check the card says "code checks only"; after it,
   Freshness counts.
 - Each AI finding shows quotes that are on their pages (open the page and look); findings whose quotes aren't were
-  dropped and counted ("N dropped: their quotes aren't in the pages").
+  dropped and counted ("N dropped: their quotes aren't in the pages"). A successfully applied AI insertion is no longer
+  offered, including a summary inserted after a heading that remains on the page; applying it cannot duplicate it.
 
 ---
 

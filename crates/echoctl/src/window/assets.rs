@@ -3,7 +3,6 @@
 use super::*;
 
 const KN_JS: &str = include_str!("../../ui/knowledge.js");
-const KN_CSS: &str = include_str!("../../ui/knowledge.css");
 
 pub(super) const INDEX: &str = include_str!("../../ui/index.html");
 // Joined at build time from the parts in `ui/app/` and `ui/css/` (build.rs).
@@ -42,7 +41,6 @@ pub(super) fn route(path: &str, _req: &Request<Vec<u8>>) -> Option<Response<Cow<
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),
         "/assets/app.css" => reply(200, "text/css; charset=utf-8", APP_CSS.as_bytes().to_vec()),
         "/assets/knowledge.js" => reply(200, "text/javascript; charset=utf-8", KN_JS.as_bytes().to_vec()),
-        "/assets/knowledge.css" => reply(200, "text/css; charset=utf-8", KN_CSS.as_bytes().to_vec()),
         "/assets/logo.png" => reply(200, "image/png", LOGO_PNG.to_vec()),
         "/assets/vendor/xterm.js" => reply(200, "text/javascript; charset=utf-8", XTERM_JS.as_bytes().to_vec()),
         "/assets/vendor/xterm-addon-fit.js" => reply(200, "text/javascript; charset=utf-8", XTERM_FIT_JS.as_bytes().to_vec()),

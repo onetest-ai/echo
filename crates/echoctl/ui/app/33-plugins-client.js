@@ -64,11 +64,14 @@ function threadSlotAfter(root, items, thread, log) {
 // end of the thread slot block
 /** The thread a `thread.profile` row is drawn for. */
 const slotThread = (p) => ({ id: p.id, name: p.name, client: p.client || null })
-function pluginCtx(id) {
+function pluginCtx(id, caps = []) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
-  const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
+  const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [], cleanups: [], windowListeners: [] }
   return {
     id,
+    ...(caps.includes('knowledge') ? { knowledge: knowledgePluginCtx(id) } : {}),
+    onUnload: (fn) => { owned.cleanups.push(fn) },
+    listenWindow: (type, fn, opts) => { window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
     /** A document listener that goes when the plugin is switched off, updated or removed. */
     listen: (type, fn, opts) => { document.addEventListener(type, fn, opts); owned.listeners.push([type, fn, opts]) },
     call: async (command, args = {}) => {
@@ -113,13 +116,21 @@ function pluginCtx(id) {
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
     ui: {
-      esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
+      esc, patch, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
       /** Put text on the clipboard (a code to paste elsewhere) on the user's click or key (`copyAllowed`: a guard
        *  against accidental copies, not a security boundary). At most 10,000 characters. */
       copy: (text) => {
         if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('the clipboard is filled only on your click')
         send({ cmd: 'copy', text: String(text).slice(0, 10000) })
       },
+      /** A stylesheet in its installed package, owned and removed with this client. */
+      stylesheet: (path) => new Promise((resolve, reject) => {
+        if (!/^[a-zA-Z0-9_/-]+\.css$/.test(path) || path.split('/').includes('..')) { reject(new Error('Not a plugin stylesheet')); return }
+        const el = document.createElement('link'); el.rel = 'stylesheet'; el.dataset.plugin = id
+        el.onload = resolve; el.onerror = () => reject(new Error(`Could not load ${path}`))
+        el.href = `plugin/${encodeURIComponent(id)}/${path}?v=${encodeURIComponent(Plugins.loaded[id] || '')}`
+        owned.styles.push(el); document.head.appendChild(el)
+      }),
       /** Its CSS in the page, taken out when it unloads. */
       style: (css) => { const el = document.createElement('style'); el.dataset.plugin = id; el.textContent = String(css); document.head.appendChild(el); owned.styles.push(el) },
       /** Echo's graph (Sigma over graphology, as the Brain's): draw(box, key, build, {click}), focus, select, find. */
@@ -152,7 +163,7 @@ async function loadPluginClientsNow(snapshot) {
     try {
       const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(key(x))}`, location.href).href)
       if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
-      await m.apply(pluginCtx(x.id))
+      await m.apply(pluginCtx(x.id, x.caps || []))
       Plugins.applied[x.id] = true
       delete Plugins.errors[x.id]
     } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
@@ -169,11 +180,14 @@ async function pluginsChanged() {
   render()
 }
 function unloadPlugin(id) {
+  Kn.unload(id);
   for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)
   // Switched off or removed (not an update, which loads it again right away): its page goes.
   setTimeout(() => { if (S.view && S.view.startsWith(id + ':') && !ACTIVITIES.some((a) => a.id === S.view)) { S.view = 'calls'; go('calls') } }, 1500)
   const owned = Plugins.owned[id]
   if (owned) {
+    for (const fn of owned.cleanups || []) { try { fn() } catch (e) { console.error(`plugin ${id} cleanup:`, e) } }
+    for (const [type, fn, opts] of owned.windowListeners || []) window.removeEventListener(type, fn, opts)
     for (const [type, fn, opts] of owned.listeners) document.removeEventListener(type, fn, opts)
     for (const el of owned.styles) el.remove()
     delete Plugins.owned[id]

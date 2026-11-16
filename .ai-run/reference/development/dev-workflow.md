@@ -46,9 +46,11 @@ An agent's worktree builds with `CARGO_TARGET_DIR=<worktree>/target`; `serve.sh`
 ## A dev app beside Echo
 
 - Its own folders: `ECHOCTL_CONFIG_DIR=<dir>` and `ECHOCTL_HOME=<dir>` (`app::record_app_path`, `paths::config_dir`).
-- Run it in the foreground with `target/debug/echoctl app run` (`--no-tray` without the icon), or in the background with
-  `target/debug/echoctl app start`: `app::spawn_app` opens the installed bundle only when the running binary is inside
-  one, so a dev build starts itself, with the folders of its environment. Stop it with `echoctl app quit`.
+- Run it in the foreground with `target/debug/echoctl app run`, or in the background with
+  `target/debug/echoctl app start`. `--no-tray` runs the watcher without the UI event loop and cannot open a native window:
+  use `app run` without that flag for native window checks. `app::spawn_app` opens the installed bundle only when the
+  running binary is inside one, so a dev build starts itself, with the folders of its environment. Stop it with
+  `echoctl app quit`.
 
 ## Debugging
 

@@ -582,6 +582,9 @@ fn checked(pages: &Pages, raw: &Raw) -> Option<Finding> {
                 return None;
             }
             once(text, &x.old)?;
+            if x.new.contains(&x.old) && text.contains(&x.new) {
+                return None;
+            }
             Some(AiFix { path, old: x.old.clone(), new: x.new.clone() })
         }
     };

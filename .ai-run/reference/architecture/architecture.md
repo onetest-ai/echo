@@ -16,7 +16,7 @@ in the same PR. The rules are in `.ai-run/guides/architecture/architecture.md`.
 | Tray and window | `tray.rs`, `window/<area>.rs`, `terminal.rs`, `ui/` |
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` |
-| Knowledge vaults | `knowledge/`, `cli/knowledge.rs`, `window/knowledge.rs`, `ui/knowledge.js` |
+| Knowledge vaults | native engine in `knowledge/`, `cli/knowledge.rs`, `window/knowledge.rs`; plugin bridge in `plugins/knowledge.rs`, `ui/knowledge.js` and `ui/app/34-plugin-knowledge.js`; feature client in echo-plugins `plugins/knowledge/` |
 | Recall (Brain) | `brain/` (feature `brain`) |
 | Echo plugins | `plugins.rs`, `jshost.rs`, `claudejob.rs`, `share.rs` (feature `js`) |
 | Claude Code plugin | `plugin/` |
@@ -121,5 +121,6 @@ line → an event in `stream.rs` (shared by Ask, ingest and AI checks); a conver
 commits in `chat.rs` and `chat/` (`chat.rs` is `tray`-only); a source or its adding in `sources.rs` / `extract.rs`; an
 ingest run in `ingest.rs` and its review in `ingest/review.rs`; a check, its fix and the score in `health.rs` (an AI
 check's run in `lint.rs`); Home in `home.rs`; every change Echo makes also calls `activity::record`. Routes and `kn_*`
-IPC go in `api.rs`, the window in `ui/knowledge.js` (pure parts in marked blocks with node tests), and what a run may
-touch in `guard.rs`.
+IPC go in `api.rs`, and what a run may touch in `guard.rs`. The separate Knowledge Echo plugin owns the seven-tab
+window client and its marked pure blocks/tests. `ui/knowledge.js` retains route compatibility and owned rendering
+hooks; `knowledgePluginCtx` exposes the native-backed client services without exposing Echo's state or terminals.

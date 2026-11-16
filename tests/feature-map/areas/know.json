@@ -3,7 +3,7 @@
  "name": "Knowledge",
  "order": 300,
  "status": "rework",
- "notes": "Recall (the Brain) and plugin knowledge tabs; top-level features only",
+ "notes": "Recall and plugin Knowledge clients; the Knowledge plugin owns the seven-tab vault UI while Echo retains its native engine",
  "features": [
   {
    "id": "F-KNOW-01",
@@ -14,7 +14,7 @@
   },
   {
    "id": "F-KNOW-02",
-   "feature": "Settings → Knowledge → Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
+   "feature": "Settings \u2192 Knowledge \u2192 Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -45,6 +45,20 @@
    "feature": "Plugins add tabs and settings rows to Knowledge (e.g. Obsidian vaults)",
    "priority": "low",
    "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-07",
+   "feature": "The separate Knowledge plugin owns Home, Pages, Graph, Ask, Ingest, Health and Settings; legacy routes, call controls and native vault state remain compatible",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-08",
+   "feature": "Native Knowledge plugin services require declared access and an enabled package; disable/update/remove stop vault jobs and terminals while retaining user files and drafts",
+   "priority": "critical",
+   "check": "agent",
    "axes": []
   }
  ]

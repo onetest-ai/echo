@@ -664,7 +664,7 @@ pub fn write(v: &Vault, run: &str, only: &[String]) -> Result<Written> {
     }
     let (kept, finished) = update_review(&dir, |rv| {
         for p in &out.written {
-            rv.answers.insert(p.clone(), Answer { state: "written".into(), ..Default::default() });
+            rv.answers.entry(p.clone()).or_default().state = "written".into();
         }
         for p in &out.changed_since {
             if let Some(a) = rv.answers.get_mut(p) {

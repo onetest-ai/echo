@@ -5,6 +5,7 @@ use super::*;
 
 pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
+        "knowledge.read" => crate::plugins::knowledge::read(id, arg.as_str().unwrap_or("")),
         // A script it declared (`uses.scripts`): a read-only routine's host runs only one marked readonly.
         "scripts.run" => {
             let args: Vec<String> = arg[2].as_array().into_iter().flatten().map(|a| a.as_str().map(str::to_owned).ok_or_else(|| anyhow!("a script's arguments are strings"))).collect::<Result<_>>()?;

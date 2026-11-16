@@ -267,6 +267,12 @@ pub fn close(id: u64) {
     }
 }
 
+/// An optional vault client is unloaded: stop only its vault terminals.
+pub fn close_vaults() {
+    let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, t)| t.key.starts_with("claude:vault:")).map(|(id, _)| *id).collect();
+    ids.into_iter().for_each(close);
+}
+
 /// Echo is going: every terminal's program is stopped, and every Ask conversation's, ingest run's and AI check's.
 pub fn close_all() {
     let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();

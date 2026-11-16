@@ -976,6 +976,10 @@ fn the_proposed_text_is_served_and_requeue_waits_for_the_review() {
     assert_eq!((t["text"].as_str(), t["edited"].as_bool()), (Some("# My own words\n"), Some(true)));
     assert!(proposed(&v, &run, "knowledge/nope.md").is_err());
     write(&v, &run, &strings(&[NOTE])).unwrap();
+    let written = proposed(&v, &run, NOTE).unwrap();
+    assert_eq!(written["state"], "written");
+    assert_eq!(written["text"], "# My own words\n", "the Written card shows the text the user actually approved");
+    assert_eq!(written["edited"], true);
     let e = requeue(&v, &strings(&[SOURCE]));
     assert!(e.as_ref().is_err_and(|e| e.to_string().contains("still has changes waiting")), "{e:?}");
     discard(&v, &run).unwrap();

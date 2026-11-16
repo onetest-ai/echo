@@ -36,6 +36,7 @@ mod capabilities;
 pub use capabilities::*;
 pub mod agent;
 pub mod scripts;
+pub mod knowledge;
 pub mod shared;
 mod settings;
 pub use settings::*;
@@ -1153,6 +1154,7 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         }
     }
     // Its scripts running from the version replaced stop with everything they started.
+    knowledge::stop(id);
     scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(&dest);
     forget_read(id);
@@ -1251,6 +1253,7 @@ pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
+    if !on { knowledge::stop(id); }
     if on {
         let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
         if let Ok(m) = read_manifest(&plugin_dir(&p)) {
@@ -1280,6 +1283,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
+    knowledge::stop(id);
     // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
     shared::bind_all();
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;

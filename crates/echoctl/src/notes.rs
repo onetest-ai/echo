@@ -595,7 +595,7 @@ fn notify_outcome(dir: &Path) {
         // Said once, here, once the run is `done` (the watcher's own check skips calls with a run).
         "done" => {
             // Into the vaults that take them (spec K3-04), on a thread of their own.
-            let vaults = crate::knowledge::export::minutes_written(dir);
+            let vaults = crate::plugins::knowledge::minutes_written(dir);
             crate::app::notify("Minutes ready", &with_vaults(&title, &vaults));
             #[cfg(feature = "js")]
             crate::share::minutes_written(dir);

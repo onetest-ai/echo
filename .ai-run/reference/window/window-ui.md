@@ -22,6 +22,8 @@ rules are in `.ai-run/guides/window/window-ui.md`.
 
 - Page assets are compiled in from `crates/echoctl/ui/` (`window::reply`).
 - Third-party JS is vendored in `ui/vendor/` with its licence and README entry.
+- Knowledge's feature client and CSS are installed assets of the separate Knowledge plugin. The compiled
+  `ui/knowledge.js` is its small compatibility/registration bridge; `knowledgePluginCtx` supplies its explicit ctx.
 
 ## Parts
 

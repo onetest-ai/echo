@@ -14,6 +14,7 @@ pub(super) struct Capability {
 }
 
 pub(super) const CAPABILITIES: &[Capability] = &[
+    Capability { id: "knowledge", ready: true, describe: super::knowledge::describe },
     Capability { id: "claude", ready: true, describe: describe_claude },
     Capability { id: "schedule", ready: true, describe: describe_schedule },
     Capability { id: "deliver", ready: true, describe: describe_deliver },

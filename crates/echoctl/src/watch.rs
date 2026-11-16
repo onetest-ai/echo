@@ -1150,7 +1150,7 @@ fn notify_notes_ready() {
         if dir.join("notes.md").exists() && dir.join(crate::calls::ACTIONS).exists() {
             let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             let title = meta["title"].as_str().map(str::to_owned).unwrap_or_else(|| "your call".into());
-            crate::app::notify("Minutes ready", &crate::notes::with_vaults(&title, &crate::knowledge::export::minutes_written(dir)));
+            crate::app::notify("Minutes ready", &crate::notes::with_vaults(&title, &crate::plugins::knowledge::minutes_written(dir)));
             #[cfg(feature = "js")]
             crate::share::minutes_written(dir);
             return false;
