@@ -33,7 +33,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         // The widgets Today can show (the catalog: Echo's, later the plugins').
         "/api/widgets" => json_reply(json!(crate::widgets::catalog())),
         // The dashboards beside every thread's Brief and every client's Overview, in their order.
-        "/api/boards" => json_reply(json!({"thread": crate::boards::list(crate::boards::Kind::Thread), "client": crate::boards::list(crate::boards::Kind::Client)})),
+        "/api/boards" => json_reply(crate::boards::view()),
         // A thread's or a client's dashboard (`page=thread:<id>`): its layout, each plugin widget's data as that page asks
         // it (`all=1`, editing: every widget it offers, previewed), and the ids it offers.
         "/api/dashboard" => {
@@ -235,6 +235,10 @@ fn board_op(v: &Value) -> anyhow::Result<()> {
         "rename" => boards::rename(kind, id, name).map(|_| ()),
         "move" => boards::move_to(kind, id, v["to"].as_u64().unwrap_or(0) as usize).map(|_| ()),
         "remove" => boards::remove(kind, id),
+        // A plugin's preset: added; its newer version taken or kept off.
+        "add_preset" => boards::add_preset(v["plugin"].as_str().unwrap_or(""), v["preset"].as_str().unwrap_or("")).map(|_| ()),
+        "preset_update" => boards::take_update(kind, id, false).map(|_| ()),
+        "preset_keep" => boards::take_update(kind, id, true).map(|_| ()),
         o => anyhow::bail!("unknown dashboard operation {o:?}"),
     }
 }

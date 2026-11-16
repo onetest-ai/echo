@@ -240,7 +240,9 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             let mut all = vec![];
             let mut each = vec![];
             for f in &folders {
-                let (id, problems) = agent::check_folder(f);
+                let (id, mut problems) = agent::check_folder(f);
+                // Its dashboards' widgets of the plugins beside it (a marketplace's folder).
+                problems.extend(plugins::presets::check_siblings(f));
                 if !json {
                     if problems.is_empty() {
                         println!("{id} ({}): ok", f.display());

@@ -44,6 +44,7 @@ use sources::*;
 mod snapshot;
 pub use snapshot::snapshot;
 pub mod mine;
+pub mod presets;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -103,6 +104,9 @@ pub struct Manifest {
     /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widgets: Vec<WidgetDef>,
+    /// Dashboards it offers ready-made (`presets`): the user adds one, or not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dashboards: Vec<presets::PresetDef>,
     /// Its package skills: folders in its package (`skills/<name>`, Agent Skills format: `SKILL.md`, `scripts/`,
     /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -424,6 +428,7 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     for w in &m.widgets {
         put(man, check_widget(w, &m, &mut ids));
     }
+    put(man, presets::check(&m));
     // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
     // only, ending `.svg` — what the window serves as an image.
     if let Some(i) = &m.icon {
@@ -1091,6 +1096,8 @@ pub struct Review {
     pub commit: String,
     pub uses: Vec<String>,
     pub new_uses: Vec<String>,
+    /// What it offers besides (its dashboards): said, never asked for.
+    pub offers: Option<String>,
     /// Why this Echo can't install it (shown; installing refuses).
     pub blocked: Option<String>,
 }
@@ -1099,7 +1106,7 @@ fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Revi
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
     let uses = sheet(m)?;
     let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
-    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, blocked: why_not(m) })
+    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, offers: presets::offers(m), blocked: why_not(m) })
 }
 
 /// The permission sheet for installing `id` (nothing changes).
@@ -1455,6 +1462,9 @@ pub fn print_review(r: &Review) {
         let new = if r.new_uses.contains(u) { " (new)" } else { "" };
         println!("  • {u}{new}");
     }
+    if let Some(o) = &r.offers {
+        println!("  {o}");
+    }
 }
 
 #[cfg(test)]
@@ -1535,7 +1545,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], dashboards: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");

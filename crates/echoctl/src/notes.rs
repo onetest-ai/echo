@@ -190,6 +190,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "project" if second == "work" && w.len() < 4 => None,
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
+        "dashboard" if matches!(second, "list" | "presets" | "export") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
         _ => Some("change"),
     }
@@ -1510,7 +1511,9 @@ mod tests {
         assert_eq!(k("project create Another"), Some("change"));
         assert_eq!(k("deliver send --title x"), Some("send"));
         assert_eq!(k("plugin script kit staffing scripts/read.sh -- ACME-1"), Some("change"));
-        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
+        assert_eq!(k("dashboard add-preset acme-crm staffing"), Some("change"));
+        assert_eq!(k("dashboard import staffing.json --client"), Some("change"));
+        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events", "dashboard list --client", "dashboard presets --thread", "dashboard export staffing --client"] {
             assert_eq!(k(read), None, "{read}");
         }
         let (_env, root) = crate::paths::testenv::folders("notes-run-actions");
