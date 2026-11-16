@@ -34,37 +34,58 @@ const START_SECS: u64 = 90;
 /// How long the guard holds a tool call for the run's mark: within its hook time limit (`guard::settings`, 10 s).
 const HOLD_SECS: u64 = 8;
 
-/// Where the marks are: inside `.plugins/`, which only Echo writes (`plugins::agent::inside_root`).
+/// Where the marks are: inside `.plugins/`, which the sessions' guards refuse to write to (`plugins::agent::inside_root`)
+/// and the layout's prune keeps (`plugins::agent::PROOF`).
 pub fn proof_dir() -> PathBuf {
-    crate::plugins::agent::root().join(".proof")
+    crate::plugins::agent::root().join(crate::plugins::agent::PROOF)
 }
 
 fn mark(value: &str) -> PathBuf {
     proof_dir().join(value)
 }
 
-/// A fresh value for one run (32 hex digits); marks a day old are swept.
-pub fn new_value() -> Result<String> {
-    let mut b = [0u8; 16];
+fn random_hex(n: usize) -> Result<String> {
+    let mut b = vec![0u8; n];
     getrandom::fill(&mut b).map_err(|e| anyhow!("no secure random source: {e}"))?;
-    if let Ok(rd) = fs::read_dir(proof_dir()) {
-        for e in rd.flatten() {
-            if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().unwrap_or_default() > Duration::from_secs(86_400)) {
-                let _ = fs::remove_file(e.path());
-            }
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// A fresh value for one run (32 hex digits). A run's mark goes when it ends (the relay's end, a terminal's exit), never
+/// by age; its files (`proof-<id>…`, read only when Claude Code starts) go a day after.
+pub fn new_value() -> Result<String> {
+    sweep_files();
+    random_hex(16)
+}
+
+/// The proof's files a day old, left by a run that was killed.
+fn sweep_files() {
+    for e in fs::read_dir(paths::config_dir().join("minutes-run")).into_iter().flatten().flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().unwrap_or_default() > Duration::from_secs(86_400));
+        if old && e.file_name().to_string_lossy().starts_with("proof-") {
+            let _ = fs::remove_file(e.path());
         }
     }
-    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// The run with `value` is over: its mark goes.
+pub fn unmark(value: &str) {
+    if valid_value(value) {
+        let _ = fs::remove_file(mark(value));
+    }
 }
 
 fn valid_value(v: &str) -> bool {
     v.len() == 32 && v.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// The profile's command, as stored.
+/// The profile's command, as stored: a full path (one that isn't fails only this profile's jobs).
 pub fn command_of(p: &Profile) -> Result<PathBuf> {
     let w = p.wrapper.as_ref().filter(|_| p.kind == Kind::Wrapper).ok_or_else(|| anyhow!("{} names no command", p.name))?;
-    Ok(PathBuf::from(&w.command))
+    let c = PathBuf::from(&w.command);
+    if !c.is_absolute() {
+        bail!("{} names its program without a full path ({}) — add it again", p.name, w.command);
+    }
+    Ok(c)
 }
 
 /// Can a job start on it now: its command is still there.
@@ -128,25 +149,22 @@ fn find_in_login_shell(name: &str) -> Result<PathBuf> {
 /// Why `path` can't be a wrapper: inside Echo's data or config folder (a plugin's package or store among them).
 pub fn outside_echo(path: &Path) -> Result<()> {
     let real = |p: PathBuf| dunce::canonicalize(&p).unwrap_or(p);
+    // macOS and Windows file systems ignore case by default: so does this.
+    let fold = |p: &Path| if cfg!(any(target_os = "macos", windows)) { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() };
     for (root, what) in [(real(paths::home()), "Echo's data folder"), (real(paths::config_dir()), "Echo's own folder")] {
-        if path.starts_with(&root) {
+        if fold(path).starts_with(fold(&root)) {
             bail!("{} is inside {what} (where plugins and what they keep are): a wrapper is a program you installed", path.display());
         }
     }
     Ok(())
 }
 
-/// What `path --version` answers when it is Claude Code (its first line naming it), within 20 s.
+/// What `path --version` answers when it is Claude Code (its first line naming it), within 20 s — asked as a run on it
+/// would start it (the login shell's environment: a `#!/usr/bin/env node` wrapper finds its node).
 pub fn claude_version(path: &Path) -> Result<String> {
-    let mut c = Command::new(path);
-    c.arg("--version").current_dir(paths::home()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use crate::app::NoWindow;
-        c = c.no_window();
-    }
-    detach(&mut c);
-    let mut child = c.spawn().map_err(|e| anyhow!("{} can't be started: {e}", path.display()))?;
+    let p = Profile { id: "wrapper-check".into(), name: path.display().to_string(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false,
+        wrapper: Some(Wrapper { command: path.display().to_string(), offered_by: None }) };
+    let mut child = super::claude_command(&p, &["--version".into()], &paths::home(), false).map_err(|e| anyhow!("{} can't be started: {e:#}", path.display()))?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).with_context(|| format!("asking {} its version", path.display()))?;
     out.lines().map(str::trim).find(|l| l.contains("(Claude Code")).map(str::to_owned).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))
 }
@@ -212,14 +230,15 @@ fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.windows(2).find(|w| w[0] == flag).map(|w| w[1].as_str())
 }
 
-/// Replace `--settings <f>` with the proof's settings built on it (or add them): the new file's path.
-fn with_proof_settings(args: &mut Vec<String>, exe: &Path, value: &str, deny_all: bool, terminal: bool) -> Result<PathBuf> {
+/// Replace `--settings <f>` with the proof's settings built on it (or add them): the new file's path, named by `id` (never
+/// by the run's value).
+fn with_proof_settings(args: &mut Vec<String>, exe: &Path, value: &str, id: &str, deny_all: bool, terminal: bool) -> Result<PathBuf> {
     let at = args.iter().position(|a| a == "--settings");
     let base = match at.and_then(|i| args.get(i + 1)) {
         Some(f) => serde_json::from_slice(&fs::read(f).with_context(|| format!("reading the run's settings {f}"))?).with_context(|| format!("the run's settings {f} aren't JSON"))?,
         None => json!({}),
     };
-    let f = write_private(&format!("proof-{value}.json"), &serde_json::to_vec_pretty(&proof_settings(base, exe, value, deny_all, terminal))?)?;
+    let f = write_private(&format!("proof-{id}.json"), &serde_json::to_vec_pretty(&proof_settings(base, exe, value, deny_all, terminal))?)?;
     match at {
         Some(i) if i + 1 < args.len() => args[i + 1] = f.display().to_string(),
         _ => args.splice(0..0, ["--settings".to_string(), f.display().to_string()]).for_each(drop),
@@ -233,7 +252,7 @@ fn with_proof_settings(args: &mut Vec<String>, exe: &Path, value: &str, deny_all
 pub fn terminal_proof(args: &mut Vec<String>) -> Result<String> {
     let value = new_value()?;
     let exe = std::env::current_exe()?;
-    with_proof_settings(args, &exe, &value, false, true)?;
+    with_proof_settings(args, &exe, &value, &random_hex(6)?, false, true)?;
     Ok(value)
 }
 
@@ -288,7 +307,9 @@ pub fn is_print(args: &[String]) -> bool {
 /// prompt (`-p <prompt>`) taken out and given back as an environment variable. (args for `wrapper-run`, the prompt)
 pub fn relay_args(wrapper: &Path, args: &[String]) -> (Vec<String>, Option<String>) {
     let mut rest = args.to_vec();
-    let prompt = (rest.len() > 1 && rest[0] == "-p" && !rest[1].starts_with("--")).then(|| rest.remove(1));
+    // After `-p`, a flag (`--output-format`) or the prompt: a prompt is anything that isn't one plain flag word.
+    let flag = |a: &str| a.strip_prefix("--").is_some_and(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'));
+    let prompt = (rest.len() > 1 && rest[0] == "-p" && !flag(&rest[1])).then(|| rest.remove(1));
     let mut out = vec!["wrapper-run".to_string(), "--".to_string(), wrapper.display().to_string()];
     out.extend(rest);
     (out, prompt)
@@ -297,7 +318,8 @@ pub fn relay_args(wrapper: &Path, args: &[String]) -> (Vec<String>, Option<Strin
 /// What a run's start event must show: the guard's Claude Code, and nothing beyond what Echo set.
 #[derive(Debug, Default, PartialEq)]
 pub struct Expected {
-    pub mode: String,
+    /// The permission mode Echo set (None: it set none — the user's own, but never one that skips permissions).
+    pub mode: Option<String>,
     /// Echo's `--tools`: the built-in tools it may have (None: Echo set none, the session's own).
     pub tools: Option<Vec<String>>,
     /// With `--strict-mcp-config`: the MCP servers from Echo's `--mcp-config` files.
@@ -307,9 +329,9 @@ pub struct Expected {
 impl Expected {
     pub fn of(args: &[String]) -> Expected {
         let mode = if args.iter().any(|a| a == "--dangerously-skip-permissions") {
-            "bypassPermissions".to_string()
+            Some("bypassPermissions".to_string())
         } else {
-            value_after(args, "--permission-mode").unwrap_or("default").to_string()
+            value_after(args, "--permission-mode").map(str::to_owned)
         };
         let tools = value_after(args, "--tools").map(|t| t.split(',').map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned).collect());
         let mcp = args.iter().any(|a| a == "--strict-mcp-config").then(|| {
@@ -336,9 +358,13 @@ impl Expected {
             let [a, b, c] = crate::guard::MIN_CLAUDE;
             return Err(format!("it started Claude Code {} — Echo's guard needs {a}.{b}.{c} or later", if v.is_empty() { "of unknown version" } else { v }));
         }
+        // A run with no tools refuses every call at the gate: its mode doesn't matter.
         let mode = init["permissionMode"].as_str().unwrap_or("");
-        if mode != self.mode {
-            return Err(format!("it started Claude Code in permission mode {mode:?}, not Echo's {:?}", self.mode));
+        match &self.mode {
+            _ if self.none() => {}
+            Some(want) if mode != want => return Err(format!("it started Claude Code in permission mode {mode:?}, not Echo's {want:?}")),
+            None if mode == "bypassPermissions" => return Err("it started Claude Code skipping permissions, which Echo didn't".into()),
+            _ => {}
         }
         let tools: Vec<&str> = init["tools"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
         if let Some(want) = &self.tools {
@@ -407,9 +433,12 @@ enum Input {
 /// (args, the files made for it)
 fn prepare(mut args: Vec<String>, exe: &Path, value: &str, exp: &Expected) -> Result<(Vec<String>, Vec<PathBuf>)> {
     let mut made = vec![];
+    let id = random_hex(6)?;
     if let Some(i) = args.iter().position(|a| a == "--output-format") {
-        if args.get(i + 1).is_some_and(|f| f == "json") {
-            args[i + 1] = "stream-json".into();
+        match args.get(i + 1).map(String::as_str) {
+            Some("json") => args[i + 1] = "stream-json".into(),
+            Some("stream-json") => {}
+            other => bail!("a run through a wrapper needs JSON output, not {}", other.unwrap_or("none")),
         }
     } else {
         args.extend(["--output-format".into(), "stream-json".into()]);
@@ -423,14 +452,14 @@ fn prepare(mut args: Vec<String>, exe: &Path, value: &str, exp: &Expected) -> Re
     for flag in ["--system-prompt", "--append-system-prompt"] {
         if let Some(i) = args.iter().position(|a| a == flag) {
             if let Some(text) = args.get(i + 1).cloned() {
-                let f = write_private(&format!("proof-{value}{flag}.txt"), text.as_bytes())?;
+                let f = write_private(&format!("proof-{id}{flag}.txt"), text.as_bytes())?;
                 args[i] = format!("{flag}-file");
                 args[i + 1] = f.display().to_string();
                 made.push(f);
             }
         }
     }
-    made.push(with_proof_settings(&mut args, exe, value, exp.none(), false)?);
+    made.push(with_proof_settings(&mut args, exe, value, &id, exp.none(), false)?);
     Ok((args, made))
 }
 
@@ -453,6 +482,23 @@ pub fn relay(argv: &[String]) -> i32 {
         return 2;
     };
     let prompt = std::env::var(PROMPT_VAR).ok();
+    // Stopped (a job's time limit, Echo quitting): the wrapper's whole group goes, and the run's files and mark.
+    // Quickly: whoever stopped it kills it outright 3 s later.
+    let _ = ctrlc::set_handler(|| {
+        if let Some((pid, files, value)) = RUNNING.lock().ok().and_then(|r| r.clone()) {
+            remove_all(&files, &value);
+            #[cfg(unix)]
+            // SAFETY: signalling the process group of the wrapper this relay started.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGTERM);
+                std::thread::sleep(Duration::from_millis(800));
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            stop_wrapper(pid);
+        }
+        std::process::exit(1);
+    });
     let out = std::io::stdout();
     match relay_with(Path::new(wrapper), args.to_vec(), prompt, Box::new(std::io::stdin()), &mut out.lock(), START_SECS) {
         Ok(code) => code,
@@ -461,6 +507,21 @@ pub fn relay(argv: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// The wrapper this relay runs (its pid, its group's leader), the run's files and value: what a stop takes down.
+static RUNNING: std::sync::Mutex<Option<(u32, Vec<PathBuf>, String)>> = std::sync::Mutex::new(None);
+
+fn remove_all(made: &[PathBuf], value: &str) {
+    for f in made {
+        let _ = fs::remove_file(f);
+    }
+    unmark(value);
+}
+
+/// Stop the wrapper and everything it started (it leads its own group; on Windows its tree).
+fn stop_wrapper(pid: u32) {
+    super::stop_group(pid);
 }
 
 /// `relay`, its parts given (tests): the wrapper, its arguments, the prompt, this relay's stdin and stdout, how long the
@@ -482,10 +543,10 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
     };
     let (args, made) = prepare(args, &exe, &value, &exp).map_err(|e| format!("{e:#}"))?;
     let cleanup = |made: &[PathBuf]| {
-        for f in made {
-            let _ = fs::remove_file(f);
+        remove_all(made, &value);
+        if let Ok(mut r) = RUNNING.lock() {
+            *r = None;
         }
-        let _ = fs::remove_file(mark(&value));
     };
     let mut c = Command::new(wrapper);
     #[cfg(windows)]
@@ -494,6 +555,8 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
         c = c.no_window();
     }
     c.args(&args).env_remove(PROMPT_VAR).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+    // Its own group: a stop reaches a Claude Code it started as a child, too.
+    detach(&mut c);
     let mut child = match c.spawn() {
         Ok(ch) => ch,
         Err(e) => {
@@ -501,6 +564,9 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
             return Err(format!("{} can't be started: {e}", wrapper.display()));
         }
     };
+    if let Ok(mut r) = RUNNING.lock() {
+        *r = Some((child.id(), made.clone(), value.clone()));
+    }
     let mut child_in = child.stdin.take();
     let child_out = child.stdout.take().expect("piped");
     let (tx, rx) = std::sync::mpsc::channel::<String>();
@@ -570,7 +636,8 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
     };
     let code = match failed {
         Some(why) => {
-            stop_foreground(&mut child);
+            stop_wrapper(child.id());
+            let _ = child.wait();
             let _ = writeln!(out, "{}", stopped_line(&why)).and_then(|()| out.flush());
             cleanup(&made);
             return Err(why);
@@ -638,7 +705,7 @@ mod tests {
     #[test]
     fn the_start_event_must_show_what_echo_set() {
         let exp = Expected::of(&args(&["-p", "x", "--tools", "Bash,Read,Skill", "--strict-mcp-config", "--permission-mode", "dontAsk"]));
-        assert_eq!(exp, Expected { mode: "dontAsk".into(), tools: Some(args(&["Bash", "Read", "Skill"])), mcp: Some(vec![]) });
+        assert_eq!(exp, Expected { mode: Some("dontAsk".into()), tools: Some(args(&["Bash", "Read", "Skill"])), mcp: Some(vec![]) });
         assert!(exp.check(&init("2.1.400", "dontAsk", &["Bash", "Read"], &[])).is_ok(), "fewer tools are fine");
         assert!(exp.check(&init("2.1.200", "dontAsk", &["Bash"], &[])).unwrap_err().contains("2.1.200"), "too old for the guard");
         assert!(exp.check(&init("", "dontAsk", &["Bash"], &[])).unwrap_err().contains("unknown version"));
@@ -648,9 +715,17 @@ mod tests {
         assert!(exp.check(&init("2.1.400", "dontAsk", &["mcp__acme__send"], &[])).unwrap_err().contains("mcp__acme__send"));
         // A routine acting on its own: Echo sets no tools list; its mode is checked.
         let acts = Expected::of(&args(&["-p", "x", "--dangerously-skip-permissions"]));
-        assert_eq!((acts.mode.as_str(), acts.tools.is_none(), acts.mcp.is_none()), ("bypassPermissions", true, true));
+        assert_eq!((acts.mode.as_deref(), acts.tools.is_none(), acts.mcp.is_none()), (Some("bypassPermissions"), true, true));
         assert!(acts.check(&init("2.1.400", "bypassPermissions", &["Bash", "Write"], &["anything"])).is_ok());
-        assert_eq!(Expected::of(&args(&["-p"])).mode, "default");
+        // Echo set no mode (a routine preparing and asking): the user's own default mode, never one skipping permissions.
+        let own = Expected::of(&args(&["-p", "--tools", "Bash"]));
+        assert_eq!(own.mode, None);
+        assert!(own.check(&init("2.1.400", "acceptEdits", &["Bash"], &[])).is_ok());
+        assert!(own.check(&init("2.1.400", "default", &["Bash"], &[])).is_ok());
+        assert!(own.check(&init("2.1.400", "bypassPermissions", &["Bash"], &[])).unwrap_err().contains("skipping permissions"));
+        // No tools and no server (a lean job): every call refused at the gate, so its mode isn't checked.
+        let lean = Expected::of(&args(&["-p", "--tools", "", "--strict-mcp-config"]));
+        assert!(lean.check(&init("2.1.400", "plan", &[], &[])).is_ok());
         assert!(Expected::of(&args(&["-p", "--tools", "", "--strict-mcp-config"])).none(), "no tools, no servers: every call refused");
     }
 
@@ -879,5 +954,93 @@ printf '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}
         assert_eq!(wrapper_ready(&good, v, &exp, true, true), Ready::Pass, "checked once");
         assert!(matches!(wrapper_ready(&init("2.1.400", "default", &["Read"], &[]), v, &exp, true, false), Ready::Stop(_)));
         assert_eq!(wrapper_ready(&json!({"type": "assistant"}), v, &exp, true, true), Ready::Pass);
+    }
+
+    #[test]
+    fn the_marks_outlive_the_plugin_layouts_prune() {
+        let (_env, _root) = crate::paths::testenv::folders("wrapper-prune");
+        let v = new_value().unwrap();
+        fs::create_dir_all(proof_dir()).unwrap();
+        fs::write(mark(&v), b"").unwrap();
+        crate::plugins::agent::sync_all();
+        assert!(marked(&v), "a run's mark is kept while it runs");
+        unmark(&v);
+        assert!(!marked(&v));
+    }
+
+    #[test]
+    fn the_proofs_files_go_a_day_on_but_a_marks_never_goes_by_age() {
+        let (_env, _root) = crate::paths::testenv::folders("wrapper-sweep");
+        let dir = paths::config_dir().join("minutes-run");
+        fs::create_dir_all(&dir).unwrap();
+        let day_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
+        let old = dir.join("proof-0a0b0c.json");
+        fs::write(&old, "{}").unwrap();
+        fs::File::options().write(true).open(&old).unwrap().set_modified(day_ago).unwrap();
+        let fresh = dir.join("proof-0d0e0f.json");
+        fs::write(&fresh, "{}").unwrap();
+        let other = dir.join("session-x.json");
+        fs::write(&other, "{}").unwrap();
+        fs::File::options().write(true).open(&other).unwrap().set_modified(day_ago).unwrap();
+        let v = "0123456789abcdef0123456789abcdef";
+        fs::create_dir_all(proof_dir()).unwrap();
+        fs::write(mark(v), b"").unwrap();
+        fs::File::options().write(true).open(mark(v)).unwrap().set_modified(day_ago).unwrap();
+        new_value().unwrap();
+        assert!(!old.exists() && fresh.exists() && other.exists());
+        assert!(marked(v), "a terminal open for days keeps its mark");
+    }
+
+    #[test]
+    fn a_prompt_after_dash_p_is_never_taken_for_a_flag() {
+        let (_, prompt) = relay_args(Path::new("/w"), &args(&["-p", "--help me with the Acme call", "--verbose"]));
+        assert_eq!(prompt.as_deref(), Some("--help me with the Acme call"));
+        let (_, prompt) = relay_args(Path::new("/w"), &args(&["-p", "--output-format", "json"]));
+        assert_eq!(prompt, None);
+    }
+
+    #[test]
+    fn a_run_through_a_wrapper_needs_json_output() {
+        let (_env, _root) = crate::paths::testenv::folders("wrapper-text");
+        let exp = Expected::of(&args(&["-p"]));
+        assert!(prepare(args(&["-p", "--output-format", "text"]), Path::new("/e"), "0123456789abcdef0123456789abcdef", &exp).unwrap_err().to_string().contains("JSON output"));
+        let (a, made) = prepare(args(&["-p", "--output-format", "json", "--system-prompt", "Echo's words"]), Path::new("/e"), "0123456789abcdef0123456789abcdef", &exp).unwrap();
+        assert!(a.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
+        assert!(made.iter().all(|f| !f.display().to_string().contains("0123456789abcdef0123456789abcdef")), "files never named by the run's value: {made:?}");
+        assert!(a.iter().all(|x| !x.contains("Echo's words")));
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn a_path_into_echos_folders_spelt_in_other_case_is_refused() {
+        let (_env, _root) = crate::paths::testenv::folders("wrapper-case");
+        let p = PathBuf::from(dunce::canonicalize(paths::home()).unwrap().join("plugins/x/acme-claude").to_string_lossy().to_uppercase());
+        assert!(outside_echo(&p).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_version_is_asked_as_a_run_would_start_the_wrapper() {
+        let (_env, root) = crate::paths::testenv::folders("wrapper-version-env");
+        let _fake = super::super::fake::install(&root);
+        // Answers as Claude Code only with what Echo gives every run it starts (a wrapper finding its runtime there).
+        let w = root.join("acme-claude");
+        fs::write(&w, "#!/bin/sh\n[ \"$ECHOCTL_HEADLESS\" = 1 ] && echo '2.1.400 (Claude Code)'\n").unwrap();
+        fs::set_permissions(&w, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        assert_eq!(claude_version(&w).unwrap(), "2.1.400 (Claude Code)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stopped_run_takes_down_what_its_wrapper_started() {
+        let (_env, root) = crate::paths::testenv::folders("wrapper-group");
+        let w = root.join("acme-claude");
+        // Starts "Claude Code" as a child (not exec), then reports a start Echo refuses.
+        fs::write(&w, format!("#!/bin/sh\nsleep 30 &\necho $! > '{}'\ns=\"\"; prev=\"\"; for a in \"$@\"; do [ \"$prev\" = \"--settings\" ] && s=\"$a\"; prev=\"$a\"; done\nv=$(sed -n 's/.*proof hello \\([0-9a-f]*\\).*/\\1/p' \"$s\" | head -1)\nprintf '{{\"type\":\"system\",\"subtype\":\"hook_response\",\"output\":\"echo-proof:%s\"}}\\n' \"$v\"\nIFS= read -r line\necho '{{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\"2.1.400\",\"permissionMode\":\"bypassPermissions\",\"tools\":[]}}'\nwait\n", root.join("child.pid").display())).unwrap();
+        fs::set_permissions(&w, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let e = relay_with(&w, args(&["-p", "--tools", "Bash", "--permission-mode", "dontAsk", "--output-format", "stream-json"]), Some("x".into()), Box::new(std::io::empty()), &mut vec![], 10).unwrap_err();
+        assert!(e.contains("bypassPermissions"), "{e}");
+        let pid: i32 = fs::read_to_string(root.join("child.pid")).unwrap().trim().parse().unwrap();
+        crate::paths::testenv::eventually("its child gone", || unsafe { libc::kill(pid, 0) } != 0);
     }
 }

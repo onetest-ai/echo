@@ -157,9 +157,6 @@ impl Settings {
             if !seen.insert(p.id.as_str()) {
                 bail!("the profile id \"{}\" is there twice", p.id);
             }
-            if p.kind == Kind::Wrapper && !p.wrapper.as_ref().is_some_and(|w| Path::new(&w.command).is_absolute()) {
-                bail!("the profile \"{}\" starts no program by its full path", p.id);
-            }
         }
         Ok(())
     }
@@ -1643,13 +1640,16 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_wrapper_profile_names_its_program_by_full_path() {
-        let (_env, _root) = crate::paths::testenv::folders("ai-wrapper-settings");
+    fn a_stored_wrapper_without_a_full_path_fails_only_its_own_jobs() {
+        let (_env, root) = crate::paths::testenv::folders("ai-wrapper-settings");
+        let _fake = fake::install(&root);
         fs::create_dir_all(paths::config_dir()).unwrap();
-        fs::write(paths::config_dir().join(FILE), r#"{"profiles":[{"id":"a","name":"A","kind":"wrapper","wrapper":{"command":"acme-claude"}}]}"#).unwrap();
-        assert!(Settings::load().unwrap_err().to_string().contains("full path") || format!("{:#}", Settings::load().unwrap_err()).contains("full path"));
-        fs::write(paths::config_dir().join(FILE), r#"{"profiles":[{"id":"a","name":"A","kind":"wrapper"}]}"#).unwrap();
-        assert!(Settings::load().is_err());
+        fs::write(paths::config_dir().join(FILE), r#"{"profiles":[{"id":"a","name":"A","kind":"wrapper","wrapper":{"command":"acme-claude"}},{"id":"b","name":"B","kind":"wrapper"},{"id":"q","name":"Q","kind":"local","base_url":"http://localhost:1","live_model":"m"}]}"#).unwrap();
+        let s = Settings::load().expect("the other profiles still load");
+        assert!(s.get("q").is_ok());
+        let a = s.get("a").unwrap();
+        assert!(prepare_claude(&a, &["--version".into()], &root, false).unwrap_err().to_string().contains("without a full path"));
+        assert!(check(&s.get("b").unwrap(), None).unwrap_err().to_string().contains("names no command"));
         fs::write(paths::config_dir().join(FILE), r#"{"profiles":[{"id":"a","name":"A","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude","offered_by":"acme-tools"}}]}"#).unwrap();
         let p = Settings::load().unwrap().get("a").unwrap();
         assert_eq!((p.kind, p.kind.managed(), p.wrapper.unwrap().offered_by.as_deref()), (Kind::Wrapper, false, Some("acme-tools")));
