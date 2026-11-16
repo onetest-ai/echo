@@ -27,10 +27,10 @@ tags: [work, ledger, sync, virtual-model, usage]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `target/debug/echoctl project sync-stats --days 1` | `{"days": [], "total": {}}`: no sync has run on this data |
-| 2 | Run `$L pending`; `$L done --evidence <id>` for every item but Acme security review (`<the build date − 1>_110000`); then `$L run` | The sync ends: `state` "done", `processed` 1; `usage` holds `extract`, `verify` and `people`, each with `input`, `output`, `cache_read`, `cache_write` and `turns` numbers, `input` and `output` above 0 |
+| 2 | Run `$L pending`; `$L done --evidence <id>` for every item but Acme security review (`<the build date − 1>_110000`); then `$L run` | The sync ends: `state` "done", `processed` 1; `usage` holds `extract`, `verify` and `people`, each with `input`, `output`, `cache_read`, `cache_write` and `turns` numbers, `input` and `output` above 0, and `ok` true |
 | 3 | Run `grep -E '^[0-9:]+  (extract|verify|people): [0-9]+ tokens' $ECHOCTL_HOME/projects/acme-rollout/ledger/runs/<run>/log.txt` (`<run>` from step 2) | Three lines, one per pass, each `<pass>: N tokens (input …, output …, cache read …, cache write …), M turns`, N the sum of the four |
-| 4 | Run `cat $ECHOCTL_HOME/projects/acme-rollout/ledger/sync-usage.jsonl` | Three JSON lines with `run` `<run>`, `pass` extract, verify, people, and the same `usage` as step 2 |
-| 5 | Run `target/debug/echoctl project sync-stats --days 1` | `days` one entry, today: `runs` 3, `tokens` the sum of the three passes; `passes.extract.runs` 1, `passes.verify.runs` 1, `passes.people.runs` 1; `total.tokens` the same as the day's |
+| 4 | Run `cat $ECHOCTL_HOME/projects/acme-rollout/ledger/sync-usage.jsonl` | Three JSON lines with `run` `<run>`, `pass` extract, verify, people, `ok` true, and the same token counts as step 2 |
+| 5 | Run `target/debug/echoctl project sync-stats --days 1` | `days` one entry, today: `runs` 3, `tokens` the sum of the three passes; `passes.extract.runs` 1, `passes.verify.runs` 1, `passes.people.runs` 1, each `failed` 0; `total.tokens` the same as the day's |
 | 6 | Run `target/debug/echoctl project sync-stats --days 0` | The same as step 5 (at least today) |
 
 ## Expected Final State
