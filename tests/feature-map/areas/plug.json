@@ -343,6 +343,24 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-37",
+   "feature": "A plugin moves a thread's stage (`ctx.threads.setStage(thread, stage, reason)`, `uses.echo.write: thread_stage`; the sheet: 'Changes your threads' stage') — the stage history keeps its name and reason, the thread's Profile says 'set by <plugin>: <reason>'; `ctx.echo.read('threads')` gives each open thread's stage and group (the sheet: 'your threads' names and stages'). Once the user changes the stage away from what that plugin last set (a stage set before its first write doesn't count) its later writes answer `{applied: false, why}` and change nothing, until the user lets it set the stage again (the Profile's 'Let <plugin> set it again', `echoctl project set <id> --stage-back-to <plugin>`); another plugin is not held. Refused without the sheet's line, while Claude prepares and asks, and in a Yolo run on another thread; an update adding it asks again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-38",
+   "feature": "A plugin keeps its own tasks in a thread by its key (`ctx.tasks.upsert(thread, {key, title, due?, owner?, state?, url?, reason?, propose?})`, `ctx.tasks.close(thread, key, reason, {propose})`, `uses.echo.write: tasks`; the sheet: 'Adds and updates tasks in your threads'): in a story named after the plugin in the thread's first workstream, its link 'From ↗ <plugin>', each write in the task's History as the plugin's ('<plugin> created it — <reason>', '<plugin>: done — <reason>'); the same values again write nothing; a field the user set, or a task they closed, deleted or merged, stays theirs (`ignored`, 'kept yours'); it never touches the user's tasks or another plugin's. `propose`: the write waits in the Work tab's To review ('<plugin> suggests a task: …', Yes / No) and Inbox ('<n> to review in <thread>'s work', 'plugin suggestion'), even before the thread has work; after No the same write stays quiet (a change proposes again); a newer proposal of a key replaces the pending one; closing a key never added withdraws its proposal. Refused without the sheet's line, while Claude prepares and asks, and in a Yolo run on another thread",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

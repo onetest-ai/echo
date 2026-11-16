@@ -204,9 +204,11 @@ pub fn collect() -> Collected {
                     weak += 1;
                 }
             }
-            if moves + weak > 0 {
-                let why = [(moves, "suggested move", "suggested moves"), (weak, "weak “done”", "weak “done”s")].iter().filter(|(n, _, _)| *n > 0).map(|(n, one, many)| format!("{n} {}", if *n == 1 { one } else { many })).collect::<Vec<_>>().join(" · ");
-                out.push(item(format!("review:{}", p.id), "work", &client_of(&p.id), format!("{} to review in {}'s work", moves + weak, p.name), why, false, vec![], Some(format!("project/{}/work", p.id))));
+            // A plugin's proposed tasks and changes, waiting for a Yes.
+            let asks = t["proposals"].as_array().map_or(0, Vec::len);
+            if moves + weak + asks > 0 {
+                let why = [(moves, "suggested move", "suggested moves"), (weak, "weak “done”", "weak “done”s"), (asks, "plugin suggestion", "plugin suggestions")].iter().filter(|(n, _, _)| *n > 0).map(|(n, one, many)| format!("{n} {}", if *n == 1 { one } else { many })).collect::<Vec<_>>().join(" · ");
+                out.push(item(format!("review:{}", p.id), "work", &client_of(&p.id), format!("{} to review in {}'s work", moves + weak + asks, p.name), why, false, vec![], Some(format!("project/{}/work", p.id))));
             }
         }
     }
@@ -584,6 +586,16 @@ mod tests {
         assert_eq!(p["actions"][0]["ipc"]["cmd"], "notes_now");
         // Waiting for the model: nothing to start early.
         assert!(find("Review")["actions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_plugins_proposed_task_waits_in_its_threads_work_to_review() {
+        let (_env, _root) = crate::paths::testenv::folders("attention-plugin-proposal");
+        let t = crate::projects::create("Aurora", None, None).unwrap().id;
+        crate::ledger::plugin_upsert(&t, "tracker", "Acme Tracker", &json!({"key": "P-7", "title": "Send the quote", "propose": true})).unwrap();
+        let c = collect();
+        let it = c.items.iter().find(|i| i["key"] == format!("review:{t}")).expect("a review item");
+        assert_eq!((it["title"].as_str(), it["why"].as_str()), (Some("1 to review in Aurora's work"), Some("1 plugin suggestion")), "{it}");
     }
 
     #[test]

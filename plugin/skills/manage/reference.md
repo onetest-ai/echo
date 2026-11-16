@@ -29,6 +29,7 @@ echoctl project list                                  # every thread: client, st
 echoctl project show <id>                             # its calls and why each belongs, rules, sources, people
 echoctl project create "Acme rollout" --client <client id> [--stage kickoff]
 echoctl project set <id> --stage done --reason "Signed off 4 Nov"   # closes it; reopen: --stage active
+echoctl project set <id> --stage-back-to <plugin id>   # an Echo plugin moves its stage again after the user changed it
 echoctl project set <id> --name … --client <id> --since 2026-09-01 --notes "What Claude should know"
 echoctl project set <id> --brief brief.md             # the Brief tab, from a file ("-": stdin)
 echoctl project delete <id>                           # to the trash; its calls stay — ask first

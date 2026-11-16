@@ -488,6 +488,7 @@ document.addEventListener('click', (e) => {
       return
     }
     case 'stage': return projectSend('stage', { stage: d.stage })
+    case 'stage-back': return projectSend('stage_back', { plugin: d.plugin })
     case 'icon': return projectSend('set', { field: 'icon', value: d.icon })
     case 'color': return projectSend('set', { field: 'color', value: d.color })
     case 'logo-remove': return projectSend('remove_logo')

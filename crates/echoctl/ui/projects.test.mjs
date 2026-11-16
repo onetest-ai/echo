@@ -12,6 +12,15 @@ const { ProjectArt } = new Function(`${src.slice(start, end)}\nreturn { ProjectA
 const tests = []
 const test = (name, f) => tests.push([name, f])
 
+test('a plugin holds off the stage once the user changed it away from its, until they hand it back', () => {
+  const st = (stage, at, by) => ({ stage, at, ...(by ? { by, by_name: 'Acme Tracker' } : {}) })
+  const lead = st('lead', '2026-11-01T09:00:00Z')
+  assert.deepEqual(ProjectArt.stageHeldFrom({ stages: [lead, st('proposal', '2026-11-02T09:00:00Z', 'tracker')] }), [], 'the user before its first write: no hold')
+  const over = { stages: [lead, st('proposal', '2026-11-02T09:00:00Z', 'tracker'), st('negotiation', '2026-11-03T09:00:00Z')] }
+  assert.deepEqual(ProjectArt.stageHeldFrom(over), [{ id: 'tracker', name: 'Acme Tracker' }])
+  assert.deepEqual(ProjectArt.stageHeldFrom({ ...over, stage_handed: { tracker: '2026-11-04T09:00:00Z' } }), [], 'handed back')
+})
+
 test('an identicon is 5×5, mirrored left to right, and the same for the same id', () => {
   for (const id of ['aurora', 'helix-data-platform', 'orbit-hiring', 'x', 'globex-agent-hub']) {
     const c = ProjectArt.cells(id)

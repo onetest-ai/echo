@@ -29,7 +29,19 @@ const ProjectArt = (() => {
     for (const [gid, glabel, xs] of STAGES) for (const [sid, label] of xs) if (sid === id) return { id, label, group: glabel, gid }
     return { id, label: id, group: '', gid: '' }
   }
-  return { hash, cells, STAGES, stage }
+  /** The plugins whose stage the user changed themselves (`projects::stage_held_from`): [{id, name}] — each may set
+   *  the stage again only once the user lets it. A stage set before a plugin's first write doesn't count. */
+  function stageHeldFrom(p) {
+    const st = p.stages || [], out = []
+    for (const id of [...new Set(st.map((c) => c.by).filter(Boolean))]) {
+      let last = -1
+      for (let i = 0; i < st.length; i++) if (st[i].by === id) last = i
+      const handed = (p.stage_handed || {})[id] || ''
+      if (st.slice(last + 1).some((c) => !c.by && c.at > handed)) out.push({ id, name: st[last].by_name || id })
+    }
+    return out
+  }
+  return { hash, cells, STAGES, stage, stageHeldFrom }
 })()
 // end of the projects block
 

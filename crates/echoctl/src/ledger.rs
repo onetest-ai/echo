@@ -34,10 +34,12 @@ mod apply;
 mod chat;
 mod edits;
 mod mail;
+mod plugin;
 pub use apply::*;
 pub use chat::*;
 pub use edits::*;
 pub use mail::*;
+pub use plugin::*;
 
 const STATUS: [&str; 9] = ["held", "done", "progress", "blocked", "cancelled", "reopen", "due", "delayed", "reassign"];
 const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
@@ -67,10 +69,10 @@ const HUMAN_OPS: [&str; 13] = ["edit", "ac_add", "ac_set", "link", "unlink", "me
 const XREF_KINDS: [&str; 3] = ["same", "depends_on", "blocks"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
 const MAX_AC: usize = 6;
-const HIST_KEYS: [&str; 34] = [
+const HIST_KEYS: [&str; 37] = [
     "mid", "type", "op", "effect", "evidence", "date", "ts", "speaker", "quote", "note", "due_text", "due", "by", "kind", "set", "text", "met", "ac",
     "ac_text", "depends_on", "into", "title", "ac_add", "who", "what", "source", "thread", "target", "master", "internal_owner", "client_owner",
-    "delegated_by", "at", "drop",
+    "delegated_by", "at", "drop", "plugin", "plugin_name", "reason",
 ];
 /// The workstream every project starts with.
 const FIRST_EPIC: &str = "General";
@@ -507,6 +509,10 @@ pub struct Node {
     /// quote}`. The user closes it (`accept` on `mid`) or not yet (`reject`); the sync never does.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub looks_done: Option<Value>,
+    /// Made by an Echo plugin (`ledger::plugin_upsert`): `{id, name, key}` — a task its key, its story none. The
+    /// plugin writes only to its own keys' tasks, and never a field the user set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<Value>,
 }
 
 /// The valid links of a value (an older or hand-written event may hold anything).
@@ -601,7 +607,17 @@ fn node_of(e: &Value) -> Node {
         due_guessed: false,
         looks_done: None,
         sent: vec![],
+        plugin: e["plugin"].as_str().map(|p| json!({"id": p, "name": e["plugin_name"], "key": e["key"]})),
     }
+}
+
+/// The story a plugin's tasks go in: its own, or where the user merged it; none once it or its workstream is deleted.
+pub(super) fn plugin_home(n: &BTreeMap<String, Node>, plugin: &str) -> Option<String> {
+    let live = |id: &str| n.get(id).is_some_and(|x| x.state != "merged" && x.state != "deleted");
+    n.values()
+        .filter(|x| x.kind == "story" && x.plugin.as_ref().is_some_and(|p| p["id"] == plugin))
+        .map(|x| chase(n, &x.id))
+        .find(|id| live(id) && n[id].parent.as_deref().is_some_and(|e| live(&chase(n, e))))
 }
 
 fn needs_verdict(e: &Value) -> bool {
@@ -670,6 +686,10 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
 
 pub struct Tree {
     pub nodes: BTreeMap<String, Node>,
+    /// A plugin's writes waiting for the user's Yes (`propose`), the latest per plugin and key.
+    pub proposals: BTreeMap<(String, String), Value>,
+    /// What the user said No to last, per plugin and key: the same again stays quiet.
+    pub refused: BTreeMap<(String, String), Value>,
     pub notes: BTreeMap<String, Vec<Value>>,
     pub order: Vec<String>,
     pub evidence: BTreeMap<String, Value>,
@@ -710,6 +730,8 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
     let mut not_before: BTreeMap<String, String> = BTreeMap::new();
     let mut n: BTreeMap<String, Node> = BTreeMap::new();
     let mut notes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut proposals: BTreeMap<(String, String), Value> = BTreeMap::new();
+    let mut refused: BTreeMap<(String, String), Value> = BTreeMap::new();
     let hist = |node: &mut Node, e: &Value, applied: bool, extra: Value| {
         let mut h = serde_json::Map::new();
         for k in HIST_KEYS {
@@ -735,6 +757,27 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             continue;
         }
         let human = by_hand(e);
+        // A plugin's write: one it proposed counts only once the user said Yes; a later one takes its place.
+        if let Some(k) = plugin_key(e) {
+            if e["propose"] == true && (e["type"] == "create" || e["op"] == "set") {
+                match e["mid"].as_str().and_then(|m| decided.get(m)).map(String::as_str) {
+                    Some("accept") => {}
+                    Some(_) => {
+                        proposals.remove(&k);
+                        refused.insert(k, e["set"].clone());
+                        continue;
+                    }
+                    None => {
+                        let node = s(&e["node"]).or_else(|| s(&e["id"]));
+                        let title = node.as_ref().and_then(|i| n.get(i)).map(|x| x.title.clone());
+                        proposals.insert(k, json!({"mid": e["mid"], "op": if e["type"] == "create" { "create" } else { "set" }, "plugin": e["plugin"], "plugin_name": e["plugin_name"],
+                            "key": e["key"], "node": node, "title": title, "set": e["set"], "reason": e["reason"], "at": e["at"]}));
+                        continue;
+                    }
+                }
+            }
+            proposals.remove(&k);
+        }
         match e["type"].as_str().unwrap_or("") {
             "create" => {
                 let mut x = node_of(e);
@@ -743,6 +786,14 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 }
                 if human {
                     x.pinned = vec!["title".into()];
+                }
+                // A plugin's new task may start in progress or blocked; it goes in its story (a merge then takes it along).
+                if let Some(st) = e["set"]["state"].as_str().filter(|_| x.plugin.is_some()) {
+                    x.state = st.into();
+                }
+                // A proposed one finds its story at the end (the Yes may come after the user changed it).
+                if x.kind == "task" && x.parent.is_none() && e["propose"] != true {
+                    x.parent = x.plugin.as_ref().and_then(|p| plugin_home(&n, p["id"].as_str()?));
                 }
                 hist(&mut x, e, true, json!({"op": "create"}));
                 n.insert(x.id.clone(), x);
@@ -855,6 +906,26 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                     }
                     _ => {}
                 }
+            }
+            // A plugin's change to its own task (`ledger::plugin_upsert`): each field unless the user set it.
+            "plugin" if e["op"] == "set" => {
+                let id = s(&e["node"]).unwrap_or_default();
+                let Some(x) = n.get_mut(&id).filter(|x| x.plugin.as_ref().is_some_and(|p| p["id"] == e["plugin"] && p["key"] == e["key"])) else { continue };
+                let gone = ["merged", "deleted"].contains(&x.state.as_str());
+                let (mut applied, mut ignored) = (vec![], vec![]);
+                for (k, v) in e["set"].as_object().into_iter().flatten() {
+                    let ok = !gone
+                        && match k.as_str() {
+                            "due" if !x.pinned.iter().any(|p| p == "due") => {
+                                x.due_history.push(json!({"due": v, "date": e["date"], "ts": null, "evidence": null, "text": format!("set by {}", e["plugin_name"].as_str().unwrap_or("a plugin"))}));
+                                true
+                            }
+                            "title" | "internal_owner" | "state" | "links" => set_field(x, k, v, false),
+                            _ => false,
+                        };
+                    if ok { applied.push(k.clone()) } else { ignored.push(k.clone()) }
+                }
+                hist(x, e, !applied.is_empty(), json!({"ignored": ignored}));
             }
             "human" => {
                 let op = e["op"].as_str().unwrap_or("");
@@ -1004,9 +1075,14 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             x.looks_done = None;
         }
     }
+    // A plugin's task proposed, then taken (the Yes makes the story after the proposal): its story now.
+    let homes: Vec<(String, String)> = n.values().filter(|x| x.kind == "task" && x.parent.is_none()).filter_map(|x| Some((x.id.clone(), plugin_home(&n, x.plugin.as_ref()?["id"].as_str()?)?))).collect();
+    for (id, home) in homes {
+        n.get_mut(&id).unwrap().parent = Some(home);
+    }
     derive(&mut n);
     let lim_n = (lim + 1).max(0) as usize;
-    Ok(Tree { nodes: n, notes, order: ord.into_iter().take(lim_n).collect(), evidence: ev })
+    Ok(Tree { nodes: n, notes, proposals, refused, order: ord.into_iter().take(lim_n).collect(), evidence: ev })
 }
 
 fn apply_status(x: &mut Node, e: &Value) -> bool {

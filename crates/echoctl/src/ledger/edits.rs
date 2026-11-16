@@ -51,6 +51,8 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
         // remembers that edit, so its undo takes both back.
         "accept" => {
             let target = body["target"].as_str().unwrap_or("");
+            // A plugin's proposed task: still waiting, and its story first.
+            story_for_accept(project, target, true)?;
             let evs = Ledger::of(project)?.events()?;
             if let Some(m) = evs.iter().find(|x| x["mid"] == target && x["effect"] == "mention" && x["covers"] == true) {
                 let raw = fold(&Ledger::of(project)?)?;
@@ -62,7 +64,9 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
                 }
             }
         }
+        "reject" => story_for_accept(project, body["target"].as_str().unwrap_or(""), false)?,
         "undo" => {
+            not_a_plugins(project, body["target"].as_str().unwrap_or(""))?;
             let evs = Ledger::of(project)?.events()?;
             // A Close that also closed the master: undone there too.
             if let Some(f) = evs.iter().find(|e| e["mid"] == body["target"] && e["op"] == "accept").map(|e| e["forwarded"].clone()).filter(|f| f.is_object()) {
@@ -451,6 +455,8 @@ pub fn tree(project: &str) -> Result<Value> {
     }
     Ok(json!({
         "nodes": nodes, "notes": t.notes,
+        // A plugin's writes waiting for the user's Yes (To review).
+        "proposals": t.proposals.values().collect::<Vec<_>>(),
         "processed": t.order.len(), "pending": pend,
         // Each evidence item's call: history entries name the call they came from.
         "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"], "kind": v["kind"], "url": v["url"],

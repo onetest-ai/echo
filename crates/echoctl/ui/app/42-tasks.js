@@ -308,7 +308,11 @@ function projectProfile(p, data) {
   const groups = ProjectArt.STAGES.map(([, glabel, xs]) => `<div class="pf-sg" role="group" aria-label="${esc(glabel)}"><span>${esc(glabel)}</span><div class="seg">${xs.map(([sid, label]) => `<button data-pj="stage" data-stage="${sid}" aria-pressed="${p.stage === sid}" class="${p.stage !== sid && passed.has(sid) ? 'passed' : ''}">${esc(label)}</button>`).join('')}</div></div>`).join('')
   const st = p.stages || []
   const hist = st.length ? [`${ProjectArt.stage(p.stage).label} since ${shortDay(st[st.length - 1].at)}`, ...st.slice(0, -1).reverse().slice(0, 3).map((c, i, arr) => { const j = st.length - 2 - i; return `${ProjectArt.stage(c.stage).label} ${shortDay(c.at)} → ${shortDay(st[j + 1].at)}` })].join(' · ') : ''
-  const reason = st.length && st[st.length - 1].reason ? ` (${esc(st[st.length - 1].reason)})` : ''
+  // Who set the stage last when it was a plugin, and why; a plugin the user overrode may be let set it again.
+  const lastSt = st[st.length - 1] || {}
+  const why = [lastSt.by ? `set by ${lastSt.by_name || lastSt.by}` : '', lastSt.reason || ''].filter(Boolean).join(': ')
+  const reason = why ? ` (${esc(why)})` : ''
+  const held = ProjectArt.stageHeldFrom(p).map((x) => ` <button class="btn ghost sm" data-pj="stage-back" data-plugin="${esc(x.id)}" title="You changed the stage yourself, so ${esc(x.name)} leaves it alone">Let ${esc(x.name)} set it again</button>`).join('')
   // Client: its chip (opens it) and domains; changed through the chip's menu.
   const clients = data.clients || []
   const cl = projClient(p.client)
@@ -350,7 +354,7 @@ function projectProfile(p, data) {
     + (S.pj.pfEdit === 'model' ? `<input class="pf-in" data-pj-field="model" data-id="${id}" value="${esc(p.model || '')}" placeholder="sonnet" aria-label="Model" autofocus>` : `<button class="tok" data-pj="pf-edit" data-what="model">model: ${esc(p.model || "the profile's minutes model")}</button>`)
     + `<div class="pf-sub">What Claude runs on for this thread's sync and questions, whichever profile a call was recorded on.</div>`
   return `<div class="pf-card">
-    ${row('Stage', `<div class="pf-stages">${groups}</div><div class="pf-sub">${esc(hist)}${reason}</div>`)}
+    ${row('Stage', `<div class="pf-stages">${groups}</div><div class="pf-sub">${esc(hist)}${reason}${held}</div>`)}
     ${row('Client', clientRow)}
     ${row('Organisations', orgsRow)}
     ${row('Since', since)}

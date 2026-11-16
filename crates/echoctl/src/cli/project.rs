@@ -36,6 +36,9 @@ pub enum ProjectCmd {
         /// Why it moved (kept with the stage change)
         #[arg(long, requires = "stage")]
         reason: Option<String>,
+        /// Let this Echo plugin set the stage again after you changed it yourself (its id)
+        #[arg(long)]
+        stage_back_to: Option<String>,
         /// YYYY-MM-DD: older calls don't belong; "" for none
         #[arg(long)]
         since: Option<String>,
@@ -381,7 +384,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             let stage = stage.as_deref().map(Stage::parse).transpose()?;
             show(&projects::create(&name, client.as_deref(), stage)?)?
         }
-        ProjectCmd::Set { id, name, client, stage, reason, since, history_before, color, notes, profile, model, brief, icon, logo } => {
+        ProjectCmd::Set { id, name, client, stage, reason, stage_back_to, since, history_before, color, notes, profile, model, brief, icon, logo } => {
             if let Some(f) = logo {
                 projects::set_logo(&id, (!f.as_os_str().is_empty()).then_some(f.as_path()))?;
             }
@@ -391,6 +394,9 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             }
             if let Some(st) = stage {
                 projects::set_stage(&id, Stage::parse(&st)?, reason.as_deref())?;
+            }
+            if let Some(plugin) = stage_back_to {
+                projects::hand_stage_back(&id, &plugin)?;
             }
             let p = projects::update(&id, |p| {
                 if let Some(n) = name {
