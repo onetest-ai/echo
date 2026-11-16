@@ -535,14 +535,18 @@ fn due() -> Vec<String> {
         .filter(|p| {
             let Ok(l) = ledger::Ledger::of(&p.id) else { return false };
             let known = l.evidence();
-            let processed: std::collections::BTreeSet<String> = l.events().unwrap_or_default().iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str().map(str::to_owned)).collect();
+            let events = l.events().unwrap_or_default();
+            let processed: std::collections::BTreeSet<String> = events.iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str().map(str::to_owned)).collect();
             let failed_recently = state(&p.id)["state"] == "failed" && state(&p.id)["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| now.signed_duration_since(t) < chrono::Duration::hours(1));
             if failed_recently {
                 return false;
             }
             // A meeting chat or a mail source due a fetch (no model run unless its batch is ready), or mail and chat
-            // whose batch is ready.
-            if ledger::chat_due(p) || ledger::mail_due(p) || batch_ready(&waiting(&p.id, now), now) {
+            // whose batch is ready: `waiting` (its lookups, its lock) only for a thread with unread mail or chat,
+            // re-queues counted.
+            let read = ledger::processed(&events);
+            let unread_mail = known.keys().any(|k| mail_or_chat(k) && !read.contains(k));
+            if ledger::chat_due(p) || ledger::mail_due(p) || (unread_mail && batch_ready(&waiting(&p.id, now), now)) {
                 return true;
             }
             projects::calls_of(p).unwrap_or_default().iter().rev().take(BACKFILL).any(|(d, _)| {
@@ -747,6 +751,17 @@ mod tests {
         assert_eq!(waiting(&id, later)[0].1.timestamp(), later.timestamp());
         let kept: BTreeMap<String, String> = serde_json::from_slice(&fs::read(ledger_dir(&id).join(WAITING)).unwrap()).unwrap();
         assert!(chrono::DateTime::parse_from_rfc3339(&kept["chat-2026-11-16"]).is_ok());
+    }
+
+    #[test]
+    fn the_scheduler_looks_at_waiting_mail_only_for_a_thread_with_unread_mail_or_chat() {
+        let (_env, _root) = crate::paths::testenv::folders("sync-due-cheap");
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        assert!(!due().contains(&id));
+        assert!(!ledger_dir(&id).join(".waiting.lock").exists() && !ledger_dir(&id).join(WAITING).exists(), "nothing unread: never looked");
+        mail_item(&id, "mail-a");
+        assert!(!due().contains(&id));
+        assert!(ledger_dir(&id).join(WAITING).exists(), "unread mail: looked at");
     }
 
     #[cfg(unix)]
