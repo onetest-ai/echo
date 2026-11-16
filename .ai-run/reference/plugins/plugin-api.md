@@ -348,11 +348,14 @@ Evidence: `pluginWidgetHtml`, `pluginTableHtml` (window script)
 A `table`'s columns may also be:
 
 - `spark`: a cell `{values: [2–30 numbers], text?}` — a small trend, its last point dotted, `text` (24) beside it.
-- `heat`: a number, shaded by its share of the column's largest; 0 or none a muted "·"; below 0 refused. Up to 12
+- `heat`: a number, shaded by its share of the column's largest (of all its rows, shown or behind "+N more"); 0 or
+  none a muted "·"; below 0 refused. Up to 12
   `heat` columns besides the 10 (a heat map's weeks); give them one `group` for a band over their heads.
 - `mix`: a cell `{parts: [1–6 {key?, value ≥ 0, tone?}], text?}` — a thin 100% bar of its parts (a zero not drawn),
   `text` beside it, its parts in its hover; colours from the column's `series: [≤ 6 {key, label, tone?}]` (Echo's
-  palette in order, or the tone), named in a legend under the table; a part's own `tone` wins.
+  palette in order, or the tone; keys `[A-Za-z0-9_-]{1,40}`, unique), named in a legend under the table; a part's own
+  `tone` wins, and with `series` given a part names one of them (or has a `tone`).
+- Numbers in all three: finite, at most 10^15 either way.
 
 `total: {label?, cells}`: one bold row under the rows, never folded away ("Total" in its first column unless that
 cell is given); its `heat` cells plain numbers. Evidence: `pluginTableHtml` (window script)

@@ -118,8 +118,10 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
     // A mix column's parts: its series (in Echo's palette, or a tone), named in its legend.
     const series = c.series == null ? [] : c.series
     if (!Array.isArray(series) || series.length > 6 || (k !== 'mix' && series.length)) throw new Error(`column ${key}: series is a mix column's, 6 at most: [{key, label, tone?}]`)
+    const skeys = new Set()
     const ser = series.map((x, j) => {
-      if (!x || typeof x.key !== 'string' || !x.key) throw new Error(`column ${key}: series ${j + 1} needs a key`)
+      if (!x || typeof x.key !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(x.key) || skeys.has(x.key)) throw new Error(`column ${key}: series ${j + 1} needs a plain, unique key`)
+      skeys.add(x.key)
       if (x.tone != null && !TONES.includes(x.tone)) throw new Error(`column ${key}: series ${x.key}'s tone is good, warn, bad or muted`)
       return { key: x.key, label: str(x.label, `column ${key}'s series ${x.key}`, 40) || x.key, color: x.tone ? `var(--${{ good: 'me', warn: 'warn', bad: 'danger', muted: 'text-3' }[x.tone]})` : `var(--chart-${j + 1})` }
     })
@@ -139,7 +141,8 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
   // A heat column's largest value, against which each of its cells is shaded.
   const val = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v.text : v)
   const heatMax = Object.fromEntries(all.filter((c) => c.kind === 'heat').map((c) => [c.key, Math.max(0, ...(Array.isArray(d.rows) ? d.rows : []).map((r) => Number(val(r && r.cells && r.cells[c.key])) || 0))]))
-  const num = (x, what) => { if (typeof x !== 'number' || !Number.isFinite(x)) throw new Error(`${what} isn't a number`); return x }
+  // A number as a chart takes one: finite, |v| ≤ 10^15 (so sums and spans stay finite).
+  const num = (x, what) => { if (typeof x !== 'number' || !Number.isFinite(x) || Math.abs(x) > 1e15) throw new Error(`${what} isn't a number (up to 10^15)`); return x }
   // A cell as drawn: by its column's kind; {text, tone} anywhere. `row` is a number (a row) or 'total'.
   const cell = (v, col, row) => {
     const what = row === 'total' ? `the total's cell “${col.key}”` : `row ${row}'s cell “${col.key}”`
@@ -159,6 +162,7 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
         if (n < 0) throw new Error(`${what}'s part ${j + 1} is below 0`)
         if (p.tone != null && !TONES.includes(p.tone)) throw new Error(`${what}'s part ${j + 1}: tone is good, warn, bad or muted`)
         const s = col.series.find((x) => x.key === p.key)
+        if (col.series.length && !s && !p.tone) throw new Error(`${what}'s part ${j + 1}: key is one of its column's series`)
         const color = p.tone ? `var(--${{ good: 'me', warn: 'warn', bad: 'danger', muted: 'text-3' }[p.tone]})` : s ? s.color : `var(--chart-${(j % 6) + 1})`
         return { n, color, label: s ? s.label : typeof p.key === 'string' ? p.key.slice(0, 40) : `part ${j + 1}` }
       })
@@ -169,6 +173,7 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
     }
     const raw = obj && !Array.isArray(v) ? v.text : v
     const t = obj && !Array.isArray(v) && v.tone ? ` tone-${v.tone}` : ''
+    if (col.kind === 'heat' && row === 'total' && raw != null && raw !== '' && num(raw, what) < 0) throw new Error(`${what} is below 0`)
     if (col.kind === 'heat' && row !== 'total') {
       // 0 or none: a muted dot; else shaded by its share of the column's largest.
       if (raw == null || raw === '' || raw === 0) return { html: '<span class="pw-heat zero" aria-label="0">·</span>', text: '0', t }

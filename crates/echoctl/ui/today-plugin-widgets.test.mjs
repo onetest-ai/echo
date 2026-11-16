@@ -191,6 +191,15 @@ test('a scorecard table: spark trends, heat columns shaded by their largest (12 
   refused('table', { columns: [{ key: 'h', label: 'H', kind: 'heat' }], rows: [{ id: 1, cells: { h: -1 } }] }, 'is below 0')
   refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 'x' }] } } }] }, "part 1 isn't a number")
   refused('table', { columns: [{ key: 'n', label: 'N', series: [{ key: 'a' }] }], rows: [] }, "series is a mix column's")
+  refused('table', { columns: [{ key: 's', label: 'S', kind: 'spark' }], rows: [{ id: 1, cells: { s: { values: [-1e308, 1e308] } } }] }, 'up to 10^15')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 1e308 }, { value: 1e308 }] } } }] }, 'up to 10^15')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'a', label: 'A' }] }], rows: [{ id: 1, cells: { m: { parts: [{ key: 'zz', value: 1 }] } } }] }, "key is one of its column's series")
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'a' }, { key: 'a' }] }], rows: [] }, 'needs a plain, unique key')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'x'.repeat(41) }] }], rows: [] }, 'needs a plain, unique key')
+  refused('table', { columns: [{ key: 'h', label: 'H', kind: 'heat' }], rows: [{ id: 1, cells: { h: 1 } }], total: { cells: { h: -5 } } }, 'is below 0')
+  // A mix of all zeros: an empty bar, no error; quotes in its text escaped in the attribute.
+  const zero = draw('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 0 }], text: '" onmouseover="x' } } }] }, 'M')
+  assert.ok(zero.includes('<span class="pw-mixbar"') && !zero.includes('" onmouseover="x'), zero)
   refused('table', { columns: [{ key: 'n', label: 'N' }], rows: [{ id: 1 }], total: [1] }, 'total is {label?, cells')
   // Others' text escaped in the new places.
   const evil = '<img src=x onerror=alert(1)>'
