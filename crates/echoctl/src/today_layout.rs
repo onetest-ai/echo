@@ -443,6 +443,23 @@ pub fn size_on(page: &Page, widget: &str) -> String {
     load_on(page).into_iter().find(|i| i.widget == widget).map(|i| i.size).or_else(|| widgets::find(widget).ok().and_then(|w| w.sizes.first().map(|s| s.to_string()))).unwrap_or_else(|| "M".into())
 }
 
+/// How many rows of the page's grid a widget takes there (1 or 2).
+pub fn height_on(page: &Page, widget: &str) -> u8 {
+    load_on(page).into_iter().find(|i| i.widget == widget).map(|i| i.height).unwrap_or(1)
+}
+
+/// What a plugin widget draws at a size and height (the window's `pluginFits`, the same numbers): a table's rows and a
+/// list's items before "+N more", a bar chart's bars. Its provider is told, to send that many.
+pub fn fits(size: &str, height: u8) -> serde_json::Value {
+    let h = u64::from(height.clamp(1, 2));
+    let (items, bars) = match size {
+        "S" => (3, 4),
+        "L" => (10, 12),
+        _ => (5, 6),
+    };
+    serde_json::json!({"rows": 8 * h, "items": items * h, "bars": bars * h})
+}
+
 /// A widget's settings as Today has them: its defaults, then what the user set (a value it no longer takes, dropped).
 pub fn params_of(widget: &str) -> serde_json::Map<String, serde_json::Value> {
     params_on(&Page::Today, widget)
@@ -837,5 +854,13 @@ mod tests {
 
     fn by_of(page: &Page, key: &str) -> serde_json::Value {
         filters_on(page)["filters"].as_array().unwrap().iter().find(|x| x["key"] == key).cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn a_widget_draws_and_is_told_the_rows_items_and_bars_its_size_and_height_hold() {
+        assert_eq!(fits("M", 1), serde_json::json!({"rows": 8, "items": 5, "bars": 6}));
+        assert_eq!(fits("S", 1), serde_json::json!({"rows": 8, "items": 3, "bars": 4}));
+        assert_eq!(fits("L", 2), serde_json::json!({"rows": 16, "items": 20, "bars": 24}));
+        assert_eq!(fits("M", 9), fits("M", 2), "two rows at most");
     }
 }

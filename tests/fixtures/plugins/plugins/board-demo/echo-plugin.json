@@ -2,7 +2,7 @@
   "id": "board-demo",
   "name": "Board Demo",
   "version": "0.1.0",
-  "summary": "A test plugin: dashboards it offers ready-made, a client's and a pursuit thread's (tests/cases/plugins/TC-056, TC-057, TC-058).",
+  "summary": "A test plugin: dashboards it offers ready-made, a client's and a pursuit thread's and a team table longer than its card (tests/cases/plugins/TC-056, TC-057, TC-058; today/TC-052).",
   "main": "main.js",
   "widgets": [
     {
@@ -62,6 +62,27 @@
           "key": "thread",
           "label": "Thread",
           "type": "thread"
+        }
+      ]
+    },
+    {
+      "id": "team",
+      "label": "Team",
+      "about": "everyone working for the client",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "heights": [
+        1,
+        2
+      ],
+      "params": [
+        {
+          "key": "client",
+          "label": "Client",
+          "type": "client"
         }
       ]
     }

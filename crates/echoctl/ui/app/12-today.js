@@ -106,7 +106,8 @@ function todayView() {
   for (const slug of ownCard) parts[`core:routines.card.${slug}`] = ''
   for (const c of d.cards || []) if (ownCard.has(c.slug)) parts[`core:routines.card.${c.slug}`] = cardHtml(c)
   // Plugins' widgets on the layout, drawn by their kind (13-today-plugins.js).
-  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id, 'M'))
+  const heightOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.height || 1]))
+  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id, 'M'), heightOf[id] || 1)
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.

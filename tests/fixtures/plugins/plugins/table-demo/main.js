@@ -6,7 +6,7 @@ const rows = [
   { id: 'p3', group: 'ctl', link: 'echo://thread/acme-rollout', cells: { urgency: { text: 'High', tone: 'warn' }, position: '1101000003', role: 'Quality Engineer · AI Lead', start: '2026-11-24', status: 'Proposed', candidates: 4, why: 'starts in 11 days, not booked' } },
   { id: 'p4', group: 'ctl', cells: { urgency: { text: 'High', tone: 'warn' }, position: '1101000005', role: '<img src=x onerror=alert(1)> kept as text', start: '2026-11-27', status: 'Open', candidates: 0, why: 'no candidates yet' } },
   { id: 'p5', cells: { urgency: { text: 'On hold', tone: 'muted' }, position: '1101000007', role: 'Delivery Manager', start: '2027-01-05', status: 'On hold', candidates: 0, why: { text: 'project on hold', tone: 'muted' } } },
-  // Enough rows to scroll inside the card (its column names stay put).
+  // More rows than the card shows: the rest behind "+N more" (today/TC-042).
   ...Array.from({ length: 8 }, (_, i) => ({ id: `q${i + 1}`, group: 'later', cells: { urgency: { text: 'Normal', tone: 'good' }, position: `11010001${String(i + 10)}`, role: `Engineer ${i + 1}`, start: `2027-02-${String(i + 10)}`, status: 'Open', candidates: i, why: 'starts next quarter' } })),
 ]
 let nudged = 0

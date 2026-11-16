@@ -69,6 +69,8 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
     }
     if let Some(size) = size {
         last["size"] = json!(size);
+        // …and the height it was asked at (what it draws differs by it: `today_layout::fits`).
+        last["height"] = json!(crate::today_layout::height_on(page, &format!("plugin:{id}:{widget}")));
     }
     // Asked with these settings (set again elsewhere — the CLI, Filters —: asked again). A failed ask for other
     // settings than its data's: that data isn't this one's, so it goes (the error shows, no ask again until due).
@@ -189,11 +191,13 @@ pub fn widget_ask_now(plugin: &str, widget: &str) {
 
 pub(super) fn widget_ask_now_on(plugin: &str, widget: &str, page: &crate::today_layout::Page) {
     // Its settings as the page has them (defaults, the user's, then the page's own: a dashboard's thread or client),
-    // given to the provider, and the size it has there (S, M, L), so it can give as much as fits.
+    // given to the provider, and the size (S, M, L) and height (1, 2) it has there with what Echo draws of it at those
+    // (`fits`: rows, items, bars), so it gives as much as fits.
     let id = format!("plugin:{plugin}:{widget}");
-    let (params, size) = (crate::today_layout::params_on(page, &id), crate::today_layout::size_on(page, &id));
+    let (params, size, height) = (crate::today_layout::params_on(page, &id), crate::today_layout::size_on(page, &id), crate::today_layout::height_on(page, &id));
+    let fits = crate::today_layout::fits(&size, height);
     let size = Some(size.as_str());
-    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size }), Duration::from_secs(5)) {
+    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size, "height": height, "fits": fits }), Duration::from_secs(5)) {
         // Kept — or, refused (over 64 KB), why, its data before kept.
         Ok(v) => {
             if let Err(e) = widget_store(plugin, widget, page, Some(&v), None, size, Some(&params)) {
