@@ -33,6 +33,21 @@ without changing it; each such edit can be undone.
   suggests.
 - A link between two threads: `ledger::link_threads`, written in both ledgers.
 
+## What a sync uses
+
+- Each pass (extract, verify, people) reads its usage from Claude Code's `result` event (`projectsync::usage_of`:
+  `input`, `output`, `cache_read`, `cache_write`, `turns`, `cost_usd` when given) into its run's `log.txt` (one line a
+  pass), the sync's state (`usage.<pass>`, with `ok`, and `error` when it failed; a failed sync's state keeps it too)
+  and one JSON line a pass in `ledger/sync-usage.jsonl` (`at`, `run`, `pass`, `usage`, `ok`, `error`), written in one
+  write. A failed pass keeps what it used when its result event came (`projectsync::RunFailed`: an error result, its
+  turns used up among them); stopped with none (its time limit, Echo quitting) its `usage` is null: "usage unknown". A failure before Claude
+  Code started (too old for the guard, refused, not started) is no run and isn't counted.
+- `echoctl project sync-stats [--days N]` (`projectsync::sync_stats`; default 7, today included, by calendar day)
+  sums every thread's lines per day and pass: `{days: [{day, runs, tokens, passes: {<pass>: {runs, failed, tokens,
+  input, output, cache_read, cache_write, turns, cost_usd, cost_runs}}}], total}`, newest day first; `tokens` is the
+  four token counts together; a run of unknown usage counts as a run with no tokens; `cost_usd` sums only the
+  `cost_runs` that gave a cost. Only the threads there now: a deleted thread's usage leaves the stats with it.
+
 ## Mail and chat in a sync
 
 `ledger::mail_sync` and `ledger::chat_sync` take mail and chat only from the user, colleagues and trusted,

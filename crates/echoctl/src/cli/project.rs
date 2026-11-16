@@ -12,6 +12,12 @@ use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, 
 pub enum ProjectCmd {
     /// Every project with its client, stage and call count
     List,
+    /// What thread syncs used, per day and pass (extract, verify, people): tokens, turns, runs
+    SyncStats {
+        /// The last N days, today included
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+    },
     /// One project, with its calls and why each belongs
     Show { id: String },
     /// A new project (stage active unless --stage)
@@ -355,7 +361,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     }
     // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
     // routine (the user's own prompt) may read them.
-    let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
+    let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::SyncStats { .. } | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
     // Yolo reads its own thread: its brief and rules, its people (as they are: no Microsoft 365 refresh).
     let own_thread_read = match &cmd {
         ProjectCmd::Show { id } | ProjectCmd::People { id, refresh: false } => guard::run_thread().is_some_and(|t| &t == id),
@@ -375,6 +381,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     };
     match cmd {
         ProjectCmd::List => print_json(&projects::overview()?),
+        ProjectCmd::SyncStats { days } => print_json(&projectsync::sync_stats(days.max(1))),
         ProjectCmd::Link { id, to, kind, remove } => match kind {
             Some(k) if !remove => show(&threadlinks::link(&id, &to, threadlinks::Kind::parse(&k)?)?)?,
             _ => show(&threadlinks::unlink(&id, &to)?)?,
