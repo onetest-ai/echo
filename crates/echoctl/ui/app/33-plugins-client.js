@@ -296,9 +296,11 @@ document.addEventListener('click', (e) => {
     return go({ cmd: 'wrapper_check', command: S.wrapForm.command })
   }
   if (at('[data-wrap-add]') && S.wrapForm) {
-    const f = S.wrapForm
-    if (!f.plugin) f.name = ($('#wrap-name') || {}).value || f.name
-    return go(f.plugin ? { cmd: 'wrapper_add', plugin: f.plugin } : { cmd: 'wrapper_add', command: f.command, name: f.name }, done)
+    // Exactly what Check showed: the program as typed now and the path it was found at (Echo refuses a mismatch).
+    const f = S.wrapForm, ws = wrapperState((S.settings || {}).wrapper) || {}
+    if (!f.plugin) { f.command = (($('#wrap-command') || {}).value || '').trim(); f.name = ($('#wrap-name') || {}).value || f.name }
+    if (ws.kind !== 'ok' || ws.command !== f.command) { f.asked = false; f.stale = true; return render() }
+    return go(f.plugin ? { cmd: 'wrapper_add', plugin: f.plugin, command: f.command, path: ws.path } : { cmd: 'wrapper_add', command: f.command, name: f.name, path: ws.path }, done)
   }
   const up = at('[data-wrap-update]')
   if (up) return go({ cmd: 'wrapper_update', id: up.dataset.wrapUpdate }, done)
@@ -322,7 +324,7 @@ function wrapperState(w) {
   if (w.busy) return { kind: 'busy', text: 'Checking it — where your shell finds it, then its version…' }
   if (w.error) return { kind: 'error', text: w.error }
   if (w.checked) return { kind: 'ok', text: `Found ${w.path} — ${w.version}`, path: w.path, version: w.version, command: w.command }
-  if (w.added) return { kind: 'done', text: `Added ${w.name}` }
+  if (w.added) return { kind: 'done', text: w.path ? `Added ${w.name} — it starts ${w.path}` : `Added ${w.name}` }
   if (w.updated) return { kind: 'done', text: `It now starts ${w.path}` }
   return null
 }
@@ -409,7 +411,7 @@ const SETTINGS_BODY = {
       const out = p.kind === 'claude' && s.state === 'signed_out'
       const up = p.kind === 'wrapper' ? wrapperUpdate(a, p.id) : null
       const who = p.kind === 'claude' ? (s.account ? `Signed in as ${esc(s.account)}` : out ? '<span class="warn">Not signed in — its calls wait for it</span>' : esc(p.account || ''))
-        : p.kind === 'wrapper' ? `Starts <code>${esc(p.command || '')}</code> in place of Claude Code${p.offered_by ? ` · offered by ${esc(p.offered_by)}` : ''}. ${WRAPPER_WARNING}`
+        : p.kind === 'wrapper' ? `Starts <code>${esc(p.command || '')}</code> in place of Claude Code${p.offered_by ? ` · offered by ${esc(p.offered_name || p.offered_by)}` : ''}. ${WRAPPER_WARNING}`
         : esc(profileWhere(p))
       const upLine = up ? `<div class="warn">${esc(up.plugin_name)}'s update offers <code>${esc(up.command)}</code> instead — this profile keeps starting its program until you take it.</div>` : ''
       const isDef = p.id === a.default
@@ -422,7 +424,8 @@ const SETTINGS_BODY = {
     const f = S.wrapForm
     // Only what this form asked for: an earlier check, add or update says nothing here.
     const mine = !!(f && f.asked && ws)
-    const msg = mine ? `<div class="${ws.kind === 'error' ? 'error' : ws.kind === 'busy' ? 'set-sub' : ''}">${esc(ws.text)}</div>` : ''
+    const msg = mine ? `<div class="${ws.kind === 'error' ? 'error' : ws.kind === 'busy' ? 'set-sub' : ''}">${esc(ws.text)}</div>`
+      : f && f.stale ? '<div class="set-sub">The program changed since its check — Check it again.</div>' : ''
     const ready = mine && ws.kind === 'ok' && ws.command === f.command
     const form = !f ? [] : [setRow(f.plugin ? `Add the wrapper ${esc(f.pluginName || f.plugin)} offers` : 'Add a wrapper',
       `A program you installed that starts Claude Code its own way — a name on your PATH or its full path. Echo starts it in place of Claude Code, on your own Claude Code setup. ${WRAPPER_WARNING}` +

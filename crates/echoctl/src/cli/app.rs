@@ -443,8 +443,8 @@ pub fn ai(cmd: Option<AiCmd>) -> Result<()> {
         AiCmd::AddLocal { id, model, live_model, url, token, name } => ai::add_local(&id, name, &model, live_model, &url, token),
         AiCmd::AddClaude { id, name, live_model, notes_model, email, sso } => ai::add_claude(&id, name, live_model, notes_model, email, sso),
         AiCmd::AddWrapper { id, command, plugin, name } => match (plugin, command) {
-            (Some(plugin), _) => ai::add_offered_wrapper(&plugin, id.as_deref()).map(drop),
-            (None, Some(command)) => ai::add_wrapper(id.as_deref().ok_or_else(|| anyhow::anyhow!("a profile id is needed"))?, &command, name, None).map(drop),
+            (Some(plugin), _) => ai::add_offered_wrapper(&plugin, id.as_deref(), None, None).map(drop),
+            (None, Some(command)) => ai::add_wrapper(id.as_deref().ok_or_else(|| anyhow::anyhow!("a profile id is needed"))?, &command, name, None, None).map(drop),
             (None, None) => anyhow::bail!("--command or --plugin"),
         },
         AiCmd::UpdateWrapper { id } => ai::update_wrapper(&id).map(drop),

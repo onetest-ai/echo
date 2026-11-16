@@ -23,6 +23,12 @@ pub struct Wrapper {
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offered_by: Option<String>,
+    /// That plugin's marketplace (another one's plugin of the same id offers nothing to this profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offered_market: Option<String>,
+    /// That plugin's name, as shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offered_name: Option<String>,
     /// The program name that plugin offered when the user took it (an update offering another is asked on the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offered_command: Option<String>,
@@ -181,7 +187,7 @@ pub fn outside_echo(path: &Path) -> Result<()> {
 /// would start it (the login shell's environment: a `#!/usr/bin/env node` wrapper finds its node).
 pub fn claude_version(path: &Path) -> Result<String> {
     let p = Profile { id: "wrapper-check".into(), name: path.display().to_string(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false,
-        wrapper: Some(Wrapper { command: path.display().to_string(), offered_by: None }) };
+        wrapper: Some(Wrapper { command: path.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None }) };
     let mut child = super::claude_command(&p, &["--version".into()], &paths::home(), false).map_err(|e| anyhow!("{} can't be started: {e:#}", path.display()))?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).with_context(|| format!("asking {} its version", path.display()))?;
     out.lines().map(str::trim).find(|l| l.contains("(Claude Code")).map(str::to_owned).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))

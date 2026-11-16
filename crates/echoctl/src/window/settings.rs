@@ -338,10 +338,12 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             })
         }
         "wrapper_add" => {
-            let (command, name, plugin) = (v["command"].as_str().map(str::to_owned), v["name"].as_str().map(str::to_owned), v["plugin"].as_str().map(str::to_owned));
+            // What Check showed (`path`) is what is added, or nothing.
+            let (command, name, plugin, path) = (v["command"].as_str().map(str::to_owned), v["name"].as_str().map(str::to_owned), v["plugin"].as_str().map(str::to_owned), v["path"].as_str().map(str::to_owned));
             wrapper_job(move || {
+                let path = path.filter(|p| !p.is_empty()).ok_or_else(|| anyhow::anyhow!("check it first"))?;
                 let p = match plugin {
-                    Some(plugin) => crate::ai::add_offered_wrapper(&plugin, None)?,
+                    Some(plugin) => crate::ai::add_offered_wrapper(&plugin, None, command.as_deref(), Some(&path))?,
                     None => {
                         let command = command.unwrap_or_default();
                         let name = name.filter(|n| !n.trim().is_empty());
@@ -349,10 +351,10 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                         let stem: String = std::path::Path::new(command.trim()).file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(32).collect();
                         let base = if stem.is_empty() || stem == crate::ai::SYSTEM { "wrapper".to_string() } else { stem };
                         let id = (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") }).find(|c| !s.profiles.iter().any(|p| p.id == *c)).unwrap_or(base);
-                        crate::ai::add_wrapper(&id, &command, name, None)?
+                        crate::ai::add_wrapper(&id, &command, name, None, Some(&path))?
                     }
                 };
-                Ok(json!({ "added": true, "name": p.name }))
+                Ok(json!({ "added": true, "name": p.name, "path": p.wrapper.map(|w| w.command) }))
             })
         }
         "wrapper_update" => {

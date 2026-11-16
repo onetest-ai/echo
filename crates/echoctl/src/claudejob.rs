@@ -107,6 +107,9 @@ impl Spec {
         }
         let minutes = v["timeout"].as_u64().unwrap_or(20).clamp(1, 60);
         let tools = Tools::parse(&s("tools"))?;
+        if !s("profile").is_empty() {
+            crate::ai::plugin_may_name(&crate::ai::Settings::load()?, &s("profile"), None)?;
+        }
         Ok(Spec {
             title: Some(s("title")).filter(|t| !t.is_empty()).unwrap_or_else(|| "a plugin's run".into()),
             prompt,
@@ -367,5 +370,16 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
         assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions" || a == "--settings" || a == "--plugin-dir"), "{args:?}");
         set_acts(false);
+    }
+
+    #[test]
+    fn a_plugins_run_cant_choose_a_wrapper_profile_that_isnt_the_users_default() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-wrapper");
+        std::fs::create_dir_all(crate::paths::config_dir()).unwrap();
+        std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
+        let e = Spec::from_value(&serde_json::json!({"prompt": "x", "profile": "acme"}), &root.join("store")).unwrap_err();
+        assert!(e.to_string().contains("can't choose the wrapper profile"), "{e}");
+        std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"default":"acme","profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
+        assert!(Spec::from_value(&serde_json::json!({"prompt": "x", "profile": "acme"}), &root.join("store")).is_ok(), "the user's default");
     }
 }

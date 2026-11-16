@@ -138,7 +138,16 @@
   },
   {
    "id": "F-AI-15",
-   "feature": "A plugin's `uses.ai.wrapper` is a line on its sheet and an offer in AI & minutes (Offered by …, Add…), added only by the user (window or `ai add-wrapper --plugin`); an update naming another program asks again and is said on the profile, taken only by Use it (`ai update-wrapper`); the plugin removed leaves the profile",
+   "feature": "A plugin's `uses.ai.wrapper` is a line on its sheet and an offer in AI & minutes (Offered by …, Add…), added only by the user (window or `ai add-wrapper --plugin`); an update naming another program asks again and is said on the profile, taken only by Use it (`ai update-wrapper`); the plugin switched off or removed leaves the profile; a same-id plugin from another marketplace offers nothing to it",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-16",
+   "feature": "Inside a run Echo started, a wrapper profile is never made the default, a call's or a thread's (`ai default`, a call's profile, `project set --profile`); a plugin's job (`ctx.claude.run({profile})`) runs on one only when it is the user's default",
    "priority": "high",
    "check": "agent",
    "axes": [

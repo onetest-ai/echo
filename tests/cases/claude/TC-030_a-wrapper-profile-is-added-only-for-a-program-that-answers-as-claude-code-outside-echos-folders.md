@@ -3,7 +3,7 @@ id: TC-030
 title: A wrapper profile is added only for a program that answers as Claude Code, outside Echo's folders, and never from a run
 priority: high
 type: functional
-requirements: [F-AI-07, F-AI-11]
+requirements: [F-AI-07, F-AI-11, F-AI-16]
 module: claude
 run: agent
 platform: macos
@@ -34,7 +34,8 @@ tags: [claude, ai, profiles, wrapper, cli]
 | 6 | `ln -s "$ECHOCTL_HOME/plugins/acme/bin/acme-claude" "$D/wrappers/via-link"`, then `target/debug/echoctl ai add-wrapper linked --command "$D/wrappers/via-link"; echo "exit $?"` | The link is followed: the same `is inside Echo's data folder` refusal, `exit 1` |
 | 7 | `target/debug/echoctl ai add-wrapper spaced --command "acme-claude --x"; echo "exit $?"` | `Error: “acme-claude --x” isn't a program name (letters, digits, “.”, “_”, “-”) or a path`, `exit 1` |
 | 8 | `ECHOCTL_HEADLESS=1 target/debug/echoctl ai add-wrapper inrun --command "$D/wrappers/acme-claude"; echo "exit $?"` | `Error: refused inside a run Echo started: which program Echo starts as Claude Code is the user's to choose`, `exit 1` |
-| 9 | `target/debug/echoctl ai status` | The data's own profiles (`system`, `work`, `other`, `out`, `ollama`) and `acme`: none of `notclaude`, `planted`, `linked`, `spaced`, `inrun` |
+| 9 | `ECHOCTL_HEADLESS=1 target/debug/echoctl ai default acme; echo "exit $?"` | `Error: refused inside a run Echo started: only the user chooses a wrapper profile for their calls and threads`, `exit 1`; `ai status` still shows `work` as the default |
+| 10 | `target/debug/echoctl ai status` | The data's own profiles (`system`, `work`, `other`, `out`, `ollama`) and `acme`: none of `notclaude`, `planted`, `linked`, `spaced`, `inrun` |
 
 ## Expected Final State
 One wrapper profile, `acme`, starting `$D/wrappers/acme-claude`.

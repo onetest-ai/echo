@@ -35,6 +35,7 @@ test('the form says each step: checking, found where with what version, refused 
   assert.deepEqual([ok.kind, ok.text, ok.command], ['ok', 'Found /opt/acme/bin/acme-claude — 2.1.400 (Claude Code)', 'acme-claude'])
   assert.deepEqual(wrapperState({ error: "/x/node doesn't answer --version as Claude Code does" }), { kind: 'error', text: "/x/node doesn't answer --version as Claude Code does" })
   assert.equal(wrapperState({ added: true, name: 'Acme Claude' }).text, 'Added Acme Claude')
+  assert.equal(wrapperState({ added: true, name: 'Acme Claude', path: '/opt/acme/bin/acme-claude' }).text, 'Added Acme Claude — it starts /opt/acme/bin/acme-claude')
   assert.equal(wrapperState({ updated: true, id: 'acme', path: '/opt/acme/bin/acme-claude2' }).text, 'It now starts /opt/acme/bin/acme-claude2')
   assert.match(WRAPPER_WARNING, /sees and can change everything Echo sends to Claude, call transcripts included/)
 })
