@@ -40,7 +40,8 @@ without changing it; each such edit can be undone.
   pass), the sync's state (`usage.<pass>`, with `ok`, and `error` when it failed; a failed sync's state keeps it too)
   and one JSON line a pass in `ledger/sync-usage.jsonl` (`at`, `run`, `pass`, `usage`, `ok`, `error`), written in one
   write. A failed pass keeps what it used when its result event came (`projectsync::RunFailed`: an error result, its
-  turns used up among them); stopped with none (its time limit, Echo quitting) its `usage` is null: "usage unknown".
+  turns used up among them); stopped with none (its time limit, Echo quitting) its `usage` is null: "usage unknown". A failure before Claude
+  Code started (too old for the guard, refused, not started) is no run and isn't counted.
 - `echoctl project sync-stats [--days N]` (`projectsync::sync_stats`; default 7, today included, by calendar day)
   sums every thread's lines per day and pass: `{days: [{day, runs, tokens, passes: {<pass>: {runs, failed, tokens,
   input, output, cache_read, cache_write, turns, cost_usd, cost_runs}}}], total}`, newest day first; `tokens` is the

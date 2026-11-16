@@ -122,14 +122,14 @@ pub fn run(id: &str) -> Result<Value> {
         let mut extract_report = String::new();
         if !pending.is_empty() {
             let prompt = prompt(&p, "extract", &pending, &run_dir);
-            let r = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log);
+            let r = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
             extract_report = pass(id, &run_id, "extract", r, &mut log, &mut used)?;
         }
         // Fresh eyes: the verifier is another process, started after the extraction ended.
         let mut verify_report = String::new();
         if !ledger::verify_prep(id, false)?.is_empty() {
             let prompt = prompt(&p, "verify", &[], &run_dir);
-            let r = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log);
+            let r = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
             verify_report = pass(id, &run_id, "verify", r, &mut log, &mut used)?;
         }
         // Who's who: proposals about people and organisations from the same calls, with their words;
@@ -138,7 +138,7 @@ pub fn run(id: &str) -> Result<Value> {
         if !for_people.is_empty() {
             let prompt = prompt(&p, "people", &for_people, &run_dir);
             let r = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log);
-            people_report = match pass(id, &run_id, "people", r, &mut log, &mut used) {
+            people_report = match r.and_then(|r| pass(id, &run_id, "people", r, &mut log, &mut used)) {
                 Ok(r) => {
                     mark_people_read(id, &for_people);
                     r
@@ -213,7 +213,7 @@ fn prompt(p: &projects::Project, mode: &str, ids: &[String], run_dir: &Path) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd: &Path, settings: &Path, prompt: &str, id: &str, run_dir: &Path, log: &mut fs::File) -> Result<(String, Value)> {
+fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd: &Path, settings: &Path, prompt: &str, id: &str, run_dir: &Path, log: &mut fs::File) -> Result<Result<(String, Value)>> {
     let ledger = dunce::canonicalize(ledger_dir(id))?;
     let abs = |p: &Path| format!("/{}", notes::rule_path(p));
     let clis = notes::run_clis(plugin);
@@ -235,8 +235,8 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
         c.env(guard::RUN_SKILL, plugin.join("skills").join("project-sync"));
         Ok(c.spawn()?)
     })?;
-    let (text, result) = finish_run_result(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time")?;
-    Ok((text, usage_of(&result)))
+    // Started: what it used counts from here, a failure too (`pass`); an error before this never started a run.
+    Ok(finish_run_result(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time").map(|(text, result)| (text, usage_of(&result))))
 }
 
 /// Each pass's usage, one line a pass, in the thread's ledger folder (`sync_stats` sums them).
@@ -301,7 +301,11 @@ fn record_usage(id: &str, run: &str, pass: &str, u: &Value, error: Option<&str>,
 /// cost_usd, cost_runs}}}], total}`. A run whose usage is unknown counts as a run, with no tokens; `cost_usd` sums the
 /// `cost_runs` that gave one. Only the threads there are now: a deleted thread's usage leaves with it.
 pub fn sync_stats(days: u32) -> Value {
-    let today = Local::now().date_naive();
+    sync_stats_on(days, Local::now().date_naive())
+}
+
+/// `sync_stats` as of `today`.
+fn sync_stats_on(days: u32, today: chrono::NaiveDate) -> Value {
     let from = today.checked_sub_days(chrono::Days::new(days.saturating_sub(1).into())).unwrap_or(chrono::NaiveDate::MIN);
     let mut by_day: BTreeMap<chrono::NaiveDate, BTreeMap<String, Value>> = Default::default();
     let add = |sum: &mut Value, v: &Value| {
@@ -512,9 +516,10 @@ mod tests {
         let (_env, _root) = crate::paths::testenv::folders("sync-stats");
         let a = projects::create("Acme pilot", None, None).unwrap().id;
         let b = projects::create("Globex rollout", None, None).unwrap().id;
-        // Fixed times: today's noon and three days before it, whenever the test runs.
+        // Fixed times: a fixed day's noon and three days before it, whenever the test runs.
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
         let noon = |days_back: u64| {
-            let d = Local::now().date_naive().checked_sub_days(chrono::Days::new(days_back)).unwrap();
+            let d = day.checked_sub_days(chrono::Days::new(days_back)).unwrap();
             d.and_hms_opt(12, 0, 0).unwrap().and_local_timezone(Local).earliest().unwrap()
         };
         usage_line(&a, noon(0), "extract", 10, 5000, 7, true);
@@ -522,7 +527,7 @@ mod tests {
         usage_line(&b, noon(0), "extract", 30, 4000, 6, false);
         usage_line(&b, noon(3), "people", 1, 1, 1, true);
         fs::OpenOptions::new().append(true).open(ledger_dir(&b).join(USAGE)).and_then(|mut f| writeln!(f, "not json")).unwrap();
-        let today = sync_stats(1);
+        let today = sync_stats_on(1, day);
         let days = today["days"].as_array().unwrap();
         assert_eq!(days.len(), 1);
         assert_eq!(days[0]["runs"], 3);
@@ -531,10 +536,11 @@ mod tests {
         assert_eq!((extract["runs"].as_u64(), extract["failed"].as_u64(), extract["cache_read"].as_u64(), extract["turns"].as_u64()), (Some(2), Some(1), Some(9000), Some(13)));
         assert_eq!((extract["cost_usd"].as_f64(), extract["cost_runs"].as_u64()), (Some(0.5), Some(1)), "the cost of the runs that gave one");
         assert_eq!(days[0]["passes"]["verify"]["input"], 20);
-        let week = sync_stats(7);
+        let week = sync_stats_on(7, day);
         assert_eq!(week["days"].as_array().unwrap().len(), 2, "the older day too, newest first");
         assert_eq!(week["days"][1]["passes"]["people"]["runs"], 1);
-        assert_eq!(sync_stats(u32::MAX)["days"].as_array().unwrap().len(), 2, "any number of days");
+        assert_eq!(sync_stats_on(u32::MAX, day)["days"].as_array().unwrap().len(), 2, "any number of days");
+        assert_eq!(sync_stats_on(1, day.checked_add_days(chrono::Days::new(1)).unwrap())["days"].as_array().unwrap().len(), 0, "the next day: none");
     }
 
     #[test]
@@ -580,10 +586,33 @@ mod tests {
         let text = fs::read_to_string(root.join("log.txt")).unwrap();
         assert!(text.contains("extract: 320980 tokens (input 900, output 80, cache read 300000, cache write 20000), 40 turns — failed: Claude Code failed: turns used up"), "{text}");
         assert!(text.contains("verify: usage unknown — failed: stopped after 40 min"), "{text}");
-        let stats = sync_stats(1);
+        // As of the day the lines were written (never straddling midnight).
+        let first: Value = serde_json::from_str(fs::read_to_string(ledger_dir(&id).join(USAGE)).unwrap().lines().next().unwrap()).unwrap();
+        let written = chrono::DateTime::parse_from_rfc3339(first["at"].as_str().unwrap()).unwrap().with_timezone(&Local).date_naive();
+        let stats = sync_stats_on(1, written);
         let passes = &stats["days"][0]["passes"];
         assert_eq!((passes["extract"]["failed"].as_u64(), passes["extract"]["tokens"].as_u64(), passes["extract"]["cost_usd"].as_f64()), (Some(1), Some(320980), Some(2.5)));
         assert_eq!((passes["verify"]["runs"].as_u64(), passes["verify"]["failed"].as_u64(), passes["verify"]["tokens"].as_u64()), (Some(1), Some(1), Some(0)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sync_stopped_before_claude_code_starts_counts_no_run() {
+        let (_env, root) = crate::paths::testenv::folders("sync-not-started");
+        let _fake = crate::ai::fake::install(&root);
+        // The default profile's Claude Code is too old for the guard: refused before it is started.
+        fs::write(root.join("user/.claude/version"), "2.1.200 (Claude Code)\n").unwrap();
+        let id = projects::create("Acme pilot", None, None).unwrap().id;
+        let ev = ledger_dir(&id).join("evidence");
+        fs::create_dir_all(&ev).unwrap();
+        let at = Local::now() - chrono::Duration::days(1);
+        fs::write(ev.join("mail-a.json"), json!({"id": "mail-a", "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": "Acme pilot status"}).to_string()).unwrap();
+        fs::write(ev.join("mail-a.md"), "Test mail, nothing real.").unwrap();
+        let e = run(&id).unwrap_err().to_string();
+        assert!(e.contains("too old to sync a thread"), "{e}");
+        assert!(!ledger_dir(&id).join(USAGE).exists(), "no run started: none counted");
+        assert_eq!(state(&id)["usage"], json!({}));
+        assert!(!root.join("user/.claude/p.args").exists(), "never asked");
     }
 
     #[cfg(unix)]
