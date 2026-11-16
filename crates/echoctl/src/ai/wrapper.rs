@@ -210,16 +210,17 @@ pub fn claude_version(path: &Path) -> Result<String> {
     version_line(&out).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))
 }
 
-/// The line of a `--version` answer that names Claude Code, or a bare version as its only line ("2.1.325": a wrapper
-/// passing on the Claude Code it starts) when the guard's Claude Code is that new. A line naming another program never.
-fn version_line(out: &str) -> Option<String> {
+/// The line of a `--version` answer that names Claude Code, or a bare version of Claude Code's 2.x as its only line
+/// ("2.1.325": a wrapper passing on the Claude Code it starts) when the guard's Claude Code is that new. A line naming
+/// another program never, nor another program's bare version ("10.9.2").
+pub(crate) fn version_line(out: &str) -> Option<String> {
     let lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     if let Some(l) = lines.iter().find(|l| l.contains("(Claude Code")) {
         return Some((*l).to_owned());
     }
     let bare = |l: &str| l.split('.').count() == 3 && l.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
     match lines.as_slice() {
-        [l] if bare(l) && crate::guard::new_enough(l) => Some((*l).to_owned()),
+        [l] if bare(l) && l.starts_with("2.") && crate::guard::new_enough(l) => Some((*l).to_owned()),
         _ => None,
     }
 }
@@ -1108,16 +1109,16 @@ printf '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}
         assert!(outside_echo(&p).is_err());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_bare_version_is_claude_codes_only_alone_and_new_enough() {
         assert_eq!(version_line("2.1.325\n").as_deref(), Some("2.1.325"));
         assert_eq!(version_line("\n 2.1.400 (Claude Code)\nmore\n").as_deref(), Some("2.1.400 (Claude Code)"));
-        for no in ["2.1.200\n", "1.4.0 (Gemini CLI)\n", "v2.1.325\n", "2.1.325\nsomething else\n", "2.1\n", "2.1.325-beta\n", ""] {
+        for no in ["2.1.200\n", "10.9.2\n", "3.0.0\n", "1.4.0 (Gemini CLI)\n", "v2.1.325\n", "2.1.325\nsomething else\n", "2.1\n", "2.1.325-beta\n", ""] {
             assert_eq!(version_line(no), None, "{no:?}");
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_version_is_asked_as_a_run_would_start_the_wrapper() {
         let (_env, root) = crate::paths::testenv::folders("wrapper-version-env");
