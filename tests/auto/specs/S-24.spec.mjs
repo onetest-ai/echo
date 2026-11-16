@@ -1021,7 +1021,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
         await expect(today.widgetButton(n.week, x.callsButton)).toBeVisible()
         // As the week holds them (a Monday's is today alone): one memo or more, minutes under an hour, else hours.
         const callsSay = fill(x.calls, { n: v.memos }).replace(/memos$/, v.memos === 1 ? 'memo' : 'memos')
-        const time = v.recorded_min < 60 ? [v.recorded_min, v.recorded_min === 1 ? x.minutes.replace('minutes', 'minute') : x.minutes] : [Math.round(v.recorded_min / 6) / 10, x.hours]
+        const time = v.recorded_min < 60 ? [v.recorded_min, v.recorded_min === 1 ? x.minutes.replace('minutes', 'minute') : x.minutes] : (() => { const h = Math.round(v.recorded_min / 6) / 10; return [h, h === 1 ? x.hours.replace('hours', 'hour') : x.hours] })()
         for (const [num, label] of [[v.calls, callsSay], time, [v.with_minutes, x.withMinutes]]) {
           await expect(today.widgetSays(n.week, String(num))).toBeVisible()
           await expect(today.widgetSays(n.week, label)).toBeVisible()
