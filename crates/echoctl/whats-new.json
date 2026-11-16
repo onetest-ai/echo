@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.9.10",
+    "items": [
+      { "icon": "plugin", "title": "Plugins keep threads up to date", "text": "A plugin you allow can move a thread's stage and add its own tasks, and your own edits always win over it.", "open": "projects" },
+      { "icon": "layout", "title": "Dashboards from your plugins", "text": "Plugins can offer ready-made dashboards: add one from the + beside a thread's or client's tabs, only if you want it.", "open": "projects" },
+      { "icon": "layout", "title": "Scroll past busy widgets", "text": "Long tables and lists show what fits and a +N more line, so the page always scrolls under your mouse.", "open": "today" },
+      { "icon": "sparkle", "title": "Scorecards and real funnels", "text": "Plugin tables can show trends, heat maps, stage mixes and a total, and funnel charts now look like funnels.", "open": "today" },
+      { "icon": "fix", "title": "Smaller fixes", "text": "A plugin marketplace that can't be read now says why and how to sign in to it." }
+    ]
+  },
+  {
     "version": "0.9.9",
     "items": [
       { "icon": "plugin", "title": "Claude knows your plugins", "text": "Claude in Echo now sees which plugins you have and reads each one's guide only when it works with it.", "open": "settings/plugins" },
