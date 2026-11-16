@@ -235,8 +235,9 @@
 .td-grid > .pw-sec { max-height: none; }
 .td-tall:has(> .pw-sec) { contain: none; }
 .td-tall > .pw-sec { overflow: visible; }
-/* A line or the held column with one: never shorter than what the widget shows (its line grows, the page scrolls). */
-.td > .td-grid:not(.td-hug):has(> .pw-sec) { flex-shrink: 0; }
+/* A line with one shown whole ("+N more" clicked): never shorter than it (the line grows, the page scrolls); folded,
+   the line is as ever — Echo's own cards beside it keep their height and scroll inside. */
+.td > .td-grid:not(.td-hug):has(> .pw-sec.pw-open) { flex-shrink: 0; }
 .td-hold:has(> .pw-sec) { contain: none; }
 .td-hold > .td-sec.pw-sec { position: static; height: auto; min-height: min(100%, var(--td-view, calc(100vh - 150px))); }
 .pw-table table { min-width: 100%; border-collapse: collapse; font-size: 12.5px; }
