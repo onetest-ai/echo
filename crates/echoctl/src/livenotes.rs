@@ -1481,7 +1481,7 @@ mod tests {
     }
 
     fn local(url: &str) -> Profile {
-        Profile { id: "t".into(), name: "Test".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("m".into()), notes_model: None, account: None, email: None, sso: false }
+        Profile { id: "t".into(), name: "Test".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("m".into()), notes_model: None, account: None, email: None, sso: false, wrapper: None }
     }
 
     /// A one-request HTTP server on 127.0.0.1 that answers `reply` (or holds the line). It reads

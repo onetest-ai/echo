@@ -106,7 +106,7 @@ pub fn run(id: &str) -> Result<Value> {
         let profile = ready.profile();
         let model = p.model.clone().or_else(|| profile.notes_model());
         let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
-        let cwd = if profile.kind == crate::ai::Kind::System { crate::ai::system_folder()? } else { paths::home() };
+        let cwd = if !profile.kind.managed() { crate::ai::system_folder()? } else { paths::home() };
         crate::ai::hooks_conflict(profile, &cwd).map_err(|w| anyhow!(w))?;
         let run_id = started.format("%Y%m%d-%H%M%S").to_string();
         let run_dir = ledger_dir(id).join("runs").join(&run_id);

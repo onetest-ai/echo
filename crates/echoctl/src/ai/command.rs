@@ -58,6 +58,7 @@ pub fn add_local(id: &str, name: Option<String>, model: &str, live_model: Option
         account: None,
         email: None,
         sso: false,
+        wrapper: None,
     })
 }
 
@@ -74,9 +75,37 @@ pub fn add_claude(id: &str, name: Option<String>, live_model: Option<String>, no
         account: None,
         email: email_arg(email)?,
         sso,
+        wrapper: None,
     })?;
     println!("sign it in once: Sign in… in the Echo window, or echoctl ai login {id}");
     Ok(())
+}
+
+/// `echoctl ai add-wrapper <id> --command <program> [--name …]`, and the window's: a wrapper profile, only by the user
+/// (never inside a run Echo started), only once its command resolves outside Echo's folders and answers as Claude Code
+/// (claude-code-runs R13). `offered_by`: the plugin whose offer the user took.
+pub fn add_wrapper(id: &str, command: &str, name: Option<String>, offered_by: Option<String>) -> Result<Profile> {
+    if crate::notes::headless() {
+        bail!("refused inside a run Echo started: which program Echo starts as Claude Code is the user's to choose");
+    }
+    let (path, version) = wrapper::admit(command)?;
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| id.to_string());
+    let p = Profile {
+        id: id.into(),
+        name: name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or(stem),
+        kind: Kind::Wrapper,
+        base_url: None,
+        token: None,
+        live_model: None,
+        notes_model: None,
+        account: None,
+        email: None,
+        sso: false,
+        wrapper: Some(wrapper::Wrapper { command: path.display().to_string(), offered_by }),
+    };
+    add(p.clone())?;
+    println!("{} starts {} ({version}); its jobs, call transcripts included, go wherever that program sends them", p.name, path.display());
+    Ok(p)
 }
 
 pub(super) fn email_arg(email: Option<String>) -> Result<Option<String>> {
@@ -165,10 +194,11 @@ pub fn status(id: Option<&str>) -> Result<()> {
             }
             _ => (None, None, check(&p, None).err().map(|e| format!("{e:#}"))),
         };
-        let conflict = (p.kind != Kind::System).then(|| policy_conflict(&p)).flatten();
+        let conflict = p.kind.managed().then(|| policy_conflict(&p)).flatten();
         out.push(crate::ollama::with_context(&p, json!({
             "id": p.id, "name": p.name, "kind": p.kind, "default": s.default_id() == p.id,
             "live_model": p.live_model(), "notes_model": p.notes_model(), "base_url": p.base_url,
+            "command": p.wrapper.as_ref().map(|w| &w.command), "offered_by": p.wrapper.as_ref().and_then(|w| w.offered_by.as_ref()),
             "signed_in": signed_in, "account": account, "expected_account": p.account,
             "problem": problem.or(conflict),
         })));
@@ -191,6 +221,8 @@ pub fn summary() -> Value {
                 "host": (p.kind == Kind::Local && !p.on_this_computer()).then(|| p.base_url.clone()).flatten(),
                 // `claude`: its sign-in now (`signin::state`; no process runs for it)
                 "signin": crate::signin::state(p),
+                // `wrapper`: the program Echo starts in place of `claude`, and the plugin that offered it
+                "command": p.wrapper.as_ref().map(|w| &w.command), "offered_by": p.wrapper.as_ref().and_then(|w| w.offered_by.as_ref()),
             })).collect::<Vec<_>>(),
         }),
         Err(e) => json!({ "error": format!("{e:#}") }),

@@ -79,7 +79,7 @@ pub fn hooks_conflict(p: &Profile, cwd: &Path) -> Result<Vec<PathBuf>, String> {
         Ok(f) => f,
         Err(e) => return Err(format!("{WHY} ({e})")),
     };
-    let folders = if p.kind == Kind::System {
+    let folders = if !p.kind.managed() {
         match system_config_dirs(cwd) {
             Ok(f) => f,
             Err(e) => return Err(format!("Echo can't tell which Claude Code settings the minutes run would use ({e}), so it can't check they allow its guard")),
@@ -259,7 +259,7 @@ pub fn unreadable(p: &Profile, cwd: &Path) -> Option<(String, &'static str)> {
     if let Some(f) = managed_files().ok()?.into_iter().find(|f| shut(f)) {
         return Some((f.display().to_string(), "anyway"));
     }
-    if p.kind == Kind::System {
+    if !p.kind.managed() {
         let dirs = system_config_dirs(cwd).ok()?;
         return dirs.iter().map(|d| d.join("remote-settings.json")).find(|f| shut(f)).map(|f| (f.display().to_string(), "anyway"));
     }
