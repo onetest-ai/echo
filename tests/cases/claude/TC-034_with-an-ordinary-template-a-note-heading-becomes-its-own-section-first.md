@@ -1,5 +1,5 @@
 ---
-id: TC-032
+id: TC-034
 title: With a template that doesn't keep every section, a heading in the user's notes becomes a section of its own before the template's (a real run on the local model)
 priority: medium
 type: functional
@@ -12,7 +12,7 @@ ai: local
 tags: [claude, minutes, templates, local-model]
 ---
 
-# TC-032: With a template that doesn't keep every section, a heading in the user's notes becomes a section of its own before the template's
+# TC-034: With a template that doesn't keep every section, a heading in the user's notes becomes a section of its own before the template's
 
 **Module:** Claude Code | **Priority:** Medium | **Type:** Functional
 

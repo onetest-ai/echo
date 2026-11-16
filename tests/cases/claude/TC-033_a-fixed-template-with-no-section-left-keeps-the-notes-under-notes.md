@@ -1,5 +1,5 @@
 ---
-id: TC-031
+id: TC-033
 title: A template that keeps every section but has none that applies puts the user's heading under one Notes section (a real run on the local model)
 priority: medium
 type: functional
@@ -12,7 +12,7 @@ ai: local
 tags: [claude, minutes, templates, local-model]
 ---
 
-# TC-031: A template that keeps every section but has none that applies puts the user's heading under one Notes section
+# TC-033: A template that keeps every section but has none that applies puts the user's heading under one Notes section
 
 **Module:** Claude Code | **Priority:** Medium | **Type:** Functional
 

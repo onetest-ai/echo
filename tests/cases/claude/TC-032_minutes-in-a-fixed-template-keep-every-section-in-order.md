@@ -1,5 +1,5 @@
 ---
-id: TC-030
+id: TC-032
 title: Minutes in a template that keeps every section have exactly its sections in order, past the heading cap, with the user's heading inside one and the end time in the header (a real run on the local model)
 priority: high
 type: functional
@@ -12,7 +12,7 @@ ai: local
 tags: [claude, minutes, templates, local-model]
 ---
 
-# TC-030: Minutes in a template that keeps every section have exactly its sections in order, past the heading cap, with the user's heading inside one and the end time in the header
+# TC-032: Minutes in a template that keeps every section have exactly its sections in order, past the heading cap, with the user's heading inside one and the end time in the header
 
 **Module:** Claude Code | **Priority:** High | **Type:** Functional
 

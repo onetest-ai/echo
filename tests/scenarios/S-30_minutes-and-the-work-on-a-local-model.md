@@ -10,9 +10,9 @@ cases:
   - tests/cases/claude/TC-016_write-again-with-another-template-rewrites-the-minutes-and-keeps-it.md
   - tests/cases/claude/TC-017_a-memo-gets-minutes-in-the-memo-template-by-thread.md
   - tests/cases/calls/TC-038_a-call-keeps-its-profile-when-the-default-changes.md
-  - tests/cases/claude/TC-030_minutes-in-a-fixed-template-keep-every-section-in-order.md
-  - tests/cases/claude/TC-031_a-fixed-template-with-no-section-left-keeps-the-notes-under-notes.md
-  - tests/cases/claude/TC-032_with-an-ordinary-template-a-note-heading-becomes-its-own-section-first.md
+  - tests/cases/claude/TC-032_minutes-in-a-fixed-template-keep-every-section-in-order.md
+  - tests/cases/claude/TC-033_a-fixed-template-with-no-section-left-keeps-the-notes-under-notes.md
+  - tests/cases/claude/TC-034_with-an-ordinary-template-a-note-heading-becomes-its-own-section-first.md
 ---
 
 # S-30: Minutes on a local model
@@ -56,9 +56,9 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 3 | `claude/TC-016_write-again-with-another-template-rewrites-the-minutes-and-keeps-it.md` | — | `<profile>`, `<model>`, `<call>` from the prelude. On stage 2's view (the Calls list): in step 1 skip the navigation, click the row and the tab |
 | 4 | `claude/TC-017_a-memo-gets-minutes-in-the-memo-template-by-thread.md` | — | `<profile>`, `<model>`, `<stamp>` from the prelude. On stage 3's view (the Calls list): in step 1 skip the navigation, click the row. Steps 4–6 in one shell call (each command preceded by `echo "== step N"`) |
 | 5 | `calls/TC-038_a-call-keeps-its-profile-when-the-default-changes.md` | — | `<profile>`, `<model>`, `<where>` from the prelude. Reload `{{base_url}}/` |
-| 6 | `claude/TC-030_minutes-in-a-fixed-template-keep-every-section-in-order.md` | — | `<sync>` from the prelude (its `<call>`). Reload `{{base_url}}/` |
-| 7 | `claude/TC-031_a-fixed-template-with-no-section-left-keeps-the-notes-under-notes.md` | — | `<call>` (Acme renewal negotiation) from the prelude; stage 3 rewrote its minutes earlier, which doesn't matter here |
-| 8 | `claude/TC-032_with-an-ordinary-template-a-note-heading-becomes-its-own-section-first.md` | — | `<kickoff>` from the prelude (its `<call>`) |
+| 6 | `claude/TC-032_minutes-in-a-fixed-template-keep-every-section-in-order.md` | — | `<sync>` from the prelude (its `<call>`). Reload `{{base_url}}/` |
+| 7 | `claude/TC-033_a-fixed-template-with-no-section-left-keeps-the-notes-under-notes.md` | — | `<call>` (Acme renewal negotiation) from the prelude; stage 3 rewrote its minutes earlier, which doesn't matter here |
+| 8 | `claude/TC-034_with-an-ordinary-template-a-note-heading-becomes-its-own-section-first.md` | — | `<kickoff>` from the prelude (its `<call>`) |
 
 ## Notes
 - Six model runs, each a different prompt or condition: a template chosen by the title (CLI), a template chosen in the window on a call with minutes, the memo template by thread, a template that keeps every section over the heading cap, one with no section that applies, and a note heading with a template that doesn't keep every section. No check needs a second run: each run's minutes, files, log and window are read by the stage that started it.
