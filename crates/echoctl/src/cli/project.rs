@@ -225,12 +225,14 @@ pub enum LedgerCmd {
     Pending,
     /// The live tree as the extractor reads it
     Context,
-    /// Apply proposals (a JSON array file) for one evidence item
+    /// Apply proposals (a JSON array file) for one evidence item; --done also marks it processed, with this note
     Apply {
         #[arg(long)]
         evidence: String,
         #[arg(long)]
         proposals: std::path::PathBuf,
+        #[arg(long)]
+        done: Option<String>,
     },
     /// Mark an evidence item processed (also when it changed nothing)
     Done {
@@ -751,9 +753,22 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     let allowed = own_task || own_thread_read || routine_edit || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
     if notes::run_limited() && !allowed {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
-        let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
+        // A sync run's steps (`guard::PROJECT_STEPS`): what it reads is in its prompt.
+        let agent_step = matches!(cmd, LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
             anyhow::bail!("{}", run_refusal(&std::env::var(guard::RUN_TASK).unwrap_or_default(), matches!(cmd, LedgerCmd::Edit { .. })));
+        }
+        // Done: only an item Echo gave this run for the work (`guard::RUN_ITEMS`, from the run's environment).
+        let marks = match &cmd {
+            LedgerCmd::Done { evidence, .. } => Some(evidence),
+            LedgerCmd::Apply { evidence, done: Some(_), .. } => Some(evidence),
+            _ => None,
+        };
+        if let Some(e) = marks {
+            let items = std::env::var(guard::RUN_ITEMS).unwrap_or_default();
+            if !items.lines().any(|i| i == e) {
+                anyhow::bail!("a sync run marks done only its own items ({})", items.lines().collect::<Vec<_>>().join(", "));
+            }
         }
     }
     let read = |p: &std::path::Path| -> Result<Vec<serde_json::Value>> {
@@ -782,7 +797,21 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Mail { ids, conversation } => print_json(&serde_json::json!({ "mail": ledger::add_mail(id, &ids, conversation)?, "pending": ledger::pending(id)? })),
         LedgerCmd::Pending => print_json(&serde_json::json!(ledger::pending(id)?)),
         LedgerCmd::Context => print_json(&ledger::context(id)?),
-        LedgerCmd::Apply { evidence, proposals } => print_json(&ledger::apply(id, &evidence, &read(&proposals)?)?),
+        LedgerCmd::Apply { evidence, proposals, done } => {
+            let mut applied = ledger::apply(id, &evidence, &read(&proposals)?)?;
+            // Done with it in the same step, when nothing was rejected; else its rejections are fixed first, then `done`.
+            if let Some(note) = done {
+                let rejected = applied["rejected"].as_array().map_or(0, Vec::len);
+                if rejected == 0 {
+                    ledger::mark_processed(id, &evidence, &note)?;
+                    applied["done"] = serde_json::json!(evidence);
+                } else {
+                    applied["done"] = serde_json::Value::Null;
+                    applied["not_done"] = serde_json::json!(format!("{rejected} rejected: fix them, then mark it with `done`"));
+                }
+            }
+            print_json(&applied)
+        }
         LedgerCmd::Done { evidence, note } => {
             ledger::mark_processed(id, &evidence, &note)?;
             print_json(&serde_json::json!({ "done": evidence }));
@@ -796,23 +825,27 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
                     anyhow::bail!("a run writes its packets only into its own folder");
                 }
             }
-            let packets = serde_json::json!(ledger::verify_prep(id, weak)?);
+            // The packets, how the user works (About me) and what this thread is about, as a sync's verifier gets them.
+            let brief = projectsync::verify_brief(id, ledger::verify_prep(id, weak)?);
             match out {
                 Some(f) => {
-                    std::fs::write(&f, serde_json::to_vec_pretty(&packets)?)?;
-                    // How the user works (About me), for judging what counts as done or handed over.
-                    let me = calls::me_profile().and_then(|t| calls::me_parts(&t, &["identity", "patterns"], 2500));
-                    // What this thread is about, for packets from an item it shares with other threads (`also_in`).
-                    let shared = packets.as_array().is_some_and(|a| a.iter().any(|p| p.get("also_in").is_some()));
-                    let scope = shared.then(|| ledger::thread_scope(id)).flatten();
-                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f, "me_patterns": me, "thread_scope": scope }));
+                    std::fs::write(&f, serde_json::to_vec_pretty(&brief["packets"])?)?;
+                    print_json(&serde_json::json!({ "packets": brief["packets"].as_array().map(|a| a.len()), "file": f, "me_patterns": brief["me_patterns"], "thread_scope": brief["thread_scope"] }));
                 }
-                None => print_json(&packets),
+                None => print_json(&brief["packets"]),
             }
         }
         LedgerCmd::VerifyApply { file } => print_json(&ledger::verify_apply(id, &read(&file)?)?),
         LedgerCmd::PeopleContext { items } => print_json(&people::context(id, &items)?),
-        LedgerCmd::PeopleApply { evidence, file } => print_json(&people::apply_suggestions(id, &evidence, &read(&file)?)?),
+        LedgerCmd::PeopleApply { evidence, file } => {
+            let applied = people::apply_suggestions(id, &evidence, &read(&file)?)?;
+            // In a sync run: noted in its folder, so Echo marks the item read for people (`projectsync::read_for_people`).
+            if let (true, Some(run)) = (notes::headless(), std::env::var_os(guard::RUN_DIR)) {
+                let note = std::path::Path::new(&run).join(projectsync::PEOPLE_APPLIED);
+                std::fs::OpenOptions::new().create(true).append(true).open(note).and_then(|mut f| std::io::Write::write_all(&mut f, format!("{evidence}\n").as_bytes()))?;
+            }
+            print_json(&applied)
+        }
         LedgerCmd::Tree => print_json(&ledger::tree(id)?),
         LedgerCmd::Run { scheduled } => print_json(&if scheduled { projectsync::run_scheduled(id)? } else { projectsync::run(id)? }),
         LedgerCmd::Status => print_json(&projectsync::state(id)),
@@ -867,6 +900,53 @@ mod tests {
         let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
         assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
         assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
+    }
+
+    #[test]
+    fn a_sync_run_applies_and_marks_an_item_done_in_one_step_and_reads_nothing_through_the_cli() {
+        let (_env, _) = crate::paths::testenv::folders("sync-run-cli");
+        let pilot = crate::projects::create("Pilot", None, None).unwrap();
+        let ledger = crate::paths::home().join("projects").join(&pilot.id).join("ledger");
+        let evid = "2026-11-10_100000";
+        std::fs::create_dir_all(ledger.join("evidence")).unwrap();
+        let item = serde_json::json!({"id": evid, "kind": "call", "date": "2026-11-10", "title": "Pilot check-in", "turns": [{"speaker": "Dana Kowal", "text": "Nothing new for the pilot today."}]});
+        std::fs::write(ledger.join(format!("evidence/{evid}.json")), item.to_string()).unwrap();
+        let run = ledger.join("runs/r1");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(run.join("p.json"), "[]").unwrap();
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, super::guard::RUN_PROJECT, super::guard::RUN_DIR, super::guard::RUN_ITEMS] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _unset = Unset;
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        std::env::set_var(super::guard::RUN_PROJECT, &pilot.id);
+        std::env::set_var(super::guard::RUN_DIR, &run);
+        std::env::set_var(super::guard::RUN_ITEMS, evid);
+        let apply = |file: &str| super::ledger_command(&pilot.id, super::LedgerCmd::Apply { evidence: evid.into(), proposals: run.join(file), done: Some("nothing for the work".into()) });
+        // Something rejected: not done yet (fixed first, then `done`).
+        std::fs::write(run.join("bad.json"), r#"[{"op": "status", "node": "T999", "effect": "done", "quote": "Nothing new for the pilot today"}]"#).unwrap();
+        apply("bad.json").unwrap();
+        assert!(crate::ledger::processed_ids(&pilot.id).unwrap().is_empty(), "a rejection: not marked done");
+        apply("p.json").unwrap();
+        assert_eq!(crate::ledger::processed_ids(&pilot.id).unwrap(), [evid], "applied and done in one step");
+        // Done only for the run's own items.
+        let other = || super::ledger_command(&pilot.id, super::LedgerCmd::Done { evidence: "2026-11-01_100000".into(), note: String::new() });
+        assert!(other().unwrap_err().to_string().contains("marks done only its own items (2026-11-10_100000)"));
+        std::env::remove_var(super::guard::RUN_ITEMS);
+        let again = super::LedgerCmd::Apply { evidence: evid.into(), proposals: run.join("p.json"), done: Some("x".into()) };
+        assert!(super::ledger_command(&pilot.id, again).is_err(), "no items named: none to mark");
+        // people-apply notes the item in the run's folder, for Echo to mark it read for people.
+        super::ledger_command(&pilot.id, super::LedgerCmd::PeopleApply { evidence: evid.into(), file: run.join("p.json") }).unwrap();
+        assert_eq!(std::fs::read_to_string(run.join(crate::projectsync::PEOPLE_APPLIED)).unwrap(), format!("{evid}\n"));
+        // What it reads Echo gave it in its prompt: the reading steps are refused, as the guard refuses them.
+        for cmd in [super::LedgerCmd::Pending, super::LedgerCmd::Context, super::LedgerCmd::VerifyPrep { weak: false, out: None }, super::LedgerCmd::PeopleContext { items: vec![evid.into()] }] {
+            assert!(super::ledger_command(&pilot.id, cmd).unwrap_err().to_string().contains("with the agent's steps"));
+        }
     }
 
     #[test]

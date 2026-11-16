@@ -10,6 +10,42 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
 - Closing a question or risk is op `answer`, verified; a near-duplicate is `suggest_merge`.
 - The verify step runs in a fresh process, apart from the extractor (`projectsync::run`).
 
+## A sync's runs
+
+`projectsync::run` starts its Claude Code runs on the thread's AI profile and model:
+
+- **extract** reads the work and who's who in one run: the items not read yet (at most `MAX_ITEMS`, 10), then items
+  read for the work already but not yet for people (`ledger/people-read-2.json`), oldest first
+  (`projectsync::take_items`). Its message stays within `MAX_TEXT` (200,000 characters, counted as characters): the
+  thread's `context` and `people-context` (`projectsync::Given`) first, the items' text in what is left (at least
+  `MIN_ROOM`, 20,000); an item is cut at `MAX_ITEM` (120,000) with "[N characters left out]" at its end, the first item
+  always goes (cut to fit), the rest whole or at the next sync. The text is read as bytes, invalid UTF-8 replaced. An
+  item cut, and one whose `.md` is missing (marked processed, "Echo couldn't read its text"; marked read for people),
+  is said in the sync's message; one that can't be read for another reason waits for the next sync.
+- Its fixed instructions — how the run works, then the project-sync skill's `EXTRACT.md` and `PEOPLE.md`, compiled in —
+  go in `--append-system-prompt-file`, the same for every run and thread (`projectsync::extract_rules`); its one message
+  — the thread, the run's folder, the items in order, the run's evidence tag, `context`, `people-context` (without its
+  file list), then each item's `pending` entry and text in a block `<evidence-<12 hex> id="…">` … `</evidence-<12 hex>>`,
+  the tag random for each run (`projectsync::evidence_tag`) — on stdin (`projectsync::extract_pass`).
+- Tools `Bash,Write`: it writes `<id>.json` and `<id>_people.json` (`[]` when none) in its run folder and runs `apply`,
+  `people-apply` and `done`. `apply --done '<note>'` marks the item processed in the same step only when nothing was
+  rejected (else `done: null`, `not_done`: fixed first, then `done`); `done` and `--done` only for the run's own items for
+  the work (`ECHOCTL_RUN_ITEMS`). `people-apply` in a run notes the item in the run folder's `people-applied.txt`; once
+  the run ends Echo marks read for people only the items noted there or marked processed during the run
+  (`projectsync::read_for_people`); an item offered `PEOPLE_OFFERS` (2) times without is marked read anyway, said in
+  the run's log and the sync's message (`ledger/people-offered.json`, `projectsync::people_handled`).
+- **verify** runs when `verify_prep` has packets: no tools, one request a batch of packets within `MAX_PACKETS` (60,000
+  characters of their JSON; each batch a fresh run, their usage summed in the state's `usage.verify`); its fixed
+  instructions are `VERIFY.md` and the answer's form, its message the packets with `me_patterns` and `thread_scope`
+  (`projectsync::verify_brief`, which `verify-prep --out` prints too). Echo reads the answer's verdicts (a fenced JSON
+  block first, else the first JSON array of entries with a `mid`: `projectsync::verdicts_of`) and applies only those on
+  its own packets through `ledger::verify_apply`; an answer it can't read leaves its packets for the next sync, and a
+  verify run that fails leaves its packets and the later batches' (`projectsync::verify`): the sync still ends done,
+  with the extract's report. The run
+  folder keeps `packets.json` and `verdicts.json`; the sync's message gets "Verify: N supports, …".
+- The skill (`plugin/skills/project-sync/SKILL.md`) runs the same instructions by hand, with the ledger's CLI steps
+  (`pending`, `context`, `people-context`, `apply`, `people-apply`, `done`, `verify-prep`, `verify-apply`).
+
 ## The user's edits
 
 `ledger::human_event` records the user's own edit: it pins the field, and an agent's later evidence lands in history
@@ -35,7 +71,7 @@ without changing it; each such edit can be undone.
 
 ## What a sync uses
 
-- Each pass (extract, verify, people) reads its usage from Claude Code's `result` event (`projectsync::usage_of`:
+- Each pass (extract, verify) reads its usage from Claude Code's `result` event (`projectsync::usage_of`:
   `input`, `output`, `cache_read`, `cache_write`, `turns`, `cost_usd` when given) into its run's `log.txt` (one line a
   pass), the sync's state (`usage.<pass>`, with `ok`, and `error` when it failed; a failed sync's state keeps it too)
   and one JSON line a pass in `ledger/sync-usage.jsonl` (`at`, `run`, `pass`, `usage`, `ok`, `error`), written in one

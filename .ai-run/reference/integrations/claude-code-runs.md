@@ -10,6 +10,9 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - `local` / `claude` jobs run with `--setting-sources user` (never on `claude auth …`); `ai::policy_conflict` refuses them
   when admin policy could route.
 - Children start in their own session (`ai::detach`); only `echoctl ai login`'s child stays in the terminal's foreground.
+- A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
+  their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill
+  (`--disable-slash-commands`) (`projectsync::args`).
 
 ## Profiles
 

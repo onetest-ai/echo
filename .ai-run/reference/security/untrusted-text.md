@@ -10,7 +10,7 @@ The CLI commands each guarded mode may call (the guard refuses any other Bash ca
 | Mode | Allowlist | Commands (on main) |
 |---|---|---|
 | minutes run | `notes::RUN_COMMANDS` | `context`, `actions`, `speakers`, `title`, `type`, `vocab add`, `frames`, `transcribe`, `memo threads` |
-| project sync | `guard::PROJECT_STEPS` | `pending`, `context`, `apply`, `done`, `verify-prep`, `verify-apply`, `people-context`, `people-apply` |
+| project sync | `guard::PROJECT_STEPS` | `apply`, `done`, `people-apply` (what it reads is in its prompt; its verify run has no tools) |
 | the window's session on a call (ask) | `guard::ASK_COMMANDS` | `context` |
 
 A routine's or Yolo's run has no run guard: it runs as the folder session (One builder, below).
@@ -37,7 +37,9 @@ then canonicalised, links resolved and re-checked, kept inside its root; Windows
 
 A run's scope is read from the environment Echo set: `ECHOCTL_RUN_CALL` (its call), `ECHOCTL_RUN_PREVIOUS` (previous
 minutes), `ECHOCTL_RUN_CLIS` (the CLI's names) (`guard::RUN_CALL`). A sync run also gets `ECHOCTL_RUN_LEDGER`,
-`ECHOCTL_RUN_DIR` and `ECHOCTL_RUN_PROJECT`.
+`ECHOCTL_RUN_DIR`, `ECHOCTL_RUN_PROJECT` and `ECHOCTL_RUN_ITEMS` (the items it may mark done; the guard and the CLI
+refuse `done` and `apply --done` for any other). A sync run reads nothing with a tool (the guard refuses Read, Glob, Grep
+and Edit): Echo gives it its text, each item in an evidence block whose tag is random for the run.
 
 ## The run guard
 

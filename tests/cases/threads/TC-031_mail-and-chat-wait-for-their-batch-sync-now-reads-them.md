@@ -27,7 +27,7 @@ tags: [threads, sync, mail, batch, virtual-model]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `$L pending`; `$L done --evidence <id>` for each item listed; then `$L run` (Sync now: the verify and people passes catch up on what the data holds) | `$L pending` prints `[]`; the sync ends `state` "done" |
+| 1 | Run `$L pending`; `$L done --evidence <id>` for each item listed; then `$L run` (Sync now: the verifier and who's who catch up on what the data holds) | `$L pending` prints `[]`; the sync ends `state` "done" |
 | 2 | `mail mail-acme-1`; run `$L run --scheduled` | `state` "done", `processed` 0, `message` "1 mail or chat item waits: read at HH:MM or once 5 wait" (HH:MM two hours from now); no run folder made (`run` absent); `$L pending` still lists `mail-acme-1` |
 | 3 | Run `cat $ECHOCTL_HOME/projects/acme-rollout/ledger/waiting.json` | `{"mail-acme-1": "<now>"}`: when it was first seen waiting, not the mail's own time a day ago |
 | 4 | Run `$L run --scheduled` again | The same message with the same HH:MM: it still waits from step 2 |

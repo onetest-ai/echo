@@ -44,4 +44,4 @@ Read only: nothing in the data folder changed.
 
 ## Notes
 - A Yolo run reads only a call pinned to the profile it was started on (`ECHOCTL_RUN_PROFILE`, set by Echo at launch — not the thread's profile now). This is a check `read` applies, not a limit on Yolo (it runs with skipped permissions). A thread re-pinned while the run goes on is covered by the Rust test `links::tests::a_run_reads_the_calls_it_may_and_a_refusal_says_why`; step 6 imitates it with a run profile that differs from the call's.
-- A thread's sync run can't run `read` at all: its guard allows only `echoctl project ledger <id> <step>` (`guard::PROJECT_STEPS`), and it reads its calls from the ledger's evidence.
+- A thread's sync run can't run `read` at all: its guard allows only `echoctl project ledger <id> apply|people-apply|done` (`guard::PROJECT_STEPS`), and Echo gives it its items' text in its prompt.
