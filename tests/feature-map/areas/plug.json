@@ -361,6 +361,27 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-39",
+   "feature": "A plugin offers dashboards ready-made (its manifest's `dashboards`: a thread's or a client's, its name, `about`, `for` stage groups, its widgets — its own or `plugin:<id>:<widget>` of its marketplace — with size, height, row and settings): the install sheet says 'Offers dashboards: <name> (clients)…' (not a permission: an update adding one doesn't ask again); the dashboards' '+' shows them under 'From plugins' ('<name> — <plugin>', about as its tooltip; `echoctl dashboard presets --thread|--client`), a click (`echoctl dashboard add-preset <plugin> <id>`) adds it once, opened, with its layout; one added isn't offered again; Echo never adds one itself; a thread's with `for` shows only on threads of those stage groups. `read_manifest` refuses a preset whose own widget lacks the page's thread / client setting, takes no such size or height, or sets a setting it hasn't (or the page's thread / client); `plugin check` checks its marketplace siblings' widgets when beside it",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-40",
+   "feature": "A dashboard added from a plugin's preset says, quietly under its name, when its plugin's new version changed the preset ('<plugin> updated this dashboard', '— Update replaces your changes' when the user changed it): Update takes the new layout and `for`; Keep mine keeps the user's, that version not offered again (`echoctl dashboard preset-update <id> [--keep]`); its plugin off ('Its plugin, <name>, is off: its widgets show nothing') or removed ('Its plugin was removed: …') — the dashboard stays the user's, with Remove… (asked first); never deleted by Echo",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-41",
+   "feature": "`echoctl dashboard export <id> --thread|--client` prints a dashboard as a preset block (its name, `for`, widgets in full with size, height, row and settings, the page's thread / client settings left out); `echoctl dashboard import <file|-> --thread|--client` adds it as the user's own (refused: a name taken, the other kind, a widget not named in full)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

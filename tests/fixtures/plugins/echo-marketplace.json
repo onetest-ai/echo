@@ -60,6 +60,10 @@
     {
       "id": "tracker-demo",
       "source": "./plugins/tracker-demo"
+    },
+    {
+      "id": "board-demo",
+      "source": "./plugins/board-demo"
     }
   ]
 }

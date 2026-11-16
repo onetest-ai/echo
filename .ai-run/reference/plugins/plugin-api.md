@@ -9,7 +9,7 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 
 - A plugin is one folder with `echo-plugin.json` at its root: required `id` (1–40 chars, a–z 0–9 `-`, no leading `-`),
   `name` (≤ 60) and `version` (`X.Y.Z[-pre]`); optional `echo` (`>=X.Y.Z`, the Echo it needs), `summary` (≤ 240),
-  `uses`, `settings`, `main`, `client`, `widgets`, `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
+  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
   with a–z 0–9 `.` `_` `-` `/` only, ≤ 16 KB, shown only as an image beside its work rows and ⌘K entries).
   Evidence: `plugins::read_manifest`, `plugins::valid_id`
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
@@ -18,8 +18,9 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
   `folder` or `secret`; read with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
-- `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, skills, scripts,
-  `agent/`): exit 0, or each problem named by file; `--json`. Needs no data folder, nothing installed, no network.
+- `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
+  scripts, `agent/`), and its dashboards' widgets of the plugins beside it in the folder's parent (a marketplace's
+  `plugins/`) when they are there: exit 0, or each problem named by file; `--json`. Needs no data folder, nothing installed, no network.
   Evidence: `plugins::agent::check_folder`
 
 ## `uses` and the permission sheet
@@ -368,6 +369,30 @@ Any widget but a `page` (which draws its own) may have `open` (an `echo://` plac
 on the user's click, then Today reads the widgets again. A plugin's `https://` link — a widget's `open`, a table row's
 or a `stats` item's `link`, a work row's `url`, its ⌘K entry — opens in the browser on the user's first click, nothing
 asked; its host shows in the link's tooltip. Evidence: `pluginWidgetHtml`, `workRowOpen` (window script)
+
+### Dashboards it offers
+
+`dashboards: [{id, kind, name, about?, for?, items: [{widget, size?, height?, row?, params?}]}]` — at most 6, each
+offered in the "+" beside a thread's (`kind: "thread"`) or a client's (`"client"`) dashboards ("From plugins", "<name> —
+<plugin>") and in `echoctl dashboard presets`; the user adds one (`echoctl dashboard add-preset <plugin> <id>`), once.
+Echo never adds one itself, and the install sheet only says so ("Offers dashboards: Staffing (clients)"): not a
+permission, an update adding one doesn't ask again.
+
+- `id` a–z 0–9 `-`, unique for its kind; `name` 1–40 chars (the dashboard's, unless the user has one of that name:
+  then it isn't added); `about` ≤ 160 (the row's tooltip).
+- `for` (a thread's only): the stage groups it shows on — `pursuit`, `delivery`, `closed`; none: every thread.
+- `items`: 1–24, each widget once — the plugin's own by its id, or `plugin:<id>:<widget>` of a plugin of its
+  marketplace. A widget has a setting of the page's kind (`thread` / `client`), which the page sets: never in `params`.
+  `size`, `height` and `params` are ones the widget takes (unset: its first size, 1 row, its defaults); `row`: it starts
+  a row. Its own widgets are checked at install; others' by `plugin check` beside them, and on a page a widget of a
+  plugin not installed draws nothing.
+- Updated: a dashboard added from a preset the plugin's new version changed says "<plugin> updated this dashboard —
+  Update / Keep mine" ("— Update replaces your changes" when the user changed it); Update takes the new layout (and
+  `for`), Keep mine keeps theirs and that version isn't offered again (`echoctl dashboard preset-update <id> [--keep]`).
+- Its plugin off or removed: the dashboard stays the user's, saying so, with Remove.
+- `echoctl dashboard export <id> --thread|--client` prints a dashboard as such a block (widgets in full, their thread /
+  client settings left out) — a preset for a manifest, or a file for `echoctl dashboard import <file>` (the user's own
+  then). Evidence: `plugins::presets::check`, `boards::add_preset`, `boards::status`
 
 ## Work rows
 

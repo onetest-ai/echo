@@ -579,6 +579,25 @@ fn board_file(kind: crate::boards::Kind, board: &str) -> PathBuf {
     paths::config_dir().join("dashboards").join("boards").join(format!("{}-{board}.json", kind.name()))
 }
 
+/// A dashboard's page, as every thread (client) shares it.
+fn board_page(kind: crate::boards::Kind, board: &str) -> Page {
+    let base = match kind {
+        crate::boards::Kind::Thread => Page::Thread("-".into()),
+        crate::boards::Kind::Client => Page::Client("-".into()),
+    };
+    Page::Board(Box::new(base), board.into())
+}
+
+/// A dashboard's layout as it shows.
+pub fn board_items(kind: crate::boards::Kind, board: &str) -> Vec<Item> {
+    load_on(&board_page(kind, board))
+}
+
+/// A dashboard's whole layout, set (a plugin's preset, an import): what it shows after.
+pub fn set_board(kind: crate::boards::Kind, board: &str, items: Vec<Item>) -> Result<Vec<Item>> {
+    change(&board_page(kind, board), |_| Ok(items))
+}
+
 /// A dashboard removed (`boards::remove`): its layout goes.
 pub fn forget_board(kind: crate::boards::Kind, board: &str) {
     let f = board_file(kind, board);

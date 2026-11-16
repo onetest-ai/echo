@@ -190,6 +190,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "project" if second == "work" && w.len() < 4 => None,
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
+        "dashboard" if matches!(second, "list" | "presets" | "export") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
         _ => Some("change"),
     }

@@ -75,6 +75,12 @@ default); on a client's page its `client` setting is that client, and a `thread`
 value only for a thread of that client (else its default). Each place a widget is on is asked, and its answer kept, on
 its own. Evidence: `today_layout::params_on`, `today_layout::Page::holds_thread`
 
+A dashboard added from a plugin's preset keeps where it came from in `boards.json` (`from: {plugin, preset, version,
+taken, laid}`: the preset's widgets as taken and the layout they made) and its `for`; `boards::status` compares them
+with the plugin's preset now (`update`) and the layout now (`edited`), and with the registry (`off`, `gone`,
+`dropped`). The window reads them with the presets on offer from `/api/boards` (`boards::view`). Evidence:
+`boards::status`, `boards::take_update`
+
 ## Where things are
 
 | When you are | Exemplar | Tests |

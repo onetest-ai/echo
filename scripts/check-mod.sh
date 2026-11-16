@@ -36,6 +36,8 @@ node crates/echoctl/ui/notes-scroll.test.mjs
 node crates/echoctl/ui/palette.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).
 node crates/echoctl/ui/projects.test.mjs
+# A thread's and a client's dashboards: which a thread shows, the plugins' presets in the "+", a preset's line.
+node crates/echoctl/ui/board-presets.test.mjs
 # The org chart's layout: governance band, workstream columns, their leads (OrgLayout).
 node crates/echoctl/ui/org-chart.test.mjs
 # How Send to Claude ranks the skills for a task (rankSkills).
