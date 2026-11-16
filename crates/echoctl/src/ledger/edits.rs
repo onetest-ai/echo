@@ -51,8 +51,8 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
         // remembers that edit, so its undo takes both back.
         "accept" => {
             let target = body["target"].as_str().unwrap_or("");
-            // A plugin's proposed task: its story first.
-            story_for_accept(project, target)?;
+            // A plugin's proposed task: still waiting, and its story first.
+            story_for_accept(project, target, true)?;
             let evs = Ledger::of(project)?.events()?;
             if let Some(m) = evs.iter().find(|x| x["mid"] == target && x["effect"] == "mention" && x["covers"] == true) {
                 let raw = fold(&Ledger::of(project)?)?;
@@ -64,7 +64,9 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
                 }
             }
         }
+        "reject" => story_for_accept(project, body["target"].as_str().unwrap_or(""), false)?,
         "undo" => {
+            not_a_plugins(project, body["target"].as_str().unwrap_or(""))?;
             let evs = Ledger::of(project)?.events()?;
             // A Close that also closed the master: undone there too.
             if let Some(f) = evs.iter().find(|e| e["mid"] == body["target"] && e["op"] == "accept").map(|e| e["forwarded"].clone()).filter(|f| f.is_object()) {

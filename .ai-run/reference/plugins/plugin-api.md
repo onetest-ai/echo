@@ -156,10 +156,12 @@ Each is refused while Claude prepares and asks, and in a Yolo run on another thr
   name and reason (≤ 300 chars). Once the user changes the stage away from what this plugin set last (a stage set before
   its first write doesn't count), `{applied: false, why: "the user set this thread's stage themselves"}` until the user
   lets it set the stage again (`echoctl project set <id> --stage-back-to <plugin>`, the Profile's button). The same
-  stage again: `{applied: true}`, nothing written. Evidence: `projects::plugin_set_stage`, `projects::stage_held_from`
+  stage again: `{applied: true}`, nothing written. A closed thread's stage is refused (it isn't among the threads it
+  reads). Evidence: `projects::plugin_set_stage`, `projects::stage_held_from`
 - `ctx.tasks.upsert(thread, {key, title, due?, owner?, state?, url?, reason?, propose?})` →
   `{task, applied, proposed, ignored, why?}`: the plugin's task of that `key` (≤ 120 chars, its own id), created in a
-  story named after the plugin in the thread's first workstream, or updated. `title` ≤ 200 chars; `due` `YYYY-MM-DD` or
+  story named after the plugin in the thread's first workstream (where the user merged that story, if they did; a new
+  one if they deleted it), or updated. `title` ≤ 200 chars; `due` `YYYY-MM-DD` or
   null; `owner` a name ≤ 80 chars; `state` `open`, `in_progress`, `blocked`, `done`, `cancelled`; `url` https, shown as
   the task's link titled with the plugin's name. A field left out stays as it is. The same values again write nothing;
   `ignored` lists the fields the user set (kept as they are), and a task the user deleted or merged takes no write
@@ -170,7 +172,8 @@ Each is refused while Claude prepares and asks, and in a Yolo run on another thr
   `{proposed: false, why: "the user said no to this"}` (a change proposes again); closing a key never added withdraws
   its proposal.
 
-Each write is in the task's History as the plugin's, with its reason. Evidence: `ledger::plugin_upsert`,
+Each write is in the task's History as the plugin's, with its reason; the user can't undo a plugin's write (they
+change or delete the task), and decides only the proposal still waiting. Evidence: `ledger::plugin_upsert`,
 `ledger::plugin_close`
 
 ## Folders and files

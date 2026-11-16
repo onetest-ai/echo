@@ -611,6 +611,15 @@ fn node_of(e: &Value) -> Node {
     }
 }
 
+/// The story a plugin's tasks go in: its own, or where the user merged it; none once it or its workstream is deleted.
+pub(super) fn plugin_home(n: &BTreeMap<String, Node>, plugin: &str) -> Option<String> {
+    let live = |id: &str| n.get(id).is_some_and(|x| x.state != "merged" && x.state != "deleted");
+    n.values()
+        .filter(|x| x.kind == "story" && x.plugin.as_ref().is_some_and(|p| p["id"] == plugin))
+        .map(|x| chase(n, &x.id))
+        .find(|id| live(id) && n[id].parent.as_deref().is_some_and(|e| live(&chase(n, e))))
+}
+
 fn needs_verdict(e: &Value) -> bool {
     e["type"] == "agent"
         && (VERIFIED_OPS.contains(&e["op"].as_str().unwrap_or(""))
@@ -778,9 +787,12 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 if human {
                     x.pinned = vec!["title".into()];
                 }
-                // A plugin's new task may start in progress or blocked.
+                // A plugin's new task may start in progress or blocked; it goes in its story (a merge then takes it along).
                 if let Some(st) = e["set"]["state"].as_str().filter(|_| x.plugin.is_some()) {
                     x.state = st.into();
+                }
+                if x.kind == "task" && x.parent.is_none() {
+                    x.parent = x.plugin.as_ref().and_then(|p| plugin_home(&n, p["id"].as_str()?));
                 }
                 hist(&mut x, e, true, json!({"op": "create"}));
                 n.insert(x.id.clone(), x);
@@ -1062,10 +1074,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             x.looks_done = None;
         }
     }
-    // A plugin's task sits in its story (`ledger::plugin_story`), however late the story came.
-    let stories: BTreeMap<String, String> = n.values().filter(|x| x.kind == "story" && !["merged", "deleted"].contains(&x.state.as_str())).filter_map(|x| Some((x.plugin.as_ref()?["id"].as_str()?.to_string(), x.id.clone()))).rev().collect();
-    for x in n.values_mut().filter(|x| x.kind == "task" && x.parent.is_none()) {
-        x.parent = x.plugin.as_ref().and_then(|p| stories.get(p["id"].as_str()?)).cloned();
+    // A plugin's task made before its story (a Yes makes the story after the proposal): its story now.
+    let homes: Vec<(String, String)> = n.values().filter(|x| x.kind == "task" && x.parent.is_none()).filter_map(|x| Some((x.id.clone(), plugin_home(&n, x.plugin.as_ref()?["id"].as_str()?)?))).collect();
+    for (id, home) in homes {
+        n.get_mut(&id).unwrap().parent = Some(home);
     }
     derive(&mut n);
     let lim_n = (lim + 1).max(0) as usize;

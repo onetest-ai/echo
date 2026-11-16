@@ -1242,6 +1242,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             let pname = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
             let out = match op {
+                // A closed thread isn't among the ones it sees: never reopened or moved by a plugin.
+                "threads.set_stage" if crate::projects::load(thread)?.stage.closed() => bail!("a closed thread's stage isn't a plugin's to change"),
                 "threads.set_stage" => crate::projects::plugin_set_stage(thread, id, &pname, crate::projects::Stage::parse(arg[1].as_str().unwrap_or(""))?, arg[2].as_str())?,
                 "tasks.upsert" => crate::ledger::plugin_upsert(thread, id, &pname, &arg[1])?,
                 _ => crate::ledger::plugin_close(thread, id, &pname, arg[1].as_str().unwrap_or(""), arg[2].as_str(), arg[3] == true)?,
@@ -3340,6 +3342,9 @@ mod tests {
             assert_eq!(run("tracker", "task", json!({"thread": t, "task": {"key": "P-9", "title": "Book the demo"}})).unwrap()["applied"], true);
         }
         assert_eq!(crate::projects::load(&t).unwrap().stage, crate::projects::Stage::Proposal);
+        // A closed thread: not the plugin's to move.
+        crate::projects::set_stage(&other, crate::projects::Stage::Done, None).unwrap();
+        assert!(run("tracker", "stage", json!({"thread": other, "stage": "lead"})).unwrap_err().contains("closed thread"));
     }
 
     #[test]

@@ -79,26 +79,53 @@ fn current(x: &Node, field: &str) -> Value {
 }
 
 /// The plugin's story in the thread, made (in the first workstream) when it has none.
+/// The plugin's story in the thread (where the user merged it, if they did); made in the first workstream when it has
+/// none or the user deleted it — and that workstream too when the user deleted them all.
 fn plugin_story(l: &Ledger, evs: &[Value], t: &Tree, plugin: &str, name: &str) -> Result<String> {
-    if let Some(x) = t.nodes.values().find(|x| x.kind == "story" && !["merged", "deleted"].contains(&x.state.as_str()) && x.plugin.as_ref().is_some_and(|p| p["id"] == plugin)) {
-        return Ok(x.id.clone());
+    if let Some(id) = plugin_home(&t.nodes, plugin) {
+        return Ok(id);
     }
-    let epic = t.nodes.values().filter(|x| x.kind == "epic" && !["merged", "deleted"].contains(&x.state.as_str())).map(|x| x.id.clone()).min().ok_or_else(|| anyhow!("the thread has no workstream"))?;
-    let id = new_id("story", evs.iter().filter(|x| x["type"] == "create" && x["kind"] == "story").count() + 1);
     let now = Local::now().to_rfc3339();
-    l.append(&[json!({"type": "create", "id": id, "kind": "story", "by": "plugin", "plugin": plugin, "plugin_name": name, "evidence": null, "date": &now[..10], "at": now,
-        "mid": mid_of(&["plugin-story", plugin, &now]), "fields": {"title": name, "parent": epic}})])?;
+    let count = |k: &str| evs.iter().filter(|x| x["type"] == "create" && x["kind"] == k).count() + 1;
+    let mut recs = vec![];
+    let epic = match t.nodes.values().filter(|x| x.kind == "epic" && !["merged", "deleted"].contains(&x.state.as_str())).map(|x| x.id.clone()).min() {
+        Some(e) => e,
+        None => {
+            let e = new_id("epic", count("epic"));
+            recs.push(json!({"type": "create", "id": e, "kind": "epic", "by": "plugin", "plugin": plugin, "plugin_name": name, "evidence": null, "date": &now[..10], "at": now,
+                "mid": mid_of(&["plugin-epic", plugin, &now]), "fields": {"title": FIRST_EPIC, "plan": "Off-plan"}}));
+            e
+        }
+    };
+    let id = new_id("story", count("story"));
+    recs.push(json!({"type": "create", "id": id, "kind": "story", "by": "plugin", "plugin": plugin, "plugin_name": name, "evidence": null, "date": &now[..10], "at": now,
+        "mid": mid_of(&["plugin-story", plugin, &now]), "fields": {"title": name, "parent": epic}}));
+    l.append(&recs)?;
     Ok(id)
 }
 
-/// Before the user's Yes to a plugin's proposed task: the plugin's story it goes in.
-pub(super) fn story_for_accept(project: &str, target: &str) -> Result<()> {
+/// Before the user's Yes or No to a plugin's proposal: only one still waiting (not replaced by a newer one, not decided);
+/// a Yes to a new task makes the plugin's story it goes in.
+pub(super) fn story_for_accept(project: &str, target: &str, yes: bool) -> Result<()> {
     let l = Ledger::of(project)?;
     let _lock = l.lock()?;
     let evs = l.events()?;
-    let Some(e) = evs.iter().find(|e| e["mid"] == target && e["type"] == "create" && e["plugin"].is_string()) else { return Ok(()) };
+    let Some(e) = evs.iter().find(|e| e["mid"] == target && e["plugin"].is_string() && e["propose"] == true) else { return Ok(()) };
     let t = fold_events(&evs, l.evidence())?;
-    plugin_story(&l, &evs, &t, e["plugin"].as_str().unwrap_or(""), e["plugin_name"].as_str().unwrap_or(""))?;
+    if !t.proposals.values().any(|p| p["mid"] == target) {
+        bail!("that suggestion was replaced by a newer one or already decided");
+    }
+    if yes && e["type"] == "create" {
+        plugin_story(&l, &evs, &t, e["plugin"].as_str().unwrap_or(""), e["plugin_name"].as_str().unwrap_or(""))?;
+    }
+    Ok(())
+}
+
+/// A plugin's own write isn't the user's to undo: they delete or change the task instead.
+pub(super) fn not_a_plugins(project: &str, target: &str) -> Result<()> {
+    if Ledger::of(project)?.events()?.iter().any(|e| e["mid"] == target && e["by"] == "plugin") {
+        bail!("a plugin's change can't be undone: change or delete the task instead");
+    }
     Ok(())
 }
 
@@ -133,7 +160,7 @@ fn write(project: &str, plugin: &str, name: &str, key: &str, set: serde_json::Ma
     }
     let pending = t.proposals.get(&k);
     let quiet = |set: &Value| -> Option<Value> {
-        if pending.is_some_and(|p| &p["set"] == set) {
+        if propose && pending.is_some_and(|p| &p["set"] == set) {
             return Some(json!({"task": pending.and_then(|p| p["node"].as_str().filter(|_| p["op"] == "set")), "applied": false, "proposed": true, "ignored": []}));
         }
         (propose && t.refused.get(&k) == Some(set)).then(|| json!({"task": null, "applied": false, "proposed": false, "ignored": [], "why": "the user said no to this"}))
@@ -339,5 +366,51 @@ mod tests {
         let r = plugin_close(&id, "tracker", "Acme Tracker", "P-9", None, true).unwrap();
         assert_eq!(r["why"], "no open task of that key");
         assert_eq!(tree(&id).unwrap()["proposals"], json!([]), "withdrawn");
+    }
+
+    #[test]
+    fn the_users_merge_or_delete_of_the_plugins_story_holds_and_its_tasks_go_with_a_merge() {
+        let (_env, id) = thread("plugin-task-story-moves");
+        let up = |key: &str, title: &str| plugin_upsert(&id, "tracker", "Acme Tracker", &json!({"key": key, "title": title})).unwrap()["task"].as_str().unwrap().to_string();
+        let a = up("P-1", "Send the quote");
+        let story = nodes(&id)[&a].parent.clone().unwrap();
+        let mine = human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Sales"})).unwrap()["id"].as_str().unwrap().to_string();
+        human_event(&id, &json!({"op": "merge", "node": story, "into": mine})).unwrap();
+        let b = up("P-2", "Book the demo");
+        let n = nodes(&id);
+        assert_eq!((n[&a].parent.as_deref(), n[&b].parent.as_deref()), (Some(mine.as_str()), Some(mine.as_str())), "merged: the plugin's tasks, old and new, in the user's story");
+        assert_eq!(n.values().filter(|x| x.kind == "story" && x.plugin.is_some() && x.state != "merged").count(), 0, "no new story of its own");
+        // The story it was merged into deleted: a new task gets a story of its own again.
+        human_event(&id, &json!({"op": "delete", "node": mine})).unwrap();
+        let c = up("P-3", "Sign the order");
+        let n = nodes(&id);
+        let home = n[&c].parent.clone().unwrap();
+        assert_eq!((n[&home].title.as_str(), n[&home].parent.as_deref()), ("Acme Tracker", Some("E01")));
+        // Every workstream deleted: a new one, with a new story in it.
+        human_event(&id, &json!({"op": "delete", "node": "E01"})).unwrap();
+        let d = up("P-4", "Send the invoice");
+        let n = nodes(&id);
+        let story = &n[n[&d].parent.as_deref().unwrap()];
+        let epic = &n[story.parent.as_deref().unwrap()];
+        assert_eq!((story.title.as_str(), epic.kind.as_str(), epic.state.as_str()), ("Acme Tracker", "epic", "open"));
+        assert_ne!(story.id, home);
+    }
+
+    #[test]
+    fn only_the_waiting_proposal_is_decided_and_a_plugins_own_write_isnt_undone() {
+        let (_env, id) = thread("plugin-task-proposal-edges");
+        let ask = |due: &str, propose: bool| plugin_upsert(&id, "tracker", "Acme Tracker", &json!({"key": "P-7", "title": "Send the quote", "due": due, "propose": propose})).unwrap();
+        ask("2026-11-21", true);
+        let old = tree(&id).unwrap()["proposals"][0]["mid"].clone();
+        ask("2026-11-28", true);
+        assert!(human_event(&id, &json!({"op": "accept", "target": old})).unwrap_err().to_string().contains("replaced by a newer one"));
+        assert!(human_event(&id, &json!({"op": "reject", "target": old})).is_err());
+        // A direct write with the waiting proposal's values: applied, the proposal gone, one task.
+        let r = ask("2026-11-28", false);
+        assert_eq!((r["applied"].as_bool(), r["proposed"].as_bool()), (Some(true), Some(false)), "{r}");
+        assert_eq!(tree(&id).unwrap()["proposals"], json!([]));
+        assert_eq!(nodes(&id).values().filter(|x| x.kind == "task").count(), 1);
+        let create = Ledger::of(&id).unwrap().events().unwrap().into_iter().rfind(|e| e["type"] == "create" && e["kind"] == "task").unwrap();
+        assert!(human_event(&id, &json!({"op": "undo", "target": create["mid"]})).unwrap_err().to_string().contains("can't be undone"));
     }
 }
