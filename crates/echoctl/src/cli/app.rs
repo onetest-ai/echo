@@ -118,6 +118,16 @@ pub enum AiCmd {
         #[arg(long)]
         sso: bool,
     },
+    /// A command you installed that starts Claude Code its own way (a company's wrapper), started in place of
+    /// `claude`, on your own Claude Code setup: its jobs, call transcripts included, go wherever it sends them
+    AddWrapper {
+        id: String,
+        /// The program: a name on your PATH, or its full path (no arguments)
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// A profile's minutes model; how a Claude profile signs in: the email pre-filled, single sign-on
     Set {
         id: String,
@@ -427,6 +437,7 @@ pub fn ai(cmd: Option<AiCmd>) -> Result<()> {
         AiCmd::Live { state } => ai::set_live(state == "on"),
         AiCmd::AddLocal { id, model, live_model, url, token, name } => ai::add_local(&id, name, &model, live_model, &url, token),
         AiCmd::AddClaude { id, name, live_model, notes_model, email, sso } => ai::add_claude(&id, name, live_model, notes_model, email, sso),
+        AiCmd::AddWrapper { id, command, name } => ai::add_wrapper(&id, &command, name, None).map(drop),
         AiCmd::Set { id, email, no_email, sso, notes_model } => {
             anyhow::ensure!(notes_model.is_some() || email.is_some() || no_email || sso.is_some(), "nothing to set: --notes-model, --email, --no-email or --sso");
             if let Some(m) = notes_model {

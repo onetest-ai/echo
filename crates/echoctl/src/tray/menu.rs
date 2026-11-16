@@ -662,6 +662,7 @@ impl Ui {
                         ),
                         crate::ai::Kind::Claude => (p.notes_model_label(), "sonnet, opus or haiku, or a full model name; empty for sonnet."),
                         crate::ai::Kind::Local => (p.notes_model_label(), "the model's name on the server; empty for its live model."),
+                        crate::ai::Kind::Wrapper => (p.notes_model_label(), "sonnet, opus or haiku, or a model name the command knows; empty for its own default."),
                     };
                     let msg = format!("Model that writes the minutes of {} (the profile new calls use):\n\n{how}", p.name);
                     if let Some(m) = app::ask_text(&msg, &current, "Save") {

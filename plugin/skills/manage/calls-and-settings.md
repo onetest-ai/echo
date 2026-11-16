@@ -60,6 +60,7 @@ echoctl ai set <profile> --notes-model sonnet  # a profile's minutes model
 echoctl ai live on | off                       # live notes during calls
 echoctl ai add-local <name> --url http://127.0.0.1:11434 --model <model>   # Ollama on this computer
 echoctl ai add-claude <name> [--email …]       # another claude.ai account; sign it in from the Echo window
+echoctl ai add-wrapper <name> --command <program> # a Claude Code wrapper the user installed (only on their say)
 echoctl ai login <profile>                     # sign it in here, in a terminal
 ```
 

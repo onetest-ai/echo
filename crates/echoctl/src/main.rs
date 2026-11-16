@@ -466,6 +466,19 @@ enum Cmd {
     /// Echo started (`guard.rs`); exit 2 refuses the call
     #[command(hide = true)]
     RunGuard,
+    /// (internal) A run on a wrapper profile: Echo's own checks between the run and the wrapper (`ai::wrapper`)
+    #[command(hide = true, name = "wrapper-run")]
+    WrapperRun {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// (internal) The proof's hooks of a run on a wrapper profile (`ai::wrapper`): hello at its start, the gate before
+    /// each tool call
+    #[command(hide = true)]
+    Proof {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
     #[command(hide = true)]
     ViewHook,
@@ -706,6 +719,8 @@ fn main() -> Result<()> {
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
         Cmd::RunGuard => std::process::exit(guard::command()),
+        Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
+        Cmd::Proof { args } => std::process::exit(ai::wrapper::proof_command(&args)),
         Cmd::ViewHook => std::process::exit(view::hook()),
         Cmd::OnedriveHook => std::process::exit(onedrive::hook()),
         #[cfg(feature = "transcribe")]

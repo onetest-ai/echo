@@ -47,6 +47,17 @@ minutes), `ECHOCTL_RUN_CLIS` (the CLI's names) (`guard::RUN_CALL`). A sync run a
   stops an older one.
 - A run reads saved `tool-results` only of its own session: the hook's `transcript_path` + `session_id`
   (`guard::own_results`).
+- Hooks the user installed, directly or through a wrapper, are the user's code and can change what a tool call runs
+  after the guard allowed it; the guard judges what Claude asks for. (Claude Code runs matching hooks in parallel, the
+  strictest decision wins, and another hook's `updatedInput` replaces the input the tool runs with.)
+- Through a wrapper profile, the run proves Echo's settings are in force before anything acts on its text
+  (`ai::wrapper`; claude-code-runs reference, Wrapper profiles): the gate holds every tool call until Echo has checked
+  the run's start event. Its marks are in `.plugins/.proof/`, where the sessions' guards refuse an Edit or Write and,
+  best effort, a Bash line that writes there; each is named by its run's value, which is in that run's own settings
+  file (owner-only, named by another id) and Echo's relay. `echoctl proof hello <value> --mark` (a terminal session's
+  hook) marks any value it is given: a process that knows a run's value can mark that run.
+- A skill's load-time `!` commands: the guard lets the Skill tool load only the run's own skills; Echo's skills carry
+  none, and a plugin's skill with one is refused (`plugins::check_skill_md`, `grants::set_session_skills`).
 
 ## Minutes run flags
 

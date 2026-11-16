@@ -171,7 +171,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
     let home = dunce::canonicalize(paths::home())?;
     // A session-like run starts in the data folder, as the folder session does: `.plugins/<id>/` loads from there.
-    let cwd = if spec.session || profile.kind != crate::ai::Kind::System { home.clone() } else { crate::ai::system_folder()? };
+    let cwd = if spec.session || profile.kind.managed() { home.clone() } else { crate::ai::system_folder()? };
     let clis = notes::run_clis(&plugin);
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.

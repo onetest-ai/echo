@@ -14,6 +14,9 @@ pub(super) fn check(p: &Profile, lease: Option<&Lease>) -> Result<()> {
             bail!("the AI profile \"{}\" names no model", p.name);
         }
     }
+    if p.kind == Kind::Wrapper {
+        wrapper::check(p)?;
+    }
     if !p.kind.signs_in() {
         return Ok(());
     }

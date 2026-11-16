@@ -99,6 +99,33 @@
    "axes": [
     "ai.kind"
    ]
+  },
+  {
+   "id": "F-AI-11",
+   "feature": "A wrapper profile (`echoctl ai add-wrapper`) starts a program the user installed in place of `claude`, on their own setup: added only when it resolves (a name as the login shell finds it, links followed) outside Echo's data and own folders and answers `--version` as Claude Code, never from inside a run; `ai status` shows its command; a program gone fails its jobs saying so",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-12",
+   "feature": "A run through a wrapper gets its text only on stdin once its own settings' session-start hook answered with the run's value; Echo's gate holds every tool call until Echo checked the run's start event (Claude Code new enough, the permission mode, tools and MCP servers Echo set); a start that doesn't match, or no answer within 90 s, stops it saying why and naming the wrapper",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-13",
+   "feature": "On a wrapper profile the window's folder and call sessions start with Echo's proof hooks; the call session's first prompt is typed in after the hook answered, never on its command line",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "ai.kind"
+   ]
   }
  ]
 }

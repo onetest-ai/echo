@@ -31,6 +31,50 @@ A routing environment-variable family is listed in two places: `ai::routing_var`
 - A run writes `actions.new-<run>.json`; `notes::finish_actions` applies only that file (never the generic
   `actions.new.json`) through `calls::apply_actions`, which keeps each item's current status.
 
+## Wrapper profiles
+
+A `wrapper` profile (`ai::Kind::Wrapper`, `ai::wrapper`) starts a command the user installed in place of `claude`,
+unmanaged like `system`: the user's own setup, the hook check (`ai::hooks_conflict`, `system`'s folders), never the
+routing-policy check.
+
+- Added by `echoctl ai add-wrapper <id> --command <program> [--name …]` (`ai::add_wrapper`), refused inside a run Echo
+  started. `ai::wrapper::admit`: the command is found as the run's login shell finds it (`command -v`, the name as
+  `$0`), links followed; refused when it lies in the data folder or Echo's own folder (plugins' packages, My plugins
+  and their stores are in them; compared ignoring case on macOS and Windows) or its `--version`, asked as a run would
+  start it (`claude_command`: the login shell), names no Claude Code. `ai.json` keeps the absolute path
+  (`wrapper.command`) and the plugin that offered it (`wrapper.offered_by`); a stored one without a full path fails
+  only that profile's jobs.
+- Every start uses that path (`ai::program_for`): a missing file fails the job. `claude plugin …` (a plugin's
+  `claude.has_plugin` / `install_plugin`) runs the bare `claude`, so a wrapper keeping its own Claude Code folder
+  answers about another one.
+- A print run (`-p`) goes through `echoctl wrapper-run -- <wrapper> <args…>` (`ai::wrapper::relay`): the prompt comes
+  in `ECHOCTL_WRAP_PROMPT` (or the relay's stdin) and goes to the wrapper only as a stream-json message on stdin
+  (after `-p`, only a plain flag word is taken for a flag); `--system-prompt` / `--append-system-prompt` become
+  `…-file` in Echo's run folder; `--output-format json` becomes stream-json (the result line is the same), any other
+  but stream-json is refused. The wrapper leads its own process group: a mismatch, a timeout or the relay stopped
+  (TERM: it stops that group — waiting for one still being started — and removes the run's files and mark) takes down what it started. The run's settings file gets the proof's hooks
+  (`ai::wrapper::proof_settings`): a `SessionStart` hook `echoctl proof hello <value>` and a `PreToolUse` gate
+  `echoctl proof gate <value>` (`--deny-all` when Echo set no tools and no MCP server). `<value>`: 32 random hex digits
+  per run. The prompt is sent once the hook's answer with that value is seen; the run's `system/init` is checked by
+  `ai::wrapper_ready` with `ai::wrapper::Expected` (a Claude Code `guard::new_enough`, the permission mode Echo set — `bypassPermissions` with
+  `--dangerously-skip-permissions`, else `--permission-mode`; none set: anything but `bypassPermissions`; not checked
+  when the run has no tool and no MCP server — no built-in tool beyond Echo's
+  `--tools`, and with `--strict-mcp-config` no MCP server or tool beyond Echo's `--mcp-config`), then marked
+  (`.plugins/.proof/<value>`, removed at the run's end, never by age). The run's files are named by another random id
+  (`minutes-run/proof-<id>…`), and a day-old one is swept. The gate (`guard::checked`) holds a tool call up to 8 s for the
+  mark, then refuses it. A mismatch, or no answer within 90 s at either step, stops the run: its stderr and a last
+  result line `Echo stopped this run: …` name the wrapper.
+- Measured on Claude Code 2.1.325: with stream-json input held back, `SessionStart` hooks run and report
+  (`hook_response`) before any input; `system/init` comes only with the first message.
+- A terminal (`ai::wrapper::terminal_proof`): the folder session and the call session get the proof's hooks, the hello
+  with `--mark` (its answer is the check; its mark `<value>.t`); the mark goes when the session ends
+  (`terminal::unmark_on_exit`) or Echo stops it (`terminal::close`), and every `.t` mark when Echo starts
+  (`ai::wrapper::clear_terminal_marks`). The call
+  session's first prompt is Echo's own words naming the call's folder, no title (`terminal::wrapper_first_prompt`),
+  typed in once the mark is there as one bracketed paste with no control characters (`terminal::type_in_when_marked`,
+  within 90 s), never on the command line. The call session's version check asks the
+  wrapper (`ai::wrapper::claude_version`).
+
 ## Tests
 
 `ai::fake::install(root)` installs a scripted fake Claude Code.
