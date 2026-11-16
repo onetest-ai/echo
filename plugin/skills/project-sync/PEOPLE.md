@@ -9,14 +9,13 @@ You also keep each person's file: **facts**
 (one dated line each, with the words it rests on — they go in at once, no yes needed, because the words
 are checked) and **who they are** (`about`, a short description you rewrite from the facts).
 
-1. `$L people-context --items '<the evidence ids, comma-separated>'` — the project's people (as they
-   stand now, with their addresses and organisations), its organisations, the readable file of each
-   call, and what was already proposed or turned down. Never propose those again.
-   When Claude Code saves that answer to a file, Read the file (your session's own: allowed). If you
-   can't read it, stop and say so — never propose without the people in view.
-2. For each evidence id: read its file in full, write `<run folder>/<id>_people.json` (a JSON array,
-   schema below), run `$L people-apply --evidence '<id>' --file '<that file>'`, and fix rejections in
-   `<id>_people_fix.json` (apply only the fixed entries). An item with nothing to say needs no file.
+**The people** (`people-context`): the project's people as they stand now, with their addresses and organisations,
+its organisations, and what was already proposed or turned down — never propose those again. If you don't have them,
+stop and say so — never propose without the people in view.
+
+For each item: read it in full; its proposals are one JSON array (schema below), `<id>_people.json` in the run's
+folder, applied with `people-apply`. Fix rejections: only the fixed entries in `<id>_people_fix.json`, applied the
+same way. An item with nothing to say needs no file.
 
 ## What to propose (`field`)
 - `role` — what they do in this engagement, in a few words ("sponsor", "approver", "security review",

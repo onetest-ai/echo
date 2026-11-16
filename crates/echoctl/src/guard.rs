@@ -39,8 +39,8 @@ pub const ASK_COMMANDS: [&str; 1] = ["context"];
 pub const RUN_LEDGER: &str = "ECHOCTL_RUN_LEDGER";
 pub const RUN_DIR: &str = "ECHOCTL_RUN_DIR";
 pub const RUN_PROJECT: &str = "ECHOCTL_RUN_PROJECT";
-/// The project-sync skill's own folder: its instructions, readable by the run.
-pub const RUN_SKILL: &str = "ECHOCTL_RUN_SKILL";
+/// The evidence items a sync run may mark done (`done`, `apply --done`), one id a line: those Echo gave it for the work.
+pub const RUN_ITEMS: &str = "ECHOCTL_RUN_ITEMS";
 /// `RUN_MODE=routine`: a routine the user wrote, run on a schedule with "read" permissions
 /// (`routines.rs`) — the data folder it may read.
 pub const RUN_HOME: &str = "ECHOCTL_RUN_HOME";
@@ -76,8 +76,9 @@ pub const ROUTINE_COMMANDS: [&str; 13] = [
 /// The Brain's MCP tools, as Claude Code names them (`mcp__<server>__<tool>`; all read-only).
 pub const BRAIN_TOOLS: &str = "mcp__echo__";
 
-/// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
-pub const PROJECT_STEPS: [&str; 8] = ["pending", "context", "apply", "done", "verify-prep", "verify-apply", "people-context", "people-apply"];
+/// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`): its proposals and its items marked done.
+/// What it reads Echo gives it in its prompt (`projectsync`); the verifier runs with no tools.
+pub const PROJECT_STEPS: [&str; 3] = ["apply", "done", "people-apply"];
 /// The oldest Claude Code whose hooks block when they fail (`onFailure`).
 pub const MIN_CLAUDE: [u32; 3] = [2, 1, 295];
 
@@ -108,8 +109,8 @@ struct ProjectScope {
     id: String,
     /// The run's own folder: the only place it writes (its JSON files).
     run_dir: PathBuf,
-    /// The skill's folder (its instructions): read only.
-    skill: Option<PathBuf>,
+    /// The items it may mark done (`RUN_ITEMS`).
+    items: Vec<String>,
 }
 
 /// `echoctl run-guard`: judge the tool call on stdin; the exit code is Claude Code's answer.
@@ -177,6 +178,25 @@ fn hook_command(exe: &Path) -> String {
     }
 }
 
+/// The gate before each tool call of a run through a wrapper (`echoctl proof gate`, claude-code-runs R14): the run
+/// marked checked by Echo within `hold` (then the guard judges the call), or why the call is refused — always, for a
+/// run Echo gave no tools (`deny_all`).
+pub fn checked(value: &str, deny_all: bool, hold: std::time::Duration) -> Result<(), String> {
+    if deny_all {
+        return Err("Echo: this run has no tools".into());
+    }
+    let t = std::time::Instant::now();
+    loop {
+        if crate::ai::wrapper::marked(value) {
+            return Ok(());
+        }
+        if t.elapsed() >= hold {
+            return Err("Echo hasn't checked this run's start yet: no tool runs before it has".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Is `version` (Claude Code's `claude_code_version`, "2.1.310") at least `MIN_CLAUDE`?
 pub fn new_enough(version: &str) -> bool {
     let parts: Vec<u32> = version.split(['.', '-', ' ']).take(3).map_while(|p| p.parse().ok()).collect();
@@ -212,8 +232,8 @@ impl Scope {
             if clis.is_empty() {
                 return Err("the run names no Echo CLI".into());
             }
-            let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] });
+            let items = clis_of(var(RUN_ITEMS));
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, items }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -259,7 +279,7 @@ impl Scope {
             }
         }
         if let Some(ps) = &self.project {
-            return self.judge_project(ps, call, tool, input);
+            return self.judge_project(ps, tool, input);
         }
         if self.routine {
             return self.judge_routine(call, tool, input);
@@ -319,7 +339,7 @@ impl Scope {
     }
 
     /// A project's sync run: read its ledger, write its own JSON files, run its ledger steps.
-    fn judge_project(&self, ps: &ProjectScope, call: &Value, tool: &str, input: &Value) -> Result<(), String> {
+    fn judge_project(&self, ps: &ProjectScope, tool: &str, input: &Value) -> Result<(), String> {
         match tool {
             "Bash" => {
                 let words = shell_words(input["command"].as_str().unwrap_or(""))?;
@@ -328,34 +348,21 @@ impl Scope {
                     return Err(format!("only the Echo CLI runs here, not {cli}"));
                 }
                 let ok = rest.len() >= 4 && rest[0] == "project" && rest[1] == "ledger" && rest[2] == ps.id && PROJECT_STEPS.contains(&rest[3].as_str());
-                if ok {
-                    Ok(())
-                } else {
-                    Err(format!("only `echoctl project ledger {} <{}>` runs here", ps.id, PROJECT_STEPS.join("|")))
+                if !ok {
+                    return Err(format!("only `echoctl project ledger {} <{}>` runs here", ps.id, PROJECT_STEPS.join("|")));
                 }
-            }
-            "Read" | "Glob" | "Grep" => {
-                let key = if tool == "Read" { "file_path" } else { "path" };
-                let p = resolve(input[key].as_str())?;
-                // The skill's own instructions.
-                if tool == "Read" && ps.skill.as_ref().is_some_and(|s| p.starts_with(s)) {
-                    return Ok(());
-                }
-                // A pattern that climbs out is refused wherever it starts.
-                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
-                if let Some(g) = pattern.filter(|g| escapes(g)) {
-                    return Err(format!("the pattern {g} reaches outside the ledger"));
-                }
-                // The session's own saved output: a large thread's context Claude Code put aside (#39).
-                if own_results(call).is_some_and(|r| p.starts_with(&r)) {
-                    return Ok(());
-                }
-                if !self.inside(&p) {
-                    return Err(format!("only this project's ledger can be read, not {}", p.display()));
+                // Done: only an item Echo gave this run for the work.
+                let marks = rest[3] == "done" || rest.iter().any(|w| w == "--done" || w.starts_with("--done="));
+                let evidence = rest.iter().position(|w| w == "--evidence").and_then(|k| rest.get(k + 1)).map(String::as_str).or_else(|| rest.iter().find_map(|w| w.strip_prefix("--evidence=")));
+                if marks && !evidence.is_some_and(|e| ps.items.iter().any(|i| i == e)) {
+                    return Err(format!("a sync run marks done only its own items ({})", ps.items.join(", ")));
                 }
                 Ok(())
             }
-            "Edit" | "Write" => {
+            // What it reads Echo gives it in its prompt.
+            "Read" | "Glob" | "Grep" => Err("a sync run reads nothing: Echo gives it its text".into()),
+            "Edit" => Err("a sync run writes its JSON files whole, with Write".into()),
+            "Write" => {
                 let raw = input["file_path"].as_str();
                 let p = resolve(raw)?;
                 let json = p.extension().is_some_and(|e| e == "json");
@@ -366,14 +373,6 @@ impl Scope {
                     return Err(format!("{} is a link: not written", p.display()));
                 }
                 Ok(())
-            }
-            "Skill" => {
-                let name = input["skill"].as_str().or_else(|| input["command"].as_str()).unwrap_or("");
-                if matches!(name.trim_start_matches('/'), "echo:project-sync" | "project-sync") {
-                    Ok(())
-                } else {
-                    Err(format!("only the project-sync skill runs here, not {name:?}"))
-                }
             }
             "" => Err("no tool named".into()),
             other => Err(format!("{other} isn't available in a project sync")),
@@ -599,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn a_project_sync_reads_its_ledger_writes_its_run_and_runs_its_steps() {
+    fn a_project_sync_writes_its_run_and_runs_only_its_apply_people_apply_and_done_steps() {
         let root = std::env::temp_dir().join(format!("echo-guard-project-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let ledger = root.join("projects/aurora/ledger");
@@ -614,42 +613,51 @@ mod tests {
                 RUN_DIR => Some(ledger.join("runs/r1").into()),
                 RUN_PROJECT => Some("aurora".into()),
                 RUN_CLIS => Some("echoctl".into()),
+                RUN_ITEMS => Some("2026-10-28_110000".into()),
                 _ => None,
             }
         };
         let s = Scope::from_vars(vars).unwrap();
         let ok = |name: &str, input: Value| s.judge(&tool(name, input));
         let l = dunce::canonicalize(&ledger).unwrap();
-        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora context"})).is_ok());
-        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora apply --evidence 2026-10-28_110000 --proposals /x/p.json"})).is_ok());
-        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora people-context --items '2026-10-28_110000'"})).is_ok(), "the people pass");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora apply --evidence 2026-10-28_110000 --proposals /x/p.json --done 'read'"})).is_ok());
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora people-apply --evidence 2026-10-28_110000 --file /x/p.json"})).is_ok());
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence 2026-10-28_110000 --note 'nothing here'"})).is_ok());
+        // Done only for its own items: another item of the thread is refused, as are apply's --done and --evidence=.
+        let mine = "a sync run marks done only its own items (2026-10-28_110000)";
+        assert_eq!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence 2026-10-01_090000 --note 'x'"})).unwrap_err(), mine);
+        assert_eq!(ok("Bash", json!({"command": "echoctl project ledger aurora apply --evidence 2026-10-01_090000 --proposals /x/p.json --done 'x'"})).unwrap_err(), mine);
+        assert_eq!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence=2026-10-01_090000"})).unwrap_err(), mine);
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence=2026-10-28_110000"})).is_ok());
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora apply --evidence 2026-10-01_090000 --proposals /x/p.json"})).is_ok(), "a fix, not done");
+        assert_eq!(ok("Bash", json!({"command": "echoctl project ledger aurora done"})).unwrap_err(), mine, "no item named");
+        // What it reads is in its prompt: the reading steps, and the verifier's, are refused.
+        for step in ["pending", "context", "people-context --items '2026-10-28_110000'", "verify-prep", "verify-apply --file /x/v.json"] {
+            let e = ok("Bash", json!({"command": format!("echoctl project ledger aurora {step}")})).unwrap_err();
+            assert_eq!(e, "only `echoctl project ledger aurora <apply|done|people-apply>` runs here", "{step}");
+        }
         assert!(ok("Bash", json!({"command": "echoctl project people aurora"})).is_err(), "not the people tab's own command");
         assert!(ok("Bash", json!({"command": "echoctl project ledger helix context"})).is_err(), "another project");
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora edit '{}'"})).is_err(), "the user's edits");
-        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora context; rm -rf /"})).is_err());
-        // A large thread's context saved by Claude Code (#39): this session's own copy may be read, nobody else's.
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence x; rm -rf /"})).is_err());
+        // It reads nothing (Echo gives it its text), not even its own ledger or its session's saved output.
         let claude = std::env::temp_dir().join(format!("echo-guard-sync-claude-{}", std::process::id()));
         let results = claude.join("s9/tool-results");
-        fs::create_dir_all(&results).unwrap();
-        fs::write(results.join("ctx.txt"), "x").unwrap();
-        let read = |session: &str| json!({"tool_name": "Read", "tool_input": {"file_path": results.join("ctx.txt").display().to_string()},
-                                          "session_id": session, "transcript_path": claude.join("s9.jsonl").display().to_string()});
-        assert!(s.judge(&read("s9")).is_ok(), "its own saved output");
-        assert!(s.judge(&read("other")).is_err(), "not another session's");
-        let climb = json!({"tool_name": "Glob", "tool_input": {"path": results.display().to_string(), "pattern": "../../*.jsonl"}, "session_id": "s9", "transcript_path": claude.join("s9.jsonl").display().to_string()});
-        assert!(s.judge(&climb).is_err(), "a pattern climbing out of it");
-        let _ = fs::remove_dir_all(&claude);
+        let read = json!({"tool_name": "Read", "tool_input": {"file_path": results.join("ctx.txt").display().to_string()},
+                          "session_id": "s9", "transcript_path": claude.join("s9.jsonl").display().to_string()});
+        assert_eq!(s.judge(&read).unwrap_err(), "a sync run reads nothing: Echo gives it its text");
         assert!(ok("Bash", json!({"command": "echoctl notes latest"})).is_err());
-        assert!(ok("Read", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_ok());
-        assert!(ok("Read", json!({"file_path": root.join("projects/helix/ledger/evidence")})).is_err());
+        assert!(ok("Read", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_err());
+        assert!(ok("Grep", json!({"path": l, "pattern": "x"})).is_err());
         assert!(ok("Write", json!({"file_path": l.join("runs/r1/2026-10-28_110000.json")})).is_ok());
+        assert!(ok("Edit", json!({"file_path": l.join("runs/r1/2026-10-28_110000.json")})).is_err(), "Write only");
+        assert!(ok("Write", json!({"file_path": l.join("runs/r1/people-applied.txt")})).is_err(), "never Echo's note of people-apply");
         assert!(ok("Write", json!({"file_path": l.join("runs/r1/notes.md")})).is_err(), "JSON only");
         assert!(ok("Write", json!({"file_path": l.join("events.jsonl")})).is_err(), "never the log itself");
         assert!(ok("Edit", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_err());
         assert!(ok("Glob", json!({"path": l, "pattern": "../../**"})).is_err());
-        assert!(ok("Skill", json!({"skill": "echo:project-sync"})).is_ok());
-        assert!(ok("Read", json!({"file_path": root.join("plugin/skills/project-sync/EXTRACT.md")})).is_err(), "no skill folder named: not readable");
+        assert!(ok("Skill", json!({"skill": "echo:project-sync"})).is_err(), "its instructions are in its prompt: no skill");
+        assert!(ok("Read", json!({"file_path": root.join("plugin/skills/project-sync/EXTRACT.md")})).is_err());
         assert!(ok("Skill", json!({"skill": "echo:process-call"})).is_err());
         assert!(ok("WebFetch", json!({"url": "https://example.com"})).is_err());
         // A run folder outside the ledger's runs is no run.

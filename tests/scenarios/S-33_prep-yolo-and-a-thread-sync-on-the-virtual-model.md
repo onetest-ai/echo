@@ -30,7 +30,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | Data build (`standard --ai virtual`) and its virtual model | the lead (`serve.sh up … --set standard --ai virtual`), right before the run | all |
 | The prep script (`prep-summary.json`) and model job 1: Acme renewal follow-up's prep (one request, no Claude Code) | stage 1's Preconditions and step 2 | 1 |
 | The Yolo script (`yolo-task.json`) and model run 2: Yolo on Globex pilot's T005 | stage 2's Preconditions and step 3 | 2 (bar, task-asks, log, drafts, file diff, git, History) |
-| The sync script (`thread-sync.json`) and model run 3: Acme rollout's sync (extract, verify, people) | stage 3's Preconditions and step 3 | 3 (status, run folder, tree, pinned fields, log, people, window) |
+| The sync script (`thread-sync.json`) and model run 3: Acme rollout's sync (extract with who's who, then verify) | stage 3's Preconditions and step 3 | 3 (status, run folder, tree, pinned fields, log, people, window) |
 | The asks script (`yolo-asks.json`) and model run 4: Yolo on Globex pilot's T009 with "Claude acts on its own" off | stage 4's Preconditions and step 1 | 4 (model log, drafts, record, ledger), 5 (its row on Yolo runs) |
 | The runs script (`yolo-runs.json`) and model runs 5–8: Yolo on Acme rollout's T010 and T016 (a failed run), Globex pilot's T001 and the Needs you now item "Mail to you" | stage 6's step 1 | 6 (the list, task link, log, ⌘K), 7 (filters) |
 

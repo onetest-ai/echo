@@ -4,12 +4,11 @@ You did not extract these. For each packet decide whether the quote, read with i
 the **claimed change on this specific node** (its `path` shows workstream › story › task). Only
 `supports` changes the tree.
 
-1. `$L verify-prep --out <run folder>/packets.json` — its answer may carry `me_patterns`: how the
-   user ("Me") works, from their About me, and `thread_scope` (see "One thread at a time"). Use it to read the context (e.g. "submitted" means the
-   prep is done; work Me "passed to" someone is that person's), never instead of the words.
-2. Read that file. For each packet write `{"mid": "…", "verdict": "supports|weak|wrong", "reason":
-   "≤ 15 words"}` into `<run folder>/verdicts.json` (a JSON array covering every packet).
-3. `$L verify-apply --file <run folder>/verdicts.json`
+You get the packets (`verify-prep`), and with them maybe `me_patterns` — how the user ("Me") works, from their About
+me — and `thread_scope` (see "One thread at a time"). Use `me_patterns` to read the context (e.g. "submitted" means
+the prep is done; work Me "passed to" someone is that person's), never instead of the words. For each packet one
+verdict, `{"mid": "…", "verdict": "supports|weak|wrong", "reason": "≤ 15 words"}`, in one JSON array covering every
+packet.
 
 Verdicts
 - `supports` — the words say this change happened to this node: `held` = the session took place;
@@ -36,4 +35,4 @@ Verdicts
 - `wrong` — contradicts the claim, or is about a different node (a quote about another story's
   session is wrong even when the topic is close).
 
-Open nothing but the packets file.
+Judge from the packets alone.

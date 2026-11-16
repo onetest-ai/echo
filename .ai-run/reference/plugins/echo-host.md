@@ -55,7 +55,8 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 Echo lays out each enabled plugin's `agent/` folder, package skills and runtime skills and entries at
 `<data folder>/.plugins/<id>/` (`CLAUDE.md`, `.claude/skills`, `.claude/rules`, `guides/`, `scripts/echoctl`), built
 beside it and swapped in, `${CLAUDE_PLUGIN_ROOT}` filled in; again on install, update, enable or a changed installed
-copy; removed on disable and remove, and what isn't an enabled plugin's pruned at start. The folder session gets no
+copy; removed on disable and remove, and what isn't an enabled plugin's pruned at start — but `.plugins/.proof/`
+(`plugins::agent::PROOF`: the marks of runs through a wrapper, claude-code-runs reference § Wrapper profiles), never. The folder session gets no
 plugin skill up front: Echo's core (`echoctl core --hook`, a SessionStart hook) names each plugin with its summary and
 its `CLAUDE.md` to Read first, and Claude Code loads the rest of that folder when Claude reads there; plugin text in the
 core is one line each, `|` escaped, the core ≤ 9,000 chars (rows left out are counted). Each skill is laid out as
@@ -65,6 +66,10 @@ was written) lives in the config folder, and a folder whose record differs is la
 hook). The pre-tool hook of the folder session, routines and Yolo (`echoctl plugins-hook`) refuses Edit and Write
 under `.plugins/` and, best effort, a Bash line that writes there.
 Evidence: `plugins::agent::lay_out`, `plugins::agent::render`, `guard`
+
+A plugin's client half runs in the window's own page and can send the page's actions as the user would; "only the user
+adds" a plugin's offer (a wrapper profile, a dashboard) holds for what a plugin can do through its manifest, `ctx`
+services, jobs and the CLI inside runs, not against its own page code or its scripts (programs run with your rights).
 
 ## Dashboards
 

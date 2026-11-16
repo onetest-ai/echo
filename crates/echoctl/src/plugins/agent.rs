@@ -392,6 +392,10 @@ pub fn root() -> PathBuf {
     paths::home().join(".plugins")
 }
 
+/// The marks of runs through a wrapper (`ai::wrapper::proof_dir`): in `.plugins/` so no session may write there, and
+/// never pruned with what plugins lay out.
+pub const PROOF: &str = ".proof";
+
 /// Plugin `id`'s folder there.
 pub fn folder(id: &str) -> PathBuf {
     root().join(id)
@@ -824,6 +828,9 @@ fn sync_within(until: Option<std::time::Instant>) -> Vec<String> {
             continue;
         }
         let name = e.file_name().to_string_lossy().to_string();
+        if name == PROOF {
+            continue;
+        }
         let leftover = name.starts_with(".new-") || name.starts_with(".old-");
         let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| since.duration_since(t).ok());
         if leftover {

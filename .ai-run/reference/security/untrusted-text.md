@@ -10,7 +10,7 @@ The CLI commands each guarded mode may call (the guard refuses any other Bash ca
 | Mode | Allowlist | Commands (on main) |
 |---|---|---|
 | minutes run | `notes::RUN_COMMANDS` | `context`, `actions`, `speakers`, `title`, `type`, `vocab add`, `frames`, `transcribe`, `memo threads` |
-| project sync | `guard::PROJECT_STEPS` | `pending`, `context`, `apply`, `done`, `verify-prep`, `verify-apply`, `people-context`, `people-apply` |
+| project sync | `guard::PROJECT_STEPS` | `apply`, `done`, `people-apply` (what it reads is in its prompt; its verify run has no tools) |
 | the window's session on a call (ask) | `guard::ASK_COMMANDS` | `context` |
 
 A routine's or Yolo's run has no run guard: it runs as the folder session (One builder, below).
@@ -37,7 +37,9 @@ then canonicalised, links resolved and re-checked, kept inside its root; Windows
 
 A run's scope is read from the environment Echo set: `ECHOCTL_RUN_CALL` (its call), `ECHOCTL_RUN_PREVIOUS` (previous
 minutes), `ECHOCTL_RUN_CLIS` (the CLI's names) (`guard::RUN_CALL`). A sync run also gets `ECHOCTL_RUN_LEDGER`,
-`ECHOCTL_RUN_DIR` and `ECHOCTL_RUN_PROJECT`.
+`ECHOCTL_RUN_DIR`, `ECHOCTL_RUN_PROJECT` and `ECHOCTL_RUN_ITEMS` (the items it may mark done; the guard and the CLI
+refuse `done` and `apply --done` for any other). A sync run reads nothing with a tool (the guard refuses Read, Glob, Grep
+and Edit): Echo gives it its text, each item in an evidence block whose tag is random for the run.
 
 ## The run guard
 
@@ -47,6 +49,17 @@ minutes), `ECHOCTL_RUN_CLIS` (the CLI's names) (`guard::RUN_CALL`). A sync run a
   stops an older one.
 - A run reads saved `tool-results` only of its own session: the hook's `transcript_path` + `session_id`
   (`guard::own_results`).
+- Hooks the user installed, directly or through a wrapper, are the user's code and can change what a tool call runs
+  after the guard allowed it; the guard judges what Claude asks for. (Claude Code runs matching hooks in parallel, the
+  strictest decision wins, and another hook's `updatedInput` replaces the input the tool runs with.)
+- Through a wrapper profile, the run proves Echo's settings are in force before anything acts on its text
+  (`ai::wrapper`; claude-code-runs reference, Wrapper profiles): the gate holds every tool call until Echo has checked
+  the run's start event. Its marks are in `.plugins/.proof/`, where the sessions' guards refuse an Edit or Write and,
+  best effort, a Bash line that writes there; each is named by its run's value, which is in that run's own settings
+  file (owner-only, named by another id) and Echo's relay. `echoctl proof hello <value> --mark` (a terminal session's
+  hook) marks any value it is given: a process that knows a run's value can mark that run.
+- A skill's load-time `!` commands: the guard lets the Skill tool load only the run's own skills; Echo's skills carry
+  none, and a plugin's skill with one is refused (`plugins::check_skill_md`, `grants::set_session_skills`).
 
 ## Minutes run flags
 

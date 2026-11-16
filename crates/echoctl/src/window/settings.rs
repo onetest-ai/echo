@@ -64,6 +64,8 @@ pub(super) fn settings_snapshot() -> Value {
         "downloading": crate::models::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
     // Colleagues' photos: [the switch, the sign-in may read them].
+    // AI & minutes: the last wrapper check, add or update the page started (`wrapper_job`).
+    v["wrapper"] = WRAPPER.lock().map(|s| s.clone()).unwrap_or(Value::Null);
     v["photos"] = json!([c.is_some_and(|c| c.people_photos == Some(true)), crate::graph::account().is_some() && crate::photos::allowed()]);
     #[cfg(target_os = "macos")]
     {
@@ -115,6 +117,24 @@ fn home_as_tilde(v: &mut Value, home: &Path) {
 /// The last OpenAI-compatible transcription server connection: `{busy}`, `{ok, …}` or `{error}`.
 #[cfg(feature = "transcribe")]
 pub(super) static SERVER_CONNECT: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+
+/// AI & minutes → a wrapper profile: the last check, add or update the page started: `{busy}`, `{checked, command,
+/// path, version}`, `{added, name}`, `{updated, id, path}` or `{error}`.
+pub(super) static WRAPPER: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+
+/// Run one wrapper step off the page's thread (a login shell and the program's `--version`), its outcome in `WRAPPER`.
+fn wrapper_job(f: impl FnOnce() -> anyhow::Result<Value> + Send + 'static) -> Handled {
+    if let Ok(mut s) = WRAPPER.lock() {
+        *s = json!({ "busy": true });
+    }
+    std::thread::spawn(move || {
+        let r = f().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+        if let Ok(mut s) = WRAPPER.lock() {
+            *s = r;
+        }
+    });
+    true.into()
+}
 
 /// Save one plain setting with the value the page shows now (never a toggle of a stale value).
 pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
@@ -308,6 +328,39 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // AI & minutes: a wrapper profile — the program checked (found as a run would find it, its version), added
+        // (typed, or a plugin's offer taken), or its plugin's new program taken (claude-code-runs R13).
+        "wrapper_check" => {
+            let command = v["command"].as_str().unwrap_or("").to_string();
+            wrapper_job(move || {
+                let (path, version) = crate::ai::wrapper::admit(&command)?;
+                Ok(json!({ "checked": true, "command": command, "path": path, "version": version }))
+            })
+        }
+        "wrapper_add" => {
+            // What Check showed (`path`) is what is added, or nothing.
+            let (command, name, plugin, path) = (v["command"].as_str().map(str::to_owned), v["name"].as_str().map(str::to_owned), v["plugin"].as_str().map(str::to_owned), v["path"].as_str().map(str::to_owned));
+            wrapper_job(move || {
+                let path = path.filter(|p| !p.is_empty()).ok_or_else(|| anyhow::anyhow!("check it first"))?;
+                let p = match plugin {
+                    Some(plugin) => crate::ai::add_offered_wrapper(&plugin, None, command.as_deref(), Some(&path))?,
+                    None => {
+                        let command = command.unwrap_or_default();
+                        let name = name.filter(|n| !n.trim().is_empty());
+                        let s = crate::ai::Settings::load()?;
+                        let stem: String = std::path::Path::new(command.trim()).file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(32).collect();
+                        let base = if stem.is_empty() || stem == crate::ai::SYSTEM { "wrapper".to_string() } else { stem };
+                        let id = (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") }).find(|c| !s.profiles.iter().any(|p| p.id == *c)).unwrap_or(base);
+                        crate::ai::add_wrapper(&id, &command, name, None, Some(&path))?
+                    }
+                };
+                Ok(json!({ "added": true, "name": p.name, "path": p.wrapper.map(|w| w.command) }))
+            })
+        }
+        "wrapper_update" => {
+            let id = v["id"].as_str().unwrap_or("").to_string();
+            wrapper_job(move || Ok(json!({ "updated": true, "id": id, "path": crate::ai::update_wrapper(&id)? })))
+        }
         // Settings: one plain value, as the page shows it now.
         "settings_set" => match settings_set(v["key"].as_str().unwrap_or(""), &v["value"]) {
             Ok(()) => true.into(),

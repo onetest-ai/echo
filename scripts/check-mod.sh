@@ -38,6 +38,8 @@ node crates/echoctl/ui/palette.test.mjs
 node crates/echoctl/ui/projects.test.mjs
 # A thread's and a client's dashboards: which a thread shows, the plugins' presets in the "+", a preset's line.
 node crates/echoctl/ui/board-presets.test.mjs
+# AI & minutes' wrapper profiles: plugins' offers, an update from a profile's plugin, the form's steps.
+node crates/echoctl/ui/wrapper-profiles.test.mjs
 # The org chart's layout: governance band, workstream columns, their leads (OrgLayout).
 node crates/echoctl/ui/org-chart.test.mjs
 # How Send to Claude ranks the skills for a task (rankSkills).

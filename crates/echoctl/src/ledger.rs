@@ -374,7 +374,7 @@ pub fn processed_ids(project: &str) -> Result<Vec<String>> {
     Ok(order(&l.evidence()).into_iter().filter(|e| done.contains(e)).collect())
 }
 
-fn processed(evs: &[Value]) -> BTreeSet<String> {
+pub(crate) fn processed(evs: &[Value]) -> BTreeSet<String> {
     let mut done = BTreeSet::new();
     for e in evs {
         let id = e["evidence"].as_str().unwrap_or("").to_string();
