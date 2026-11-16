@@ -78,6 +78,7 @@ Stories (with acceptance criteria) › tasks, plus decisions, risks and question
 echoctl project ledger <id> tree                     # the whole tree (JSON): find nodes here
 echoctl project ledger <id> status                   # the last sync
 echoctl project ledger <id> run                      # sync now: its new calls, then Claude reads them
+echoctl project ledger <id> run --scheduled          # as the app's scheduler: mail and chat wait for their batch (2 h or 5)
 echoctl project tasks                                # open tasks across threads: I owe / owed to me / waiting / nobody named
 echoctl project people <id> [--refresh]              # its people: calls, talk share, tasks, roles
 ```

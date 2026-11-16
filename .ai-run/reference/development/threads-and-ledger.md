@@ -56,8 +56,10 @@ authenticated senders.
   `projectsync::run_scheduled`) fetches due mail and chat sources, but reads mail and chat items with the model only as
   a batch (`batch_ready`): once the first has waited `BATCH_WAIT` (2 h) since it was first seen waiting, or
   `BATCH_ITEMS` (5) wait, or with a call read anyway (calls keep `SETTLE`, 15 min). When each waiting item was first
-  seen waiting is kept in `ledger/waiting.json` (a chat read again once it changed waits from then). A held sync ends
-  `done` saying how many wait and when they're read. Sync now (`projectsync::run`, the window's and `ledger <id> run`)
+  seen waiting is kept in `ledger/waiting.json` (`projectsync::waiting`, under `ledger/.waiting.lock`, re-read inside it;
+  an item read since its kept time — a chat re-queued once it changed — or with a kept time that can't be read waits
+  from now). A held sync ends `done` saying how many wait and when they're read (also under the other passes' reports
+  when those ran). Sync now (`projectsync::run`, the window's and `ledger <id> run`)
   reads them at once.
 
 ## People
