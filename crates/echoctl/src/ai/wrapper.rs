@@ -171,10 +171,14 @@ fn find_in_login_shell(name: &str) -> Result<PathBuf> {
     out.lines().rev().map(str::trim).find(|l| l.starts_with('/')).map(PathBuf::from).ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"))
 }
 
-/// The first `name` in the folders of a `PATH` value.
+/// The first `name` a program can be started from in the absolute folders of a `PATH` value.
 #[cfg(unix)]
 fn on_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
-    std::env::split_paths(path).map(|d| d.join(name)).find(|f| f.is_file())
+    use std::os::unix::fs::PermissionsExt;
+    std::env::split_paths(path)
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join(name))
+        .find(|f| std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
 #[cfg(not(unix))]
@@ -718,10 +722,17 @@ mod tests {
         for d in [&first, &second, &empty] {
             std::fs::create_dir_all(d).unwrap();
         }
-        std::fs::write(second.join("acme-claude"), "").unwrap();
-        std::fs::write(first.join("acme-claude"), "").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let program = |f: PathBuf, mode: u32| {
+            std::fs::write(&f, "").unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        program(empty.join("acme-claude"), 0o644); // can't be started: skipped, as the shell skips it
+        program(first.join("acme-claude"), 0o755);
+        program(second.join("acme-claude"), 0o755);
         std::fs::create_dir_all(empty.join("globex-claude")).unwrap(); // a folder of that name is no program
-        let path = std::env::join_paths([&empty, &first, &second]).unwrap();
+        // An empty or relative folder (the current one) is never looked in.
+        let path = std::env::join_paths([PathBuf::new(), PathBuf::from("."), empty.clone(), first.clone(), second.clone()]).unwrap();
         assert_eq!(on_path("acme-claude", &path), Some(first.join("acme-claude")));
         assert_eq!(on_path("globex-claude", &path), None);
         let _ = std::fs::remove_dir_all(&root);
