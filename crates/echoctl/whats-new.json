@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.9.12",
+    "items": [
+      { "icon": "sparkle", "title": "More company Claude tools", "text": "A company's Claude Code program that answers its version with just the number can now be added in Settings.", "open": "settings/ai" }
+    ]
+  },
+  {
     "version": "0.9.11",
     "items": [
       { "icon": "sparkle", "title": "Claude through your company's tool", "text": "If your company gives you its own Claude Code program, add it in Settings and Echo runs Claude through it.", "open": "settings/ai" },
