@@ -107,6 +107,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::needs::start_scheduler();
     // What plugins tell Claude, in the data folder (`.plugins/`): as installed and on now.
     crate::plugins::agent::sync_all();
+    // No Claude terminal of an earlier run of Echo is alive: their wrapper marks go (`ai::wrapper`).
+    crate::ai::wrapper::clear_terminal_marks();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
     {

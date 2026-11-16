@@ -44,6 +44,20 @@ fn mark(value: &str) -> PathBuf {
     proof_dir().join(value)
 }
 
+/// A terminal session's mark (its hook writes it): `<value>.t`, cleared when Echo starts, as no session outlives it.
+fn terminal_mark(value: &str) -> PathBuf {
+    proof_dir().join(format!("{value}.t"))
+}
+
+/// Echo starts: no terminal session of an earlier run of it is alive, so their marks go.
+pub fn clear_terminal_marks() {
+    for e in fs::read_dir(proof_dir()).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().ends_with(".t") {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
 fn random_hex(n: usize) -> Result<String> {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).map_err(|e| anyhow!("no secure random source: {e}"))?;
@@ -71,6 +85,7 @@ fn sweep_files() {
 pub fn unmark(value: &str) {
     if valid_value(value) {
         let _ = fs::remove_file(mark(value));
+        let _ = fs::remove_file(terminal_mark(value));
     }
 }
 
@@ -258,7 +273,7 @@ pub fn terminal_proof(args: &mut Vec<String>) -> Result<String> {
 
 /// Has the run with `value` been marked checked?
 pub fn marked(value: &str) -> bool {
-    valid_value(value) && mark(value).is_file()
+    valid_value(value) && (mark(value).is_file() || terminal_mark(value).is_file())
 }
 
 /// `echoctl proof hello|gate <value> [--mark|--deny-all]`: the proof's hooks. Hello prints the value (and, `--mark`, in
@@ -272,7 +287,7 @@ pub fn proof_command(args: &[String]) -> i32 {
     }
     match (what, flag) {
         (Some("hello"), mark_it) => {
-            if mark_it == Some("--mark") && (fs::create_dir_all(proof_dir()).is_err() || fs::write(mark(value), b"").is_err()) {
+            if mark_it == Some("--mark") && (fs::create_dir_all(proof_dir()).is_err() || fs::write(terminal_mark(value), b"").is_err()) {
                 eprintln!("Echo: this session can't be marked checked");
                 return 2;
             }
@@ -485,7 +500,12 @@ pub fn relay(argv: &[String]) -> i32 {
     // Stopped (a job's time limit, Echo quitting): the wrapper's whole group goes, and the run's files and mark.
     // Quickly: whoever stopped it kills it outright 3 s later.
     let _ = ctrlc::set_handler(|| {
-        if let Some((pid, files, value)) = RUNNING.lock().ok().and_then(|r| r.clone()) {
+        // Stopped while the wrapper is being started (pid 0): wait for it, so it isn't left running.
+        let t = Instant::now();
+        while RUNNING.lock().ok().and_then(|r| r.as_ref().map(|x| x.0)) == Some(0) && t.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if let Some((pid, files, value)) = RUNNING.lock().ok().and_then(|r| r.clone()).filter(|r| r.0 != 0) {
             remove_all(&files, &value);
             #[cfg(unix)]
             // SAFETY: signalling the process group of the wrapper this relay started.
@@ -557,6 +577,9 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
     c.args(&args).env_remove(PROMPT_VAR).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
     // Its own group: a stop reaches a Claude Code it started as a child, too.
     detach(&mut c);
+    if let Ok(mut r) = RUNNING.lock() {
+        *r = Some((0, made.clone(), value.clone()));
+    }
     let mut child = match c.spawn() {
         Ok(ch) => ch,
         Err(e) => {
@@ -1042,5 +1065,18 @@ printf '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}
         assert!(e.contains("bypassPermissions"), "{e}");
         let pid: i32 = fs::read_to_string(root.join("child.pid")).unwrap().trim().parse().unwrap();
         crate::paths::testenv::eventually("its child gone", || unsafe { libc::kill(pid, 0) } != 0);
+    }
+
+    #[test]
+    fn echo_starting_clears_terminal_marks_but_not_a_running_print_runs() {
+        let (_env, _root) = crate::paths::testenv::folders("wrapper-clear");
+        let (t, r) = (new_value().unwrap(), new_value().unwrap());
+        assert_eq!(proof_command(&args(&["hello", &t, "--mark"])), 0);
+        fs::create_dir_all(proof_dir()).unwrap();
+        fs::write(mark(&r), b"").unwrap();
+        assert!(marked(&t) && marked(&r));
+        clear_terminal_marks();
+        assert!(!marked(&t), "no terminal outlives the Echo that opened it");
+        assert!(marked(&r), "a print run may be another process's, still running");
     }
 }

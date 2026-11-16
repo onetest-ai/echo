@@ -226,7 +226,19 @@ pub fn stopping(key: &str) -> bool {
     STOPPING.lock().unwrap_or_else(|e| e.into_inner()).get(key).is_some_and(|n| *n > 0)
 }
 
+/// The wrapper sessions' marks by terminal: one Echo stops (closed, replaced, Echo quitting) loses its mark too.
+static PROOFS: Mutex<BTreeMap<u64, String>> = Mutex::new(BTreeMap::new());
+
+fn note_proof(id: u64, proof: Option<String>) {
+    if let Some(v) = proof {
+        PROOFS.lock().unwrap_or_else(|e| e.into_inner()).insert(id, v);
+    }
+}
+
 pub fn close(id: u64) {
+    if let Some(v) = PROOFS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+        ai::wrapper::unmark(&v);
+    }
     let term = TERMS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(t) = term {
         t.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -552,7 +564,9 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     // Through a wrapper, its own settings file's session-start hook answering is the check (claude-code-runs R14).
     let proof = if p.kind == ai::Kind::Wrapper { Some(ai::wrapper::terminal_proof(&mut args)?) } else { None };
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
-    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(unmark_on_exit(forget, proof)))
+    let id = open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(unmark_on_exit(forget, proof.clone())))?;
+    note_proof(id, proof);
+    Ok(id)
 }
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
@@ -659,6 +673,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
         }
     }
     let id = open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(unmark_on_exit(forget, proof.clone())))?;
+    note_proof(id, proof.clone());
     if let (Some(value), Some(text)) = (proof, first) {
         std::thread::spawn(move || type_in_when_marked(id, &value, &text));
     }
@@ -926,5 +941,20 @@ mod tests {
         let on_exit = unmark_on_exit(Box::new(move |_| f.store(true, std::sync::atomic::Ordering::SeqCst)), Some(v.clone()));
         on_exit(Duration::from_secs(1));
         assert!(forgot.load(std::sync::atomic::Ordering::SeqCst) && !ai::wrapper::marked(&v));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_wrapper_session_echo_stops_loses_its_mark_too() {
+        let (_env, _root) = paths::testenv::folders("terminal-close-unmark");
+        let v = ai::wrapper::new_value().unwrap();
+        assert_eq!(ai::wrapper::proof_command(&[ "hello".into(), v.clone(), "--mark".into()]), 0);
+        assert!(ai::wrapper::marked(&v));
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args(["-c", "sleep 30"]);
+        let id = open("test-unmark", cmd, 80, 20).unwrap();
+        note_proof(id, Some(v.clone()));
+        close(id);
+        assert!(!ai::wrapper::marked(&v), "closed by Echo: no exit callback, the mark goes anyway");
     }
 }
