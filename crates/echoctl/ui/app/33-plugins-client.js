@@ -272,6 +272,62 @@ document.addEventListener('click', (e) => {
   setTimeout(poll, 500)
 })
 
+document.addEventListener('click', (e) => {
+  const at = (sel) => e.target.closest && e.target.closest(sel)
+  const poll = (then) => loadSettings().then(() => {
+    const w = (S.settings || {}).wrapper || {}
+    if (w.busy) return setTimeout(() => poll(then), 700)
+    if (then) then(w)
+    render()
+  })
+  const go = (msg, then) => { send(msg); setTimeout(() => poll(then), 400) }
+  const done = (w) => { if (w.added || w.updated) { S.wrapForm = null; loadState().then(render) } }
+  if (at('[data-wrap-form]')) { S.wrapForm = S.wrapForm && !S.wrapForm.plugin ? null : { command: '', name: '' }; return render() }
+  if (at('[data-wrap-cancel]')) { S.wrapForm = null; return render() }
+  const offer = at('[data-wrap-offer]')
+  if (offer) {
+    const o = wrapperOffers(ai()).find((x) => x.plugin === offer.dataset.wrapOffer)
+    S.wrapForm = { plugin: offer.dataset.wrapOffer, command: offer.dataset.wrapCommand, pluginName: o ? o.plugin_name : '', asked: true }
+    return go({ cmd: 'wrapper_check', command: S.wrapForm.command })
+  }
+  if (at('[data-wrap-check]') && S.wrapForm) {
+    if (!S.wrapForm.plugin) S.wrapForm = { command: (($('#wrap-command') || {}).value || '').trim(), name: ($('#wrap-name') || {}).value || '' }
+    S.wrapForm.asked = true
+    return go({ cmd: 'wrapper_check', command: S.wrapForm.command })
+  }
+  if (at('[data-wrap-add]') && S.wrapForm) {
+    const f = S.wrapForm
+    if (!f.plugin) f.name = ($('#wrap-name') || {}).value || f.name
+    return go(f.plugin ? { cmd: 'wrapper_add', plugin: f.plugin } : { cmd: 'wrapper_add', command: f.command, name: f.name }, done)
+  }
+  const up = at('[data-wrap-update]')
+  if (up) return go({ cmd: 'wrapper_update', id: up.dataset.wrapUpdate }, done)
+})
+
+// ── wrapper-profiles: AI & minutes' wrapper profiles (claude-code-runs R12–R13) — what plugins offer, a profile's
+// update from its plugin, and the last check, add or update the page asked for (`st.wrapper`). No DOM: tested by
+// wrapper-profiles.test.mjs.
+/** The wrappers enabled plugins offer that the user hasn't added, by name. */
+const wrapperOffers = (a) => ((a || {}).wrapper_offers || []).filter((o) => !o.profile).sort((x, y) => x.name.localeCompare(y.name) || x.plugin_name.localeCompare(y.plugin_name))
+/** A wrapper profile's plugin offering another program now: `{plugin_name, command, from}`, else null. */
+const wrapperUpdate = (a, id) => {
+  const o = ((a || {}).wrapper_offers || []).find((x) => x.profile === id && x.update)
+  return o ? { plugin_name: o.plugin_name, command: o.command, from: o.update } : null
+}
+/** What every wrapper profile says of itself, in Echo's words. */
+const WRAPPER_WARNING = 'It sees and can change everything Echo sends to Claude, call transcripts included.'
+/** The last wrapper step, for the form: `{text, kind: 'busy'|'ok'|'error'|'done', path?, version?}`, or null. */
+function wrapperState(w) {
+  if (!w) return null
+  if (w.busy) return { kind: 'busy', text: 'Checking it — where your shell finds it, then its version…' }
+  if (w.error) return { kind: 'error', text: w.error }
+  if (w.checked) return { kind: 'ok', text: `Found ${w.path} — ${w.version}`, path: w.path, version: w.version, command: w.command }
+  if (w.added) return { kind: 'done', text: `Added ${w.name}` }
+  if (w.updated) return { kind: 'done', text: `It now starts ${w.path}` }
+  return null
+}
+// end of the wrapper-profiles block
+
 // ── own title bar row: Settings → Layout's "Echo's own title bar" (#76, on by default) — on Windows only, by the
 // app's platform (`state.platform`), not the browser's: absent on macOS, Linux and in `--serve`, so search can't find it.
 const ownTitleBarCard = (st, state) => (state || {}).platform !== 'windows' ? '' : setCard('Window', [setRow("Echo's own title bar",
@@ -344,19 +400,37 @@ const SETTINGS_BODY = {
   },
   ai(st) {
     const a = ai()
-    const kind = (p) => p.kind === 'claude' ? 'Claude account' : p.kind === 'local' ? `Model · ${esc(p.host || 'this computer')}` : 'Built in'
+    const kind = (p) => p.kind === 'claude' ? 'Claude account' : p.kind === 'local' ? `Model · ${esc(p.host || 'this computer')}` : p.kind === 'wrapper' ? 'Wrapper' : 'Built in'
+    const ws = wrapperState(st.wrapper)
+    const busy = !!(ws && ws.kind === 'busy')
     const localDefault = a.profiles.find((p) => p.id === a.default && p.kind === 'local' && !p.host)
     const rows = a.profiles.map((p) => {
       const s = p.signin || {}
       const out = p.kind === 'claude' && s.state === 'signed_out'
-      const who = p.kind === 'claude' ? (s.account ? `Signed in as ${esc(s.account)}` : out ? '<span class="warn">Not signed in — its calls wait for it</span>' : esc(p.account || '')) : esc(profileWhere(p))
+      const up = p.kind === 'wrapper' ? wrapperUpdate(a, p.id) : null
+      const who = p.kind === 'claude' ? (s.account ? `Signed in as ${esc(s.account)}` : out ? '<span class="warn">Not signed in — its calls wait for it</span>' : esc(p.account || ''))
+        : p.kind === 'wrapper' ? `Starts <code>${esc(p.command || '')}</code> in place of Claude Code${p.offered_by ? ` · offered by ${esc(p.offered_by)}` : ''}. ${WRAPPER_WARNING}`
+        : esc(profileWhere(p))
+      const upLine = up ? `<div class="warn">${esc(up.plugin_name)}'s update offers <code>${esc(up.command)}</code> instead — this profile keeps starting its program until you take it.</div>` : ''
       const isDef = p.id === a.default
-      const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
-      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}`, ctl, '', p.name)
+      const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (up ? `<button class="btn primary" data-wrap-update="${esc(p.id)}"${busy ? ' disabled' : ''}>Use it</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
+      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}${upLine}`, ctl, '', p.name)
     })
-    const add = '<div class="set-sub" style="padding:10px 14px">Add a profile: <code>echoctl ai add-claude &lt;name&gt;</code> (a Claude account) or <code>echoctl ai add-local &lt;name&gt; --url …</code> (a model on this computer) — or ask Claude in the window.</div>'
+    const offers = wrapperOffers(a).map((o) => setRow(`${esc(o.name)} <span class="tag">Offered by ${esc(o.plugin_name)}</span>`,
+      `Starts <code>${esc(o.command)}</code> — a program you install yourself — in place of Claude Code. ${WRAPPER_WARNING}`,
+      `<button class="btn" data-wrap-offer="${esc(o.plugin)}" data-wrap-command="${esc(o.command)}"${busy ? ' disabled' : ''}>Add…</button>`, '', o.name))
+    const f = S.wrapForm
+    // Only what this form asked for: an earlier check, add or update says nothing here.
+    const mine = !!(f && f.asked && ws)
+    const msg = mine ? `<div class="${ws.kind === 'error' ? 'error' : ws.kind === 'busy' ? 'set-sub' : ''}">${esc(ws.text)}</div>` : ''
+    const ready = mine && ws.kind === 'ok' && ws.command === f.command
+    const form = !f ? [] : [setRow(f.plugin ? `Add the wrapper ${esc(f.pluginName || f.plugin)} offers` : 'Add a wrapper',
+      `A program you installed that starts Claude Code its own way — a name on your PATH or its full path. Echo starts it in place of Claude Code, on your own Claude Code setup. ${WRAPPER_WARNING}` +
+      `<div class="stt-form">${f.plugin ? `<code>${esc(f.command)}</code>` : `<input class="set-in" id="wrap-command" value="${esc(f.command)}" placeholder="acme-claude" aria-label="Program" spellcheck="false"><input class="set-in" id="wrap-name" value="${esc(f.name || '')}" placeholder="name (optional)" aria-label="Name">`}` +
+      `<button class="btn" data-wrap-check${busy ? ' disabled' : ''}>Check</button><button class="btn primary" data-wrap-add${ready && !busy ? '' : ' disabled'}>Add profile</button><button class="btn ghost" data-wrap-cancel>Cancel</button></div>${msg}`, '', 'Add a wrapper')]
+    const add = '<div class="set-sub" style="padding:10px 14px">Add a profile: <code>echoctl ai add-claude &lt;name&gt;</code> (a Claude account), <code>echoctl ai add-local &lt;name&gt; --url …</code> (a model on this computer), <code>echoctl ai add-wrapper &lt;name&gt; --command …</code> or <button class="btn ghost" data-wrap-form>Add a wrapper…</button> (a program you installed that starts Claude Code) — or ask Claude in the window.</div>'
     return `<h2>AI &amp; minutes</h2><p class="set-lead">Which model and account writes each call's live notes and minutes. A call keeps the profile it was recorded with.</p>` +
-      `<section class="set-sec" aria-label="Profiles"><h3>Profiles</h3><div class="set-card">${rows.join('')}${add}</div></section>` +
+      `<section class="set-sec" aria-label="Profiles"><h3>Profiles</h3><div class="set-card">${rows.join('')}${offers.join('')}${form.join('')}${add}</div></section>` +
       setCard('Minutes', [
         setRow('Write minutes automatically', "15 min after a call ends (or after your last note), with the call's profile.", sw('auto_minutes', st.auto_minutes, 'Write minutes automatically')),
         setRow("Keep threads' work current", "After a thread's calls, Claude reads them into its stories, tasks, decisions, risks and questions — with the thread's AI profile.", sw('project_sync', st.project_sync, "Keep threads' work current")),

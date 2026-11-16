@@ -1,0 +1,7 @@
+{
+  "id": "wrapper-demo",
+  "name": "Wrapper demo",
+  "version": "0.2.0",
+  "summary": "A test plugin: offers a made-up company's Claude Code wrapper, now acme-claude2, as an AI profile (tests/cases/settings/TC-032).",
+  "uses": { "ai": { "wrapper": { "name": "Acme Claude", "command": "acme-claude2" } } }
+}

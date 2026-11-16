@@ -18,7 +18,7 @@ const ai = () => (S.state && S.state.ai && S.state.ai.profiles) ? S.state.ai : {
 const profileOf = (id) => ai().profiles.find((p) => p.id === id)
 const profileName = (id) => { const p = profileOf(id); return p ? p.name : (id || '') }
 /** Where a profile's requests go, in words. */
-const profileWhere = (p) => !p ? '' : p.kind === 'local' ? (p.host ? `at ${p.host}` : 'on this computer') : p.kind === 'claude' ? `with your Claude account${p.account ? ` (${p.account})` : ''}` : 'as Claude Code is set up'
+const profileWhere = (p) => !p ? '' : p.kind === 'local' ? (p.host ? `at ${p.host}` : 'on this computer') : p.kind === 'claude' ? `with your Claude account${p.account ? ` (${p.account})` : ''}` : p.kind === 'wrapper' ? `through ${String(p.command || '').split(/[\\/]/).pop()}` : 'as Claude Code is set up'
 /** A profile in a menu: a Claude one with the account its folder is signed in to ("— not signed
  *  in"; the recorded one until checked). */
 function profileLabel(p) {
@@ -31,7 +31,7 @@ function profileLabel(p) {
 /** A profile's line under its name in Echo's menu: its model and where it runs (`note`: what this place adds). */
 function profileSub(p, note) {
   // The account is in its name already (profileLabel): here what it is.
-  const kind = p.kind === 'local' ? profileWhere(p) : p.kind === 'claude' ? 'its own Claude sign-in' : 'as Claude Code is set up'
+  const kind = p.kind === 'local' || p.kind === 'wrapper' ? profileWhere(p) : p.kind === 'claude' ? 'its own Claude sign-in' : 'as Claude Code is set up'
   return [p.notes_model_label || p.model || '', kind, note].filter(Boolean).join(' · ')
 }
 function profileOptions(cur, note = () => '') {

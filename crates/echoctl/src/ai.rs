@@ -1623,7 +1623,7 @@ mod tests {
         let _fake = fake::install(&root);
         let cmd = root.join("acme-claude");
         fs::write(&cmd, "").unwrap();
-        let p = Profile { id: "acme".into(), name: "Acme".into(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: Some(wrapper::Wrapper { command: cmd.display().to_string(), offered_by: None }) };
+        let p = Profile { id: "acme".into(), name: "Acme".into(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: Some(wrapper::Wrapper { command: cmd.display().to_string(), offered_by: None, offered_command: None }) };
         let run = prepare_claude(&p, &["-p".into(), "the call “Acme”".into(), "--output-format".into(), "stream-json".into()], &root, false).unwrap();
         assert_eq!(run.get_program(), std::env::current_exe().unwrap().as_os_str(), "Echo's own relay starts it");
         let a: Vec<String> = run.get_args().map(|a| a.to_string_lossy().into_owned()).collect();

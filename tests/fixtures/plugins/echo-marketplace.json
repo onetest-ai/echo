@@ -64,6 +64,10 @@
     {
       "id": "board-demo",
       "source": "./plugins/board-demo"
+    },
+    {
+      "id": "wrapper-demo",
+      "source": "./plugins/wrapper-demo"
     }
   ]
 }

@@ -23,6 +23,9 @@ pub struct Wrapper {
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offered_by: Option<String>,
+    /// The program name that plugin offered when the user took it (an update offering another is asked on the profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offered_command: Option<String>,
 }
 
 /// The prompt of a print run for `wrapper-run`, passed in its environment (never on a command line).

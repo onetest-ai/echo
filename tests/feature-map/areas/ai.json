@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-AI-01",
-   "feature": "AI & minutes lists the profiles with their kind (Built in, Claude account, Model on a host), \"Default for new calls\", minutes and live models; Make default changes it",
+   "feature": "AI & minutes lists the profiles with their kind (Built in, Claude account, Model on a host, Wrapper), \"Default for new calls\", minutes and live models; Make default changes it",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -66,7 +66,7 @@
   },
   {
    "id": "F-AI-07",
-   "feature": "`echoctl ai status / add-local / add-claude / default / remove` manage profiles as the window shows them",
+   "feature": "`echoctl ai status / add-local / add-claude / add-wrapper / update-wrapper / default / remove` manage profiles as the window shows them",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -123,6 +123,24 @@
    "feature": "On a wrapper profile the window's folder and call sessions start with Echo's proof hooks; the call session's first prompt is typed in after the hook answered, never on its command line",
    "priority": "high",
    "check": "person",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-14",
+   "feature": "AI & minutes adds a wrapper typed in (Add a wrapper…): Check shows where the login shell finds it and its version, or why it can't be one, before Add profile; a wrapper profile's row says what it starts and that it sees and can change everything Echo sends to Claude, call transcripts included",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-15",
+   "feature": "A plugin's `uses.ai.wrapper` is a line on its sheet and an offer in AI & minutes (Offered by …, Add…), added only by the user (window or `ai add-wrapper --plugin`); an update naming another program asks again and is said on the profile, taken only by Use it (`ai update-wrapper`); the plugin removed leaves the profile",
+   "priority": "high",
+   "check": "agent",
    "axes": [
     "ai.kind"
    ]

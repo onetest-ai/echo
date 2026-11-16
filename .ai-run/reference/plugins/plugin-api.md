@@ -46,6 +46,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
+| `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Evidence: `plugins::describe_ai`, `ai::offered` |
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s, and that Echo can't check a `readonly` one only reads; an update that adds a script or changes any
