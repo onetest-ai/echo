@@ -624,9 +624,9 @@ fn program_for(p: &Profile, args: &[String], fake: Option<PathBuf>) -> Result<Pa
 pub fn guard_ready(p: &Profile, cwd: &Path, what: &str) -> Result<()> {
     let mut child = claude_command(p, &["--version".into()], cwd, false)?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).context("asking Claude Code its version")?;
-    // Its line "2.1.310 (Claude Code)", wherever a login shell's own output put it (only that line: another
-    // program's version must not pass for it).
-    let v = out.lines().find(|l| l.contains("(Claude Code")).and_then(|l| l.split_whitespace().next()).unwrap_or("").to_string();
+    // Its line "2.1.310 (Claude Code)", wherever a login shell's own output put it, or a wrapper's bare "2.1.310"
+    // (only those: another program's version must not pass for it).
+    let v = wrapper::version_line(&out).and_then(|l| l.split_whitespace().next().map(str::to_owned)).unwrap_or_default();
     if crate::guard::new_enough(&v) {
         return Ok(());
     }
@@ -1114,6 +1114,11 @@ mod tests {
         fs::write(fake::file(&p, "version"), "Python 3.12.1\n2.1.200 (Claude Code)\n").unwrap();
         assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("Claude Code 2.1.200 is too old"));
         fs::write(fake::file(&p, "version"), "").unwrap();
+        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
+        // A wrapper's bare version, alone, is Claude Code's; another program's bare version isn't.
+        fs::write(fake::file(&p, "version"), "2.1.400\n").unwrap();
+        assert!(guard_ready(&p, &root, "write minutes").is_ok(), "a wrapper's bare version");
+        fs::write(fake::file(&p, "version"), "10.9.2\n").unwrap();
         assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
         fs::write(fake::file(&p, "version"), format!("{a}.{b}.{c} (Claude Code)\n")).unwrap();
         assert!(guard_ready(&p, &root, "write minutes").is_ok());
