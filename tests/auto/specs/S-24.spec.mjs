@@ -1009,16 +1009,20 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       const minutes = calls.reduce((a, c) => a + (c.meta.ended_at ? (new Date(c.meta.ended_at) - new Date(c.meta.started_at)) / 60000 : 0), 0)
       expect(v).toMatchObject({ calls: calls.length, memos: calls.filter((c) => c.meta.kind === x.memo).length, with_minutes: calls.filter((c) => c.notes).length, recorded_min: Math.round(minutes) })
       for (const d of v.days) expect(d.calls).toBe(calls.filter((c) => c.date === d.date).length)
-      expect(v.memos).toBeGreaterThan(1)
+      // Whatever the weekday (on a Monday the week is only today): today's memo counted, calls besides it, time recorded.
+      expect(v.memos).toBeGreaterThanOrEqual(1)
       expect(v.calls).toBeGreaterThan(v.memos)
-      expect(v.recorded_min).toBeGreaterThanOrEqual(60)
+      expect(v.recorded_min).toBeGreaterThan(0)
       // At S: the three numbers, no bars.
       expect(data.cli('today', 'add', id.week, '--size', x.S, '--above', id.needs).code).toBe(0)
       await page.setViewportSize(w.sizes.wide)
       await today.openToday()
       const numbers = async () => {
         await expect(today.widgetButton(n.week, x.callsButton)).toBeVisible()
-        for (const [num, label] of [[v.calls, fill(x.calls, { n: v.memos })], [Math.round(v.recorded_min / 6) / 10, x.hours], [v.with_minutes, x.withMinutes]]) {
+        // As the week holds them (a Monday's is today alone): one memo or more, minutes under an hour, else hours.
+        const callsSay = fill(x.calls, { n: v.memos }).replace(/memos$/, v.memos === 1 ? 'memo' : 'memos')
+        const time = v.recorded_min < 60 ? [v.recorded_min, v.recorded_min === 1 ? x.minutes.replace('minutes', 'minute') : x.minutes] : [Math.round(v.recorded_min / 6) / 10, x.hours]
+        for (const [num, label] of [[v.calls, callsSay], time, [v.with_minutes, x.withMinutes]]) {
           await expect(today.widgetSays(n.week, String(num))).toBeVisible()
           await expect(today.widgetSays(n.week, label)).toBeVisible()
         }
