@@ -791,7 +791,8 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 if let Some(st) = e["set"]["state"].as_str().filter(|_| x.plugin.is_some()) {
                     x.state = st.into();
                 }
-                if x.kind == "task" && x.parent.is_none() {
+                // A proposed one finds its story at the end (the Yes may come after the user changed it).
+                if x.kind == "task" && x.parent.is_none() && e["propose"] != true {
                     x.parent = x.plugin.as_ref().and_then(|p| plugin_home(&n, p["id"].as_str()?));
                 }
                 hist(&mut x, e, true, json!({"op": "create"}));
@@ -1074,7 +1075,7 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             x.looks_done = None;
         }
     }
-    // A plugin's task made before its story (a Yes makes the story after the proposal): its story now.
+    // A plugin's task proposed, then taken (the Yes makes the story after the proposal): its story now.
     let homes: Vec<(String, String)> = n.values().filter(|x| x.kind == "task" && x.parent.is_none()).filter_map(|x| Some((x.id.clone(), plugin_home(&n, x.plugin.as_ref()?["id"].as_str()?)?))).collect();
     for (id, home) in homes {
         n.get_mut(&id).unwrap().parent = Some(home);

@@ -78,7 +78,6 @@ fn current(x: &Node, field: &str) -> Value {
     }
 }
 
-/// The plugin's story in the thread, made (in the first workstream) when it has none.
 /// The plugin's story in the thread (where the user merged it, if they did); made in the first workstream when it has
 /// none or the user deleted it — and that workstream too when the user deleted them all.
 fn plugin_story(l: &Ledger, evs: &[Value], t: &Tree, plugin: &str, name: &str) -> Result<String> {
@@ -412,5 +411,16 @@ mod tests {
         assert_eq!(nodes(&id).values().filter(|x| x.kind == "task").count(), 1);
         let create = Ledger::of(&id).unwrap().events().unwrap().into_iter().rfind(|e| e["type"] == "create" && e["kind"] == "task").unwrap();
         assert!(human_event(&id, &json!({"op": "undo", "target": create["mid"]})).unwrap_err().to_string().contains("can't be undone"));
+        // Its story deleted while a proposal waits: the Yes puts the task in a new story, never the deleted one.
+        let story = nodes(&id).values().find(|x| x.kind == "task").unwrap().parent.clone().unwrap();
+        plugin_upsert(&id, "tracker", "Acme Tracker", &json!({"key": "P-8", "title": "Book the demo", "propose": true})).unwrap();
+        human_event(&id, &json!({"op": "delete", "node": story})).unwrap();
+        let mid = tree(&id).unwrap()["proposals"][0]["mid"].clone();
+        human_event(&id, &json!({"op": "accept", "target": mid})).unwrap();
+        let n = nodes(&id);
+        let x = n.values().find(|x| x.title == "Book the demo").unwrap();
+        let home = &n[x.parent.as_deref().unwrap()];
+        assert_ne!(home.id, story);
+        assert_eq!((home.title.as_str(), home.state.as_str()), ("Acme Tracker", "open"));
     }
 }
