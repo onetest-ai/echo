@@ -154,6 +154,13 @@ pub fn program_name(c: &str) -> bool {
 
 #[cfg(unix)]
 fn find_in_login_shell(name: &str) -> Result<PathBuf> {
+    if !super::use_shell() {
+        // Runs start without the login shell here (the test data's environment): look where they would, on this
+        // process's own PATH, never through the user's start-up files.
+        return std::env::var_os("PATH")
+            .and_then(|path| on_path(name, &path))
+            .ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"));
+    }
     let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
     // The name goes in as `$0`, never into the script's text.
     let mut c = Command::new(shell);
@@ -162,6 +169,12 @@ fn find_in_login_shell(name: &str) -> Result<PathBuf> {
     let mut child = c.spawn()?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).context("asking your login shell where it is")?;
     out.lines().rev().map(str::trim).find(|l| l.starts_with('/')).map(PathBuf::from).ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"))
+}
+
+/// The first `name` in the folders of a `PATH` value.
+#[cfg(unix)]
+fn on_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path).map(|d| d.join(name)).find(|f| f.is_file())
 }
 
 #[cfg(not(unix))]
@@ -694,6 +707,24 @@ mod tests {
     fn init(version: &str, mode: &str, tools: &[&str], servers: &[&str]) -> Value {
         json!({"type": "system", "subtype": "init", "claude_code_version": version, "permissionMode": mode, "tools": tools,
             "mcp_servers": servers.iter().map(|s| json!({"name": s, "status": "connected"})).collect::<Vec<_>>()})
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn without_the_login_shell_a_program_is_found_on_the_path_given_in_its_order() {
+        let root = std::env::temp_dir().join(format!("echo-on-path-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (first, second, empty) = (root.join("first"), root.join("second"), root.join("empty"));
+        for d in [&first, &second, &empty] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(second.join("acme-claude"), "").unwrap();
+        std::fs::write(first.join("acme-claude"), "").unwrap();
+        std::fs::create_dir_all(empty.join("globex-claude")).unwrap(); // a folder of that name is no program
+        let path = std::env::join_paths([&empty, &first, &second]).unwrap();
+        assert_eq!(on_path("acme-claude", &path), Some(first.join("acme-claude")));
+        assert_eq!(on_path("globex-claude", &path), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
