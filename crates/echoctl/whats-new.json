@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.9.11",
+    "items": [
+      { "icon": "sparkle", "title": "Claude through your company's tool", "text": "If your company gives you its own Claude Code program, add it in Settings and Echo runs Claude through it.", "open": "settings/ai" },
+      { "icon": "thread", "title": "Thread updates cost less", "text": "Threads now read new mail and chat together and send Claude far less each time, so keeping them current uses fewer tokens.", "open": "projects" },
+      { "icon": "layout", "title": "Templates keep every section", "text": "Tick Keep every section and minutes follow your template exactly, with the end time and screenshots where you put them.", "open": "settings/templates" }
+    ]
+  },
+  {
     "version": "0.9.10",
     "items": [
       { "icon": "plugin", "title": "Plugins keep threads up to date", "text": "A plugin you allow can move a thread's stage and add its own tasks, and your own edits always win over it.", "open": "projects" },
