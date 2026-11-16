@@ -4111,6 +4111,7 @@
       "last": "help",
       "project": [
         "list",
+        "sync-stats",
         "show",
         "create",
         "set",
