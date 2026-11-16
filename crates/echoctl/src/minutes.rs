@@ -124,7 +124,7 @@ pub fn with_theme(html: String, theme: Option<&str>) -> String {
 
 /// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-const RENDER_VERSION: u32 = 9;
+const RENDER_VERSION: u32 = 10;
 
 /// A short hash of exactly what the page is rendered from: the minutes and the kept frames (size
 /// and time), the title, the model it names, the renderer. The Minutes tab reloads its frame only
