@@ -39,7 +39,7 @@ routing-policy check.
 
 - Added by `echoctl ai add-wrapper <id> --command <program> [--name …]` (`ai::add_wrapper`), refused inside a run Echo
   started. `ai::wrapper::admit`: the command is found as the run's login shell finds it (`command -v`, the name as
-  `$0`), links followed; refused when it lies in the data folder or Echo's own folder (plugins' packages, My plugins
+  `$0`; with `ECHOCTL_NOTES_NO_SHELL`, on this process's own `PATH`, no shell asked: runs then start it directly), links followed; refused when it lies in the data folder or Echo's own folder (plugins' packages, My plugins
   and their stores are in them; compared ignoring case on macOS and Windows) or its `--version`, asked as a run would
   start it (`claude_command`: the login shell), names no Claude Code. `ai.json` keeps the absolute path
   (`wrapper.command`) and the plugin that offered it (`wrapper.offered_by`); a stored one without a full path fails

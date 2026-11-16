@@ -28,7 +28,8 @@ tags: [claude, ai, profiles, wrapper, cli]
 |---|--------|----------------|
 | 1 | `target/debug/echoctl ai add-wrapper acme --command "$D/wrappers/acme-claude" --name "Acme Claude"; echo "exit $?"` | `added Acme Claude (acme)`, then `Acme Claude starts <$D>/wrappers/acme-claude (2.1.400 (Claude Code)); its jobs, call transcripts included, go wherever that program sends them` (the path resolved, `/private/…` on macOS), `exit 0` |
 | 2 | `target/debug/echoctl ai status acme` | One profile: `"kind": "wrapper"`, `"command"` the full path of step 1, `"offered_by": null`, `"problem": null`, `"default": false` |
-| 3 | `PATH="$D/wrappers:$PATH" target/debug/echoctl ai add-wrapper byname --command acme-claude; echo "exit $?"` | Found as the login shell finds it: `added acme-claude (byname)` and the same full path; `exit 0`. Then `target/debug/echoctl ai remove byname` |
+| 3 | `PATH="$D/wrappers:$PATH" target/debug/echoctl ai add-wrapper byname --command acme-claude; echo "exit $?"` | Found where runs look (here, with runs started without the login shell, this process's own PATH): `added acme-claude (byname)` and the same full path; `exit 0`. Then `target/debug/echoctl ai remove byname` |
+| 3a | A shell whose start-up would find another one: `mkdir -p "$D/elsewhere" && cp "$D/wrappers/acme-claude" "$D/elsewhere/"; printf '#!/bin/sh\necho %s/elsewhere/acme-claude\n' "$D" > "$D/fakeshell"; chmod +x "$D/fakeshell"`, then `SHELL="$D/fakeshell" target/debug/echoctl ai add-wrapper byshell --command acme-claude; echo "exit $?"` | The test data's shell isn't asked: `Error: “acme-claude” isn't on your PATH — install it, or give its full path`, `exit 1` |
 | 4 | `target/debug/echoctl ai add-wrapper notclaude --command "$D/wrappers/node-ish"; echo "exit $?"` | `Error: <$D>/wrappers/node-ish doesn't answer --version as Claude Code does`, `exit 1` |
 | 5 | `mkdir -p "$ECHOCTL_HOME/plugins/acme/bin" && cp "$D/wrappers/acme-claude" "$ECHOCTL_HOME/plugins/acme/bin/"`, then `target/debug/echoctl ai add-wrapper planted --command "$ECHOCTL_HOME/plugins/acme/bin/acme-claude"; echo "exit $?"` | `Error: <…>/home/plugins/acme/bin/acme-claude is inside Echo's data folder (where plugins and what they keep are): a wrapper is a program you installed`, `exit 1` |
 | 6 | `ln -s "$ECHOCTL_HOME/plugins/acme/bin/acme-claude" "$D/wrappers/via-link"`, then `target/debug/echoctl ai add-wrapper linked --command "$D/wrappers/via-link"; echo "exit $?"` | The link is followed: the same `is inside Echo's data folder` refusal, `exit 1` |
@@ -36,7 +37,7 @@ tags: [claude, ai, profiles, wrapper, cli]
 | 8 | `ECHOCTL_HEADLESS=1 target/debug/echoctl ai add-wrapper inrun --command "$D/wrappers/acme-claude"; echo "exit $?"` | `Error: refused inside a run Echo started: which program Echo starts as Claude Code is the user's to choose`, `exit 1` |
 | 9 | `ECHOCTL_HEADLESS=1 target/debug/echoctl ai default acme; echo "exit $?"` | `Error: refused inside a run Echo started: only the user chooses a wrapper profile for their calls and threads`, `exit 1`; `ai status` still shows `work` as the default |
 | 10 | `ECHOCTL_HEADLESS=1 target/debug/echoctl arm --ai acme; echo "exit $?"` | The same refusal, `exit 1`; nothing armed |
-| 11 | `target/debug/echoctl ai status` | The data's own profiles (`system`, `work`, `other`, `out`, `ollama`) and `acme`: none of `notclaude`, `planted`, `linked`, `spaced`, `inrun` |
+| 11 | `target/debug/echoctl ai status` | The data's own profiles (`system`, `work`, `other`, `out`, `ollama`) and `acme`: none of `byshell`, `notclaude`, `planted`, `linked`, `spaced`, `inrun` |
 
 ## Expected Final State
 One wrapper profile, `acme`, starting `$D/wrappers/acme-claude`.
