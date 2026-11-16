@@ -1,0 +1,20 @@
+{
+ "about": "Text from others that reaches the window — where a `hostile` data set must put HTML and script (`<img onerror>`, `<script>`, `javascript:` links), very long strings (10 000 chars, no spaces), right-to-left and combining Unicode, emoji and Cyrillic, and Markdown that looks like links or headings: ",
+ "places": [
+  "Call titles and folder names (list rows, call header, Today, palette, thread and client call lists)",
+  "Meeting subjects, organizers, people and locations (calendar blocks and cards, Coming up today, preps)",
+  "Transcript turns and speaker names (Transcript, What moved quotes, history quotes, live notes)",
+  "Meeting chat messages, senders and file names (Chat tab)",
+  "Minutes (`notes.md`: headings, tables, links, mermaid, frontmatter) in the minutes frame and the opt-in page",
+  "My notes, including the raw `my-notes.md` and quoted words",
+  "Work items: titles, descriptions, answers, decisions, responses, links, owners, waiting-for text, verifier notes",
+  "People: names, titles, roles, groups, \"who they are\", facts, addresses; organisation names and domains",
+  "Thread and client names, briefs, About, notes for Claude, aliases, rule text, source names",
+  "Mail and Teams items: subjects, senders, snippets (Needs you now, Read and reply, New since then)",
+  "Inbox item titles and reasons; Found for you names and reasons",
+  "Plugin names, summaries, categories, marketplace names and titles, plugin settings, its Today cards and slot labels",
+  "Skill names, descriptions and SKILL.md text; template names, words, headers and sections; meeting type names",
+  "Vocabulary terms (always and learned) and their meetings and people",
+  "Live-notes answers and Yolo / Claude run outcomes; AI profile names and accounts"
+ ]
+}

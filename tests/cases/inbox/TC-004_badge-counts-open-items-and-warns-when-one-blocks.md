@@ -1,0 +1,44 @@
+---
+id: TC-004
+title: The Inbox button's badge counts the open items and is in warn colour while one blocks work
+priority: high
+type: functional
+requirements: [F-INBOX-01]
+module: inbox
+run: agent
+platform: any
+data: standard
+tags: [inbox, badge]
+---
+
+# TC-004: The Inbox button's badge counts the open items and is in warn colour while one blocks work
+
+**Module:** Inbox | **Priority:** High | **Type:** Functional
+
+## Preconditions
+- Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
+- Load `{{base_url}}/` and wait until the Inbox has the blocking item "Sign in to Claude · out" (the badge then updates by itself), up to 120 seconds, reloading the page if it hasn't come after 60: the sign-in check of the AI profiles settles in the background and the window shows it at its next attention refresh, 25–90 s in all (#513); before it, the answer lists 24 open items and none blocking
+
+## Test Data
+
+| Field | Value |
+|---|---|
+| Open items | 25 (1 blocking: Sign in to Claude · out) |
+| Button | `[data-panel-flip="needs"]` at the right end of the top bar, with `.act-badge`, `aria-label="25 open"` |
+
+## Steps
+
+| # | Action | Expected Result |
+|---|---|---|
+| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day" | The button "Inbox" at the right end of the top bar carries a badge reading 25 with `aria-label="25 open"`; the badge sits on the button and inside the window (its box within `#r-top`) |
+| 2 | Read the badge's class | `act-badge` without `new` (the warn colour is used because an item blocks; a non-blocking badge has `new`) |
+| 3 | Click "Inbox" | The panel opens on "Inbox"; the button is pressed; the badge still reads 25 |
+| 4 | Click "Inbox" again | The panel closes; the badge is still there |
+
+## Expected Final State
+The panel is closed and the badge shows 25 in warn colour.
+
+## Notes
+- Step 1 is the check for #115 (no badge after a full load on Today until the panel opened or the view changed).
+- Creates or changes nothing.
+- The neutral badge (open items, none blocking) needs a data set without the signed-out profile.

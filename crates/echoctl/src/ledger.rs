@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
@@ -28,15 +28,25 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::calls;
+use crate::evidence::{call_item, render_md};
+
+mod apply;
+mod chat;
+mod edits;
+mod mail;
+pub use apply::*;
+pub use chat::*;
+pub use edits::*;
+pub use mail::*;
 
 const STATUS: [&str; 9] = ["held", "done", "progress", "blocked", "cancelled", "reopen", "due", "delayed", "reassign"];
 const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
 const KINDS: [&str; 6] = ["epic", "story", "task", "risk", "decision", "question"];
 const TASK_TYPES: [&str; 3] = ["action", "session", "dependency"];
 const CLOSED: [&str; 4] = ["done", "cancelled", "merged", "deleted"];
-const HUMAN_FIELDS: [&str; 16] = [
+const HUMAN_FIELDS: [&str; 20] = [
     "title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by",
-    "decided_by", "likelihood", "impact",
+    "decided_by", "likelihood", "impact", "mode", "how", "prompt", "skill",
 ];
 /// A risk's likelihood and impact.
 const LEVELS: [&str; 3] = ["low", "med", "high"];
@@ -52,10 +62,10 @@ const HUMAN_OPS: [&str; 13] = ["edit", "ac_add", "ac_set", "link", "unlink", "me
 const XREF_KINDS: [&str; 3] = ["same", "depends_on", "blocks"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
 const MAX_AC: usize = 6;
-const HIST_KEYS: [&str; 33] = [
+const HIST_KEYS: [&str; 34] = [
     "mid", "type", "op", "effect", "evidence", "date", "ts", "speaker", "quote", "note", "due_text", "due", "by", "kind", "set", "text", "met", "ac",
     "ac_text", "depends_on", "into", "title", "ac_add", "who", "what", "source", "thread", "target", "master", "internal_owner", "client_owner",
-    "delegated_by", "at",
+    "delegated_by", "at", "drop",
 ];
 /// The workstream every project starts with.
 const FIRST_EPIC: &str = "General";
@@ -398,661 +408,6 @@ pub fn quote_in(project: &str, evid: &str, quote: &str) -> Result<Option<Value>>
                    "ts": turn.map(|t| t["ts"].clone()), "speaker": turn.map(|t| t["speaker"].clone())})))
 }
 
-fn render_md(x: &Value) -> String {
-    let mut head = vec![format!("# {}", x["title"].as_str().unwrap_or("")), format!("evidence: {} · {} · {}", x["id"].as_str().unwrap_or(""), x["date"].as_str().unwrap_or(""), x["kind"].as_str().unwrap_or(""))];
-    if let Some(p) = x["people"].as_array().filter(|p| !p.is_empty()) {
-        head.push(format!("people: {}", p.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")));
-    }
-    let mut body: Vec<String> = x["turns"].as_array().map(|a| a.iter().map(|t| format!("[{}] {}: {}", t["ts"].as_str().unwrap_or(""), t["speaker"].as_str().unwrap_or("?"), t["text"].as_str().unwrap_or(""))).collect()).unwrap_or_default();
-    if let Some(t) = x["text"].as_str().filter(|t| !t.is_empty()) {
-        body.push(t.to_string());
-    }
-    format!("{}\n\n{}\n", head.join("\n"), body.join("\n\n"))
-}
-
-fn clock(secs: f64) -> String {
-    let s = secs.max(0.0) as u64;
-    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
-}
-
-/// A call as an evidence item: its transcript (turns), chat and the user's notes (text). A memo split by thread
-/// (`memo.rs`) gives `thread` only its part: what the user said about another thread never becomes this one's work.
-pub fn call_item(dir: &Path, thread: Option<&str>) -> Option<Value> {
-    let meta = calls::read_json(&dir.join("meta.json"));
-    let started = meta["started_at"].as_str()?.to_string();
-    let date = chrono::DateTime::parse_from_rfc3339(&started).ok()?.with_timezone(&Local).date_naive().to_string();
-    let segs = calls::read_json(&dir.join("segments.json"));
-    // A memo split by thread: this thread's parts only. A thread the split didn't name gets the whole memo only when
-    // the user put it there by hand; one it reaches through its rules gets nothing.
-    let spans = match thread.and_then(|t| crate::memo::parts_for(dir, t).map(|s| (t, s))) {
-        Some((t, s)) if s.is_empty() && !crate::memo::whole_for(dir, t) => return None,
-        Some((_, s)) if !s.is_empty() => Some(s),
-        _ => None,
-    };
-    let within = |s: &Value| {
-        let at = s["start"].as_f64().unwrap_or(0.0);
-        spans.as_ref().is_none_or(|sp| sp.iter().any(|&(a, b)| at >= a && at < b))
-    };
-    let turns: Vec<Value> = segs
-        .as_array()?
-        .iter()
-        .filter(|s| s["text"].as_str().is_some_and(|t| !t.trim().is_empty()) && within(s))
-        .map(|s| {
-            let who = match s["speaker"].as_str() {
-                Some("me") | Some("mic") => "Me".to_string(),
-                _ => s["name"].as_str().unwrap_or("Remote").to_string(),
-            };
-            json!({"ts": clock(s["start"].as_f64().unwrap_or(0.0)), "speaker": who, "text": s["text"].as_str().unwrap_or("").trim()})
-        })
-        .collect();
-    if turns.is_empty() {
-        return None;
-    }
-    let mut text = vec![];
-    if let Some(chat) = calls::read_json(&dir.join("chat.json")).as_array().filter(|c| !c.is_empty()) {
-        text.push("## Chat during the call".to_string());
-        for m in chat {
-            text.push(format!("{}: {}", m["from"].as_str().unwrap_or("?"), m["text"].as_str().unwrap_or("")));
-        }
-    }
-    if let Ok(n) = fs::read_to_string(dir.join(calls::USER_NOTES)) {
-        if !n.trim().is_empty() {
-            text.push(format!("## The user's own notes\n{}", n.trim()));
-        }
-    }
-    let mut people: Vec<String> = vec![];
-    for p in crate::meeting::MeetingContext::load(dir).ok().flatten().map(|m| m.organizer.into_iter().chain(m.attendees).collect::<Vec<_>>()).unwrap_or_default() {
-        let name = p.name.trim().trim_end_matches("(external)").trim().to_string();
-        if !name.is_empty() && !people.contains(&name) {
-            people.push(name);
-        }
-    }
-    let stamp = calls::stamp_of(dir);
-    if crate::memo::is_memo(dir) {
-        text.insert(0, format!("## A memo\nThe user alone, thinking aloud — not a meeting: what they say they will do is theirs (\"Me\") unless \
-                                they name someone.{}", if spans.is_some() { " Only its part about this thread is here." } else { "" }));
-    }
-    Some(json!({
-        "id": stamp, "kind": "meeting", "source": "call", "at": started, "date": date,
-        "title": meta["title"].as_str().unwrap_or(&stamp), "call": dir.file_name().map(|n| n.to_string_lossy().into_owned()),
-        "people": people, "turns": turns, "text": text.join("\n"),
-    }))
-}
-
-// ── the meeting chat between calls ───────────────────────────────────────────────────────────
-
-/// How far back a chat's first read goes, and how far each later read looks again (a sender trusted
-/// meanwhile, a message edited): its days are rebuilt and an item that changed is read again.
-const CHAT_FIRST_DAYS: i64 = 30;
-const CHAT_AGAIN_DAYS: i64 = 7;
-/// Messages taken at most a read (the newest).
-const CHAT_MAX: usize = 2000;
-/// Messages this close to one of this thread's calls on the same chat belong to that call's item.
-const CALL_MARGIN_MIN: i64 = 2;
-/// A chat is read at most this often (the sync looks every 5 minutes).
-pub const CHAT_EVERY_MIN: i64 = 30;
-
-fn chats_file(project: &str) -> PathBuf {
-    crate::projects::dir().join(project).join("ledger").join("chats.json")
-}
-
-/// Per chat: `{read_at, found, days, error, checked_at}` (the Sources chip shows it).
-pub fn chat_state(project: &str) -> Value {
-    fs::read(chats_file(project)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}))
-}
-
-fn short(id: &str) -> String {
-    use sha2::Digest as _;
-    sha2::Sha256::digest(id.as_bytes())[..4].iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// Whether one of the project's meeting chats is due a read.
-pub fn chat_due(p: &crate::projects::Project) -> bool {
-    let st = chat_state(&p.id);
-    p.sources.iter().filter(|s| s.kind == "teams_chat").any(|s| {
-        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
-    })
-}
-
-/// Who may speak into the work through a chat: the user and colleagues, and senders trusted for the
-/// thread's client (the Brain's list); the others wait in that list. A Teams author not looked up yet
-/// holds the day back. Without the Brain built in, everyone in the chat (as for a call's own chat).
-struct ChatTrust {
-    #[cfg(feature = "brain")]
-    snd: crate::brain::senders::Senders,
-    #[cfg(feature = "brain")]
-    lookups: usize,
-    #[cfg(feature = "brain")]
-    client: String,
-    #[cfg(feature = "brain")]
-    name: String,
-}
-
-#[derive(PartialEq)]
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-enum Said {
-    Read,
-    Skip,
-    Unknown,
-}
-
-impl ChatTrust {
-    #[allow(unused_variables)]
-    fn new(p: &crate::projects::Project, name: &str) -> ChatTrust {
-        #[cfg(feature = "brain")]
-        {
-            let mut snd = crate::brain::senders::load();
-            snd.refresh_org();
-            ChatTrust { snd, lookups: 0, client: p.client.clone().unwrap_or_else(|| "-".into()), name: name.to_string() }
-        }
-        #[cfg(not(feature = "brain"))]
-        ChatTrust {}
-    }
-
-    #[allow(unused_variables)]
-    fn judge(&mut self, m: &Value) -> Said {
-        #[cfg(feature = "brain")]
-        {
-            use crate::brain::senders::Verdict;
-            let Some(id) = m["from"]["user"]["id"].as_str() else { return Said::Skip }; // bots, apps
-            let key = format!("teams:{id}");
-            let who = m["from"]["user"]["displayName"].as_str().unwrap_or("?");
-            if self.snd.unknown_author(&key) && self.lookups < 40 {
-                self.lookups += 1;
-                self.snd.learn_author(&key, who);
-            }
-            if self.snd.unknown_author(&key) {
-                return Said::Unknown;
-            }
-            match self.snd.teams(&self.client, &key) {
-                Verdict::Trusted => Said::Read,
-                Verdict::Ignored => Said::Skip,
-                Verdict::Waiting | Verdict::Unverified => {
-                    let at = m["createdDateTime"].as_str().unwrap_or("");
-                    self.snd.wait(&self.client, &key, who, "teams", m["id"].as_str().unwrap_or(""), at, &format!("💬 {}", self.name), false, None);
-                    Said::Skip
-                }
-            }
-        }
-        #[cfg(not(feature = "brain"))]
-        Said::Read
-    }
-
-    fn save(self) {
-        #[cfg(feature = "brain")]
-        {
-            let mut s = self.snd;
-            let _ = crate::brain::senders::save_merged(&mut s);
-        }
-    }
-}
-
-/// The thread's calls on this chat: when each was, widened by the margin (their messages are theirs).
-fn call_windows(p: &crate::projects::Project, chat: &str) -> Vec<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
-    let t = |v: &Value| v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|d| d.with_timezone(&chrono::Utc));
-    crate::projects::calls_of(p)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|(d, _)| fs::read_to_string(d.join("chat.id")).is_ok_and(|c| c.trim() == chat))
-        .filter_map(|(d, _)| {
-            let m = calls::read_json(&d.join("meta.json"));
-            let a = t(&m["started_at"])?;
-            let b = t(&m["ended_at"]).unwrap_or(a + chrono::Duration::hours(3));
-            Some((a - chrono::Duration::minutes(CALL_MARGIN_MIN), b + chrono::Duration::minutes(CALL_MARGIN_MIN)))
-        })
-        .collect()
-}
-
-/// A day of a meeting chat between the thread's calls as one evidence item (`chat-<chat>-<day>`):
-/// turns at their local time, files named in the text.
-fn chat_item(chat: &str, name: &str, day: chrono::NaiveDate, msgs: &[&Value]) -> Option<Value> {
-    let local = |m: &Value| m["createdDateTime"].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|d| d.with_timezone(&Local));
-    let mut people: Vec<String> = vec![];
-    let mut files: Vec<String> = vec![];
-    let turns: Vec<Value> = msgs
-        .iter()
-        .filter_map(|m| {
-            let text = crate::graph::html_to_text(m["body"]["content"].as_str().unwrap_or(""));
-            let att: Vec<String> = m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str().map(str::to_owned)).collect();
-            if text.trim().is_empty() && att.is_empty() {
-                return None;
-            }
-            let who = m["from"]["user"]["displayName"].as_str().unwrap_or("?").to_string();
-            if !people.contains(&who) {
-                people.push(who.clone());
-            }
-            files.extend(att.iter().map(|a| format!("{who} shared {a}")));
-            let text = if text.trim().is_empty() { format!("(shared {})", att.join(", ")) } else { text };
-            Some(json!({"ts": local(m)?.format("%H:%M:%S").to_string(), "speaker": who, "text": text.trim()}))
-        })
-        .collect();
-    if turns.is_empty() {
-        return None;
-    }
-    let first = msgs.iter().find_map(|m| local(m))?;
-    let text = if files.is_empty() { String::new() } else { format!("## Files shared\n{}", files.join("\n")) };
-    Some(json!({
-        "id": format!("chat-{}-{day}", short(chat)), "kind": "chat", "source": "teams_chat", "chat": chat,
-        "at": first.to_rfc3339(), "date": day.to_string(), "title": format!("{name} · chat on {day}"),
-        "people": people, "turns": turns, "text": text,
-    }))
-}
-
-/// Read the project's meeting chats (`teams_chat` sources) between its calls into evidence: one item
-/// a day, only the trusted senders' messages, a day taken once the chat has been quiet for
-/// `projectsync::SETTLE` (today's grows: an item that changed is read again). Returns the ids
-/// written; a chat that can't be read keeps its error in `chats.json` and doesn't stop the others.
-pub fn chat_sync(project: &str) -> Result<Vec<String>> {
-    let p = crate::projects::load(project)?;
-    let chats: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "teams_chat").cloned().collect();
-    if chats.is_empty() {
-        return Ok(vec![]);
-    }
-    let l = Ledger::of(project)?;
-    let mut state = chat_state(project);
-    let now = chrono::Utc::now();
-    let mut written = vec![];
-    for s in &chats {
-        let name = s.name.clone().unwrap_or_else(|| "Meeting chat".into());
-        let first = state[&s.id]["read_at"].is_null();
-        let mut since = now - chrono::Duration::days(if first { CHAT_FIRST_DAYS } else { CHAT_AGAIN_DAYS });
-        if let Some(t) = p.since.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).and_then(|d| d.and_hms_opt(0, 0, 0)).and_then(|d| d.and_local_timezone(Local).single()) {
-            since = since.max(t.with_timezone(&chrono::Utc));
-        }
-        state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-        let msgs = match crate::graph::chat_history(&s.id, since, now, CHAT_MAX) {
-            Ok(m) => m,
-            Err(e) => {
-                state[&s.id]["error"] = json!(format!("{e:#}"));
-                continue;
-            }
-        };
-        let windows = call_windows(&p, &s.id);
-        let mut trust = ChatTrust::new(&p, &name);
-        let mut days: BTreeMap<chrono::NaiveDate, Vec<&Value>> = BTreeMap::new();
-        let mut held: std::collections::BTreeSet<chrono::NaiveDate> = Default::default();
-        for m in &msgs {
-            let Some(at) = m["createdDateTime"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|d| d.with_timezone(&chrono::Utc)) else { continue };
-            if windows.iter().any(|(a, b)| at >= *a && at <= *b) {
-                continue; // the call's own item has it
-            }
-            let day = at.with_timezone(&Local).date_naive();
-            match trust.judge(m) {
-                Said::Read => days.entry(day).or_default().push(m),
-                Said::Skip => {}
-                Said::Unknown => {
-                    held.insert(day);
-                }
-            }
-        }
-        trust.save();
-        let settle = crate::projectsync::SETTLE;
-        let _lock = l.lock()?;
-        let done = processed(&l.events()?);
-        let mut requeue = vec![];
-        let mut found = 0;
-        for (day, ms) in &days {
-            let last = ms.iter().filter_map(|m| m["createdDateTime"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())).max();
-            if held.contains(day) || last.is_some_and(|t| now.signed_duration_since(t.with_timezone(&chrono::Utc)) < settle) {
-                continue; // a sender not looked up yet, or the chat still going: next time
-            }
-            let Some(item) = chat_item(&s.id, &name, *day, ms) else { continue };
-            let id = item["id"].as_str().unwrap_or("").to_string();
-            let path = l.dir.join("evidence").join(format!("{id}.json"));
-            let body = serde_json::to_vec_pretty(&item)?;
-            if fs::read(&path).ok().as_deref() == Some(body.as_slice()) {
-                continue;
-            }
-            fs::create_dir_all(l.dir.join("evidence"))?;
-            fs::write(l.evidence_md(&id), render_md(&item))?;
-            crate::paths::write_atomic(&path, &body)?;
-            if done.contains(&id) {
-                requeue.push(json!({"type": "reprocess", "evidence": id, "why": "the chat changed", "at": Local::now().to_rfc3339()}));
-            }
-            found += 1;
-            written.push(id);
-        }
-        l.append(&requeue)?;
-        state[&s.id]["read_at"] = json!(Local::now().to_rfc3339());
-        state[&s.id]["found"] = json!(found);
-        state[&s.id]["days"] = json!(days.len());
-        if let Some(o) = state[&s.id].as_object_mut() {
-            o.remove("error");
-        }
-    }
-    // Chats no longer watched forget their state (a source added back reads its 30 days again).
-    if let Some(o) = state.as_object_mut() {
-        o.retain(|k, _| chats.iter().any(|s| &s.id == k));
-    }
-    fs::create_dir_all(l.dir.clone())?;
-    crate::paths::write_atomic(&chats_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
-    Ok(written)
-}
-
-/// The meeting chats of a thread's calls it doesn't read yet: `[{id, name, calls}]`, the most used first.
-pub fn chat_suggestions(p: &crate::projects::Project) -> Vec<Value> {
-    let mut by: BTreeMap<String, (String, usize)> = BTreeMap::new();
-    for (d, _) in crate::projects::calls_of(p).unwrap_or_default() {
-        let Some(c) = fs::read_to_string(d.join("chat.id")).ok().map(|c| c.trim().to_string()).filter(|c| c.starts_with("19:")) else { continue };
-        if p.sources.iter().any(|s| s.kind == "teams_chat" && s.id == c) {
-            continue;
-        }
-        let title = calls::read_json(&d.join("meta.json"))["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("Meeting chat").to_string();
-        let e = by.entry(c).or_insert((title, 0));
-        e.1 += 1;
-    }
-    let mut v: Vec<Value> = by.into_iter().map(|(id, (name, n))| json!({"id": id, "name": name, "calls": n})).collect();
-    v.sort_by_key(|x| std::cmp::Reverse(x["calls"].as_u64().unwrap_or(0)));
-    v
-}
-
-// ── mail ────────────────────────────────────────────────────────────────────────────────────────
-
-/// A mail as one evidence item (`mail-<sha8 of its Internet message id>`: Graph's own id changes when
-/// the mail moves to another folder): the new part of its text as one turn at the local time it
-/// came, the sender as the speaker, and its link in Outlook (`url`).
-fn mail_item(m: &Value) -> Option<Value> {
-    if m["invite"] == true {
-        return None; // a meeting's invite: the meeting is the call
-    }
-    let key = m["internet_id"].as_str().or(m["id"].as_str())?;
-    let at = m["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())?.with_timezone(&Local);
-    let text = m["text"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
-    let me = mail_me();
-    // The user is "Me", as in a call; names as people read them ("Morgan, Alex" → "Alex Morgan").
-    let name = |p: &Value| {
-        let email = p["email"].as_str().unwrap_or("").to_lowercase();
-        if !email.is_empty() && me(&email) {
-            return "Me".to_string();
-        }
-        let n = p["name"].as_str().map(crate::people::display).filter(|n| !n.trim().is_empty());
-        n.unwrap_or_else(|| p["email"].as_str().unwrap_or("?").trim().to_string())
-    };
-    let from = name(&m["from"]);
-    let mut people = vec![from.clone()];
-    for p in m["to"].as_array().into_iter().flatten().map(name) {
-        if !people.contains(&p) {
-            people.push(p);
-        }
-    }
-    let subject = m["subject"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("(no subject)");
-    Some(json!({
-        "id": format!("mail-{}", short(key)), "kind": "mail", "source": "mail", "message": m["id"], "conversation": m["conversation"],
-        "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": subject, "from": m["from"], "to": m["to"], "auth": m["auth"],
-        "url": m["url"].as_str().filter(|u| u.starts_with("https://")),
-        "people": people, "turns": [{"ts": at.format("%H:%M:%S").to_string(), "speaker": from, "text": text}], "text": "",
-    }))
-}
-
-/// Whether an address is the user's: the one in Settings → About me, or (with the Brain) the signed-in
-/// account's local part at any of their domains.
-fn mail_me() -> impl Fn(&str) -> bool {
-    let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
-    #[cfg(feature = "brain")]
-    let local = crate::brain::sources::me_local();
-    #[cfg(not(feature = "brain"))]
-    let local: Option<String> = None;
-    move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
-}
-
-/// How far back a mail source's first read goes, and how far each later read looks again.
-#[cfg(feature = "brain")]
-const MAIL_FIRST_DAYS: i64 = 30;
-#[cfg(feature = "brain")]
-const MAIL_AGAIN_DAYS: i64 = 7;
-/// Mails taken at most a read (the newest).
-#[cfg(feature = "brain")]
-const MAIL_MAX: usize = 200;
-
-fn mails_file(project: &str) -> PathBuf {
-    crate::projects::dir().join(project).join("ledger").join("mails.json")
-}
-
-/// Each ✉ Mail source's read into the work: `{<rule>: {read_at, checked_at, found, error}}`.
-pub fn mail_state(project: &str) -> Value {
-    calls::read_json(&mails_file(project)).as_object().map(|o| Value::Object(o.clone())).unwrap_or_else(|| json!({}))
-}
-
-/// A mail source not checked for `CHAT_EVERY_MIN` (or never).
-pub fn mail_due(p: &crate::projects::Project) -> bool {
-    // Without the Brain built in mail isn't read: never due (it would be every tick).
-    if !cfg!(feature = "brain") {
-        return false;
-    }
-    let st = mail_state(&p.id);
-    p.sources.iter().filter(|s| s.kind == "mail").any(|s| {
-        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
-    })
-}
-
-/// Read the project's ✉ Mail sources (`domain:` / `person:` rules, as the Brain reads them) into its
-/// evidence: one item a mail, only from the user, colleagues and senders trusted for the thread's
-/// client — a trusted outside sender's only when Exchange says it is really theirs (DMARC); the
-/// others wait in the Brain's senders list (Needs you), never read meanwhile. The sync runs Claude
-/// Code with tools on what it reads, hence the same rules as the Brain's quarantine. Returns the ids
-/// written; a source that can't be read keeps its error in `mails.json`.
-#[cfg(feature = "brain")]
-pub fn mail_sync(project: &str) -> Result<Vec<String>> {
-    use crate::brain::senders::{self, Verdict};
-    use crate::brain::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
-    let p = crate::projects::load(project)?;
-    let rules: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "mail").cloned().collect();
-    if rules.is_empty() {
-        return Ok(vec![]);
-    }
-    let l = Ledger::of(project)?;
-    let mut state = mail_state(project);
-    let now = chrono::Utc::now();
-    let mut snd = senders::load();
-    snd.refresh_org();
-    let mut items: Vec<Value> = vec![];
-    if snd.org_domains.is_empty() {
-        // Nobody can be told a colleague: nothing is judged, every source reads this window next time.
-        for s in &rules {
-            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-            state[&s.id]["error"] = json!("couldn't read your organisation's domains: mail waits");
-        }
-    } else {
-        let me = me_local();
-        let client = p.client.clone().unwrap_or_else(|| "-".into());
-        for s in &rules {
-            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-            let Some(rule) = MailRule::parse(&s.id) else {
-                state[&s.id]["error"] = json!(format!("not a mail rule: {}", s.id));
-                continue;
-            };
-            let first = state[&s.id]["read_at"].is_null();
-            let mut since = now - chrono::Duration::days(if first { MAIL_FIRST_DAYS } else { MAIL_AGAIN_DAYS });
-            if let Some(t) = p.since.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).and_then(|d| d.and_hms_opt(0, 0, 0)).and_then(|d| d.and_local_timezone(Local).single()) {
-                since = since.max(t.with_timezone(&chrono::Utc));
-            }
-            let found = match crate::graph::mail(&rule.kql(), since, MAIL_MAX) {
-                Ok(f) => f,
-                Err(e) => {
-                    state[&s.id]["error"] = json!(format!("{e:#}"));
-                    continue;
-                }
-            };
-            let mut n = 0;
-            for m in &found {
-                let people = not_me(std::iter::once(&m["from"]).chain(m["to"].as_array().into_iter().flatten()), me.as_deref());
-                // Graph's search is fuzzy: only mail that really has these people; a broadcast isn't a thread's.
-                if m["invite"] == true || people.len() > MAX_PEOPLE || !rule.matches(&people) {
-                    continue;
-                }
-                let from = m["from"]["email"].as_str().unwrap_or("").to_lowercase();
-                let who = m["from"]["name"].as_str().unwrap_or(&from).to_string();
-                let (auth, id, at, subject) = (m["auth"].as_str().unwrap_or("none"), m["id"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or("(no subject)"));
-                match snd.mail(&client, &from, auth) {
-                    Verdict::Trusted => {
-                        if let Some(item) = mail_item(m) {
-                            n += 1;
-                            items.push(item);
-                        }
-                    }
-                    Verdict::Ignored => {}
-                    Verdict::Unverified => snd.note_unverified(&client, &from, &who, id, at, subject, auth),
-                    Verdict::Waiting => snd.wait(&client, &from, &who, "mail", id, at, subject, auth == "pass", None),
-                }
-            }
-            state[&s.id]["read_at"] = json!(Local::now().to_rfc3339());
-            state[&s.id]["found"] = json!(n);
-            if let Some(o) = state[&s.id].as_object_mut() {
-                o.remove("error");
-            }
-        }
-        let _ = senders::save_merged(&mut snd);
-    }
-    // Sources no longer watched forget their state (one added back reads its 30 days again).
-    if let Some(o) = state.as_object_mut() {
-        o.retain(|k, _| rules.iter().any(|s| &s.id == k));
-    }
-    let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
-    let mut written = vec![];
-    for item in &items {
-        let id = item["id"].as_str().unwrap_or("").to_string();
-        let path = l.dir.join("evidence").join(format!("{id}.json"));
-        if path.exists() || written.contains(&id) {
-            continue; // a mail doesn't change; one the user added by hand is already there
-        }
-        fs::write(l.evidence_md(&id), render_md(item))?;
-        crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(item)?)?;
-        written.push(id);
-    }
-    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
-    Ok(written)
-}
-
-/// A sender the user trusted for `client` (or whose mail they read anyway): that client's open threads
-/// read their mail and meeting chats from the start again at the next sync (due at once) — what was
-/// held back comes in; items already there stay as they are.
-#[cfg(feature = "brain")]
-pub fn reread_sources(client: &str) -> Result<()> {
-    for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed() && p.client.as_deref().unwrap_or("-") == client) {
-        for f in [mails_file(&p.id), chats_file(&p.id)] {
-            let mut st = calls::read_json(&f);
-            let Some(o) = st.as_object_mut() else { continue };
-            for v in o.values_mut().filter_map(Value::as_object_mut) {
-                v.remove("read_at");
-                v.remove("checked_at");
-            }
-            crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
-        }
-    }
-    Ok(())
-}
-
-/// Without the Brain built in there is no senders list to trust anyone by: mail isn't read.
-#[cfg(not(feature = "brain"))]
-pub fn mail_sync(_project: &str) -> Result<Vec<String>> {
-    Ok(vec![])
-}
-
-/// Mails the user picked (Graph message ids; `conversation`: every message of their conversations
-/// too) as evidence of the project: one item a mail, written once — the next sync reads it as it
-/// reads a call. The user's own choice is the trust here (a thread's ✉ Mail sources, read by
-/// themselves, will take only trusted senders). Returns the items, new or already there.
-pub fn add_mail(project: &str, ids: &[String], conversation: bool) -> Result<Vec<Value>> {
-    let l = Ledger::of(project)?;
-    let mut mails: Vec<Value> = vec![];
-    for id in ids {
-        let m = crate::graph::message(id).with_context(|| format!("mail {id}"))?;
-        match m["conversation"].as_str().filter(|_| conversation) {
-            Some(c) => mails.extend(crate::graph::conversation(c)?),
-            None => mails.push(m),
-        }
-    }
-    let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
-    let mut out = vec![];
-    for m in &mails {
-        let Some(item) = mail_item(m) else { continue };
-        let id = item["id"].as_str().unwrap_or("").to_string();
-        if out.iter().any(|x: &Value| x["id"] == id.as_str()) {
-            continue;
-        }
-        let path = l.dir.join("evidence").join(format!("{id}.json"));
-        let new = !path.exists();
-        if new {
-            fs::write(l.evidence_md(&id), render_md(&item))?;
-            crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(&item)?)?;
-        }
-        out.push(json!({"id": id, "title": item["title"], "date": item["date"], "from": item["turns"][0]["speaker"], "new": new}));
-    }
-    Ok(out)
-}
-
-/// Bring the project's evidence up to date with its calls: new ones written, changed ones written
-/// again (and queued again when they were processed). `limit`: only the newest calls (the backfill).
-/// Returns the ids written.
-pub fn sync(project: &str, limit: Option<usize>) -> Result<Vec<String>> {
-    let l = Ledger::of(project)?;
-    let p = crate::projects::load(project)?;
-    // Strict routing: the sync runs on the thread's AI profile; a call pinned to another profile never
-    // becomes its evidence (nor reaches its people pass).
-    let profile = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
-    let mut dirs: Vec<PathBuf> = crate::projects::calls_of(&p)?
-        .into_iter()
-        .map(|(d, _)| d)
-        .filter(|d| crate::ai::call_profile_id(d).ok().as_deref() == Some(profile.as_str()))
-        .collect();
-    if let Some(n) = limit {
-        dirs = dirs.split_off(dirs.len().saturating_sub(n));
-    }
-    let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
-    let evs = l.events()?;
-    let done = processed(&evs);
-    let mut written = vec![];
-    let mut requeue = vec![];
-    for d in dirs {
-        let Some(item) = call_item(&d, Some(project)) else { continue };
-        let id = item["id"].as_str().unwrap_or("").to_string();
-        let path = l.dir.join("evidence").join(format!("{id}.json"));
-        let body = serde_json::to_vec_pretty(&item)?;
-        if fs::read(&path).ok().as_deref() == Some(body.as_slice()) {
-            continue;
-        }
-        fs::write(l.evidence_md(&id), render_md(&item))?;
-        crate::paths::write_atomic(&path, &body)?;
-        if done.contains(&id) {
-            requeue.push(json!({"type": "reprocess", "evidence": id, "why": "the call changed", "at": Local::now().to_rfc3339()}));
-        }
-        written.push(id);
-    }
-    l.append(&requeue)?;
-    Ok(written)
-}
-
-pub(crate) fn ensure_first_epic(l: &Ledger) -> Result<()> {
-    if l.events()?.iter().any(|e| e["type"] == "create" && e["kind"] == "epic") {
-        return Ok(());
-    }
-    l.append(&[json!({"type": "create", "mid": mid_of(&["plan", FIRST_EPIC]), "id": "E01", "kind": "epic", "by": "plan",
-        "evidence": null, "date": null, "fields": {"title": FIRST_EPIC, "plan": FIRST_EPIC}})])
-}
-
-/// Evidence not processed yet, oldest first, with the file the agent reads.
-pub fn pending(project: &str) -> Result<Vec<Value>> {
-    let l = Ledger::of(project)?;
-    let ev = l.evidence();
-    let done = processed(&l.events()?);
-    Ok(order(&ev)
-        .into_iter()
-        .filter(|i| !done.contains(i))
-        .map(|i| json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()}))
-        .collect())
-}
-
-pub fn mark_processed(project: &str, evid: &str, note: &str) -> Result<()> {
-    let l = Ledger::of(project)?;
-    if !l.evidence().contains_key(evid) {
-        bail!("unknown evidence {evid:?}");
-    }
-    l.append(&[json!({"type": "processed", "evidence": evid, "by": "agent", "note": note, "at": Local::now().to_rfc3339()})])
-}
-
 // ── fold ───────────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
@@ -1104,6 +459,12 @@ pub struct Node {
     /// A risk's likelihood and impact: low | med | high.
     pub likelihood: Option<String>,
     pub impact: Option<String>,
+    /// Who does it (`taskmodes`): `claude` — Claude can, with `prompt` (what to hand back) and a `skill`; `manual` —
+    /// the user, with `how`. Only the user's choice is here; Echo's guess is kept beside the ledger.
+    pub mode: Option<String>,
+    pub how: Option<String>,
+    pub prompt: Option<String>,
+    pub skill: Option<String>,
     #[serde(skip)]
     unlinked: Vec<String>,
     pub created: Option<String>,
@@ -1126,6 +487,17 @@ pub struct Node {
     /// Open items in other threads this one waits on (`depends_on`): `{thread, node, title, owner, state}`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub xwaits: Vec<Value>,
+    /// Mail the user sent from it (`m365 mail send|reply --task`, #92): `{conversation, subject, to, at, reply_at}`;
+    /// `reply_at` is the first reply's time once the thread holds one (its mail evidence in that conversation).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sent: Vec<Value>,
+    /// Its due is guessed (#463): not said in the item it came from, that item's own date. It never makes it late.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub due_guessed: bool,
+    /// A later call, mail or chat that only mentioned it, while it is open (#463): `{mid, evidence, kind, title, date,
+    /// quote}`. The user closes it (`accept` on `mid`) or not yet (`reject`); the sync never does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looks_done: Option<Value>,
 }
 
 /// The valid links of a value (an older or hand-written event may hold anything).
@@ -1199,6 +571,10 @@ fn node_of(e: &Value) -> Node {
         decided_by: s(&f["decided_by"]),
         likelihood: level_of(&f["likelihood"]),
         impact: level_of(&f["impact"]),
+        mode: None,
+        how: None,
+        prompt: None,
+        skill: None,
         unlinked: vec![],
         created: s(&e["date"]),
         created_in: s(&e["evidence"]),
@@ -1212,11 +588,16 @@ fn node_of(e: &Value) -> Node {
         mirror_of: None,
         also_in: vec![],
         xwaits: vec![],
+        due_guessed: false,
+        looks_done: None,
+        sent: vec![],
     }
 }
 
 fn needs_verdict(e: &Value) -> bool {
-    e["type"] == "agent" && (VERIFIED_OPS.contains(&e["op"].as_str().unwrap_or("")) || (e["op"] == "status" && STATUS.contains(&e["effect"].as_str().unwrap_or(""))))
+    e["type"] == "agent"
+        && (VERIFIED_OPS.contains(&e["op"].as_str().unwrap_or(""))
+            || (e["op"] == "status" && (STATUS.contains(&e["effect"].as_str().unwrap_or("")) || (e["effect"] == "mention" && e["covers"] == true))))
 }
 
 fn chase(n: &BTreeMap<String, Node>, id: &str) -> String {
@@ -1263,6 +644,15 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
         "decided_by" => n.decided_by = s(v),
         "likelihood" => n.likelihood = level_of(v),
         "impact" => n.impact = level_of(v),
+        "mode" => n.mode = v.as_str().filter(|m| crate::taskmodes::MODES.contains(m)).map(str::to_owned),
+        "how" | "prompt" | "skill" => {
+            let t = v.as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+            match field {
+                "how" => n.how = t,
+                "prompt" => n.prompt = t,
+                _ => n.skill = t,
+            }
+        }
         _ => return false,
     }
     true
@@ -1273,6 +663,17 @@ pub struct Tree {
     pub notes: BTreeMap<String, Vec<Value>>,
     pub order: Vec<String>,
     pub evidence: BTreeMap<String, Value>,
+}
+
+/// When a sent mail was first answered: the earliest mail of the thread in its conversation after `at`, not the user's.
+fn reply_at(ev: &BTreeMap<String, Value>, conversation: &str, at: &str) -> Option<String> {
+    let sent = chrono::DateTime::parse_from_rfc3339(at).ok()?;
+    ev.values()
+        .filter(|e| e["kind"] == "mail" && !conversation.is_empty() && e["conversation"] == conversation && e["turns"][0]["speaker"] != "Me")
+        .filter_map(|e| e["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()))
+        .filter(|t| *t > sent)
+        .min()
+        .map(|t| t.to_rfc3339())
 }
 
 /// The tree as the events say, up to the last evidence processed.
@@ -1293,6 +694,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         .filter(|e| e["type"] == "human" && (e["op"] == "accept" || e["op"] == "reject") && !undone.contains(e["mid"].as_str().unwrap_or("")))
         .filter_map(|e| Some((s(&e["target"])?, s(&e["op"])?)))
         .collect();
+    // Looks done (#463): each covering mention's task and day, by its mid; and per task, the day of the latest item the
+    // user said Not yet to (only a later item may suggest again).
+    let mut mention_of: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut not_before: BTreeMap<String, String> = BTreeMap::new();
     let mut n: BTreeMap<String, Node> = BTreeMap::new();
     let mut notes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let hist = |node: &mut Node, e: &Value, applied: bool, extra: Value| {
@@ -1324,7 +729,7 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             "create" => {
                 let mut x = node_of(e);
                 if let Some(d) = s(&e["fields"]["due"]) {
-                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"]}));
+                    x.due_history.push(json!({"due": d, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["fields"]["due_text"], "guessed": e["fields"]["due_guessed"] == true}));
                 }
                 if human {
                     x.pinned = vec!["title".into()];
@@ -1333,6 +738,13 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 n.insert(x.id.clone(), x);
             }
             "note" => notes.entry(s(&e["node"]).unwrap_or_default()).or_default().push(e.clone()),
+            // Mail the user sent from an item: its conversation's replies come back to it (`ledger::mail_sync`).
+            "sent" => {
+                let id = chase(&n, e["node"].as_str().unwrap_or(""));
+                if let Some(x) = n.get_mut(&id) {
+                    x.sent.push(json!({"conversation": e["conversation"], "subject": e["subject"], "to": e["to"], "at": e["at"], "reply_at": null}));
+                }
+            }
             "agent" => {
                 let id = chase(&n, e["node"].as_str().unwrap_or(""));
                 if !n.contains_key(&id) {
@@ -1341,6 +753,20 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                 let op = e["op"].as_str().unwrap_or("");
                 let mut ok = !needs_verdict(e) || e["mid"].as_str().and_then(|m| verdict.get(m)).map(String::as_str) == Some("supports");
                 match op {
+                    // A later item that says a task's outcome happened (#463: a covering mention, verified): it looks done
+                    // until the user closes it or says not yet — at their own place in the log.
+                    "status" if e["effect"] == "mention" && e["covers"] == true && e["quote"].is_string() => {
+                        let x = n.get_mut(&id).unwrap();
+                        let day = s(&e["date"]).unwrap_or_default();
+                        let later = x.kind == "task" && e["evidence"].is_string() && s(&e["evidence"]) != x.created_in && not_before.get(&id).is_none_or(|d| day > *d);
+                        if ok && later && ["open", "in_progress", "blocked"].contains(&x.state.as_str()) {
+                            let item = e["evidence"].as_str().and_then(|i| ev.get(i));
+                            x.looks_done = Some(json!({"mid": e["mid"], "evidence": e["evidence"], "date": e["date"], "quote": e["quote"],
+                                "kind": item.map(|i| i["kind"].clone()), "title": item.map(|i| i["title"].clone())}));
+                            mention_of.insert(s(&e["mid"]).unwrap_or_default(), (id.clone(), day));
+                        }
+                        hist(x, e, false, json!({}));
+                    }
                     "status" => {
                         let x = n.get_mut(&id).unwrap();
                         if ok && !["merged", "deleted"].contains(&x.state.as_str()) {
@@ -1422,6 +848,27 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             }
             "human" => {
                 let op = e["op"].as_str().unwrap_or("");
+                // Close (accept) or Not yet (reject) on a task that looks done (#463), here in the log: Close makes it done
+                // as the user's edit; Not yet hides it and every earlier suggestion.
+                if let Some((id, day)) = e["target"].as_str().and_then(|t| mention_of.get(t)).filter(|_| op == "accept" || op == "reject").cloned() {
+                    if let Some(x) = n.get_mut(&id) {
+                        if op == "accept" && !["merged", "deleted"].contains(&x.state.as_str()) {
+                            x.state = "done".into();
+                            settable(x, "state", true);
+                        }
+                        x.looks_done = None;
+                        if op == "reject" {
+                            not_before.insert(id.clone(), day);
+                        }
+                        if let Some(h) = x.history.iter_mut().rev().find(|h| h["mid"] == e["target"]) {
+                            h["status"] = json!(op);
+                            h["decided"] = e["mid"].clone();
+                            h["applied"] = json!(op == "accept");
+                            h["at"] = e["at"].clone();
+                        }
+                    }
+                    continue;
+                }
                 if ["undo", "accept", "reject"].contains(&op) {
                     continue;
                 }
@@ -1456,6 +903,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                                     set_field(x, k, v, true);
                                 }
                             }
+                        }
+                        // Closed by the user's own edit: its Looks done goes, and doesn't come back with a reopen (#463).
+                        if let Some(x) = n.get_mut(&id).filter(|x| closed(&x.state)) {
+                            x.looks_done = None;
                         }
                     }
                     "ac_add" => n.get_mut(&id).unwrap().ac.push(Ac { text: s(&e["text"]).unwrap_or_default(), met: false, met_by: None, source: Some("human".into()), human: false, dropped: false }),
@@ -1512,6 +963,11 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
             _ => {}
         }
     }
+    for x in n.values_mut() {
+        for m in &mut x.sent {
+            m["reply_at"] = json!(reply_at(&ev, m["conversation"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or("")));
+        }
+    }
     let ids: Vec<String> = n.keys().cloned().collect();
     for id in &ids {
         let deps: Vec<String> = n[id].depends_on.iter().map(|d| chase(&n, d)).collect();
@@ -1525,6 +981,10 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
         x.depends_on = uniq;
         x.ac.retain(|a| !a.dropped);
         x.due = x.due_history.last().and_then(|h| s(&h["due"]));
+        x.due_guessed = x.due.is_some() && x.due_history.last().is_some_and(|h| h["guessed"] == true);
+        if !["open", "in_progress", "blocked"].contains(&x.state.as_str()) {
+            x.looks_done = None;
+        }
     }
     derive(&mut n);
     let lim_n = (lim + 1).max(0) as usize;
@@ -1532,6 +992,15 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
 }
 
 fn apply_status(x: &mut Node, e: &Value) -> bool {
+    let ok = apply_status_here(x, e);
+    // Closed by anything: an old Looks done never comes back with a reopen (#463).
+    if closed(&x.state) {
+        x.looks_done = None;
+    }
+    ok
+}
+
+fn apply_status_here(x: &mut Node, e: &Value) -> bool {
     let eff = e["effect"].as_str().unwrap_or("");
     if eff == "mention" {
         return false;
@@ -1556,11 +1025,14 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
             }
             x.due_history.push(json!({"due": null, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"].as_str().unwrap_or("delayed, no new date")}));
         }
+        // A hand-over is one change: if the user set an owner it names, none of it is applied (a Handed over by they set is kept).
         "reassign" => {
-            for k in ["internal_owner", "client_owner", "delegated_by"] {
-                if e[k].is_string() {
-                    set_field(x, k, &e[k], false);
-                }
+            let fields: Vec<_> = ["internal_owner", "client_owner", "delegated_by"].into_iter().filter(|k| e[*k].is_string()).collect();
+            if fields.iter().any(|k| *k != "delegated_by" && pinned(x, k)) {
+                return false;
+            }
+            for k in fields {
+                set_field(x, k, &e[k], false);
             }
         }
         _ => {}
@@ -1569,8 +1041,12 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
         if pinned(x, "due") {
             return eff != "due";
         }
+        // The same date said now: no longer guessed (#463).
+        if let Some(h) = x.due_history.last_mut().filter(|h| h["due"] == e["due"] && h["guessed"] == true && e["due_guessed"] != true) {
+            h["guessed"] = json!(false);
+        }
         if x.due_history.last().map(|h| &h["due"]) != Some(&e["due"]) {
-            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"]}));
+            x.due_history.push(json!({"due": e["due"], "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"], "guessed": e["due_guessed"] == true}));
         }
     }
     true
@@ -1694,7 +1170,24 @@ pub fn context(project: &str) -> Result<Value> {
     let p = crate::projects::load(project)?;
     let t = fold_linked(project)?;
     let n = &t.nodes;
-    fn view(n: &BTreeMap<String, Node>, x: &Node) -> Value {
+    // Only threads known to be on this thread's AI profile are named; any other thread's ids, names, item titles,
+    // owners and waits never reach this thread's model (strict routing) — an unknown thread counts as another.
+    let default = crate::ai::default_id();
+    let mine = p.ai_profile.clone().unwrap_or_else(|| default.clone());
+    let same: BTreeSet<String> = crate::projects::list().into_iter().filter(|q| q.ai_profile.clone().unwrap_or_else(|| default.clone()) == mine).map(|q| q.id).collect();
+    fn view(n: &BTreeMap<String, Node>, x: &Node, same: &BTreeSet<String>) -> Value {
+        let away = |v: &Value| v["thread"].as_str().is_some_and(|t| !same.contains(t));
+        // A mirror shows its master's owners and wait: only when the master's thread is on this profile.
+        let master_away = x.mirror_of.as_ref().is_some_and(away);
+        let named = |v: &Value| format!("{} {} (thread {})", v["node"].as_str().unwrap_or(""), v["title"].as_str().unwrap_or(""), v["thread"].as_str().unwrap_or(""));
+        let lines = |xs: &[Value]| {
+            let mut out: Vec<String> = xs.iter().filter(|v| !away(v)).map(named).collect();
+            let hidden = xs.iter().filter(|v| away(v)).count();
+            if hidden > 0 {
+                out.push(format!("{hidden} item(s) in a thread on another AI profile"));
+            }
+            out
+        };
         if closed(&x.state) {
             return json!({"id": x.id, "title": x.title, "state": x.state});
         }
@@ -1712,6 +1205,9 @@ pub fn context(project: &str) -> Result<Value> {
             d["description"] = json!(if t.chars().count() > 400 { format!("{}…", t.chars().take(400).collect::<String>()) } else { t.clone() });
         }
         for (k, v) in [("internal_owner", &x.internal_owner), ("client_owner", &x.client_owner), ("delegated_by", &x.delegated_by), ("due", &x.due)] {
+            if master_away && k != "due" {
+                continue;
+            }
             if let Some(v) = v {
                 d[k] = json!(v);
             }
@@ -1726,7 +1222,11 @@ pub fn context(project: &str) -> Result<Value> {
             d["holds_up"] = json!(x.blocks.iter().filter_map(|i| n.get(i).map(|y| format!("{i} {}", y.title))).collect::<Vec<_>>());
         }
         if let Some(w) = &x.waiting_for {
-            d["waiting_for"] = json!(format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or("")));
+            d["waiting_for"] = json!(if master_away {
+                format!("waiting (since {})", w["since"].as_str().unwrap_or(""))
+            } else {
+                format!("{}: {} (since {})", w["who"].as_str().unwrap_or("?"), w["what"].as_str().unwrap_or(""), w["since"].as_str().unwrap_or(""))
+            });
         }
         if !x.pinned.is_empty() {
             d["pinned_by_human"] = json!(x.pinned);
@@ -1734,13 +1234,13 @@ pub fn context(project: &str) -> Result<Value> {
         // One piece of work raised in two threads (#20): known here — don't create it again; what is said
         // about it here still counts (a status change goes to it).
         if let Some(m) = &x.mirror_of {
-            d["also_tracked_in"] = json!(format!("{} {} (thread {}) — the same work; its state is shown from there", m["node"].as_str().unwrap_or(""), m["title"].as_str().unwrap_or(""), m["thread"].as_str().unwrap_or("")));
+            d["also_tracked_in"] = json!(if away(m) { "a thread on another AI profile — the same work; its state is shown from there".to_string() } else { format!("{} — the same work; its state is shown from there", named(m)) });
         }
         if !x.also_in.is_empty() {
-            d["also_raised_in"] = json!(x.also_in.iter().map(|a| format!("{} {} (thread {})", a["node"].as_str().unwrap_or(""), a["title"].as_str().unwrap_or(""), a["thread"].as_str().unwrap_or(""))).collect::<Vec<_>>());
+            d["also_raised_in"] = json!(lines(&x.also_in));
         }
         if !x.xwaits.is_empty() {
-            d["waits_for_other_threads"] = json!(x.xwaits.iter().map(|w| format!("{} {} (thread {})", w["node"].as_str().unwrap_or(""), w["title"].as_str().unwrap_or(""), w["thread"].as_str().unwrap_or(""))).collect::<Vec<_>>());
+            d["waits_for_other_threads"] = json!(lines(&x.xwaits));
         }
         let pend: Vec<String> = x.history.iter().filter(|h| h["type"] == "agent" && needs_verdict(h) && h["verdict"].is_null()).map(|h| format!("{}@{}", h["effect"].as_str().or(h["op"].as_str()).unwrap_or(""), h["date"].as_str().unwrap_or(""))).collect();
         if !pend.is_empty() {
@@ -1754,7 +1254,7 @@ pub fn context(project: &str) -> Result<Value> {
             d["last"] = h["date"].clone();
         }
         for (k, name) in [("story", "stories"), ("task", "tasks")] {
-            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c])).collect();
+            let xs: Vec<Value> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| view(n, &n[c], same)).collect();
             if !xs.is_empty() {
                 d[name] = json!(xs);
             }
@@ -1773,13 +1273,27 @@ pub fn context(project: &str) -> Result<Value> {
     Ok(json!({
         "project": p.name, "stage": p.stage.id(), "client": client.map(|c| &c.name),
         "client_domains": client.map(|c| &c.domains), "notes": p.notes,
+        // What the thread is about, for an item it shares with other threads: its brief (cut) and its terms.
+        "brief": brief_cut(&p.id),
+        "terms": p.terms.iter().map(|t| t.term.as_str()).collect::<Vec<_>>(),
         // About me (the user's `me.md`): who "Me" is and how they work — defaults the words can override.
         "me_profile": crate::calls::me_profile(),
         "people": p.people,
         "evidence_processed": {"count": t.order.len(), "latest": t.order.iter().rev().take(5).rev().map(|c| format!("{} {}", t.evidence[c]["date"].as_str().unwrap_or(""), t.evidence[c]["title"].as_str().unwrap_or(""))).collect::<Vec<_>>()},
-        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e)).collect::<Vec<_>>(),
+        "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e, &same)).collect::<Vec<_>>(),
         "epics_without_work": epics.iter().filter(|e| e.children.is_empty()).map(|e| format!("{} {}", e.id, e.title)).collect::<Vec<_>>(),
     }))
+}
+
+/// A thread's brief for its sync, cut at 1500 characters (none when empty).
+fn brief_cut(id: &str) -> Option<String> {
+    crate::projects::brief(id).ok().filter(|b| !b.trim().is_empty()).map(|b| if b.chars().count() > 1500 { format!("{}…", b.chars().take(1500).collect::<String>()) } else { b })
+}
+
+/// What a thread is about, for its verifier: its name, notes, brief and terms.
+pub fn thread_scope(id: &str) -> Option<Value> {
+    let p = crate::projects::load(id).ok()?;
+    Some(json!({"thread": p.name, "notes": p.notes, "brief": brief_cut(id), "terms": p.terms.iter().map(|t| t.term.as_str()).collect::<Vec<_>>()}))
 }
 
 /// A record as the extractor reads it: its id and title, then what it holds — a question's answer, a
@@ -1817,867 +1331,6 @@ fn record_line(r: &Node) -> String {
         s.push_str(&format!(" ({})", more.join("; ")));
     }
     s
-}
-
-// ── apply: agent proposals ───────────────────────────────────────────────────────────────────────
-
-/// Owners as the project knows them: a member's name for their name, email, or unique first name.
-fn canonical(p: &crate::projects::Project, who: Option<&str>) -> Option<String> {
-    let w = who?.trim();
-    if w.is_empty() {
-        return None;
-    }
-    let lw = w.to_lowercase();
-    if let Some(m) = p.people.iter().find(|m| m.name.to_lowercase() == lw || m.email.as_deref().is_some_and(|e| e.to_lowercase() == lw)) {
-        return Some(m.name.clone());
-    }
-    let first: Vec<&crate::projects::Member> = p.people.iter().filter(|m| m.name.split_whitespace().next().is_some_and(|f| f.to_lowercase() == lw)).collect();
-    if first.len() == 1 {
-        return Some(first[0].name.clone());
-    }
-    Some(w.to_string())
-}
-
-fn key_str(v: &Value) -> String {
-    if v.is_null() { "None".into() } else { v.to_string() }
-}
-
-/// Apply one evidence item's proposals: each checked against the item's words and the tree's rules.
-/// Returns `{events, by_op, rejected}`.
-pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
-    let l = Ledger::of(project)?;
-    let p = crate::projects::load(project)?;
-    let _lock = l.lock()?;
-    let ev = l.evidence();
-    let item = ev.get(evid).ok_or_else(|| anyhow!("unknown evidence {evid:?}"))?.clone();
-    let full = norm(&full_text(&item));
-    let evs = l.events()?;
-    let mut n = fold_events(&evs, ev.clone())?.nodes;
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for e in &evs {
-        if e["type"] == "create" {
-            *counts.entry(s(&e["kind"]).unwrap_or_default()).or_default() += 1;
-        }
-    }
-    let mut seen: BTreeSet<String> = evs.iter().filter_map(|e| s(&e["mid"])).collect();
-    let mut made: BTreeMap<String, String> = evs.iter().filter(|e| e["type"] == "create").filter_map(|e| Some((s(&e["mid"])?, s(&e["id"])?))).collect();
-    let mut handles: BTreeMap<String, String> = BTreeMap::new();
-    let (mut out, mut rej): (Vec<Value>, Vec<Value>) = (vec![], vec![]);
-    let date = s(&item["date"]).unwrap_or_default();
-    let turns = item["turns"].as_array().cloned().unwrap_or_default();
-    let locate = |q: &str| -> (Value, Value) {
-        let head: String = q.chars().take(40).collect();
-        for t in &turns {
-            if norm(t["text"].as_str().unwrap_or("")).contains(&head) {
-                return (t["ts"].clone(), json!(canonical(&p, t["speaker"].as_str())));
-            }
-        }
-        (Value::Null, Value::Null)
-    };
-    let base = |pr: &Value, q: &str, key: &[String]| -> Value {
-        let (ts, sp) = locate(q);
-        let mut parts: Vec<&str> = vec![evid, q];
-        parts.extend(key.iter().map(String::as_str));
-        json!({"mid": mid_of(&parts), "evidence": evid, "date": date, "source": item["source"], "kind": item["kind"], "ts": ts, "speaker": sp,
-               "quote": pr["quote"], "quote_norm": q, "note": pr["note"], "by": "agent"})
-    };
-    for (i, pr) in proposals.iter().enumerate() {
-        let r = |x: &Value, h: &BTreeMap<String, String>| x.as_str().map(|v| h.get(v).cloned().unwrap_or_else(|| v.to_string()));
-        let q = norm(pr["quote"].as_str().unwrap_or(""));
-        let op = pr["op"].as_str().unwrap_or("");
-        let why = if q.split(' ').count() < 3 {
-            Some("quote too short".to_string())
-        } else if !full.contains(&q) {
-            Some("quote not verbatim in this evidence item (one contiguous span)".to_string())
-        } else if !AGENT_OPS.contains(&op) {
-            Some(format!("bad op {op:?}"))
-        } else {
-            None
-        };
-        if let Some(w) = why {
-            rej.push(json!({"i": i, "why": w, "quote": pr["quote"].as_str().unwrap_or("").chars().take(80).collect::<String>()}));
-            continue;
-        }
-        if op == "create" {
-            let k = pr["kind"].as_str().unwrap_or("");
-            let par = r(&pr["parent"], &handles);
-            let pk = par.as_deref().and_then(|x| n.get(x)).map(|x| x.kind.clone());
-            let ty = pr["type"].as_str().unwrap_or("");
-            let ac = pr["ac"].as_array().cloned().unwrap_or_default();
-            let title = pr["title"].as_str().unwrap_or("").trim().to_string();
-            let why = if !KINDS.contains(&k) {
-                Some(format!("bad kind {k:?}"))
-            } else if k == "epic" && pr["plan"] != "Off-plan" {
-                Some("agents create workstreams (epics) only for off-plan work: plan must be 'Off-plan'".into())
-            } else if title.is_empty() {
-                Some("a create needs a title".into())
-            } else if k != "epic" && !parent_ok(k, pk.as_deref()) {
-                Some(format!("a {k} needs a parent of the right kind, got {par:?} ({pk:?})"))
-            } else if k == "story" && ac.is_empty() {
-                Some("a story needs acceptance criteria (ac: [...]): what must be true for it to be done".into())
-            } else if k == "story" && ac.len() > MAX_AC {
-                Some(format!("more than {MAX_AC} acceptance criteria: split it into two stories and link them"))
-            } else if pr["description"].as_str().is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
-                Some(format!("description: at most {MAX_AGENT_DESC} characters"))
-            } else if (k == "question" || k == "risk") && pr["description"].as_str().is_some_and(|t| !t.trim().is_empty()) {
-                Some(format!("a {k}'s {} is checked by the verifier: create it without one, then op 'answer' on its ref", if k == "question" { "answer" } else { "response" }))
-            } else if let Some(f) = ["likelihood", "impact"].into_iter().find(|f| !pr[*f].is_null() && (k != "risk" || level_of(&pr[*f]).is_none())) {
-                Some(format!("{f} is for a risk: one of {LEVELS:?}"))
-            } else if k == "task" && !TASK_TYPES.contains(&ty) {
-                Some(format!("task type must be one of {TASK_TYPES:?}"))
-            } else if k == "task" && !(pr["internal_owner"].is_string() || pr["client_owner"].is_string() || pr["due_text"].is_string() || ty == "session" || ty == "dependency") {
-                Some("admission bar: a task needs an owner, a date, or to be a session/dependency; else op 'note'".into())
-            } else {
-                None
-            };
-            if let Some(w) = why {
-                rej.push(json!({"i": i, "why": w, "title": pr["title"]}));
-                continue;
-            }
-            let cmid = mid_of(&[evid, &q, "create", k, par.as_deref().unwrap_or("None"), &title]);
-            let handle = pr["ref"].as_str().map(str::to_owned).unwrap_or_else(|| format!("#{i}"));
-            if let Some(id) = made.get(&cmid) {
-                handles.insert(handle, id.clone());
-                continue;
-            }
-            let c = counts.entry(k.to_string()).or_default();
-            *c += 1;
-            let nid = new_id(k, *c);
-            handles.insert(handle, nid.clone());
-            let mut e = base(pr, &q, &["create".into(), nid.clone()]);
-            e["mid"] = json!(cmid);
-            e["type"] = json!("create");
-            e["id"] = json!(nid);
-            e["kind"] = json!(k);
-            e["fields"] = json!({
-                "title": title, "parent": if k == "epic" { None } else { par.clone() }, "type": pr["type"],
-                "plan": if k == "epic" { Some("Off-plan") } else { None },
-                "internal_owner": canonical(&p, pr["internal_owner"].as_str()), "client_owner": canonical(&p, pr["client_owner"].as_str()),
-                "delegated_by": canonical(&p, pr["delegated_by"].as_str()),
-                "client_owed": pr["client_owed"] == true, "ac": ac,
-                "due": resolve_due(pr["due_text"].as_str(), &date), "due_text": pr["due_text"],
-                "description": pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty()),
-                "decided_by": if k == "decision" { canonical(&p, pr["decided_by"].as_str()) } else { None },
-                "likelihood": pr["likelihood"], "impact": pr["impact"],
-            });
-            n.insert(nid.clone(), node_of(&e));
-            made.insert(cmid, nid.clone());
-            out.push(e);
-            for d in pr["depends_on"].as_array().cloned().unwrap_or_default() {
-                let d = r(&d, &handles).unwrap_or_default();
-                if n.get(&d).is_some_and(|x| x.kind == "story" || x.kind == "task") && (k == "story" || k == "task") {
-                    let mut le = base(pr, &q, &["link".into(), nid.clone(), d.clone()]);
-                    le["type"] = json!("agent");
-                    le["op"] = json!("link");
-                    le["node"] = json!(nid);
-                    le["depends_on"] = json!(d);
-                    out.push(le);
-                }
-            }
-            continue;
-        }
-        let node = r(&pr["node"], &handles).unwrap_or_default();
-        if op == "note" {
-            if !n.contains_key(&node) {
-                rej.push(json!({"i": i, "why": format!("note needs a known node, got {node:?}")}));
-                continue;
-            }
-            if pr["note"].as_str().is_none_or(|t| t.trim().is_empty()) {
-                rej.push(json!({"i": i, "why": "note needs its text in `note`"}));
-                continue;
-            }
-            let mut e = base(pr, &q, &["note".into(), node.clone()]);
-            e["type"] = json!("note");
-            e["node"] = json!(node);
-            e["text"] = pr["note"].clone();
-            out.push(e);
-            continue;
-        }
-        let Some(x) = n.get(&node) else {
-            rej.push(json!({"i": i, "why": format!("unknown node {node:?}")}));
-            continue;
-        };
-        let later: Vec<String> = [Some(node.clone()), r(&pr["depends_on"], &handles), r(&pr["into"], &handles)]
-            .into_iter()
-            .flatten()
-            .filter(|y| n.get(y).is_some_and(|z| z.created.as_deref().unwrap_or("") > date.as_str()))
-            .collect();
-        if !later.is_empty() {
-            rej.push(json!({"i": i, "why": format!("{later:?} did not exist yet on {date}")}));
-            continue;
-        }
-        let mut key: Vec<String> = ["effect", "depends_on", "into", "parent", "ac", "what"].iter().map(|k| key_str(&pr[*k])).collect();
-        if op == "answer" {
-            key.push(key_str(&pr["text"]));
-        }
-        if op == "revise" {
-            key.push(key_str(&pr["title"]));
-            key.push(key_str(&pr["ac_add"]));
-            key.push(key_str(&pr["description"]));
-        }
-        let mut k2 = vec![op.to_string(), node.clone()];
-        k2.extend(key);
-        let mut e = base(pr, &q, &k2);
-        e["type"] = json!("agent");
-        e["op"] = json!(op);
-        e["node"] = json!(node);
-        let mid = s(&e["mid"]).unwrap_or_default();
-        if seen.contains(&mid) {
-            continue;
-        }
-        let bad = |w: String, rej: &mut Vec<Value>| rej.push(json!({"i": i, "why": w}));
-        match op {
-            "status" => {
-                let eff = pr["effect"].as_str().unwrap_or("");
-                if !STATUS.contains(&eff) && eff != "mention" {
-                    bad(format!("bad effect {eff:?}"), &mut rej);
-                    continue;
-                }
-                if eff == "due" && resolve_due(pr["due_text"].as_str(), &date).is_none() {
-                    bad(format!("no date can be read from due_text {:?}: write it as a date (\"December 18\", \"next Friday\", \"2026-12-18\")", pr["due_text"].as_str().unwrap_or("")), &mut rej);
-                    continue;
-                }
-                e["effect"] = json!(eff);
-                e["due_text"] = pr["due_text"].clone();
-                e["due"] = if eff == "delayed" { Value::Null } else { json!(resolve_due(pr["due_text"].as_str(), &date)) };
-                e["internal_owner"] = json!(canonical(&p, pr["internal_owner"].as_str()));
-                e["client_owner"] = json!(canonical(&p, pr["client_owner"].as_str()));
-                e["delegated_by"] = json!(canonical(&p, pr["delegated_by"].as_str()));
-            }
-            "revise" => {
-                let add = pr["ac_add"].as_array().map(|a| a.len()).unwrap_or(0);
-                let desc = pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty());
-                if !pr["title"].is_string() && add == 0 && desc.is_none() {
-                    bad("revise needs a new title, ac_add and/or description".into(), &mut rej);
-                    continue;
-                }
-                if desc.is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
-                    bad(format!("description: at most {MAX_AGENT_DESC} characters"), &mut rej);
-                    continue;
-                }
-                if desc.is_some() && (x.kind == "question" || x.kind == "risk") {
-                    bad(format!("a {}'s answer or response is op 'answer' (the verifier checks it)", x.kind), &mut rej);
-                    continue;
-                }
-                if x.ac.len() + add > MAX_AC {
-                    bad(format!("{node} would have more than {MAX_AC} criteria: create a second story"), &mut rej);
-                    continue;
-                }
-                e["title"] = pr["title"].clone();
-                e["ac_add"] = pr["ac_add"].clone();
-                e["description"] = json!(desc);
-            }
-            "ac_met" => {
-                let a = pr["ac"].as_u64().unwrap_or(0) as usize;
-                if x.kind != "story" || a == 0 || a > x.ac.len() {
-                    bad("ac_met needs a story node and the 1-based number of one of its criteria".into(), &mut rej);
-                    continue;
-                }
-                let live = x.ac[a - 1].text.clone();
-                if let Some(saw) = pr["ac_text"].as_str() {
-                    if norm(saw) != norm(&live) {
-                        bad(format!("criterion {a} of {node} is now “{live}”, not “{saw}”: the criteria changed since you read context; re-read it"), &mut rej);
-                        continue;
-                    }
-                }
-                e["ac"] = json!(a);
-                e["ac_text"] = json!(live);
-            }
-            "link" => {
-                let d = r(&pr["depends_on"], &handles).unwrap_or_default();
-                let ok = n.get(&d).is_some_and(|y| y.kind == "story" || y.kind == "task") && (x.kind == "story" || x.kind == "task");
-                if !ok {
-                    bad(format!("link joins stories/tasks; got {node} -> {d}"), &mut rej);
-                    continue;
-                }
-                e["depends_on"] = json!(d);
-            }
-            "answer" => {
-                let text = pr["text"].as_str().map(str::trim).filter(|t| !t.is_empty());
-                if x.kind != "question" && x.kind != "risk" {
-                    bad(format!("answer is for a question (its answer) or a risk (its response); {node} is a {}", x.kind), &mut rej);
-                    continue;
-                }
-                let Some(text) = text else {
-                    bad("answer needs its text: the answer, or what is done about the risk".into(), &mut rej);
-                    continue;
-                };
-                if text.chars().count() > MAX_AGENT_DESC {
-                    bad(format!("text: at most {MAX_AGENT_DESC} characters"), &mut rej);
-                    continue;
-                }
-                if let Some(f) = ["likelihood", "impact"].into_iter().find(|f| !pr[*f].is_null() && (x.kind != "risk" || level_of(&pr[*f]).is_none())) {
-                    bad(format!("{f} is for a risk: one of {LEVELS:?}"), &mut rej);
-                    continue;
-                }
-                e["text"] = json!(text);
-                if x.kind == "risk" {
-                    e["internal_owner"] = json!(canonical(&p, pr["internal_owner"].as_str()));
-                    e["likelihood"] = pr["likelihood"].clone();
-                    e["impact"] = pr["impact"].clone();
-                }
-            }
-            "waiting" => {
-                if x.kind != "story" && x.kind != "task" {
-                    bad("waiting applies to a story or task".into(), &mut rej);
-                    continue;
-                }
-                e["who"] = json!(canonical(&p, pr["who"].as_str()));
-                e["what"] = pr["what"].clone();
-            }
-            "suggest_move" => {
-                let to = r(&pr["parent"], &handles).unwrap_or_default();
-                if !n.get(&to).is_some_and(|y| parent_ok(&x.kind, Some(&y.kind))) {
-                    bad(format!("cannot move {node} under {to}"), &mut rej);
-                    continue;
-                }
-                e["parent"] = json!(to);
-            }
-            "suggest_merge" => {
-                let to = r(&pr["into"], &handles).unwrap_or_default();
-                if n.get(&to).is_none_or(|y| y.kind != x.kind) || to == node {
-                    bad(format!("merge needs two nodes of one kind; got {node} -> {to}"), &mut rej);
-                    continue;
-                }
-                e["into"] = json!(to);
-            }
-            _ => {}
-        }
-        seen.insert(mid);
-        out.push(e);
-    }
-    // The same work twice (#39: a mail and the call after it asked for one thing): a new story or task whose
-    // title shares most of its words with an open one of this thread is offered as "same as …?" — To review,
-    // never merged by itself.
-    let mut same: Vec<Value> = vec![];
-    // Words that say what the work is (not "the", "with", "for"…), and pairs offered once.
-    const STOP: [&str; 16] = ["the", "and", "for", "with", "from", "into", "onto", "this", "that", "their", "them", "our", "your", "about", "over", "via"];
-    let key_words = |t: &str| -> BTreeSet<String> { words(t).into_iter().filter(|w| !STOP.contains(&w.as_str())).collect() };
-    let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
-    for e in out.iter().filter(|e| e["type"] == "create" && (e["kind"] == "story" || e["kind"] == "task")) {
-        let (id, kind) = (e["id"].as_str().unwrap_or(""), e["kind"].as_str().unwrap_or(""));
-        let mine = key_words(e["fields"]["title"].as_str().unwrap_or(""));
-        if mine.len() < 2 {
-            continue;
-        }
-        // Most of both titles in common (shared over all their words), at least two words of it.
-        let best = n.values().filter(|x| x.kind == kind && x.id != id && !closed(&x.state)).filter_map(|x| {
-            let theirs = key_words(&x.title);
-            let shared = mine.intersection(&theirs).count();
-            let ratio = shared as f64 / mine.union(&theirs).count().max(1) as f64;
-            (shared >= 2 && ratio >= 0.6).then_some((ratio, x))
-        }).max_by(|a, b| a.0.total_cmp(&b.0));
-        if let Some((_, x)) = best {
-            let pair = if id < x.id.as_str() { (id.to_string(), x.id.clone()) } else { (x.id.clone(), id.to_string()) };
-            if !pairs.insert(pair) {
-                continue;
-            }
-            let mid = mid_of(&["same", evid, id, &x.id]);
-            if seen.insert(mid.clone()) {
-                same.push(json!({"type": "agent", "op": "suggest_merge", "node": id, "into": x.id, "by": "agent", "evidence": evid, "date": date, "mid": mid,
-                                 "note": format!("Same as {} “{}”? Their titles share most words (Echo's check, no model).", x.id, x.title)}));
-            }
-        }
-    }
-    out.extend(same);
-    l.append(&out)?;
-    let mut by: BTreeMap<String, usize> = BTreeMap::new();
-    for e in &out {
-        let k = if e["type"] == "create" { format!("create_{}", e["kind"].as_str().unwrap_or("")) } else { e["op"].as_str().or(e["type"].as_str()).unwrap_or("").to_string() };
-        *by.entry(k).or_default() += 1;
-    }
-    // What it made and touched, by id: the next item and the dependency pass refer to them (#39).
-    let created: Vec<Value> = out.iter().filter(|e| e["type"] == "create").map(|e| json!({"id": e["id"], "kind": e["kind"], "title": e["fields"]["title"], "parent": e["fields"]["parent"]})).collect();
-    let touched: BTreeSet<&str> = out.iter().filter(|e| e["type"] != "create").filter_map(|e| e["node"].as_str()).collect();
-    Ok(json!({"events": out.len(), "by_op": by, "rejected": rej, "created": created, "touched": touched}))
-}
-
-// ── verify ──────────────────────────────────────────────────────────────────────────────────────
-
-/// The claims a verifier must judge (each with its words in context). `weak`: also those judged weak.
-pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
-    let l = Ledger::of(project)?;
-    let evs = l.events()?;
-    let ev = l.evidence();
-    let latest: BTreeMap<String, String> = evs.iter().filter(|e| e["type"] == "verdict").filter_map(|e| Some((s(&e["mid"])?, s(&e["verdict"])?))).collect();
-    let n = fold_events(&evs, ev.clone())?.nodes;
-    let mut out = vec![];
-    for e in evs.iter().filter(|e| needs_verdict(e)) {
-        let mid = s(&e["mid"]).unwrap_or_default();
-        if let Some(v) = latest.get(&mid) {
-            if !(weak && v == "weak") {
-                continue;
-            }
-        }
-        let item = e["evidence"].as_str().and_then(|i| ev.get(i)).cloned().unwrap_or(Value::Null);
-        let turns = item["turns"].as_array().cloned().unwrap_or_default();
-        let head: String = e["quote_norm"].as_str().unwrap_or("").chars().take(40).collect();
-        let k = turns.iter().position(|t| norm(t["text"].as_str().unwrap_or("")).contains(&head));
-        let ctx: Vec<String> = match k {
-            Some(k) => turns[k.saturating_sub(2)..(k + 3).min(turns.len())].iter().map(|t| format!("[{}] {}: {}", t["ts"].as_str().unwrap_or(""), t["speaker"].as_str().unwrap_or(""), t["text"].as_str().unwrap_or(""))).collect(),
-            None => vec![item["text"].as_str().unwrap_or("").chars().take(1200).collect()],
-        };
-        let node = e["node"].as_str().unwrap_or("");
-        let x = n.get(node);
-        let claim = match e["op"].as_str().unwrap_or("") {
-            "ac_met" => format!("acceptance criterion {} met: {}", e["ac"], e["ac_text"].as_str().unwrap_or("?")),
-            "link" => {
-                let d = e["depends_on"].as_str().unwrap_or("");
-                format!("cannot finish until “{}” ({d}) does", n.get(d).map(|y| y.title.as_str()).unwrap_or(d))
-            }
-            "waiting" => match e["what"].as_str() {
-                Some(w) if !w.is_empty() => format!("is waiting on {}: {w}", e["who"].as_str().unwrap_or("someone")),
-                _ => "is no longer waiting on anyone (what it waited for arrived or was dropped)".into(),
-            },
-            "answer" if x.is_some_and(|y| y.kind == "risk") => format!("what is done about this risk: {}", e["text"].as_str().unwrap_or("")),
-            "answer" => format!("this question is answered: {}", e["text"].as_str().unwrap_or("")),
-            _ => e["effect"].as_str().unwrap_or("").to_string(),
-        };
-        out.push(json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
-                        "quote": e["quote"], "evidence": format!("{} {}", e["date"].as_str().unwrap_or(""), item["title"].as_str().unwrap_or("")), "context": ctx}));
-    }
-    Ok(out)
-}
-
-pub fn verify_apply(project: &str, verdicts: &[Value]) -> Result<Value> {
-    let l = Ledger::of(project)?;
-    let _lock = l.lock()?;
-    let mids: BTreeSet<String> = l.events()?.iter().filter(|e| needs_verdict(e)).filter_map(|e| s(&e["mid"])).collect();
-    let (mut out, mut rej) = (vec![], vec![]);
-    for v in verdicts {
-        let ok = v["mid"].as_str().is_some_and(|m| mids.contains(m)) && ["supports", "weak", "wrong"].contains(&v["verdict"].as_str().unwrap_or(""));
-        if !ok {
-            rej.push(v.clone());
-            continue;
-        }
-        out.push(json!({"type": "verdict", "mid": v["mid"], "verdict": v["verdict"], "reason": v["reason"], "by": "verifier"}));
-    }
-    l.append(&out)?;
-    let mut c: BTreeMap<String, usize> = BTreeMap::new();
-    for v in &out {
-        *c.entry(s(&v["verdict"]).unwrap_or_default()).or_default() += 1;
-    }
-    Ok(json!({"verdicts": c, "rejected": rej}))
-}
-
-// ── the user's edits ─────────────────────────────────────────────────────────────────────────────
-
-fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
-    let Some(m) = sets.as_object() else { bail!("set must be an object of {HUMAN_FIELDS:?}") };
-    for (k, v) in m {
-        match k.as_str() {
-            "due" if !v.is_null() => {
-                NaiveDate::parse_from_str(v.as_str().unwrap_or(""), "%Y-%m-%d").map_err(|_| anyhow!("due must be YYYY-MM-DD or null"))?;
-            }
-            "due" => {}
-            "state" if !HUMAN_STATES.contains(&v.as_str().unwrap_or("")) => bail!("state must be one of {HUMAN_STATES:?}"),
-            "waiting_for" if !v.is_null() && !(v.is_object() && (v["what"].is_string() || v["who"].is_string())) => bail!("waiting_for is null or {{who, what}}"),
-            "parent" if !v.as_str().is_some_and(|p| n.contains_key(p)) => bail!("unknown parent {v}"),
-            "client_owed" if !v.is_boolean() => bail!("client_owed is true or false"),
-            "column" if !(v.is_null() || v.as_str().is_some_and(|c| !c.is_empty() && c.len() <= 40)) => bail!("column is a column id"),
-            "title" if v.as_str().is_none_or(|t| t.trim().is_empty()) => bail!("title cannot be empty"),
-            "internal_owner" | "client_owner" | "delegated_by" | "decided_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
-            "likelihood" | "impact" if !(v.is_null() || level_of(v).is_some()) => bail!("{k} is null or one of {LEVELS:?}"),
-            "links" => check_links(v)?,
-            "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
-            k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-/// An edit the user made (`{op, node, set|text|ac|met|drop|depends_on|into|target, …}` or a create). A link
-/// to an item in another thread is written in both ledgers (`link_threads`), and so is its removal — an
-/// undo of one included.
-pub fn human_event(project: &str, body: &Value) -> Result<Value> {
-    match body["op"].as_str().unwrap_or("") {
-        "xref" => {
-            let master_here = body["master"] == "here";
-            return link_threads(project, body["node"].as_str().unwrap_or(""), body["thread"].as_str().unwrap_or(""), body["target"].as_str().unwrap_or(""), body["kind"].as_str().unwrap_or("same"), master_here);
-        }
-        "unxref" => return unlink_threads(project, body["node"].as_str().unwrap_or(""), body["thread"].as_str().unwrap_or(""), body["target"].as_str().unwrap_or("")),
-        "undo" => {
-            let evs = Ledger::of(project)?.events()?;
-            if let Some(x) = evs.iter().find(|e| e["mid"] == body["target"] && e["type"] == "human" && (e["op"] == "xref" || e["op"] == "unxref")) {
-                let (node, thread, target) = (x["node"].as_str().unwrap_or(""), x["thread"].as_str().unwrap_or(""), x["target"].as_str().unwrap_or(""));
-                // The pair's latest link event: undoing an older one would undo something else.
-                let latest = evs.iter().rev().find(|e| e["type"] == "human" && (e["op"] == "xref" || e["op"] == "unxref") && e["node"] == node && e["thread"] == thread && e["target"] == target);
-                if latest.is_some_and(|l| l["mid"] != x["mid"]) {
-                    bail!("this link was changed since: undo the newer change, or link / unlink it again");
-                }
-                if x["op"] == "xref" {
-                    return unlink_threads(project, node, thread, target);
-                }
-                // Undo an unlink: link them again as they were.
-                let before = evs.iter().rev().find(|e| e["type"] == "human" && e["op"] == "xref" && e["node"] == node && e["thread"] == thread && e["target"] == target).ok_or_else(|| anyhow!("nothing to link again"))?;
-                return link_threads(project, node, thread, target, before["kind"].as_str().unwrap_or("same"), before["master"] == "here");
-            }
-        }
-        "edit" => {
-            // A mirror's state, owners and due are its master's (#20): changed there, or they would never show.
-            let node = body["node"].as_str().unwrap_or("");
-            let raw = fold(&Ledger::of(project)?)?;
-            let master = raw.nodes.get(node).and_then(|x| x.xrefs.iter().find(|r| r["kind"] == "same" && r["master"] == "there").cloned());
-            if let (Some(m), Some(set)) = (master, body["set"].as_object()) {
-                let (theirs, mine): (serde_json::Map<String, Value>, serde_json::Map<String, Value>) =
-                    set.clone().into_iter().partition(|(k, _)| MIRRORED.contains(&k.as_str()));
-                let mut out = Value::Null;
-                if !theirs.is_empty() {
-                    out = human_event_here(m["thread"].as_str().unwrap_or(""), &json!({"op": "edit", "node": m["node"], "set": theirs}))?;
-                }
-                if !mine.is_empty() {
-                    out = human_event_here(project, &json!({"op": "edit", "node": node, "set": mine}))?;
-                }
-                return Ok(out);
-            }
-        }
-        _ => {}
-    }
-    human_event_here(project, body)
-}
-
-/// A mirror's fields that are its master's (#20).
-const MIRRORED: [&str; 6] = ["state", "internal_owner", "client_owner", "due", "waiting_for", "delegated_by"];
-
-/// Link `node` here to `target` in `thread` (#20), in both ledgers. `same`: one piece of work, its master
-/// here or there; `depends_on`: this one waits on that one (the other records `blocks`).
-pub fn link_threads(project: &str, node: &str, thread: &str, target: &str, kind: &str, master_here: bool) -> Result<Value> {
-    if thread == project {
-        bail!("a link to an item in the same thread is a dependency (link), not a cross-thread link");
-    }
-    if !["same", "depends_on"].contains(&kind) {
-        bail!("kind is same or depends_on");
-    }
-    // Both items must be there before either side is written.
-    for (p, id) in [(project, node), (thread, target)] {
-        let t = fold(&Ledger::of(p)?)?;
-        if t.nodes.get(id).is_none_or(|x| CLOSED.contains(&x.state.as_str())) {
-            bail!("{p} has no open item {id}");
-        }
-    }
-    let (here, there) = match kind {
-        "same" => (if master_here { "here" } else { "there" }, if master_here { "there" } else { "here" }),
-        _ => ("there", "there"),
-    };
-    let back = if kind == "depends_on" { "blocks" } else { "same" };
-    let e = human_event_here(project, &json!({"op": "xref", "node": node, "thread": thread, "target": target, "kind": kind, "master": here}))?;
-    if let Err(err) = human_event_here(thread, &json!({"op": "xref", "node": target, "thread": project, "target": node, "kind": back, "master": there})) {
-        // Never a link on one side only.
-        let _ = human_event_here(project, &json!({"op": "unxref", "node": node, "thread": thread, "target": target}));
-        return Err(err.context(format!("{thread} couldn't take the link")));
-    }
-    Ok(e)
-}
-
-/// Take a cross-thread link away, in both ledgers: each item is on its own again, with its own last values.
-pub fn unlink_threads(project: &str, node: &str, thread: &str, target: &str) -> Result<Value> {
-    let e = human_event_here(project, &json!({"op": "unxref", "node": node, "thread": thread, "target": target}))?;
-    if Ledger::of(thread).is_ok() {
-        let _ = human_event_here(thread, &json!({"op": "unxref", "node": target, "thread": project, "target": node}));
-    }
-    Ok(e)
-}
-
-fn human_event_here(project: &str, body: &Value) -> Result<Value> {
-    let l = Ledger::of(project)?;
-    let _lock = l.lock()?;
-    ensure_first_epic(&l)?;
-    let evs = l.events()?;
-    let t = fold_events(&evs, l.evidence())?;
-    let n = &t.nodes;
-    let op = body["op"].as_str().unwrap_or("");
-    if !HUMAN_OPS.contains(&op) {
-        bail!("bad op {op:?}");
-    }
-    let last = t.order.last().cloned();
-    let now = Local::now().to_rfc3339();
-    let date = last.as_ref().and_then(|c| s(&t.evidence[c]["date"])).unwrap_or_else(|| now[..10].to_string());
-    let mut e = json!({"type": "human", "op": op, "by": "human", "evidence": last, "date": date, "at": now});
-    if op == "create" {
-        let k = body["kind"].as_str().unwrap_or("");
-        let par = body["parent"].as_str();
-        if !KINDS.contains(&k) || (k != "epic" && !parent_ok(k, par.and_then(|p| n.get(p)).map(|x| x.kind.as_str()))) {
-            bail!("cannot create a {k} under {par:?}");
-        }
-        check_links(&body["links"])?;
-        for f in ["likelihood", "impact"] {
-            if !(body[f].is_null() || (k == "risk" && level_of(&body[f]).is_some())) {
-                bail!("{f} is for a risk: one of {LEVELS:?}");
-            }
-        }
-        if !(body["description"].is_null() || body["description"].as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) {
-            bail!("description is text of at most {MAX_DESC} characters");
-        }
-        let c = evs.iter().filter(|x| x["type"] == "create" && x["kind"] == k).count() + 1;
-        e = json!({"type": "create", "id": new_id(k, c), "kind": k, "by": "human", "evidence": last, "date": date, "at": now,
-                   "fields": {"title": body["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("Untitled"),
-                              "parent": if k == "epic" { None } else { par }, "type": body["type"].as_str().or(if k == "task" { Some("action") } else { None }),
-                              "ac": body["ac"].as_array().cloned().unwrap_or_default(), "plan": if k == "epic" { Some("Off-plan") } else { None },
-                              "internal_owner": body["internal_owner"], "delegated_by": body["delegated_by"], "due": body["due"], "links": body["links"], "description": body["description"],
-                              "decided_by": body["decided_by"], "likelihood": body["likelihood"], "impact": body["impact"]}});
-    } else if ["undo", "accept", "reject"].contains(&op) {
-        let target = body["target"].as_str().ok_or_else(|| anyhow!("target mid required"))?;
-        e["target"] = json!(target);
-    } else {
-        let node = body["node"].as_str().filter(|x| n.contains_key(*x)).ok_or_else(|| anyhow!("unknown node {}", body["node"]))?;
-        e["node"] = json!(node);
-        for k in ["set", "text", "ac", "met", "drop", "depends_on", "into", "thread", "target", "kind", "master"] {
-            if !body[k].is_null() {
-                e[k] = body[k].clone();
-            }
-        }
-        if (op == "xref" || op == "unxref") && !(body["thread"].as_str().is_some_and(|t| !t.is_empty() && t != project) && body["target"].is_string()) {
-            bail!("{op} needs another thread and its item (thread, target)");
-        }
-        if op == "xref" && !(XREF_KINDS.contains(&body["kind"].as_str().unwrap_or("")) && ["here", "there"].contains(&body["master"].as_str().unwrap_or("there"))) {
-            bail!("kind is one of {XREF_KINDS:?}, master here or there");
-        }
-        if op == "edit" {
-            check_edit(&e["set"], n)?;
-        }
-        if op == "ac_set" && !body["ac"].is_u64() {
-            bail!("ac must be a 1-based number");
-        }
-        if (op == "link" || op == "unlink") && !body["depends_on"].as_str().is_some_and(|d| n.contains_key(d)) {
-            bail!("unknown node {}", body["depends_on"]);
-        }
-        if op == "merge" && !body["into"].as_str().is_some_and(|d| n.contains_key(d)) {
-            bail!("unknown node {}", body["into"]);
-        }
-    }
-    e["mid"] = json!(mid_of(&["human", &now, &body.to_string()]));
-    l.append(std::slice::from_ref(&e))?;
-    Ok(e)
-}
-
-/// Status changes an agent made from a mirror's own evidence (#20): applied, verified, in its history — the
-/// ones that move work along (not mentions).
-fn status_moves(x: &Node) -> Vec<Value> {
-    x.history.iter().filter(|h| h["type"] == "agent" && h["op"] == "status" && h["applied"] == true && h["verdict"] != "unsupported").cloned().collect()
-}
-
-/// When a history entry happened, comparable across entries: a call's day and time for an agent's, the
-/// moment the user acted for theirs.
-fn when(h: &Value) -> String {
-    match h["at"].as_str().filter(|_| h["by"] == "human") {
-        Some(at) => at.chars().take(19).collect(),
-        None => format!("{}T{}", h["date"].as_str().unwrap_or(""), h["ts"].as_str().unwrap_or("00:00:00")),
-    }
-}
-
-/// A ledger folded with its master items taking the status changes their mirrors' threads heard (one
-/// level: the mirrors' own ledgers as they are) — newer than the master's own last word on its state.
-fn fold_forwarded(project: &str) -> Result<Tree> {
-    let mut t = fold(&Ledger::of(project)?)?;
-    let mut mirrors: BTreeMap<String, Option<Tree>> = BTreeMap::new();
-    let ids: Vec<String> = t.nodes.keys().cloned().collect();
-    let mut moved = false;
-    for id in ids {
-        let refs: Vec<Value> = t.nodes[&id].xrefs.iter().filter(|r| r["kind"] == "same" && r["master"] == "here").cloned().collect();
-        for r in refs {
-            let (th, node) = (r["thread"].as_str().unwrap_or("").to_string(), r["node"].as_str().unwrap_or("").to_string());
-            let other = mirrors.entry(th.clone()).or_insert_with(|| Ledger::of(&th).and_then(|l| fold(&l)).ok());
-            let Some(m) = other.as_ref().and_then(|o| o.nodes.get(&node)).cloned() else { continue };
-            let x = t.nodes.get_mut(&id).unwrap();
-            x.also_in.push(json!({"thread": th, "node": node, "title": m.title}));
-            // A merged or deleted master takes nothing.
-            if x.state == "merged" || x.state == "deleted" {
-                continue;
-            }
-            let last_here = x.history.iter().filter(|h| h["op"] == "status" || (h["op"] == "edit" && h["set"]["state"].is_string())).map(when).max().unwrap_or_default();
-            for h in status_moves(&m).into_iter().filter(|h| when(h) > last_here) {
-                if apply_status(x, &h) {
-                    let mut h = h.clone();
-                    h["from"] = json!({"thread": th, "node": node});
-                    x.history.push(h);
-                    moved = true;
-                }
-            }
-            x.due = x.due_history.last().and_then(|h| s(&h["due"]));
-        }
-    }
-    if moved {
-        derive(&mut t.nodes);
-    }
-    Ok(t)
-}
-
-/// A ledger as the window, Tasks and the extractor read it (#20): masters with their mirrors' status
-/// changes; each mirror showing its master's state, owners, due and last history entries; each item that
-/// waits on an open item of another thread with it in `xwaits`.
-pub fn fold_linked(project: &str) -> Result<Tree> {
-    let mut t = fold_forwarded(project)?;
-    let mut others: BTreeMap<String, Option<Tree>> = BTreeMap::new();
-    let mut get = |th: &str, node: &str| -> Option<Node> { others.entry(th.to_string()).or_insert_with(|| fold_forwarded(th).ok()).as_ref().and_then(|t| t.nodes.get(node).cloned()) };
-    let ids: Vec<String> = t.nodes.keys().cloned().collect();
-    for id in &ids {
-        let refs = t.nodes[id].xrefs.clone();
-        for r in refs {
-            let (th, node, kind) = (r["thread"].as_str().unwrap_or("").to_string(), r["node"].as_str().unwrap_or("").to_string(), r["kind"].as_str().unwrap_or(""));
-            let Some(mut o) = get(&th, &node) else { continue };
-            // An item that is itself a mirror stands for its master (one more step).
-            if let Some(m) = o.xrefs.iter().find(|x| x["kind"] == "same" && x["master"] == "there").cloned() {
-                if let Some(mm) = get(m["thread"].as_str().unwrap_or(""), m["node"].as_str().unwrap_or("")) {
-                    o.state = mm.state;
-                    o.internal_owner = mm.internal_owner;
-                    o.client_owner = mm.client_owner;
-                    o.due = mm.due;
-                }
-            }
-            let x = t.nodes.get_mut(id).unwrap();
-            match kind {
-                "same" if r["master"] == "there" => {
-                    x.state = o.state.clone();
-                    x.internal_owner = o.internal_owner.clone();
-                    x.client_owner = o.client_owner.clone();
-                    x.delegated_by = o.delegated_by.clone();
-                    x.due = o.due.clone();
-                    x.waiting_for = o.waiting_for.clone();
-                    let last: Vec<Value> = o.history.iter().rev().take(3).rev().cloned().collect();
-                    // A master in a closed thread isn't on Tasks: the mirror is shown there instead.
-                    let closed_thread = crate::projects::load(&th).map(|p| p.stage.closed()).unwrap_or(true);
-                    x.mirror_of = Some(json!({"thread": th, "node": node, "title": o.title, "history": last, "closed_thread": closed_thread}));
-                }
-                "depends_on" if !closed(&o.state) => {
-                    let owner = o.internal_owner.clone().or(o.client_owner.clone());
-                    x.xwaits.push(json!({"thread": th, "node": node, "title": o.title, "owner": owner, "state": o.state}));
-                }
-                _ => {}
-            }
-        }
-    }
-    // A local wait on a mirror is a wait on its master's work (Tasks shows the master, not the mirror).
-    for id in &ids {
-        let waits: Vec<String> = t.nodes[id].waiting_on.clone();
-        for w in waits {
-            let Some(m) = t.nodes.get(&w).and_then(|y| y.mirror_of.clone()).filter(|m| m["closed_thread"] != true) else { continue };
-            let (state, owner) = (t.nodes[&w].state.clone(), t.nodes[&w].internal_owner.clone());
-            let x = t.nodes.get_mut(id).unwrap();
-            x.waiting_on.retain(|v| v != &w);
-            if !closed(&state) {
-                x.xwaits.push(json!({"thread": m["thread"], "node": m["node"], "title": m["title"], "owner": owner, "state": state}));
-            }
-        }
-    }
-    Ok(t)
-}
-
-/// Open stories, tasks and questions of every open thread (but `not`) whose title has every word of `q`
-/// (no model; at most 20, the threads' newest first): what an item can be linked to (#20).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn search_open(q: &str, not: Option<&str>) -> Vec<Value> {
-    let words: Vec<String> = norm(q).split_whitespace().map(str::to_owned).collect();
-    if words.is_empty() {
-        return vec![];
-    }
-    let mut out = vec![];
-    for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed() && Some(p.id.as_str()) != not) {
-        let Ok(t) = Ledger::of(&p.id).and_then(|l| fold(&l)) else { continue };
-        for x in t.nodes.values().filter(|x| ["story", "task", "question"].contains(&x.kind.as_str()) && !closed(&x.state)) {
-            let title = norm(&x.title);
-            if words.iter().all(|w| title.contains(w.as_str())) || x.id.eq_ignore_ascii_case(q.trim()) {
-                out.push(json!({"thread": p.id, "thread_name": p.name, "id": x.id, "title": x.title, "kind": x.kind, "state": x.state, "owner": x.internal_owner.as_ref().or(x.client_owner.as_ref())}));
-            }
-        }
-        if out.len() >= 20 {
-            break;
-        }
-    }
-    out.truncate(20);
-    out
-}
-
-/// The tree for the window and `ledger tree`: every node, the workstreams first.
-/// What one call changed in a project's work (the call's Actions tab): every history entry whose
-/// evidence is this call, by node, in the order said — new nodes, status changes, dates, links,
-/// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
-/// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
-    let l = Ledger::of(project)?;
-    let t = fold(&l)?;
-    let read = t.order.iter().any(|e| e == stamp);
-    let queued = !read && pending(project)?.iter().any(|e| e["id"] == stamp);
-    let mut out: Vec<Value> = vec![];
-    for n in t.nodes.values().filter(|n| n.state != "merged" && n.state != "deleted" && n.kind != "epic") {
-        for h in n.history.iter().filter(|h| h["evidence"] == stamp && h["by"] != "human" && h["effect"] != "mention" && !h["op"].as_str().is_some_and(|o| o.starts_with("suggest_"))) {
-            let mut c = h.clone();
-            c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
-                               "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref())});
-            if let Some(d) = h["depends_on"].as_str().and_then(|d| t.nodes.get(d)) {
-                c["depends_on_title"] = json!(d.title);
-            }
-            out.push(c);
-        }
-    }
-    out.sort_by(|a, b| a["ts"].as_str().unwrap_or("").cmp(b["ts"].as_str().unwrap_or("")));
-    Ok(json!({"read": read, "queued": queued, "changes": out}))
-}
-
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn words(s: &str) -> BTreeSet<String> {
-    norm(s).split_whitespace().filter(|w| w.len() > 2).map(str::to_owned).collect()
-}
-
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn hms(ts: &str) -> Option<f64> {
-    let p: Vec<f64> = ts.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
-    Some(p.iter().fold(0.0, |a, x| a * 60.0 + x))
-}
-
-/// The task an action item became, if any: one created from this call within a minute of the item's
-/// moment whose words share a third of the item's (or, with no moment, half). Deterministic.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn match_actions(actions: &[Value], changes: &[(String, Value)]) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
-    let mut used = BTreeSet::new();
-    for a in actions {
-        let (Some(id), Some(text)) = (a["id"].as_str(), a["task"].as_str()) else { continue };
-        let aw = words(text);
-        if aw.is_empty() {
-            continue;
-        }
-        let best = changes
-            .iter()
-            .filter(|(p, c)| c["op"] == "create" && c["node"]["kind"] == "task" && !used.contains(&format!("{p}/{}", c["node"]["id"])))
-            .filter_map(|(p, c)| {
-                let tw = words(&format!("{} {}", c["node"]["title"].as_str().unwrap_or(""), c["quote"].as_str().unwrap_or("")));
-                let share = aw.intersection(&tw).count() as f64 / aw.len() as f64;
-                let near = a["t"].as_f64().zip(c["ts"].as_str().and_then(hms)).map(|(x, y)| (x - y).abs() <= 60.0);
-                let ok = match near {
-                    Some(true) => share >= 0.34,
-                    Some(false) => share >= 0.75,
-                    None => share >= 0.5,
-                };
-                ok.then_some((share + if near == Some(true) { 1.0 } else { 0.0 }, p, c))
-            })
-            .max_by(|x, y| x.0.total_cmp(&y.0));
-        if let Some((_, p, c)) = best {
-            used.insert(format!("{p}/{}", c["node"]["id"]));
-            out.insert(id.to_owned(), json!({"project": p, "id": c["node"]["id"], "title": c["node"]["title"], "state": c["node"]["state"]}));
-        }
-    }
-    out
-}
-
-pub fn tree(project: &str) -> Result<Value> {
-    let t = fold_linked(project)?;
-    let pend = pending(project)?.len();
-    let mut nodes = serde_json::to_value(&t.nodes)?;
-    for (_, x) in nodes.as_object_mut().into_iter().flatten() {
-        if let Some(d) = x["description"].as_str().map(crate::minutes::markdown_html) {
-            x["description_html"] = json!(d);
-        }
-    }
-    Ok(json!({
-        "nodes": nodes, "notes": t.notes,
-        "processed": t.order.len(), "pending": pend,
-        // Each evidence item's call: history entries name the call they came from.
-        "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"], "kind": v["kind"], "url": v["url"],
-            "link": v["call"].as_str().map(|c| format!("echo://call/{c}")), "from": v["turns"][0]["speaker"].as_str().filter(|_| v["kind"] == "mail")}))).collect::<serde_json::Map<String, Value>>(),
-        "roots": t.nodes.values().filter(|x| x.kind == "epic" && x.state != "merged" && x.state != "deleted").map(|x| &x.id).collect::<Vec<_>>(),
-    }))
 }
 
 #[cfg(test)]
@@ -2750,6 +1403,49 @@ mod tests {
     }
 
     #[test]
+    fn an_item_in_several_threads_is_read_for_this_thread_only() {
+        let (_env, l, id) = setup("ledger-also-in");
+        let ev = "2026-10-28_110000";
+        crate::projects::update(&id, |p| {
+            p.terms = vec![crate::projects::Term { term: "SSO".into(), kind: None, note: None }];
+            Ok(())
+        })
+        .unwrap();
+        fs::write(crate::paths::home().join("projects").join(&id).join("brief.md"), "Aurora: the Berlin pilot's sign-on.").unwrap();
+        // The same mail in two other threads' ledgers: one on this thread's AI profile, one pinned to another. (A call's
+        // threads come from the threads' rules instead: work/TC-031.)
+        let f = l.dir.join(format!("evidence/{ev}.json"));
+        let mut item: Value = serde_json::from_slice(&fs::read(&f).unwrap()).unwrap();
+        item["source"] = json!("mail");
+        fs::write(&f, serde_json::to_vec(&item).unwrap()).unwrap();
+        let same = crate::projects::create("Borealis", None, None).unwrap();
+        let other = crate::projects::create("Cygnus", None, None).unwrap();
+        crate::projects::update(&other.id, |p| {
+            p.ai_profile = Some("elsewhere".into());
+            Ok(())
+        })
+        .unwrap();
+        for t in [&same.id, &other.id] {
+            let o = Ledger::of(t).unwrap();
+            fs::create_dir_all(o.dir.join("evidence")).unwrap();
+            fs::copy(l.dir.join(format!("evidence/{ev}.json")), o.dir.join(format!("evidence/{ev}.json"))).unwrap();
+        }
+        let p = pending(&id).unwrap();
+        assert_eq!(p[0]["also_in"], json!({"threads": ["Borealis"], "others": 1}), "another profile's thread only counted, never named");
+        let c = context(&id).unwrap();
+        assert_eq!((c["brief"].as_str(), c["terms"].clone()), (Some("Aurora: the Berlin pilot's sign-on."), json!(["SSO"])));
+        apply(&id, ev, &[json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works", "Review passed"], "quote": "Then SSO has to land first"}),
+                         json!({"op": "status", "node": "s1", "effect": "due", "due_text": "24th of November", "quote": "the pilot moves to the 24th of November"})]).unwrap();
+        let packets = super::apply::verify_prep(&id, false).unwrap();
+        assert_eq!(super::apply::verify_count(&id).unwrap(), packets.len(), "the count the sync reports, without the packets");
+        assert!(!packets.is_empty() && packets.iter().all(|k| k["thread"] == "Aurora" && k["also_in"]["threads"] == json!(["Borealis"])), "{packets:?}");
+        // An item in this thread only: nothing about others.
+        fs::remove_file(Ledger::of(&same.id).unwrap().dir.join(format!("evidence/{ev}.json"))).unwrap();
+        fs::remove_file(Ledger::of(&other.id).unwrap().dir.join(format!("evidence/{ev}.json"))).unwrap();
+        assert!(pending(&id).unwrap().iter().all(|i| i.get("also_in").is_none()));
+    }
+
+    #[test]
     fn what_a_call_changed_and_the_tasks_its_action_items_became() {
         let (_env, _l, id) = setup("ledger-call-changes");
         let ev = "2026-10-28_110000";
@@ -2761,20 +1457,138 @@ mod tests {
         ]).unwrap();
         mark_processed(&id, ev, "").unwrap();
         let c = call_changes(&id, ev).unwrap();
+        // Still to do from that call: its open tasks (not the story, not a mention), each once, by its link.
+        let todo = open_tasks_from(std::slice::from_ref(&id), ev);
+        assert_eq!(todo.len(), 1, "{todo:?}");
+        assert_eq!((todo[0]["task"].as_str(), todo[0]["link"].as_str()), (Some("SAML config"), Some(format!("echo://task/{id}/T001").as_str())));
         assert_eq!(c["read"], true);
         let ch = c["changes"].as_array().unwrap();
         assert_eq!(ch.len(), 2, "a mention changes nothing: {c}");
         assert_eq!(ch[0]["node"]["id"], "S001", "in the order said");
         assert_eq!(ch[1]["node"]["due"], "2026-10-30");
 
-        let all: Vec<(String, Value)> = ch.iter().map(|x| (id.clone(), x.clone())).collect();
-        let m = match_actions(&[
-            json!({"id": "a1", "task": "Have the SAML config ready by Friday", "t": 790.0}),
-            json!({"id": "a2", "task": "Book the Berlin flights", "t": 790.0}),
-            json!({"id": "a3", "task": "SAML config ready", "t": 3000.0}),
-        ], &all);
-        assert_eq!(m["a1"]["id"], "T001");
-        assert!(!m.contains_key("a2") && !m.contains_key("a3"), "unrelated words; a task taken once: {m:?}");
+    }
+
+    /// A covering mention (#463) of `node` from item `ev`, with the verifier's `verdict`: its mid.
+    fn covering(id: &str, ev: &str, node: &str, quote: &str, verdict: Option<&str>) -> String {
+        apply(id, ev, &[json!({"op": "status", "node": node, "effect": "mention", "covers": true, "quote": quote})]).unwrap();
+        let mid = Ledger::of(id).unwrap().events().unwrap().iter().rev().find(|e| e["effect"] == "mention" && e["evidence"] == ev).unwrap()["mid"].as_str().unwrap().to_string();
+        if let Some(v) = verdict {
+            verify_apply(id, &[json!({"mid": mid, "verdict": v})]).unwrap();
+        }
+        mid
+    }
+
+    fn later_item(l: &Ledger, eid: &str, kind: &str, text: &str) {
+        let item = json!({"id": eid, "kind": kind, "date": &eid[..10], "title": format!("About SAML ({kind} {eid})"), "turns": [{"speaker": "Dana Kowal", "text": text}], "text": ""});
+        fs::write(l.dir.join(format!("evidence/{eid}.json")), serde_json::to_vec(&item).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_same_day_due_is_said_in_the_users_languages_but_not_inside_a_word_or_a_quoted_header() {
+        let said = |text: &str, due_text: &str| apply::due_said(&apply::said_words(&json!({"turns": [{"text": text}]})), Some(due_text));
+        // The extractor's "today" for words said in Ukrainian, Russian or as EOD; an ISO date for "today".
+        for (text, due) in [("Зробимо це сьогодні, обіцяю.", "today"), ("Сделаем это сегодня.", "today"), ("I'll have it by EOD", "today"),
+                            ("I'll send it today.", "2026-11-10"), ("до кінця дня надішлю", "today"), ("by end of day", "2026-11-10"), ("by Friday", "Friday")] {
+            assert!(said(text, due), "{text:?} says {due:?}");
+        }
+        // Not inside another word, and not in a mail's quoted reply or its header.
+        assert!(!said("Thanks for today's call, see the notes.", "today"));
+        assert!(!said("Sure.\nOn 10 Nov 2026, Dana Kowal wrote:\n> please send it 10 Nov", "10 Nov"));
+        assert!(!said("Thanks!\nSent: 10 Nov 2026 09:00", "10 Nov"));
+        assert!(said("Can you send it by 10 Nov?", "10 Nov"));
+    }
+
+    #[test]
+    fn a_verified_covering_mention_looks_done_and_the_users_close_or_not_yet_counts_where_they_made_it() {
+        let (_env, l, id) = setup("ledger-looks-done");
+        let ev = "2026-10-28_110000";
+        later_item(&l, "2026-10-30_090000", "mail", "Thanks, the SAML config arrived and the pilot users can log in now.");
+        later_item(&l, "2026-10-31_090000", "chat", "We still need to send the SAML config to the Berlin team.");
+        later_item(&l, "2026-11-02_100000", "chat", "Quick note: the SAML config works for the Berlin users as well.");
+        later_item(&l, "2026-11-03_100000", "mail", "All good: the SAML config is live and nobody needs anything more.");
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO for the Berlin pilot", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            // "today" is nowhere in the call: the call's own date taken as the due — guessed.
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Data-flow diagram", "type": "action", "internal_owner": "Me", "due_text": "this week", "quote": "can you send it this week"}),
+        ]).unwrap();
+        let node = |n: &str| fold(&l).unwrap().nodes[n].clone();
+        assert_eq!((node("T001").due.as_deref(), node("T001").due_guessed), (Some("2026-10-28"), true));
+        assert!(!node("T002").due_guessed, "said");
+        // The same date said later: no longer guessed.
+        later_item(&l, "2026-10-29_100000", "chat", "Yes, the SAML config is due on the 28th of October, as agreed.");
+        apply(&id, "2026-10-29_100000", &[json!({"op": "status", "node": "T001", "effect": "due", "due_text": "28th of October", "quote": "the SAML config is due on the 28th of October"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &p.iter().map(|x| json!({"mid": x["mid"], "verdict": "supports"})).collect::<Vec<_>>()).unwrap();
+        assert_eq!((node("T001").due.as_deref(), node("T001").due_guessed), (Some("2026-10-28"), false));
+        // A plain mention, and a covering one the verifier didn't support, are no "looks done".
+        apply(&id, "2026-10-31_090000", &[json!({"op": "status", "node": "T001", "effect": "mention", "quote": "We still need to send the SAML config"})]).unwrap();
+        covering(&id, "2026-10-31_090000", "T001", "still need to send the SAML config to the Berlin team", Some("wrong"));
+        assert!(node("T001").looks_done.is_none());
+        // A verified covering mail: it looks done; nothing changes by itself.
+        let m1 = covering(&id, "2026-10-30_090000", "T001", "the SAML config arrived and the pilot users can log in", Some("supports"));
+        assert_eq!((node("T001").state.as_str(), node("T001").looks_done.as_ref().map(|l| l["kind"].clone())), ("open", Some(json!("mail"))));
+        // A later chat: the latest shows. Not yet on it hides it and the earlier mail's (#2 of the review)…
+        let m2 = covering(&id, "2026-11-02_100000", "T001", "the SAML config works for the Berlin users", Some("supports"));
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m2.as_str());
+        let not_yet = human_event(&id, &json!({"op": "reject", "target": m2})).unwrap();
+        assert!(node("T001").looks_done.is_none(), "not the older one back");
+        human_event(&id, &json!({"op": "undo", "target": not_yet["mid"]})).unwrap();
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m2.as_str(), "undone: shown again");
+        human_event(&id, &json!({"op": "reject", "target": m2})).unwrap();
+        // …a later mail suggests again.
+        let m3 = covering(&id, "2026-11-03_100000", "T001", "the SAML config is live and nobody needs anything more", Some("supports"));
+        assert_eq!(node("T001").looks_done.unwrap()["mid"], m3.as_str());
+        // The user set In progress after the mention; Close still closes it — where it was made (#1 of the review).
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "in_progress"}})).unwrap();
+        let close = human_event(&id, &json!({"op": "accept", "target": m3})).unwrap();
+        let t = node("T001");
+        assert_eq!((t.state.as_str(), t.pinned.contains(&"state".to_string()), t.looks_done.is_none()), ("done", true, true));
+        let h = t.history.iter().find(|h| h["mid"] == m3.as_str()).unwrap();
+        assert_eq!((h["applied"].as_bool(), h["status"].as_str(), h["decided"].as_str()), (Some(true), Some("accept"), close["mid"].as_str()));
+        // Done this week counts it, on the day it was closed.
+        assert_eq!(crate::glance::done_on(&t), Some(chrono::Local::now().date_naive()));
+        // Reopened by the user: the old suggestion doesn't come back (#8 of the review).
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "open"}})).unwrap();
+        assert!(node("T001").looks_done.is_none());
+        // Undo of the Close: open (as it was set before) with its Looks done back.
+        human_event(&id, &json!({"op": "undo", "target": close["mid"]})).unwrap();
+        let t = node("T001");
+        assert_eq!((t.state.as_str(), t.looks_done.map(|l| l["mid"].clone())), ("open", Some(json!(m3))));
+        assert_ne!(m1, m3);
+    }
+
+    #[test]
+    fn close_on_a_mirror_closes_its_master_and_its_guessed_due_follows_the_masters() {
+        let (_env, l, id) = setup("ledger-looks-done-mirror");
+        let ev = "2026-10-28_110000";
+        later_item(&l, "2026-10-30_090000", "mail", "Thanks, the SAML config arrived and the pilot users can log in now.");
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        let other = crate::projects::create("Identity programme", None, None).unwrap().id;
+        let ol = Ledger::of(&other).unwrap();
+        fs::create_dir_all(ol.dir.join("evidence")).unwrap();
+        fs::write(ol.dir.join("evidence/2026-10-28_110000.json"), fs::read(l.dir.join("evidence/2026-10-28_110000.json")).unwrap()).unwrap();
+        ensure_first_epic(&ol).unwrap();
+        apply(&other, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "Single sign-on", "ac": ["SAML works"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML configuration", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "xref", "node": "T001", "thread": other, "target": "T001", "kind": "same", "master": "there"})).unwrap();
+        // The mirror shows the master's due — guessed, as the master's is.
+        let mirror = &fold_linked(&id).unwrap().nodes["T001"];
+        assert_eq!((mirror.due.as_deref(), mirror.due_guessed), (Some("2026-10-28"), true));
+        // Close on the mirror's Looks done closes the master; its undo reopens both.
+        let m = covering(&id, "2026-10-30_090000", "T001", "the SAML config arrived and the pilot users can log in", Some("supports"));
+        let close = human_event(&id, &json!({"op": "accept", "target": m})).unwrap();
+        assert_eq!(fold_linked(&other).unwrap().nodes["T001"].state, "done");
+        assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
+        human_event(&id, &json!({"op": "undo", "target": close["mid"]})).unwrap();
+        assert_eq!(fold_linked(&other).unwrap().nodes["T001"].state, "open");
+        assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "open");
     }
 
     #[test]
@@ -2826,6 +1640,41 @@ mod tests {
     }
 
     #[test]
+    fn a_reassign_of_an_owner_the_user_set_is_kept_out_whole() {
+        let (_env, l, id) = setup("ledger-reassign-pinned");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["a"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"internal_owner": "Alex Chen"}})).unwrap();
+        // A call hands it to someone else: the user's owner stays, and nothing of the reassign is applied.
+        apply(&id, ev, &[json!({"op": "status", "node": "T001", "effect": "reassign", "internal_owner": "Priya Nair", "delegated_by": "Me", "quote": "can you send it this week?"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Alex Chen"), None));
+        assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == false), "{:?}", t["T001"].history);
+    }
+
+    #[test]
+    fn a_reassign_is_applied_when_the_user_set_no_owner_and_keeps_their_handed_over_by() {
+        let (_env, l, id) = setup("ledger-reassign-free");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["a"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"delegated_by": "Dana Kowal"}})).unwrap();
+        apply(&id, ev, &[json!({"op": "status", "node": "T001", "effect": "reassign", "internal_owner": "Ravi Mehta", "delegated_by": "Me", "quote": "can you send it this week?"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Ravi Mehta"), Some("Dana Kowal")));
+        assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == true));
+    }
+
+    #[test]
     fn the_users_edits_win_and_undo() {
         let (_env, l, id) = setup("ledger-human");
         let ev = "2026-10-28_110000";
@@ -2849,8 +1698,29 @@ mod tests {
         assert_eq!(t["T001"].due.as_deref(), Some("2026-11-06"));
         // Bad edits are refused when written, never stored.
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "soon"}})).is_err());
+        // A date no work item is due on: what a date box gives while its year is half typed (#303).
+        for due in ["0002-12-12", "0202-12-12", "1999-12-31", "2101-01-01"] {
+            let err = human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": due}})).unwrap_err();
+            assert!(err.to_string().contains("between 2000 and 2100"), "{due}: {err}");
+        }
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "finished"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T999", "set": {"title": "x"}})).is_err());
+        // An undo, accept or reject of an event that isn't there is refused, and nothing is written (#127).
+        let before = l.events().unwrap().len();
+        for op in ["undo", "accept", "reject"] {
+            let err = human_event(&id, &json!({"op": op, "target": "0000000000"})).unwrap_err();
+            assert!(err.to_string().contains("unknown event 0000000000"), "{op}: {err}");
+        }
+        assert_eq!(l.events().unwrap().len(), before);
+        // Who does it: the user's choice on the task, pinned; Echo's guess never overwrites it.
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "claude", "prompt": "Draft the SAML runbook.", "skill": "follow-up-mail"}})).unwrap();
+        let n = fold(&Ledger::of(&id).unwrap()).unwrap().nodes["T001"].clone();
+        assert_eq!((n.mode.as_deref(), n.prompt.as_deref(), n.skill.as_deref()), (Some("claude"), Some("Draft the SAML runbook."), Some("follow-up-mail")));
+        assert!(n.pinned.iter().any(|f| f == "mode"));
+        let guess = serde_json::from_value(json!({format!("{id}/T001"): {"mode": "manual", "how": "x"}})).unwrap();
+        assert_eq!(crate::taskmodes::of(&guess, &id, &n)["by"], "you", "the user's choice over Echo's guess");
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "robot"}})).is_err());
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"skill": "Rm -rf"}})).is_err());
         let c = human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Book the room"})).unwrap();
         assert_eq!(c["id"], "T002");
         assert!(human_event(&id, &json!({"op": "create", "kind": "task", "parent": "E01", "title": "No story"})).is_err());
@@ -2885,6 +1755,22 @@ mod tests {
         assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
         // The mirror's own history keeps its evidence ("What this call changed" still lists it).
         assert!(fold(&l).unwrap().nodes["T001"].history.iter().any(|h| h["op"] == "status" && h["evidence"] == ev));
+        // The sync's context names the other thread's items while it is on the same AI profile — and the master's owner
+        // and wait, through its mirror…
+        human_event(&other, &json!({"op": "edit", "node": master, "set": {"state": "open", "internal_owner": "Priya Nair",
+            "waiting_for": {"who": "Ravi Mehta", "what": "the IdP metadata from Globex", "since": "2026-10-29"}}})).unwrap();
+        let shown = context(&id).unwrap().to_string();
+        assert!(shown.contains("IdP contract") && shown.contains(&other) && shown.contains("IdP metadata") && shown.contains("Priya Nair"), "{shown}");
+        // …and never once it is pinned to another: only that such an item exists (strict routing).
+        crate::projects::update(&other, |p| {
+            p.ai_profile = Some("elsewhere".into());
+            Ok(())
+        })
+        .unwrap();
+        let shown = context(&id).unwrap().to_string();
+        assert!(!shown.contains("SAML configuration") && !shown.contains("IdP contract") && !shown.contains(&other), "{shown}");
+        assert!(!shown.contains("IdP metadata") && !shown.contains("Ravi Mehta") && !shown.contains("Priya Nair"), "{shown}");
+        assert!(shown.contains("a thread on another AI profile"), "{shown}");
     }
 
     #[test]
@@ -2983,6 +1869,97 @@ mod tests {
         assert_eq!(quote_in(&id, &ev, "prepare the agents demo").unwrap().unwrap()["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
     }
 
+    #[test]
+    fn a_mail_source_with_subjects_reads_its_mail_and_the_rest_of_their_conversations() {
+        let src = |subject: &[&str]| crate::projects::Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: subject.iter().map(|w| w.to_string()).collect(), ..Default::default() };
+        let m = |subject: &str, conv: &str| json!({"subject": subject, "conversation": conv});
+        let found = [m("Acme Platform status", "c1"), m("Quick question", "c1"), m("Lunch on Friday", "c2"), m("RE: dates", "c3"), m("Acme platform: APX cut-over", "c4")];
+        let none = BTreeSet::new();
+        assert_eq!(about_thread(&found, &src(&["Acme Platform"]), &none), [true, true, false, false, true], "its subject, or its conversation's");
+        let known: BTreeSet<String> = ["c3".to_string()].into();
+        assert_eq!(about_thread(&found, &src(&["Acme Platform"]), &known), [true, true, false, true, true], "a conversation the thread already holds");
+        assert_eq!(about_thread(&found, &src(&[]), &none), [true; 5], "no subjects: every mail of its people");
+    }
+
+    #[test]
+    fn mail_sent_from_an_item_is_followed_until_someone_answers() {
+        let (_env, l, id) = setup("ledger-mail-sent");
+        ensure_first_epic(&l).unwrap();
+        human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Regroup"})).unwrap();
+        let t = human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Get Dana's dates", "internal_owner": "Me"})).unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(task_ref(&format!("{id}/{t}")).unwrap(), (id.clone(), t.clone()));
+        assert!(task_ref("no-slash").is_err() && task_ref(&format!("{id}/T999")).is_err() && task_ref("nowhere/T001").is_err());
+        assert!(mail_sent(&id, "T999", "conv-1", "x", &[]).is_err(), "no such item");
+        assert!(mail_sent(&id, &t, " ", "x", &[]).is_err(), "nothing to follow");
+        mail_sent(&id, &t, "conv-1", "Dates for the regroup", &["dana@northwind.example".into()]).unwrap();
+        let sent = fold(&l).unwrap().nodes[&t].sent.clone();
+        assert_eq!((sent.len(), sent[0]["conversation"].as_str(), sent[0]["to"][0].as_str()), (1, Some("conv-1"), Some("dana@northwind.example")));
+        assert!(sent[0]["reply_at"].is_null(), "no reply yet");
+        let f = followed(&id);
+        assert_eq!((f.len(), f[0].1.as_str(), f[0].3.as_str()), (1, t.as_str(), "conv-1"));
+        // Mail in that conversation: the user's own and an older one don't answer it; Dana's later one does.
+        let at = chrono::DateTime::parse_from_rfc3339(sent[0]["at"].as_str().unwrap()).unwrap();
+        let mail = |key: &str, mins: i64, who: &str, conv: &str| {
+            let item = json!({"id": key, "kind": "mail", "conversation": conv, "at": (at + chrono::Duration::minutes(mins)).to_rfc3339(), "date": "2026-11-11", "title": "RE: Dates",
+                              "turns": [{"ts": "10:00:00", "speaker": who, "text": "x"}]});
+            fs::write(l.dir.join(format!("evidence/{key}.json")), item.to_string()).unwrap();
+        };
+        mail("mail-old", -60, "Dana Kowal", "conv-1");
+        mail("mail-mine", 5, "Me", "conv-1");
+        mail("mail-other", 10, "Dana Kowal", "conv-2");
+        assert!(fold(&l).unwrap().nodes[&t].sent[0]["reply_at"].is_null(), "not an answer yet");
+        mail("mail-dana", 30, "Dana Kowal", "conv-1");
+        let reply = fold(&l).unwrap().nodes[&t].sent[0]["reply_at"].as_str().map(str::to_owned).unwrap();
+        assert_eq!(chrono::DateTime::parse_from_rfc3339(&reply).unwrap(), at + chrono::Duration::minutes(30));
+        // A closed item follows nothing.
+        human_event(&id, &json!({"op": "edit", "node": t, "set": {"state": "done"}})).unwrap();
+        assert!(followed(&id).is_empty());
+    }
+
+    #[test]
+    fn a_reply_is_someone_elses_later_mail_and_says_which_item_it_answers() {
+        let m = |i: &str, at: &str, from: &str| json!({"id": i, "at": at, "from": {"email": from}});
+        let mut invite = m("invite", "2026-11-11T12:00:00Z", "dana@northwind.example");
+        invite["invite"] = json!(true);
+        let msgs = [m("before", "2026-11-11T09:00:00Z", "dana@northwind.example"), m("mine", "2026-11-11T11:00:00Z", "Me@Initech.example"), m("dana", "2026-11-11T11:30:00Z", "dana@northwind.example"), invite];
+        let mine = |e: &str| e == "me@initech.example";
+        let got: Vec<&str> = replies(&msgs, "2026-11-11T10:00:00Z", &mine).iter().filter_map(|x| x["id"].as_str()).collect();
+        assert_eq!(got, ["dana"]);
+        let item = answering(json!({"id": "mail-1", "kind": "mail", "date": "2026-11-11", "title": "RE: Dates", "turns": []}), "T001", "Get Dana's dates");
+        assert!(render_md(&item).contains("answers: T001 “Get Dana's dates” (a reply to mail Me sent from it)"), "{}", render_md(&item));
+    }
+
+    #[test]
+    fn a_followed_reply_a_source_also_read_still_says_which_item_it_answers() {
+        let (_env, l, _id) = setup("ledger-mail-answers");
+        let mail = |key: &str| json!({"id": key, "kind": "mail", "conversation": "conv-1", "at": "2026-11-11T10:00:00+00:00", "date": "2026-11-11", "title": "RE: Dates",
+                                      "turns": [{"ts": "10:00:00", "speaker": "Dana Kowal", "text": "The 24th works."}]});
+        // The thread's mail source read Dana's reply first; the followed conversation brings the same mail.
+        let mut items = vec![mail("mail-a")];
+        take_reply(&mut items, mail("mail-a"), "T001", "Get Dana's dates");
+        take_reply(&mut items, mail("mail-b"), "T001", "Get Dana's dates");
+        assert_eq!(items.len(), 2, "one copy each");
+        assert!(items.iter().all(|x| x["answers"]["node"] == "T001"), "{items:?}");
+        // One already on disk (read before it was followed): it learns which item it answers, and isn't written anew.
+        let first = write_mail_items(&l, &[mail("mail-c")]).unwrap();
+        assert_eq!(first, ["mail-c"]);
+        let again = write_mail_items(&l, &[answering(mail("mail-c"), "T001", "Get Dana's dates")]).unwrap();
+        assert!(again.is_empty(), "not new evidence");
+        assert_eq!(l.evidence()["mail-c"]["answers"]["node"], "T001");
+        assert!(fs::read_to_string(l.evidence_md("mail-c")).unwrap().contains("answers: T001"));
+    }
+
+    #[test]
+    fn new_subjects_read_the_sources_window_again() {
+        let (_env, _l, id) = setup("ledger-mail-again");
+        let f = mails_file(&id);
+        fs::write(&f, json!({"person:jane@acme.example": {"read_at": "2026-11-10T09:00:00+00:00", "checked_at": "2026-11-10T09:00:00+00:00", "found": 3}, "domain:acme.example": {"read_at": "x"}}).to_string()).unwrap();
+        read_mail_again(&id, "person:jane@acme.example").unwrap();
+        let st = mail_state(&id);
+        assert!(st["person:jane@acme.example"]["read_at"].is_null() && st["person:jane@acme.example"]["checked_at"].is_null(), "{st}");
+        assert_eq!(st["domain:acme.example"]["read_at"], "x", "the other sources as they were");
+    }
+
     #[cfg(feature = "brain")]
     #[test]
     fn mail_waits_while_nobody_can_be_told_a_colleague() {
@@ -3041,6 +2018,9 @@ mod tests {
             json!({"op": "create", "kind": "risk", "parent": "E01", "title": "SAML late", "description": "Watch it.", "quote": "I can have the SAML config ready by Friday"}),
         ]).unwrap();
         assert_eq!(r["rejected"].as_array().unwrap().len(), 3, "{r}");
+        // The refusal names the field to drop and where the response goes, or the model keeps retrying it (#137).
+        let why = r["rejected"][2]["why"].as_str().unwrap();
+        assert!(why.contains("without `description`") && why.contains("op 'answer'") && why.contains("`text`"), "{why}");
         mark_processed(&id, ev, "").unwrap();
         let t = fold(&l).unwrap();
         let (q, d, k) = (&t.nodes["Q001"], &t.nodes["D001"], &t.nodes["R001"]);

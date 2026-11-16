@@ -1,0 +1,29 @@
+/* ── A call's Actions tab: what this call changed in its threads' work ── */
+.cc { margin-bottom: 22px; }
+.cc-h { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; margin: 0 0 10px; }
+.todo + .cc-h, .cc + .cc-h { margin-top: 4px; }
+.cc-th { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; font-size: 13px; }
+.cc-th .set-sub { font-size: 12px; }
+.cc-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+.cc-row { display: grid; grid-template-columns: 128px minmax(0, 1fr) auto auto; align-items: start; gap: 12px; padding: 9px 12px; border-top: 1px solid var(--line); }
+.cc-row:first-child { border-top: 0; }
+.cc-row > .btn { margin-top: -3px; }
+.cc-what { font-size: 11.5px; font-weight: 600; padding-top: 2px; color: var(--accent-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-what.done { color: var(--me); }
+.cc-what.warn { color: var(--warn); }
+.cc-what.risk { color: var(--danger); }
+.cc-what.decision, .cc-what.question, .cc-what.link { color: var(--text-2); }
+.cc-main { min-width: 0; }
+.cc-node { display: block; max-width: 100%; text-align: left; border: 0; background: none; padding: 0; font: inherit; font-size: 13px; color: var(--text); cursor: default; overflow-wrap: anywhere; }
+.cc-node:hover { color: var(--accent-ink); }
+.cc-node .wk-id { margin-right: 4px; }
+.cc-q { margin-top: 3px; font-size: 12px; line-height: 1.45; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cc-q span { font-style: normal; }
+.cc-row .wk-v { margin-top: 1px; white-space: nowrap; }
+.cc-link { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line-strong); background: none; color: var(--text-2); font: inherit; font-size: 11px; cursor: default; }
+.cc-link:hover { color: var(--text); border-color: var(--accent); }
+@media (max-width: 760px) { .cc-row { grid-template-columns: minmax(0, 1fr) auto; } .cc-what { grid-column: 1 / -1; } }
+.cc-dep { margin-top: 2px; font-size: 12.5px; color: var(--text-2); }
+.cc-node.inline { display: inline; font-size: 12.5px; color: var(--text-2); }
+.cc-row { grid-template-columns: 104px minmax(0, 1fr) auto auto; }
+

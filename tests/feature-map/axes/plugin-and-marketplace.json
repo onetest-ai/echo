@@ -1,0 +1,45 @@
+{
+ "entity": "plugin and marketplace",
+ "axes": [
+  {
+   "axis": "plugin.installed",
+   "values": "none / some",
+   "where": "`/api/plugins` `installed`"
+  },
+  {
+   "axis": "plugin.offer",
+   "values": "can install / installed here / installed from another marketplace / needs a newer Echo / can't be read / busy",
+   "where": "app.js `plDiscover`"
+  },
+  {
+   "axis": "plugin.enabled",
+   "values": "on / off",
+   "where": "`plugins.json`; app.js `plDetail`"
+  },
+  {
+   "axis": "plugin.update",
+   "values": "none / available / blocked (why); its marketplace removed",
+   "where": "app.js `plDetail` (`update`, `market_gone`)"
+  },
+  {
+   "axis": "plugin.setting",
+   "values": "switch / text / folder / secret set / secret not set",
+   "where": "app.js `plField`"
+  },
+  {
+   "axis": "plugin.uses",
+   "values": "nothing / known capabilities / an unknown kind (granted nothing)",
+   "where": "`plugins::sheet`"
+  },
+  {
+   "axis": "market.kind",
+   "values": "built in (Echo's) / added (GitHub, git URL, folder)",
+   "where": "`plugins::built_in_source`"
+  },
+  {
+   "axis": "market.state",
+   "values": "not read / read (count, date) / error / busy; hidden or shown",
+   "where": "app.js `plMarkets`"
+  }
+ ]
+}

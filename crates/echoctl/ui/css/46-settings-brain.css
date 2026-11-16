@@ -1,0 +1,6 @@
+/* ── Settings → Brain: text fields in a settings row ── */
+.set-in { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; min-width: 0; width: 220px; }
+.set-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+select.set-in { width: auto; margin-right: 6px; }
+.set-in::placeholder { color: var(--text-3); }
+

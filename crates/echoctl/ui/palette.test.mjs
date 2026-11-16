@@ -1,9 +1,9 @@
 // The ⌘K palette's ranking (app.js, Palette). Run by scripts/check-mod.sh
 // (`node crates/echoctl/ui/palette.test.mjs`): the block is taken from app.js as it ships.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
-const src = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
+const src = appSource()
 const start = src.indexOf('// ── ⌘K palette: ranking what was typed')
 const end = src.indexOf('// end of the palette block', start)
 assert.ok(start >= 0 && end > start, 'the palette block not found in app.js')
@@ -16,7 +16,7 @@ const ITEMS = [
   { label: 'Write minutes again' },
   { label: 'Ask Claude about this call', keywords: 'question terminal' },
   { label: 'Open Transcript' },
-  { label: 'Record the next Teams call', keywords: 'start arm' },
+  { label: 'Record the next call', keywords: 'start arm' },
   { label: 'Settings: Transcription' },
   { label: 'Bruno - Acme follow-up', keywords: 'Pat Novak Ivo Brandt Today' },
   { label: 'Delete this call…', disabled: null },

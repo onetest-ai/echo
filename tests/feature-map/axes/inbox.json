@@ -1,0 +1,40 @@
+{
+ "entity": "inbox (Needs you item)",
+ "axes": [
+  {
+   "axis": "inbox.kind",
+   "values": "signin / minutes (failed, waiting) / people / work (review) / found / sender (trust, unverified) / brain / health (permission, stale plugin) / update / plugin-update / transcript",
+   "where": "`attention.rs` `item(…)`"
+  },
+  {
+   "axis": "inbox.urgent",
+   "values": "blocking / not",
+   "where": "`attention.rs` (`urgent`)"
+  },
+  {
+   "axis": "inbox.group",
+   "values": "a client / Everything else",
+   "where": "app.js `needsPanel` `groupName`"
+  },
+  {
+   "axis": "inbox.action",
+   "values": "IPC action / go to a place / Change… (edit elsewhere)",
+   "where": "`attention.rs` `act`; app.js click handler"
+  },
+  {
+   "axis": "inbox.busy",
+   "values": "idle / working (job or click) / failed",
+   "where": "`NY.busy`, `busy`, `failed`"
+  },
+  {
+   "axis": "inbox.filter",
+   "values": "open / blocking / done",
+   "where": "app.js `NY.filter`"
+  },
+  {
+   "axis": "inbox.count",
+   "values": "0 / ≤ 5 of a kind / > 5 of a kind",
+   "where": "app.js `NY_CAP`"
+  }
+ ]
+}

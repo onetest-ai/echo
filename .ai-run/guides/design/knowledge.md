@@ -1113,3 +1113,7 @@ marked `readonly`. A `Write` or `Edit` of `.echo-ingest/steps.json` also gives a
 `TodoWrite`, ruling R6). `user`, `answered` and `notice` events are made by `chat.rs`, `error` also by Echo itself
 (a sign-in); a sub-agent's events carry `parent`. Everything in a text, a result or a preview is others' words: the
 page shows it through `esc()` or the safe writer (X-T10).
+
+## Main refresh integration
+
+Knowledge’s CLI is in `cli/knowledge.rs`, its window routes and IPC in `window/knowledge.rs`, and its UI hooks in the corresponding `ui/app/` parts. `drawBrain` selects the vault renderer before Recall; the compiled assets retain Knowledge’s separate script and stylesheet. `knowledge/chat/tests.rs` holds the conversation tests, moved unchanged when adopting the source size gate.

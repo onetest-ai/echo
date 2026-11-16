@@ -1,0 +1,93 @@
+{
+ "prefix": "STT",
+ "name": "Transcription",
+ "order": 210,
+ "status": "stable",
+ "notes": "Engines, languages, speakers, servers",
+ "features": [
+  {
+   "id": "F-STT-01",
+   "feature": "A call is transcribed on the computer as it goes, the transcript ready seconds after it ends; a failure falls back to a full pass, and a failed one shows Failed with `transcribe.error`",
+   "priority": "critical",
+   "check": "person",
+   "axes": [
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-STT-02",
+   "feature": "A call has one language, chosen when it starts (the Record button's choice, its meeting series', else Settings' default, the first), never detected; kept in its meta.json, and in every line of its transcript",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.languages"
+   ]
+  },
+  {
+   "id": "F-STT-03",
+   "feature": "Silence gives no made-up text; on speakers the others aren't duplicated as Me",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-STT-04",
+   "feature": "Remote voices become Speaker N or the names Teams lights; one other person names the whole remote track",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-STT-05",
+   "feature": "A transcription server (another Echo or OpenAI-compatible) takes the utterances; when it is down this computer's model takes over",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.server"
+   ]
+  },
+  {
+   "id": "F-STT-06",
+   "feature": "A long call transcribes and the computer stays usable",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-STT-07",
+   "feature": "On speakers the mic's echo of the others is found during the call (once they have talked about 30 s, two looks 15 s apart agreeing) and the stretches of the mic it explains along their whole length aren't transcribed; the user's own words, a short word inside the echo or talking over the others, are; the app's log says the delay, gain, correlation and seconds skipped; found and skipped, and the same echo in the call's last minutes, nothing is decoded again at the end, otherwise the call's echo cancellation decodes the mic again at the end as before",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-STT-08",
+   "feature": "The model follows the call's language, from the downloaded ones: English → Parakeet v3, else Nemotron; another language → the Whisper model in use, else turbo; nothing better downloaded → the model in use",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.models"
+   ]
+  },
+  {
+   "id": "F-STT-09",
+   "feature": "A call's language is changed by hand (echoctl language, the window): while it records, what is said from then on is in the new language with its model and the whole call is transcribed again at its end; after it, transcribed again when its audio was kept, refused once the audio is gone",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-STT-10",
+   "feature": "Quitting Echo while it transcribes for other computers ends cleanly (no crash at exit): the server's model is let go first, an utterance being decoded waited for",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

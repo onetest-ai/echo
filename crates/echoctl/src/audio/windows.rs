@@ -399,6 +399,8 @@ fn capture_loop(target: Target, epoch: u32, tx: Sender<Chunk>, stop: Arc<AtomicB
 }
 
 const PROCESS_CHECK_EVERY: Duration = Duration::from_secs(1);
+/// How long opening a loopback waits for its capture thread to start.
+const OPEN_WITHIN: Duration = Duration::from_secs(10);
 
 pub struct LoopbackSource {
     app: TargetApp,
@@ -452,7 +454,15 @@ impl Source for LoopbackSource {
         let s = stop.clone();
         let t = target.clone();
         let thread = std::thread::spawn(move || capture_loop(t, epoch, tx, s, ready_tx));
-        ready_rx.recv().map_err(|_| anyhow!("loopback thread exited"))??;
+        match ready_rx.recv_timeout(OPEN_WITHIN) {
+            Ok(ready) => ready?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Hung in the audio stack: it stops if it ever starts; the track retries.
+                stop.store(true, Ordering::SeqCst);
+                bail!("the loopback didn't start within {} s", OPEN_WITHIN.as_secs());
+            }
+            Err(_) => bail!("loopback thread exited"),
+        }
         Ok(Box::new(LoopbackStream {
             app: self.app,
             target,

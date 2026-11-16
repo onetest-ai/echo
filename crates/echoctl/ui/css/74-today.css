@@ -1,0 +1,271 @@
+/* Today: cards delivered to Echo, your day, your work. */
+/* One scroll per card, as Templates: the head and Needs you now stay, Your day and My work scroll inside; the page
+   itself scrolls only when the window is too short for the cards' least height. */
+.td { padding: 18px 24px 24px; display: flex; flex-direction: column; gap: 16px; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+.td-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.td-head h1 { margin: 0; font-size: 20px; font-weight: 650; white-space: nowrap; }
+.td-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.td-card-h { display: flex; align-items: center; gap: 2px 10px; flex-wrap: wrap; }
+.td-card-h > b { white-space: nowrap; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.td-md { font-size: 13px; line-height: 1.55; }
+.td-md > :first-child { margin-top: 0; } .td-md > :last-child { margin-bottom: 0; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: stretch; flex: 1 1 auto; min-height: 280px; }
+.td-sec { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; }
+.td-grid > .td-sec { display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
+/* A line of hug widgets only (Today's layout): as tall as they are, not the fill's height. */
+.td-grid.td-hug { flex: none; min-height: 0; align-items: stretch; }
+/* Needs you now and its drafts as one cell of a shared row (Today's layout). */
+.td-grid > .td-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+.td-rows, .td-tasks { min-height: 0; overflow-y: auto; }
+.td-sec h2 { margin: 0 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
+.td-sec h2 .link-btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+/* A plugin widget's header may carry a thread's or client's name (any length): it wraps, never overflows its frame. */
+.pw-sec h2 { min-width: 0; overflow-wrap: anywhere; }
+.td-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.td-row:first-of-type { border-top: 0; }
+.td-row.past .td-t, .td-row.past .td-s { opacity: 0.6; }
+.td-t { font-size: 12px; color: var(--text-2); padding-top: 2px; white-space: nowrap; }
+.td-card-h [data-today-seen] { margin-left: auto; }
+.td-b { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.td-s { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-a { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-a:empty { display: none; }
+.td-now { display: flex; align-items: center; gap: 8px; color: var(--recording); font-size: 11px; font-family: var(--mono); }
+.td-now::after { content: ""; flex: 1; height: 1px; background: var(--recording); }
+.td-tasks { display: flex; flex-direction: column; gap: 6px; }
+.td-task { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.td-task:hover { border-color: var(--line-strong); background: var(--surface); }
+.td-task { cursor: pointer; }
+.td-task.on { border-color: var(--accent); background: var(--surface); }
+.td-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.td-task-t { font-size: 13px; line-height: 1.4; }
+.td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
+.td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
+/* Whose and where on one line, cut with … when narrow (the whole of it on hover). */
+.td-task-w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-icos { margin-left: auto; display: flex; gap: 2px; }
+.td-ico { width: 28px; height: 28px; color: var(--text-3); }
+.td-ico svg { width: 18px; height: 18px; }
+.td-task:hover .td-ico { color: var(--text-2); }
+.td-ico:hover { color: var(--accent-ink); }
+.td-task:hover .td-close { color: var(--accent-ink); }
+.td-askbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+.td-askbar.failed { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.td-modal { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.35); display: flex; align-items: center; justify-content: center; }
+.td-dialog { width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow); padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.td-dialog h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.td-dialog p { margin: 0; color: var(--text-2); }
+.td-dialog textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); color: var(--text); font: inherit; padding: 8px; resize: vertical; }
+.td-dialog-a { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.td-due { display: inline-flex; color: var(--text-3); padding-top: 1px; }
+.td-due svg { width: 16px; height: 16px; }
+.td-due.today { color: var(--accent-ink); }
+.td-due.late { color: var(--warn); }
+/* The list scrolls inside its card: the page stays put. */
+.td-tasks { padding-right: 2px; }
+/* Narrow: the cards one above the other, and the page scrolls (each card still at most a screen's worth). */
+/* A narrow Today needs no rule of its own: the layout engine gives it fewer columns, each fill line keeping its floor
+   (min-height above) — too short, and Today scrolls as a page (#328). */
+
+/* Today → Needs you now: a row an item — a dot (burning: warn), where and the line, who and when, its actions. */
+.nd .td-card-h { margin-bottom: 4px; }
+.nd-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.nd-row:first-of-type { border-top: 0; }
+.nd-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--accent); margin-top: 6px; }
+.nd-dot.hot { background: var(--warn); }
+.nd-b { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nd-a { display: flex; gap: 2px; justify-content: flex-end; align-self: start; }
+.nd-act.take { color: var(--accent-ink); }
+.nd-reply { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; margin-right: 2px; }
+.nd-reply svg { width: 14px; height: 14px; }
+.nd-act.take:hover { background: var(--accent-soft); }
+.td-dialog.wide { width: min(640px, calc(100vw - 32px)); }
+.td-dialog select { width: 100%; height: 30px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.nd-mail { max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
+@media (max-width: 900px) { .nd-row { grid-template-columns: 10px minmax(0, 1fr); } .nd-a { grid-column: 2; justify-content: flex-start; } }
+
+/* Today → Asks: Won't do's lines (who it's for, why) and a draft to Send, Edit or Drop */
+.wd { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.wd-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; flex-wrap: wrap; }
+.wd-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.wd-b { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.wd-draft { white-space: pre-wrap; padding: 8px 10px; border-radius: var(--r-control); background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
+.wd-text { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; padding: 8px; resize: vertical; }
+.wd-a { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.wd-row.failed .warn { font-size: 12.5px; }
+
+/* Today → Next meeting (core:calendar.next): S / M a card; L two columns — the prep's points, then who's coming. */
+.td-next { gap: 8px; }
+.td-next-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-next-when { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.td-next-t { font-size: 16px; font-weight: 650; }
+.td-next-exp { margin: 0; }
+.td-next-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.td-next-l { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px); gap: 0; padding: 0; }
+.td-next-main { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.td-next-side { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--line); min-width: 0; }
+.td-next-cap { margin: 4px 0 0; font-size: 10.5px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); }
+.td-next-list { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 5px; font-size: 13px; line-height: 1.45; }
+.td-next-list .late { color: var(--danger); font-weight: 600; }
+.td-next-sum { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.td-avs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.td-av { width: 24px; height: 24px; border-radius: 12px; background: var(--surface-2, var(--line)); color: var(--text-2); font-size: 10px; font-weight: 650; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--surface); }
+.td-av.yes { color: var(--text); }
+.td-av.no { opacity: 0.45; text-decoration: line-through; }
+.td-next-rec { margin-top: auto; font-size: 12px; color: var(--danger); }
+@media (max-width: 700px) { .td-next-l { grid-template-columns: minmax(0, 1fr); } .td-next-side { border-left: 0; border-top: 1px solid var(--line); } }
+
+/* Today → Your day as "where you'll be": a line a place — time, a bar for how sure, the place and its reason, ⋯. */
+.ag-row { display: grid; grid-template-columns: 64px 4px minmax(0, 1fr) auto; gap: 0 10px; align-items: start; padding: 7px 4px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 6px; }
+.ag-row:first-child { border-top: 0; }
+.ag-row:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.ag-row.past { opacity: 0.55; }
+.ag-row.folded { opacity: 0.5; }
+.ag-t { padding-top: 1px; color: var(--text-3); white-space: nowrap; }
+.ag-t.next { color: var(--accent); font-weight: 650; }
+.ag-next { background: var(--accent-soft); color: var(--accent-ink); }
+.ag-t.choice { color: var(--warn); }
+.ag-bar { align-self: stretch; border-radius: 2px; min-height: 18px; box-sizing: border-box; }
+.ag-bar.yes { background: var(--me); }
+.ag-bar.noreply { border: 1px dashed var(--text-3); }
+.ag-bar.maybe { border: 1px dashed var(--accent); }
+.ag-bar.work { border: 1px dashed color-mix(in srgb, var(--me) 70%, transparent); }
+.ag-work .ag-s { color: color-mix(in srgb, var(--me) 75%, var(--text)); }
+.ag-b { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ag-s { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.ag-why { font-size: 11.5px; color: var(--text-3); }
+.ag-why .link-btn { font: inherit; padding: 0; }
+.ag-why .ag-new { color: var(--accent); font-weight: 650; }
+.ag-more { opacity: 0; }
+.ag-row:hover .ag-more, .ag-more:focus-visible, .ag-more[aria-expanded="true"] { opacity: 1; }
+.ag-skip { margin-top: 8px; font-size: 12px; }
+
+/* Today → Your day as a calendar: the hours down, a block a meeting in its lane (solid going, dashed not sure). */
+.dc-sec { display: flex; flex-direction: column; min-height: 0; }
+.dc-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.dc-grid { position: relative; height: calc(100% - 8px); margin: 8px 0 0 30px; }
+.dc-h { position: absolute; left: -30px; right: 0; border-top: 1px solid var(--line); }
+.dc-h span { position: absolute; left: 0; top: -7px; font: 10px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--text-3); background: var(--surface); padding-right: 4px; }
+.dc-ev { position: absolute; box-sizing: border-box; border-radius: 5px; padding: 1px 6px; overflow: hidden; font-size: 11.5px; line-height: 14px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 6px; cursor: pointer; background: color-mix(in srgb, var(--accent) 20%, transparent); border-left: 3px solid var(--accent); }
+.dc-ev b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dc-ev .mono { font-size: 10px; color: var(--text-3); }
+.dc-ev.noreply { background: transparent; border: 1px dashed var(--text-3); }
+.dc-ev.maybe { background: transparent; border: 1px dashed var(--accent); }
+.dc-ev.past { opacity: 0.5; }
+.dc-now { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--recording); z-index: 1; }
+.dc-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 4px; background: var(--recording); }
+
+/* Today → Your day as a strip: the day in one bar. */
+.ds-sec h2 .set-sub { font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.ds-bar { position: relative; height: 28px; border-radius: 6px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.ds-ev { position: absolute; box-sizing: border-box; border: 1px solid var(--surface); border-radius: 4px; background: var(--accent); cursor: pointer; }
+.ds-ev.maybe { background: transparent; border: 1px dashed var(--accent); }
+.ds-ev.past { opacity: 0.35; }
+.ds-now { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--recording); }
+.ds-ticks { position: relative; height: 14px; font-size: 10px; color: var(--text-3); }
+.ds-ticks span { position: absolute; transform: translateX(-50%); }
+.ds-ticks span:first-child { transform: none; }
+
+/* A list cut by its card: a fade at the bottom while there is more below (todayMoreCue). */
+.td-rows[data-more]::after, .td-tasks[data-more]::after { content: ''; position: sticky; bottom: 0; display: block; flex: none; height: 32px; margin-top: -32px; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--surface)); }
+.td-stale .warn, .td .warn { color: var(--warn); }
+
+/* Today → The day's choices: a line a choice, what Echo suggests, the answers as buttons. */
+.ch-list { display: flex; flex-direction: column; }
+.ch-row { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.ch-row:first-child { border-top: 0; }
+.ch-row[data-td-ev], .ch-m[data-td-ev] { cursor: pointer; }
+.ch-b { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; }
+.ch-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.ch-row .ag-t.choice { color: var(--warn); }
+
+/* Today → Threads at a glance: a traffic light a thread; Done this week: a number. */
+.gl-row { display: grid; grid-template-columns: minmax(80px, 34%) 1fr 32px; align-items: center; gap: 10px; padding: 5px 0; }
+.gl-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.gl-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.gl-done { background: var(--me); } .gl-todo { background: var(--warn); } .gl-wait { background: var(--danger); }
+.gl-n { text-align: right; font-size: 12px; color: var(--text-2); }
+.gl-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; }
+.gl-key { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; }
+.gl-key > span { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.gl-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.gl-more { margin-left: auto; font-size: 12px; }
+.dn-n { display: flex; align-items: baseline; gap: 8px; }
+.dn-n b { font-size: 30px; font-weight: 650; line-height: 1.1; }
+.dn-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.dn-row { display: flex; flex-direction: column; font-size: 12.5px; }
+.dn-row .link-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Today → a plugin's widget, drawn by its kind. */
+.pw-stat { display: flex; align-items: baseline; gap: 8px; }
+.pw-stat b, .pw-stats b { font-size: 28px; font-weight: 650; line-height: 1.1; }
+.pw-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
+.pw-stats > div { display: flex; flex-direction: column; }
+.pw-stats b { font-size: 22px; }
+.tone-good { color: var(--me); } .tone-warn { color: var(--warn); } .tone-bad { color: var(--danger); }
+.pw-note { margin-top: 4px; }
+.pw-list { display: flex; flex-direction: column; }
+.pw-li { display: flex; flex-direction: column; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.pw-li:first-child { border-top: 0; }
+.pw-li a, .pw-card a { text-align: left; }
+.pw-status { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.pw-status i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; align-self: center; }
+.pw-status.st-ok i { background: var(--me); } .pw-status.st-warn i { background: var(--warn); } .pw-status.st-bad i { background: var(--danger); }
+.pw-card b { font-size: 13.5px; }
+.pw-card p { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+/* Today → Recorded this week: three numbers; at M a bar a day, Monday to Sunday, today marked. A click opens Calls. */
+.cw-sec { cursor: pointer; }
+.cw-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.cw-stat { display: flex; flex-direction: column; min-width: 0; }
+.cw-stat b { font-size: 26px; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.cw-stat span { font-size: 12px; white-space: nowrap; }
+.cw-none { margin: 6px 0 0; font-size: 12.5px; }
+.cw-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.cw-day { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.cw-bar { display: flex; align-items: flex-end; width: 100%; max-width: 28px; height: 48px; border-bottom: 2px solid var(--line-strong); }
+.cw-bar i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.cw-day.on .cw-bar i { background: var(--accent); }
+.cw-day.on .cw-bar { border-bottom-color: var(--accent); }
+.cw-d { font-size: 11px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.cw-day.on .cw-d { color: var(--text); font-weight: 650; }
+
+/* Today → a widget holding the first column (Your day), the rest beside it (todayPlan). */
+.td-side { display: grid; gap: 16px; flex: 1 0 auto; min-height: 420px; }
+/* The held column is as tall as what's beside it; its widget stays in view as Today scrolls (sticky), as tall as the
+   view at most, and scrolls inside — so Your day opens on now and is always there beside a long column. */
+.td-hold { min-height: 420px; contain: size; }
+.td-hold > .td-sec, .td-hold > .tw { position: sticky; top: 0; height: min(100%, var(--td-view, calc(100vh - 150px))); box-sizing: border-box; display: flex; flex-direction: column; }
+.td-hold > .tw > .tw-in { flex: 1 1 auto; max-height: none; }
+.td-rest { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+
+/* A plugin widget's chart, progress, link and actions. */
+.pw-prog { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; margin-top: 6px; }
+.pw-prog span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.pw-chart { width: 100%; height: 90px; display: block; }
+/* A widget its plugin hasn't answered yet: its place held, about the height its kind draws (a list's
+   depends on its rows: a few). */
+.pw-wait { overflow: hidden; }
+.pw-wait.k-stat { height: 66px; } .pw-wait.k-stat.s-S { height: 44px; } .pw-wait.k-stats { height: 43px; } .pw-wait.k-list { height: 140px; }
+.pw-wait.k-page { height: 72px; } .pw-wait.k-chart { height: 131px; }
+.pw-chart line { stroke: var(--line-strong); }
+.pw-chart rect { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
+.pw-chart rect.last { fill: var(--accent); }
+.pw-chart polyline { stroke: var(--accent); stroke-width: 2; }
+.pw-chart circle { fill: var(--accent); }
+.pw-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
+.pw-bars { display: grid; grid-template-columns: minmax(60px, 34%) minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; font-size: 12.5px; }
+.pw-bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-bt { height: 10px; }
+.pw-bt span { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+.pw-bn { font-size: 11.5px; color: var(--text-2); }
+.pw-foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 8px; }
+.pw-ask { margin-top: 6px; }
+/* A widget two rows high: it in its columns, the lines beside it in the others; as tall as they are. */
+.td-pair { display: grid; gap: 16px; align-items: stretch; }
+.td-tall { min-height: 280px; contain: size; display: flex; flex-direction: column; min-width: 0; }
+/* Whatever the widget draws (.td-sec, .td-card, a plugin's, an edit frame) scrolls inside, never over the next line. */
+.td-tall > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.td-tall > .tw > .tw-in { flex: 1 1 auto; max-height: none; }
+/* A task that looks done (#463): the line and Close / Not yet, under its title. */
+.td-looks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.td-looks-t { flex: 1 1 100%; }

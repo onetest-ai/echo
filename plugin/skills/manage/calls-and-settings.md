@@ -76,6 +76,45 @@ echoctl plugin call <id> <command> ['{json}']  # run one of its commands
 echoctl plugin marketplace list | add <owner/repo> | remove <name> | update
 ```
 
+## Minutes templates
+
+The shapes minutes are written in (the user edits them in Settings → Templates). `echoctl templates` prints each one
+— `id`, `kind` (builtin / edited / yours), `match` (words of a meeting title it is for), `header`, `sections` — the
+`values` a template may name in braces, and `folder`, where the user's own live. To make or change one, write
+`<folder>/<id>.md` — lower-case id, words joined by `-`; the id of a built-in changes it:
+
+```
+---
+name: client-kickoff
+match: [kickoff, onboarding]
+---
+# {title}
+{date} · {duration} · {participants} · {client}
+
+## Summary
+One sentence: why we met. Then **Highlights**: 3–7 bullets, each `**Topic:** what was said [mm:ss]`.
+
+## Next steps
+`- [ ] owner — task (due, if stated)`.
+```
+
+Before the first `## ` is the header: how the minutes start. `{value}` from `values` is filled in; any other `{…}`
+is an instruction in the template's words; the rest is kept as written. Under each `## heading`: what to write there,
+in the user's words and formats (a table, bullets). Show the user the template before writing it; the next minutes
+of a matching call follow it, and Write again with… in a call's Minutes uses it at once.
+
+Meeting types (what kind of meeting a call was — Client, Internal… — and how to tell each, which the minutes classify
+by) are in the same output as `meeting_types`; the user changes them in Settings → Templates → Meeting types
+(`<data folder>/.echo/meeting-types.json`, `[{"id", "name", "about"}]`: a built-in's id changes it). `echoctl type
+<call> <id>` sets one call's.
+
+Skills (Settings → Templates → Skills) are Agent Skills (agentskills.io) for the work a task asks for — `echoctl
+templates` lists them as `skills`, with any `problems`. To make or change one, work in its folder,
+`<data folder>/.echo/skills/<id>/`: `SKILL.md` (frontmatter `name: <id>` — the folder's name, lower-case and hyphens —
+and `description: "Use when…"`, then what to do, under 500 lines) and, as it needs, `scripts/`, `references/`,
+`assets/`. To change one of Echo's own, copy it there first (Customize in the window). Echo's Claude panel loads the
+valid ones that are on as `/my-skills:<id>` when its session starts.
+
 ## Settings
 
 `echoctl config` with no flags prints them. One flag a setting:

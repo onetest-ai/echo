@@ -1,0 +1,21 @@
+/* Echo's calendar for a date box (07-date.js): the quick days on the left, the month on the right, "No date" under. */
+input[type="date"]:not([data-native])::-webkit-calendar-picker-indicator { display: none; }
+input[type="date"][aria-expanded="true"] { border-color: var(--accent) !important; }
+.menu.dp-menu { position: fixed; right: auto; z-index: 60; display: grid; grid-template-columns: auto auto; gap: 0 6px; padding: 6px; width: max-content; }
+.dp-quick { display: flex; flex-direction: column; gap: 1px; padding-right: 6px; border-right: 1px solid var(--line); min-width: 168px; }
+.dp-q { display: flex; align-items: baseline; gap: 12px; font-size: 13px; }
+.dp-q.on { background: var(--accent-soft); color: var(--accent-ink, var(--text)); }
+.dp-qd { margin-left: auto; font-size: 11.5px; color: var(--text-3); }
+.dp-cal { padding: 2px 2px 0 4px; }
+.dp-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.dp-title { flex: 1; text-align: center; font-size: 13px; font-weight: 600; }
+.dp-nav { width: 26px; height: 26px; font-size: 16px; line-height: 1; }
+.dp-wk { display: grid; grid-template-columns: repeat(7, 30px); gap: 2px; }
+.dp-wd span { text-align: center; font-size: 10.5px; font-weight: 600; color: var(--text-3); padding: 2px 0 4px; }
+.dp-d { height: 28px; border: 0; border-radius: 7px; background: none; color: var(--text); font: inherit; font-size: 12.5px; cursor: default; font-variant-numeric: tabular-nums; }
+.dp-d:hover { background: var(--accent-soft); }
+.dp-d.out { color: var(--text-3); opacity: 0.6; }
+.dp-d.today { color: var(--accent); font-weight: 700; }
+.dp-d.sel { background: var(--accent); color: #fff; font-weight: 650; }
+.dp-menu > .menu-sep, .dp-menu > .dp-none { grid-column: 1 / -1; }
+.dp-none { font-size: 13px; color: var(--text-2); }

@@ -1,0 +1,205 @@
+{
+ "prefix": "SET",
+ "name": "Settings",
+ "order": 130,
+ "status": "stable",
+ "notes": "Every section but Plugins, Templates and Knowledge",
+ "features": [
+  {
+   "id": "F-SET-01",
+   "feature": "Settings lists General, Recording, Transcription, AI & minutes, Templates, Calendar & chat, Knowledge, About me, Sends to you, Plugins, Layout, Health, then plugins' own sections; `#settings` opens General; each section opens without an error, and one that fails says so in its place",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.config"
+   ]
+  },
+  {
+   "id": "F-SET-02",
+   "feature": "Search settings finds sections by their names and by their settings' own labels (rows' titles, cards' heads), shows the first one found with those settings picked out, and says \"Nothing matches\" when nothing does",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-03",
+   "feature": "Plain values save at once with the value shown (never a toggle of a stale one); \"Saved as you change it\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-04",
+   "feature": "General → Appearance System / Light / Dark switches the window (graphs, terminals and the minutes frame too), per computer",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.theme"
+   ]
+  },
+  {
+   "id": "F-SET-05",
+   "feature": "General → data folder Change…, Start at login, Hide from the Dock (macOS), Command line Install…, Claude Code plugin Connect, the version with Check for updates / Update to X",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.general",
+    "set.claude_code"
+   ]
+  },
+  {
+   "id": "F-SET-06",
+   "feature": "Recording → Calendar meetings and Other Teams calls each Ask or Manual, saved to `config.json`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.when_record"
+   ]
+  },
+  {
+   "id": "F-SET-07",
+   "feature": "Recording → Languages adds and removes the languages offered when a call starts, and Default language makes one the first (the Record button's and the calls Echo starts by itself); nothing detects a call's language",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.languages",
+    "set.record_lang"
+   ]
+  },
+  {
+   "id": "F-SET-08",
+   "feature": "Recording → Follow Teams' mute (off and greyed while Read the Teams window is off), Read the Teams window (off: no names, mute sync or call name read from Teams' window, from the next call; back-to-back calls may become one recording; it says what it costs Teams), Meeting chat and Shared screens (with Grant… when not permitted; snapshots read the window too, apart from that switch) switches",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-SET-09",
+   "feature": "Transcription → speech models with In use, Recommended (Parakeet v3 where this build runs it), Not in this build; the Whisper models marked deprecated; Download (size), Use, Remove (its question says which calls the model transcribes besides the active one: English calls, or calls in other languages), a progress bar (a download that gets no data for a minute ends as \"stalled\" and resumes on the next try), \"Another download is running\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.models"
+   ]
+  },
+  {
+   "id": "F-SET-10",
+   "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it and says what's wrong in the form's words: no speech-to-text model → type one in the model field), Disconnect; Transcribe for other computers shows its address and key",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.server"
+   ]
+  },
+  {
+   "id": "F-SET-11",
+   "feature": "Transcription → Echo cancellation on speakers and Keep audio files switches",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-SET-12",
+   "feature": "AI & minutes → Minutes switches (automatic, keep threads' work current, live notes, minutes page), Minutes model Change…, where Claude Code runs (Choose… / Use the data folder), Claude in the window without permission prompts (with its warning)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.minutes",
+    "set.window_claude"
+   ]
+  },
+  {
+   "id": "F-SET-13",
+   "feature": "Calendar & chat → Not connected with Sign in…, or Signed in as X with Sync now and Sign out; Meeting chat; App registration Change…",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-SET-14",
+   "feature": "About me → name and email; Your profile in Markdown (Edit, Save, Cancel, ⌘S) with who reads which part",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.me"
+   ]
+  },
+  {
+   "id": "F-SET-15",
+   "feature": "Sends to you → Teams and Mail (sign in first) and the ways plugins add, each with Send a test or Set up…",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "deliver.way",
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-SET-16",
+   "feature": "Layout → each panel view Right or Bottom; Reset puts every view back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.layout"
+   ]
+  },
+  {
+   "id": "F-SET-17",
+   "feature": "Health → Claude Code (runs, found in a terminal, Echo's plugin; Get, Connect, Add to PATH), an older Echo plugin (Update), each permission with Open settings, Ask for permissions, Check again; Settings shows a ⚠ count",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.claude_code",
+    "set.health"
+   ]
+  },
+  {
+   "id": "F-SET-18",
+   "feature": "An unreadable `config.json` says so instead of the sections",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.config"
+   ]
+  },
+  {
+   "id": "F-SET-19",
+   "feature": "General and Health say that what they show of the computer (Start at login, the command line, Claude Code, permissions) is this computer's, whichever data folder; Claude Code follows the PATH and CLAUDE_CONFIG_DIR Echo runs with, and its paths show the home folder as `~`",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.claude_code",
+    "set.health"
+   ]
+  },
+  {
+   "id": "F-SET-20",
+   "feature": "General → Where drafts go: Echo's default (Microsoft 365 Drafts when connected, else the default mail app), Microsoft 365 Drafts, the default mail app or another app (macOS: its name; Windows: its program); the line says where drafts go now",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-21",
+   "feature": "Settings → Calendar & chat → \"OneDrive on this computer\": the folder OneDrive keeps here — found by Echo (macOS: the one ~/Library/CloudStorage/OneDrive-<org>, not shared libraries; Windows: OneDriveCommercial / OneDrive), chosen, or off (`echoctl config --onedrive <folder|auto|none>`, refused inside a run). In the Echo folder session a write (Write, Edit, mkdir/touch/cp/mv) that would make here a folder OneDrive has online but doesn't sync to this computer is refused, with the reason and the fix (OneDrive → Choose folders); writes into folders that are here go on at once",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-22",
+   "feature": "Settings → Calendar & chat → \"Colleagues' photos\": not connected, it says photos come once Microsoft 365 is; connected but the sign-in may not read photos, Allow… (a sign-in of its own asking one more permission; allowed, the switch goes on; refused, it says so); allowed, a switch, off by default",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  }
+ ]
+}

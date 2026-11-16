@@ -36,7 +36,7 @@ fn call_title(dir: &std::path::Path) -> String {
 /// Calls of the last `days` days, newest first.
 fn recent_calls(days: i64) -> Vec<std::path::PathBuf> {
     let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
-    let mut v: Vec<_> = crate::calls::all_calls().into_iter().filter(|d| d.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.get(..10).is_some_and(|x| x >= since.as_str()))).collect();
+    let mut v: Vec<_> = crate::calls::all_calls().into_iter().filter(|d| d.file_name().and_then(|n| n.to_str()).is_some_and(|n| crate::calls::has_stamp(n) && n[..10] >= *since.as_str())).collect();
     v.reverse();
     v
 }
@@ -52,6 +52,9 @@ pub struct Collected {
     keep_kinds: BTreeSet<&'static str>,
     pub(crate) quiet: BTreeSet<String>,
     quiet_kinds: BTreeSet<&'static str>,
+    /// The version each installed plugin has now, by its update item's key: an update item gone is Done only when
+    /// the plugin has the version it offered (not when the offer went away).
+    installed: BTreeMap<String, String>,
 }
 
 /// Failed minutes are news for 14 days; after that they leave the list without counting as done.
@@ -139,7 +142,12 @@ pub fn collect() -> Collected {
                 format!("Minutes failed: {}", call_title(&d)),
                 run.message.as_deref().unwrap_or("Claude Code didn't finish them").chars().take(160).collect(),
                 false,
-                vec![act("Write again", true, json!({"cmd": "write_notes", "call": name})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                // A policy file Echo couldn't read (#404): the user's choice waits here too.
+                match run.policy.as_ref().map(|p| (p["choice"].as_str(), p["file"].as_str())) {
+                    Some((Some("system"), _)) => vec![act("Write on Claude Code (as configured)", true, json!({"cmd": "write_notes", "call": name, "profile": crate::ai::SYSTEM})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                    Some((Some("anyway"), Some(f))) => vec![act("Write anyway", true, json!({"cmd": "write_notes", "call": name, "without_policy": f})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                    _ => vec![act("Write again", true, json!({"cmd": "write_notes", "call": name})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
+                },
                 Some(format!("call/{name}/minutes")),
             )),
             _ => {}
@@ -371,7 +379,7 @@ pub fn collect() -> Collected {
     #[cfg(feature = "brain")]
     if brain_on && crate::brain::EXTRAS {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
-            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Brain → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
+            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Knowledge → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
         }
         // A topic in the wrong place (`taxonomy::moves`, no model): up to the practice, or down to a client.
         for m in crate::brain::taxonomy::moves().unwrap_or_default() {
@@ -454,6 +462,21 @@ pub fn collect() -> Collected {
     if let Some(v) = crate::update::AVAILABLE.lock().ok().and_then(|a| a.as_ref().map(|r| r.version.clone())) {
         out.push(item("update".into(), "update", "echo", format!("Echo {v} is available"), "Installs after Echo saves and quits".into(), false, vec![act("Update…", true, json!({"cmd": "settings_action", "action": "update", "arg": ""}))], None));
     }
+    // A plugin with a newer version in its marketplace: one item each, opening it in Settings → Plugins (an update
+    // that asks for more says so; it shows its sheet there before anything changes).
+    // Installed (that version or a later one), it is Done (fold); gone otherwise — the marketplace took it back —
+    // it leaves quietly. One read of the registry for both.
+    c.quiet_kinds.insert("plugin-update");
+    match crate::plugins::Registry::load() {
+        Ok(r) => {
+            c.installed = r.installed.values().map(|p| (format!("plugin-update:{}", p.id), p.version.clone())).collect();
+            out.extend(crate::plugins::updates_in(&r).iter().filter(|(_, u)| u.blocked.is_none()).map(|(p, u)| update_item(p, u)));
+        }
+        // The registry can't be read: what it had stays open, not Done.
+        Err(_) => {
+            c.keep_kinds.insert("plugin-update");
+        }
+    }
     // What plugins put here (`ctx.inbox.set`): their buttons call their own commands.
     #[cfg(feature = "js")]
     for (plugin, key, it) in crate::jshost::inbox_items() {
@@ -466,6 +489,20 @@ pub fn collect() -> Collected {
     }
     c.items = out;
     c
+}
+
+/// A plugin's waiting update as an Inbox item: opening it in Settings → Plugins; one that asks for more says so.
+pub fn update_item(p: &crate::plugins::Installed, u: &crate::plugins::Review) -> Value {
+    let more = match u.new_uses.len() {
+        0 => String::new(),
+        1 => format!(" — it asks for more: {}", u.new_uses[0]),
+        n => format!(" — it asks for {n} more things"),
+    };
+    let why: String = format!("{} → {}, from {}{more}", p.version, u.version, u.market).chars().take(200).collect();
+    let mut it = item(format!("plugin-update:{}", p.id), "plugin-update", "echo", format!("{} {} is available", u.name, u.version).chars().take(120).collect(), why, false,
+        vec![], Some(format!("settings/plugins/{}", p.id)));
+    it["version"] = json!(u.version);
+    it
 }
 
 fn file() -> std::path::PathBuf {
@@ -494,9 +531,10 @@ fn fold(rec: &mut Value, got: &Collected, now: chrono::DateTime<chrono::Utc>) ->
         if k.is_empty() || keys.contains(&k) {
             continue;
         }
+        let installed = b["version"].as_str().is_some_and(|v| got.installed.get(&k).is_some_and(|have| !crate::update::newer(v, have)));
         if got.keep.contains(&k) || got.keep_kinds.contains(kind) {
             open.push(b);
-        } else if !(got.quiet.contains(&k) || got.quiet_kinds.contains(kind)) {
+        } else if installed || !(got.quiet.contains(&k) || got.quiet_kinds.contains(kind)) {
             done.push(json!({"key": k, "title": b["title"], "group": b["group"], "kind": kind, "at": now.to_rfc3339()}));
         }
     }
@@ -511,12 +549,10 @@ fn fold(rec: &mut Value, got: &Collected, now: chrono::DateTime<chrono::Utc>) ->
     open
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static COLLECTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Moved by `stale`: a collection that saw it move while it ran is answered but not cached.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn shape(open: Vec<Value>, rec: &Value) -> Value {
@@ -529,11 +565,23 @@ fn shape(open: Vec<Value>, rec: &Value) -> Value {
 
 /// Collect again at the next request: a job an item started has ended (the item may be gone now).
 /// A collection running meanwhile may have read the old state: it isn't kept (`GENERATION`).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn stale() {
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Ok(mut c) = CACHE.lock() {
         *c = None;
+    }
+}
+
+/// Whether an answer is kept for the next request (tests).
+#[cfg(test)]
+pub(crate) fn cached() -> bool {
+    CACHE.lock().is_ok_and(|c| c.is_some())
+}
+
+#[cfg(test)]
+pub(crate) fn cache_for_test(v: Value) {
+    if let Ok(mut c) = CACHE.lock() {
+        *c = Some((Instant::now(), v));
     }
 }
 
@@ -623,6 +671,26 @@ mod tests {
         assert_eq!(p["actions"][0]["ipc"]["cmd"], "notes_now");
         // Waiting for the model: nothing to start early.
         assert!(find("Review")["actions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_plugin_update_is_done_only_once_installed() {
+        let now = chrono::Utc::now();
+        let mut up = item("plugin-update:demo".into(), "plugin-update", "echo", "Demo 0.2.0 is available".into(), String::new(), false, vec![], None);
+        up["version"] = json!("0.2.0");
+        let with = |installed: &str| {
+            let mut c = got(&[]);
+            c.quiet_kinds.insert("plugin-update");
+            c.installed.insert("plugin-update:demo".into(), installed.into());
+            c
+        };
+        let mut rec = Value::Null;
+        fold(&mut rec, &got(&[&up]), now);
+        fold(&mut rec, &with("0.1.0"), now);
+        assert!(rec["done"].as_array().unwrap().is_empty(), "the offer went away, nothing was installed: not Done");
+        fold(&mut rec, &got(&[&up]), now);
+        fold(&mut rec, &with("0.3.0"), now);
+        assert_eq!(rec["done"][0]["key"], "plugin-update:demo", "installed — a later one too: Done");
     }
 
     #[test]

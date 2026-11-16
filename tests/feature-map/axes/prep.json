@@ -1,0 +1,30 @@
+{
+ "entity": "prep",
+ "axes": [
+  {
+   "axis": "prep.state",
+   "values": "none / writing / ready / error; still to come (Write it again) or past",
+   "where": "`prep.rs`; app.js `upcomingDoc`, `prepView`"
+  },
+  {
+   "axis": "prep.thread",
+   "values": "meeting in one or more threads / in none",
+   "where": "`prep.rs`"
+  },
+  {
+   "axis": "prep.sections",
+   "values": "each of In short, Expected (empty: \"Nothing waits on you\"; task / from last time / reply), Last time, Open (task / risk / question; late / due), New since then (mail / chat) present or absent",
+   "where": "app.js `prepView`"
+  },
+  {
+   "axis": "prep.people",
+   "values": "0 / ≤ 10 / > 10; new or with calls together; role",
+   "where": "app.js `prepView`"
+  },
+  {
+   "axis": "prep.profiles",
+   "values": "all threads on one profile (In short) / several (facts only)",
+   "where": "`prep.rs`"
+  }
+ ]
+}

@@ -12,7 +12,7 @@ use chrono::{DateTime, Local};
 use serde::Serialize;
 
 use crate::apps::TargetApp;
-use crate::audio::{self, mic::MicSource, Track, TrackInfo};
+use crate::audio::{self, Track, TrackInfo};
 use crate::meeting::MeetingContext;
 use crate::paths;
 
@@ -25,9 +25,13 @@ struct Meta {
     ended_at: Option<DateTime<Local>>,
     /// Why the recording stopped (user, call ended, …)
     stop_reason: Option<String>,
-    /// Languages pinned for this call (overrides the workspace list); absent = workspace list
+    /// The call's language as a list, for older readers of `meta.json`: `[language]`
     #[serde(skip_serializing_if = "Option::is_none")]
     languages: Option<Vec<String>>,
+    /// The call's one language, chosen when it starts (`call_language::for_new_call`); changed by hand straight in
+    /// the file (`call_language::set`, under the call's lock) and kept from there
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
     /// The AI profile this call's live notes and minutes use (`ai.rs`), pinned at the start
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_profile: Option<String>,
@@ -81,6 +85,11 @@ pub struct Recording {
 }
 
 impl Recording {
+    /// The call app it records.
+    pub fn app(&self) -> TargetApp {
+        self.meta.app
+    }
+
     pub fn start(
         app: TargetApp,
         title: Option<&str>,
@@ -93,6 +102,7 @@ impl Recording {
         let title = title.map(str::to_owned).or_else(|| meeting.and_then(|m| m.subject.clone()));
         let dir = call_dir(&started_at, title.as_deref());
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
             app,
@@ -100,7 +110,8 @@ impl Recording {
             started_at,
             ended_at: None,
             stop_reason: None,
-            languages: languages.clone(),
+            languages: Some(vec![language.clone()]),
+            language: Some(language),
             ai_profile,
             kind: None,
             tracks: vec![],
@@ -112,15 +123,12 @@ impl Recording {
         // Both tracks share t0, so their timelines line up sample-for-sample.
         let t0 = Instant::now();
         let remote = Some(Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?);
-        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: Some(app) }), t0)?;
+        let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(Some(app)), t0)?;
         // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]
-        let live = crate::live::start(&dir, meeting, languages);
+        let live = crate::live::start(&dir, meeting);
         #[cfg(not(feature = "transcribe"))]
-        let live = {
-            let _ = languages;
-            None
-        };
+        let live = None;
         Ok(Recording {
             live,
             dir,
@@ -141,6 +149,7 @@ impl Recording {
         let title = Some("Memo".to_string());
         let dir = call_dir(&started_at, title.as_deref());
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
             app,
@@ -148,7 +157,8 @@ impl Recording {
             started_at,
             ended_at: None,
             stop_reason: None,
-            languages: languages.clone(),
+            languages: Some(vec![language.clone()]),
+            language: Some(language),
             ai_profile,
             kind: Some("memo"),
             tracks: vec![],
@@ -156,14 +166,11 @@ impl Recording {
         paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
         let t0 = Instant::now();
         // The default input, not the call app's: there is no call.
-        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: None }), t0)?;
+        let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(None), t0)?;
         #[cfg(feature = "transcribe")]
-        let live = crate::live::start(&dir, None, languages);
+        let live = crate::live::start(&dir, None);
         #[cfg(not(feature = "transcribe"))]
-        let live = {
-            let _ = languages;
-            None
-        };
+        let live = None;
         Ok(Recording { live, dir, t0, title, started_at, meta, remote: None, mic, memo: true })
     }
 
@@ -171,6 +178,7 @@ impl Recording {
     /// (and rewrites it whole then), so the change goes through here.
     pub fn set_ai_profile(&mut self, id: &str) -> Result<()> {
         let _lock = crate::calls::lock_meta(&self.dir)?;
+        keep_language(&self.dir, &mut self.meta);
         let before = self.meta.ai_profile.replace(id.to_string());
         if let Err(e) = paths::write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&self.meta)?) {
             self.meta.ai_profile = before; // memory and disk say the same
@@ -238,8 +246,19 @@ fn write_final_meta(dir: &std::path::Path, meta: &mut Meta) -> Result<()> {
     if let Some(id) = on_disk.as_ref().and_then(|m| m["ai_profile"].as_str()).filter(|s| !s.is_empty()) {
         meta.ai_profile = Some(id.to_string());
     }
+    keep_language(dir, meta);
     paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(meta)?)?;
     Ok(())
+}
+
+/// The call's language as changed by hand meanwhile (`call_language::set`), into the recording's copy (under the
+/// call's lock).
+fn keep_language(dir: &std::path::Path, meta: &mut Meta) {
+    let on_disk = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    if let Some(l) = on_disk.as_ref().and_then(|m| m["language"].as_str()).filter(|s| !s.is_empty()) {
+        meta.language = Some(l.to_string());
+        meta.languages = Some(vec![l.to_string()]);
+    }
 }
 
 /// `echoctl capture`: record until Ctrl-C or `--seconds`.
@@ -264,8 +283,15 @@ pub fn capture(
         let _ = rec.poll();
     }
 
-    // `capture` leaves transcription to `echoctl transcribe` (the worker ends with the process).
-    let (dir, tracks, _live) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
+    // `capture` leaves transcription to `echoctl transcribe`: the worker gives up, and is waited for so its model
+    // is freed before the process exits (#141).
+    let (dir, tracks, live) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
+    #[cfg(feature = "transcribe")]
+    if let Some(l) = live {
+        l.abandon();
+    }
+    #[cfg(not(feature = "transcribe"))]
+    let _ = live;
     for t in &tracks {
         let restarts = t.events.iter().filter(|e| e.kind == "restarting").count();
         eprintln!(
@@ -277,4 +303,40 @@ pub fn capture(
     }
     println!("{}", dir.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_final_meta_keeps_the_language_the_live_transcription_wrote() {
+        let (_env, _) = paths::testenv::folders("recorder-final-meta-language");
+        let dir = paths::calls_dir().join("2026-11-09_140000-x");
+        fs::create_dir_all(&dir).unwrap();
+        let mut meta = Meta {
+            title: Some("x".into()),
+            app: TargetApp::Teams,
+            platform: "macos",
+            started_at: Local::now(),
+            ended_at: None,
+            stop_reason: None,
+            languages: Some(vec!["en".into(), "uk".into()]),
+            language: None,
+            ai_profile: None,
+            kind: None,
+            tracks: vec![],
+        };
+        fs::write(dir.join("meta.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
+        // The live worker decides the call's language mid-call (`calls::update_meta`).
+        crate::calls::update_meta(&dir, |m| {
+            m["language"] = serde_json::json!("uk");
+            Ok(())
+        })
+        .unwrap();
+        meta.stop_reason = Some("call_ended".into());
+        write_final_meta(&dir, &mut meta).unwrap();
+        let on_disk: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json")).unwrap()).unwrap();
+        assert_eq!((on_disk["language"].as_str(), on_disk["stop_reason"].as_str()), (Some("uk"), Some("call_ended")));
+    }
 }

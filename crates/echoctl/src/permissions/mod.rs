@@ -62,6 +62,9 @@ fn request_all() -> Result<()> {
 }
 
 pub fn open_settings(url: &str) -> Result<()> {
+    if crate::app::open_log_only(url) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(url).status()?;
     #[cfg(windows)]
@@ -90,7 +93,7 @@ pub fn collect(request: bool, probe: bool) -> Result<Report> {
 /// `echoctl doctor`. Permissions belong to the process that records — the app — so when the
 /// app is running it checks (and prompts) in its own process; otherwise this process checks
 /// and says whose permissions those are.
-pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Result<()> {
+pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>, no_ai: bool) -> Result<()> {
     let (r, from_app) = match crate::app::app_health(request, probe)? {
         Some(v) => (v, true),
         None => (serde_json::to_value(collect(request, probe)?)?, false),
@@ -102,9 +105,14 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             None => anyhow::bail!("no settings page for '{id}'"),
         }
     }
+    // Local AI profiles' context (#224): their models are loaded to check, so not on --no-ai or the repeated --request / --probe / --open.
+    let local = if no_ai || request || probe || open.is_some() { vec![] } else { crate::ollama::local_profiles() };
     if json {
         let mut out = r.clone();
         out["checked_by"] = serde_json::json!(if from_app { "app" } else { "this process" });
+        if !(no_ai || request || probe || open.is_some()) {
+            out["ai"] = local.iter().map(crate::ollama::report).collect(); // absent when skipped, not `[]`
+        }
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
@@ -136,6 +144,13 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             if !c["settings_url"].is_null() {
                 println!("    run: echoctl doctor --open {}", s(&c["id"]));
             }
+        }
+    }
+    if !local.is_empty() {
+        println!();
+        println!("AI profiles — loading each local model to check its context (up to 2 min each)…");
+        for p in &local {
+            crate::ollama::print(&crate::ollama::report(p));
         }
     }
     println!();

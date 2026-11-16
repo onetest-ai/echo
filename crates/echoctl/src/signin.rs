@@ -37,7 +37,7 @@ const DEADLINE: Duration = Duration::from_secs(600);
 /// A background check of a profile at most this often (unless asked for).
 const REFRESH_EVERY: Duration = Duration::from_secs(30);
 
-/// A Claude profile's sign-in as the window (`ai::summary` → `p.signin`, ui/app.js `signinNote`)
+/// A Claude profile's sign-in as the window (`ai::summary` → `p.signin`, ui/app/10-shell.js `signinNote`)
 /// and the tray show it. `account` is an `Account::key` (`Use <account>` sends it back to `accept`),
 /// with the plan (`label`) only right after a sign-in.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -296,7 +296,7 @@ pub fn choose(purpose: &str, id: &str) -> u64 {
 /// A profile was chosen in a menu: sign it in if — and only if — it is plainly signed out (the
 /// window registers the choice with `choose` on its own thread, in the order they came, then calls
 /// `ensure_request`).
-#[cfg(test)]
+#[cfg(all(test, unix))] // only Unix tests use it
 pub fn ensure(id: &str, purpose: &str) {
     let request = choose(purpose, id);
     ensure_request(id, purpose, request);
@@ -314,7 +314,6 @@ pub fn applied(call: &str, id: &str) {
 
 /// The check for choice `request` of `purpose` (`choose`): signed out and still the latest choice
 /// → the sign-in starts.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn ensure_request(id: &str, purpose: &str, request: u64) {
     if with(|s| s.shutdown) {
         return;

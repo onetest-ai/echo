@@ -133,6 +133,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     })
 }
 
+/// `<dir>/<name><ext>`, or `<name>-2<ext>`, `-3`… when that is taken: a place in the trash nothing has yet, so two
+/// things trashed within the same second (or millisecond) keep both.
+pub fn unused(dir: &Path, name: &str, ext: &str) -> PathBuf {
+    (1..).map(|n| dir.join(if n == 1 { format!("{name}{ext}") } else { format!("{name}-{n}{ext}") })).find(|p| !p.exists()).unwrap_or_else(|| dir.join(name))
+}
+
 /// Tests that point the data folder and the config dir at temporary folders take this first, so
 /// they don't move each other's folders (the variables are process-wide).
 #[cfg(test)]
@@ -163,12 +169,14 @@ pub mod testenv {
         }
     }
 
-    /// `f()` comes true within a second — for a lock just released: while another test thread starts
+    /// `f()` comes true soon (polled every 20 ms) — for a lock just released: while another test thread starts
     /// a process, its child holds a copy of the descriptor until it execs (macOS).
     pub fn eventually(what: &str, f: impl Fn() -> bool) {
         let t = std::time::Instant::now();
         while !f() {
-            assert!(t.elapsed() < std::time::Duration::from_secs(1), "{what}");
+            // A bound for a failure only: it returns as soon as `f` holds. A fake Claude Code is a process of its own,
+            // which takes more than a second to answer while the Mac is busy (#283).
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "{what}");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
@@ -186,5 +194,23 @@ pub mod testenv {
         std::env::set_var("ECHOCTL_HOME", root.join("home"));
         std::env::set_var("ECHOCTL_CONFIG_DIR", root.join("config"));
         (Env { _lock: lock, root: root.clone(), before }, root)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unused_name_never_takes_one_that_is_there() {
+        let dir = std::env::temp_dir().join(format!("echo-unused-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(unused(&dir, "mine-20261109120000", ".md"), dir.join("mine-20261109120000.md"));
+        fs::write(dir.join("mine-20261109120000.md"), "first").unwrap();
+        assert_eq!(unused(&dir, "mine-20261109120000", ".md"), dir.join("mine-20261109120000-2.md"));
+        fs::create_dir_all(dir.join("mine-20261109120000-2.md")).unwrap();
+        assert_eq!(unused(&dir, "mine-20261109120000", ".md"), dir.join("mine-20261109120000-3.md"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

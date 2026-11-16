@@ -1,0 +1,25 @@
+{
+  "name": "test-plugins",
+  "plugins": [
+    {
+      "id": "widget-demo",
+      "source": "./plugins/widget-demo"
+    },
+    {
+      "id": "hang-demo",
+      "source": "./plugins/hang-demo"
+    },
+    {
+      "id": "thread-demo",
+      "source": "./plugins/thread-demo"
+    },
+    {
+      "id": "work-demo",
+      "source": "./plugins/work-demo"
+    },
+    {
+      "id": "signin-demo",
+      "source": "./plugins/signin-demo"
+    }
+  ]
+}

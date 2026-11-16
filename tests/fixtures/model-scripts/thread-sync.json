@@ -1,0 +1,151 @@
+{
+ "model": {
+  "context_length": 32768
+ },
+ "rules": [
+  {
+   "when": [
+    "/echo:project-sync",
+    "Mode: extract."
+   ],
+   "vars": {
+    "run": "This run's folder — write your JSON files there with the Write tool, nowhere else: `([^`]+)`",
+    "evid": "Evidence ids, strictly in this order: ([0-9_-]+)",
+    "file": "\"file\": \"([^\"]+\\.md)\""
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout pending",
+      "description": "The items to read"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout context",
+      "description": "The live tree"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger globex-pilot context",
+      "description": "Another thread's tree"
+     }
+    },
+    {
+     "tool": "Read",
+     "input": {
+      "file_path": "{file}"
+     }
+    },
+    {
+     "tool": "Write",
+     "input": {
+      "file_path": "{run}/{evid}.json",
+      "content": "[\n {\n  \"op\": \"create\",\n  \"ref\": \"r1\",\n  \"kind\": \"risk\",\n  \"parent\": \"E01\",\n  \"title\": \"Second-phase budget not approved yet\",\n  \"quote\": \"the budget for the second phase is not approved yet, finance meets on the twentieth\"\n },\n {\n  \"op\": \"create\",\n  \"ref\": \"t1\",\n  \"kind\": \"task\",\n  \"parent\": \"S001\",\n  \"title\": \"Nominate two help desk observers\",\n  \"type\": \"dependency\",\n  \"client_owed\": true,\n  \"client_owner\": \"Omar Haddad\",\n  \"quote\": \"I will nominate two people from the service desk and send their names to you tomorrow morning\"\n },\n {\n  \"op\": \"status\",\n  \"node\": \"T008\",\n  \"effect\": \"due\",\n  \"due_text\": \"November 27\",\n  \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n },\n {\n  \"op\": \"status\",\n  \"node\": \"T003\",\n  \"effect\": \"reassign\",\n  \"internal_owner\": \"Priya\",\n  \"delegated_by\": \"Me\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n }\n]"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout apply --evidence {evid} --proposals {run}/{evid}.json",
+      "description": "Apply the proposals"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout done --evidence {evid} --note 'a risk, a client dependency, a date and an owner'",
+      "description": "Mark it read"
+     }
+    },
+    {
+     "text": "Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner."
+    }
+   ]
+  },
+  {
+   "when": [
+    "/echo:project-sync",
+    "Mode: verify."
+   ],
+   "vars": {
+    "run": "This run's folder — write your JSON files there with the Write tool, nowhere else: `([^`]+)`",
+    "m1": "\"mid\": \"([0-9a-f]{10})\"",
+    "m2": "\"mid\": \"[0-9a-f]{10}\"[\\s\\S]*?\"mid\": \"([0-9a-f]{10})\"",
+    "m3": "\"mid\": \"[0-9a-f]{10}\"[\\s\\S]*?\"mid\": \"[0-9a-f]{10}\"[\\s\\S]*?\"mid\": \"([0-9a-f]{10})\""
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout verify-prep --out {run}/packets.json",
+      "description": "The claims to judge"
+     }
+    },
+    {
+     "tool": "Read",
+     "input": {
+      "file_path": "{run}/packets.json"
+     }
+    },
+    {
+     "tool": "Write",
+     "input": {
+      "file_path": "{run}/verdicts.json",
+      "content": "[\n {\n  \"mid\": \"{m1}\",\n  \"verdict\": \"supports\",\n  \"reason\": \"the words state it\"\n },\n {\n  \"mid\": \"{m2}\",\n  \"verdict\": \"supports\",\n  \"reason\": \"the words state it\"\n },\n {\n  \"mid\": \"{m3}\",\n  \"verdict\": \"supports\",\n  \"reason\": \"the words state it\"\n }\n]"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout verify-apply --file {run}/verdicts.json",
+      "description": "Record the verdicts"
+     }
+    },
+    {
+     "text": "Verify (virtual model): 3 supports."
+    }
+   ]
+  },
+  {
+   "when": [
+    "/echo:project-sync",
+    "Mode: people."
+   ],
+   "vars": {
+    "run": "This run's folder — write your JSON files there with the Write tool, nowhere else: `([^`]+)`",
+    "evid": "Mode: people\\. Evidence ids: ([0-9_-]+)"
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout people-context --items '{evid}'",
+      "description": "The people in view"
+     }
+    },
+    {
+     "tool": "Write",
+     "input": {
+      "file_path": "{run}/{evid}_people.json",
+      "content": "[\n {\n  \"who\": \"Priya Nair\",\n  \"field\": \"role\",\n  \"value\": \"help desk training\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n },\n {\n  \"who\": \"Priya Nair\",\n  \"field\": \"fact\",\n  \"value\": \"Prepares the help desk training deck and its FAQ page for the Acme rollout.\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n },\n {\n  \"who\": \"Tom Becker\",\n  \"field\": \"role\",\n  \"value\": \"dry run owner\",\n  \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n }\n]"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "echoctl project ledger acme-rollout people-apply --evidence '{evid}' --file '{run}/{evid}_people.json'",
+      "description": "Propose who's who"
+     }
+    },
+    {
+     "text": "People (virtual model): proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's."
+    }
+   ]
+  }
+ ]
+}

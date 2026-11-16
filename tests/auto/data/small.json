@@ -1,0 +1,1700 @@
+{
+  "_about": "What tests/fixtures/make_data.py (the small set) builds, as the autotests read it. Change it with the fixture.",
+  "calls": {
+    "noMinutes": {
+      "title": "Initech planning",
+      "folder": "initech-planning"
+    },
+    "withMinutes": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync"
+    },
+    "other": {
+      "folder": "globex-pilot-kickoff"
+    },
+    "withDiagram": {
+      "title": "Globex pilot kickoff",
+      "folder": "globex-pilot-kickoff"
+    }
+  },
+  "virtualModel": {
+    "profile": "Claude Code writes them with Virtual model (virtual), on this computer.",
+    "minutesRule": 0,
+    "minutes": "The virtual model wrote these minutes from the transcript it read.",
+    "actionLine": "Me — send the follow-up notes",
+    "action": {
+      "task": "Send the follow-up notes",
+      "owner": "Me",
+      "status": "todo"
+    },
+    "runTools": [
+      "Bash",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Read",
+      "Skill",
+      "Write"
+    ],
+    "turns": 6
+  },
+  "guardProbe": {
+    "script": "guard-probe.json",
+    "refusals": [
+      "only this call's folder can be read",
+      "denied by your permission settings",
+      "isn't one of the commands a minutes run uses",
+      "only the Echo CLI runs here, not cat",
+      "writes only notes.md and its new action list"
+    ],
+    "toolResults": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "work": {
+    "thread": "acme-rollout",
+    "item": "Answer the security questionnaire",
+    "people": [
+      "Dana Lee",
+      "Omar Haddad"
+    ],
+    "otherName": "Sam Rivera",
+    "owner": "Dana Lee",
+    "initials": "DL",
+    "due": "2026-12-18",
+    "dueShown": "Fri, Dec 18",
+    "chip": "Dec 18",
+    "before": {
+      "owner": "Omar Haddad",
+      "handedOver": "not known · Set",
+      "due": "no date · Set"
+    },
+    "remove": "--remove",
+    "typed": {
+      "keys": "11112026",
+      "due": "2026-11-11",
+      "shown": "Wed, Nov 11",
+      "halfYear": "1110002",
+      "_why": "day = month: the same keys in a month/day/year box and a day.month.year one (the box's order is the computer's region's)",
+      "leftKeys": "12122026",
+      "leftDue": "2026-12-12",
+      "leftShown": "Sat, Dec 12"
+    }
+  },
+  "threads": [
+    "Acme rollout",
+    "Globex pilot"
+  ],
+  "kickoff": "Globex pilot kickoff",
+  "myTask": "Send Acme the SSO checklist",
+  "palette": {
+    "thread": "Globex pilot",
+    "typed": "globex pilot"
+  },
+  "sizes": {
+    "start": {
+      "width": 1201,
+      "height": 868
+    },
+    "topBar": [
+      {
+        "width": 1201,
+        "height": 868
+      },
+      {
+        "width": 900,
+        "height": 700
+      },
+      {
+        "width": 760,
+        "height": 480
+      }
+    ],
+    "narrow": {
+      "width": 800,
+      "height": 700
+    }
+  },
+  "board": {
+    "thread": "acme-rollout",
+    "threadName": "Acme rollout",
+    "story": {
+      "id": "S001",
+      "title": "SSO for the Berlin pilot",
+      "criterion": "SAML works for Berlin users"
+    },
+    "t1": {
+      "id": "T001",
+      "title": "Send Acme the SSO checklist",
+      "owner": "Sam Rivera",
+      "initials": "SR"
+    },
+    "t2": {
+      "id": "T002",
+      "title": "Answer the security questionnaire",
+      "owner": "Omar Haddad",
+      "initials": "OH",
+      "pastDue": "2026-01-05",
+      "pastDueShown": "Jan 5"
+    },
+    "columns": [
+      [
+        "To do",
+        2
+      ],
+      [
+        "In progress",
+        0
+      ],
+      [
+        "Waiting",
+        0
+      ],
+      [
+        "Blocked",
+        0
+      ],
+      [
+        "Done",
+        0
+      ]
+    ],
+    "fields": [
+      [
+        "Story",
+        true
+      ],
+      [
+        "Kind",
+        true
+      ],
+      [
+        "Owner",
+        true
+      ],
+      [
+        "Due date",
+        true
+      ],
+      [
+        "Waiting on",
+        true
+      ],
+      [
+        "Holds up",
+        true
+      ],
+      [
+        "Last call",
+        false
+      ]
+    ],
+    "newView": "Mine",
+    "description": "Checklist covers SAML and SCIM.",
+    "titleV2": "Send Acme the SSO checklist (v2)",
+    "path": "Acme rollout › SSO for the Berlin pilot",
+    "kinds": [
+      "All kinds · 4",
+      "Stories · 1",
+      "Tasks · 2",
+      "Decisions · 1",
+      "Risks · 0",
+      "Questions · 0"
+    ],
+    "owners": [
+      "Anyone",
+      "Nobody named",
+      "Me (Sam Rivera)",
+      "Omar Haddad"
+    ],
+    "decision": "Pilot starts in Berlin",
+    "risk": "SSO vendor delay",
+    "question": "Who signs off the pilot?",
+    "likelihood": "high",
+    "impact": "medium",
+    "link": "echo://task/acme-rollout/T002",
+    "counts": {
+      "both": "2",
+      "one": "1",
+      "none": "0"
+    },
+    "states": {
+      "open": "open",
+      "inProgress": "in_progress"
+    },
+    "modes": {
+      "byHand": "manual",
+      "cleared": {
+        "by": "you",
+        "mode": null
+      }
+    }
+  },
+  "globex": {
+    "thread": "globex-pilot",
+    "t1": {
+      "id": "T001",
+      "title": "Draft the Globex pilot plan"
+    },
+    "column": {
+      "name": "Review",
+      "limit": "1",
+      "state": "to do",
+      "shown": "0 / 1"
+    },
+    "search": "SSO",
+    "results": [
+      "Acme rollout · S001 SSO for the Berlin pilot",
+      "Acme rollout · T001 Send Acme the SSO checklist"
+    ],
+    "resultOwner": "Sam Rivera",
+    "linked": "Acme rollout · T001 Send Acme the SSO checklist",
+    "linkedHistory": "you linked it to Acme rollout · T001 (the same work, done there)",
+    "unlinkedHistory": "you unlinked Acme rollout · T001",
+    "proposal": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Share the Globex pilot plan next week",
+        "internal_owner": "Sam Rivera",
+        "quote": "I'll draft the pilot plan and share it next week."
+      }
+    ],
+    "path": "Globex pilot › Pilot plan",
+    "source": "▮ 00:13"
+  },
+  "review": {
+    "merge": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Send Acme the SSO checklist today",
+        "internal_owner": "Sam Rivera",
+        "quote": "I'll send the SSO checklist this afternoon."
+      }
+    ],
+    "mergeBanner": "Same work as Send Acme the SSO checklist? Send Acme the SSO checklist today — Same as T001 “Send Acme the SSO checklist”? Their titles share most words (Echo's check, no model).",
+    "reject": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Answer the security questionnaire by Friday",
+        "internal_owner": "Omar Haddad",
+        "quote": "Omar will answer the security questionnaire by Friday."
+      }
+    ],
+    "rejectBanner": "Same work as Answer the security questionnaire?"
+  },
+  "account": "Claude Code (as configured)",
+  "diagrams": {
+    "script": "diagram-repair.json",
+    "broken": "\n## Plan\n\n```mermaid\nflowchart TD\n  A[Budget (Q3)] --> B[Pilot (Globex)]\n```\n",
+    "repaired": "A[\"Budget (Q3)\"] --> B[\"Pilot (Globex)\"]",
+    "refused": "\n## Risks\n\n```mermaid\nflowchart LR\n  R1[Data (EU)] --> R2[Legal sign-off]\n```\n",
+    "refusedBlock": "R1[Data (EU)] --> R2[Legal sign-off]"
+  },
+  "s19": {
+    "long": {
+      "recording": "minutes-call",
+      "title": "CLA-004 write now"
+    },
+    "short": {
+      "recording": "very-short",
+      "title": "CLA-004 short"
+    },
+    "notes": "- [00:09] ask legal about the contract\n- [00:14] Berlin needs ten seats in the training room\n- Ask Kim for the pilot budget\n",
+    "notesSay": [
+      "ask legal about the contract",
+      "ten seats",
+      "pilot budget"
+    ],
+    "folderA": "folder-a",
+    "delay": 4,
+    "wrongModel": "no-such-model",
+    "model": "large-v3-turbo-q5_0",
+    "autoOff": {
+      "recording": "minutes-call",
+      "title": "CLA-015 auto off",
+      "quiet": 120
+    },
+    "missed": {
+      "recording": "minutes-call",
+      "title": "CLA-007 missed",
+      "quiet": 105,
+      "startsWithin": 15,
+      "said": "sso checklist"
+    },
+    "checks": [
+      "microphone",
+      "system-audio",
+      "accessibility",
+      "screen"
+    ]
+  },
+  "clients": {
+    "own": {
+      "id": "initech",
+      "group": "Initech · your company",
+      "facts": "0 threads · initech.example"
+    },
+    "groups": [
+      "Acme",
+      "Globex"
+    ],
+    "acme": {
+      "id": "acme",
+      "name": "Acme",
+      "facts": "1 thread · acme.example",
+      "tabs": [
+        "Overview",
+        "Calls1",
+        "Tasks1",
+        "People",
+        "Profile"
+      ],
+      "thread": {
+        "id": "acme-rollout",
+        "name": "Acme rollout"
+      },
+      "card": "Acme rollout Active",
+      "cardLines": [
+        "1 call · last today",
+        "0 of 1 story done",
+        "1 I owe"
+      ],
+      "about": "Pilot customer in Berlin.",
+      "typed": "x",
+      "call": "Acme weekly sync",
+      "notCall": "Initech planning",
+      "callDay": "Today, ",
+      "piles": [
+        [
+          "I owe",
+          1
+        ],
+        [
+          "Owed to me",
+          0
+        ],
+        [
+          "Waiting for others",
+          0
+        ],
+        [
+          "Nobody named",
+          0
+        ]
+      ],
+      "mine": "Send Acme the SSO checklist",
+      "other": "Answer the security questionnaire",
+      "otherOwner": "Omar Haddad",
+      "others": 1,
+      "detailsPath": "Acme rollout › SSO for the Berlin pilot"
+    },
+    "globex": {
+      "id": "globex",
+      "name": "Globex",
+      "facts": "1 thread · globex.example",
+      "domain": "globex.example",
+      "alias": "GBX",
+      "newDomain": "globex.net",
+      "thread": "Globex pilot Active 1 call",
+      "newThread": {
+        "name": "Globex support",
+        "id": "globex-support",
+        "placeholder": "New thread for Globex"
+      }
+    },
+    "hooli": {
+      "id": "hooli",
+      "name": "Hooli",
+      "domain": "hooli.example",
+      "group": "Hooli"
+    },
+    "org": {
+      "name": "Contoso Partners",
+      "id": "contoso-partners",
+      "domain": "contoso.example",
+      "options": [
+        "Contoso Partners · contoso.example",
+        "Globex · globex.example"
+      ]
+    }
+  },
+  "people": {
+    "thread": {
+      "name": "People lab",
+      "id": "people-lab"
+    },
+    "call": "acme-weekly-sync",
+    "seen": [
+      {
+        "name": "Dana Lee",
+        "email": "dana@acme.example",
+        "org": "Acme",
+        "calls": "1/1",
+        "last": "today"
+      },
+      {
+        "name": "Omar Haddad",
+        "email": "omar@acme.example",
+        "org": "Acme",
+        "calls": "1/1",
+        "last": "today"
+      }
+    ],
+    "dana": {
+      "name": "Dana Lee",
+      "key": "dana@acme.example",
+      "org": "Acme"
+    },
+    "omar": {
+      "name": "Omar Haddad"
+    },
+    "place": {
+      "to": "Manage closely",
+      "influence": 3,
+      "interest": 3,
+      "then": "Monitor"
+    },
+    "suggestions": [
+      {
+        "who": "Dana Lee",
+        "field": "stance",
+        "value": "champion",
+        "quote": "We need the SSO checklist from you by the end of today."
+      },
+      {
+        "who": "Omar Haddad",
+        "field": "influence",
+        "value": 3,
+        "quote": "Omar will answer the security questionnaire by Friday."
+      },
+      {
+        "who": "Omar Haddad",
+        "field": "title",
+        "value": "Security lead",
+        "quote": "Omar will answer the security questionnaire by Friday."
+      }
+    ],
+    "asks": [
+      "Is Dana Lee a champion?",
+      "Omar Haddad's influence: high?",
+      "Omar Haddad is Security lead?"
+    ],
+    "firstRow": "Is Dana Lee a champion? “We need the SSO checklist from you by the end of today.” Acme weekly sync · today · 00:13",
+    "added": 3,
+    "changing": "Omar Haddad is Security lead →",
+    "changed": "Head of Security",
+    "edit": {
+      "title": "Head of IT",
+      "subtitle": "Head of IT · Acme",
+      "stance": "supporter",
+      "role": "Sponsor"
+    },
+    "orgByDomain": "Acme (by mail domain)",
+    "saw": "1 of 1",
+    "dup": {
+      "name": "Dana L",
+      "entry": "Dana L <dlee@acme.example>",
+      "email": "dlee@acme.example",
+      "option": "Dana Lee · dana@acme.example"
+    },
+    "pat": {
+      "entry": "Pat Novak <pat@acme.example>",
+      "name": "Pat Novak",
+      "email": "pat@acme.example",
+      "org": "Acme"
+    },
+    "lena": {
+      "entry": "Lena Fox <lena@contoso.example>",
+      "name": "Lena Fox",
+      "domain": "contoso.example",
+      "line": "lena@contoso.example · contoso.example",
+      "org": "Contoso",
+      "orgId": "contoso"
+    },
+    "suggestionsFile": "people-suggestions.json"
+  },
+  "tasks": {
+    "acme": {
+      "project": "acme-rollout",
+      "id": "T001",
+      "title": "Send Acme the SSO checklist",
+      "story": "SSO for the Berlin pilot",
+      "thread": "Acme rollout",
+      "option": "Acme rollout · 2",
+      "path": "Acme rollout › SSO for the Berlin pilot",
+      "owner": "Sam Rivera"
+    },
+    "globex": {
+      "project": "globex-pilot",
+      "id": "T001",
+      "title": "Draft the Globex pilot plan",
+      "story": "Pilot plan",
+      "thread": "Globex pilot",
+      "option": "Globex pilot · 1",
+      "path": "Globex pilot › Pilot plan",
+      "owner": "Sam Rivera",
+      "due": "no date",
+      "status": "● to do"
+    },
+    "other": {
+      "project": "acme-rollout",
+      "id": "T002",
+      "title": "Answer the security questionnaire",
+      "owner": "Omar Haddad",
+      "thread": "Acme rollout",
+      "handedBy": "Me"
+    },
+    "threads": [
+      "All threads",
+      "Acme rollout · 2",
+      "Globex pilot · 1"
+    ],
+    "active": 2,
+    "skillTask": {
+      "project": "acme-rollout",
+      "parent": "S001",
+      "title": "Write the follow-up mail to Acme",
+      "owner": "Sam Rivera",
+      "skill": "Use when a task is to write a follow-up mail"
+    },
+    "fold": {
+      "project": "acme-rollout",
+      "parent": "S001",
+      "title": "Fold test {n}",
+      "owner": "Sam Rivera",
+      "total": 7,
+      "shown": 6
+    },
+    "close": {
+      "note": "Sent the checklist by email"
+    },
+    "counts": {
+      "start": [
+        2,
+        0,
+        0,
+        0
+      ],
+      "handedOver": [
+        1,
+        0,
+        0
+      ]
+    },
+    "emptyPiles": [
+      "owed",
+      "waiting",
+      "nobody"
+    ],
+    "states": {
+      "done": "done",
+      "open": "open",
+      "cancelled": "cancelled"
+    },
+    "stages": {
+      "closed": "done",
+      "active": "active"
+    }
+  },
+  "housekeeping": {
+    "groups": [
+      "Today",
+      "Yesterday"
+    ],
+    "icons": [
+      [
+        "Acme weekly sync",
+        "Minutes"
+      ],
+      [
+        "Initech planning",
+        "Transcript"
+      ],
+      [
+        "Globex pilot kickoff",
+        "Minutes"
+      ]
+    ],
+    "kickoff": {
+      "title": "Globex pilot kickoff",
+      "thread": "Globex pilot",
+      "sections": [
+        [
+          "Summary",
+          "Globex wants a pilot plan in two weeks",
+          "00:05"
+        ],
+        [
+          "Action items",
+          "Me — draft the Globex pilot plan",
+          "00:13"
+        ]
+      ],
+      "absent": [
+        "Decisions",
+        "Open questions"
+      ]
+    },
+    "acme": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "thread": {
+        "id": "acme-rollout",
+        "name": "Acme rollout"
+      },
+      "turns": 5,
+      "kind": "Client",
+      "kindSet": "Partner",
+      "menu": [
+        "Show folder",
+        "Open minutes in browser",
+        "Show minutes in Finder",
+        "Write minutes again",
+        "Default",
+        "Discussion",
+        "Edit templates…",
+        "Ask Claude about this call",
+        "Delete…"
+      ],
+      "firstLine": "# Acme weekly sync"
+    },
+    "initech": {
+      "title": "Initech planning",
+      "folder": "initech-planning",
+      "turns": 2,
+      "kind": "1:1",
+      "menu": [
+        "Show folder",
+        "Ask Claude about this call",
+        "Delete…"
+      ]
+    },
+    "threads": [
+      "Acme rollout",
+      "Globex pilot"
+    ],
+    "pin": {
+      "thread": "globex-pilot",
+      "name": "Globex pilot",
+      "why": "pinned"
+    },
+    "kinds": [
+      "Client",
+      "Partner",
+      "1:1",
+      "Internal",
+      "Industry & Analyst",
+      "Other"
+    ],
+    "missing": "2026-01-01_000000-no-such-call",
+    "failingRun": {
+      "wrote": "# Half-written minutes",
+      "says": "test fake: stopped after writing",
+      "script": "#!/bin/sh\n# A minutes run: writes over notes.md, then fails. Anything else: the data's fake.\nif [ -n \"$ECHOCTL_RUN_CALL\" ] && [ -z \"$ECHOCTL_RUN_MODE\" ]; then printf '# Half-written minutes\\n' > \"$ECHOCTL_RUN_CALL/notes.md\"; echo \"test fake: stopped after writing\" >&2; exit 1; fi\nexec \"$(dirname \"$0\")/claude.fake\" \"$@\"\n",
+      "bin": "bin",
+      "claude": "claude",
+      "dataFake": "claude.fake"
+    }
+  },
+  "setup": {
+    "me": {
+      "name": "Sam Rivera",
+      "email": "sam@initech.example",
+      "newName": "Sam Rivera Jr",
+      "profile": "I lead delivery at Initech. Write to me in short bullets.",
+      "profileLines": [
+        "Name:",
+        "Role:",
+        "Company / team:"
+      ]
+    },
+    "language": {
+      "code": "uk",
+      "name": "Ukrainian",
+      "base": "English",
+      "baseCode": "en",
+      "short": [
+        "EN",
+        "UK"
+      ]
+    },
+    "templates": {
+      "rows": [
+        [
+          "Default",
+          "Built in",
+          "Any call no other template matches · 4 sections"
+        ],
+        [
+          "Discussion",
+          "Built in",
+          "discuss, review, design, architecture, planning, workshop, brainstorm · 5 sections"
+        ],
+        [
+          "Status sync",
+          "Built in",
+          "daily, sync, standup, stand-up, status, weekly · 4 sections"
+        ],
+        [
+          "Memo",
+          "Built in",
+          "Memos only — a part per thread · 2 sections"
+        ]
+      ],
+      "status": {
+        "id": "status-sync",
+        "name": "Status sync",
+        "words": [
+          "daily",
+          "sync",
+          "standup",
+          "stand-up",
+          "status",
+          "weekly"
+        ],
+        "sections": [
+          "Summary",
+          "Progress",
+          "Blockers & risks",
+          "Action items"
+        ],
+        "summary": "Two lines on the week for Acme.",
+        "word": "retro",
+        "newSection": "Risks",
+        "removed": "Blockers & risks",
+        "value": "{language}"
+      },
+      "values": [
+        "{title}",
+        "{date}",
+        "{time}",
+        "{duration}",
+        "{participants}",
+        "{colleagues}",
+        "{external}",
+        "{organizer}",
+        "{type}",
+        "{thread}",
+        "{client}",
+        "{previous}",
+        "{me}",
+        "{language}"
+      ],
+      "own": {
+        "name": "Client kickoff",
+        "id": "client-kickoff",
+        "word": "kickoff",
+        "sections": [
+          "Summary",
+          "Decisions",
+          "Action items",
+          "Open questions"
+        ]
+      },
+      "tabs": {
+        "minutes": [
+          "Minutes",
+          4
+        ],
+        "types": [
+          "Meeting types",
+          6
+        ],
+        "skills": [
+          "Skills",
+          1
+        ]
+      },
+      "types": [
+        "Client",
+        "Partner",
+        "1:1",
+        "Internal",
+        "Industry & Analyst",
+        "Other"
+      ],
+      "client": {
+        "id": "client",
+        "name": "Client",
+        "about": "A client's or prospect's people take part, about their work: a status meeting, a workshop, a demo, a negotiation.",
+        "edited": "A client or prospect takes part: status, workshop, demo."
+      },
+      "oneOnOne": {
+        "name": "1:1",
+        "about": "The user and one colleague, nobody else."
+      },
+      "newType": {
+        "name": "Steering committee",
+        "id": "steering-committee",
+        "about": "Sponsors and leads reviewing a programme monthly."
+      },
+      "cli": {
+        "templates": [
+          "default",
+          "discussion",
+          "status-sync",
+          "memo"
+        ],
+        "types": [
+          "client",
+          "partner",
+          "one-on-one",
+          "internal",
+          "industry",
+          "other"
+        ],
+        "skill": "follow-up-mail",
+        "values": [
+          "title",
+          "date",
+          "time",
+          "duration",
+          "participants",
+          "colleagues",
+          "external",
+          "organizer",
+          "type",
+          "thread",
+          "client",
+          "previous",
+          "me",
+          "language"
+        ],
+        "keys": [
+          "folder",
+          "meeting_types",
+          "skills",
+          "templates",
+          "values"
+        ],
+        "kind": "builtin"
+      }
+    },
+    "vocabulary": {
+      "terms": [
+        "Kubernetes",
+        "Berlin pilot"
+      ],
+      "twice": "Okta SSO",
+      "learned": [
+        "Berlin pilot",
+        "Okta SSO"
+      ],
+      "scope": "Meetings: acme weekly sync · People: dana@acme.example, omar@acme.example · 1 call",
+      "more": [
+        "Entra ID",
+        "SCIM",
+        "Zero trust",
+        "Data residency"
+      ],
+      "seventh": "Pen test",
+      "filter": "okta",
+      "nomatch": "nomatch",
+      "call": "acme-weekly-sync"
+    }
+  },
+  "s10": {
+    "clients": {
+      "acme": "Acme",
+      "globex": "Globex",
+      "initech": "Initech"
+    },
+    "listed": "Acme weekly sync",
+    "meetings": [
+      {
+        "subject": "Globex design review",
+        "names": [
+          "Kim Park"
+        ],
+        "minutes": 30
+      },
+      {
+        "subject": "Acme demo",
+        "names": [
+          "Dana Lee"
+        ],
+        "minutes": 30
+      }
+    ],
+    "notListed": "Industry webinar",
+    "search": "Acme",
+    "globexEvent": "ev-globex-review",
+    "threads": [
+      "Acme rollout",
+      "Globex pilot"
+    ],
+    "pin": "Globex pilot",
+    "me": "Sam",
+    "todayCalls": [
+      "acme-weekly-sync",
+      "initech-planning"
+    ],
+    "task": {
+      "thread": "acme-rollout",
+      "done": "{\"op\":\"edit\",\"node\":\"T001\",\"set\":{\"state\":\"done\"}}",
+      "undo": "{\"op\":\"undo\",\"target\":\"{mid}\"}"
+    }
+  },
+  "s12": {
+    "skill": {
+      "id": "follow-up-mail",
+      "name": "Follow up mail",
+      "heading": "Follow-up mail",
+      "count": 1,
+      "description": "Use when a task is to write a follow-up mail after a meeting",
+      "badName": "Звіт"
+    },
+    "profiles": {
+      "system": {
+        "id": "system",
+        "name": "Claude Code (as configured)",
+        "minutes": "sonnet",
+        "live": "haiku"
+      },
+      "local": {
+        "id": "local-llama",
+        "name": "Local Llama",
+        "model": "llama3.2",
+        "url": "http://127.0.0.1:9",
+        "kind": "local"
+      }
+    },
+    "models": {
+      "turbo": [
+        "large-v3-turbo-q5_0",
+        574
+      ],
+      "others": [
+        [
+          "large-v3-turbo-q8_0",
+          874
+        ],
+        [
+          "large-v3-q5_0",
+          1081
+        ],
+        [
+          "small-q8_0",
+          264
+        ]
+      ],
+      "notInBuild": [
+        "nemotron-3.5-0.6b",
+        "parakeet-tdt-0.6b-v3"
+      ]
+    },
+    "market": {
+      "folder": "market",
+      "name": "acme-local",
+      "manifest": {
+        "name": "acme-local",
+        "featured": [
+          "acme-notes"
+        ],
+        "plugins": [
+          {
+            "id": "acme-notes",
+            "source": "./plugins/acme-notes",
+            "categories": [
+              "automation"
+            ]
+          }
+        ]
+      },
+      "builtIn": {
+        "name": "onetest",
+        "source": "onetest-ai/echo-plugins"
+      }
+    },
+    "plugin": {
+      "id": "acme-notes",
+      "name": "Acme notes",
+      "version": "0.1.0",
+      "category": "Automation",
+      "summary": "A made-up plugin for tests",
+      "folder": "plugins/acme-notes",
+      "manifest": {
+        "id": "acme-notes",
+        "name": "Acme notes",
+        "version": "0.1.0",
+        "summary": "A made-up plugin for tests",
+        "settings": [
+          {
+            "key": "greeting",
+            "label": "Greeting",
+            "type": "string",
+            "default": "hello"
+          },
+          {
+            "key": "loud",
+            "label": "Loud",
+            "type": "bool",
+            "default": false
+          }
+        ]
+      },
+      "greeting": {
+        "key": "greeting",
+        "label": "Greeting",
+        "before": "hello",
+        "after": "good morning"
+      },
+      "loud": {
+        "key": "loud",
+        "label": "Loud",
+        "before": false,
+        "after": true
+      },
+      "search": "acme",
+      "noMatch": "zzzz"
+    }
+  },
+  "s14": {
+    "model": "large-v3-turbo-q5_0",
+    "maxWer": 0.15,
+    "acme": {
+      "recording": "acme-sync",
+      "title": "TRN-001 acme",
+      "says": [
+        "Berlin first",
+        "SSO checklist"
+      ]
+    },
+    "twoRemotes": {
+      "recording": "two-remotes",
+      "title": "TRN-003 en only",
+      "language": "en"
+    },
+    "oneLanguage": [
+      {
+        "recording": "ukrainian-call",
+        "title": "TRN-002 Ukrainian",
+        "language": "uk"
+      },
+      {
+        "recording": "russian-call",
+        "title": "TRN-002 Russian",
+        "language": "ru"
+      }
+    ],
+    "silence": {
+      "recording": "long-silence",
+      "title": "TRN-005 silence"
+    },
+    "vocabulary": {
+      "conversation": "acme-sync",
+      "turns": 6,
+      "terms": "ServiceNow,Kubernetes,Terraform,Snowflake,SSO,Berlin,Madrid",
+      "hint": "ServiceNow, Kubernetes, Terraform, Snowflake, SSO, Berlin, Madrid",
+      "unsaid": [
+        "ServiceNow",
+        "Kubernetes",
+        "Terraform",
+        "Snowflake"
+      ],
+      "said": [
+        "SSO checklist",
+        "Berlin first"
+      ],
+      "withIt": "_150000-acme-sync-vocabulary",
+      "plain": "_150500-acme-sync-plain"
+    }
+  },
+  "s01": {
+    "groups": [
+      [
+        "Today",
+        [
+          "Initech planning",
+          "Acme weekly sync"
+        ]
+      ],
+      [
+        "Yesterday",
+        [
+          "Globex pilot kickoff"
+        ]
+      ]
+    ],
+    "next": "Globex design review",
+    "acme": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "length": "30 min",
+      "firstPeople": "Dana Lee, Omar Haddad",
+      "people": "Dana Lee, Omar Haddad",
+      "thread": "Acme rollout"
+    },
+    "search": [
+      {
+        "words": "Globex",
+        "listed": [
+          "Globex pilot kickoff"
+        ]
+      },
+      {
+        "words": "Omar",
+        "listed": [
+          "Acme weekly sync"
+        ]
+      }
+    ],
+    "sections": [
+      "Summary",
+      "Decisions",
+      "Action items",
+      "Open questions"
+    ],
+    "actions": [
+      [
+        "Me — send Acme the SSO checklist today",
+        "00:21"
+      ],
+      [
+        "Omar Haddad — answer the security questionnaire by Friday",
+        "00:29"
+      ]
+    ],
+    "chip": {
+      "line": "SSO rollout for Acme is on track; the pilot starts with the Berlin office",
+      "time": "00:37"
+    },
+    "jump": {
+      "turn": "0:37 Me",
+      "says": "Then we agree: pilot starts with the Berlin office."
+    },
+    "turns": [
+      "0:05 Me",
+      "0:13 Remote",
+      "0:21 Me",
+      "0:29 Remote",
+      "0:37 Me"
+    ],
+    "find": {
+      "word": "checklist",
+      "hits": [
+        "0:13 Remote",
+        "0:21 Me"
+      ]
+    },
+    "note": "Ask Dana about the Berlin office date",
+    "status": "● to do"
+  },
+  "s02": {
+    "accepted": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Acme demo"
+    ],
+    "notAccepted": "Industry webinar",
+    "lastPast": "Initech planning",
+    "coming": [
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "recorded": [
+      "Acme weekly sync",
+      "Initech planning"
+    ],
+    "card": {
+      "subject": "Globex design review",
+      "organizer": "Sam Rivera"
+    },
+    "schedule": {
+      "subject": "Globex design review",
+      "other": "Acme demo"
+    },
+    "scroll": 120,
+    "dayList": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "comingGoing": [
+      "Globex design review",
+      "Acme demo"
+    ],
+    "noReplySays": "no reply"
+  },
+  "s04": {
+    "mine": [
+      "Send Acme the SSO checklist",
+      "Draft the Globex pilot plan"
+    ],
+    "others": [
+      "Answer the security questionnaire"
+    ],
+    "dueToday": {
+      "title": "Send Acme the SSO checklist",
+      "project": "acme-rollout"
+    },
+    "agenda": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "keys": [
+      "watcher",
+      "armed",
+      "agenda"
+    ]
+  },
+  "s05": {
+    "groups": [
+      "Acme",
+      "Globex",
+      "Initech · your company"
+    ],
+    "under": {
+      "Acme": [
+        "Acme rollout 1 call · Today Active"
+      ],
+      "Globex": [
+        "Globex pilot 1 call · Yesterday Active"
+      ],
+      "Initech · your company": []
+    },
+    "own": "Initech · your company",
+    "fold": {
+      "group": "Acme",
+      "row": "Acme rollout",
+      "count": 1,
+      "client": "acme"
+    },
+    "openOn": {
+      "id": "globex-pilot",
+      "tab": "work"
+    },
+    "hiring": {
+      "name": "Initech hiring",
+      "id": "initech-hiring",
+      "client": "Initech",
+      "clientId": "initech",
+      "row": "Initech hiring 0 calls Active",
+      "facts": "0 calls",
+      "stage": "active"
+    },
+    "clientOptions": [
+      "None",
+      "Initech",
+      "Acme",
+      "Globex"
+    ],
+    "acme": {
+      "id": "acme-rollout",
+      "name": "Acme rollout",
+      "client": "Acme",
+      "stage": "Delivery · Active",
+      "facts": "1 call · last call today",
+      "tabs": [
+        "Brief",
+        "Work3",
+        "Calls1",
+        "People",
+        "Profile"
+      ],
+      "menu": [
+        "Open Acme",
+        "Claude about this thread",
+        "Sync now",
+        "Delete…"
+      ]
+    },
+    "org": {
+      "token": "Globex",
+      "option": "Globex · globex.example",
+      "options": [
+        "Organisation…",
+        "Globex · globex.example",
+        "+ New organisation…"
+      ]
+    },
+    "rule": {
+      "kind": "Subject contains",
+      "kinds": [
+        "Meeting series",
+        "The client's people",
+        "Subject contains",
+        "Teams chat id"
+      ],
+      "words": "planning",
+      "token": "subject “planning”",
+      "json": {
+        "kind": "subject",
+        "contains": "planning"
+      },
+      "before": "1 call match · 1 pinned",
+      "after": "2 calls match · 1 pinned",
+      "takenOut": "1 call match · 1 pinned, 1 taken out by hand",
+      "remove": "1",
+      "calls": [
+        "Acme weekly sync",
+        "Initech planning"
+      ]
+    },
+    "pinned": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync",
+      "day": "Today"
+    },
+    "matched": {
+      "title": "Initech planning",
+      "folder": "initech-planning"
+    },
+    "whys": {
+      "pinned": "pinned",
+      "subject": "subject"
+    },
+    "fromCall": {
+      "id": "initech-planning",
+      "name": "Initech planning",
+      "token": "series “Initech planning”",
+      "line": "1 call match · 1 pinned",
+      "threads": [
+        "Acme rollout",
+        "Globex pilot"
+      ]
+    },
+    "globex": {
+      "id": "globex-pilot",
+      "name": "Globex pilot",
+      "renamed": "Globex pilot phase 2",
+      "group": "Globex",
+      "brief": "Pilot for **Globex** design review.",
+      "briefShown": "Pilot for Globex design review.",
+      "bold": "Globex",
+      "draft": "Draft to throw away",
+      "latest": "Globex pilot kickoff",
+      "since": "2026-11-01",
+      "notes": "Call the pilot \"GP\".",
+      "colour": "#f0a24a",
+      "stageGroups": {
+        "Pursuit": [
+          "Lead",
+          "Proposal",
+          "Negotiation"
+        ],
+        "Delivery": [
+          "Kickoff",
+          "Active",
+          "On hold",
+          "Wrap-up"
+        ],
+        "Closed": [
+          "Done",
+          "Lost",
+          "Cancelled"
+        ]
+      },
+      "active": "Active",
+      "wrapUp": "Wrap-up",
+      "done": "Done",
+      "wrapUpTag": "Delivery · Wrap-up",
+      "doneTag": "Done",
+      "closedRow": "Globex pilot 1 call · Yesterday",
+      "stageIds": {
+        "active": "active",
+        "done": "done",
+        "closed": "closed"
+      },
+      "domains": "globex.example",
+      "clientId": "globex"
+    },
+    "northwind": {
+      "name": "Northwind",
+      "id": "northwind",
+      "domain": "northwind.example"
+    },
+    "scratch": {
+      "name": "Scratch thread",
+      "id": "scratch-thread"
+    },
+    "notIn": "acme-rollout",
+    "callFiles": [
+      "meta.json",
+      "meeting.json"
+    ],
+    "emptyBrief": "empty-brief.md"
+  },
+  "s17": {
+    "_about": "S-17 A recorded call end to end: the prepared recordings it reads and copies, and the call it opens in the browser",
+    "model": "large-v3-turbo-q5_0",
+    "capture": {
+      "recording": "acme-sync",
+      "seconds": [
+        36,
+        44
+      ],
+      "exit": "0"
+    },
+    "pinned": {
+      "recording": "mixed-languages-pinned",
+      "title": "TRN-004 pinned",
+      "language": "uk",
+      "languages": [
+        "uk"
+      ]
+    },
+    "next": {
+      "recording": "mixed-languages",
+      "title": "TRN-004 next",
+      "language": "uk"
+    },
+    "workspace": [
+      "en",
+      "uk",
+      "ru"
+    ],
+    "short": {
+      "recording": "very-short",
+      "title": "REC-013 very-short",
+      "files": [
+        "meta.json",
+        "segments.json",
+        "transcript.md"
+      ],
+      "says": "Quick one. Is the call at three still on?",
+      "minutes": 1,
+      "why": "shorter than 3 minutes"
+    },
+    "browser": {
+      "title": "Acme weekly sync",
+      "folder": "acme-weekly-sync"
+    },
+    "main": {
+      "conversation": "acme-sync",
+      "title": "REC-001 next call",
+      "slug": "rec-001-next-call",
+      "hangUpAt": 37,
+      "stopsIn": [
+        10,
+        15
+      ],
+      "words": [
+        "Berlin first",
+        "training room"
+      ],
+      "lines": 2
+    },
+    "notes": {
+      "typed": "Ask Dana about the Berlin office date",
+      "draft": "half a thought",
+      "terminal": "Tray-style note from the terminal",
+      "after": "Checklist goes out Friday",
+      "within": 5
+    },
+    "open": {
+      "title": "Initech planning",
+      "turns": 2
+    },
+    "autoMinutes": {
+      "recording": "minutes-call",
+      "title": "MIN-A catch-up",
+      "slug": "min-a-catch-up",
+      "early": 45,
+      "slack": 30,
+      "delay": 90
+    },
+    "notesMove": {
+      "recording": "minutes-call",
+      "title": "MIN-B notes move",
+      "slug": "min-b-notes-move",
+      "noteAfter": 35,
+      "note": "Ask Kim for the pilot budget"
+    },
+    "localLive": {
+      "profile": "here",
+      "url": "http://127.0.0.1:9",
+      "model": "m",
+      "name": "m · this computer",
+      "conversation": "minutes-call",
+      "title": "LIVE-019",
+      "slug": "live-019",
+      "early": 5,
+      "past": 100
+    },
+    "language": "en"
+  },
+  "s18": {
+    "_about": "S-18 Recording off the happy path: the captures it records from files and the prepared recordings it copies",
+    "model": "large-v3-turbo-q5_0",
+    "language": "en",
+    "stop": {
+      "conversation": "acme-sync",
+      "title": "REC-016 stop",
+      "slug": "rec-016-stop",
+      "startAt": 2,
+      "stopAt": 22,
+      "seconds": [
+        18,
+        26
+      ],
+      "peak": 1000
+    },
+    "crash": {
+      "conversation": "acme-sync",
+      "title": "REC-011 crash",
+      "slug": "rec-011-crash",
+      "startAt": 2,
+      "killAt": 17,
+      "said": "checklist",
+      "after": [
+        "Madrid",
+        "training room"
+      ],
+      "before": 17.0,
+      "files": [
+        "meta.json",
+        "mic.wav",
+        "remote.wav"
+      ],
+      "transcribed": [
+        "transcript.md",
+        "segments.json"
+      ]
+    },
+    "silence": {
+      "recording": "long-silence",
+      "title": "REC-017 silence",
+      "quiet": [
+        6,
+        25
+      ],
+      "segments": 3,
+      "speakers": [
+        "me",
+        "remote",
+        "me"
+      ],
+      "skew": 1.0
+    },
+    "voices": {
+      "recording": "two-remotes",
+      "title": "REC-018 two voices",
+      "sides": {
+        "dana": "remote",
+        "omar": "remote",
+        "me": "me"
+      }
+    },
+    "cancel": {
+      "title": "REC-003 cancelled"
+    },
+    "expire": {
+      "title": "REC-004 expiring",
+      "minutes": 16
+    },
+    "optIn": {
+      "conversation": "acme-sync",
+      "quiet": 6
+    },
+    "midCall": {
+      "conversation": "acme-sync",
+      "title": "REC-002 mid call",
+      "slug": "rec-002-mid-call",
+      "armAt": 13,
+      "endAt": 36,
+      "before": [
+        "single sign-on",
+        "SSO checklist"
+      ],
+      "after": [
+        "Berlin first",
+        "training room"
+      ],
+      "afterLines": 2
+    },
+    "terminal": {
+      "conversation": "acme-sync",
+      "title": "CLI-004 terminal",
+      "slug": "cli-004-terminal",
+      "stopAt": 20,
+      "stoppedBy": 30,
+      "endAt": 38,
+      "said": "checklist",
+      "notSaid": [
+        "Madrid",
+        "training room",
+        "Thursday"
+      ]
+    },
+    "pill": {
+      "conversation": "acme-sync",
+      "title": "REC-005 pill stop",
+      "slug": "rec-005-pill-stop",
+      "stoppedBy": 30,
+      "endAt": 38,
+      "notSaid": [
+        "training room",
+        "Thursday"
+      ]
+    },
+    "rejoin": {
+      "conversation": "acme-sync",
+      "then": "two-remotes",
+      "title": "REC-006 rejoin",
+      "slug": "rec-006-rejoin",
+      "endAt": 38,
+      "drop": 4,
+      "checkAt": 5,
+      "thenEndAt": 36,
+      "first": [
+        "Berlin first",
+        "training room"
+      ],
+      "second": [
+        "Omar is joining",
+        "pilot plan"
+      ],
+      "lines": 2,
+      "lastOfFirst": "training room",
+      "secondFirstTurn": "Hi everyone, Omar is joining us from the security team today.",
+      "joining": "Omar is joining"
+    },
+    "busy": {
+      "conversation": "acme-sync",
+      "title": "REC-025 busy",
+      "next": "REC-025 next",
+      "slug": "rec-025-busy",
+      "frozen": 8
+    }
+  },
+  "s21": {
+    "_about": "S-21 Living with Echo: the call recorded in another data folder (lifecycle/TC-005)",
+    "model": "large-v3-turbo-q5_0",
+    "language": "en",
+    "newHome": "home2",
+    "call": {
+      "conversation": "very-short",
+      "title": "LIFE-005 new folder",
+      "slug": "life-005-new-folder"
+    }
+  }
+}

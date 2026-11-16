@@ -29,6 +29,18 @@ use sha2::{Digest, Sha256};
 use crate::app::NoWindow;
 use crate::paths;
 
+pub mod addresses;
+mod appfiles;
+#[cfg_attr(not(feature = "js"), allow(unused_imports))]
+pub use appfiles::{app_file_real, app_file_rel};
+#[cfg(test)]
+use appfiles::app_file;
+mod capabilities;
+pub use capabilities::*;
+pub mod thread_values;
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub mod signin;
+
 /// Our public marketplace, always listed (it can be hidden, not removed).
 pub const BUILT_IN: &str = "onetest-ai/echo-plugins";
 const BUILT_IN_NAME: &str = "onetest";
@@ -47,219 +59,6 @@ const PLUGIN_LIMIT: Limit = Limit { files: 400, bytes: 20 << 20 };
 struct Limit {
     files: usize,
     bytes: u64,
-}
-
-// ── capabilities ──
-
-/// What a plugin may ask of Echo. `ready` = this Echo implements it; a plugin using one that isn't
-/// is listed but can't be installed ("needs a newer Echo"). The words are the permission sheet's —
-/// written here, never taken from the plugin.
-struct Capability {
-    id: &'static str,
-    ready: bool,
-    describe: fn(&Value) -> Result<String>,
-}
-
-const CAPABILITIES: &[Capability] = &[
-    Capability { id: "claude", ready: true, describe: describe_claude },
-    Capability { id: "schedule", ready: true, describe: describe_schedule },
-    Capability { id: "deliver", ready: true, describe: describe_deliver },
-    Capability { id: "deliver_provider", ready: true, describe: describe_deliver_provider },
-    Capability { id: "network", ready: true, describe: describe_network },
-    Capability { id: "channel", ready: true, describe: describe_channel },
-    Capability { id: "brain_source", ready: false, describe: describe_brain_source },
-    Capability { id: "export", ready: false, describe: describe_export },
-    Capability { id: "sessions", ready: true, describe: describe_sessions },
-    Capability { id: "folders", ready: true, describe: describe_folders },
-    Capability { id: "echo", ready: true, describe: describe_echo },
-];
-
-fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
-    match &v[key] {
-        Value::Null => Ok(vec![]),
-        Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_string).ok_or_else(|| anyhow!("“{key}” must list words"))).collect(),
-        _ => bail!("“{key}” must be a list"),
-    }
-}
-
-fn only(what: &str, got: &[String], allowed: &[&str]) -> Result<()> {
-    match got.iter().find(|g| !allowed.contains(&g.as_str())) {
-        Some(g) => bail!("{what} “{g}” isn't one Echo knows ({})", allowed.join(", ")),
-        None => Ok(()),
-    }
-}
-
-fn join_words(w: &[&str]) -> String {
-    match w {
-        [] => String::new(),
-        [a] => a.to_string(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
-fn describe_claude(_: &Value) -> Result<String> {
-    Ok("Runs Claude Code on your AI profiles, with the permissions you pick".into())
-}
-
-fn describe_schedule(_: &Value) -> Result<String> {
-    Ok("Works on its own on a schedule while Echo runs".into())
-}
-
-fn describe_deliver(v: &Value) -> Result<String> {
-    let to = strings(v, "to")?;
-    if let Some(k) = to.iter().find(|k| !crate::deliver::valid_kind(k)) {
-        bail!("a delivery “{k}” isn't a plain name");
-    }
-    if to.is_empty() {
-        bail!("“deliver” names no way to send (teams, mail, or one a plugin adds)");
-    }
-    let words: Vec<String> = to
-        .iter()
-        .map(|t| match t.as_str() {
-            "teams" => "Teams (your chat with yourself)".to_string(),
-            "mail" => "mail (to you, or to the addresses you set on a routine)".to_string(),
-            k => format!("{} (through the plugin that adds it)", title_case(k)),
-        })
-        .collect();
-    Ok(format!("Sends messages: {}", join_words(&words.iter().map(String::as_str).collect::<Vec<_>>())))
-}
-
-fn title_case(k: &str) -> String {
-    let mut c = k.chars();
-    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
-}
-
-fn describe_deliver_provider(v: &Value) -> Result<String> {
-    let kinds = strings(v, "kinds")?;
-    if kinds.is_empty() || kinds.iter().any(|k| !crate::deliver::valid_kind(k) || crate::deliver::BUILTIN.contains(&k.as_str())) {
-        bail!("“deliver_provider” names its ways by plain new names");
-    }
-    Ok(format!("Adds a way Echo sends things to you: {}", join_words(&kinds.iter().map(|k| title_case(k)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>())))
-}
-
-fn describe_network(v: &Value) -> Result<String> {
-    let hosts = strings(v, "hosts")?;
-    if hosts.is_empty() || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
-        bail!("“network” names hosts (e.g. api.example.com)");
-    }
-    Ok(format!("Talks to {} over HTTPS", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())))
-}
-
-fn describe_channel(v: &Value) -> Result<String> {
-    let p = v["plugin"].as_str().unwrap_or("");
-    // Claude Code's own channel plugins only, from Anthropic's marketplace (an org allowlist would
-    // refuse any other anyway).
-    let Some(name) = p.strip_suffix("@claude-plugins-official").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else {
-        bail!("“channel” must name a channel plugin of claude-plugins-official, e.g. telegram@claude-plugins-official");
-    };
-    let shown: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
-    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo"))
-}
-
-fn describe_brain_source(v: &Value) -> Result<String> {
-    match v["kind"].as_str() {
-        Some("vault") => Ok("Adds a folder you pick (an Obsidian vault) to the Brain: read and indexed on this computer".into()),
-        _ => bail!("“brain_source” kind must be one Echo knows (vault)"),
-    }
-}
-
-fn describe_export(v: &Value) -> Result<String> {
-    if v["kind"].as_str() != Some("vault") {
-        bail!("“export” kind must be one Echo knows (vault)");
-    }
-    let what = strings(v, "what")?;
-    only("An export of", &what, &["minutes", "people"])?;
-    if what.is_empty() {
-        bail!("“export” names nothing to write (minutes, people)");
-    }
-    Ok(format!("Writes copies of your {} into a folder you pick — only files it wrote, never yours", join_words(&what.iter().map(String::as_str).collect::<Vec<_>>())))
-}
-
-fn describe_sessions(v: &Value) -> Result<String> {
-    let mut parts = vec![];
-    if v["skills"].as_bool() == Some(true) {
-        parts.push("gives Claude in Echo skills of its own — text only, in Echo's sessions, not your Claude Code".to_string());
-    }
-    if v["read"].as_bool() == Some(true) {
-        parts.push("lets Claude in Echo read the folders you give it (your Echo folder session may also change them, with your permissions)".to_string());
-    }
-    if v["hints"].as_bool() == Some(true) {
-        parts.push("tells Claude what it knows about the client or thread open in the window".to_string());
-    }
-    if parts.is_empty() {
-        bail!("“sessions” adds nothing (skills, read, hints)");
-    }
-    let mut text = parts.join("; ");
-    text[..1].make_ascii_uppercase();
-    Ok(text)
-}
-
-fn describe_folders(v: &Value) -> Result<String> {
-    if v["write"].as_bool() == Some(true) {
-        bail!("“folders” is read-only (Echo doesn't let plugins write to your folders)");
-    }
-    let what = v["what"].as_str().unwrap_or("folders").trim();
-    if what.is_empty() || what.chars().count() > 60 {
-        bail!("“folders” what: a few words, e.g. “Obsidian vaults”");
-    }
-    Ok(format!("Reads the {what} you pick, on this computer — only those"))
-}
-
-/// What `uses.echo.read` may name, with how the sheet says it.
-const ECHO_READS: &[(&str, &str)] = &[
-    ("clients", "the names of your clients"),
-    ("threads", "the names of your threads"),
-    ("people", "who the people in your threads are"),
-    ("dictionary", "your dictionary"),
-    ("sources", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
-    ("source", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
-    ("calls", "your calls' minutes and transcripts"),
-];
-
-fn describe_echo(v: &Value) -> Result<String> {
-    let read = strings(v, "read")?;
-    let write = strings(v, "write")?;
-    if read.is_empty() && write.is_empty() {
-        bail!("“echo” reads nothing ({})", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
-    }
-    // A kind a newer Echo has means nothing here: named on the sheet, never granted (an older Echo degrades, the
-    // plugin still installs).
-    let mut said: Vec<&str> = vec![];
-    for k in &read {
-        if let Some((_, words)) = ECHO_READS.iter().find(|(x, _)| x == k) {
-            if !said.contains(words) {
-                said.push(words);
-            }
-        }
-    }
-    let unknown: Vec<&str> = read.iter().chain(&write).map(String::as_str).filter(|k| !ECHO_READS.iter().any(|(x, _)| x == k) && *k != "dictionary").collect();
-    let mut lines = vec![];
-    if !said.is_empty() {
-        lines.push(format!("Reads {} in Echo", join_words(&said)));
-    }
-    if write.iter().any(|w| w == "dictionary") {
-        lines.push("Adds names to your Echo dictionary".to_string());
-    }
-    if !unknown.is_empty() {
-        lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
-    }
-    Ok(lines.join(". "))
-}
-
-/// The permission sheet's lines for a manifest's `uses`, in order; an unknown capability or a bad
-/// value is an error naming it.
-pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
-    uses.iter()
-        .map(|(k, v)| {
-            let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
-            (c.describe)(v).with_context(|| format!("“{k}”"))
-        })
-        .collect()
-}
-
-/// The capabilities a manifest uses that this Echo doesn't implement yet.
-fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
-    uses.keys().filter(|k| CAPABILITIES.iter().find(|c| c.id == k.as_str()).is_none_or(|c| !c.ready)).cloned().collect()
 }
 
 // ── manifest ──
@@ -284,6 +83,115 @@ pub struct Manifest {
     /// The client half: a JavaScript module loaded into the Echo window, `export function apply(ctx)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
+    /// Widgets it offers for Today (`plugin:<id>:<widget>` in the catalog), their data from its host half
+    /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub widgets: Vec<WidgetDef>,
+    /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
+    /// work rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `list`, `status`, `card`) at the sizes it takes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WidgetDef {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub about: String,
+    pub kind: String,
+    #[serde(default = "widget_sizes")]
+    pub sizes: Vec<String>,
+    #[serde(default = "widget_height")]
+    pub height: String,
+    /// The rows of Today's grid it may take: 1, 2 (`[1]` when not said).
+    #[serde(default = "widget_heights")]
+    pub heights: Vec<u8>,
+    /// How often Echo asks its provider again while Today shows it, in seconds (60 at least; 60 when not said).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<u64>,
+    /// What the user may set on it (edit mode's ⚙, `echoctl today set`); its provider gets them as `params`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamDef>,
+}
+
+/// A widget's setting: `choice` (one of `options`), `bool`, `thread` (an open thread's id) or `client` (a client's id).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParamDef {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+}
+
+impl ParamDef {
+    /// Whether `v` is a value this setting takes (a thread or client: one that exists).
+    pub fn takes(&self, v: &Value) -> bool {
+        match self.kind.as_str() {
+            "choice" => v.as_str().is_some_and(|s| self.options.iter().any(|o| o == s)),
+            "bool" => v.is_boolean(),
+            "thread" => v.as_str().is_some_and(|s| crate::projects::list().iter().any(|p| p.id == s && !p.stage.closed())),
+            "client" => v.as_str().is_some_and(|s| crate::projects::clients().is_ok_and(|cs| cs.iter().any(|c| c.id == s))),
+            _ => false,
+        }
+    }
+}
+
+/// A widget's settings, checked: plain unique keys, labels, a type Echo knows, a choice's options, a default it takes.
+pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
+    let mut keys = std::collections::HashSet::new();
+    if params.len() > 6 {
+        bail!("widget “{widget}” has more than 6 settings");
+    }
+    for p in params {
+        if !valid_id(&p.key.replace('_', "-")) || !keys.insert(p.key.clone()) {
+            bail!("widget “{widget}”: setting “{}” needs a plain, unique key", p.key);
+        }
+        if p.label.trim().is_empty() || p.label.chars().count() > 40 {
+            bail!("widget “{widget}”: setting “{}” needs a label of 1–40 characters", p.key);
+        }
+        match p.kind.as_str() {
+            "choice" if p.options.is_empty() || p.options.len() > 12 || p.options.iter().any(|o| o.is_empty() || o.chars().count() > 40) => {
+                bail!("widget “{widget}”: setting “{}” is a choice of 1–12 options of 40 characters at most", p.key)
+            }
+            "choice" | "bool" | "thread" | "client" => {}
+            k => bail!("widget “{widget}”: setting “{}” has a type Echo doesn't know ({k}; choice, bool, thread, client)", p.key),
+        }
+        if let Some(d) = &p.default {
+            if matches!(p.kind.as_str(), "choice" | "bool") && !p.takes(d) {
+                bail!("widget “{widget}”: setting “{}”'s default isn't one it takes", p.key);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn widget_sizes() -> Vec<String> {
+    vec!["M".into()]
+}
+fn widget_height() -> String {
+    "hug".into()
+}
+fn widget_heights() -> Vec<u8> {
+    vec![1]
+}
+
+/// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
+pub const WIDGET_KINDS: [&str; 7] = ["stat", "stats", "chart", "list", "status", "card", "page"];
+
+/// Each enabled plugin's manifest (one it can't read is left out).
+pub fn enabled_manifests() -> Vec<(String, Manifest)> {
+    enabled().into_iter().filter_map(|p| read_manifest(&plugin_dir(&p)).ok().map(|m| (p.id.clone(), m))).collect()
+}
+
+/// The commands enabled plugins let Echo's sessions run (`uses.sessions.commands`): `(plugin, command)`.
+pub fn session_commands() -> Vec<(String, String)> {
+    enabled_manifests().into_iter().flat_map(|(id, m)| m.uses.get("sessions").and_then(|s| s["commands"].as_array()).into_iter().flatten().filter_map(|c| c.as_str().map(|c| (id.clone(), c.to_string()))).collect::<Vec<_>>()).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +256,59 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
+        let k = k.as_str().unwrap_or("");
+        match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
+            None => bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin"),
+            Some(s) if s.default.is_some() => bail!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter"),
+            Some(_) => {}
+        }
+    }
+    let mut ids = std::collections::HashSet::new();
+    if m.widgets.len() > 12 {
+        bail!("it declares more than 12 widgets");
+    }
+    for w in &m.widgets {
+        if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
+            bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
+        }
+        if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
+            bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
+        }
+        if !WIDGET_KINDS.contains(&w.kind.as_str()) {
+            bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
+        }
+        let mut seen = std::collections::HashSet::new();
+        if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
+            bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+        }
+        if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
+            bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
+        }
+        if !["hug", "fill"].contains(&w.height.as_str()) {
+            bail!("widget “{}” is hug or fill high", w.id);
+        }
+        if w.refresh.is_some_and(|r| r < 60) {
+            bail!("widget “{}” is asked again every 60 s at most often", w.id);
+        }
+        if m.main.is_none() {
+            bail!("widget “{}” needs a host half (main) to give its data", w.id);
+        }
+        if w.kind == "page" && m.client.is_none() {
+            bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
+        }
+        check_params(&w.id, &w.params)?;
+    }
+    // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
+    // only, ending `.svg` — what the window serves as an image.
+    if let Some(i) = &m.icon {
+        if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
+            bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
+        }
+        if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
+            bail!("its icon {i} must be an .svg of 16 KB at most");
+        }
+    }
     for f in [&m.main, &m.client].into_iter().flatten() {
         let p = inside_plugin(dir, f)?;
         if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
@@ -394,6 +355,12 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
+    match m.widgets.len() {
+        0 => {}
+        1 => lines.push("Adds a widget you can put on Today".into()),
+        n => lines.push(format!("Adds {n} widgets you can put on Today")),
     }
     Ok(lines)
 }
@@ -491,15 +458,20 @@ impl Registry {
     }
 }
 
-/// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's).
-fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
+/// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's). Echo's shared JSON files use it too.
+pub(crate) fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
+    wait_lock_for(path, "plugins", std::time::Duration::from_secs(30))
+}
+
+/// The same for one lock: `what` it guards, named when it stays busy longer than `wait`.
+pub(crate) fn wait_lock_for(path: &Path, what: &str, wait: std::time::Duration) -> Result<crate::app::FileLock> {
     let t = std::time::Instant::now();
     loop {
         if let Some(l) = crate::app::FileLock::try_take(path)? {
             return Ok(l);
         }
-        if t.elapsed() > std::time::Duration::from_secs(30) {
-            bail!("another Echo is changing plugins — try again in a moment");
+        if t.elapsed() > wait {
+            bail!("another Echo is changing {what} — try again in a moment");
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -1092,6 +1064,12 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
+    // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
+    // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
+    let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
+    if !keeps || before.as_ref().is_some_and(|b| b.market != rec.market) {
+        signin::forget_plugin(id);
+    }
     // Older versions' files go.
     if let Ok(rd) = fs::read_dir(installed_dir(id)) {
         for e in rd.flatten() {
@@ -1105,12 +1083,26 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
 
 /// An update waiting for an installed plugin: the newer offer's review (`None` = up to date or gone).
 pub fn update_for(p: &Installed) -> Option<Review> {
-    let o = catalog(&p.market)?.plugins.into_iter().find(|o| o.id == p.id)?;
-    let m = o.manifest.as_ref()?;
-    if !crate::update::newer(&m.version, &p.version) {
-        return None;
-    }
-    review_of(&p.market, &o, Some(p)).ok()
+    update_in(p, &catalog(&p.market)?)
+}
+
+/// The same, from a catalog already read.
+fn update_in(p: &Installed, c: &Catalog) -> Option<Review> {
+    let o = c.plugins.iter().find(|o| o.id == p.id)?;
+    crate::update::newer(&o.manifest.as_ref()?.version, &p.version).then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
+}
+
+/// Every installed plugin of `r` with an update waiting (from its marketplace's last fetched catalog, no network;
+/// each catalog read once).
+pub fn updates_in(r: &Registry) -> Vec<(Installed, Review)> {
+    let mut catalogs: std::collections::HashMap<String, Option<Catalog>> = std::collections::HashMap::new();
+    r.installed
+        .values()
+        .filter_map(|p| {
+            let c = catalogs.entry(p.market.clone()).or_insert_with(|| catalog(&p.market)).as_ref()?;
+            update_in(p, c).map(|u| (p.clone(), u))
+        })
+        .collect()
 }
 
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
@@ -1139,15 +1131,18 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     let _ = fs::remove_dir_all(installed_dir(id));
     crate::grants::remove_plugin(id);
+    // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
+    signin::forget_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));
+        let _ = fs::remove_file(addresses_file(id));
+        thread_values::forget(id);
     }
     Ok(())
 }
 
 /// Installed and switched on (what the host halves and the window load).
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn enabled() -> Vec<Installed> {
     Registry::load().map(|r| r.installed.into_values().filter(|p| p.enabled).collect()).unwrap_or_default()
 }
@@ -1165,6 +1160,18 @@ fn secrets_file(id: &str) -> PathBuf {
     plugins_dir().join("secrets").join(format!("{id}.json"))
 }
 
+/// The addresses the user listed (`uses.network.hosts_from`), outside the plugin's store: nothing the plugin writes
+/// can reach this file, whatever name it uses.
+fn addresses_file(id: &str) -> PathBuf {
+    plugins_dir().join("addresses").join(format!("{id}.json"))
+}
+
+/// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
+    read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
+}
+
 fn read_map(path: &Path) -> serde_json::Map<String, Value> {
     fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
@@ -1177,7 +1184,10 @@ fn installed_manifest(id: &str) -> Result<Manifest> {
 /// The settings as the page shows them: each definition with its value (a secret only as set / not).
 pub fn settings_view(id: &str) -> Result<Vec<Value>> {
     let m = installed_manifest(id)?;
-    let vals = read_map(&data_dir(id).join("settings.json"));
+    let mut vals = read_map(&data_dir(id).join("settings.json"));
+    let listed = address_settings(&m.uses);
+    vals.retain(|k, _| !listed.contains(k));
+    vals.extend(read_map(&addresses_file(id)));
     let secrets = read_map(&secrets_file(id));
     Ok(m.settings
         .iter()
@@ -1193,10 +1203,55 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
         .collect())
 }
 
-/// A setting's value (secrets included), for the capabilities.
-#[allow(dead_code)] // read by the capabilities from phase 2 on
+/// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&secrets_file(id)).remove(key).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+}
+
+/// When the user last said no to a plugin's addresses from the window: for a minute after, the page's requests for it
+/// are refused without a dialog, so a page can't keep asking until the user gives in.
+static REFUSED: Mutex<BTreeMap<String, std::time::Instant>> = Mutex::new(BTreeMap::new());
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn refused_lately(id: &str) -> bool {
+    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).get(id).is_some_and(|t| t.elapsed().as_secs() < 60)
+}
+
+/// For a setting from the window: the plugin's name and the addresses to allow, when `value` lists addresses it may
+/// reach (checked first, so a wrong one is refused at once); `None` for anything else or an empty list (it narrows).
+/// The list as saved is asked about too: a check against the saved file would race with a save under way.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn addresses_to_allow(id: &str, key: &str, value: &Value) -> Result<Option<(String, Vec<String>)>> {
+    let m = installed_manifest(id)?;
+    let text = value.as_str().unwrap_or("").trim();
+    if !address_settings(&m.uses).iter().any(|k| k == key) || text.is_empty() {
+        return Ok(None);
+    }
+    if text.chars().count() > 2000 {
+        bail!("an address list is 2000 characters at most");
+    }
+    let label = m.settings.iter().find(|s| s.key == key).map_or(key, |s| s.label.as_str());
+    addresses::parse_list(text).with_context(|| format!("“{label}” isn't an address the plugin may reach"))?;
+    let name: String = m.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    Ok(Some((name, text.split([',', ' ', '\n', '\r', '\t']).filter(|p| !p.is_empty()).map(str::to_owned).collect())))
+}
+
+/// The user's yes, in a dialog of the system's, to `name` reaching `list`. Development builds and tests:
+/// `ECHOCTL_ALLOW_ADDRESSES=yes|no` answers instead (never in a release build).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+fn allow_addresses(name: &str, list: &[String]) -> bool {
+    #[cfg(debug_assertions)]
+    if let Ok(a) = std::env::var("ECHOCTL_ALLOW_ADDRESSES") {
+        return a == "yes";
+    }
+    let msg = format!("Let {name} reach these addresses?\n\n{}\n\nAllow only if you entered them yourself.", list.join("\n"));
+    crate::app::ask(&msg, &["Don't allow", "Allow"], "Don't allow").as_deref() == Some("Allow")
+}
+
+/// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
+pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
+    uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
 }
 
 /// Save one setting, checked against its definition; an empty secret forgets it.
@@ -1212,8 +1267,18 @@ pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
     if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
         bail!("{} isn't a folder", value.as_str().unwrap_or(""));
     }
+    let is_address = address_settings(&m.uses).iter().any(|k| k == key);
+    if is_address {
+        addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
+    }
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    if def.kind == "secret" {
+    if is_address {
+        let f = addresses_file(id);
+        fs::create_dir_all(f.parent().unwrap())?;
+        let mut all = read_map(&f);
+        all.insert(key.into(), value);
+        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
+    } else if def.kind == "secret" {
         let f = secrets_file(id);
         fs::create_dir_all(f.parent().unwrap())?;
         let mut all = read_map(&f);
@@ -1331,7 +1396,26 @@ pub fn page_op(v: &Value) -> Result<()> {
     match s("op").as_str() {
         "enable" => set_enabled(&s("id"), v["on"].as_bool().unwrap_or(true)).inspect(|_| reload()),
         "remove" => remove(&s("id"), v["keep_data"].as_bool().unwrap_or(true)).inspect(|_| reload()),
-        "set" => set_setting(&s("id"), &s("key"), &v["value"]),
+        "set" => {
+            let (id, key, value) = (s("id"), s("key"), v["value"].clone());
+            match addresses_to_allow(&id, &key, &value)? {
+                Some(_) if BUSY.lock().is_ok_and(|b| b.contains_key(&format!("plugin:{id}"))) => bail!("Not saved: {id} is busy (being installed, updated or asking you); try again in a moment"),
+                Some(_) if refused_lately(&id) => bail!("Not saved: you didn't allow these addresses a moment ago"),
+                // Addresses a plugin may reach: the page can't be told apart from a plugin's own window half, so the
+                // user says yes outside it, in a dialog of the system's.
+                Some((name, list)) => {
+                    background(format!("plugin:{id}"), "Waiting for you to allow the addresses…", move || {
+                        if !allow_addresses(&name, &list) {
+                            REFUSED.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), std::time::Instant::now());
+                            bail!("Not saved: you didn't allow {name} to reach {}", list.join(", "));
+                        }
+                        set_setting(&id, &key, &value)
+                    });
+                    Ok(())
+                }
+                None => set_setting(&id, &key, &value),
+            }
+        }
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
         "market_remove" => market_remove(&s("name")),
         "market_add" => {
@@ -1390,6 +1474,8 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
         if let Ok(mut b) = BUSY.lock() {
             b.remove(&key);
         }
+        // Installed, updated or removed: the Inbox (its update items) is read again, not from its cache.
+        crate::attention::stale();
     });
 }
 
@@ -1411,7 +1497,35 @@ pub fn print_review(r: &Review) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
+        let uses = |v: Value| v.as_object().cloned().unwrap();
+        // No `claude`: no run at all; `claude` without `skip`: any run but one with permission checks skipped.
+        assert!(may_run_claude(&uses(json!({})), "none").is_err());
+        let plain = uses(json!({"claude": {}}));
+        assert!(may_run_claude(&plain, "read").is_ok() && may_run_claude(&plain, "folder").is_ok());
+        assert!(may_run_claude(&plain, "skip").is_err());
+        assert!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").is_ok());
+        assert!(describe_claude(&json!({"skip": true})).unwrap().contains("skipped"));
+        // Sends: the ways its sheet named, or its own way.
+        let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
+        assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());
+        assert!(may_send(&sched, "mail").is_err());
+        let tg = uses(json!({"deliver_provider": {"kinds": ["telegram"]}}));
+        assert!(may_send(&tg, "telegram").is_ok() && may_send(&tg, "teams").is_err());
+    }
     use super::*;
+
+    #[test]
+    fn events_are_heard_as_asked_and_minutes_only_with_sources() {
+        let u = |v: Value| v.as_object().cloned().unwrap();
+        assert_eq!(heard_events(&u(json!({"events": {"on": ["recording_started", "brain_synced"]}}))), ["recording_started"], "one this Echo has");
+        assert_eq!(heard_events(&u(json!({"echo": {"read": ["sources"]}}))), ["minutes_written", "sources_changed"], "as before events existed");
+        assert!(heard_events(&u(json!({"echo": {"read": ["dictionary", "clients"]}}))).is_empty(), "names only: no call titles");
+        assert!(describe_events(&json!({"on": ["meeting_soon"]})).unwrap().contains("(its subject)"), "the sheet says what text comes");
+        assert!(describe_events(&json!({"on": []})).is_err());
+    }
 
     fn plugin(root: &Path, id: &str, version: &str, uses: Value) -> PathBuf {
         let d = root.join("plugins").join(id);
@@ -1456,10 +1570,160 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
+    }
+
+    #[test]
+    fn the_sheet_says_whose_sign_in_a_plugin_uses_and_only_those_hosts_are_handed_over() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap(),
+            vec!["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to"]
+        );
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com", "ghe.acme.example"]}}))).unwrap(),
+            vec!["Gets the sign-in saved on this computer for github.com and ghe.acme.example (GitHub CLI or git): it can act as you there and send it to the places it talks to"]
+        );
+        for bad in [json!({}), json!({"hosts": []}), json!({"hosts": ["a.com", "b.com", "c.com", "d.com", "e.com"]}), json!({"hosts": "github.com"}), json!({"hosts": ["github.com", "github.com"]})] {
+            assert!(describe(&uses(json!({"signin": bad}))).is_err(), "{bad}");
+        }
+        for bad in ["https://github.com", "GitHub.com", "github", "github.com:443", "-x.com", "a..com", "user@github.com", "github.com/x", "git hub.com", "github.com\nhost=evil.com", "10.0.0.1", "192.168.1.20"] {
+            assert!(describe(&uses(json!({"signin": {"hosts": [bad]}}))).is_err(), "{bad}");
+        }
+        // It grants no network of its own.
+        assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap().iter().all(|l| !l.contains("Talks to")));
+        // `keep`: the plugin signs in itself and Echo keeps that sign-in for it.
+        assert_eq!(
+            describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": true}}))).unwrap(),
+            ["Gets the sign-in saved on this computer for github.com (GitHub CLI or git): it can act as you there and send it to the places it talks to; it may sign you in to github.com itself and have Echo keep that sign-in for it"]
+        );
+        assert_eq!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": false}}))).unwrap(), describe(&uses(json!({"signin": {"hosts": ["github.com"]}}))).unwrap());
+        assert!(describe(&uses(json!({"signin": {"hosts": ["github.com"], "keep": "yes"}}))).is_err());
+        let granted = uses(json!({"signin": {"hosts": ["github.com"]}, "network": {"hosts": ["api.github.com"]}}));
+        assert!(may_use_signin(&granted, "github.com").is_ok());
+        for other in ["gitlab.com", "api.github.com", "GITHUB.COM", ""] {
+            assert!(may_use_signin(&granted, other).unwrap_err().to_string().contains("didn't ask to use your sign-in"), "{other}");
+        }
+        assert!(may_use_signin(&uses(json!({"network": {"hosts": ["api.github.com"]}})), "github.com").is_err());
+    }
+
+    #[test]
+    fn the_sheet_says_a_plugin_reaches_the_addresses_the_user_lists() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"network": {"hosts_from": ["tts"]}}))).unwrap(),
+            vec!["Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network)"]
+        );
+        assert_eq!(
+            describe(&uses(json!({"network": {"hosts": ["api.acme.example"], "hosts_from": ["a", "b"]}}))).unwrap(),
+            vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed; plain http only inside your own network)"]
+        );
+        assert!(describe(&uses(json!({"network": {}}))).is_err(), "neither a host nor a setting");
+    }
+
+    #[test]
+    fn addresses_from_the_window_wait_for_the_users_yes_and_nothing_else_does() {
+        let (_env, root) = paths::testenv::folders("plugins-allow");
+        let mk = root.join("market");
+        let d = mk.join("plugins/sneak");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(
+            d.join(MANIFEST),
+            json!({"id": "sneak", "name": "Acme sneak", "version": "0.1.0", "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS", "type": "string"}, {"key": "voice", "label": "Voice", "type": "string"}]})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "sneak", "source": "./plugins/sneak"}]}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        refresh(&name).unwrap();
+        install("sneak", Some(&name), &review("sneak", Some(&name)).unwrap().uses).unwrap();
+        let ask = |key: &str, v: &str| addresses_to_allow("sneak", key, &json!(v));
+        assert_eq!(ask("tts", "http://10.0.0.*:*, https://a.acme.example").unwrap(), Some(("Acme sneak".to_string(), vec!["http://10.0.0.*:*".to_string(), "https://a.acme.example".to_string()])));
+        assert!(ask("tts", "http://example.com").unwrap_err().to_string().contains("“TTS” isn't an address"), "a wrong list is refused at once, no dialog, by its label");
+        assert_eq!(ask("voice", "alto").unwrap(), None, "not an address setting");
+        assert_eq!(ask("tts", "  ").unwrap(), None, "emptied: it only narrows");
+        set_setting("sneak", "tts", &json!("http://10.0.0.*:*")).unwrap();
+        assert!(ask("tts", "http://10.0.0.*:*").unwrap().is_some(), "the list as saved is asked about too (no race with a save)");
+        assert!(ask("tts", &format!("http://10.0.0.1,{}", " ".repeat(2001))).is_ok(), "spaces trimmed");
+        assert!(ask("tts", &"http://10.0.0.1,".repeat(200)).unwrap_err().to_string().contains("2000"));
+        assert!(ask("tts", "http://10.0.*.*:*").unwrap().is_some(), "a wider one asks again");
+    }
+
+    #[test]
+    fn a_plugin_reads_only_the_other_apps_files_it_named() {
+        let uses = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(
+            describe(&uses(json!({"files": {"read": ["~/Library/Application Support/obsidian/obsidian.json", "%APPDATA%/obsidian/obsidian.json"]}}))).unwrap(),
+            vec!["Reads these files of other apps on this computer: “~/Library/Application Support/obsidian/obsidian.json” and “%APPDATA%/obsidian/obsidian.json”"]
+        );
+        for bad in [
+            json!([]), json!(["/etc/passwd"]), json!(["~/../x"]), json!(["~/.ssh/id_rsa"]), json!(["~/Library/Keychains/login.keychain-db"]), json!(["~/notes/*.md"]), json!(["~/"]), json!(["~/a//b"]),
+            json!(["~/Library/Application Support/echo/graph.json"]), json!(["%APPDATA%/echo/graph.json"]), json!(["~/.config/gh/hosts.yml"]), json!(["~/.netrc"]),
+            json!(["~/Library/Application Support/Google/Chrome/Default/Cookies"]), json!(["~/.ssh./id_rsa"]), json!(["~/SSH~1/id_rsa"]), json!(["%APPDATA%/acme /x.json"]),
+            json!(["~/.config/acme/credentials.json"]), json!(["~/.config/acme/token"]), json!(["~/.zsh_history"]),
+        ] {
+            assert!(describe(&uses(json!({"files": {"read": bad.clone()}}))).is_err(), "{bad}");
+        }
+        let env = |k: &str| match k {
+            "HOME" => Some(PathBuf::from("/Users/sam")),
+            "APPDATA" => Some(PathBuf::from("C:/Users/sam/AppData/Roaming")),
+            _ => None,
+        };
+        assert_eq!(app_file("~/Library/Application Support/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("/Users/sam/Library/Application Support/obsidian/obsidian.json")));
+        assert_eq!(app_file("%APPDATA%/obsidian/obsidian.json", env).unwrap(), Some(PathBuf::from("C:/Users/sam/AppData/Roaming/obsidian/obsidian.json")));
+        assert_eq!(app_file("%LOCALAPPDATA%/x/y.json", env).unwrap(), None, "not on this computer");
+        assert!(app_file_rel("~/.config/acme/app.json").is_ok());
+        // Read only as named: a link anywhere below the base (here a folder above the file) leads elsewhere: not read.
+        let (_env, root) = paths::testenv::folders("plugins-app-file");
+        let home = root.join("home-of-sam");
+        fs::create_dir_all(home.join(".config/acme")).unwrap();
+        fs::write(home.join(".config/acme/app.json"), "{}").unwrap();
+        let h = home.clone();
+        let env = move |k: &str| (k == "HOME").then(|| h.clone());
+        assert!(app_file_real("~/.config/acme/app.json", env.clone()).unwrap().is_some_and(|f| f.ends_with(".config/acme/app.json")));
+        assert_eq!(app_file_real("~/.config/acme/none.json", env.clone()).unwrap(), None, "not there");
+        #[cfg(unix)]
+        {
+            let elsewhere = root.join("echo-config");
+            fs::create_dir_all(&elsewhere).unwrap();
+            fs::write(elsewhere.join("app.json"), "secret").unwrap();
+            std::os::unix::fs::symlink(&elsewhere, home.join(".config/other")).unwrap();
+            assert_eq!(app_file_real("~/.config/other/app.json", env.clone()).unwrap(), None, "a linked folder above the file");
+            std::os::unix::fs::symlink(elsewhere.join("app.json"), home.join(".config/acme/linked.json")).unwrap();
+            assert_eq!(app_file_real("~/.config/acme/linked.json", env).unwrap(), None, "the file itself a link");
+        }
+    }
+
+    #[test]
+    fn hosts_from_names_a_string_setting_of_the_plugin() {
+        let (_env, root) = paths::testenv::folders("plugins-hosts-from");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let manifest = |hosts_from: Value| {
+            fs::write(
+                d.join(MANIFEST),
+                json!({"id": "p", "name": "P", "version": "0.1.0", "uses": {"network": {"hosts_from": hosts_from}},
+                       "settings": [{"key": "tts", "label": "TTS", "type": "string"}, {"key": "on", "label": "On", "type": "bool"}]})
+                .to_string(),
+            )
+            .unwrap();
+            read_manifest(&d)
+        };
+        assert!(manifest(json!(["tts"])).is_ok());
+        assert!(manifest(json!(["nope"])).unwrap_err().to_string().contains("isn't a string setting"), "no such setting");
+        assert!(manifest(json!(["on"])).unwrap_err().to_string().contains("isn't a string setting"), "not a string");
+        fs::write(
+            d.join(MANIFEST),
+            json!({"id": "p", "name": "P", "version": "0.1.0", "uses": {"network": {"hosts_from": ["tts"]}},
+                   "settings": [{"key": "tts", "label": "TTS", "type": "string", "default": "https://tts.acme.example"}]})
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_manifest(&d).unwrap_err().to_string().contains("has a default"), "the author doesn't choose the address");
     }
 
     #[test]
@@ -1521,9 +1785,17 @@ mod tests {
         refresh(&name).unwrap();
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
+        // The Inbox lists it (`attention`): every installed plugin with an update waiting.
+        let waiting = updates_in(&Registry::load().unwrap());
+        assert_eq!(waiting.iter().map(|(p, u)| (p.id.as_str(), u.version.as_str())).collect::<Vec<_>>(), [("demo", "0.2.0")]);
+        // Its Inbox item: what it says and where it goes.
+        let item = crate::attention::update_item(&waiting[0].0, &waiting[0].1);
+        assert_eq!((item["title"].as_str(), item["go"].as_str(), item["version"].as_str()), (Some("Plugin demo 0.2.0 is available"), Some("settings/plugins/demo"), Some("0.2.0")));
+        assert!(item["why"].as_str().unwrap().contains("it asks for more"), "{item}");
         assert_eq!(rv.new_uses.len(), 1);
         assert!(update("demo", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("demo", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
+        assert!(updates_in(&Registry::load().unwrap()).is_empty(), "updated: nothing waits");
         assert_eq!(fs::read_dir(installed_dir("demo")).unwrap().count(), 1, "the old version's files are gone");
         set_enabled("demo", false).unwrap();
         assert!(enabled().is_empty());
@@ -1534,5 +1806,27 @@ mod tests {
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
         market_remove("acme").unwrap();
         assert!(market_remove(BUILT_IN_NAME).is_err());
+    }
+
+    #[test]
+    fn a_plugins_icon_is_an_svg_of_its_own_16_kb_at_most() {
+        let (_env, root) = paths::testenv::folders("plugins-icon");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let with = |icon: &str| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "icon": icon, "uses": {"work": {}}}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        fs::write(d.join("icon.svg"), "<svg/>").unwrap();
+        fs::write(d.join("icon.png"), "png").unwrap();
+        fs::write(d.join("big.svg"), "x".repeat(17 * 1024)).unwrap();
+        let m = with("icon.svg").unwrap();
+        assert_eq!(m.icon.as_deref(), Some("icon.svg"));
+        assert_eq!(sheet(&m).unwrap(), ["Adds its items to Today → My work and to threads' Work"]);
+        fs::write(d.join("Icon.SVG"), "<svg/>").unwrap();
+        fs::write(d.join("a b.svg"), "<svg/>").unwrap();
+        for bad in ["icon.png", "big.svg", "none.svg", "../icon.svg", "Icon.SVG", "a b.svg", "x\"y.svg", "/icon.svg"] {
+            assert!(with(bad).is_err(), "{bad}");
+        }
     }
 }

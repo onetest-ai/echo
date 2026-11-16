@@ -231,7 +231,8 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
     let threads = acc.people_threads();
     let ok = match &l {
         Link::Call { name, .. } => {
-            let dir = crate::calls::resolve_call(name).map_err(|_| anyhow::anyhow!("no call {name:?}"))?;
+            // Found without the run's check: `links::read` below applies it, as for `echoctl read` (#136).
+            let dir = crate::calls::find_call(name).map_err(|_| anyhow::anyhow!("no call {name:?}"))?;
             acc.sources(&store::open(&super::store_path())?)?.contains(&format!("call/{}", crate::calls::stamp_of(&dir)))
         }
         Link::Mail(src) => acc.sources(&store::open(&super::store_path())?)?.contains(src),
@@ -240,6 +241,13 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
         Link::Person(key) => return crate::people::card(&threads, key, 40),
         // Recall never reads a vault (they stay apart); a session reads it in its folder, on its profile.
         Link::Page { .. } => false,
+        // A prep: only when all its threads are this reader's.
+        Link::Prep(id) => crate::prep::load(id).is_some_and(|p| {
+            let ts: Vec<&str> = p["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect();
+            !ts.is_empty() && ts.iter().all(|t| threads.iter().any(|x| x == t))
+        }),
+        // The user's own inbox of the day: no session scoped to threads reads it.
+        Link::Needs(_) => false,
     };
     anyhow::ensure!(ok, "not found (or not readable from this session)");
     Ok(json!({"text": crate::links::read(link)?}))

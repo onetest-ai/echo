@@ -1,20 +1,23 @@
 # Testing
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: Rust test isolation, fakes, node tests, manual release tests
+**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: test design in the plan, Rust and node tests, functional cases and the map
 
-## Tests and checks
-
-### Rules
-- R0. Every change in behaviour starts from acceptance criteria and ends with them checked: each criterion has a functional test — a Rust test that proves the behaviour, a node test over an `app.js` block, or a check in the running window (`echoctl window --serve` on a copy of a data folder, never the user's real one); tests are written with the change, not on request, and run with the quality gates before it is called done. Evidence: `crates/echoctl/ui/workbench.test.mjs`
-- R1. A test that touches the data folder or config dir takes `paths::testenv::folders(name)` first and keeps the guard alive; it is the only code that sets `ECHOCTL_HOME` / `ECHOCTL_CONFIG_DIR` (the variables are process-wide). Evidence: `crates/echoctl/src/paths.rs::testenv.folders`
-- R2. Write Rust tests as a `#[cfg(test)] mod tests` at the end of the module they test, each named as the behaviour it proves in snake_case (`only_this_calls_files_and_the_previous_minutes`). Evidence: `crates/echoctl/src/guard.rs::only_this_calls_files_and_the_previous_minutes`
-- R3. Wait for a lock just released with `testenv::eventually`, not a fixed sleep (on macOS a child process holds the descriptor until it execs). Evidence: `crates/echoctl/src/paths.rs::eventually`
-- R4. Before a release run the manual cases in `tests/` (P0 at least) and keep the run log; never use real call data in tests or issues, only made-up people and companies. Evidence: `tests/README.md::P0`
-- R5. `scripts/check-mod.sh` is the list of mod and window checks (plugin validate and test, every `ui/*.test.mjs` it names, tsc); read the script rather than a copy of its list, and note its tsc step prints `skip tsc` and passes when no Claude Code type declarations are found. Evidence: `scripts/check-mod.sh::node`
-- R6. On Windows before a release, run the native check of the code behind `tray` and `brain` that the macOS cross-check skips (the command is in quality-gates.md, Full runs). Evidence: `crates/echoctl/Cargo.toml::features`
+## Rules
+- R1. A change in behaviour starts from acceptance criteria, each with a test: a Rust test, a node test over a window-script block, or a functional case. The plan's **Tests** part names the cases to add, change and remove (each existing case of the touched features checked against the new behaviour; obsolete ones removed, duplicates merged), written before the code. Evidence: `workbench.test.mjs`
+- R2. A Rust test that touches the data folder or config dir takes `paths::testenv::folders(name)` first and keeps its guard alive; nothing else sets `ECHOCTL_HOME` / `ECHOCTL_CONFIG_DIR`. Evidence: `paths::testenv::folders`
+- R3. Rust tests are a `#[cfg(test)] mod tests` at the end of their module, each named as the behaviour it proves (`only_this_calls_files_and_the_previous_minutes`). Evidence: `guard::only_this_calls_files_and_the_previous_minutes`
+- R4. Wait for a released lock with `paths::testenv::eventually`, never a fixed sleep. Evidence: `paths::testenv::eventually`
+- R5. A functional case is one behaviour, `tests/cases/<area>/TC-NNN_<slug>.md`, with `run: agent | person` and `platform`; a scenario (`tests/scenarios/S-NN_<slug>.md`) chains cases into a journey. Rules for writing them are in `tests/app_profile.md`. Evidence: `tests/app_profile.md`
+- R6. What Echo does is the functional map, `tests/feature-map/` (one JSON file per area); a case names its features in `requirements:`; a change in behaviour updates its area's file in the same PR, and `python3 tests/tools/feature-map.py check` passes. Evidence: `tests/tools/feature-map.py::check`
+- R7. Cases change with behaviour: a changed behaviour updates its cases, a removed feature removes them, a bug found by hand gets a case. A text the app shows (a label, a message, a CLI command or its list) renamed or removed is searched in all of `tests/`, not only the touched features' cases, and every case and scenario that quotes it is updated in the same PR; `feature-map.py changes` lists the lines still quoting a label or message gone from the code (exit 1): each is updated, or the PR says why the app still shows it (a text now built from parts); CLI commands, and texts it doesn't recognise as a label, are searched by hand. Run results go to `tests/reports/` (git-ignored), never into a case. Evidence: `tests/tools/feature-map.py::gone_texts`
+- R8. Test data is made up (`tests/fixtures/make_data.py`, acme.example-style names), never real call data, in tests, cases, reports or issues. Evidence: `tests/fixtures/make_data.py`
+- R9. `scripts/check-mod.sh` is the list of mod and window checks; a new `ui/*.test.mjs` adds itself there. Evidence: `scripts/check-mod.sh`
+- R10. Tests never open the user's browser: with `ECHOCTL_TEST_OPEN_LOG_ONLY` set (the test data's `<dir>/env` sets it) Echo, in any build and on any OS, appends what the window's `open_url`, a sign-in, `echoctl join` or a Settings pane would open to `ECHOCTL_TEST_OPEN_LOG` (`<dir>/open.log`) and opens nothing. A case that clicks an outside link checks `open.log`, and never runs that click without the variable set. Evidence: `app::open_log_only`
+- R11. Tests never open a native dialog or reach a real service: a test relying on a development-build stand-in (`ECHOCTL_PICK_FOLDER`, `ECHOCTL_TEST_HOSTS`) is `#[cfg(debug_assertions)]`, so a release build's `cargo test` skips it instead of opening the real folder picker or reaching the real host. Evidence: `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests`
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| adding a test that needs Claude Code | `crates/echoctl/src/ai.rs::fake.install` | scripted fake with status, login and `-p` replies | exemplar is a test |
-| adding a window node test | `crates/echoctl/ui/palette.test.mjs::Palette` | slices one marked block of `app.js`, plain `node:assert` | exemplar is a test |
+| When you are | Exemplar |
+|---|---|
+| adding a test that needs Claude Code | `ai::fake::install` |
+| adding a window node test | `palette.test.mjs::Palette` |
+| writing a functional case | `tests/cases/today/TC-003_task-card-opens-details.md` |

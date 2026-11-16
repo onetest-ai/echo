@@ -103,7 +103,7 @@ for you and put its ID under **App registration → Change…** on the same page
 
 **Check:** the **Calendar** view shows today's meetings.
 
-> Mail from Claude in the Echo window always goes through Echo first (`echoctl deliver send mail`), from your own
+> Mail from Claude in the Echo window always goes through Echo first (`echoctl m365 mail send`), from your own
 > account, after you confirm. Claude uses its own Microsoft 365 connector only when Echo can't send. If neither
 > works, it opens a draft in your mail app.
 
@@ -124,7 +124,7 @@ If the minutes fail, the Minutes tab says why and **Show log** shows what Claude
 - **Command line:** Settings → General → Command line → **Install…** puts `echoctl` in your terminal (macOS asks
   for your password).
 - **Start at login:** Settings → General (on by default).
-- **Brain:** Settings → Brain → **Use the Brain** (off by default). It indexes your calls, threads' mail, channels
+- **Recall:** Settings → Knowledge → **Use Recall** (off by default). It indexes your calls, threads' mail, channels
   and folders for search and for Claude.
 
 ## Troubleshooting

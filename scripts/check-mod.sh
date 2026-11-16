@@ -5,16 +5,33 @@
 # (plugin/.claude-plugin/types) if present, else the one the plugin-authoring skill wrote.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Source files under 1,500 lines, today's large ones at their ceilings (architecture.md, Structure and boundaries R9).
+scripts/size-check.sh
 claude plugin validate plugin
 claude plugin test plugin
-# The Echo window's notes saving (crates/echoctl/ui/app.js, NotesSync), as it ships.
+# The Echo window's notes saving (NotesSync, crates/echoctl/ui/app/02-notes-sync.js), as it ships.
+node crates/echoctl/ui/app-parses.test.mjs
 node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs
 # The window's workbench: activities, call tabs, calendar actions, and where panel views go.
 node crates/echoctl/ui/workbench.test.mjs
+# Which handler a click runs: the nearest element a handler matches, then the first handler that holds (clickFor).
+node crates/echoctl/ui/clicks.test.mjs
+# A plugin's ctx.ui.copy: only with the user's activation, fails closed (copyAllowed).
+node crates/echoctl/ui/copy-guard.test.mjs
+# Echo's menu for the page's selects: rows, arrows, type-ahead, where it opens (select menu block).
+node crates/echoctl/ui/select-menu.test.mjs
+# Echo's suggestions for a text box: the rows for what is typed (suggest block).
+node crates/echoctl/ui/suggest.test.mjs
+# Echo's calendar for a date box: a month from Monday, the quick days (date picker block).
+node crates/echoctl/ui/date-picker.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
+# Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
+node crates/echoctl/ui/note-time.test.mjs
+# Where My notes' list is after a redraw: kept, or following its end (notesScroll).
+node crates/echoctl/ui/notes-scroll.test.mjs
 # The ⌘K palette's ranking (Palette).
 node crates/echoctl/ui/palette.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).
@@ -23,6 +40,68 @@ node crates/echoctl/ui/projects.test.mjs
 node crates/echoctl/ui/org-chart.test.mjs
 # Knowledge in the window: routes, the switcher, a call's chip, the tree, the graph's filters, unsaved edits.
 node crates/echoctl/ui/knowledge.test.mjs
+# How Send to Claude ranks the skills for a task (rankSkills).
+node crates/echoctl/ui/skill-fit.test.mjs
+# Send to Claude's Escape: the skill list folds, then the dialog closes (ScKeys).
+node crates/echoctl/ui/send-claude.test.mjs
+# A client page's tabs: a count only when there is something to count (clientTabs).
+node crates/echoctl/ui/client-tabs.test.mjs
+# Where a Work board column's menu goes, over the board (colMenuSpot).
+node crates/echoctl/ui/column-menu.test.mjs
+# Opening a thread loads its work tree on every tab (loadProject).
+node crates/echoctl/ui/thread-load.test.mjs
+# Whether the open call may write its own address, or a click is on its way (callUrl).
+node crates/echoctl/ui/call-url.test.mjs
+# History's words for the user's own ledger edits (humanHistory).
+node crates/echoctl/ui/human-history.test.mjs
+# My notes' timeline with live notes among the user's own (LiveTimeline).
+node crates/echoctl/ui/live-timeline.test.mjs
+# Which transcript turn a moment (a minutes chip, a note's time) opens on (jumpTurn).
+node crates/echoctl/ui/transcript-jump.test.mjs
+# The Minutes tab without Claude Code or Echo's plugin: what to do, in the window (minutesNeeds).
+node crates/echoctl/ui/minutes-needs.test.mjs
+# What the poll redraws for: the Inbox's list too (fingerprint, #115, #121).
+node crates/echoctl/ui/fingerprint.test.mjs
+# A plugin's work row on My work and in a thread's Work tab (every layout): its icon as an image, text escaped, https
+# only and asked first, its task.actions on its own row (#85).
+node crates/echoctl/ui/plugin-work-rows.test.mjs
+# The plugins' rows of a thread's Profile: each drawn on its own, one that throws or repeats left out, after once per box drawn afresh, gone with its plugin (threadSlotRows, threadSlotAfter, #464).
+node crates/echoctl/ui/thread-slot.test.mjs
+# The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
+node crates/echoctl/ui/work-status.test.mjs
+# Settings search: sections by their names and their settings' own labels (SettingsSearch).
+node crates/echoctl/ui/settings-search.test.mjs
+# Settings → Layout's "Echo's own title bar": a Windows-only row, absent (and unsearchable) elsewhere (#76).
+node crates/echoctl/ui/own-title-bar.test.mjs
+# `window --selftest`'s terminal check: no POSIX arithmetic on Windows, the output line as proof (selftestTerm, #419).
+node crates/echoctl/ui/selftest-terminal.test.mjs
+# Where the octopus lives, in the platform's words: the menu bar on macOS, the notification area on Windows (trayWords, #420).
+node crates/echoctl/ui/tray-words.test.mjs
+# A mail sent from an item: its row says when, to whom, and whether it was answered (sentMailLine, #92).
+node crates/echoctl/ui/sent-mail.test.mjs
+# Where mail drafts go: the setting's line and a run's draft as its outcome says it (draftsNow, draftLine, #135).
+node crates/echoctl/ui/drafts.test.mjs
+node crates/echoctl/ui/layout-save.test.mjs
+# Today's widgets in rows, in its layout's order (todayRows, #323).
+node crates/echoctl/ui/today-rows.test.mjs
+# Today's columns from its width and its rows as lines (todayCols / todayLines, #328).
+node crates/echoctl/ui/today-layout.test.mjs
+# Your day as where you'll be: overlaps folded, your work in gaps, no reply / maybe (agendaRows).
+node crates/echoctl/ui/today-agenda.test.mjs
+# Your day as a calendar and a strip: meetings side by side in lanes, the hours shown (dayLanes, dayWindow).
+node crates/echoctl/ui/today-calendar.test.mjs
+# Today's edit mode: where a dragged widget goes over another (dropSide).
+node crates/echoctl/ui/today-edit.test.mjs
+# The day's choices: overlaps you accepted, what Echo suggests, invites to answer (dayChoices).
+node crates/echoctl/ui/today-choices.test.mjs
+# A meeting of Your day opened as Calendar's popover: which one, beside which of its forms (tdFormOf, tdPick).
+node crates/echoctl/ui/today-popover.test.mjs
+# A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).
+node crates/echoctl/ui/today-plugin-widgets.test.mjs
+# The virtual model for the functional cases (#275): scripts, answers, streaming, log.
+python3 tests/fixtures/model_server_test.py
+# make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418).
+python3 tests/fixtures/make_data_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

@@ -1,0 +1,3 @@
+[
+  {"op": "create", "ref": "g", "kind": "task", "parent": "S003", "title": "Send Dana the rollout summary", "type": "action", "internal_owner": "Me", "due_text": "today", "quote": "Let's agree what the rollout needs before the Berlin pilot can start"}
+]

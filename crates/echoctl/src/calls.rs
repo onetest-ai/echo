@@ -14,6 +14,13 @@ use crate::config::Config;
 use crate::meeting::MeetingContext;
 use crate::paths;
 
+mod actions;
+mod templates;
+mod types;
+pub use actions::*;
+pub use templates::*;
+pub use types::*;
+
 /// Below these, a call is too thin to summarize.
 const MIN_SUMMARY_MINUTES: f64 = 3.0;
 const MIN_SUMMARY_CHARS: usize = 1_500;
@@ -21,13 +28,34 @@ pub const USER_NOTES: &str = "my-notes.md";
 /// In a trashed call: when it was deleted (its mtime ages the trash entry).
 const DELETED_AT: &str = ".deleted_at";
 
-/// All recorded calls, oldest first.
+/// All recorded calls, oldest first: folders without a date stamp in their name (an imported or hand-made one,
+/// `old-dictation`) first, then the dated ones by their stamp. Every caller — `latest`, the window's list and its
+/// newest call — sees the same order (#147).
 pub fn all_calls() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths::calls_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
         .unwrap_or_default();
-    dirs.sort();
+    dirs.sort_by_cached_key(|d| { let (dated, n) = order_key(d); (dated, n.to_owned()) });
     dirs
+}
+
+/// A call's place in `all_calls()`: undated folders before dated ones, each by name (a dated name sorts by its
+/// stamp, the local wall clock it was recorded at). The window's paging cursor compares by the same key.
+pub fn order_key(dir: &Path) -> (bool, &std::ffi::OsStr) {
+    let name = dir.file_name().unwrap_or_default();
+    (has_stamp(&name.to_string_lossy()), name)
+}
+
+/// Whether a folder name starts with a `YYYY-MM-DD_HHMMSS` stamp (by its shape, as `stamp_of` and the page's
+/// `callStamp` judge it).
+pub fn has_stamp(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() >= 17
+        && b[..17].iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'_',
+            _ => c.is_ascii_digit(),
+        })
 }
 
 /// Resolve `latest`, a path, or a folder name under calls/ to a call directory. Inside a minutes
@@ -40,7 +68,9 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn find_call(arg: &str) -> Result<PathBuf> {
+
+/// `resolve_call` without the run's check: the caller makes its own (`links::call_dir`).
+pub(crate) fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
         return all_calls().pop().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
     }
@@ -84,14 +114,7 @@ pub fn lock_meta(dir: &Path) -> Result<crate::app::FileLock> {
 /// a stamp is its own key (its whole name).
 pub fn stamp_of(dir: &Path) -> String {
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let b = name.as_bytes();
-    let stamp = b.len() >= 17
-        && b[..17].iter().enumerate().all(|(i, c)| match i {
-            4 | 7 => *c == b'-',
-            10 => *c == b'_',
-            _ => c.is_ascii_digit(),
-        });
-    if stamp { name[..17].to_string() } else { name }
+    if has_stamp(&name) { name[..17].to_string() } else { name }
 }
 
 /// The call folder with this stamp now (it may have been renamed since it was last seen). None
@@ -100,7 +123,8 @@ pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     if stamp.is_empty() {
         return None;
     }
-    let mut found = all_calls().into_iter().filter(|d| stamp_of(d) == stamp);
+    // By name only (a folder's name starts with its stamp): no sort of the whole folder for one lookup.
+    let mut found = fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).filter(|d| stamp_of(d) == stamp && d.join("meta.json").exists());
     let first = found.next()?;
     found.next().is_none().then_some(first)
 }
@@ -163,16 +187,8 @@ pub fn prep(dir: &Path) -> Value {
         .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
         .map(|t| t.format("%-d %b").to_string())
         .unwrap_or_default();
-    let open: Vec<Value> = read_json(&prev.join("actions.json"))
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|a| a["status"].as_str() != Some("done"))
-        .filter_map(|a| {
-            let task = a["task"].as_str().filter(|t| !t.trim().is_empty())?;
-            Some(json!({ "task": task, "owner": a["owner"], "due": a["due"] }))
-        })
-        .collect();
+    // Still to do: the tasks that call raised in its threads, still open (its action items aren't ticked; tasks are).
+    let open = crate::ledger::open_tasks_of_call(&prev);
     json!({
         "call": prev.file_name().map(|n| n.to_string_lossy().into_owned()),
         "date": date,
@@ -234,7 +250,7 @@ pub fn recap_from_notes(md: &str) -> Vec<String> {
                 out.extend(Some(clean(l)).filter(|t| !filler(t)));
             } else if out.is_empty() && !l.starts_with('#') {
                 // a summary paragraph: its first sentence
-                out.extend(Some(clean(l.split(". ").next().unwrap_or(l))).filter(|t| !filler(t)));
+                out.extend(Some(clean(l.split(". ").next().unwrap_or(l)).trim_end_matches('.').to_string()).filter(|t| !filler(t)));
             }
         }
         out
@@ -315,7 +331,7 @@ pub fn previous_with_notes(subject: &str, before: Option<&Path>) -> Option<PathB
         .rev()
         // Earlier by folder name (it starts with the call's time): the same whatever spelling of
         // the data folder each path came with.
-        .filter(|d| before.is_none_or(|b| d.file_name() < b.file_name()))
+        .filter(|d| before.is_none_or(|b| order_key(d) < order_key(b)))
         .find(|d| d.join("notes.md").exists() && previous_subject(d).is_some_and(|s| s.trim().to_lowercase() == want))
 }
 
@@ -333,71 +349,14 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
 pub struct Template {
     pub name: String,
     pub path: String,
+    /// The whole template below its frontmatter: what the minutes skill follows, as a reference (header, sections,
+    /// their tables and instructions as written).
+    pub text: String,
+    /// What comes before its first section (`## `): the minutes' start — title line, participants, frontmatter.
+    pub header: String,
     pub sections: Vec<Value>,
     #[serde(skip)]
     keywords: Vec<String>,
-}
-
-fn parse_template(text: &str, stem: &str, path: String) -> Option<Template> {
-    let (front, body) = text.strip_prefix("---\n")?.split_once("\n---\n")?;
-    let mut name = stem.to_string();
-    let mut keywords = vec![];
-    for line in front.lines() {
-        if let Some(v) = line.strip_prefix("name:") {
-            name = v.trim().to_string();
-        } else if let Some(v) = line.strip_prefix("match:") {
-            keywords = v
-                .trim()
-                .trim_matches(|c| c == '[' || c == ']')
-                .split(',')
-                .map(|k| k.trim().trim_matches('"').to_lowercase())
-                .filter(|k| !k.is_empty())
-                .collect();
-        }
-    }
-    let mut sections = vec![];
-    for chunk in body.split("\n## ").map(|c| c.trim_start_matches("## ")) {
-        let (heading, instruction) = chunk.split_once('\n').unwrap_or((chunk, ""));
-        if !heading.trim().is_empty() {
-            sections.push(json!({ "heading": heading.trim(), "instruction": instruction.trim() }));
-        }
-    }
-    Some(Template { name, path, sections, keywords })
-}
-
-/// A memo's template: the user's own `memo.md` if they wrote one, else the built-in.
-fn memo_template() -> Option<Template> {
-    let own = paths::state_dir().join("templates").join("memo.md");
-    fs::read_to_string(&own).ok().and_then(|t| parse_template(&t, "memo", own.display().to_string())).or_else(|| {
-        BUILTIN_TEMPLATES.iter().find(|(stem, _)| *stem == "memo").and_then(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")))
-    })
-}
-
-/// The template for a meeting title: the first whose keyword appears in it (user templates
-/// first), else `default`.
-pub fn pick_template(title: Option<&str>) -> Option<Template> {
-    let mut all = vec![];
-    let mut seen = std::collections::HashSet::new();
-    // User templates (<home>/.echo/templates/*.md) override built-ins of the same name.
-    let mut files: Vec<PathBuf> = fs::read_dir(paths::state_dir().join("templates"))
-        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "md")).collect())
-        .unwrap_or_default();
-    files.sort();
-    let user = files.iter().filter_map(|f| {
-        let text = fs::read_to_string(f).ok()?;
-        parse_template(&text, &f.file_stem()?.to_string_lossy(), f.display().to_string())
-    });
-    let builtin = BUILTIN_TEMPLATES.iter().filter_map(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")));
-    for t in user.chain(builtin) {
-        if seen.insert(t.name.clone()) {
-            all.push(t);
-        }
-    }
-    let t = title.unwrap_or("").to_lowercase();
-    all.iter()
-        .find(|tpl| tpl.keywords.iter().any(|k| t.contains(k.as_str())))
-        .or_else(|| all.iter().find(|tpl| tpl.name == "default"))
-        .cloned()
 }
 
 /// Why a transcribed call is too thin for minutes (None: it isn't). Shared screens make a call
@@ -432,6 +391,42 @@ fn duration_min(meta: &Value) -> f64 {
         (Some(a), Some(b)) => (b - a).num_seconds() as f64 / 60.0,
         _ => 0.0,
     }
+}
+
+/// Colleagues vs external attendees (the user left out): by the user's email domain and internal organisations', and
+/// a colleague invited on a client address is still a colleague (`people::Colleagues`).
+fn attendees_split(meeting: Option<&MeetingContext>, cfg: &Config) -> (Vec<String>, Vec<String>) {
+    let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
+    let (mut colleagues, mut external) = (vec![], vec![]);
+    let mut seen = std::collections::HashSet::new();
+    if let Some(m) = meeting {
+        let book = crate::people::colleagues();
+        let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
+        for p in m.organizer.iter().chain(m.attendees.iter()) {
+            let same = |a: Option<&str>, b: Option<&str>| a.zip(b).is_some_and(|(a, b)| !a.trim().is_empty() && a.trim().eq_ignore_ascii_case(b.trim()));
+            // The user: by address, else (no address in About me yet) by name.
+            if cfg.me.as_ref().is_some_and(|me| same(me.email.as_deref(), p.email.as_deref()) || (me.email.is_none() && same(Some(&me.name), Some(&p.name)))) {
+                continue;
+            }
+            // One person once: by address, however their name is written ("Park, Lee"); by name when there is none.
+            let who = p.email.as_deref().map(|e| e.trim().to_lowercase()).unwrap_or_else(|| p.name.trim().to_lowercase());
+            if !seen.insert(who) {
+                continue;
+            }
+            let label = match &p.email {
+                Some(e) => format!("{} <{e}>", p.name),
+                None => p.name.clone(),
+            };
+            let colleague = p.email.as_deref().is_some_and(|e| theirs.contains(&e.trim().to_lowercase()));
+            match (p.email.as_deref().and_then(domain), &my_domain) {
+                (Some(d), Some(mine)) if &d != mine && !colleague => external.push(label),
+                _ => colleagues.push(label),
+            }
+        }
+        colleagues.dedup();
+        external.dedup();
+    }
+    (colleagues, external)
 }
 
 /// The minutes gate for a call, as `context` applies it (the skill's), from its files: why it is
@@ -478,31 +473,8 @@ pub fn context(call: &str) -> Result<()> {
     }
     let dominant_language = by_lang.iter().max_by_key(|(_, v)| v.as_u64().unwrap_or(0)).map(|(k, _)| k.clone());
 
-    // Colleagues vs external attendees: by the user's email domain and internal organisations', and a
-    // colleague invited on a client address is still a colleague (`people::Colleagues`).
-    let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
-    let (mut colleagues, mut external) = (vec![], vec![]);
-    if let Some(m) = &meeting {
-        let book = crate::people::colleagues();
-        let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
-        for p in m.organizer.iter().chain(m.attendees.iter()) {
-            let is_me = cfg.me.as_ref().is_some_and(|me| me.email.is_some() && me.email == p.email);
-            if is_me {
-                continue;
-            }
-            let label = match &p.email {
-                Some(e) => format!("{} <{e}>", p.name),
-                None => p.name.clone(),
-            };
-            let colleague = p.email.as_deref().is_some_and(|e| theirs.contains(&e.trim().to_lowercase()));
-            match (p.email.as_deref().and_then(domain), &my_domain) {
-                (Some(d), Some(mine)) if &d != mine && !colleague => external.push(label),
-                _ => colleagues.push(label),
-            }
-        }
-        colleagues.dedup();
-        external.dedup();
-    }
+    let (colleagues, external) = attendees_split(meeting.as_ref(), &cfg);
+    let types = meeting_types();
 
     let user_notes = dir.join(USER_NOTES);
     let user_headings: Vec<String> = fs::read_to_string(&user_notes)
@@ -533,6 +505,10 @@ pub fn context(call: &str) -> Result<()> {
         "meeting": meeting,
         "colleagues": colleagues,
         "external": external,
+        // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`), and every kind with
+        // how to tell it (step 3b settles it).
+        "meeting_type": meeting_type_of(&dir, &types, Some((colleagues.len(), external.len())), meeting.as_ref()),
+        "meeting_types": types.iter().map(|t| json!({"id": t["id"], "name": t["name"], "about": t["about"]})).collect::<Vec<_>>(),
         "transcript_chars": chars,
         "chars_by_speaker": by_speaker,
         "chars_by_language": by_lang,
@@ -543,12 +519,14 @@ pub fn context(call: &str) -> Result<()> {
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
-        "template": if memo { memo_template() } else { pick_template(subject_of(&dir).as_deref()) },
+        "template": if memo { memo_template() } else { template_for(&dir) },
+        // What `{date}`, `{participants}`… in it stand for.
+        "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
         "memo": memo,
         "open_threads": if memo { crate::memo::open_threads(&dir) } else { Value::Null },
         "memo_parts": if memo { json!(crate::memo::parts(&dir)) } else { Value::Null },
-        "frames": frames,
+        "frames": frames_for_minutes(&dir, &frames),
         "chat": fs::read(dir.join("chat.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!([])),
         "me_profile": me_profile(),
         // This call's terms (always-on + learned for this meeting); learning: `vocab add --call`.
@@ -816,33 +794,12 @@ pub fn ensure_me_profile() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `echoctl compose`: open a pre-filled email in the default mail app (never sends).
-pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path) -> Result<()> {
-    let body = fs::read_to_string(body_file).with_context(|| format!("reading {}", body_file.display()))?;
-    let enc = |s: &str| -> String {
-        s.bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'@' => (b as char).to_string(),
-                _ => format!("%{b:02X}"),
-            })
-            .collect()
-    };
-    let mut url = format!("mailto:{}?subject={}&body={}", to.iter().map(|t| enc(t)).collect::<Vec<_>>().join(","), enc(subject), enc(&body));
-    if !cc.is_empty() {
-        url.push_str(&format!("&cc={}", cc.iter().map(|t| enc(t)).collect::<Vec<_>>().join(",")));
-    }
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&url).status()?;
-    #[cfg(windows)]
-    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
-    println!("opened a draft to {} in the mail app — review and send it there", to.join(", "));
-    Ok(())
-}
-
 /// `echoctl frames <call> --keep a.jpg,b.jpg | none`: keep only the frames the notes use,
 /// delete the rest (talking heads, Teams UI, near-duplicates) and rewrite `frames.jsonl`.
 pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
     let dir = resolve_call(call)?;
+    // `.` from inside the call has no name of its own (#98): its full path has.
+    let dir = if dir.file_name().is_none() { dunce::canonicalize(&dir)? } else { dir };
     let name = |p: &str| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let keep: std::collections::HashSet<String> = keep.iter().filter(|k| k.as_str() != "none").map(|k| name(k)).collect();
     // Never deleted outright: what is pruned goes to `.echo/trash/<call>.frames/` (with its
@@ -888,6 +845,25 @@ pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
         println!("frames: kept {kept}");
     }
     Ok(())
+}
+
+/// A call's shared screens for its minutes, small however long the call (#98): how many, the index that lists them
+/// all (`frames.jsonl` in the call's folder, its files relative to it), and up to 12 to look at — the call cut in 12
+/// equal stretches, from each the frame that changed the screen most — in time order.
+fn frames_for_minutes(dir: &Path, all: &[Value]) -> Value {
+    const SAMPLE: usize = 12;
+    let change = |i: usize| all[i]["change"].as_f64().unwrap_or(0.0);
+    let pick: Vec<usize> = if all.len() <= SAMPLE {
+        (0..all.len()).collect()
+    } else {
+        // Of equal changes (a new screen is 1.0; an older index has none), the stretch's first.
+        (0..SAMPLE).filter_map(|s| (s * all.len() / SAMPLE..(s + 1) * all.len() / SAMPLE).reduce(|a, b| if change(b) > change(a) { b } else { a })).collect()
+    };
+    json!({
+        "count": all.len(),
+        "index": (!all.is_empty()).then(|| dir.join("frames.jsonl").display().to_string()),
+        "sample": pick.iter().map(|i| all[*i].clone()).collect::<Vec<_>>(),
+    })
 }
 
 /// Key frames saved during the call (`frames.jsonl`): `[{t, file, change}]`, file absolute.
@@ -1048,237 +1024,6 @@ pub fn save_my_notes(dir: &Path, text: &str, base: &str) -> Result<NotesSaved> {
     Ok(NotesSaved { stored, kept })
 }
 
-// ── action items ────────────────────────────────────────────────────────────────────────────
-
-pub const ACTIONS: &str = "actions.json";
-/// The file an app run writes its new action list to (its prompt names it) before `echoctl actions
-/// --apply`; only that run's (a session uses the skill's `actions.new.json`).
-pub fn actions_new_of(run_id: &str) -> String {
-    format!("actions.new-{run_id}.json")
-}
-/// Written by `apply_actions` only: which run last wrote the list (a status change never touches
-/// it), so a run is `done` only when it wrote its own (`notes::finish_actions`).
-pub const ACTIONS_GENERATION: &str = ".actions-generation";
-
-/// The run that last wrote the call's action items (`ACTIONS_GENERATION`; "session" for a
-/// Claude Code session's).
-pub fn actions_written_by(dir: &Path) -> Option<String> {
-    let v: Value = serde_json::from_slice(&fs::read(dir.join(ACTIONS_GENERATION)).ok()?).ok()?;
-    v["run"].as_str().map(str::to_owned)
-}
-/// Set on an app run's Claude Code: `apply_actions` records it as the list's writer.
-pub const RUN_ID: &str = "ECHOCTL_RUN_ID";
-
-/// A new id for an action item: 8 lowercase letters and digits (no l, o, 0, 1).
-fn action_id() -> String {
-    const ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
-    let mut b = [0u8; 8];
-    if getrandom::fill(&mut b).is_err() {
-        // No random source: the clock and a counter are unique enough within one list.
-        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-        b = (t ^ n.rotate_left(32) ^ std::process::id() as u64).to_le_bytes();
-    }
-    b.iter().map(|x| ALPHABET[*x as usize % ALPHABET.len()] as char).collect()
-}
-
-fn read_actions(dir: &Path) -> Result<Option<Vec<Value>>> {
-    let path = dir.join(ACTIONS);
-    match fs::read(&path) {
-        Ok(b) => match serde_json::from_slice::<Value>(&b).with_context(|| format!("reading {}", path.display()))? {
-            Value::Array(items) => Ok(Some(items)),
-            _ => bail!("{} isn't a list", path.display()),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
-    }
-}
-
-fn write_actions(dir: &Path, items: &[Value]) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(items)?;
-    bytes.push(b'\n');
-    Ok(paths::write_atomic(&dir.join(ACTIONS), &bytes)?)
-}
-
-/// Before the call's action items are written again (a run's admission, `apply_actions`): a list
-/// that isn't JSON, or isn't a list, is moved aside as `actions.unreadable-<HHMMSS>.json` — kept,
-/// never deleted — so one bad file can't stop the minutes for good. True if one was.
-fn set_aside_unreadable(dir: &Path) -> Result<bool> {
-    let path = dir.join(ACTIONS);
-    let bytes = match fs::read(&path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-    };
-    if matches!(serde_json::from_slice::<Value>(&bytes), Ok(Value::Array(_))) {
-        return Ok(false);
-    }
-    let aside = (0..100)
-        .map(|n| dir.join(format!("actions.unreadable-{}{}.json", Local::now().format("%H%M%S"), if n == 0 { String::new() } else { format!("-{n}") })))
-        .find(|p| !p.exists())
-        .context("no free name for a copy of the action items")?;
-    fs::rename(&path, &aside).with_context(|| format!("moving {} aside", path.display()))?;
-    eprintln!("{} isn't a list of action items: kept as {}", path.display(), aside.display());
-    Ok(true)
-}
-
-/// Give every item without one an id (in place); true if any was given.
-fn give_ids(items: &mut [Value]) -> bool {
-    let mut given = false;
-    for it in items.iter_mut().filter(|it| it["id"].as_str().is_none_or(str::is_empty)) {
-        if it.is_object() {
-            it["id"] = json!(action_id());
-            given = true;
-        }
-    }
-    given
-}
-
-/// A call's action items (None: none written), every one with an id. A list written before ids
-/// existed gets them here, once, under the call's lock and written back — so neither the window,
-/// the pane, the CLI nor a minutes run ever sees an item it couldn't address.
-pub fn actions(dir: &Path) -> Result<Option<Vec<Value>>> {
-    let items = read_actions(dir)?;
-    if items.as_ref().is_none_or(|i| i.iter().all(|it| it["id"].as_str().is_some_and(|s| !s.is_empty()))) {
-        return Ok(items);
-    }
-    let _lock = lock_meta(dir)?;
-    actions_locked(dir)
-}
-
-/// `actions`, for a caller that holds the call's lock already (a run's admission: a list that
-/// can't be read is set aside first — the run writes a new one).
-pub(crate) fn actions_locked(dir: &Path) -> Result<Option<Vec<Value>>> {
-    set_aside_unreadable(dir)?;
-    let Some(mut items) = read_actions(dir)? else { return Ok(None) };
-    if give_ids(&mut items) {
-        write_actions(dir, &items)?;
-    }
-    Ok(Some(items))
-}
-
-/// Mark the action item `id` done or to do (the window, the pane, `echoctl action`). Under the
-/// call's lock, so it lands in the list a minutes run applies at the same moment, or after it.
-pub fn set_action_status(dir: &Path, id: &str, status: &str) -> Result<()> {
-    anyhow::ensure!(status == "done" || status == "todo", "a status is done or todo, not {status}");
-    let _lock = lock_meta(dir)?;
-    let mut items = read_actions(dir)?.ok_or_else(|| anyhow!("this call has no action items"))?;
-    let given = give_ids(&mut items);
-    let Some(it) = items.iter_mut().find(|it| it["id"].as_str() == Some(id)) else {
-        if given {
-            write_actions(dir, &items)?;
-        }
-        bail!("that action item isn't in the list any more — look again");
-    };
-    it["status"] = json!(status);
-    write_actions(dir, &items)
-}
-
-/// An action's task as compared across rewrites: lower case, single spaces.
-fn task_key(it: &Value) -> String {
-    it["task"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
-}
-
-/// Replace the call's action items with the list in `file` (what process-call writes): each item
-/// whose `id` is in the current list keeps it and takes its current status (ticks made while the
-/// minutes were being written survive); an item without a known id (one not in the current list
-/// counts as none) takes the id and status of the one current item with the same owner and task,
-/// if exactly one; the rest get new ids. A current list that can't be read is set aside first.
-/// Records the writer in `.actions-generation` (`ECHOCTL_RUN_ID`, else a session's) and removes
-/// `file` — so only a new list in the call's own folder (`actions.new.json`, a run's
-/// `actions.new-<run>.json`) is taken: never `actions.json` itself, another call's or any other file.
-pub fn apply_actions(dir: &Path, file: &Path) -> Result<usize> {
-    let run = std::env::var(RUN_ID).ok().filter(|r| !r.is_empty()).unwrap_or_else(|| "session".into());
-    apply_actions_as(dir, file, &run)
-}
-
-/// `apply_actions` recorded as `run`'s (the app finishing a run that left its list unapplied).
-pub fn apply_actions_as(dir: &Path, file: &Path, run: &str) -> Result<usize> {
-    // The file itself as it is on disk (a link named actions.new.json resolves to what it points
-    // at), in the same folder however it is spelled; as written where neither can be resolved
-    // (some Windows drives).
-    let (real, in_call) = match (dunce::canonicalize(file), dunce::canonicalize(dir)) {
-        (Ok(f), Ok(d)) => {
-            let here = f.parent() == Some(d.as_path());
-            (f, here)
-        }
-        (Err(_), Err(_)) => (file.to_path_buf(), file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")) == dir),
-        (Err(e), Ok(_)) => return Err(anyhow::Error::new(e).context(format!("reading {}", file.display()))),
-        (Ok(_), Err(_)) => (file.to_path_buf(), false),
-    };
-    let name = real.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    anyhow::ensure!(
-        name.starts_with("actions.new") && name.ends_with(".json") && in_call,
-        "{} isn't a new action list in the call's folder (actions.new.json there)",
-        file.display()
-    );
-    let text = fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
-    let Value::Array(mut new) = serde_json::from_str::<Value>(&text).with_context(|| format!("{} isn't JSON", file.display()))? else {
-        bail!("{} must be a JSON list of action items", file.display());
-    };
-    for (i, it) in new.iter().enumerate() {
-        anyhow::ensure!(it.is_object(), "item {} isn't an object", i + 1);
-        anyhow::ensure!(it["task"].as_str().is_some_and(|t| !t.trim().is_empty()), "item {} has no task", i + 1);
-        if let Some(st) = it.get("status").filter(|v| !v.is_null()) {
-            anyhow::ensure!(st == "todo" || st == "done", "item {}: status is todo or done", i + 1);
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    for id in new.iter().filter_map(|it| it["id"].as_str().filter(|s| !s.is_empty())) {
-        anyhow::ensure!(seen.insert(id.to_string()), "the id {id} is used twice");
-    }
-    let _lock = lock_meta(dir)?;
-    set_aside_unreadable(dir)?;
-    let mut current = read_actions(dir)?.unwrap_or_default();
-    give_ids(&mut current);
-    let by_id: std::collections::HashMap<String, &Value> = current.iter().filter_map(|it| Some((it["id"].as_str()?.to_string(), it))).collect();
-    let mut taken: std::collections::HashSet<String> = new.iter().filter_map(|it| it["id"].as_str().filter(|id| by_id.contains_key(*id)).map(str::to_owned)).collect();
-    for it in new.iter_mut() {
-        match it["id"].as_str().map(str::to_owned).filter(|id| by_id.contains_key(id)) {
-            Some(id) => it["status"] = by_id[&id]["status"].clone(),
-            None => {
-                let same: Vec<&&Value> = by_id
-                    .values()
-                    .filter(|c| task_key(c) == task_key(it) && c["owner"] == it["owner"] && !taken.contains(c["id"].as_str().unwrap_or("")))
-                    .collect();
-                if let [one] = same.as_slice() {
-                    let id = one["id"].as_str().unwrap_or("").to_string();
-                    it["status"] = one["status"].clone();
-                    it["id"] = json!(id);
-                    taken.insert(id);
-                } else {
-                    it["id"] = json!(action_id());
-                }
-            }
-        }
-        if !(it["status"] == "done" || it["status"] == "todo") {
-            it["status"] = json!("todo");
-        }
-    }
-    write_actions(dir, &new)?;
-    paths::write_atomic(&dir.join(ACTIONS_GENERATION), serde_json::to_string(&json!({ "run": run, "at": Local::now().to_rfc3339(), "items": new.len() }))?.as_bytes())?;
-    let _ = fs::remove_file(file);
-    Ok(new.len())
-}
-
-/// `echoctl action <call> <id> done|todo`.
-pub fn action_command(call: &str, id: &str, status: &str) -> Result<()> {
-    set_action_status(&resolve_call(call)?, id, status)?;
-    println!("{status}");
-    Ok(())
-}
-
-/// `echoctl actions <call> [--apply <file>]`: the list (with ids) as JSON, or apply a new one.
-pub fn actions_command(call: &str, apply: Option<&Path>) -> Result<()> {
-    let dir = resolve_call(call)?;
-    match apply {
-        Some(file) => println!("applied {} action items", apply_actions(&dir, file)?),
-        None => println!("{}", serde_json::to_string_pretty(&actions(&dir)?)?),
-    }
-    Ok(())
-}
-
 /// `echoctl previous --subject S`: notes of the last call with that subject, if any.
 pub fn previous(subject: &str) -> Result<()> {
     if let Some(d) = previous_with_notes(subject, None) {
@@ -1290,7 +1035,7 @@ pub fn previous(subject: &str) -> Result<()> {
 /// Deleted calls wait here this long before being purged.
 const TRASH_DAYS: u64 = 30;
 
-fn trash_dir() -> PathBuf {
+pub(crate) fn trash_dir() -> PathBuf {
     paths::state_dir().join("trash")
 }
 
@@ -1359,6 +1104,25 @@ fn purge_trash_in(trash: &Path) {
 
 #[cfg(test)]
 mod tests {
+
+    /// The trashed copy of a template never writes over one trashed before within the same second (a file renamed
+    /// onto another replaces it): every name of the seconds around now is taken already, and all stay.
+    #[test]
+    fn a_template_taken_away_never_writes_over_one_in_the_trash() {
+        let (_env, _root) = paths::testenv::folders("templates-trash");
+        fs::create_dir_all(templates_dir()).unwrap();
+        fs::write(templates_dir().join("ours.md"), "---\nname: ours\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        let bin = trash_dir().join("templates");
+        fs::create_dir_all(&bin).unwrap();
+        let now = chrono::Utc::now();
+        let taken: Vec<PathBuf> = (-2..=5).map(|s| bin.join(format!("ours-{}.md", (now + chrono::Duration::seconds(s)).format("%Y%m%d%H%M%S")))).collect();
+        for t in &taken {
+            fs::write(t, "trashed before").unwrap();
+        }
+        template_remove("ours").unwrap();
+        assert!(taken.iter().all(|t| fs::read_to_string(t).unwrap() == "trashed before"), "none written over");
+        assert_eq!(fs::read_dir(&bin).unwrap().count(), taken.len() + 1, "the new one beside them");
+    }
     use super::*;
 
     #[test]
@@ -1417,7 +1181,7 @@ mod tests {
         mk("2026-10-30_120000-sync", Some("## Decisions\n\n- Later\n"), "[]"); // after this one: not "last time"
         let p = prep(&now);
         assert_eq!(p["call"], "2026-10-16_120000-sync");
-        assert_eq!(p["open_actions"].as_array().unwrap().len(), 1);
+        assert_eq!(p["open_actions"], json!([]), "from its threads' tasks (none here), not its action items");
         assert_eq!(p["highlights"][0], "Lisbon first");
     }
 
@@ -1445,6 +1209,214 @@ mod tests {
         assert_eq!(recap_from_notes(md), vec!["Keep X out", "Meet weekly"]);
         let md = "# T\n\n## Summary\nWe agreed on the plan. Then more.\n";
         assert_eq!(recap_from_notes(md), vec!["We agreed on the plan"]);
+    }
+
+    #[test]
+    fn templates_are_edited_made_reset_and_chosen_for_a_call() {
+        let (_env, root) = crate::paths::testenv::folders("calls-templates");
+        let kind = |id: &str| templates_view()["templates"].as_array().unwrap().iter().find(|t| t["id"] == id).map(|t| t["kind"].as_str().unwrap().to_string());
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        // A built-in changed: edited, and the minutes follow the change.
+        let secs = vec![json!({"heading": "Decisions", "instruction": "Who owns each.\n## Not a heading"}), json!({"heading": "  ", "instruction": "dropped"})];
+        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs).unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("edited"));
+        let t = pick_in(&all_templates(), Some("Sprint retro x")).unwrap().0.clone();
+        assert_eq!(t.name, "discussion");
+        assert_eq!(t.sections.len(), 1, "an empty heading is no section; a '## ' line stays inside its section");
+        assert!(t.sections[0]["instruction"].as_str().unwrap().contains("### Not a heading"));
+        assert_eq!(t.header, "# {title}\n### not a section", "the header kept, before the sections");
+        assert!(t.text.starts_with("# {title}") && t.text.contains("## Decisions"), "the whole template for the skill");
+        // A new one of the user's: its id from its name, not a taken one, at least one section.
+        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs).unwrap(), "client-kickoff");
+        assert!(!template_id(&"word ".repeat(30)).ends_with('-'), "a long name cut at a word's end");
+        assert_eq!(kind("client-kickoff").as_deref(), Some("yours"));
+        assert!(template_save(None, "client kickoff", &[], "", &secs).is_err(), "taken");
+        assert!(template_save(None, "Empty", &[], "", &[]).is_err(), "no section");
+        assert_eq!(pick_in(&all_templates(), Some("Acme kickoff")).unwrap().0.name, "client-kickoff");
+        // A call: its title's template, then the one chosen for it (Write again with…), and why.
+        let d = root.join("home/calls/2026-11-04_100000-weekly-sync");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"title":"Weekly sync","started_at":"2026-11-04T10:00:00+02:00"}"#).unwrap();
+        assert_eq!(template_of(&d), json!({"id": "status-sync", "why": "word", "word": "sync"}));
+        choose_template(&d, "client-kickoff").unwrap();
+        assert_eq!(template_of(&d), json!({"id": "client-kickoff", "why": "chosen"}));
+        assert!(choose_template(&d, "memo").is_err() && choose_template(&d, "nope").is_err());
+        // Reset and delete: the user's files go to the trash; a choice of a gone template falls back.
+        template_remove("discussion").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        assert!(template_remove("discussion").is_err(), "Echo's own: nothing to take away");
+        template_remove("client-kickoff").unwrap();
+        assert_eq!(kind("client-kickoff"), None);
+        assert_eq!(fs::read_dir(trash_dir().join("templates")).unwrap().count(), 2);
+        assert_eq!(template_of(&d)["id"], "status-sync");
+        // A file named after itself is its own template; one whose frontmatter names a built-in changes that built-in, as
+        // before Settings → Templates — saved and taken away through that same file.
+        fs::write(templates_dir().join("ours.md"), "---\nname: ours\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("ours").as_deref(), Some("yours"));
+        fs::write(templates_dir().join("our-minutes.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("edited"));
+        assert_eq!(kind("our-minutes"), None);
+        template_save(Some("discussion"), "", &["y".into()], "", &secs).unwrap();
+        assert!(fs::read_to_string(templates_dir().join("our-minutes.md")).unwrap().contains("match: [y]"), "its own file");
+        assert!(!templates_dir().join("discussion.md").exists());
+        template_remove("discussion").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        template_remove("ours").unwrap();
+        // A new one never writes over a file that is there, whatever its frontmatter says.
+        fs::write(templates_dir().join("kickoff.md"), "---\nname: something-else\nmatch: []\n---\n## A\nb\n").unwrap();
+        assert!(template_save(None, "Kickoff", &[], "", &secs).is_err());
+        // Nothing outside the folder.
+        assert!(template_save(Some("../../x"), "", &[], "", &secs).is_err());
+        assert!(template_remove("../x").is_err() && template_remove("C:notes").is_err() && template_remove("default").is_err());
+        assert_eq!(template_id("CON"), "con-template", "no device name on Windows");
+    }
+
+    #[test]
+    fn a_template_with_its_own_frontmatter_and_tables_round_trips() {
+        let (_env, _) = crate::paths::testenv::folders("calls-template-rich");
+        // A minutes format of its own: YAML frontmatter, a title format, a decision table.
+        let header = "---\ndate: {date}\nattendees:\n  - {each participant}\n---\n\n# Meeting Minutes: {title}";
+        let table = "| # | Decision | Options Considered | Agreed Option | Rationale | ADR Reference |\n|---|---|---|---|---|---|\nOne row per decision [mm:ss]; ADR-TBD when none.";
+        let secs = vec![json!({"heading": "Decisions", "instruction": table}), json!({"heading": "Action Items", "instruction": "- owner — task"})];
+        let id = template_save(None, "Minutes format", &["steering".into()], header, &secs).unwrap();
+        let t = all_templates().into_iter().find(|t| t.name == id).unwrap();
+        assert_eq!(t.header, header);
+        assert_eq!(t.sections, secs);
+        assert!(t.text.starts_with("---\ndate: {date}") && t.text.contains(table), "the skill reads it whole: {}", t.text);
+        // Saved again unchanged (an edit elsewhere in the window): the same file.
+        let f = templates_dir().join(format!("{id}.md"));
+        let before = fs::read_to_string(&f).unwrap();
+        template_save(Some(&id), "", &t.keywords, &t.header, &t.sections).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
+    fn a_meeting_type_is_guessed_from_who_came_and_the_users_choice_is_kept() {
+        let (_env, root) = crate::paths::testenv::folders("calls-meeting-type");
+        let p = |n: &str, e: &str| crate::meeting::Person { name: n.into(), email: Some(e.into()) };
+        let me = p("Dana Kowal", "dana@acme.example");
+        Config { me: Some(me.clone()), ..Default::default() }.save().unwrap();
+        let call = |name: &str, people: Vec<crate::meeting::Person>| {
+            let d = root.join("home/calls").join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), r#"{"title":"Sync","started_at":"2026-11-04T10:00:00+02:00","ended_at":"2026-11-04T10:30:00+02:00"}"#).unwrap();
+            let m = MeetingContext { id: Some(format!("ev-{name}")), subject: Some(format!("Sync {name}")), attendees: people, ..Default::default() };
+            fs::write(d.join(crate::meeting::FILE), serde_json::to_vec(&m).unwrap()).unwrap();
+            d
+        };
+        let one = call("2026-11-04_100000-a", vec![me.clone(), p("Lee Park", "lee@acme.example")]);
+        let team = call("2026-11-04_110000-b", vec![me.clone(), p("Lee Park", "lee@acme.example"), p("Kim Ito", "kim@acme.example")]);
+        let client = call("2026-11-04_120000-c", vec![me.clone(), p("Ann Ruiz", "ann@contoso.example")]);
+        assert_eq!(meeting_type(&one), json!({"type": "one-on-one", "label": "1:1", "by": "guess"}));
+        assert_eq!(meeting_type(&team)["type"], "internal");
+        assert_eq!(meeting_type(&client)["type"], "client");
+        // Typed before it started, by its series: the call takes its meeting's; the user's choice on the call is above it.
+        let m: MeetingContext = serde_json::from_slice(&fs::read(team.join(crate::meeting::FILE)).unwrap()).unwrap();
+        let key = event_key(&m).unwrap();
+        assert!(key.starts_with("event:") || key.starts_with("id:"), "a meeting by its event or series, never its subject: {key}");
+        assert_eq!(event_type_in(&m, &type_book())["by"], "guess");
+        // By the classifier: the call's is from its invite (the minutes may settle it).
+        update_state(&event_types_file(), |all: &mut serde_json::Map<String, Value>| {
+            all.insert(key.clone(), json!({"type": "partner", "by": "invite"}));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(meeting_type(&team), json!({"type": "partner", "label": "Partner", "by": "invite"}));
+        // By the user on the calendar: the call's is theirs too, so no minutes run replaces it.
+        set_event_type(&key, "client").unwrap();
+        assert_eq!(event_type_in(&m, &type_book())["type"], "client");
+        assert_eq!(meeting_type(&team), json!({"type": "client", "label": "Client", "by": "you"}));
+        // …not even inside a run (the call's own run, as Echo starts one).
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        std::env::set_var(crate::guard::RUN_CALL, &team);
+        set_meeting_type(&team.display().to_string(), "partner").unwrap();
+        std::env::remove_var(crate::notes::HEADLESS);
+        std::env::remove_var(crate::guard::RUN_CALL);
+        assert_eq!(meeting_type(&team)["type"], "client", "a run never replaces the user's choice on the calendar");
+        set_meeting_type(&team.display().to_string(), "internal").unwrap();
+        assert_eq!(meeting_type(&team)["by"], "you");
+        // A types file gone wrong by hand is an error, never written over with nothing.
+        fs::write(meeting_types_file(), "[{\"id\": \"x\",}]").unwrap();
+        assert!(meeting_type_save(None, "Board", "b").is_err());
+        assert_eq!(fs::read_to_string(meeting_types_file()).unwrap(), "[{\"id\": \"x\",}]");
+        fs::remove_file(meeting_types_file()).unwrap();
+        assert!(set_event_type("../x", "client").is_err() && set_event_type(&key, "nope").is_err());
+        // The user by another case, a person listed twice, a meeting with the user alone.
+        let twice = call("2026-11-04_130000-d", vec![p("Dana Kowal", "DANA@acme.example"), p("Lee Park", "lee@acme.example"), p("Park, Lee", "Lee@acme.example")]);
+        assert_eq!(meeting_type(&twice)["type"], "one-on-one");
+        let alone = call("2026-11-04_140000-e", vec![me.clone()]);
+        assert_eq!(meeting_type(&alone)["type"], "other");
+        // No address in About me yet: the user is told by name.
+        Config { me: Some(crate::meeting::Person { name: "Dana Kowal".into(), email: None }), ..Default::default() }.save().unwrap();
+        let named = call("2026-11-04_150000-f", vec![p("Dana Kowal", "dana@acme.example"), p("Lee Park", "lee@acme.example")]);
+        assert_eq!(meeting_type(&named)["type"], "one-on-one");
+        // The minutes run settles it; the user's choice is kept from then on, the run's never replaces it.
+        // Inside a run, as Echo starts one — and out again even when an assert fails (the variables are the process's).
+        struct Out;
+        impl Drop for Out {
+            fn drop(&mut self) {
+                std::env::remove_var(crate::notes::HEADLESS);
+                std::env::remove_var(crate::guard::RUN_CALL);
+            }
+        }
+        let _out = Out;
+        let in_run = |on: bool| {
+            if on {
+                std::env::set_var(crate::notes::HEADLESS, "1");
+                std::env::set_var(crate::guard::RUN_CALL, &client);
+            } else {
+                std::env::remove_var(crate::notes::HEADLESS);
+                std::env::remove_var(crate::guard::RUN_CALL);
+            }
+        };
+        in_run(true);
+        set_meeting_type(&client.display().to_string(), "partner").unwrap();
+        assert_eq!(meeting_type(&client)["by"], "echo");
+        in_run(false);
+        set_meeting_type(&client.display().to_string(), "industry").unwrap();
+        assert_eq!(meeting_type(&client), json!({"type": "industry", "label": "Industry & Analyst", "by": "you"}));
+        in_run(true);
+        set_meeting_type(&client.display().to_string(), "client").unwrap();
+        in_run(false);
+        assert_eq!(meeting_type(&client)["type"], "industry");
+        assert!(set_meeting_type(&client.display().to_string(), "board").is_err());
+        // The list is the user's to change: a built-in told differently (Edited, Reset), a type of their own.
+        let kind = |id: &str| meeting_types().into_iter().find(|t| t["id"] == id).map(|t| t["kind"].as_str().unwrap().to_string());
+        meeting_type_save(Some("partner"), "Partner", "An alliance partner: Microsoft, AWS, a reseller.").unwrap();
+        assert_eq!(kind("partner").as_deref(), Some("edited"));
+        assert!(meeting_types().iter().any(|t| t["about"] == "An alliance partner: Microsoft, AWS, a reseller."));
+        meeting_type_remove("partner").unwrap();
+        assert_eq!(kind("partner").as_deref(), Some("builtin"));
+        assert!(meeting_type_remove("partner").is_err(), "Echo's own: nothing to take away");
+        assert_eq!(meeting_type_save(None, "Board meeting", "The board or a steering committee.").unwrap(), "board-meeting");
+        assert_eq!(kind("board-meeting").as_deref(), Some("yours"));
+        assert!(meeting_type_save(None, "Board meeting", "again").is_err(), "taken");
+        set_meeting_type(&client.display().to_string(), "board-meeting").unwrap();
+        assert_eq!(meeting_type(&client), json!({"type": "board-meeting", "label": "Board meeting", "by": "you"}));
+        // A type taken away: the call falls back to its guess.
+        meeting_type_remove("board-meeting").unwrap();
+        assert_eq!(meeting_type(&client)["by"], "guess");
+    }
+
+    #[test]
+    fn the_summary_has_its_shape_and_its_recap_is_the_purpose() {
+        // Each built-in template but the memo's asks for the shape: purpose, Highlights, Key dates.
+        for (name, body) in BUILTIN_TEMPLATES.iter().filter(|(n, _)| *n != "memo") {
+            let t = parse_template(body, name, "t".into()).unwrap();
+            let s = &t.sections[0];
+            assert_eq!(s["heading"], "Summary", "{name}");
+            let i = s["instruction"].as_str().unwrap();
+            assert!(i.starts_with("One sentence") && i.contains("**Highlights**") && i.contains("**Key dates**"), "{name}: {i}");
+        }
+        // Every one-word `{value}` in a built-in is one the skill is told about; longer ones are instructions.
+        for (name, body) in BUILTIN_TEMPLATES {
+            for v in body.split('{').skip(1).filter_map(|r| r.split_once('}').map(|(v, _)| v)).filter(|v| !v.contains(' ')) {
+                assert!(TEMPLATE_VALUES.iter().any(|(n, _)| *n == v), "{name}: {{{v}}} is not a known value");
+            }
+        }
+        // Minutes in that shape: a call's recap with no decisions is its purpose, then its highlights and dates.
+        let md = "# T\n\n## Summary\nTo agree the pilot scope with Acme.\n\n**Highlights**\n- **Scope:** two sites first, Dana Kowal [03:10]\n\n**Key dates**\n- **24 Nov** — pilot starts [12:05]\n";
+        assert_eq!(recap_from_notes(md), vec!["To agree the pilot scope with Acme", "Scope: two sites first, Dana Kowal", "24 Nov — pilot starts"]);
     }
 
     #[test]
@@ -1496,10 +1468,31 @@ mod tests {
         // Pruned, not deleted: in the call's own data folder's trash, with its index line.
         assert!(bin.join("00m10s.jpg").exists());
         assert_eq!(fs::read_to_string(bin.join("frames.jsonl")).unwrap().lines().count(), 1);
-        prune_frames(dir.to_str().unwrap(), &["none".into()]).unwrap();
+        // A path with no name of its own (`.` from inside the call, here `frames/..`) is the call all the same (#98).
+        prune_frames(dir.join("frames/..").to_str().unwrap(), &["none".into()]).unwrap();
         assert!(!dir.join("frames").exists() && !dir.join("frames.jsonl").exists());
         assert!(bin.join("02m00s.jpg").exists() && bin.join("05m30s.jpg").exists());
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_long_calls_frames_go_to_the_minutes_as_a_sample() {
+        let dir = Path::new("/c");
+        let frames = |n: usize| (0..n).map(|i| json!({"t": i * 30, "file": format!("/c/frames/{i}.jpg"), "change": if i == 40 || i == 90 { 0.9 } else { 0.1 }})).collect::<Vec<_>>();
+        let few = frames_for_minutes(dir, &frames(3));
+        assert_eq!((few["count"].as_u64(), few["sample"].as_array().unwrap().len()), (Some(3), 3), "a short call: all of them");
+        let many = frames_for_minutes(dir, &frames(150));
+        let ts: Vec<u64> = many["sample"].as_array().unwrap().iter().map(|f| f["t"].as_u64().unwrap()).collect();
+        assert_eq!((many["count"].as_u64(), ts.len()), (Some(150), 12));
+        assert!(ts.windows(2).all(|w| w[0] < w[1]), "in time order, once each");
+        assert!(ts.contains(&(40 * 30)) && ts.contains(&(90 * 30)), "the biggest changes on screen");
+        assert!(ts.first() == Some(&0) && ts.last() >= Some(&(137 * 30)), "spread over the whole call");
+        // All alike (a new screen each time, or an index from before `change`): still spread, not the call's start.
+        let alike: Vec<Value> = (0..150).map(|i| json!({"t": i, "change": 1.0})).collect();
+        let ts: Vec<u64> = frames_for_minutes(dir, &alike)["sample"].as_array().unwrap().iter().map(|f| f["t"].as_u64().unwrap()).collect();
+        assert_eq!(ts, (0..12).map(|s| s * 150 / 12).collect::<Vec<u64>>());
+        assert_eq!(many["index"], json!(dir.join("frames.jsonl").display().to_string()));
+        assert!(frames_for_minutes(dir, &[])["index"].is_null());
     }
 
     #[test]
@@ -1712,6 +1705,33 @@ mod tests {
         let d = root.join("home/calls/2026-10-25_090000-atlas-planning");
         retitle(&d, "Atlas review", false).unwrap();
         assert!(root.join("home/calls/2026-10-25_090000-atlas-review").exists() && !d.exists());
+    }
+
+    #[test]
+    fn latest_is_the_newest_dated_call_not_the_last_folder_name() {
+        let (_env, _root) = crate::paths::testenv::folders("calls-latest");
+        let make = |name: &str, meta: Value| {
+            let d = paths::calls_dir().join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), meta.to_string()).unwrap();
+        };
+        make("2026-10-20_100000-older", json!({"title": "Older", "started_at": "2026-10-20T10:00:00+02:00"}));
+        make("2026-10-22_090000-newest", json!({"title": "Newest", "started_at": "2026-10-22T09:00:00+02:00"}));
+        // #147: no stamp in its name and no start: it sorts after every dated name, but it is the oldest.
+        make("old-dictation", json!({"title": "Old dictation"}));
+        // A stamp in its name and no start in meta.json: the stamp counts.
+        make("2026-10-21_120000-stamp-only", json!({"title": "Stamp only"}));
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-22_090000-newest");
+        // The list is in the same order: the undated folder first (oldest), the newest dated last.
+        let names: Vec<_> = all_calls().iter().map(|d| d.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["old-dictation", "2026-10-20_100000-older", "2026-10-21_120000-stamp-only", "2026-10-22_090000-newest"]);
+        // Only undated folders: one of them is still `latest`.
+        for d in fs::read_dir(paths::calls_dir()).unwrap().flatten() {
+            if d.file_name() != "old-dictation" {
+                fs::remove_dir_all(d.path()).unwrap();
+            }
+        }
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "old-dictation");
     }
 
     /// Inside a run, every command's call goes through `resolve_call`: checked in a child process

@@ -1,0 +1,50 @@
+---
+id: TC-007
+title: "Same person as…" merges two people; "Not the same" splits an address off
+priority: low
+type: functional
+requirements: [F-PPL-07]
+module: people
+run: agent
+platform: any
+tags: [people, merge]
+auto: [tests/auto/specs/S-07.spec.mjs]
+---
+
+# TC-007: "Same person as…" merges two people; "Not the same" splits an address off
+
+**Module:** People | **Priority:** Low | **Type:** Functional
+
+## Preconditions
+- Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
+- Create the scratch thread with the Acme call: `echoctl project create "People lab"` (id `people-lab`), then `echoctl project include people-lab <folder of Acme weekly sync>` (the entry of `$ECHOCTL_HOME/calls` ending `-acme-weekly-sync`). People are placed per thread, so the case never touches Acme rollout
+- In S-07: `people-lab` is the scenario's shared thread, made by stage 10's precondition (people/TC-001) and kept (Dana Lee in it since stage 11; other people may be in it too); skip making it. On its own: make it as above
+- Add the duplicate and the original to the thread: in the List "Add" on Dana Lee (in S-07 she is already in), then "+ Person" `Dana L <dlee@acme.example>`
+
+## Test Data
+
+| Field | Value |
+|-------|-------|
+| Thread | People lab (`people-lab`), with the call Acme weekly sync |
+| People | Dana Lee <dana@acme.example> and Dana L <dlee@acme.example> |
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | Navigate to `{{base_url}}/#project/people-lab/people` and click "List" in the view switch (`role=group[name="View"]`) | Rows "Dana Lee" and "Dana L" in the thread's table |
+| 2 | Click the row "Dana L", then "Same person as…" in the panel | A select "Same person as" (first option "Same person as…") and buttons "Merge", "Cancel" |
+| 3 | Choose "Dana Lee · dana@acme.example" and click "Merge". Wait up to 3 s after an action for the window to redraw before reading. | The thread's table holds one Dana row, "Dana Lee" (the one seen in more calls), and no row "Dana L"; the panel of Dana Lee shows two addresses `dana@acme.example` and `dlee@acme.example` with a button "Not the same" beside the second |
+| 4 | Click "Not the same". Wait up to 3 s after an action for the window to redraw before reading. | Two rows "Dana Lee" and "Dana L" are listed again |
+
+## Expected Final State
+Dana Lee and Dana L are two people again.
+
+## Teardown
+- `echoctl project delete people-lab`
+
+## Notes
+- Step 3 checks #122: an address merged in that no call shows (Dana L was added by hand) was once missing from the panel, so there was no "Not the same" to undo the merge; the panel lists every address the person has, the merged ones after the first.
+
+## Changes
+- Merges and splits two people of `people-lab`.

@@ -51,8 +51,24 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
   automatically. Not when `skip_reason` says there is no transcript yet: step 1 first.
 
 ## 3. Template
-`context` already picked it: `template.sections` is the list of `heading` + `instruction` to
-follow (user templates in `<data folder>/.echo/templates/` override the built-in ones).
+`context` already picked it (the user's templates, made in Settings → Templates, come before Echo's). Read
+`template.text` as the reference for the minutes' shape and follow it:
+- Its **header** (everything before the first `## `) is how the minutes start:
+  - `{value}`: fill it in — `context.template_values` says what each known one stands for (`{date}`,
+    `{participants}`, `{previous}`…). One with nothing to fill (no thread, no previous meeting) goes, with the
+    separator or words next to it; a line left with nothing goes.
+  - Any other `{…}` is an instruction in the template's words ("{one line on why we met}").
+  - A line that says when it applies ("only when…") is left out otherwise.
+  - Everything else (frontmatter, a title format) is kept as written.
+- Each `## ` **section** is a heading of the minutes, in that order, and the words under it say what to write there —
+  including formats it shows (a table's columns, bullet shapes, bold labels).
+`template.header` and `template.sections` are the same, split.
+
+## 3b. Meeting type (before you write)
+`context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
+from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
+it. Settle it from what was said and who took part, by those `about`s, and run `echoctl type <dir> <id>` when it
+differs from the guess. Never for a memo. Settle it before step 4: a template's `{type}` is this one.
 
 ## 4. Write `<dir>/notes.md`
 
@@ -82,7 +98,7 @@ Leave the others as "Speaker N"; never guess from who talked most or from the in
 this before writing the notes, and use the names in them.
 
 Name the speakers first (4a, if the transcript has "Speaker N" labels), then write:
-- Start with `# {title}` and one line: date, duration, participants (colleagues, then external).
+- Start with the template's header.
 - **If the user took notes** (`user_notes`): their notes are the backbone. Keep every point
   they wrote, expand it from the transcript, and use their `user_headings` as section headings
   before the template's. Never drop or contradict something the user wrote.
@@ -107,8 +123,8 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   statement to a named person only when the transcript makes it unambiguous (they introduce
   themselves, or answer when addressed by name); a speaker you named in step 4a counts as that
   person everywhere. Otherwise say "someone on the call". "Me" is the user (`me.name` if set).
-- If `previous_notes` exists, read it and add a short "Since last time" line when there is real
-  continuity (a decision revisited, an action item followed up). Skip it otherwise.
+- If `previous_notes` exists, read it: real continuity (a decision revisited, an action item followed up) fills the
+  header's "Since last time" line, when the template has one. No continuity: leave that line out.
 - `projects` lists the projects this call belongs to: each one's `brief`, `notes` (what the user
   wants you to know), `terms`, `people` and the `highlights` of its `recent_calls`. Use them to name
   things the way the project does and to see continuity across calls with other titles (a decision
@@ -132,10 +148,13 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   Echo's window turns these into jumps into the transcript.
 
 ### Shared screens (`frames`)
-If `frames` is non-empty, these are snapshots of what was on screen (slides, documents, demos),
-each with `t` (seconds into the call, same clock as the transcript). Look at them with Read —
-all of them if ≤ 12, otherwise the ones nearest to decisions, numbers and "as you can see"
-moments plus an even spread. Use what they show to fill gaps the audio leaves (figures on a
+If `frames.count` is above 0, the call has snapshots of what was on screen (slides, documents,
+demos), each with `t` (seconds into the call, same clock as the transcript). `frames.sample` holds
+up to 12 of them (all of them when there are no more): from each twelfth of the call, the frame
+that changed the screen most. On a longer call, `frames.index` (`frames.jsonl` in the call's
+folder) lists them all, one JSON line each — Read it; its `file` is relative to the call's folder
+(`frames/42m10s.jpg` → Read `<dir>/frames/42m10s.jpg`). Look at the frames with Read: the sample, and on a longer call
+also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section: one bullet per
 meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
@@ -145,7 +164,7 @@ Teams UI.
 
 Then prune: keep exactly the frames the **On screen** section cites and move the rest to Echo's trash (video
 tiles, Teams UI, near-duplicates of a kept slide) — `echoctl frames <dir> --keep
-<file1>,<file2>,…` (names as in `frames`), or `--keep none` if none was useful. Frames you
+<file1>,<file2>,…` (the file names, as in the frames' `file`), or `--keep none` if none was useful. Frames you
 didn't look at (more than 12) are judged by their neighbours: keep one per distinct slide.
 
 ### Meeting chat (`chat`)

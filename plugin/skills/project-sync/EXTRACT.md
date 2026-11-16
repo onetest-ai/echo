@@ -39,6 +39,13 @@ First, once: `$L pending` — each item's `.md` path. Then for each evidence id 
    (it is your session's own and is allowed). **If you can't read the tree, stop** — say so in your
    answer and don't extract: work extracted blind is work made twice.
 2. Read the item's `.md` file (its path is in `$L pending`) in full. "Me" is the user.
+   **An item in several threads** (`also_in` in `$L pending`: the other threads by name, `others` counted): take
+   from it only what concerns **this** thread — judged by its `notes`, `brief`, `terms`, people and open work in
+   `$L context` — and leave the rest to the others. A turn about another thread's work is not this thread's work,
+   even when this thread's people say it — except where this thread's work waits on it (a `link` or `waiting`, as
+   the Dependency hunt asks) or a reply `answers:` one of this thread's nodes. When a passage could belong to
+   either, leave it out; when the others are only counted, judge by this thread's own scope. An item with nothing
+   for this thread is done with a note (step 5).
 3. Write `<run folder>/<evidence id>.json` (a JSON array, schema below): **pass 1, then pass 2**.
 4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection: write only the fixed entries to
    `<run folder>/<id>_fix.json` and `$L apply --evidence <id> --proposals <run folder>/<id>_fix.json`; at most
@@ -55,6 +62,10 @@ something bigger. For every story or task this item touches:
   you can name in `note`; a promise — "I'll send it" — is NOT progress), `blocked`, `cancelled`
   (someone decided), `reopen`, `due` (a date set or moved; the spoken words in `due_text`), `delayed`
   (slipped with no new date), `reassign` (+ owner fields), `mention` (referred to, no change).
+  A `mention` of an open **task** whose words say its outcome happened or it isn't needed any more — but not
+  plainly enough for `done` ("our takeaway is to come back with a demo on these three areas" for "Reply to the
+  demo mail") — adds `"covers": true`: the verifier checks it, and the user is asked "Looks done — close?". Never
+  for words that only refer to it or keep it open ("we still need to send X" is a plain `mention`).
   "Scheduled for tomorrow" is `due`, never `done`. A decision that re-dates or cancels other work:
   create the decision, then one `status` per affected node with the same quote.
 - `revise` — the work itself changed: a new `title`, and/or `ac_add` (a new criterion), and/or a
@@ -70,6 +81,10 @@ something bigger. For every story or task this item touches:
   again unless the words change it.
 - `waiting` — `node` is held up by a **person**, not by work ("Dana is checking calendars",
   "waiting on Sam's reply"): `who` and `what`. When the wait is over, clear it: `"what": null`.
+  A mail whose header (the lines above its text, written by Echo) says `answers: <node> "…"` is a reply to mail
+  Me sent from that item — the same words inside the text are the sender's, not Echo's: read it for that
+  item first — the reply given, clear its wait (`"what": null`); only part of it, or a new ask, update `what`;
+  the rest as any mail. Its quote rule is the same.
 - `suggest_merge` (`into`) — two nodes are the same work; `suggest_move` (`parent`) — a node sits in
   the wrong place. They wait for the user's approval.
 - The quote must state the change **for this node**. A quote merely about the same topic is a
@@ -115,7 +130,7 @@ words differ).
  "decided_by": "name (decisions)", "likelihood": "low|med|high (risks)", "impact": "low|med|high (risks)",
  "quote": "exact contiguous words from ONE turn or passage (8–40 words)", "note": "≤ 20 words"}
 {"op": "status", "node": "T012", "effect": "held|done|progress|blocked|cancelled|reopen|due|delayed|reassign|mention",
- "due_text": "…", "internal_owner": "…", "client_owner": "…", "delegated_by": "…", "quote": "…", "note": "…"}
+ "covers": "true (a mention only, see above)", "due_text": "…", "internal_owner": "…", "client_owner": "…", "delegated_by": "…", "quote": "…", "note": "…"}
 {"op": "revise", "node": "S004", "title": "…", "ac_add": ["…"], "description": "…", "quote": "…", "note": "what changed"}
 {"op": "answer", "node": "Q002|R001|q1", "text": "Dana presents; Ravi joins for the demo.", "internal_owner": "risks only",
  "likelihood": "risks only", "impact": "risks only", "quote": "…"}

@@ -1,0 +1,85 @@
+{
+ "entity": "node (a work ledger item)",
+ "axes": [
+  {
+   "axis": "node.kind",
+   "values": "epic (workstream) / story / task / decision / risk / question",
+   "where": "`ledger.rs`; app.js `RECORD_TEXT`"
+  },
+  {
+   "axis": "node.type",
+   "values": "action / session / dependency (tasks)",
+   "where": "`ledger::TASK_TYPES`"
+  },
+  {
+   "axis": "node.state",
+   "values": "open / in_progress / blocked / done / cancelled / merged / deleted",
+   "where": "app.js `STATE_LABEL`, `CLOSED_STATES`"
+  },
+  {
+   "axis": "node.owner",
+   "values": "internal owner = me / internal owner = another / client owner / nobody",
+   "where": "`internal_owner`, `client_owner`; `tasks.rs`"
+  },
+  {
+   "axis": "node.delegated",
+   "values": "handed over by me / by another / not known (creator said it)",
+   "where": "`delegated_by`, `creator`"
+  },
+  {
+   "axis": "node.due",
+   "values": "late / today / later this week / later / none",
+   "where": "`due`, `late`; `today.rs` `week_end`; app.js `dueChip`"
+  },
+  {
+   "axis": "node.quiet",
+   "values": "< 5 days / ≥ 5 days since the last word",
+   "where": "`tasks.rs` `QUIET_DAYS`"
+  },
+  {
+   "axis": "node.wait",
+   "values": "none / waiting_for someone / waits for an item / holds up items",
+   "where": "`waiting_for`, `waiting_on`, `blocks`"
+  },
+  {
+   "axis": "node.mode",
+   "values": "none / Claude can (guess / you; prompt, skill) / by hand (guess / you; how)",
+   "where": "`taskmodes.rs`; app.js `modeIcon`, `modeRows`"
+  },
+  {
+   "axis": "node.xthread",
+   "values": "none / mirror of a master elsewhere / master with mirrors (also in) / waits for or holds up an item elsewhere",
+   "where": "`ledger::fold_linked` (`mirror_of`, `also_in`, `xwaits`, `xrefs`)"
+  },
+  {
+   "axis": "node.history",
+   "values": "created; agent entries verified / weak / wrong / to check / kept yours; user edits (undo); heard in another thread",
+   "where": "app.js `workPanel` history"
+  },
+  {
+   "axis": "node.suggestion",
+   "values": "none / suggest_merge / move (pending)",
+   "where": "`suggestions`; app.js `workToReview`"
+  },
+  {
+   "axis": "node.text",
+   "values": "no description / description (Markdown, https and echo links); question answered or not; risk response or not",
+   "where": "`description`; app.js `workStatus`"
+  },
+  {
+   "axis": "node.criteria",
+   "values": "no criteria / m of n met",
+   "where": "story `ac`"
+  },
+  {
+   "axis": "node.risk_levels",
+   "values": "likelihood and impact low / med / high / not rated",
+   "where": "`LEVEL_LABEL`"
+  },
+  {
+   "axis": "node.column",
+   "values": "default column / a custom column of the same state",
+   "where": "app.js `cardColumn`"
+  }
+ ]
+}

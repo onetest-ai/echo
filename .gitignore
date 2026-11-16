@@ -34,3 +34,13 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 .claude/settings.local.json
 .idea
 tasks
+
+# functional test reports and screenshots (made-up data, but kept per machine)
+/tests/reports/
+/.playwright-mcp/
+__pycache__/
+/tests/tools/testcall/build/
+/tests/fixtures/ai.local.json
+/tests/auto/node_modules/
+/tests/auto/test-results/
+/tests/auto/playwright-report/

@@ -1,0 +1,50 @@
+{
+ "entity": "ai (profile), live notes, app",
+ "axes": [
+  {
+   "axis": "ai.kind",
+   "values": "system / local (loopback or another host) / claude",
+   "where": "`ai.rs`"
+  },
+  {
+   "axis": "ai.default",
+   "values": "is default / not",
+   "where": "`ai.json` `default`"
+  },
+  {
+   "axis": "ai.signin",
+   "values": "signed in / signed out / other account / signing in",
+   "where": "`signin.rs` `SignInState`"
+  },
+  {
+   "axis": "ai.count",
+   "values": "one profile / several",
+   "where": "app.js `ai().profiles`"
+  },
+  {
+   "axis": "ai.file",
+   "values": "readable / unreadable `ai.json`",
+   "where": "app.js `ai().error`"
+  },
+  {
+   "axis": "live.enabled",
+   "values": "on / off / settings unreadable",
+   "where": "`ai.json` `live_notes`; app.js `hasLive`"
+  },
+  {
+   "axis": "live.state",
+   "values": "waiting / updating / updated / failed / busy / signing_in / paused / ended",
+   "where": "app.js `LIVE_STATE`"
+  },
+  {
+   "axis": "live.content",
+   "values": "none / now, decisions, actions, questions, gaps; usage; draft by another profile; last time",
+   "where": "app.js `liveNotes`, `liveHead`, `prepCard`"
+  },
+  {
+   "axis": "app.record",
+   "values": "idle / in a call / meeting soon / armed / recording a call / recording a memo / stop asked; a call being transcribed",
+   "where": "app.js `pill`; `/api/state`"
+  }
+ ]
+}

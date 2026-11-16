@@ -34,7 +34,13 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ai::{self, Kind, Profile};
+
+mod agent;
+pub use agent::serve as serve_agent;
 use crate::{calls, paths};
+
+mod model;
+pub(crate) use model::*;
 
 pub const NOTES: &str = "live-notes.json";
 /// What the call's live jobs used, added up (`Usage`).
@@ -79,6 +85,13 @@ impl Usage {
 thread_local! {
     /// The last job's usage on this thread (`take_usage` after `complete`).
     static LAST_USAGE: std::cell::RefCell<Option<Usage>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The job that just ran on this thread used this (a Claude Code result envelope; `cost` the job's own).
+pub(crate) fn set_usage(v: &Value, cost: Option<f64>) {
+    let mut u = Usage::of(v);
+    u.cost_usd = cost.unwrap_or(u.cost_usd);
+    LAST_USAGE.with(|l| *l.borrow_mut() = Some(u));
 }
 
 fn take_usage() -> Option<Usage> {
@@ -167,15 +180,6 @@ pub fn read_usage(dir: &Path) -> Option<Usage> {
 /// Settings for every short model job (live notes, questions, the Brain's readers): no CLAUDE.md and no
 /// auto memory — they are about one call or one document, and the data folder's CLAUDE.md (or the
 /// user's own) made each 90-second update ~46K tokens instead of ~2.5K (measured 2026-10-30).
-fn lean_settings() -> Result<PathBuf> {
-    let f = paths::config_dir().join("lean-job-settings.json");
-    let want = br#"{"claudeMdExcludes": ["**"]}"#;
-    if fs::read(&f).ok().as_deref() != Some(&want[..]) {
-        fs::create_dir_all(paths::config_dir())?;
-        paths::write_atomic(&f, want)?;
-    }
-    Ok(f)
-}
 pub const ASKS: &str = "live-asks.jsonl";
 pub const STATE: &str = "live-state.json";
 /// The live transcript (`live.rs` writes it; named here too, for builds without transcription).
@@ -422,7 +426,7 @@ fn notes_for_prompt(n: &Notes) -> String {
     .to_string()
 }
 
-fn clip(s: &str, n: usize) -> String {
+pub(crate) fn clip(s: &str, n: usize) -> String {
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > n { format!("{}…", s.chars().take(n).collect::<String>()) } else { s }
 }
@@ -468,210 +472,6 @@ fn parse_notes(text: &str, duration: f64) -> Result<Draft> {
     Ok(Draft { now, decisions: points("decisions"), actions, questions: points("questions") })
 }
 
-// ── talking to the model ────────────────────────────────────────────────────────────────────
-
-/// One completion: `system` + `user` → the model's text. `cancelled()` is polled while it runs (a
-/// stopped job is a stopped child process). `whole`: a reply cut off at the token limit is an
-/// error (a summary's JSON would be broken).
-fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    match p.kind {
-        Kind::Local => complete_local(p, system, user, max_tokens, whole, cancelled),
-        Kind::System | Kind::Claude => complete_claude(p, &p.live_model(), system, user, whole, CLAUDE_DEADLINE, cancelled),
-    }
-}
-
-/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
-/// minutes model) — a local profile answers through its own server.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
-    match p.kind {
-        Kind::Local => complete_local(p, system, user, max_tokens, true, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => {
-            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting())
-        }
-    }
-}
-
-/// One request with images (PNG bytes) and a text, on a profile's minutes model: the Brain's page
-/// reader. Claude Code gets the images as content blocks (no tools); a `local` profile its Messages API.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], text: &str, max_tokens: u32) -> Result<String> {
-    use base64::Engine as _;
-    let mut blocks: Vec<Value> = images
-        .iter()
-        .map(|png| json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}))
-        .collect();
-    blocks.push(json!({"type": "text", "text": text}));
-    let blocks = Value::Array(blocks);
-    match p.kind {
-        Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => {
-            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
-        }
-    }
-}
-
-fn curl_quote(s: &str) -> String {
-    // A newline would end the option and start another (curl reads its config line by line).
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
-}
-
-/// The curl config for one request (read from stdin: the token never on a command line). The HTTP
-/// status comes last, on a line of its own.
-fn curl_config(p: &Profile, body: &Value) -> String {
-    let base = p.base_url.as_deref().unwrap_or("").trim_end_matches('/');
-    let token = p.token.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| "ollama".into());
-    let mut c = format!(
-        "url = {}\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\nheader = \"anthropic-version: 2023-06-01\"\nheader = {}\ndata-binary = {}\nmax-time = {}\nconnect-timeout = 5\nwrite-out = \"\\n%{{http_code}}\"\n",
-        curl_quote(&format!("{base}/v1/messages")),
-        curl_quote(&format!("x-api-key: {token}")),
-        curl_quote(&body.to_string()),
-        LOCAL_DEADLINE.as_secs(),
-    );
-    // "This Mac" stays on this Mac, whatever proxy the environment names.
-    if ai::loopback(base) {
-        c.push_str("noproxy = \"*\"\n");
-    }
-    c
-}
-
-/// curl's arguments: `-q` must come first (it stops curl reading `~/.curlrc`); no `-L`.
-const CURL_ARGS: [&str; 4] = ["-q", "-sS", "-K", "-"];
-
-/// The last non-empty line of a child's stderr (a login shell's start-up noise comes first).
-fn last_line(s: &str) -> String {
-    s.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").to_string()
-}
-
-/// `POST <base_url>/v1/messages` with thinking off, through curl. `-q` first: the user's
-/// `.curlrc` isn't read (it could turn on following redirects); no `-L`: redirects aren't followed.
-fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, json!(user), max_tokens, whole, cancelled)
-}
-
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-fn complete_local_blocks(p: &Profile, system: &str, blocks: &Value, max_tokens: u32, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, system, blocks.clone(), max_tokens, true, cancelled)
-}
-
-fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let body = json!({
-        "model": p.live_model(),
-        "max_tokens": max_tokens,
-        "thinking": {"type": "disabled"},
-        "system": system,
-        "messages": [{"role": "user", "content": content}],
-    });
-    let mut c = Command::new("curl");
-    #[cfg(windows)]
-    {
-        use crate::app::NoWindow;
-        c = c.no_window();
-    }
-    c.args(CURL_ARGS).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    ai::detach(&mut c);
-    let mut child = c.spawn().context("running curl")?;
-    let (out, err, ok, wrote) = ai::wait_output_with(&mut child, Some(curl_config(p, &body).into_bytes()), LOCAL_DEADLINE + Duration::from_secs(5), cancelled)
-        .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
-    if let Err(e) = wrote {
-        bail!("{} didn't get the request: {e} {}", p.name, last_line(&err));
-    }
-    if !ok {
-        let why = last_line(&err);
-        bail!("{} didn't answer{}", p.name, if why.is_empty() { String::new() } else { format!(": {why}") });
-    }
-    let (body, status) = out.rsplit_once('\n').unwrap_or((out.as_str(), ""));
-    let v: Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => bail!("{} answered HTTP {}: {}", p.name, status.trim(), clip(body, 200)),
-    };
-    if let Some(e) = v.get("error") {
-        bail!("{}: {}", p.name, e["message"].as_str().or(e.as_str()).unwrap_or("error"));
-    }
-    if status.trim().parse::<u16>().is_ok_and(|s| s >= 400) {
-        bail!("{} answered HTTP {}: {}", p.name, status.trim(), clip(body, 200));
-    }
-    if whole && v["stop_reason"] == "max_tokens" {
-        bail!("{}'s reply was cut off at the token limit", p.name);
-    }
-    let text: String = v["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect();
-    if text.trim().is_empty() {
-        bail!("{} returned no text", p.name);
-    }
-    Ok(text)
-}
-
-/// A lean Claude Code run: no tools, our system prompt, the text on stdin; the result envelope
-/// is checked before the model's own text is used. `system` runs where the minutes run (the
-/// data folder or `notes_in`: its `.claude/settings.json` is part of "as configured"); the others
-/// in Echo's state folder (they load no project settings anyway).
-fn complete_claude(p: &Profile, model: &str, system: &str, user: &str, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
-}
-
-/// As `complete_claude`; with `blocks` (Messages API content: images, text) the prompt goes in as one
-/// stream-json user message instead of plain text.
-#[allow(clippy::too_many_arguments)]
-fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, blocks: Option<&Value>, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let mut args: Vec<String> = vec!["-p".into()];
-    if blocks.is_some() {
-        args.extend(["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from));
-    } else {
-        args.extend(["--output-format", "json"].map(String::from));
-    }
-    args.extend([
-        "--system-prompt".into(),
-        system.into(),
-        "--tools".into(),
-        String::new(),
-        "--strict-mcp-config".into(),
-        "--no-session-persistence".into(),
-        "--model".into(),
-        model.to_string(),
-        "--settings".into(),
-        lean_settings()?.display().to_string(),
-    ]);
-    let input = match blocks {
-        Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
-        None => user.to_string(),
-    };
-    let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
-    fs::create_dir_all(&cwd)?;
-    let mut cmd = ai::prepare_claude(p, &args, &cwd, true)?;
-    cmd.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
-    let mut child = cmd.spawn()?;
-    let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled)
-        .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
-    let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
-    let text = result.as_ref().and_then(|v| v["result"].as_str()).unwrap_or("").to_string();
-    if let Some(v) = &result {
-        LAST_USAGE.with(|u| *u.borrow_mut() = Some(Usage::of(v)));
-    }
-    let is_error = result.as_ref().is_none_or(|v| v["is_error"].as_bool().unwrap_or(false));
-    if is_error {
-        let all = format!("{out}\n{err}\n{text}");
-        if crate::notes::needs_login(&all) {
-            if !p.kind.signs_in() {
-                bail!("Claude Code isn't signed in — open Terminal, run claude and type /login");
-            }
-            ai::auth_failed(p);
-            return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(p)));
-        }
-        let why = [text.trim().lines().next().unwrap_or("").to_string(), last_line(&err)].into_iter().find(|l| !l.is_empty());
-        let why = why.or_else(|| wrote.err().map(|e| format!("couldn't send the prompt: {e}")));
-        bail!("{}: {}", p.name, clip(&why.unwrap_or_else(|| "Claude Code failed".into()), 200));
-    }
-    if whole && result.as_ref().is_some_and(|v| v["stop_reason"] == "max_tokens") {
-        bail!("{}'s reply was cut off at the token limit", p.name);
-    }
-    if text.trim().is_empty() {
-        bail!("{} returned no text", p.name);
-    }
-    Ok(text)
-}
-
 // ── the scheduler ───────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -713,7 +513,7 @@ struct CallState {
     /// When the next summary is due (None: not before something sets it).
     next_summary: Option<Instant>,
     /// waiting · updating · updated · failed · busy (the local model is taken) · signing_in (its
-    /// profile is being signed in) · paused · ended
+    /// profile is being signed in) · paused · local (its model is on this computer: none while recording) · ended
     state: String,
     error: Option<String>,
     /// The profile (id) a job failed for — not signed in, or to another account: the window offers
@@ -755,6 +555,7 @@ fn with<R>(f: impl FnOnce(&mut Shared) -> R) -> R {
 #[cfg(test)]
 pub fn forget_all() {
     with(|s| *s = Shared::default());
+    agent::stop(None);
 }
 
 /// Note a call's folder and return its stamp (every entry point does this).
@@ -864,7 +665,9 @@ pub fn recording_started(dir: &Path) {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.recording = true;
         c.paused = false;
-        c.next_summary = Some(Instant::now() + SUMMARY_EVERY);
+        // At once: with Claude Code the call's notes session starts now (#239); a model server's first summary waits
+        // for enough words (`run_summary` reschedules it).
+        c.next_summary = Some(Instant::now());
     });
     match enabled() {
         Ok(true) => {
@@ -874,13 +677,15 @@ pub fn recording_started(dir: &Path) {
             std::thread::spawn(move || {
                 // Said only while the call still has the profile that was checked.
                 let current = |c: &CallState| c.profile_gen == generation;
-                if let Err(e) = ai::for_call(&dir) {
-                    match classify(&e) {
+                match ai::for_call(&dir) {
+                    Ok(r) if held_here(r.profile(), true) => set_state_where(&stamp, current, "local", None, None),
+                    Ok(_) => false,
+                    Err(e) => match classify(&e) {
                         Hold::SigningIn => set_state_where(&stamp, current, "signing_in", None, None),
                         Hold::SignIn { profile, why } => set_state_where(&stamp, current, "failed", Some(why), Some(Some(profile))),
                         Hold::Busy | Hold::Fail(_) => set_state_where(&stamp, current, "failed", Some(format!("{e:#}")), None),
-                    };
-                }
+                    },
+                };
             });
         }
         Ok(false) => {}
@@ -893,6 +698,7 @@ pub fn recording_started(dir: &Path) {
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
+    agent::finish(&stamp); // after: a session starting meanwhile sees the recording over and stops
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
     }
@@ -920,6 +726,9 @@ pub fn pause(dir: &Path, paused: bool) {
         c.recording
     });
     stop_running(&stamp, &[JobKind::Summary]);
+    if paused {
+        agent::stop(Some(&stamp)); // nothing more goes to the model while paused
+    }
     set_state(&stamp, if paused { "paused" } else if recording { "waiting" } else { "ended" }, None);
     WAKE.notify_all();
 }
@@ -928,6 +737,7 @@ pub fn pause(dir: &Path, paused: bool) {
 /// again, both with the new profile.
 pub fn profile_changed(dir: &Path) {
     let stamp = track(dir);
+    agent::stop(Some(&stamp)); // the call's text goes only to its own profile
     with(|s| {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.summary_gen += 1;
@@ -948,6 +758,7 @@ pub fn profile_changed(dir: &Path) {
 /// keep `needs_sign_in`: a sign-in that works resumes them).
 pub fn defer(id: &str, generation: u64) {
     with(|s| s.deferred.insert(id.to_string(), generation));
+    agent::stop_profile(id);
     let on = enabled().unwrap_or(false);
     for dir in calls_on(id) {
         let stamp = track(&dir);
@@ -992,6 +803,7 @@ fn wake(id: &str, failed: bool) {
     let on = enabled().unwrap_or(false);
     for dir in waiting.into_iter().filter(|d| ai::call_profile_id(d).ok().as_deref() == Some(id)) {
         let stamp = track(&dir);
+        agent::clear(&stamp);
         let state = with(|s| {
             let c = s.calls.entry(stamp.clone()).or_default();
             if failed {
@@ -1010,14 +822,12 @@ fn wake(id: &str, failed: bool) {
 }
 
 /// (tests) A recording call whose last summary failed for want of `id`'s sign-in.
-#[cfg(test)]
+#[cfg(all(test, unix))] // only Unix tests use it
 pub fn test_call_needing(dir: &Path, id: &str) {
     let stamp = track(dir);
     with(|s| {
         let c = s.calls.entry(stamp).or_default();
-        c.recording = true;
-        c.state = "failed".into();
-        c.needs_sign_in = Some(id.into());
+        (c.recording, c.state, c.needs_sign_in) = (true, "failed".into(), Some(id.into()));
     });
 }
 
@@ -1076,6 +886,7 @@ pub fn report(dir: &Path, why: &str) {
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
 pub fn shutdown() {
+    agent::stop(None);
     with(|s| {
         s.shutdown = true;
         if let Some(r) = s.running.as_mut() {
@@ -1132,6 +943,9 @@ fn worker() {
         let job = {
             let mut g = SHARED.lock().unwrap_or_else(|e| e.into_inner());
             loop {
+                if !enabled().unwrap_or(true) {
+                    agent::stop(None); // live notes off: no call's text goes on to a model (checked every 2 s)
+                }
                 let s = g.get_or_insert_with(Shared::default);
                 if s.shutdown {
                     return;
@@ -1288,6 +1102,11 @@ fn take_profile(dir: &Path) -> Result<(ai::Ready, Option<crate::app::FileLock>),
     }
 }
 
+/// No summaries while recording on a model on this computer, the call's GPU (#237). Look `p` up without a lease.
+fn held_here(p: &Profile, recording: bool) -> bool {
+    recording && p.on_this_computer()
+}
+
 fn run_summary(stamp: &str, generation: u64) {
     let Some(dir) = call_dir(stamp) else { return };
     match enabled() {
@@ -1295,15 +1114,24 @@ fn run_summary(stamp: &str, generation: u64) {
         Ok(false) => return,
         Err(e) => return set_state_if(stamp, generation, "failed", Some(format!("the AI settings can't be read: {e:#}"))),
     }
+    // Claude Code keeps the notes itself, in a session of its own for the recording (#239): started below, reported.
+    let recording = with(|s| s.calls.get(stamp).is_some_and(|c| c.recording));
+    let agent = recording && ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| p.kind != Kind::Local);
     let all = lines(&dir);
     let prev = read_notes(&dir);
     let cursor = prev.as_ref().map_or(0, |n| n.cursor).min(all.len());
     let new: Vec<&Line> = all[cursor..].iter().collect();
     let new_chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
-    if new_chars < MIN_NEW_CHARS {
+    if agent && agent::running(stamp) {
+        return set_state_if(stamp, generation, if prev.is_some() { "updated" } else { "waiting" }, None);
+    }
+    if new_chars < MIN_NEW_CHARS && !agent {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
-    let (ready, _lock) = match take_profile(&dir) {
+    if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
+        return set_state_if(stamp, generation, "local", None);
+    }
+    let (ready, lock) = match take_profile(&dir) {
         Ok(x) => x,
         Err(Hold::Busy) => {
             set_state_if(stamp, generation, "busy", None);
@@ -1319,6 +1147,16 @@ fn run_summary(stamp: &str, generation: u64) {
     let p = ready.profile();
     if !summary_current(stamp, generation) || cancelled() || !still_on() {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
+    }
+    if agent {
+        let still = || with(|s| s.calls.get(stamp).is_some_and(|c| c.recording && !c.paused && c.summary_gen == generation)) && still_on();
+        return match agent::ensure(stamp, &dir, ready, lock, still) {
+            Ok(()) => set_state_if(stamp, generation, if read_notes(&dir).is_some() { "updated" } else { "waiting" }, None),
+            Err(e) => match classify(&e) {
+                Hold::SignIn { profile, why } => summary_needs_sign_in(stamp, generation, profile, why),
+                _ => set_state_if(stamp, generation, "failed", Some(format!("{e:#}"))),
+            },
+        };
     }
     // Its header from the call where it is now: it may have been retitled during the check.
     let dir = call_dir(stamp).unwrap_or(dir);
@@ -1568,21 +1406,6 @@ pub fn test_once(dir: &Path, ask: Option<(AskKind, String)>) -> Result<()> {
 
 // ── requests from the CLI and the terminal pane ─────────────────────────────────────────────
 
-/// `echoctl live ask|pause|resume <call>`: a request file the running app picks up.
-pub fn request(call: &str, cmd: &str, kind: Option<AskKind>, text: &str) -> Result<()> {
-    let dir = calls::resolve_call(call)?;
-    if crate::watch::running_watcher().is_none() {
-        bail!("Echo isn't running — start it with `echoctl app start`");
-    }
-    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let req = json!({ "call": name, "cmd": cmd, "kind": kind, "text": text });
-    fs::create_dir_all(paths::state_dir())?;
-    let path = paths::state_dir().join(format!("live-{}-{}.request", calls::stamp_of(&dir), Local::now().timestamp_millis()));
-    paths::write_atomic(&path, req.to_string().as_bytes())?;
-    println!("sent to Echo");
-    Ok(())
-}
-
 /// Requests left by `echoctl live …` (the app, every second). A question that can't be asked is
 /// recorded as an answer with the reason.
 pub fn handle_requests() {
@@ -1624,6 +1447,14 @@ pub fn handle_requests() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_json_answer_is_read_or_not_never_a_panic() {
+        assert_eq!(json_answer("```json\n{\"a\": 1}\n```").unwrap()["a"], 1);
+        assert_eq!(json_answer("Here it is: {\"a\": 2} hope it helps").unwrap()["a"], 2);
+        assert!(json_answer("} sorry, no {").is_none());
+        assert!(json_answer("nothing").is_none());
+    }
 
     #[test]
     fn the_transcript_keeps_the_live_notes() {
@@ -1731,6 +1562,20 @@ mod tests {
             assert_eq!(c.contains("noproxy = \"*\""), here, "{url}");
             assert!(!c.contains("location"));
         }
+    }
+
+    #[test]
+    fn a_local_profiles_one_shot_jobs_run_on_the_model_they_record() {
+        // #294: a prep records text_model; that is the one asked — on a local profile its live model, already loaded.
+        let p = Profile { live_model: Some("small".into()), notes_model: Some("big".into()), ..local("") };
+        let ok = http("200 OK", "", r#"{"content":[{"type":"text","text":"ok"}]}"#);
+        let (url, seen) = serve_seen(ok.clone());
+        complete_text(&Profile { base_url: Some(url), ..p.clone() }, "sys", "hi", 10).unwrap();
+        assert_eq!(text_model(&p), "small");
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
+        let (url, seen) = serve_seen(ok);
+        complete(&Profile { base_url: Some(url), ..p }, "sys", "hi", 10, true, &|| false).unwrap();
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
     }
 
     #[test]
@@ -1842,6 +1687,17 @@ mod tests {
     }
 
     #[test]
+    fn no_summaries_while_recording_on_a_model_on_this_computer() {
+        let here = local("http://127.0.0.1:11434");
+        let elsewhere = local("http://192.168.1.20:11434");
+        assert!(held_here(&here, true));
+        assert!(!held_here(&here, false), "after the recording");
+        assert!(!held_here(&elsewhere, true), "a server on another computer");
+        let claude = Profile { kind: Kind::Claude, base_url: None, ..here.clone() };
+        assert!(!held_here(&claude, true));
+    }
+
+    #[test]
     fn a_summary_runs_end_to_end_and_failures_keep_the_draft() {
         let (_env, root) = crate::paths::testenv::folders("live-summary");
         let d = root.join("home/calls/2026-10-23_120000-sync");
@@ -1852,11 +1708,14 @@ mod tests {
         let settings = |url: &str| {
             ai::Settings { default: None, live_notes: true, profiles: vec![local(url)] }.save().unwrap();
         };
+        // The test server is on this computer: while recording nothing is sent (#237); the summaries below run as
+        // they would after the call's last minute, or on a server elsewhere (`held_here`).
+        let recording = std::cell::Cell::new(true);
         let run = || {
             let stamp = track(&d);
             let generation = with(|s| {
                 let c = s.calls.entry(stamp.clone()).or_default();
-                c.recording = true;
+                c.recording = recording.get();
                 c.summary_gen
             });
             with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
@@ -1864,8 +1723,13 @@ mod tests {
             with(|s| s.running = None);
             with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.error.clone())).unwrap())
         };
-        settings(&serve(Some(http("200 OK", "", r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#))));
-        assert_eq!(run().0, "updated");
+        let reply = r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#;
+        settings(&serve(Some(http("200 OK", "", reply))));
+        assert_eq!(run().0, "local");
+        assert!(read_notes(&d).is_none(), "no summary on this computer while recording");
+        recording.set(false);
+        settings(&serve(Some(http("200 OK", "", reply))));
+        assert_eq!(run().0, "ended");
         let n = read_notes(&d).unwrap();
         assert_eq!((n.cursor, n.decisions.len()), (12, 1));
         // More talk, a model that fails: the draft and its cursor stay.
@@ -2036,11 +1900,13 @@ mod tests {
             c.recording = true;
             c.summary_gen
         });
-        with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
-        run_summary(&stamp, generation);
-        with(|s| s.running = None);
-        let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
-        assert_eq!((state.as_str(), needs.as_deref()), ("failed", Some("w")));
+        // The session starts, Claude Code says it isn't signed in, and the next look reports it (#239).
+        crate::paths::testenv::eventually("the session's sign-in error is reported", || {
+            with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
+            run_summary(&stamp, generation);
+            with(|s| s.running = None);
+            with(|s| s.calls.get(&stamp).is_some_and(|c| c.state == "failed" && c.needs_sign_in.as_deref() == Some("w")))
+        });
         assert!(ai::observation("w").unwrap().stale, "the 'signed in' seen before no longer counts");
         signed_in("w");
         let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
@@ -2203,7 +2069,8 @@ mod tests {
         assert!(a.is_some());
         assert!(crate::app::FileLock::try_take(&p).unwrap().is_none(), "the live worker and the minutes thread share one process");
         drop(a);
-        assert!(crate::app::FileLock::try_take(&p).unwrap().is_some());
+        // Free once dropped: once any child another test thread is starting has exec'd (#251).
+        crate::paths::testenv::eventually("free once dropped", || crate::app::FileLock::try_take(&p).unwrap().is_some());
         let _ = std::fs::remove_file(&p);
     }
 

@@ -14,8 +14,8 @@
 //! Protocol (ours, versioned by the path):
 //! - `GET /v1/hello` → `{name, model, engine, version}`
 //! - `POST /v1/utterance`: a little-endian u32 length, that many bytes of JSON
-//!   (`{languages, prev, prompt}`), then the samples as 16-bit little-endian PCM →
-//!   `{lang_id, lang, segs: [[start, end, text]]}`.
+//!   (`{languages, prompt}`; an older client's `prev` is ignored), then the samples as 16-bit little-endian PCM →
+//!   `{lang_id, lang, segs: [[start, end, text]], words, ranked}` (`ranked`: the detection, when several languages were allowed).
 //!
 //! Both need `Authorization: Bearer <key>`; a wrong key gets 401 after a 1 s pause.
 //!
@@ -29,8 +29,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -50,6 +50,8 @@ const MAX_HEADERS: usize = 16 << 10;
 const MAX_CONNECTIONS: usize = 8;
 /// The model is unloaded after this long without a request (it holds GPU memory).
 const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
+/// At quit, how long an utterance being decoded is waited for before the process exits anyway.
+const LET_GO_WITHIN: Duration = Duration::from_secs(30);
 /// A queued utterance can wait behind others' on the server.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -226,42 +228,20 @@ impl Client {
         serde_json::from_str(&text).with_context(|| format!("unexpected answer from the server: {}", text.chars().take(200).collect::<String>()))
     }
 
-    /// Decode one utterance on an OpenAI-compatible server: the language pinned when the call has one;
-    /// else the server's detection, asked again pinned (the track's last language, else the call's
-    /// first) when it falls outside the call's list. The hint is checked against a plain decode.
-    fn openai_utterance(&self, model: &str, chunk: &[f32], prev: Option<i32>, allowed: &[i32], prompt: Option<&str>) -> Result<(Option<i32>, String, Decoded)> {
-        let code = |id: i32| whisper_rs::get_lang_str(id).map(str::to_owned);
-        let pinned: Option<String> = if allowed.len() == 1 { code(allowed[0]) } else { None };
-        let decode = |lang: Option<&str>, hint: Option<&str>| -> Result<(Option<i32>, Decoded)> {
-            let v = self.openai_request(model, chunk, lang, hint)?;
-            Ok((lang_of(&v["language"]), pieces(&v)))
-        };
-        let (mut lang_id, mut segs) = decode(pinned.as_deref(), prompt)?;
-        if pinned.is_none() && !allowed.is_empty() && lang_id.is_some_and(|l| !allowed.contains(&l)) {
-            let fix = prev.filter(|p| allowed.contains(p)).unwrap_or(allowed[0]);
-            if let Some(c) = code(fix) {
-                (_, segs) = decode(Some(&c), prompt)?;
-                lang_id = Some(fix);
-            }
-        }
-        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
-        if let Some(hint) = prompt.filter(|_| chunk.len() as f64 / 16000.0 >= crate::transcribe::GUARD_MIN_S) {
-            let lang_arg = lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned);
-            let (_, plain) = decode(lang_arg.as_deref(), None)?;
-            segs = crate::transcribe::choose_hinted(segs, plain, hint);
-        }
-        Ok((lang_id, lang, segs))
+    /// Decode one utterance on an OpenAI-compatible server (`openai_decode`, one request per `decode`).
+    fn openai_utterance(&self, model: &str, chunk: &[f32], lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
+        let decode = |lang: &str, hint: Option<&str>| -> Result<Decoded> { Ok(pieces(&self.openai_request(model, chunk, Some(lang), hint)?)) };
+        openai_decode(decode, chunk.len() as f64 / 16000.0, lang, prompt)
     }
 
-    /// Decode one utterance on the server (see `Engine::utterance`).
-    pub fn utterance(&self, chunk: &[f32], prev: Option<i32>, allowed: &[i32], prompt: Option<&str>) -> Result<(Option<i32>, String, Decoded)> {
+    /// Decode one utterance on the server in `lang`, the call's (see `Engine::utterance`).
+    pub fn utterance(&self, chunk: &[f32], lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
         if let Some(model) = &self.openai {
-            return self.openai_utterance(model, chunk, prev, allowed, prompt);
+            return self.openai_utterance(model, chunk, lang, prompt);
         }
-        let languages: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
+        let languages: Vec<&str> = whisper_rs::get_lang_str(lang).into_iter().collect();
         let head = serde_json::to_vec(&json!({
             "languages": languages,
-            "prev": prev.and_then(whisper_rs::get_lang_str),
             "prompt": prompt,
         }))?;
         let mut body = Vec::with_capacity(4 + head.len() + chunk.len() * 2);
@@ -282,12 +262,12 @@ impl Client {
         let v: Answer = serde_json::from_str(&text).context("unexpected answer from the server")?;
         let mut words = v.words.into_iter();
         let segs = v.segs.into_iter().map(|(a, b, t)| Piece::new(a, b, t, words.next().unwrap_or_default())).collect();
-        Ok((v.lang_id.as_deref().and_then(whisper_rs::get_lang_id), v.lang, segs))
+        Ok((v.lang, segs))
     }
 }
 
-/// The server's answer. `words` (per sentence, its words' times) came later: older servers
-/// leave it out, older clients ignore it.
+/// The server's answer. `words` (per sentence, its words' times) came later: older servers leave it out. `lang_id` and
+/// `ranked` were a detection's, from when a call could be in several languages: kept empty for older clients.
 #[derive(Serialize, Deserialize)]
 struct Answer {
     lang_id: Option<String>,
@@ -295,6 +275,8 @@ struct Answer {
     segs: Vec<(f64, f64, String)>,
     #[serde(default)]
     words: Vec<Vec<[f64; 2]>>,
+    #[serde(default)]
+    ranked: Vec<(String, f32)>,
 }
 
 /// 16 kHz mono 16-bit PCM as a WAV file.
@@ -319,10 +301,18 @@ fn wav16k(chunk: &[f32]) -> Vec<u8> {
     w
 }
 
-/// A language as servers name it ("en", "english", "English") → whisper's id.
-fn lang_of(v: &serde_json::Value) -> Option<i32> {
-    let s = v.as_str()?.trim().to_lowercase();
-    whisper_rs::get_lang_id(&s).or_else(|| (0..=whisper_rs::get_lang_max_id()).find(|&i| whisper_rs::get_lang_str_full(i).is_some_and(|f| f.eq_ignore_ascii_case(&s))))
+/// One utterance on an OpenAI-compatible server in the call's language, `decode` being one request (language, hint).
+/// From `GUARD_MIN_S` on, the utterance is decoded plain and asked again with the hint only when a term may
+/// have been heard (`transcribe::with_hint`); a shorter one is decoded with the hint, unchecked.
+fn openai_decode(mut decode: impl FnMut(&str, Option<&str>) -> Result<Decoded>, dur: f64, lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
+    let lang = whisper_rs::get_lang_str(lang).unwrap_or("en").to_string();
+    let checked = prompt.filter(|_| dur >= crate::transcribe::GUARD_MIN_S);
+    let first = if checked.is_some() { None } else { prompt };
+    let mut segs = decode(&lang, first)?;
+    if let Some(hint) = checked {
+        segs = crate::transcribe::with_hint(segs, hint, || decode(&lang, Some(hint)))?;
+    }
+    Ok((lang, segs))
 }
 
 /// A verbose answer's segments as sentences: Whisper's no-speech rule applied where the segment
@@ -396,17 +386,14 @@ pub struct OpenAiCheck {
 }
 
 /// Connect to an OpenAI-compatible server: its models listed (the one asked for, else the first
-/// that looks like speech-to-text), a test transcription of a short tone, then kept.
-pub fn connect_openai(url: &str, key: &str, model: Option<&str>) -> Result<OpenAiCheck> {
+/// that looks like speech-to-text), a test transcription of a short tone, then kept. `name_it`: how the
+/// user names a model where they asked (the CLI's `--model`, the window's model field).
+pub fn connect_openai(url: &str, key: &str, model: Option<&str>, name_it: &str) -> Result<OpenAiCheck> {
     let mut c = Client::new(url, key)?;
     let models = c.openai_models()?;
     let model = match model.map(str::trim).filter(|m| !m.is_empty()) {
         Some(m) => m.to_string(),
-        None => models
-            .iter()
-            .find(|m| ["whisper", "parakeet", "canary", "stt", "asr", "transcri"].iter().any(|k| m.to_lowercase().contains(k)))
-            .cloned()
-            .ok_or_else(|| anyhow!("the server lists no speech-to-text model ({}); name one with --model", models.join(", ")))?,
+        None => stt_model(&models, name_it)?,
     };
     c.openai = Some(model.clone());
     // A second of a quiet tone: enough to show the answer's shape (segments, words).
@@ -418,6 +405,15 @@ pub fn connect_openai(url: &str, key: &str, model: Option<&str>) -> Result<OpenA
     let s = ClientSettings { url: c.url.clone(), key: c.key.clone(), name: Some(host), api: Some("openai".into()), model: Some(model.clone()), words: Some(words) };
     write_private(CLIENT_FILE, &serde_json::to_vec_pretty(&s)?)?;
     Ok(OpenAiCheck { model, models, words, seconds: t.elapsed().as_secs_f64() })
+}
+
+/// The first of a server's models that looks like speech-to-text, or why there is none.
+fn stt_model(models: &[String], name_it: &str) -> Result<String> {
+    models
+        .iter()
+        .find(|m| ["whisper", "parakeet", "canary", "stt", "asr", "transcri"].iter().any(|k| m.to_lowercase().contains(k)))
+        .cloned()
+        .ok_or_else(|| anyhow!("the server lists no speech-to-text model ({}); {name_it}", models.join(", ")))
 }
 
 /// The server in use, for the window: its address, kind, model, what it gives.
@@ -556,6 +552,34 @@ static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
 /// Wrong keys are answered one at a time, each after a pause.
 static AUTH_FAIL: Mutex<()> = Mutex::new(());
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+/// The app is quitting: no model is loaded again.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// The app is quitting: let go of the server's model, so no whisper context is alive at exit (ggml's Metal device
+/// asserts then, #141). An utterance being decoded holds it and is waited for, at most `LET_GO_WITHIN`.
+pub fn shutdown() {
+    if !let_go(&LOADED, &QUITTING, LET_GO_WITHIN) {
+        eprintln!("transcription server: quitting while an utterance is still being decoded");
+    }
+}
+
+/// Mark `quitting`, then empty `slot` once its holder lets go (within `within`); false if it never did.
+fn let_go<T>(slot: &Mutex<Option<T>>, quitting: &AtomicBool, within: Duration) -> bool {
+    quitting.store(true, Ordering::SeqCst);
+    let until = Instant::now() + within;
+    loop {
+        match slot.try_lock() {
+            Ok(mut g) => *g = None,
+            Err(TryLockError::Poisoned(e)) => *e.into_inner() = None,
+            Err(TryLockError::WouldBlock) if Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            Err(TryLockError::WouldBlock) => return false,
+        }
+        return true;
+    }
+}
 
 /// The app's server thread: follows `transcription-serve.json` (checked every 2 s), listening
 /// while it says on. Never returns.
@@ -723,7 +747,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
 struct Request {
     #[serde(default)]
     languages: Vec<String>,
-    prev: Option<String>,
+    // An older client also sends `prev` (its track's last language): ignored, a call has one language.
     prompt: Option<String>,
 }
 
@@ -737,15 +761,21 @@ fn parse_body(body: &[u8]) -> Result<(Request, Vec<f32>)> {
     if !pcm.len().is_multiple_of(2) {
         return Err(bad("odd number of sample bytes"));
     }
-    Ok((req, pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32).collect()))
+    Ok((req, pcm.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect()))
 }
 
 fn decode_request(body: &[u8]) -> Result<Answer> {
     let (req, audio) = parse_body(body)?;
     let lang = |l: &str| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow::Error::new(Refused(format!("unknown language '{l}'"))));
-    let allowed = req.languages.iter().map(|l| lang(l)).collect::<Result<Vec<_>>>()?;
-    let prev = req.prev.as_deref().map(lang).transpose()?;
+    // The call's language; an older client may send several (or none): its first, else the server's own.
+    let call = match req.languages.first() {
+        Some(l) => lang(l)?,
+        None => Config::load().map(|c| whisper_rs::get_lang_id(&crate::call_language::default_language(&c)).unwrap_or(0)).unwrap_or(0),
+    };
     let mut g = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+    if QUITTING.load(Ordering::SeqCst) {
+        bail!("the server is stopping"); // its model was let go (`shutdown`)
+    }
     let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
     if g.as_ref().is_some_and(|l| l.model != model) {
         *g = None; // the active model was changed here
@@ -762,15 +792,60 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
     }
     let l = g.as_mut().expect("just loaded");
     l.used = Instant::now();
-    let (lang_id, lang, segs) = l.engine.utterance(&mut l.state, prev, &allowed, req.prompt.as_deref(), &audio)?;
+    let (lang, segs) = l.engine.utterance(&mut l.state, call, req.prompt.as_deref(), &audio)?;
     let words = segs.iter().map(|p| p.words.clone()).collect();
     let segs = segs.into_iter().map(|p| (p.start, p.end, p.text)).collect();
-    Ok(Answer { lang_id: lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned), lang, segs, words })
+    let (lang_id, ranked) = (None, vec![]);
+    Ok(Answer { lang_id, lang, segs, words, ranked })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    /// Each request's (language, hint).
+    type Requests = Vec<(String, Option<String>)>;
+
+    /// The requests `openai_decode` makes for an utterance in `lang` whose plain answer is `plain` (a hinted request
+    /// answers "We moved it to ServiceNow."), and the text it keeps.
+    fn openai_requests(plain: &str, dur: f64, lang: &str) -> (Requests, String, String) {
+        let mut calls = vec![];
+        let (lang, segs) = openai_decode(
+            |lang, hint| {
+                calls.push((lang.to_owned(), hint.map(str::to_owned)));
+                let text = if hint.is_some() { "We moved it to ServiceNow." } else { plain };
+                Ok(vec![Piece::new(0.0, 1.0, text.to_string(), vec![])])
+            },
+            dur,
+            whisper_rs::get_lang_id(lang).unwrap(),
+            Some("ServiceNow, Kubernetes"),
+        )
+        .unwrap();
+        (calls, segs[0].text.clone(), lang)
+    }
+
+    #[test]
+    fn a_hinted_request_only_when_a_term_may_have_been_heard_always_in_the_calls_language() {
+        let hint = || Some("ServiceNow, Kubernetes".to_string());
+        let (calls, text, lang) = openai_requests("We will meet at ten.", 3.0, "en");
+        assert_eq!((calls, text.as_str(), lang.as_str()), (vec![("en".into(), None)], "We will meet at ten.", "en"), "no term heard: one plain request");
+        let (calls, text, _) = openai_requests("We moved it to service now.", 3.0, "en");
+        assert_eq!(calls, vec![("en".into(), None), ("en".into(), hint())], "plain, then hinted");
+        assert_eq!(text, "We moved it to ServiceNow.");
+        let (calls, _, _) = openai_requests("We moved it to service now.", 3.0, "uk");
+        assert_eq!(calls, vec![("uk".into(), None), ("uk".into(), hint())]);
+        let (calls, _, _) = openai_requests("Yes.", 0.5, "en");
+        assert_eq!(calls, vec![("en".into(), hint())], "a short utterance: one hinted request, as before");
+    }
+
+    #[test]
+    fn an_older_servers_detection_fields_are_read_and_ignored() {
+        let old: Answer = serde_json::from_str(r#"{"lang_id":"uk","lang":"uk","segs":[],"ranked":[["uk",0.6],["en",0.3]]}"#).unwrap();
+        assert_eq!(old.lang, "uk");
+        let oldest: Answer = serde_json::from_str(r#"{"lang_id":null,"lang":"en","segs":[[0.0,1.0,"Hi."]]}"#).unwrap();
+        assert!(oldest.words.is_empty() && oldest.ranked.is_empty());
+    }
 
     #[test]
     fn openai_answers_become_sentences() {
@@ -783,10 +858,17 @@ mod tests {
         assert_eq!(p.len(), 2, "the no-speech segment is dropped");
         assert_eq!(p[1].text, "Budget's fine.");
         assert_eq!(p[1].words, vec![[1.3, 1.8], [1.9, 2.4]]);
-        assert_eq!(lang_of(&v["language"]), whisper_rs::get_lang_id("en"));
-        assert_eq!(lang_of(&serde_json::json!("uk")), whisper_rs::get_lang_id("uk"));
         let w = wav16k(&[0.0, 0.5]);
         assert_eq!((&w[..4], w.len()), (&b"RIFF"[..], 48));
+    }
+
+    #[test]
+    fn no_speech_model_says_how_to_name_one_where_the_user_asked() {
+        let models = vec!["llama3".to_string(), "qwen3".to_string()];
+        let e = stt_model(&models, "type one in the model field").unwrap_err().to_string();
+        assert_eq!(e, "the server lists no speech-to-text model (llama3, qwen3); type one in the model field");
+        let both = vec!["llama3".to_string(), "Whisper-1".to_string()];
+        assert_eq!(stt_model(&both, "x").unwrap(), "Whisper-1");
     }
 
     #[test]
@@ -809,9 +891,77 @@ mod tests {
         body.extend(0i16.to_le_bytes());
         let (req, audio) = parse_body(&body).unwrap();
         assert_eq!(req.languages, ["en", "uk"]);
-        assert_eq!(req.prev.as_deref(), Some("uk"));
+        // An older client's `prev` is accepted and ignored.
         assert_eq!(audio, [1.0, 0.0]);
         assert!(parse_body(&body[..3]).is_err());
         assert!(parse_body(&body[..body.len() - 1]).is_err());
+    }
+
+    /// A model that drops counts itself.
+    struct Model(Arc<AtomicUsize>);
+    impl Drop for Model {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn quitting_lets_go_of_an_idle_model_at_once() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let (slot, quitting) = (Mutex::new(Some(Model(dropped.clone()))), AtomicBool::new(false));
+        assert!(let_go(&slot, &quitting, Duration::from_secs(5)));
+        assert!(quitting.load(Ordering::SeqCst) && slot.lock().unwrap().is_none());
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn quitting_waits_for_the_utterance_being_decoded_then_lets_go() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let slot = Arc::new(Mutex::new(Some(Model(dropped.clone()))));
+        let decoded = Arc::new(AtomicBool::new(false));
+        let (held, s, d) = (std::sync::mpsc::channel(), slot.clone(), decoded.clone());
+        let decode = std::thread::spawn(move || {
+            let _g = s.lock().unwrap();
+            held.0.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            d.store(true, Ordering::SeqCst); // still holding the model
+        });
+        held.1.recv().unwrap();
+        assert!(let_go(&slot, &AtomicBool::new(false), Duration::from_secs(5)));
+        assert!(decoded.load(Ordering::SeqCst), "let go only after the decode");
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        decode.join().unwrap();
+    }
+
+    #[test]
+    fn quitting_never_waits_past_its_bound() {
+        let slot = Arc::new(Mutex::new(Some(())));
+        let (held, s) = (std::sync::mpsc::channel(), slot.clone());
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let decode = std::thread::spawn(move || {
+            let _g = s.lock().unwrap();
+            held.0.send(()).unwrap();
+            let _ = wait.recv();
+        });
+        held.1.recv().unwrap();
+        let t = Instant::now();
+        assert!(!let_go(&slot, &AtomicBool::new(false), Duration::from_millis(200)));
+        assert!(t.elapsed() < Duration::from_secs(2));
+        release.send(()).unwrap();
+        decode.join().unwrap();
+    }
+
+    #[test]
+    fn once_quitting_a_request_loads_no_model() {
+        // The only test that touches the server's statics; a fresh config, should it ever reach the model.
+        let (_env, _) = crate::paths::testenv::folders("remote-quitting");
+        let head = br#"{"languages":["en"]}"#;
+        let mut body = (head.len() as u32).to_le_bytes().to_vec();
+        body.extend(head);
+        body.extend(0i16.to_le_bytes());
+        QUITTING.store(true, Ordering::SeqCst);
+        let e = decode_request(&body).err().expect("refused");
+        assert_eq!(e.to_string(), "the server is stopping");
+        assert!(LOADED.lock().unwrap().is_none());
     }
 }

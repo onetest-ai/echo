@@ -1,0 +1,104 @@
+{
+ "prefix": "AI",
+ "name": "AI profiles",
+ "order": 180,
+ "status": "stable",
+ "notes": "Profiles, pinning, routing, sign-in",
+ "features": [
+  {
+   "id": "F-AI-01",
+   "feature": "AI & minutes lists the profiles with their kind (Built in, Claude account, Model on a host), \"Default for new calls\", minutes and live models; Make default changes it",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind",
+    "ai.default"
+   ]
+  },
+  {
+   "id": "F-AI-02",
+   "feature": "With several profiles the minutes and the Live tab offer a profile picker; with one they don't; the Record button never does (the account chip picks the default)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-AI-03",
+   "feature": "A call keeps the profile it was recorded with; changing the default later never moves it",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.profile"
+   ]
+  },
+  {
+   "id": "F-AI-04",
+   "feature": "A job whose profile is missing, unreadable, signed out or on another account fails with the reason, never on another profile",
+   "priority": "critical",
+   "check": "person",
+   "axes": [
+    "ai.signin",
+    "call.profile"
+   ]
+  },
+  {
+   "id": "F-AI-05",
+   "feature": "A Claude profile signs in from the window (Sign in…, Cancel), the tray or `echoctl ai login`; \"Signed in as …\"; another account asks \"Use X\"",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-AI-06",
+   "feature": "Admin policy that could route Claude Code or switch hooks off refuses the runs it would affect; a policy file Echo can't read asks (#404): a profile's own file offers Claude Code (as configured), a managed file only the admin may read offers to write anyway, a broken managed one says Claude Code won't start with it",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "ai.kind"
+   ],
+   "cases": [
+    "claude/TC-029"
+   ]
+  },
+  {
+   "id": "F-AI-07",
+   "feature": "`echoctl ai status / add-local / add-claude / default / remove` manage profiles as the window shows them",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "ai.kind",
+    "ai.file"
+   ]
+  },
+  {
+   "id": "F-AI-08",
+   "feature": "A minutes model Claude Code can't use fails with what's wrong and where to change it (the menu and `echoctl ai set`); a run the model answered in that fails later says its own error, never \"can't use the model\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-AI-09",
+   "feature": "The account chip at the top bar's right end, left of the Inbox, shows the default profile by name (tooltip: its account and where it runs); with several profiles it picks the default as Make default does (kept, the status bar and Settings follow), with one it opens the Claude session (as the status bar's Claude), with none it is gone",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.count",
+    "ai.default"
+   ]
+  },
+  {
+   "id": "F-AI-10",
+   "feature": "A local profile whose Ollama server gives its minutes or live-notes model less than 64k tokens of context is warned about, with OLLAMA_CONTEXT_LENGTH: `echoctl doctor` loads the model to check (not with `--no-ai`, `--request`, `--probe`, `--open`), `echoctl ai status` only reads what is loaded; an Ollama that doesn't report the context says so; a server without /api/ps is never warned about or sent a load",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
+  }
+ ]
+}

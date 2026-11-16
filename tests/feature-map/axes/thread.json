@@ -1,0 +1,75 @@
+{
+ "entity": "thread",
+ "axes": [
+  {
+   "axis": "thread.stage",
+   "values": "lead / proposal / negotiation (Pursuit); kickoff / active / on_hold / wrap_up (Delivery); done / lost / cancelled (Closed)",
+   "where": "app.js `ProjectArt.STAGES`"
+  },
+  {
+   "axis": "thread.client",
+   "values": "none / a client / the user's company / a removed client",
+   "where": "`profile.json` `client`; app.js `projectList`"
+  },
+  {
+   "axis": "thread.orgs",
+   "values": "no counterpart / one / several",
+   "where": "`Project.orgs`"
+  },
+  {
+   "axis": "thread.rules",
+   "values": "none / series / people (own domains or the client's) / chat / subject; several",
+   "where": "app.js `RULE_TOKEN`"
+  },
+  {
+   "axis": "thread.membership",
+   "values": "per call: series / people / chat / subject / pinned; excluded calls; since; closed after",
+   "where": "`projects::calls_of`; app.js `WHY`"
+  },
+  {
+   "axis": "thread.calls",
+   "values": "0 / 1 / many",
+   "where": "`call_count`"
+  },
+  {
+   "axis": "thread.since",
+   "values": "none / a date; history_before none / a date",
+   "where": "`profile.json`"
+  },
+  {
+   "axis": "thread.brief",
+   "values": "empty / Markdown",
+   "where": "`brief.md`"
+  },
+  {
+   "axis": "thread.notes",
+   "values": "empty / text",
+   "where": "`profile.json` `notes`"
+  },
+  {
+   "axis": "thread.look",
+   "values": "pattern in a colour / own logo / legacy symbol / legacy client logo",
+   "where": "app.js `projIcon`, `projectProfile`"
+  },
+  {
+   "axis": "thread.ai",
+   "values": "default profile / a named profile; model default / set",
+   "where": "`profile.json` `ai_profile`, `model`"
+  },
+  {
+   "axis": "thread.sources",
+   "values": "none / meeting chat / channel / mail domain / mail person / folder (with excludes); each not read / read / error",
+   "where": "app.js `threadSources`, `chatSources`"
+  },
+  {
+   "axis": "thread.sync",
+   "values": "not synced / running / failed / synced; pending calls 0 / n",
+   "where": "app.js `projectWork` (`w.sync`, `w.pending`)"
+  },
+  {
+   "axis": "thread.review",
+   "values": "0 / n items to review",
+   "where": "app.js `workToReview`"
+  }
+ ]
+}

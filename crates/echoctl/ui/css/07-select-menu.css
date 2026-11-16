@@ -1,0 +1,30 @@
+/* Echo's selects (07-select-menu.js): the closed select a quiet field with Echo's caret, not the system's arrows; its
+   list Echo's menu, a row a name and a line under it. (Over-label selects are invisible: their label draws the chip.) */
+select:not([multiple]):not([size]):not([data-native]) {
+  -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a95' stroke-width='1.5'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important; background-position: right 9px center !important; background-size: 9px 6px !important;
+  padding-right: 26px !important; text-overflow: ellipsis; cursor: default;
+}
+/* A select with no look of its own gets Echo's field (no weight: an area's own rule wins). */
+:where(select:not([multiple]):not([size]):not([data-native])) {
+  height: 28px; padding-left: 9px; border: 1px solid var(--line-strong); border-radius: var(--r-control);
+  background-color: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+}
+:where(select:not([multiple]):not([size]):not([data-native])):hover { border-color: color-mix(in srgb, var(--text) 25%, transparent); }
+/* The keyboard's focus shows on every select, whatever its area's own :focus rule says. */
+select:not([multiple]):not([size]):not([data-native]):focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+/* An invisible select over a chip: the chip's size, not a field's (the meeting type's chip has no height of its own). */
+.mt-chip select { height: 100%; }
+select[aria-expanded="true"] { border-color: var(--accent) !important; }
+.menu.sm-menu { position: fixed; right: auto; z-index: 60; max-width: min(420px, calc(100vw - 16px)); overflow-y: auto; outline: none; gap: 1px; }
+.sm-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px 6px 8px; font: inherit; font-size: 13px; }
+.sm-item.on { background: var(--accent-soft); }
+.sm-item:hover { background: var(--accent-soft); }
+.sm-item[aria-selected="true"] .sm-label { font-weight: 600; }
+.sm-check { flex: none; width: 12px; height: 16px; display: inline-flex; align-items: center; color: var(--accent); }
+.sm-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sm-label { overflow: hidden; text-overflow: ellipsis; }
+.sm-sub { font-size: 11.5px; color: var(--text-3); white-space: normal; max-width: 360px; }
+.sm-item[aria-disabled="true"] { opacity: 0.45; }
+.sm-item[aria-disabled="true"]:hover { background: none; }

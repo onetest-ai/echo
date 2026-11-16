@@ -5,7 +5,8 @@
 //!
 //! **Nothing leaves without `--yes`**: a send, a reply, a post or an upload without it only says what would go where
 //! (`{sent: false, would}`) — the session shows that to the user and runs it again with `--yes` after their yes. A run
-//! Echo started (minutes, a thread's sync, a routine) can't send or draft (`ECHOCTL_HEADLESS`). Both are conventions the
+//! Echo started (minutes, a thread's sync, a routine, Yolo) can't send, reply or post (`ECHOCTL_HEADLESS`); it may leave
+//! a draft in the user's Drafts, which only the user sends (#135, `drafts::compose`). Both are conventions the
 //! session follows, not a lock: `--yes` is a flag a model can pass, and a session allowed every command (the folder
 //! session with no permission prompts, a routine in skip mode) could unset the variable. The real gate is Claude
 //! Code's own permission prompt on the command — what a session reads (mail, chats) is others' words.
@@ -35,7 +36,7 @@ pub(crate) fn enc(s: &str) -> String {
 }
 
 /// A OneDrive path (`Documents/plan.docx`), each segment encoded, the slashes kept.
-fn enc_path(p: &str) -> String {
+pub(crate) fn enc_path(p: &str) -> String {
     p.trim_matches('/').split('/').map(enc).collect::<Vec<_>>().join("/")
 }
 
@@ -157,26 +158,90 @@ fn markdown_file(file: &Path) -> Result<(String, String)> {
 }
 
 /// A new mail from the user's account (kept in Sent): `to`, `cc`, `subject`, the Markdown `file` as its body.
-pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
+pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>, task: Option<&str>, yes: bool) -> Result<Value> {
     let (to, cc) = (recipients(to)?, recipients(cc)?);
     if to.is_empty() {
         bail!("no recipient (--to)");
     }
+    // From an item (`--task <thread>/<item>`, #92): checked before anything is sent.
+    let task = task.map(crate::ledger::task_ref).transpose()?;
     let (md, html) = markdown_file(file)?;
     let html = with_notice(html, ai);
-    let would = json!({"to": to, "cc": cc, "subject": subject, "text": md});
+    let mut would = json!({"to": to, "cc": cc, "subject": subject, "text": md});
+    if let Some((p, n)) = &task {
+        would["task"] = json!(format!("{p}/{n}"));
+    }
     if !yes {
         return Ok(not_sent(would));
     }
     not_in_run()?;
-    graph::request("POST", "/me/sendMail", Body::Json(&json!({"message": {"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": to, "ccRecipients": cc}, "saveToSentItems": true})), None, &[])?;
-    Ok(json!({"sent": true, "to": would["to"], "subject": subject}))
+    let message = json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": to, "ccRecipients": cc});
+    let Some((p, n)) = task else {
+        graph::request("POST", "/me/sendMail", Body::Json(&json!({"message": message, "saveToSentItems": true})), None, &[])?;
+        return Ok(json!({"sent": true, "to": would["to"], "subject": subject}));
+    };
+    // From an item: a draft first, so its conversation is known, then sent; the item follows that conversation.
+    let draft = graph::request("POST", "/me/messages", Body::Json(&message), None, &[])?;
+    let id = draft["id"].as_str().ok_or_else(|| anyhow!("Microsoft 365 made no draft"))?;
+    if let Err(e) = graph::request("POST", &format!("/me/messages/{}/send", enc(id)), Body::None, None, &["Content-Length: 0"]) {
+        // Not sent: its draft goes too, so a retry doesn't leave one each time.
+        let gone = graph::request("DELETE", &format!("/me/messages/{}", enc(id)), Body::None, None, &[]).is_ok();
+        return Err(e.context(if gone { "not sent" } else { "not sent (its draft is still in Drafts)" }));
+    }
+    let addresses: Vec<String> = to.iter().filter_map(|r| r["emailAddress"]["address"].as_str().map(str::to_owned)).collect();
+    Ok(followed(json!({"sent": true, "to": would["to"], "subject": subject}), &p, &n, draft["conversationId"].as_str().unwrap_or(""), subject, &addresses))
+}
+
+/// A mail sent from an item: the item follows its conversation (`ledger::mail_sent`). The mail is gone either way; if
+/// it can't be followed, the answer says so.
+fn followed(mut out: Value, project: &str, node: &str, conversation: &str, subject: &str, to: &[String]) -> Value {
+    out["task"] = json!(format!("{project}/{node}"));
+    match crate::ledger::mail_sent(project, node, conversation, subject, to) {
+        Ok(()) => out["followed"] = json!(true),
+        Err(e) => {
+            out["followed"] = json!(false);
+            out["error"] = json!(format!("sent, but {node} won't hear its replies: {e:#}"));
+        }
+    }
+    out
 }
 
 /// A reply to mail `id` (`all`: to everyone on it), the Markdown `file` above the quoted mail.
-pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
+pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, task: Option<&str>, yes: bool) -> Result<Value> {
+    let task = task.map(crate::ledger::task_ref).transpose()?;
+    let (md, _) = markdown_file(file)?;
+    anyhow::ensure!(!md.trim().is_empty(), "the reply is empty");
+    // The mail answered, read once before anything is sent: nothing after the send can fail it.
     let m = graph::message(id)?;
-    let (md, html) = markdown_file(file)?;
+    let mut out = reply_to(&m, id, all, &md, ai, yes)?;
+    // From an item (#92): the reply is in the mail's conversation, which the item now follows.
+    if let Some((p, n)) = task {
+        if out["sent"] == true {
+            let mine = crate::ledger::mail_me();
+            let mut to: Vec<String> = vec![];
+            let people = std::iter::once(&m["from"]).chain(if all { m["to"].as_array().map(|a| a.as_slice()).unwrap_or_default() } else { &[] });
+            for e in people.filter_map(|x| x["email"].as_str()).map(str::to_lowercase) {
+                if !mine(&e) && !to.contains(&e) {
+                    to.push(e);
+                }
+            }
+            out = followed(out, &p, &n, m["conversation"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or(""), &to);
+        } else {
+            out["would"]["task"] = json!(format!("{p}/{n}"));
+        }
+    }
+    Ok(out)
+}
+
+/// A reply in the user's own words (Today's Read and reply: their click on Reply is the yes).
+pub fn mail_reply_text(id: &str, all: bool, md: &str, ai: Option<&str>, yes: bool) -> Result<Value> {
+    anyhow::ensure!(!md.trim().is_empty(), "the reply is empty");
+    reply_to(&graph::message(id)?, id, all, md, ai, yes)
+}
+
+/// A reply to mail `m` (Graph id `id`), already read.
+fn reply_to(m: &Value, id: &str, all: bool, md: &str, ai: Option<&str>, yes: bool) -> Result<Value> {
+    let html = crate::minutes::markdown_html(md);
     let html = with_notice(html, ai);
     let would = json!({"reply_to": {"subject": m["subject"], "from": m["from"], "at": m["at"]}, "to": if all { "everyone on it" } else { "its sender" }, "text": md});
     if !yes {
@@ -187,13 +252,53 @@ pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, yes: bool)
     Ok(json!({"sent": true, "reply_to": m["subject"]}))
 }
 
+/// An answer to a meeting invite (`how`: accept, tentative, decline), sent to its organiser — the user's click on Today's
+/// choices is the yes. Today's agenda takes the answer at once (the next calendar sync confirms it).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn event_respond(event: &str, how: &str, yes: bool) -> Result<Value> {
+    let (verb, said) = match how {
+        "accept" => ("accept", "accepted"),
+        "tentative" => ("tentativelyAccept", "tentativelyAccepted"),
+        "decline" => ("decline", "declined"),
+        _ => bail!("no answer {how:?}: accept, tentative or decline"),
+    };
+    let mut agenda = crate::watch::agenda();
+    let Some(m) = agenda.iter_mut().find(|m| m.id.as_deref() == Some(event)) else { bail!("no meeting {event:?} in today's agenda") };
+    let would = json!({"meeting": m.subject, "answer": said});
+    if !yes {
+        return Ok(not_sent(would));
+    }
+    not_in_run()?;
+    graph::request("POST", &format!("/me/events/{}/{verb}", enc(event)), Body::Json(&json!({"sendResponse": true})), None, &[])
+        .map_err(|e| {
+            // Refused by Microsoft 365 (the sign-in may not be allowed to change the calendar): say where to answer.
+            let e = format!("{e:#}");
+            if e.contains("403") || e.contains("Forbidden") || e.contains("Authorization") { anyhow::anyhow!("{e} — answer it in Outlook instead") } else { anyhow::anyhow!(e) }
+        })?;
+    // Today's agenda as it is now (a sync may have written it during the request), with this answer.
+    let subject = m.subject.clone();
+    let mut agenda = crate::watch::agenda();
+    if let Some(m) = agenda.iter_mut().find(|m| m.id.as_deref() == Some(event)) {
+        m.response = Some(said.into());
+        crate::watch::write_agenda(&agenda)?;
+    }
+    Ok(json!({"sent": true, "meeting": subject, "answer": said}))
+}
+
 /// A draft in the user's Drafts (nothing is sent): its link, to open and send from Outlook.
 pub fn mail_draft(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>) -> Result<Value> {
-    not_in_run()?;
+    // A draft is never sent: the user opens it in Outlook and sends it (runs Echo started may leave one, #135).
     let (_, html) = markdown_file(file)?;
     let html = with_notice(html, ai);
     let v = graph::request("POST", "/me/messages", Body::Json(&json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients(to)?, "ccRecipients": recipients(cc)?})), None, &[])?;
     Ok(json!({"draft": true, "id": v["id"], "url": v["webLink"]}))
+}
+
+/// A draft of plain text (`echoctl compose`): its lines kept, nothing in it read as markup.
+pub fn draft_text(to: &[String], cc: &[String], subject: &str, text: &str) -> Result<Value> {
+    let html = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\n', "<br>");
+    let v = graph::request("POST", "/me/messages", Body::Json(&json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients(to)?, "ccRecipients": recipients(cc)?})), None, &[])?;
+    Ok(json!({"draft": true, "id": v["id"], "url": v["webLink"].as_str().filter(|u| u.starts_with("https://"))}))
 }
 
 fn not_sent(would: Value) -> Value {
@@ -288,6 +393,17 @@ pub fn chat_send(chat: Option<&str>, to: Option<&str>, file: &Path, ai: Option<&
     not_in_run()?;
     let v = graph::request("POST", &format!("/chats/{}/messages", enc(&id)), Body::Json(&json!({"body": {"contentType": "html", "content": html}})), None, &[])?;
     Ok(json!({"sent": true, "chat": id, "id": v["id"], "url": v["webUrl"]}))
+}
+
+/// A message the user sent by a click in the window (Won't do's draft): `md` into the chat `chat`, at once.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn chat_send_text(chat: &str, md: &str, ai: Option<&str>) -> Result<Value> {
+    anyhow::ensure!(!md.trim().is_empty(), "the message is empty");
+    anyhow::ensure!(!chat.trim().is_empty(), "no Teams chat to send it to");
+    not_in_run()?;
+    let html = with_notice(crate::minutes::markdown_html(md), ai);
+    let v = graph::request("POST", &format!("/chats/{}/messages", enc(chat)), Body::Json(&json!({"body": {"contentType": "html", "content": html}})), None, &[])?;
+    Ok(json!({"sent": true, "chat": chat, "id": v["id"], "url": v["webUrl"]}))
 }
 
 /// The user's teams, or (`team`) a team's channels.
@@ -430,6 +546,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_invite_answer_says_what_it_would_send_and_refuses_what_it_cannot() {
+        let (_env, _) = crate::paths::testenv::folders("m365-respond");
+        let m: crate::meeting::MeetingContext = serde_json::from_value(json!({"id": "ev-1", "subject": "Ops weekly", "response": "notResponded"})).unwrap();
+        crate::watch::write_agenda(&[m]).unwrap();
+        // Without the user's yes nothing is sent, and the agenda keeps its answer.
+        let v = event_respond("ev-1", "tentative", false).unwrap();
+        assert_eq!(v["would"], json!({"meeting": "Ops weekly", "answer": "tentativelyAccepted"}));
+        assert_eq!(crate::watch::agenda()[0].response.as_deref(), Some("notResponded"));
+        assert!(event_respond("ev-1", "maybe", false).unwrap_err().to_string().contains("accept, tentative or decline"));
+        assert!(event_respond("ev-9", "accept", false).unwrap_err().to_string().contains("no meeting"));
+    }
+
+    #[test]
     fn hits_read_the_same_whatever_their_kind() {
         let h = json!({"summary": "the <c0>pilot</c0> moves<ddd/>", "hitId": "m1", "resource": {"subject": "Pilot", "from": {"emailAddress": {"name": "Jane", "address": "jane@acme.example"}},
                        "receivedDateTime": "2026-11-03T10:00:00Z", "conversationId": "c1", "webLink": "https://outlook/m1"}});
@@ -457,15 +586,41 @@ mod tests {
         let f = std::env::temp_dir().join(format!("echo-test-m365-{}.md", std::process::id()));
         std::fs::write(&f, "Hi **Bob**").unwrap();
         // No sign-in is touched: the preview comes first.
-        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, Some("sonnet"), false).unwrap();
+        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, Some("sonnet"), None, false).unwrap();
         assert_eq!(v["sent"], false);
         assert_eq!(v["would"]["to"][0]["emailAddress"]["address"], "bob@acme.example");
-        assert!(mail_send(&["not an address".into()], &[], "x", &f, None, false).is_err());
+        assert!(mail_send(&["not an address".into()], &[], "x", &f, None, None, false).is_err());
         assert!(with_notice("<p>x</p>".into(), Some("sonnet")).contains("sonnet"), "a model's text says so");
         assert_eq!(with_notice("<p>x</p>".into(), None), "<p>x</p>");
         let u = drive_upload(&f, "Documents/x.md", false).unwrap();
         assert_eq!(u["sent"], false);
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn a_run_echo_started_may_leave_a_draft_but_never_sends_replies_or_posts() {
+        // Under the test env's lock (the variable is the process's): a run Echo started, not signed in.
+        let (_env, root) = crate::paths::testenv::folders("m365-run-draft");
+        let f = root.join("msg.md");
+        std::fs::write(&f, "Hi Kim").unwrap();
+        std::env::set_var("ECHOCTL_HEADLESS", "1");
+        struct Unset;
+        impl Drop for Unset {
+            fn drop(&mut self) {
+                std::env::remove_var("ECHOCTL_HEADLESS");
+            }
+        }
+        let _unset = Unset;
+        let refused = |r: Result<Value>| r.is_err_and(|e| format!("{e:#}").contains("refused inside a run"));
+        // A draft goes past the run's refusal (it fails here only for want of a sign-in).
+        let d = mail_draft(&["kim@acme.example".into()], &[], "Slots", &f, None).unwrap_err();
+        assert!(!format!("{d:#}").contains("refused inside a run"), "{d:#}");
+        assert!(!format!("{:#}", draft_text(&["kim@acme.example".into()], &[], "Slots", "Hi").unwrap_err()).contains("refused inside a run"));
+        // Sending, replying and posting stay refused.
+        assert!(refused(mail_send(&["kim@acme.example".into()], &[], "Slots", &f, None, None, true)));
+        // (A reply reads the mail it answers first: with no sign-in it stops there, before its refusal.)
+        assert!(mail_reply_text("AAMk", false, "Hi", None, true).is_err());
+        assert!(refused(chat_send(None, Some("kim@acme.example"), &f, None, true)));
     }
 
     #[test]

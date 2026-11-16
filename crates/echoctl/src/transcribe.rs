@@ -1,21 +1,21 @@
-//! On-device transcription of a recorded call with whisper.cpp.
+//! On-device transcription of a recorded call: whisper.cpp, or NVIDIA's models through NeMo-Speech (`nemo.rs`).
 //!
 //! Each track is transcribed separately, which gives speaker attribution for free ("Me" =
-//! mic, "Remote" = the app). Tracks are cut into utterances at pauses, and the language is
-//! detected *per utterance* restricted to the workspace's `languages` list — Whisper's
-//! default (one language per 30 s window, any of 99) mislabels Ukrainian as Russian and
-//! translates code-switched speech instead of transcribing it.
+//! mic, "Remote" = the app). Tracks are cut into utterances at pauses. A call has one language, chosen when it
+//! starts (`call_language`), never detected; its model is the downloaded one best at it (`models::for_call`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
 use crate::audio::{downmix, Resampler};
+use crate::call_language;
 use crate::config::Config;
 use crate::meeting::MeetingContext;
 use crate::models;
@@ -23,8 +23,6 @@ use crate::models;
 pub(crate) const RATE: usize = 16_000;
 /// Whisper's window. Utterances are kept shorter than this.
 const MAX_UTTERANCE_S: f64 = 25.0;
-/// Below this, language detection is unreliable; reuse the track's previous language.
-const SHORT_UTTERANCE_S: f64 = 1.5;
 /// Hinted utterances from this length are checked against an unhinted
 /// decode: the hint is kept only if the text length stays within
 /// GUARD_MIN_RATIO × … GUARD_MAX_RATIO × + GUARD_SLACK chars of the plain text — otherwise
@@ -33,8 +31,6 @@ pub(crate) const GUARD_MIN_S: f64 = 1.0;
 const GUARD_MIN_RATIO: f64 = 0.6;
 const GUARD_MAX_RATIO: f64 = 1.8;
 const GUARD_SLACK: f64 = 80.0;
-/// Model used only for language identification, when downloaded.
-const DETECTOR_MODEL: &str = "large-v3-turbo-q5_0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Segment {
@@ -255,51 +251,6 @@ pub(crate) fn final_threads() -> usize {
     if cfg!(target_os = "macos") { n.min(8) } else { (n / 2).clamp(4, 16) }
 }
 
-/// Allowed languages ranked by detection probability, for audio already in `state`'s mel.
-fn rank_languages(state: &mut WhisperState, allowed: &[i32], threads: usize) -> Result<Vec<(i32, f32)>> {
-    let (best_any, probs) = state.lang_detect(0, threads)?;
-    if std::env::var_os("ECHOCTL_DEBUG").is_some() {
-        let mut top: Vec<(i32, f32)> = probs.iter().enumerate().map(|(i, p)| (i as i32, *p)).collect();
-        top.sort_by(|a, b| b.1.total_cmp(&a.1));
-        let fmt: Vec<String> = top[..4.min(top.len())]
-            .iter()
-            .map(|(i, p)| format!("{}={:.2}", whisper_rs::get_lang_str(*i).unwrap_or("?"), p))
-            .collect();
-        eprintln!("\n  debug: lang probs {}", fmt.join(" "));
-    }
-    if allowed.is_empty() {
-        return Ok(vec![(best_any, probs.get(best_any as usize).copied().unwrap_or(0.0))]);
-    }
-    let mut ranked: Vec<(i32, f32)> = allowed
-        .iter()
-        .filter(|id| (**id as usize) < probs.len())
-        .map(|id| (*id, probs[*id as usize]))
-        .collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
-    Ok(ranked)
-}
-
-/// A detection is "confident" when the top allowed language clearly wins. When it doesn't,
-/// the track keeps its previous language if that is a close runner-up: forcing the wrong
-/// language makes Whisper *translate* (accented English → fluent Ukrainian/Russian).
-/// Note: comparing decode log-probs across languages does NOT work — translations and
-/// hallucinations score higher than faithful transcriptions (tested, 2026-10-09).
-const CONFIDENT_PROB: f32 = 0.6;
-const CONFIDENT_MARGIN: f32 = 0.3;
-
-/// Pick the language for one utterance from ranked candidates.
-fn choose_language(ranked: &[(i32, f32)], prev: Option<i32>) -> Option<i32> {
-    let (top, p1) = *ranked.first()?;
-    let p2 = ranked.get(1).map(|r| r.1).unwrap_or(0.0);
-    if p1 >= CONFIDENT_PROB && p1 - p2 >= CONFIDENT_MARGIN {
-        return Some(top);
-    }
-    match prev {
-        Some(prev) if ranked.iter().take(2).any(|(id, _)| *id == prev) => Some(prev),
-        _ => Some(top),
-    }
-}
-
 /// Whisper hint: a language-neutral, comma-separated term list (people, products, acronyms).
 /// A sentence-style English prompt would bias Ukrainian/Russian utterances toward English
 /// (i.e. translation), so only bare terms are passed. Capped: long prompts invite Whisper to
@@ -334,19 +285,9 @@ pub(crate) fn build_prompt(cfg: &Config, meeting: Option<&MeetingContext>) -> Op
     (!prompt.is_empty()).then_some(prompt)
 }
 
-fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
-    cfg.languages
-        .iter()
-        .map(|l| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow!("unknown language code '{l}' in config")))
-        .collect()
-}
-
-/// whisper.cpp with the model loaded: the transcription model and, when downloaded, turbo for
-/// language ID.
+/// whisper.cpp with the model loaded.
 pub(crate) struct Whisper {
     ctx: WhisperContext,
-    /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's.
-    detector: Option<WhisperContext>,
     threads: usize,
 }
 
@@ -380,68 +321,42 @@ pub(crate) type Decoded = Vec<Piece>;
 /// whisper.cpp's decoding state, reused across utterances.
 pub(crate) struct WhisperStates {
     state: WhisperState,
-    det_state: Option<WhisperState>,
+}
+
+/// Flash attention on the Mac's GPU, Apple Silicon only. It can't be combined with DTW, which Echo
+/// doesn't use.
+fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
+    let flash_attn = flash_attention(use_gpu, cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    WhisperContextParameters { use_gpu, flash_attn, ..Default::default() }
+}
+
+fn flash_attention(use_gpu: bool, apple_silicon: bool) -> bool {
+    use_gpu && apple_silicon
 }
 
 impl Whisper {
-    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and turbo for language ID
-    /// when it is downloaded and different.
+    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`).
     fn load(model_path: &Path, threads: usize) -> Result<Whisper> {
         whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
-        let use_gpu = crate::gpu::allowed();
-        let cp = WhisperContextParameters { use_gpu, ..Default::default() };
+        let cp = context_params(crate::gpu::allowed());
+        let flash = cp.flash_attn;
         let ctx = WhisperContext::new_with_params(model_path, cp).context("loading model")?;
-        let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
-        let detector = if det_path.exists() && det_path != model_path {
-            eprintln!("  language detection: {DETECTOR_MODEL}");
-            Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu, ..Default::default() })?)
-        } else {
-            None
-        };
-        Ok(Whisper { ctx, detector, threads })
+        if flash {
+            eprintln!("  flash attention: on");
+        }
+        Ok(Whisper { ctx, threads })
     }
 
     fn state(&self) -> Result<WhisperStates> {
-        Ok(WhisperStates {
-            state: self.ctx.create_state()?,
-            det_state: match &self.detector {
-                Some(d) => Some(d.create_state()?),
-                None => None,
-            },
-        })
+        Ok(WhisperStates { state: self.ctx.create_state()? })
     }
 
-    /// Detect the language (restricted to `allowed`, sticky: `prev` is the track's last one) and
-    /// decode one utterance. Returns the detected language (None: uncertain), its code for the
-    /// segments, and (start, end, text) relative to the chunk.
-    fn utterance(
-        &self,
-        st: &mut WhisperStates,
-        prev: Option<i32>,
-        allowed: &[i32],
-        prompt: Option<&str>,
-        chunk: &[f32],
-    ) -> Result<(Option<i32>, String, Decoded)> {
+    /// Decode one utterance in `lang`. Returns the language's code and the sentences.
+    fn utterance(&self, st: &mut WhisperStates, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         let dur = chunk.len() as f64 / RATE as f64;
-        let lang_id = match prev {
-            Some(prev) if dur < SHORT_UTTERANCE_S => Some(prev),
-            _ => {
-                let s = st.det_state.as_mut().unwrap_or(&mut st.state);
-                s.pcm_to_mel(chunk, self.threads)?;
-                let ranked = rank_languages(s, allowed, self.threads)?;
-                choose_language(&ranked, prev)
-            }
-        };
-        let lang = lang_id.or(prev).and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
-        let segs = match prompt {
-            Some(hint) if dur >= GUARD_MIN_S => {
-                let hinted = self.decode(&mut st.state, chunk, &lang, Some(hint))?;
-                let plain = self.decode(&mut st.state, chunk, &lang, None)?;
-                choose_hinted(hinted, plain, hint)
-            }
-            _ => self.decode(&mut st.state, chunk, &lang, None)?,
-        };
-        Ok((lang_id, lang, segs))
+        let lang = whisper_rs::get_lang_str(lang).unwrap_or("en").to_string();
+        let segs = decode_with_hint(dur, prompt, |hint| self.decode(&mut st.state, chunk, &lang, hint))?;
+        Ok((lang, segs))
     }
 
     fn decode(&self, state: &mut WhisperState, chunk: &[f32], lang: &str, hint: Option<&str>) -> Result<Decoded> {
@@ -527,32 +442,20 @@ impl Engine {
         })
     }
 
-    /// Detect the language (restricted to `allowed`, sticky: `prev` is the track's last one) and
-    /// decode one utterance. Returns the detected language (None: uncertain), its code for the
-    /// segments, and (start, end, text) relative to the chunk.
-    pub(crate) fn utterance(
-        &self,
-        st: &mut EngineState,
-        prev: Option<i32>,
-        allowed: &[i32],
-        prompt: Option<&str>,
-        chunk: &[f32],
-    ) -> Result<(Option<i32>, String, Decoded)> {
+    /// Decode one utterance in `lang` (the call's). Returns the language's code and the sentences.
+    pub(crate) fn utterance(&self, st: &mut EngineState, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         match (self, st) {
-            (Engine::Whisper(w), EngineState::Whisper(s)) => w.utterance(s, prev, allowed, prompt, chunk),
-            (Engine::Nemo(n), _) => n.utterance(prev, allowed, prompt, chunk),
+            (Engine::Whisper(w), EngineState::Whisper(s)) => w.utterance(s, lang, prompt, chunk),
+            (Engine::Nemo(n), _) => n.utterance(lang, prompt, chunk),
             (Engine::Whisper(w), st) => {
                 *st = EngineState::Whisper(w.state()?);
-                self.utterance(st, prev, allowed, prompt, chunk)
+                self.utterance(st, lang, prompt, chunk)
             }
         }
     }
+
 }
 
-/// Nemotron hears the language from this much of an utterance (a decode in `auto` mode); the
-/// utterance is then decoded with that language pinned. `auto` alone mixes Russian into
-/// Ukrainian ("Так я сгоден", tested 2026-10-13); pinned, it doesn't.
-const NEMO_DETECT_S: f64 = 4.0;
 /// Word times against the audio, measured on a two-speaker recording with reference turns
 /// (2026-10-13): Whisper's token times run ~0.3–0.5 s early, Nemotron's streaming decoder
 /// emits words ~0.4–0.5 s late. Corrected in the word times only, which serve speaker
@@ -582,42 +485,13 @@ impl Nemo {
         Ok(Nemo { model: crate::nemo::Model::load(model_path, gpu)? })
     }
 
-    fn utterance(&self, prev: Option<i32>, allowed: &[i32], prompt: Option<&str>, chunk: &[f32]) -> Result<(Option<i32>, String, Decoded)> {
+    /// As `Engine::utterance`: the language pinned (its `auto` mode mixes Russian into Ukrainian, tested 2026-10-13).
+    fn utterance(&self, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         let dur = chunk.len() as f64 / RATE as f64;
         let phrases: Vec<String> = prompt.map(|p| p.split(", ").map(str::to_owned).collect()).unwrap_or_default();
-        let codes: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
-        let prev_code = prev.and_then(whisper_rs::get_lang_str);
-        let mut detected = None;
-        let lang: Option<&str> = match (codes.as_slice(), prev_code) {
-            ([only], _) => Some(only),
-            (_, Some(p)) if dur < SHORT_UTTERANCE_S => Some(p),
-            _ => {
-                let n = chunk.len().min((NEMO_DETECT_S * RATE as f64) as usize);
-                let r = self.model.recognize(&chunk[..n], None, &[], NEMO_BOOST)?;
-                let heard: Vec<&str> = r.languages.iter().map(|l| crate::nemo::code(l)).collect();
-                let ok = |c: &&str| codes.is_empty() || codes.contains(c);
-                let pick = match prev_code {
-                    // Sticky, as with Whisper: the track's language when the model heard it too.
-                    Some(p) if heard.contains(&p) && ok(&p) => Some(p),
-                    _ => heard.iter().copied().find(ok).or(prev_code).or(codes.first().copied()),
-                };
-                let text: String = r.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-                let pick = match (pick, cyrillic_hint(&text)) {
-                    (Some("uk" | "ru"), Some(c)) if ok(&c) => Some(c),
-                    (p, _) => p,
-                };
-                let pick = pick.and_then(|c| whisper_rs::get_lang_id(c).and_then(whisper_rs::get_lang_str));
-                if n == chunk.len() && heard.len() == 1 && pick == heard.first().copied() {
-                    detected = Some(r); // the whole utterance, in one language: no second pass
-                }
-                pick
-            }
-        };
+        let lang = whisper_rs::get_lang_str(lang);
         let locale = lang.and_then(crate::nemo::locale);
-        let plain = match detected {
-            Some(r) => r,
-            None => self.model.recognize(chunk, locale, &[], NEMO_BOOST)?,
-        };
+        let plain = self.model.recognize(chunk, locale, &[], NEMO_BOOST)?;
         // The vocabulary boost, kept only when every term it adds sounds like what the plain
         // decode heard there: boosting alone put "Flow Studio" and "ServiceNow" into a call that
         // never mentioned them, dozens of times (2026-10-13).
@@ -629,16 +503,15 @@ impl Nemo {
             if boost_is_heard(&text(&boosted), &text(&plain), &phrases) { boosted } else { plain }
         };
         if std::env::var_os("ECHOCTL_DEBUG").is_some() {
-            eprintln!("  debug: nemotron {dur:.1}s {lang:?} heard {:?}, {} words: {}", r.languages, r.words.len(),
+            eprintln!("  debug: nemotron {dur:.1}s {lang:?}, {} words: {}", r.words.len(),
                 r.words.iter().take(12).map(|w| format!("{}@{:.1}", w.text, w.start)).collect::<Vec<_>>().join(" "));
         }
-        let lang_id = lang.and_then(whisper_rs::get_lang_id);
         let segs = nemo_sentences(&r.words)
             .into_iter()
             .map(|p| Piece::new(p.start, p.end, clean_text(&p.text), shift(p.words, NEMO_WORD_LAG)))
             .filter(|p| !p.text.is_empty() && !is_hallucination(&p.text) && !is_word_list(&p.text))
             .collect();
-        Ok((lang_id, lang.unwrap_or("auto").to_string(), segs))
+        Ok((lang.unwrap_or("auto").to_string(), segs))
     }
 }
 
@@ -715,19 +588,39 @@ fn boost_is_heard(boosted: &str, plain: &str, phrases: &[String]) -> bool {
     })
 }
 
-/// Ukrainian or Russian, from letters only one of them has (і ї є ґ / ы э ё ъ). Nemotron's own
-/// detection tags Ukrainian speech `ru-RU, uk-UA` and writes its first words in Russian; the
-/// letters it wrote still give the language away.
-fn cyrillic_hint(text: &str) -> Option<&'static str> {
-    let count = |set: &str| text.chars().flat_map(char::to_lowercase).filter(|c| set.contains(*c)).count();
-    let (uk, ru) = (count("іїєґ"), count("ыэёъ"));
-    if uk > ru * 2 && uk >= 1 {
-        Some("uk")
-    } else if ru > uk * 2 && ru >= 1 {
-        Some("ru")
-    } else {
-        None
-    }
+/// Decode with the hint too? Only when the plain decode holds something that sounds like one of
+/// its terms and isn't already spelled as it.
+fn hint_needed(plain: &str, terms: &[String]) -> bool {
+    let words: Vec<&str> = plain.split_whitespace().collect();
+    terms.iter().any(|t| {
+        let term: Vec<&str> = t.split_whitespace().collect();
+        // The plain words around the places the term is spelled as it is, each stretch on its own (a
+        // misheard second mention still asks for the hint).
+        let mut stretches: Vec<Vec<String>> = vec![vec![]];
+        let mut i = 0;
+        while i < words.len() {
+            if !term.is_empty() && words.len() - i >= term.len() && term.iter().zip(&words[i..]).all(|(t, w)| spelled_as(w, t)) {
+                stretches.push(vec![]);
+                i += term.len();
+                continue;
+            }
+            let w = latin(words[i]);
+            if !w.is_empty() {
+                stretches.last_mut().expect("never empty").push(w);
+            }
+            i += 1;
+        }
+        stretches.iter().any(|s| sounds_heard(t, s))
+    })
+}
+
+/// Is `word` the term's word `term` exactly as spelled — case, script and the term's own symbols — with
+/// only the sentence's punctuation around it? "Kubernetes," and "println!," are; "kubernetes",
+/// "кубернетес", "println" for "println!" and "C" for "C++" aren't.
+fn spelled_as(word: &str, term: &str) -> bool {
+    [word, word.trim_start_matches(|c| "\"'([{«“‘¿¡".contains(c))]
+        .iter()
+        .any(|w| w.strip_prefix(term).is_some_and(|rest| rest.chars().all(|c| ".,;:!?…\"')]}»”’".contains(c))))
 }
 
 fn shift(words: Vec<[f64; 2]>, by: f64) -> Vec<[f64; 2]> {
@@ -762,7 +655,9 @@ fn nemo_sentences(words: &[crate::nemo::Word]) -> Vec<Piece> {
 /// Where utterances are decoded: this computer, or a transcription server on the local network
 /// (`remote.rs`) with this computer as the fallback while it can't be reached.
 enum Backend {
-    Local(Engine),
+    /// This computer's model: another one once the call's language changes to one another model is better at
+    /// (`Transcriber::set_language`).
+    Local(RwLock<Arc<Engine>>),
     Remote {
         server: crate::remote::Client,
         /// This computer's model, loaded the first time the server can't be reached.
@@ -774,6 +669,10 @@ enum Backend {
     },
 }
 
+fn read(e: &RwLock<Arc<Engine>>) -> std::sync::RwLockReadGuard<'_, Arc<Engine>> {
+    e.read().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A server that failed is tried again after this.
 const SERVER_RETRY: Duration = Duration::from_secs(60);
 /// No local model to fall back on: how long to keep waiting for the server.
@@ -781,37 +680,85 @@ const SERVER_WAIT: Duration = Duration::from_secs(15 * 60);
 
 pub(crate) struct Transcriber {
     backend: Backend,
-    allowed: Vec<i32>,
     prompt: Option<String>,
+    /// The call's one language, shared by both tracks; changed only by hand (`set_language`).
+    language: Mutex<i32>,
+    /// The model `Backend::Local` runs, and whether it follows the call's language (`models::for_language`; not for a
+    /// `--model` comparison run).
+    model: Mutex<String>,
+    follows_language: bool,
+    threads: usize,
+    /// Bumped by each model swap: a track's decoding state from another model is made again.
+    generation: AtomicU64,
 }
 
 /// Per-track decoding state, reused across utterances.
 pub(crate) struct TrackState {
-    /// Created when this computer decodes (always, or the first time the server fails).
+    /// Created when this computer decodes (always, or the first time the server fails), for the model of
+    /// `generation`.
     local: Option<EngineState>,
-    prev_lang: Option<i32>,
+    generation: u64,
 }
 
 impl Transcriber {
     pub(crate) fn track_state(&self) -> Result<TrackState> {
         let local = match &self.backend {
-            Backend::Local(e) => Some(e.state()?),
+            Backend::Local(e) => Some(read(e).state()?),
             Backend::Remote { .. } => None,
         };
-        Ok(TrackState { local, prev_lang: None })
+        Ok(TrackState { local, generation: self.generation.load(Ordering::SeqCst) })
     }
 
-    /// Detect the language (restricted, sticky per track) and decode one utterance.
-    /// Returns the language code and (start, end, text) relative to the chunk.
+    pub(crate) fn language(&self) -> i32 {
+        *self.language.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The model the call is transcribed with now.
+    pub(crate) fn model_name(&self) -> String {
+        self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The call's language was changed by hand: what is decoded from now on is in `l`, with the downloaded model best
+    /// at it when that is another one (`models::for_language`). A model that fails to load leaves the current one.
+    pub(crate) fn set_language(&self, l: i32) {
+        *self.language.lock().unwrap_or_else(|e| e.into_inner()) = l;
+        let code = whisper_rs::get_lang_str(l).unwrap_or("en");
+        eprintln!("  language: {code} (changed during the call)");
+        let Backend::Local(engine) = &self.backend else { return };
+        if !self.follows_language {
+            return;
+        }
+        let active = crate::config::Config::load().ok().and_then(|c| c.model);
+        let Some(m) = models::for_call(code, active.as_deref()) else { return };
+        if *self.model.lock().unwrap_or_else(|e| e.into_inner()) == m.name {
+            return;
+        }
+        match Engine::load(&models::model_path(m), self.threads) {
+            Ok(e) => {
+                *engine.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(e);
+                *self.model.lock().unwrap_or_else(|e| e.into_inner()) = m.name.to_string();
+                self.generation.fetch_add(1, Ordering::SeqCst);
+                eprintln!("  model: {} (for {code})", m.name);
+            }
+            Err(e) => eprintln!("  model {} for {code} didn't load, kept the current one: {e:#}", m.name),
+        }
+    }
+
+    /// Decode one utterance in the call's language. Returns the language code and (start, end, text) relative to
+    /// the chunk.
     pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
-        let (lang_id, lang, segs) = match &self.backend {
-            Backend::Local(e) => self.local(e, ts, chunk)?,
+        let lang = self.language();
+        Ok(match &self.backend {
+            Backend::Local(e) => {
+                let e = read(e).clone();
+                self.local(&e, ts, chunk, lang)?
+            }
             Backend::Remote { server, fallback, local, threads, down_until } => {
                 let waiting = Instant::now();
                 loop {
                     let down = down_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| Instant::now() < t);
                     if !down {
-                        match server.utterance(chunk, ts.prev_lang, &self.allowed, self.prompt.as_deref()) {
+                        match server.utterance(chunk, lang, self.prompt.as_deref()) {
                             Ok(r) => break r,
                             Err(e) if e.downcast_ref::<crate::remote::Refused>().is_some() => return Err(e),
                             Err(e) => {
@@ -825,7 +772,7 @@ impl Transcriber {
                         Engine::load(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
                     });
                     if let Some(e) = engine {
-                        break self.local(e, ts, chunk)?;
+                        break self.local(e, ts, chunk, lang)?;
                     }
                     // No model here: the WAVs keep the audio, so wait for the server.
                     if waiting.elapsed() < Duration::from_secs(1) {
@@ -838,17 +785,17 @@ impl Transcriber {
                     *down_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 }
             }
-        };
-        ts.prev_lang = lang_id.or(ts.prev_lang);
-        Ok((lang, segs))
+        })
     }
 
-    fn local(&self, e: &Engine, ts: &mut TrackState, chunk: &[f32]) -> Result<(Option<i32>, String, Decoded)> {
-        if ts.local.is_none() {
+    fn local(&self, e: &Engine, ts: &mut TrackState, chunk: &[f32], lang: i32) -> Result<(String, Decoded)> {
+        let generation = self.generation.load(Ordering::SeqCst);
+        if ts.local.is_none() || ts.generation != generation {
             ts.local = Some(e.state()?);
+            ts.generation = generation;
         }
         let st = ts.local.as_mut().expect("just set");
-        e.utterance(st, ts.prev_lang, &self.allowed, self.prompt.as_deref(), chunk)
+        e.utterance(st, lang, self.prompt.as_deref(), chunk)
     }
 
     pub(crate) fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
@@ -920,6 +867,29 @@ pub(crate) fn choose_hinted(hinted: Decoded, plain: Decoded, hint: &str) -> Deco
     } else {
         plain
     }
+}
+
+/// One utterance's decode (`decode` with or without the hint): plain, and from `GUARD_MIN_S` on through
+/// `with_hint`.
+fn decode_with_hint(dur: f64, prompt: Option<&str>, mut decode: impl FnMut(Option<&str>) -> Result<Decoded>) -> Result<Decoded> {
+    match prompt {
+        Some(hint) if dur >= GUARD_MIN_S => {
+            let plain = decode(None)?;
+            with_hint(plain, hint, || decode(Some(hint)))
+        }
+        _ => decode(None),
+    }
+}
+
+/// The plain decode, or `choose_hinted` over it and the hinted one — which `hinted` decodes only when
+/// a term may have been heard (`hint_needed`). Whisper (here or on an Echo server) and the OpenAI path.
+pub(crate) fn with_hint(plain: Decoded, hint: &str, hinted: impl FnOnce() -> Result<Decoded>) -> Result<Decoded> {
+    let text = plain.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
+    let terms: Vec<String> = hint.split(", ").map(str::to_owned).collect();
+    if !hint_needed(&text, &terms) {
+        return Ok(plain);
+    }
+    Ok(choose_hinted(hinted()?, plain, hint))
 }
 
 /// The hint made Whisper "hear" its own terms: most of the hinted text is hint words the plain
@@ -1135,16 +1105,28 @@ pub(crate) fn take_marker(dir: &Path) -> Result<InProgress> {
     bail!("could not mark {} as being transcribed", dir.display())
 }
 
-/// The final pass's transcriber: the configured model (or `model_override`), with turbo for
-/// language ID when it is downloaded — or the transcription server when one is set
-/// (`echoctl server use`; never with `model_override`). Returns it with the model's name.
-pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize) -> Result<(Transcriber, String)> {
-    let allowed = allowed_languages(cfg)?;
+/// The transcriber of a call (live and after): in the call's language (`call_language::of_call`), with the downloaded
+/// model best at it (`models::for_language`, else the configured one), or `model_override` (a comparison run), or the
+/// transcription server when one is set (`echoctl server use`; never with `model_override`). Returns it with the
+/// model's name.
+pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize, call: Option<&Path>) -> Result<(Transcriber, String)> {
     if let Some(p) = &prompt {
         eprintln!("  vocabulary hint: {p}");
     }
+    let lang = call_language::of_call(call, cfg);
+    let code = whisper_rs::get_lang_str(lang).unwrap_or("en");
+    eprintln!("  language: {code}");
+    let transcriber = |backend, model: &str| Transcriber {
+        backend,
+        prompt,
+        language: Mutex::new(lang),
+        model: Mutex::new(model.to_string()),
+        follows_language: model_override.is_none(),
+        threads,
+        generation: AtomicU64::new(0),
+    };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
-        let fallback = models::active_model_path().ok().filter(|p| p.exists());
+        let fallback = models::for_call(code, cfg.model.as_deref()).map(models::model_path).filter(|p| p.exists());
         let name = match server.hello() {
             Ok(h) => format!("{} on {}", h.model, h.name),
             Err(e) => {
@@ -1157,13 +1139,14 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         };
         eprintln!("  model: {name}");
         let backend = Backend::Remote { server, fallback, local: OnceLock::new(), threads, down_until: Mutex::new(None) };
-        return Ok((Transcriber { backend, allowed, prompt }, name));
+        return Ok((transcriber(backend, &name), name));
     }
-    let (model_name, model_path) = match model_override {
-        Some(name) => {
-            let m = models::find(name)?;
-            (m.name.to_string(), models::model_path(m))
-        }
+    let chosen = match model_override {
+        Some(name) => Some(models::find(name)?),
+        None => models::for_language(code, cfg.model.as_deref()),
+    };
+    let (model_name, model_path) = match chosen {
+        Some(m) => (m.name.to_string(), models::model_path(m)),
         None => (cfg.model.clone().unwrap_or_default(), models::active_model_path()?),
     };
     if !model_path.exists() {
@@ -1171,7 +1154,7 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     }
     eprintln!("  model: {model_name}");
     let engine = Engine::load(&model_path, threads)?;
-    Ok((Transcriber { backend: Backend::Local(engine), allowed, prompt }, model_name))
+    Ok((transcriber(Backend::Local(RwLock::new(Arc::new(engine))), &model_name), model_name))
 }
 
 /// Order the segments, drop the mic's echo of the remote side, name the remote speaker when the
@@ -1227,19 +1210,14 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     }
     crate::watch::close_unfinished(&dir)?;
     let _marker = take_marker(&dir)?;
-    let mut cfg = Config::load()?;
-    // A call can pin its own languages (chosen when it was armed).
-    let call_meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
-    if let Some(l) = call_meta["languages"].as_array().filter(|a| !a.is_empty()) {
-        cfg.languages = l.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
-    }
+    let cfg = Config::load()?;
     let meeting = MeetingContext::load(&dir)?;
     let t = Instant::now();
-    eprintln!("transcribing {} (languages: {})", dir.display(),
-        if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
-    let (tr, model_name) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads())?;
+    eprintln!("transcribing {}", dir.display());
+    let (tr, _) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads(), Some(&dir))?;
 
     let mut segs = vec![];
+    let mut mic_audio = None;
     let remote = dir.join("remote.wav").exists().then(|| load_16k(&dir.join("remote.wav"))).transpose()?;
     if dir.join("mic.wav").exists() {
         let mut mic = load_16k(&dir.join("mic.wav"))?;
@@ -1254,17 +1232,36 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
                 Err(e) => eprintln!("  echo cancellation skipped: {e:#}"),
             }
         }
-        segs.extend(tr.track("me", &mic)?);
+        mic_audio = Some(mic);
     }
-    if let Some(r) = &remote {
-        segs.extend(tr.track("remote", r)?);
+    // Its language changed by hand while this pass ran: the tracks again, in it (once; a comparison run keeps its own).
+    for _ in 0..2 {
+        segs.clear();
+        if let Some(mic) = &mic_audio {
+            segs.extend(tr.track("me", mic)?);
+        }
+        if let Some(r) = &remote {
+            segs.extend(tr.track("remote", r)?);
+        }
+        match call_language::meta_language(&dir).filter(|l| model_override.is_none() && *l != tr.language()) {
+            Some(l) => tr.set_language(l),
+            None => break,
+        }
     }
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
     // A comparison run (--model) must leave the audio for the real transcript.
-    let md_path = write_transcript(&dir, &cfg, &model_name, segs, &suffix, keep_audio || model_override.is_some())?;
+    let md_path = write_transcript(&dir, &cfg, &tr.model_name(), segs, &suffix, keep_audio || model_override.is_some())?;
     eprintln!("done in {:.0}s", t.elapsed().as_secs_f64());
     println!("{}", md_path.display());
     Ok(())
+}
+
+/// The app is quitting: no whisper model is left loaded at exit (ggml's Metal device asserts then, #141) — neither a
+/// live worker's (`live::shutdown`) nor the transcription server's (`remote::shutdown`), each waited for side by side.
+pub fn shutdown() {
+    let server = std::thread::spawn(crate::remote::shutdown);
+    crate::live::shutdown();
+    let _ = server.join();
 }
 
 #[cfg(test)]
@@ -1287,16 +1284,6 @@ mod tests {
     fn vad_splits_long_speech() {
         let a: Vec<f32> = (0..RATE * 60).map(|i| 0.3 * (i as f32 * 0.05).sin()).collect();
         assert!(utterances(&a).iter().all(|(s, e)| (e - s) as f64 / RATE as f64 <= MAX_UTTERANCE_S + 0.5));
-    }
-
-    #[test]
-    fn uncertain_detection_keeps_track_language() {
-        let (en, uk, ru) = (0, 1, 2);
-        // large-v3 on accented English: uk 0.41 / ru 0.27 / en 0.25, track was English
-        assert_eq!(choose_language(&[(uk, 0.41), (ru, 0.27), (en, 0.25)], Some(en)), Some(uk)); // en not top-2
-        assert_eq!(choose_language(&[(uk, 0.36), (en, 0.34)], Some(en)), Some(en));
-        assert_eq!(choose_language(&[(uk, 0.90), (en, 0.05)], Some(en)), Some(uk)); // confident switch
-        assert_eq!(choose_language(&[], None), None);
     }
 
     #[test]
@@ -1344,6 +1331,76 @@ mod tests {
         assert!(!hint_is_sane("", "We talked about the migration plan for a while"));
         assert!(!hint_is_sane(&"Pat O, Miro, IPAM, ".repeat(10), "yes"));
         assert!(hint_is_sane("Okay.", "Okay."));
+    }
+
+    #[test]
+    fn hinted_decode_only_when_a_term_may_have_been_heard() {
+        let terms: Vec<String> = ["ServiceNow", "Kubernetes", "Олена", "2026"].map(String::from).to_vec();
+        assert!(!hint_needed("We moved it to ServiceNow", &terms), "already written as the term");
+        assert!(hint_needed("We moved it to service now", &terms));
+        assert!(hint_needed("the kubernetis cluster", &terms));
+        assert!(hint_needed("Мы перенесли всё в сервис нау", &terms));
+        assert!(hint_needed("поговори с Оленой", &terms));
+        assert!(hint_needed("the 2025 budget", &terms));
+        assert!(!hint_needed("the 2026 budget", &terms));
+        assert!(hint_needed("a servicenowadays thing", &terms)); // a term inside a longer word
+        let tf = ["Terraform".to_string()];
+        assert!(!hint_needed("the Terraform modules", &tf), "already written as the term");
+        assert!(hint_needed("the Terraform modules and the terra form state", &tf), "written once, misheard once");
+        let one = ["ServiceNow".to_string()];
+        assert!(!hint_needed("We will meet at ten.", &one));
+        assert!(!hint_needed("", &one));
+        assert!(!hint_needed("We moved it to service now", &[]));
+    }
+
+    #[test]
+    fn written_terms_skip_the_hint_only_when_spelled_as_the_term() {
+        let k = ["Kubernetes".to_string()];
+        assert!(hint_needed("на кубернетес", &k), "a Cyrillic spelling is a correction to make");
+        assert!(hint_needed("the kubernetes cluster", &k), "so is another case");
+        assert!(!hint_needed("the Kubernetes, cluster", &k), "punctuation around it doesn't count");
+        let iva = ["IVA Studio".to_string()];
+        assert!(!hint_needed("we opened IVA Studio today", &iva), "a multi-word term written as it");
+        assert!(hint_needed("we opened IVA Studio and then eva studio", &iva), "written once, misheard once");
+        assert!(hint_needed("we opened eva studio", &iva));
+        let cpp = ["C++".to_string()];
+        assert!(hint_needed("We should use C for this module.", &cpp), "a term's own symbols count");
+        assert!(!hint_needed("We should use C++.", &cpp));
+        assert!(!hint_needed("We ship it on .NET, as planned", &[".NET".to_string()]));
+        let mac = ["println!".to_string()];
+        assert!(hint_needed("Use println for logs.", &mac), "the term's own '!' counts");
+        assert!(!hint_needed("Use println!, then return.", &mac), "sentence punctuation after it doesn't");
+        assert!(!hint_needed("(println!)", &mac), "nor brackets around it");
+    }
+
+    #[test]
+    fn the_hinted_decode_runs_only_when_needed_and_is_kept_only_through_the_guards() {
+        let d = |t: &str| vec![Piece::new(0.0, 1.0, t.to_string(), vec![])];
+        let hint = "ServiceNow, Kubernetes";
+        let kept = with_hint(d("We will meet at ten."), hint, || panic!("no term heard: no second decode")).unwrap();
+        assert_eq!(kept[0].text, "We will meet at ten.");
+        let fixed = with_hint(d("We moved it to service now."), hint, || Ok(d("We moved it to ServiceNow."))).unwrap();
+        assert_eq!(fixed[0].text, "We moved it to ServiceNow.");
+        let runaway = with_hint(d("We moved it to service now."), hint, || Ok(d(&"ServiceNow, Kubernetes, ".repeat(20)))).unwrap();
+        assert_eq!(runaway[0].text, "We moved it to service now.", "a guard failed: the plain decode is kept");
+    }
+
+    #[test]
+    fn local_whisper_decodes_plain_first_and_with_the_hint_only_when_needed() {
+        let run = |plain: &'static str, dur: f64| {
+            let mut calls: Vec<Option<String>> = vec![];
+            let segs = decode_with_hint(dur, Some("ServiceNow, Kubernetes"), |hint| {
+                calls.push(hint.map(str::to_owned));
+                let text = if hint.is_some() { "We moved it to ServiceNow." } else { plain };
+                Ok(vec![Piece::new(0.0, 1.0, text.to_string(), vec![])])
+            })
+            .unwrap();
+            (calls, segs[0].text.clone())
+        };
+        let hint = Some("ServiceNow, Kubernetes".to_string());
+        assert_eq!(run("We moved it to service now.", 3.0), (vec![None, hint], "We moved it to ServiceNow.".to_string()));
+        assert_eq!(run("We will meet at ten.", 3.0), (vec![None], "We will meet at ten.".to_string()));
+        assert_eq!(run("Yes.", 0.5), (vec![None], "Yes.".to_string()), "under GUARD_MIN_S: plain only");
     }
 
     #[test]
@@ -1428,12 +1485,14 @@ mod tests {
     }
 
     #[test]
-    fn ukrainian_and_russian_told_apart_by_letters() {
-        assert_eq!(cyrillic_hint("Так я сгоден. Давайте перенесимо зустріч на четвер."), Some("uk"));
-        assert_eq!(cyrillic_hint("Первый этап нужно закончить. Есть вопросы?"), Some("ru"));
-        assert_eq!(cyrillic_hint("Добрый день, коллеги"), Some("ru"));
-        assert_eq!(cyrillic_hint("Так, добре"), None);
-        assert_eq!(cyrillic_hint("Good morning"), None);
+    fn flash_attention_only_on_the_macs_gpu() {
+        assert!(flash_attention(true, true));
+        assert!(!flash_attention(false, true), "the CPU on Apple Silicon");
+        assert!(!flash_attention(true, false), "a GPU elsewhere (Windows, an Intel Mac)");
+        assert!(!flash_attention(false, false));
+        assert!(!context_params(false).flash_attn);
+        assert_eq!(context_params(true).flash_attn, cfg!(all(target_os = "macos", target_arch = "aarch64")));
+        assert!(context_params(true).use_gpu);
     }
 
     #[test]

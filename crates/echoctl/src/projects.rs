@@ -205,6 +205,28 @@ pub struct Source {
     /// A folder's globs of what not to read (`Archive/`, `*draft*`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// A mail source's subjects ("Acme Platform", "APX"): it reads a mail only when its subject, or its
+    /// conversation's, contains one of them (as a call's `subject` rule). None: every mail of its people.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subject: Vec<String>,
+}
+
+impl Source {
+    /// Whether a mail's subject is one this source reads: it contains one of its subjects, or it names none.
+    pub fn about(&self, subject: &str) -> bool {
+        self.subject.is_empty() || self.subject.iter().any(|w| contains_words(subject, w))
+    }
+}
+
+/// Subjects as typed ("Acme Platform, APX"): each trimmed, empty and repeated ones dropped.
+pub fn subject_words(typed: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for w in typed.split(',').map(str::trim).filter(|w| !words(w).is_empty()) {
+        if !out.iter().any(|x| words(x) == words(w)) {
+            out.push(w.to_string());
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -249,7 +271,6 @@ pub struct Place {
     pub interest: Option<u8>,
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub const STANCES: [&str; 5] = ["champion", "supporter", "neutral", "sceptic", "blocker"];
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
@@ -288,7 +309,6 @@ pub struct Relation {
     pub note: Option<String>,
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub const RELATIONS: [&str; 6] = ["partner", "vendor", "delivers_for", "integrates_for", "customer", "competitor"];
 
 /// A glossary entry: hints transcription on the project's calls.
@@ -417,6 +437,9 @@ pub struct Project {
     pub ai_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Its links to other whole threads, kept on this side only (`threadlinks`): what it is part of, what it relates to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<crate::threadlinks::Link>,
     pub created_at: String,
 }
 
@@ -518,7 +541,7 @@ fn norm_domains(ds: &[String]) -> Vec<String> {
 }
 
 /// Words of a subject, for "contains" (lowercase, letters and digits).
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
 
@@ -602,14 +625,12 @@ fn lock() -> Result<crate::app::FileLock> {
 }
 
 /// Run `f` under the projects' lock (another file of theirs, as `people.json`).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub(crate) fn with_lock<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     let _l = lock()?;
     f()
 }
 
 /// A client's logo version for the page (0: none).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub(crate) fn client_logo_v(id: &str) -> u64 {
     logo_v(client_logo_stem(id))
 }
@@ -735,6 +756,10 @@ fn check(p: &Project, clients: &[Client]) -> Result<()> {
             bail!("a {} rule needs a value", r.kind());
         }
     }
+    // Mail from anyone is a thread's only by its subject.
+    if p.sources.iter().any(|s| s.kind == "mail" && s.id == "any:*" && s.subject.is_empty()) {
+        bail!("mail from anyone needs subjects (--subject \"Acme Platform, APX\")");
+    }
     Ok(())
 }
 
@@ -774,6 +799,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         notes: String::new(),
         ai_profile: None,
         model: None,
+        links: vec![],
         created_at: now,
     };
     check(&p, &clients()?)?;
@@ -785,7 +811,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
 pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Project> {
     let _l = lock()?;
     let mut p = load(id)?;
-    let stage = p.stage;
+    let (stage, name) = (p.stage, p.name.clone());
     f(&mut p)?;
     p.id = id.to_string();
     if p.stage != stage {
@@ -793,6 +819,9 @@ pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Pr
     }
     check(&p, &clients()?)?;
     write_json(&profile_path(id)?, &p)?;
+    if p.name != name {
+        crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Renamed { name: &p.name, from: &name })?;
+    }
     Ok(p)
 }
 
@@ -898,11 +927,19 @@ pub fn set_stage(id: &str, stage: Stage, reason: Option<&str>) -> Result<Project
 /// Remove a project's folder (its brief and profile; later its ledger) into the trash.
 pub fn delete(id: &str) -> Result<()> {
     let _l = lock()?;
-    load(id)?;
+    // Who it was: a later thread under its id is another.
+    let born = load(id)?.stages.first().map(|s| s.at.clone());
     let trash = paths::state_dir().join("trash");
     fs::create_dir_all(&trash)?;
-    let to = trash.join(format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")));
+    let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
+    // Gone now: plugins' values for it go with it, and they hear it — before anything below may fail.
+    crate::plugins::thread_values::changed(id, crate::plugins::thread_values::Change::Deleted { born })?;
+    // Its links go with it: a new thread may get its id.
+    for mut o in list().into_iter().filter(|o| o.links.iter().any(|l| l.to == id)) {
+        o.links.retain(|l| l.to != id);
+        write_json(&profile_path(&o.id)?, &o)?;
+    }
     Ok(())
 }
 
@@ -1008,7 +1045,6 @@ pub fn of_meeting(m: &MeetingContext) -> Vec<Project> {
 
 /// The projects a calendar event belongs to (its rules, or added by hand), as chips — `pinned`:
 /// added by hand to this very event.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn for_event(m: &MeetingContext) -> Vec<Value> {
     let Ok(clients) = orgs() else { return vec![] };
     let f = CallFacts::of_meeting(m, me().as_ref());
@@ -1316,6 +1352,8 @@ pub(crate) fn call_row(d: &Path, why: &str) -> Value {
 /// A project as the window and `project show` give it.
 pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
     let mut v = serde_json::to_value(p)?;
+    // The stored side of its links only: `links` is both sides, with calls (below).
+    v.as_object_mut().map(|o| o.remove("links"));
     v["group"] = json!(p.stage.group());
     let b = brief(&p.id)?;
     v["brief_html"] = json!(crate::minutes::markdown_html(&b));
@@ -1336,6 +1374,15 @@ pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
         v["chat_state"] = crate::ledger::chat_state(&p.id);
         v["mail_state"] = crate::ledger::mail_state(&p.id);
         v["chat_suggestions"] = json!(crate::ledger::chat_suggestions(p));
+        // Its linked threads, each with what it holds now (Brief → Linked threads).
+        v["links"] = crate::threadlinks::of(p, &list())
+            .into_iter()
+            .map(|mut l| {
+                let d = crate::threadlinks::digest(l["id"].as_str().unwrap_or(""), 5, 3);
+                l["work"] = d;
+                l
+            })
+            .collect();
     }
     Ok(v)
 }
@@ -1447,6 +1494,24 @@ pub fn terms_for_meeting(m: &MeetingContext) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A project deleted again within the same second as one before it goes to the trash beside it, not onto it.
+    #[test]
+    fn a_project_deleted_twice_in_a_second_keeps_both_in_the_trash() {
+        let (_env, _root) = paths::testenv::folders("projects-trash");
+        let p = create("Acme pilot", None, None).unwrap();
+        let trash = paths::state_dir().join("trash");
+        let now = Utc::now();
+        let taken: Vec<PathBuf> = (-2..=5).map(|s| trash.join(format!("project-{}-{}", p.id, (now + chrono::Duration::seconds(s)).format("%Y%m%d%H%M%S")))).collect();
+        for t in &taken {
+            fs::create_dir_all(t).unwrap();
+            fs::write(t.join("brief.md"), "deleted before").unwrap();
+        }
+        delete(&p.id).unwrap();
+        assert!(!dir().join(&p.id).exists(), "gone from the projects");
+        assert!(taken.iter().all(|t| fs::read_to_string(t.join("brief.md")).unwrap() == "deleted before"));
+        assert_eq!(fs::read_dir(&trash).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("project-")).count(), taken.len() + 1);
+    }
     use super::*;
 
     fn person(name: &str, email: &str) -> Person {
@@ -1571,6 +1636,7 @@ mod tests {
             notes: String::new(),
             ai_profile: None,
             model: None,
+            links: vec![],
             created_at: String::new(),
         };
         let f = |others: &[&str]| CallFacts { others: others.iter().map(|s| s.to_string()).collect(), ..Default::default() };
@@ -1813,5 +1879,31 @@ mod tests {
         let recent = c[0]["recent_calls"].as_array().unwrap();
         assert_eq!(recent.len(), 1, "only earlier calls with minutes: {recent:?}");
         assert!(recent[0]["highlights"].to_string().contains("24 Nov"));
+    }
+
+    #[test]
+    fn a_mail_source_reads_only_its_subjects_and_mail_from_anyone_needs_them() {
+        let (_env, _root) = paths::testenv::folders("projects-mail-subject");
+        assert_eq!(subject_words(" Acme Platform, APX,, acme  platform ,  "), ["Acme Platform", "APX"], "trimmed, empty and repeated dropped");
+        let src = Source { kind: "mail".into(), id: "person:jane@acme.example".into(), subject: subject_words("Acme Platform, APX"), ..Default::default() };
+        assert!(src.about("RE: Acme Platform — status"));
+        assert!(src.about("apx cut-over"), "any case");
+        assert!(!src.about("Acme Platformer launch"), "whole words only");
+        assert!(!src.about("Lunch on Friday"));
+        assert!(Source { kind: "mail".into(), id: "domain:acme.example".into(), ..Default::default() }.about("anything"), "no subjects: every mail");
+        let p = create("Acme Platform", None, None).unwrap();
+        let any = |subject: Vec<String>| Source { kind: "mail".into(), id: "any:*".into(), subject, ..Default::default() };
+        let e = update(&p.id, |p| {
+            p.sources.push(any(vec![]));
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("needs subjects"), "{e:#}");
+        update(&p.id, |p| {
+            p.sources.push(any(vec!["Acme Platform".into()]));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(load(&p.id).unwrap().sources[0].subject, ["Acme Platform"]);
     }
 }

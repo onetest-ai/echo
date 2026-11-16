@@ -2,6 +2,7 @@
 // unsaved edits, Ask (turns, tool rows, @ mentions, following the bottom), Health (findings, the trend, fixes) and Ingest (the queue, a run, the review, the Add a source sheet) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
 const src = readFileSync(new URL('./knowledge.js', import.meta.url), 'utf8')
 const block = (name) => {
@@ -329,10 +330,9 @@ test('unsaved text is kept for the same page and base, gone after a save', () =>
 })
 
 test('Knowledge\'s buttons use attributes the app\'s own click handler leaves alone', () => {
-  const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
-  const sel = app.split('\n').find((l) => l.includes("e.target.closest('[data-me-edit]"))
-  assert.ok(sel, 'the app\'s click handler selector not found in app.js')
-  const owned = new Set([...sel.matchAll(/\[(data-[a-z-]+)\]/g)].map((m) => m[1]))
+  const selectors = [...appSource().matchAll(/sel: '([^']+)'/g)].map((m) => m[1]).join(',')
+  assert.ok(selectors.includes('[data-me-edit]'), 'the app click registry is present')
+  const owned = new Set([...selectors.matchAll(/\[(data-[a-z-]+)\]/g)].map((m) => m[1]))
   const used = new Set([...src.matchAll(/\b(data-[a-z-]+)=/g)].map((m) => m[1]))
   const both = [...used].filter((a) => owned.has(a) && a !== 'data-copy') // data-copy: the app's Copy, on purpose
   assert.deepEqual(both, [], `a click on these would also run the app's handler: ${both.join(', ')}`)

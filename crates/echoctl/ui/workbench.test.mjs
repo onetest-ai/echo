@@ -2,35 +2,38 @@
 // where panel views go (`Layout`). Run by scripts/check-mod.sh (`node crates/echoctl/ui/workbench.test.mjs`):
 // the block is taken from app.js as it ships.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
-const src = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
+const src = appSource()
 const start = src.indexOf('// ── workbench: what the window is made of')
 const end = src.indexOf('// end of the workbench block', start)
 assert.ok(start >= 0 && end > start, 'the workbench block not found in app.js')
-const { ACTIVITIES, callTabs, eventAction, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, callTabs, eventAction, Layout }`)()
+const { ACTIVITIES, callTabs, eventAction, meetingApp, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, callTabs, eventAction, meetingApp, Layout }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
 const ids = (tabs) => tabs.map((t) => t[0])
 const VIEWS = [{ id: 'claude', label: 'Claude', area: 'bottom' }, { id: 'tasks', label: 'Tasks', area: 'right' }]
 
-test('Calls (list beside the call) comes first, Calendar (one column) second, Settings at the bottom', () => {
-  assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
+test('Today comes first, then Calls (list beside the call) and Calendar (one column), Settings at the bottom', () => {
+  assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['today', 'single', false], ['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
+})
+
+test('each of Echo\'s own views draws itself, but Calls: the list beside the call, drawn when no activity draws', () => {
+  assert.deepEqual(ACTIVITIES.filter((a) => a.draw).map((a) => a.id), ['today', 'calendar', 'projects', 'tasks', 'brain', 'settings'])
 })
 
 test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {
-  assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0, actions: null })), ['transcript', 'minutes', 'actions'])
-  assert.equal(callTabs({ recording: true, chat: 0, frames: 0, actions: null })[0][3], true)
-  assert.deepEqual(callTabs({ recording: false, chat: 3, frames: 2, actions: 4 }), [
+  assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0 })), ['transcript', 'minutes'])
+  assert.equal(callTabs({ recording: true, chat: 0, frames: 0 })[0][3], true)
+  assert.deepEqual(callTabs({ recording: false, chat: 3, frames: 2 }), [
     ['minutes', 'Minutes', ''], ['transcript', 'Transcript', ''],
-    ['chat', 'Chat', 3], ['screens', 'Screens', 2], ['actions', 'Actions', 4],
+    ['chat', 'Chat', 3], ['screens', 'Screens', 2],
   ])
 })
 
-test('Actions shows no count before the minutes, and 0 for a call without any', () => {
-  assert.equal(callTabs({ live: false, chat: 0, frames: 0, actions: null }).at(-1)[2], '')
-  assert.equal(callTabs({ live: false, chat: 0, frames: 0, actions: 0 }).at(-1)[2], 0)
+test('no Actions tab: the minutes list the action items, What moved beside them the tasks', () => {
+  assert.ok(!ids(callTabs({ recording: false, chat: 0, frames: 0 })).includes('actions'))
 })
 
 test('a calendar event offers what the card offered before', () => {
@@ -41,6 +44,29 @@ test('a calendar event offers what the card offered before', () => {
   assert.equal(eventAction({ join_url: 'https://teams' }, st()), 'record')
   assert.equal(eventAction({}, st({ live: true })), 'record')
   assert.equal(eventAction({}, st({ recordable: false })), null)
+})
+
+test('a Zoom meeting, or a Google Meet one off a Mac, offers no Record, Join or Teams transcript: recording isn\'t available for it yet (#228)', () => {
+  const st = (o) => ({ past: false, live: false, recordable: true, ...o })
+  const zoom = { app: 'zoom', join_url: 'https://zoom.us/j/81234567890' }
+  assert.equal(eventAction(zoom, st()), 'other-app')
+  assert.equal(eventAction(zoom, st({ live: true })), 'other-app')
+  assert.equal(eventAction({ ...zoom, scheduled: true }, st()), 'other-app')
+  assert.equal(eventAction({ app: 'meet', join_url: 'https://meet.google.com/abc-defg-hij' }, st({ past: true, recordable: false })), null, 'over: no Teams transcript to import')
+  assert.equal(eventAction({ ...zoom, recorded: { name: 'x' } }, st()), 'open-notes')
+  assert.equal(eventAction({ app: 'teams', join_url: 'https://teams' }, st({ past: true, recordable: false })), 'import')
+  const mac = /Mac/.test(navigator.platform || navigator.userAgent)
+  assert.deepEqual([meetingApp({ app: 'zoom' }), meetingApp({ app: 'meet' }), meetingApp({ app: 'teams' }), meetingApp({ app: null }), meetingApp({ app: 'toString' })],
+    [{ name: 'Zoom', other: true }, { name: 'Google Meet', other: !mac }, { name: 'Teams', other: false }, null, null])
+})
+
+test('on a Mac a Google Meet meeting offers Record, and Join & record while it goes on (#230)', () => {
+  if (!/Mac/.test(navigator.platform || navigator.userAgent)) return
+  const st = (o) => ({ past: false, live: false, recordable: true, ...o })
+  const meet = { app: 'meet', join_url: 'https://meet.google.com/abc-defg-hij' }
+  assert.equal(eventAction(meet, st()), 'record')
+  assert.equal(eventAction(meet, st({ live: true })), 'join')
+  assert.equal(eventAction({ ...meet, scheduled: true }, st()), 'scheduled')
 })
 
 test('no layout saved: views in their own areas, both panels closed', () => {
@@ -59,6 +85,16 @@ test('the window opening closes the right panel, however it was saved; its size 
   assert.deepEqual(Layout.toJSON().right, { open: false, size: 400, active: 'tasks' })
   Layout.show('tasks', VIEWS)
   assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, true)
+})
+
+test('the right panel closed over a narrow page stays closed when the window is widened (#278)', () => {
+  Layout.load({ right: { open: false, size: 320, active: 'tasks' } })
+  Layout.show('tasks', VIEWS) // asked for in a narrow window: over the page
+  assert.equal(Layout.effective(800, 700, VIEWS, true).right.overlay, true)
+  Layout.close('right') // its Close (or Escape)
+  assert.equal(Layout.effective(800, 700, VIEWS, false).right.shown, false)
+  assert.equal(Layout.effective(1201, 868, VIEWS).right.shown, false)
+  assert.equal(Layout.toJSON().right.open, false)
 })
 
 test('the activity bar starts folded, opens and is remembered; narrow, it opens only over the page', () => {
@@ -126,6 +162,15 @@ test('views of a removed plugin are forgotten', () => {
   Layout.load({ views: { gone: { area: 'right' }, claude: { area: 'right' } } })
   Layout.prune(VIEWS)
   assert.deepEqual(Object.keys(Layout.toJSON().views), ['claude'])
+})
+
+test('a layout saved showing a view that is gone (Today\'s Meeting, now a popover) loads: the area shows its first view', () => {
+  Layout.load({ right: { open: true, active: 'meeting' }, bottom: { open: true, active: 'meeting' }, views: { meeting: { area: 'bottom' } } })
+  Layout.prune(VIEWS)
+  assert.deepEqual(Layout.toJSON().views, {})
+  const e = Layout.effective(1180, 760, VIEWS)
+  assert.equal(e.right.active, 'tasks')
+  assert.equal(e.bottom.active, 'claude')
 })
 
 test('malformed saved values fall back to the defaults', () => {

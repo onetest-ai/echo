@@ -1,0 +1,55 @@
+{
+ "entity": "person",
+ "axes": [
+  {
+   "axis": "person.side",
+   "values": "yours (colleague) / other (an organisation or only a domain)",
+   "where": "`people.rs` `side`"
+  },
+  {
+   "axis": "person.in_thread",
+   "values": "placed in the thread / seen only in its calls",
+   "where": "`in_thread`"
+  },
+  {
+   "axis": "person.recency",
+   "values": "new (first seen ≤ 14 days) / quiet (> 6 weeks) / neither",
+   "where": "`people.rs`"
+  },
+  {
+   "axis": "person.levels",
+   "values": "influence 1–3 / none × interest 1–3 / none (map quadrant or tray)",
+   "where": "app.js `peopleMap`"
+  },
+  {
+   "axis": "person.place",
+   "values": "stance champion / supporter / neutral / sceptic / blocker / none; role (yours or Echo's); governance yes / no / unset; workstream; works for",
+   "where": "app.js `STANCES`, `personPanel`"
+  },
+  {
+   "axis": "person.field_source",
+   "values": "you / Microsoft 365 / Echo; a question where Microsoft 365 differs",
+   "where": "`people.json` sources, `questions`"
+  },
+  {
+   "axis": "person.about",
+   "values": "none / Echo's summary / the user's own",
+   "where": "`about`, `about_by`"
+  },
+  {
+   "axis": "person.facts",
+   "values": "0 / ≤ 8 / > 8",
+   "where": "app.js `personPanel`"
+  },
+  {
+   "axis": "person.maybe_same",
+   "values": "none / a suggested match; merged (`also`) / split",
+   "where": "`people::merge`, `split`, `maybe_same`"
+  },
+  {
+   "axis": "person.suggestion",
+   "values": "none / stance / role / person / influence / interest / title / group / reports_to / left / relation",
+   "where": "app.js `peopleSuggestions`; `people-suggestions.json`"
+  }
+ ]
+}

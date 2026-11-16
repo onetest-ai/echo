@@ -1,0 +1,67 @@
+{
+ "prefix": "WIN",
+ "name": "Windows",
+ "order": 280,
+ "status": "stable",
+ "notes": "The Windows build",
+ "features": [
+  {
+   "id": "F-WIN-01",
+   "feature": "The Windows build and per-user MSI are produced; install and first run work",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-02",
+   "feature": "A Teams call is recorded (Teams' output device as the other side) and transcribed",
+   "priority": "critical",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-03",
+   "feature": "The window works on Windows (Echo's own title bar by default, the native one when turned off; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox) and speaks Windows' words: the octopus in the notification area, never the menu bar; the taskbar names the app Echo",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-04",
+   "feature": "Start at sign-in, quit and `echoctl` on the user PATH",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-05",
+   "feature": "Updates install from the release MSI only with a matching digest",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-06",
+   "feature": "Mute sync, Teams UI text, notifications, the tray icon and shared-screen frames work on Windows",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-07",
+   "feature": "Echo's own title bar (on by default, off in Settings → Layout; Windows only): no system frame, the strip moves, maximises and resizes the window and holds minimise, maximise and close; on or off at once",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-08",
+   "feature": "A release's announcement shows as a strip across the window under the top bar for the users it applies to (Whisper in use: \"Whisper is deprecated\", Switch to Parakeet v3 / Not now) until answered; an answer is kept and it never comes back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.models"
+   ]
+  }
+ ]
+}

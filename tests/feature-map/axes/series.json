@@ -1,0 +1,20 @@
+{
+ "entity": "series (schedule rule)",
+ "axes": [
+  {
+   "axis": "series.key",
+   "values": "`id:<seriesMasterId>` / `subject:<normalised>`",
+   "where": "`series.rs`, `projects/series.json`"
+  },
+  {
+   "axis": "series.record",
+   "values": "none (Don't record, default) / always / ask (CLI only) / never",
+   "where": "`series.rs`; app.js `seriesEditor`, `seriesSummary`"
+  },
+  {
+   "axis": "series.languages",
+   "values": "any / one language",
+   "where": "`series.rs` `languages`"
+  }
+ ]
+}

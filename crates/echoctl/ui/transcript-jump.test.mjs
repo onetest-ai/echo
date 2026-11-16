@@ -1,0 +1,36 @@
+// Which transcript turn a moment opens on (app.js, jumpTurn): a minutes time chip or a note's time.
+// Run by scripts/check-mod.sh (`node crates/echoctl/ui/transcript-jump.test.mjs`).
+import assert from 'node:assert/strict'
+import { appSource } from './source.mjs'
+
+const src = appSource()
+const start = src.indexOf('// ── transcript jump')
+const end = src.indexOf('// end of the transcript jump block', start)
+assert.ok(start >= 0 && end > start, 'the transcript jump block not found in app.js')
+const { jumpTurn } = new Function(`${src.slice(start, end)}\nreturn { jumpTurn }`)()
+
+// The turns of the made-up Acme weekly sync around the chips of #101.
+const turns = [
+  { start: 5, end: 12 }, { start: 13.2, end: 20 }, { start: 21, end: 28 }, { start: 29, end: 35.4 }, { start: 37.3, end: 44 }, { start: 50.666, end: 58 },
+]
+const cases = [
+  ['a chip at a turn that starts later in the same second opens that turn, not the one before', 37, 4],
+  ['a chip at 00:13 opens the turn starting at 0:13.2', 13, 1],
+  ['a moment inside a turn opens that turn', 31, 3],
+  ['a moment in the silence after a turn opens the next turn', 36, 4],
+  ['a note saved at a turn\'s start (whole seconds, rounded down) opens that turn', Math.floor(50.666), 5],
+  ['a moment before the first turn opens the first', 1, 0],
+  ['a moment after the last turn opens the last', 99, 5],
+]
+// A short turn followed closely by another, and two tracks starting in the same second.
+const short = [{ start: 50.1, end: 50.9 }, { start: 51.4, end: 55 }]
+cases.push(['a note on a short turn (saved at its start, rounded down) opens that turn, not the next', Math.floor(50.1), 0, short])
+const overlap = [{ start: 40.2, end: 48 }, { start: 40.7, end: 44 }]
+cases.push(['two turns starting in the same second: the first of them', 40, 0, overlap])
+cases.push(['a moment after both began: the later of them', 45, 1, overlap])
+cases.push(['a note at a turn starting at 49.5 (saved at 49) stays on it, not on the next at 50.0', 49, 0, [{ start: 49.5, end: 49.9 }, { start: 50, end: 52 }]])
+let failed = 0
+for (const [name, t, want, ts = turns] of cases) {
+  try { assert.equal(jumpTurn(ts, t), want); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
+}
+if (failed) process.exit(1)

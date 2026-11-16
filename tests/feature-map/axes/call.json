@@ -1,0 +1,75 @@
+{
+ "entity": "call",
+ "axes": [
+  {
+   "axis": "call.status",
+   "values": "recording / transcribing / notes (minutes) / transcript / failed / audio",
+   "where": "`window.rs` `status()` (`.transcribing`, `notes.md`, `transcript.md`, `transcribe.error`)"
+  },
+  {
+   "axis": "call.kind",
+   "values": "call / memo / imported from Teams transcript / deleted (in trash)",
+   "where": "`meta.json` `kind: memo`, `source: teams-transcript`; `echoctl delete` / `restore`"
+  },
+  {
+   "axis": "call.run",
+   "values": "none / queued (wait own · call · model; may_start; now) / running / done / skipped / failed / needs_login; had_minutes",
+   "where": "`notes-run.json`, `notes.rs` (`conclude`, `wait`); app.js `minutesTab`, `minutesBar`, `notesNowBtn`"
+  },
+  {
+   "axis": "call.auto",
+   "values": "now / at (moved by later · notes) / off / before / not_ready / tried (held_by a session) / held / gate / missing / error",
+   "where": "`notes.rs` auto state (`auto_due`), app.js `minutesHint`"
+  },
+  {
+   "axis": "call.today_minutes",
+   "values": "none / transcribing / writing / at HH:MM / ready unread (counts) / ready read / failed (why)",
+   "where": "`today.rs` `minutes()`, `minutes-seen.json`"
+  },
+  {
+   "axis": "call.extras",
+   "values": "chat 0 / >0; frames 0 / >0; prep yes / no; has_log; live notes kept",
+   "where": "app.js `CALL_TABS`, `callTabs`, `hasLive`"
+  },
+  {
+   "axis": "call.threads",
+   "values": "none / one / several; why series · people · chat · subject · pinned; a suggestion; projects_error",
+   "where": "app.js `callProjects`, `WHY`; `projects::suggest`"
+  },
+  {
+   "axis": "call.type_by",
+   "values": "none / guess / invite / echo (minutes) / you; type client · partner · one-on-one · internal · industry · other · user's own",
+   "where": "app.js `meetingTypeChip`; `calls::meeting_type`"
+  },
+  {
+   "axis": "call.people",
+   "values": "0 / 1–2 / 3–6 / > 6",
+   "where": "app.js `list` (+N), `doc` (\"and N more\")"
+  },
+  {
+   "axis": "call.day",
+   "values": "today / yesterday / this week / older this year / other year / undated",
+   "where": "app.js `dayLabel`"
+  },
+  {
+   "axis": "call.notes",
+   "values": "none / notes of each kind (note, question, decision, to-do done / not, flag, heading, quote) / unreadable / conflict kept",
+   "where": "`my-notes.md`; app.js `NoteDoc`, `notesTab` (`my_notes_error`, `kept`)"
+  },
+  {
+   "axis": "call.transcript",
+   "values": "none / Me + Remote / Speaker N (1–6+) / named speakers; language per turn; long turns",
+   "where": "app.js `turnsHtml`, `speaker()`; `speakers.json`"
+  },
+  {
+   "axis": "call.profile",
+   "values": "pinned existing / pinned missing / `!unreadable` / unreadable meta",
+   "where": "`meta.json` `ai_profile`; app.js `minutesHint` (`profile_error`)"
+  },
+  {
+   "axis": "call.list_size",
+   "values": "0 / < 60 / > 60 (paged)",
+   "where": "`window.rs` `calls_page`; app.js `CALLS_PAGE`"
+  }
+ ]
+}

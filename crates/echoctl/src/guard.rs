@@ -55,6 +55,23 @@ pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
 /// More read paths (one per line): a routine's plugin-granted folders; a vault conversation's installed skill
 /// folders or exact command files. Ingest and lint ignore this key.
 pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
+/// A read-only routine may run these plugin commands (`echoctl plugin call <id> <command> …`), one `<id> <command>`
+/// per line: those the enabled plugins name in `uses.sessions.commands` (the user agreed on their sheets).
+pub const RUN_PLUGIN_COMMANDS: &str = "ECHOCTL_RUN_PLUGIN_COMMANDS";
+/// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
+pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
+/// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
+/// calls even if the thread is re-pinned while it runs.
+pub const RUN_PROFILE: &str = "ECHOCTL_RUN_PROFILE";
+/// Yolo's run: the thread it works in (a task's, or an item of Needs you now's), whose data it may read — its brief,
+/// people, work and calls (`run_thread`); nothing of it changes but its own task's state.
+pub const RUN_THREAD: &str = "ECHOCTL_RUN_THREAD";
+
+/// The thread a run Echo started may read (Yolo's: `RUN_THREAD`, else its task's); none for any other run.
+pub fn run_thread() -> Option<String> {
+    let t = std::env::var(RUN_THREAD).ok().filter(|t| !t.is_empty());
+    t.or_else(|| std::env::var(RUN_TASK).ok().and_then(|t| t.split_once('/').map(|(p, _)| p.to_string())).filter(|t| !t.is_empty()))
+}
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
     "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
@@ -96,6 +113,8 @@ pub struct Scope {
     extra: Vec<PathBuf>,
     /// …and load these skills (`RUN_SKILLS`).
     skills: Vec<String>,
+    /// …and run these plugin commands, `(plugin, command)` (`RUN_PLUGIN_COMMANDS`).
+    plugin_commands: Vec<(String, String)>,
     /// A run in a knowledge vault (`RUN_MODE=vault`, `ingest`, `lint`): judged by its own rules alone.
     vault: Option<VaultScope>,
 }
@@ -277,7 +296,7 @@ impl Scope {
     pub(crate) fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
         if let Some(mode) = var(RUN_MODE).and_then(|m| m.into_string().ok()).filter(|m| matches!(m.as_str(), "vault" | "ingest" | "lint")) {
             let v = VaultScope::from_vars(&mode, &var)?;
-            return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], vault: Some(v) });
+            return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: Some(v) });
         }
         let clis_of = |v: Option<std::ffi::OsString>| -> Vec<String> { v.and_then(|c| c.into_string().ok()).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect() };
         if var(RUN_MODE).is_some_and(|m| m == "project") {
@@ -293,7 +312,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], vault: None });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -307,7 +326,8 @@ impl Scope {
             }
             let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
             let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, vault: None });
+            let plugin_commands = var(RUN_PLUGIN_COMMANDS).map(|v| v.to_string_lossy().lines().filter_map(|l| l.split_once(' ').map(|(p, c)| (p.to_string(), c.to_string()))).collect()).unwrap_or_default();
+            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, plugin_commands, vault: None });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -320,7 +340,7 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], vault: None })
+        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None })
     }
 
     /// The answer to a tool call. Only a run in a vault is ever asked about; the other runs are allowed or refused.
@@ -350,11 +370,13 @@ impl Scope {
         if self.routine {
             return self.judge_routine(call, tool, input);
         }
+        // A command's answer too long to show goes to the session's own tool results, for the model to Read there.
+        let theirs = |p: &Path| own_results(call).is_some_and(|r| p.starts_with(&r));
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
             "Read" => {
                 let p = resolve(input["file_path"].as_str())?;
-                if self.inside(&p) || self.previous.as_ref() == Some(&p) {
+                if self.inside(&p) || self.previous.as_ref() == Some(&p) || theirs(&p) {
                     Ok(())
                 } else {
                     Err(format!("only {} can be read, not {}", self.place(), p.display()))
@@ -379,7 +401,7 @@ impl Scope {
             }
             "Glob" | "Grep" => {
                 let p = resolve(input["path"].as_str()).map_err(|e| format!("{tool} needs a path in this call's folder ({e})"))?;
-                if !self.inside(&p) {
+                if !self.inside(&p) && !theirs(&p) {
                     return Err(format!("{tool} works only in {}, not {}", self.place(), p.display()));
                 }
                 let pattern = if tool == "Glob" { input["pattern"].as_str() } else { input["glob"].as_str() };
@@ -534,7 +556,7 @@ impl Scope {
         let allowed = commands.iter().any(|c| {
             let c: Vec<&str> = c.split(' ').collect();
             rest.len() >= c.len() && rest.iter().zip(&c).all(|(w, c)| *c == "*" || w.as_str() == *c)
-        });
+        }) || (self.routine && matches!(rest, [p, c, id, cmd, ..] if p == "plugin" && c == "call" && self.plugin_commands.iter().any(|(i, k)| i == id && k == cmd)));
         if allowed {
             Ok(())
         } else {
@@ -1396,7 +1418,7 @@ mod tests {
             routine: false,
             extra: vec![],
             skills: vec![],
-            vault: None,
+            plugin_commands: vec![], vault: None,
         }
     }
 
@@ -1522,6 +1544,20 @@ mod tests {
         ] {
             assert!(s.judge(&tool(t, input.clone())).is_err(), "{t} {input}");
         }
+        // A long call's context saved by Claude Code (#98): this session's own copy may be read, nobody else's.
+        let claude = std::env::temp_dir().join(format!("echo-guard-minutes-claude-{}", std::process::id()));
+        let results = claude.join("m1/tool-results");
+        fs::create_dir_all(&results).unwrap();
+        fs::write(results.join("ctx.txt"), "x").unwrap();
+        let read = |session: &str| json!({"tool_name": "Read", "tool_input": {"file_path": path(&results.join("ctx.txt"))},
+                                          "session_id": session, "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&read("m1")).is_ok(), "its own saved output");
+        assert!(s.judge(&read("other")).is_err(), "not another session's");
+        let in_results = |input: Value| json!({"tool_name": "Write", "tool_input": input, "session_id": "m1", "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&in_results(json!({"file_path": path(&results.join("notes.md")), "content": "x"}))).is_err(), "read, never written");
+        let climb = json!({"tool_name": "Glob", "tool_input": {"path": path(&results), "pattern": "../../*.jsonl"}, "session_id": "m1", "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&climb).is_err(), "a pattern climbing out of it");
+        let _ = fs::remove_dir_all(&claude);
     }
 
     #[test]
@@ -1581,6 +1617,7 @@ mod tests {
         let vars = move |k: &str| match k {
             RUN_READ => Some(v2.clone().into_os_string()),
             RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
+            RUN_PLUGIN_COMMANDS => Some("obsidian search\nobsidian backlinks".into()),
             o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
         };
         let s = Scope::from_vars(vars).unwrap();
@@ -1596,6 +1633,12 @@ mod tests {
         ok("Grep", json!({"pattern": "budget", "path": path(&home.join("calls"))})).unwrap();
         ok("Bash", json!({"command": "echoctl project tasks"})).unwrap();
         ok("Bash", json!({"command": "echoctl project ledger acme tree"})).unwrap();
+        // The commands a plugin named for Echo's sessions (its sheet said so), and only those.
+        ok("Bash", json!({"command": r#"echoctl plugin call obsidian search '{"q":"Dana"}'"#})).unwrap();
+        ok("Bash", json!({"command": "echoctl plugin call obsidian backlinks"})).unwrap();
+        for no in ["echoctl plugin call obsidian rename_plan", "echoctl plugin call other search", "echoctl plugin call obsidian", "echoctl plugin install obsidian"] {
+            assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
+        }
         ok("mcp__echo__search_sources", json!({"query": "budget"})).unwrap();
         ok("Glob", json!({"pattern": "projects/*/ledger/*.jsonl"})).unwrap();
         // The session's own saved output (a long command answer), named by Claude Code's hook input.
@@ -1637,7 +1680,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], vault: None };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),

@@ -1,0 +1,54 @@
+---
+id: TC-023
+title: Merged and deleted items are not on the tree, the board or in the kind counts
+priority: medium
+type: functional
+requirements: [F-WORK-02, F-WORK-07]
+module: work
+run: agent
+platform: any
+tags: [work, tree, state, filters]
+auto: [tests/auto/specs/S-25.spec.mjs]
+---
+
+# TC-023: Merged and deleted items are not on the tree, the board or in the kind counts
+
+**Module:** Work | **Priority:** Medium | **Type:** Functional
+
+## Preconditions
+- `data: standard`: the standard data set, built and served by `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window is at `{{base_url}}` and `{{base_url}}/` is loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`. Times in the data are relative to the run's start, so build it right before the run
+- Acme rollout has no filter set
+- "Open only" is on in Acme rollout's Tree (on its own). In S-25 `TC-021` (the stage before) leaves Acme rollout's Tree open with "Open only" off: the scenario skips step 1, since its click would turn it back on
+
+## Test Data
+
+| Id | Kind | Title | State |
+|---|---|---|---|
+| T020 | task | Agree the acceptance criteria | merged |
+| T013 | task | Order the licences | deleted |
+| T025 | task | Agree the acceptance criteria (2) | deleted |
+| R002 | risk | Training too late | deleted |
+
+Kind counts of Acme rollout: all 32, stories 4, tasks 22, decisions 2, risks 1, questions 3.
+Owners: Alex Chen, Dana Lee, Me, Omar Haddad, Rita Gomez, Sam Rivera, Tom Becker ("Me" and "Sam Rivera" are the user).
+
+## Steps
+
+| # | Action | Expected Result |
+|---|---|---|
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/work`, click the view "Tree" and turn "Open only" off | The tree lists closed items too |
+| 2 | Read the options of `[aria-label="Kind"]` | "All kinds · 32", "Stories · 4", "Tasks · 22", "Decisions · 2", "Risks · 1", "Questions · 3": merged and deleted items and the workstreams are not counted |
+| 3 | For each row of the table look for `[data-pj="node"][data-node=<Id>]` in the tree | None of the four items is shown |
+| 4 | Click the view "Board" and look for the same four items | None is on the board |
+| 5 | Read the options of `[aria-label="Owner"]` | "Anyone", "Nobody named", "Me (Sam Rivera)", then "Alex Chen", "Dana Lee", "Omar Haddad", "Rita Gomez", "Tom Becker": the user is one option (`TC-029`) |
+
+## Expected Final State
+Acme rollout is on its board again.
+
+## Teardown
+- Turn "Open only" on again in the Tree view and click the view "Board"
+
+## Changes
+- Turns "Open only" off and on again (a saved view setting).
+
+## Notes

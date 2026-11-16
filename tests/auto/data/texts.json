@@ -1,0 +1,2562 @@
+{
+  "_about": "The window's and the CLI's own wording the autotests check, in one place: when the app's words change, change them here.",
+  "statusBar": {
+    "actions": "Actions",
+    "claude": "Claude",
+    "noProfile": "AI:",
+    "liveNotes": "Live notes on",
+    "minutesFor": "Minutes for"
+  },
+  "work": {
+    "handedOverBy": "Handed over by",
+    "me": "Me",
+    "syncNow": "Sync now",
+    "synced": "Synced {time} · {n} to review",
+    "history": "History",
+    "undo": "undo",
+    "keptYours": "kept yours",
+    "youSet": "you set {field}",
+    "owner": "Owner",
+    "due": "Due",
+    "status": "● {state}",
+    "dueText": "due {text}",
+    "fields": {
+      "state": "state",
+      "due": "due",
+      "internal_owner": "internal owner",
+      "delegated_by": "delegated by"
+    },
+    "ledger": "ledger/events.jsonl",
+    "runs": "ledger/runs",
+    "people": "people.json",
+    "suggestions": "people-suggestions.json",
+    "addColumn": "+ Column",
+    "views": {
+      "board": "Board",
+      "tree": "Tree",
+      "newView": "+ New view",
+      "third": "View 3",
+      "copy": "{name} copy",
+      "duplicate": "Duplicate view",
+      "delete": "Delete view"
+    },
+    "workstream": "{thread} · workstream",
+    "dueTitle": "Due",
+    "overdue": "Overdue",
+    "holdsUp": "holds up {n}",
+    "setColumnState": "you set column, state",
+    "waitsFor": "Waits for",
+    "holdsUpRow": "Holds up",
+    "details": "Details",
+    "task": "task",
+    "states": {
+      "open": "to do",
+      "in_progress": "in progress",
+      "done": "done"
+    },
+    "description": "description",
+    "selects": {
+      "layout": "Layout",
+      "kind": "Kind",
+      "owner": "Owner",
+      "group": "Group by"
+    },
+    "layouts": {
+      "board": "Board",
+      "tree": "Tree"
+    },
+    "groupBy": {
+      "none": "No grouping",
+      "story": "Story",
+      "owner": "Owner"
+    },
+    "anyone": "Anyone",
+    "doneWhen": "Done when · {met} of {all}",
+    "criteria": "criteria {met} / {all}",
+    "ticked": "you ticked criterion {n}",
+    "risk": "risk",
+    "question": "question",
+    "decision": "decision",
+    "notRated": "not rated · Set",
+    "likelihood": "Likelihood",
+    "impact": "Impact",
+    "noResponse": "No response yet",
+    "openState": "● open",
+    "noResponseState": "● no response",
+    "newColumn": "New column",
+    "hidden": "{n} hidden",
+    "keepDone": "Keep a column for “Done” — its cards need somewhere to go.",
+    "linkOther": "Link to an item in another thread…",
+    "findOther": "Find an item in another thread",
+    "findPlaceholder": "Words from its title, or its id",
+    "linkKinds": [
+      "Same work · done there",
+      "Done here",
+      "Waits on it"
+    ],
+    "sameAs": "Same as",
+    "unlink": "Unlink",
+    "created": "created",
+    "verified": "verified",
+    "notSynced": "Not synced yet · {n} call to read",
+    "toReview": "To review",
+    "nToReview": "{n} to review",
+    "yes": "Yes",
+    "no": "No",
+    "merged": "merged",
+    "whoDoesIt": "Who does it",
+    "claudeCan": "Claude can",
+    "byHand": "By hand",
+    "progress": "{met}/{all}",
+    "statusMark": "●",
+    "columnItems": [
+      "Move left",
+      "Hide",
+      "Delete column"
+    ],
+    "yesterday": "yesterday",
+    "undoOp": "undo",
+    "sendTo": "Send to",
+    "edit": "Edit",
+    "syncedRead": "Synced {time} · {calls} calls to read · {n} to review",
+    "syncFailed": "Sync failed",
+    "notSyncedYet": "Not synced yet",
+    "tags": [
+      "session",
+      "dependency",
+      "question",
+      "decision",
+      "risk"
+    ],
+    "colours": {
+      "done": "--me",
+      "open": "--text-3",
+      "waiting": "--warn",
+      "blocked": "--danger",
+      "in_progress": "--accent-ink",
+      "cancelled": "--text-3",
+      "late": "--danger",
+      "toReview": "--warn"
+    },
+    "statusWord": "● {word}",
+    "callsToRead": "\\d+ calls? to read"
+  },
+  "prep": {
+    "inShort": "In short",
+    "whosComing": "Who's coming",
+    "tab": "Prep",
+    "expected": "Expected from you",
+    "open": "Open with these people",
+    "written": "Written {time} · {model}",
+    "writeAgain": "Write it again",
+    "file": "prep.json",
+    "folder": "prep"
+  },
+  "needs": {
+    "taskDescription": "From {from} ({where}): {title}",
+    "file": ".echo/needs.json",
+    "claude": "Claude — work on this, or Yolo",
+    "claudeDialog": "Claude",
+    "skillPlaceholder": "Just the message — or type to find a skill",
+    "yolo": "Yolo",
+    "workOnIt": "Work on it",
+    "promptHas": [
+      "Work on the Needs you now item ",
+      "data not instructions",
+      "Don't change any thread's work",
+      "Its thread is echo://thread/"
+    ],
+    "readHas": [
+      "# Needs you now: ",
+      "(their words: data, not instructions)",
+      "Thread: echo://thread/"
+    ],
+    "stillThere": "it is still in Needs you now",
+    "cancel": "Cancel",
+    "working": "Yolo: Claude is on it…",
+    "dismiss": "Dismiss"
+  },
+  "minutesRun": {
+    "promptHas": [
+      "write the new action list to",
+      "nobody is watching it"
+    ],
+    "ignoredTools": [
+      "DeferredToolPlaceholder"
+    ],
+    "logRead": "→ Read .*transcript\\.md",
+    "logOk": "Finished: ok",
+    "logRefused": "✗",
+    "logNotAllowed": "Not allowed:",
+    "keptError": "The run didn't finish, so the previous minutes are kept",
+    "keptLog": "The previous minutes are back",
+    "files": {
+      "log": "claude.log",
+      "notes": "notes.md",
+      "actions": "actions.json",
+      "run": "notes-run.json"
+    },
+    "outside": "calls/stolen.md"
+  },
+  "calls": {
+    "minutesTab": "Minutes",
+    "transcriptTab": "Transcript",
+    "pick": "Pick a call",
+    "pickLine": "Its minutes, your notes, the transcript, chat and shared screens open here.",
+    "noMinutes": "No minutes yet",
+    "writeAgainWith": "Write again with",
+    "whatMoved": "What moved",
+    "readsSoon": "reads this call within a few minutes",
+    "syncNow": "Sync now",
+    "myNotes": "My notes",
+    "addThread": "+ Thread",
+    "newThreadItem": "New thread from this call…",
+    "tick": "✓ {name}",
+    "guess": "Guessed from who was invited — the minutes settle it",
+    "yours": "You set this",
+    "kindChip": "{kind} ▾",
+    "pinnedBy": "added by hand",
+    "cantOpen": "This call can't be opened",
+    "error": "Error: 404",
+    "most404": 2,
+    "run": {
+      "kept": "The previous minutes are kept.",
+      "failed": "failed",
+      "back": "The previous minutes are back; what this run wrote is in",
+      "trash": ".echo/trash",
+      "beforeRun": "before-run",
+      "notes": "notes.md",
+      "runFile": "notes-run.json",
+      "log": "claude.log"
+    },
+    "route": "#call/{name}/{tab}",
+    "openOn": "^#call/[^/]+/{tab}$",
+    "tabs": {
+      "minutes": "minutes",
+      "transcript": "transcript"
+    },
+    "refresh": "api/state",
+    "refreshes": 4,
+    "search": "Search calls",
+    "searchPlaceholder": "Search titles and people",
+    "aiNotice": "Written by AI (Echo) from an automatic transcript. Check names, figures and commitments before you share it.",
+    "header": "{day}, {time}",
+    "meta": "meta.json",
+    "notes": {
+      "empty": "Add notes about this call. Select words in the transcript to comment on what was said.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "file": "my-notes.md"
+    },
+    "ready": "The transcript is ready.",
+    "writesWith": "Claude Code writes them with ",
+    "command": "/echo:process-call {folder}",
+    "copy": "Copy",
+    "deleteItem": "Delete…",
+    "deleteAsk": "Delete \"{title}\"? It goes to the trash in the data folder for 30 days.",
+    "keep": "Keep",
+    "delete": "Delete"
+  },
+  "fake": {
+    "claudeFails": "test data: Claude Code is a fake here"
+  },
+  "palette": {
+    "illDoIt": "I'll do it",
+    "wontDo": "Won't do",
+    "target": "On: {label} ×",
+    "groups": {
+      "call": "This call",
+      "echo": "Echo",
+      "goTo": "Go to",
+      "threads": "Threads",
+      "claude": "Claude",
+      "myWork": "My work",
+      "calls": "Calls"
+    },
+    "callGroups": [
+      "This call",
+      "Echo",
+      "Claude",
+      "Go to",
+      "Threads"
+    ],
+    "callItems": [
+      "Open Minutes",
+      "Open Transcript",
+      "Write minutes again",
+      "Ask Claude about this call",
+      "Add a note",
+      "Show the call folder",
+      "Open minutes in browser",
+      "Delete this call…"
+    ],
+    "inBrowser": "Open minutes in browser",
+    "noMinutes": "no minutes yet",
+    "active": "Active",
+    "today": "Today",
+    "todayWork": [
+      "Close: {task}",
+      "Claude: {task}"
+    ],
+    "todayEcho": [
+      "Record the next call",
+      "Record a memo",
+      "Vocabulary",
+      "Show or hide Inbox",
+      "Expand or fold the sidebar",
+      "Check for updates"
+    ],
+    "plugins": {
+      "typed": "plugins",
+      "item": "Settings: Plugins",
+      "route": "#settings/plugins",
+      "heading": "Plugins"
+    },
+    "vocabulary": {
+      "typed": "Vocabulary",
+      "item": "Vocabulary"
+    }
+  },
+  "claude": {
+    "yoloLine": "Yolo: Claude does it on its own.",
+    "asks": ".echo/task-asks.json",
+    "yoloFolder": "yolo",
+    "log": "log.txt",
+    "drafts": "mail-drafts.log",
+    "tool": "→ {tool}",
+    "tools": {
+      "bash": "Bash",
+      "write": "Write",
+      "read": "Read"
+    }
+  },
+  "shell": {
+    "activities": [
+      "Today",
+      "Calls",
+      "Calendar",
+      "Threads",
+      "Tasks",
+      "Settings"
+    ],
+    "notActivities": [
+      "Inbox",
+      "Knowledge"
+    ],
+    "yourDay": "Your day",
+    "threads": "Threads",
+    "routes": {
+      "today": "#today",
+      "calls": "#calls",
+      "calendar": "#calendar",
+      "project": "#project",
+      "tasks": "#tasks",
+      "settings": "#settings/",
+      "layout": "#settings/layout",
+      "vocabulary": "#settings/vocabulary"
+    },
+    "keys": {
+      "sidebar": "ControlOrMeta+\\",
+      "palette": "ControlOrMeta+k",
+      "settings": "ControlOrMeta+,",
+      "activity": "ControlOrMeta+{n}",
+      "escape": "Escape",
+      "enter": "Enter",
+      "down": "ArrowDown",
+      "backspace": "Backspace",
+      "save": "ControlOrMeta+s",
+      "tab": "Tab",
+      "end": "End"
+    },
+    "inbox": "Inbox",
+    "vocabulary": "Vocabulary",
+    "nothingNeedsYou": "Nothing needs you",
+    "vocabularyLine": "Names and terms the transcription should hear right.",
+    "right": "right",
+    "bottom": "bottom",
+    "layoutFile": "window-layout.json",
+    "needsView": "needs",
+    "vocabularyView": "vocabulary",
+    "saveWait": 1500
+  },
+  "settings": {
+    "general": {
+      "route": "#settings/general",
+      "heading": "General",
+      "line": "Start at login and the command line are this computer’s, "
+    },
+    "recording": {
+      "section": "Recording",
+      "route": "#settings/recording",
+      "calendar": "Calendar meetings",
+      "other": "Other Teams calls",
+      "ask": "Ask",
+      "manual": "Manual",
+      "languages": "Languages you record in",
+      "neverGuesses": "Echo never guesses a call's language",
+      "addLanguage": "Add a language",
+      "remove": "Remove {name}",
+      "defaultLanguage": "Default language",
+      "callLanguage": "Language of the call",
+      "mute": "Follow Teams' mute",
+      "teams": "Read the Teams window",
+      "teamsLines": [
+        "Who is speaking, mute sync and the call's name",
+        "about 10–20% of its CPU",
+        "calls are still recorded and transcribed"
+      ],
+      "screens": "snapshots read Teams' window too, apart from the switch above",
+      "muteOff": "(it needs Read the Teams window)",
+      "manualValue": "manual"
+    },
+    "layout": {
+      "heading": "Layout",
+      "views": [
+        "My notes",
+        "Also discussed",
+        "Inbox",
+        "Claude",
+        "What moved",
+        "Vocabulary",
+        "Details",
+        "Asks",
+        "Person",
+        "Source",
+        "Topic",
+        "Add a widget"
+      ],
+      "right": "Right",
+      "bottom": "Bottom"
+    },
+    "sections": [
+      "General",
+      "Recording",
+      "Transcription",
+      "AI & minutes",
+      "Templates",
+      "Calendar & chat",
+      "Knowledge",
+      "About me",
+      "Sends to you",
+      "Plugins",
+      "Layout",
+      "Health"
+    ],
+    "headings": {
+      "Knowledge": [
+        "Recall",
+        3
+      ]
+    },
+    "savedFoot": "Saved as you change it.",
+    "broken": "This section couldn't be shown",
+    "search": {
+      "box": "Search settings",
+      "nothing": "Nothing matches “{q}”.",
+      "queries": [
+        [
+          "keep audio",
+          [
+            "Transcription"
+          ],
+          "Transcription",
+          [
+            "Keep audio files"
+          ]
+        ],
+        [
+          "calendar",
+          [
+            "Recording",
+            "Calendar & chat"
+          ],
+          "Recording",
+          [
+            "Calendar meetings"
+          ]
+        ]
+      ],
+      "none": "zzz"
+    },
+    "appearance": {
+      "group": "Appearance",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark",
+      "bar": {
+        "light": "rgb(239, 239, 243)",
+        "dark": "rgb(23, 23, 28)"
+      },
+      "window": {
+        "light": "rgb(246, 246, 248)",
+        "dark": "rgb(20, 20, 24)"
+      },
+      "text": {
+        "light": "rgb(24, 24, 29)",
+        "dark": "rgb(236, 236, 241)"
+      }
+    },
+    "config": {
+      "file": ".echo/config.json",
+      "me": ".echo/me.md",
+      "templates": ".echo/templates",
+      "trash": ".echo/trash/templates",
+      "types": ".echo/meeting-types.json"
+    },
+    "me": {
+      "route": "#settings/me",
+      "name": "Your name",
+      "email": "Your email",
+      "profile": "Your profile",
+      "heading": "About me",
+      "edit": "Edit",
+      "box": "Your profile (Markdown)",
+      "readers": [
+        "minutes",
+        "live notes",
+        "Recall's mail and channel reader"
+      ]
+    },
+    "templates": {
+      "route": "#settings/templates",
+      "heading": "Templates",
+      "line": "The shapes Claude writes in.",
+      "tablist": "Kind of template",
+      "typesHead": "What a call can be, and how to tell",
+      "newType": "New type",
+      "newSkill": "New skill",
+      "newTemplate": "New template",
+      "list": "Minutes templates",
+      "builtIn": "Built in",
+      "edited": "Edited",
+      "yours": "Yours",
+      "reset": "Reset to built-in",
+      "delete": "Delete",
+      "close": "Close",
+      "choose": "Choose a template to see and change it.",
+      "usedWhen": "Used when the title has",
+      "foot": "Saved as you change it · the next minutes follow it",
+      "heading_": "Heading",
+      "summaryBox": "What to write in Summary",
+      "addWord": "Add a word",
+      "removeWord": "Remove {word}",
+      "moveUp": "Move {s} up",
+      "moveDown": "Move {s} down",
+      "addSection": "Add a section",
+      "newSection": "New section",
+      "removeSection": "Remove the section {s}",
+      "header": "Header — how the minutes start",
+      "values": "Values and how a header is read",
+      "name": "Name",
+      "create": "Create",
+      "cancel": "Cancel",
+      "newTypeEditor": "New meeting type",
+      "howToTell": "How to tell it",
+      "sections": "{n} sections",
+      "match": "match: [{words}]",
+      "nameLine": "name: {id}",
+      "lines": {
+        "section": "## ",
+        "match": "match:",
+        "name": "name:"
+      },
+      "sectionLine": "## {s}"
+    },
+    "route": "#settings"
+  },
+  "tasks": {
+    "whoDoesIt": "Who does it",
+    "byHand": "By hand",
+    "claudeCan": "Claude can do",
+    "anyone": "Anyone",
+    "iOwe": "I owe",
+    "heading": "Tasks",
+    "across": "across {n} active projects",
+    "allThreads": "All threads",
+    "due": "Due",
+    "piles": [
+      "I owe",
+      "Owed to me",
+      "Waiting for others",
+      "Nobody named"
+    ],
+    "nothing": "Nothing here",
+    "othersLine": "other people's work in your threads: not handed over by you, not stopping you",
+    "orders": {
+      "due": "Due",
+      "thread": "Thread",
+      "quiet": "Quiet longest"
+    },
+    "overdue": "Overdue",
+    "dueTitle": "Due",
+    "noDate": "no date",
+    "quiet": "quiet \\d+ d",
+    "asks": {
+      "tab": "Asks",
+      "head": "Asks · by person",
+      "when": "next time you meet",
+      "empty": "Nothing to chase: nobody owes you anything late, due soon or gone quiet.",
+      "foot": "Computed from what went quiet, what's due and what's owed — never a model's guess.",
+      "noMeeting": "no meeting this week",
+      "wasDue": "{title} — was due "
+    },
+    "byHandMark": "You do it by hand",
+    "how": "How",
+    "notSaid": "not said",
+    "link": "Link",
+    "skillField": "Skill",
+    "noSkill": "No skill — just the task",
+    "skillPlaceholder": "Just the task — or type to find a skill (1)",
+    "fitsBest": "fits best",
+    "claudePanel": "Claude",
+    "showFewer": "Show fewer",
+    "more": "+ {n}",
+    "closeDialog": "Close this task?",
+    "closeNote": "A comment, if you like — why it's done, or where",
+    "closeIt": "Close it",
+    "cancel": "Cancel",
+    "myWork": "My work",
+    "noThreads": "No active threads",
+    "noThreadsLine": "Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.",
+    "openThreads": "Open Threads",
+    "noTasks": "No open tasks",
+    "noTasksLine": "Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.",
+    "filters": {
+      "thread": "Thread",
+      "who": "Who does it",
+      "order": "Order"
+    },
+    "howField": "How",
+    "dialogLine": "{thread} · {title}",
+    "modes": {
+      "claude": "Claude can do it",
+      "hand": "You do it by hand: {how}"
+    },
+    "quietMark": "quiet {n} d",
+    "quietTitle": "No word about it in {n} days",
+    "blocked": "blocked",
+    "others": "Others",
+    "askWhy": {
+      "due": "due {due}",
+      "item": "{title} — {why}"
+    },
+    "colours": {
+      "late": "--danger"
+    },
+    "filterChip": "{name} ▾",
+    "cliPiles": {
+      "I owe": "mine",
+      "Owed to me": "owed",
+      "Waiting for others": "waiting",
+      "Nobody named": "nobody",
+      "Others": "others"
+    },
+    "waitBorder": "dashed",
+    "cardBorder": "solid"
+  },
+  "diagrams": {
+    "system": "You fix one Mermaid diagram",
+    "userHas": [
+      "Mermaid's error:",
+      "The diagram:"
+    ],
+    "repaired": "diagram 1 repaired",
+    "refused": "diagram 2 not repaired",
+    "cantDraw": "This diagram couldn’t be drawn",
+    "bomb": "Syntax error",
+    "serveLog": "serve.log"
+  },
+  "minutes": {
+    "due": "Minutes in ",
+    "writeNow": "Write now",
+    "writeMinutes": "Write minutes",
+    "writing": "Writing minutes…",
+    "profile": "Virtual model · virtual",
+    "tooThin": "No minutes written automatically",
+    "tooThinWhy": "The call is too thin for them",
+    "logStarts": "Echo starts Claude Code to write the minutes",
+    "logGuard": "every tool call is checked: this call's folder",
+    "logOk": "Finished: ok",
+    "logWritten": "Minutes written.",
+    "folderLine": "folder:",
+    "modelLine": "model:",
+    "notice": "Written by AI (Echo, Virtual model · virtual",
+    "callActions": "Call actions",
+    "writeAgain": "Write minutes again",
+    "cantUseModel": "Claude Code can't use the model of Virtual model",
+    "claimRefused": "Echo is writing the minutes for this call right now",
+    "claimTaken": "a Claude Code session's claim taken over by Write minutes",
+    "minutesModelBack": "minutes model virtual",
+    "userNotes": "my-notes.md"
+  },
+  "clients": {
+    "routes": {
+      "projects": "#projects",
+      "client": "#client/{id}/{tab}",
+      "thread": "#project/{id}/"
+    },
+    "openClient": "Open {name}",
+    "yourCompany": "your company",
+    "client": "client",
+    "noThreads": "No threads for this client yet — add one on Profile.",
+    "ownSwitch": "Your own company",
+    "ownLine": "Your own company (internal work)",
+    "ownHint": "Its people are your colleagues: they never count as a client's people.",
+    "tabs": {
+      "overview": "Overview",
+      "calls": "Calls",
+      "tasks": "Tasks",
+      "profile": "Profile",
+      "people": "People"
+    },
+    "rows": {
+      "name": "Name",
+      "aliases": "Other names",
+      "domains": "Mail domains",
+      "kind": "Kind",
+      "logo": "Logo",
+      "threads": "Threads"
+    },
+    "notOwn": "A client, partner or vendor",
+    "domainsHint": "A call is this client's when half of its outside people come from these domains.",
+    "aboutHead": "About {name}",
+    "aboutEmpty": "Nothing yet — who they are, what you do for them, who matters.",
+    "noMinutes": "no minutes yet",
+    "keeps": "A client with threads stays: move or delete them first.",
+    "stillHas": "{id} still has projects: move or delete them first",
+    "removeAsk": "Remove {name}?",
+    "gone": "This client is gone",
+    "backToThreads": "Back to the threads",
+    "orgRemoved": "{id} removed",
+    "claudeAbout": "Claude about {name}",
+    "addLogo": "Add a logo…",
+    "changeLogo": "Change logo…",
+    "logoBox": "logo",
+    "removeLogo": "Remove",
+    "newThread": "+ New thread",
+    "removeClient": "Remove this client…",
+    "noCalls": "No calls in this client's threads yet.",
+    "cardCalls": "{calls} · last {day}",
+    "callLine": "{day}, {time}",
+    "callLineMinutes": "{day}, {time} · {minutes}",
+    "logoRoute": "/api/client/{id}/logo",
+    "tabIds": {
+      "overview": "overview",
+      "calls": "calls",
+      "tasks": "tasks",
+      "people": "people",
+      "profile": "profile"
+    }
+  },
+  "people": {
+    "views": [
+      "Map",
+      "Org chart",
+      "List"
+    ],
+    "map": "Map",
+    "org": "Org chart",
+    "list": "List",
+    "legend": [
+      "champion",
+      "supporter",
+      "neutral",
+      "sceptic",
+      "blocker"
+    ],
+    "nobody": "Nobody in this thread yet",
+    "nobodyList": "Nobody in this thread yet.",
+    "seenLine": "{n} people were in its calls — add them from List, then drag them where they stand.",
+    "seenCap": "Seen in calls",
+    "notIn": "{n} aren't in this thread yet",
+    "notInOne": "{n} isn't in this thread yet",
+    "columns": [
+      "Person",
+      "Organisation",
+      "Role",
+      "Stance",
+      "Calls",
+      "Talk",
+      "Owes",
+      "Last seen",
+      "Contact"
+    ],
+    "add": "Add",
+    "quadrants": [
+      "Keep satisfied",
+      "Manage closely",
+      "Monitor",
+      "Keep informed"
+    ],
+    "answers": [
+      "Yes",
+      "No",
+      "Change…"
+    ],
+    "save": "Save",
+    "cancel": "Cancel",
+    "yourVersion": "Your version",
+    "newPersonPlaceholder": "Name, or name <email>",
+    "panel": {
+      "tab": "Person",
+      "describe": "Describe them…",
+      "sections": [
+        "Who they are",
+        "In {thread}",
+        "About them",
+        "What Echo saw"
+      ],
+      "inThread": [
+        "Role",
+        "Stance",
+        "Influence",
+        "Interest",
+        "Workstream",
+        "Governance",
+        "Works for here"
+      ],
+      "about": [
+        "Title",
+        "Organisation",
+        "Group",
+        "Reports to",
+        "Matters",
+        "Phone"
+      ],
+      "calls": "calls",
+      "title": "Title",
+      "role": "Role",
+      "sameFirst": "Same person as…",
+      "orgPlaceholder": "Who is {domain}?",
+      "nameOrg": "Name this organisation ({domain})",
+      "influence": "influence",
+      "interest": "interest",
+      "workstream": "Workstream",
+      "governance": "Governance",
+      "worksFor": "Works for in this thread",
+      "phone": "Phone",
+      "office": "Office"
+    },
+    "owes": "Owes",
+    "addAll": "Add all",
+    "tabCount": "People{n}",
+    "notPlaced": "Not placed yet",
+    "quadrantHead": "{name} {sub}",
+    "newTag": "new",
+    "col": {
+      "person": "Person",
+      "organisation": "Organisation",
+      "role": "Role",
+      "stance": "Stance",
+      "calls": "Calls",
+      "threads": "Threads"
+    }
+  },
+  "vocabulary": {
+    "panel": "Vocabulary",
+    "line": "Names and terms the transcription should hear right.",
+    "every": "Every call",
+    "none": "None yet.",
+    "add": "Add a term",
+    "addButton": "Add",
+    "learned": "Learned from calls",
+    "learnedNone": "None yet — the minutes add the names they had to fix.",
+    "always": "Always",
+    "remove": "Remove",
+    "removeTerm": "Remove {term}",
+    "filter": "Filter learned terms",
+    "nothing": "Nothing matches.",
+    "learnedFrom": "learned from {call}: ",
+    "always2": "always ({n}): {terms}",
+    "learnedN": "learned ({n}):",
+    "moved": "moved"
+  },
+  "inbox": {
+    "open": "Open",
+    "done": "Done",
+    "blocking": "Blocking",
+    "thisWeek": "this week",
+    "nothing": "Nothing needs you",
+    "nothingLine": "Echo counts it here when something does.",
+    "nothingDecided": "Nothing decided this week yet.",
+    "badge": "^\\d+ open$",
+    "keys": [
+      "clients",
+      "done",
+      "open",
+      "urgent"
+    ]
+  },
+  "upcoming": {
+    "head": "Coming up today",
+    "headName": "Coming up today {n} Next {time} {next}",
+    "rowName": "Coming up {subject} {time} {minutes} min {names}",
+    "rowPrefix": "Coming up",
+    "noPrep": "No prep yet",
+    "noThread": "This meeting is in no thread: Echo prepares it when you ask, from its people's mail and Teams.",
+    "noThreadStart": "This meeting is in no thread",
+    "inThread": "Echo writes it this morning for every meeting of a thread.",
+    "prepareNow": "Prepare now",
+    "addThread": "+ Thread",
+    "newThread": "New thread from this meeting…",
+    "takeOut": "Take it out of {thread}",
+    "copyLink": "Copy link",
+    "prepTab": "Prep",
+    "laterTabs": [
+      "Transcript",
+      "Minutes"
+    ],
+    "minutes": "{n} min",
+    "when": "{day}, {time}",
+    "route": "#upcoming/{id}",
+    "noPrepShow": "Error: no prep \"{id}\"",
+    "hash": "^[0-9a-f]{16}$"
+  },
+  "quietDay": {
+    "heading": "A quiet day",
+    "line": "No meetings today and nothing on you in Tasks.",
+    "greeting": "^Good (night|morning|afternoon|evening), {name}$",
+    "yourDay": "Your day",
+    "myWork": "My work · this week",
+    "agendaCleared": "agenda: 0 meeting(s)",
+    "notGroups": [
+      "Today",
+      "My work"
+    ],
+    "echoFirst": [
+      "Record the next call",
+      "Record a memo"
+    ]
+  },
+  "skills": {
+    "tab": "Skills",
+    "listLine": "What Claude does with a task you send it",
+    "builtIn": "Built in",
+    "customized": "Customized",
+    "yours": "Yours",
+    "problems": "⚠",
+    "switch": "{name} on",
+    "on": "On — Claude can use it",
+    "off": "Off — kept out of Claude",
+    "askClaude": "Ask Claude",
+    "newSkill": "New skill",
+    "skillLine": "SKILL.md · in Claude as /my-skills:{id}",
+    "text": "^---\\s+name: {id}\\s+description: .+\\s+---\\s+# {heading}",
+    "toFix": "To fix before Claude can use it",
+    "customize": "Customize",
+    "openCode": "Open in VS Code",
+    "showFinder": "Show in Finder",
+    "reset": "Reset",
+    "name": "Name",
+    "cancel": "Cancel",
+    "create": "Create and open",
+    "latin": "give the skill a name in latin letters (Claude Code's rule for skill names) — its text can be in any language",
+    "ok": "OK",
+    "choose": "Choose a skill to see what Claude does with it.",
+    "offFile": ".echo/skills-off.json",
+    "folder": ".echo/skills",
+    "trash": ".echo/trash/skills",
+    "skillFile": "SKILL.md",
+    "trashed": "^{id}-\\d+$"
+  },
+  "ai": {
+    "route": "#settings/ai",
+    "heading": "AI & minutes",
+    "profiles": "Profiles",
+    "default": "Default for new calls",
+    "builtIn": "Built in",
+    "local": "Model · this computer",
+    "minutes": "minutes: {model}",
+    "live": "live notes: {model}",
+    "makeDefault": "Make default",
+    "chip": "AI profile",
+    "chipButton": "Claude ({name})",
+    "chipTitle": [
+      "Claude Code (as configured)",
+      "as Claude Code is set up"
+    ],
+    "language": "Language of the call",
+    "file": "ai.json",
+    "added": "added {name} ({id})",
+    "defaultBack": "new calls use {name}",
+    "removed": "removed {id}",
+    "liveNotes": "Live notes",
+    "liveOn": "Live notes on",
+    "autoMinutes": "Write minutes automatically",
+    "skipRow": "Claude in the window: no permission prompts",
+    "skipFlag": "--dangerously-skip-permissions",
+    "skipSays": [
+      "runs any command and tool without asking",
+      "Takes effect the next time the session starts."
+    ],
+    "skipOn": "On."
+  },
+  "transcription": {
+    "route": "#settings/transcription",
+    "heading": "Transcription",
+    "models": "Speech models",
+    "download": "Download ({mb} MB)",
+    "size": "· {mb} MB",
+    "recommended": "Recommended for this computer",
+    "notInBuild": "Not in this build",
+    "whisper": "Whisper, deprecated",
+    "downloading": "Downloading",
+    "keepAudio": "Keep audio files",
+    "echoCancel": "Echo cancellation"
+  },
+  "calendar": {
+    "route": "#settings/calendar",
+    "heading": "Calendar & chat",
+    "card": "Microsoft 365",
+    "account": "Account",
+    "notConnected": "Not connected: the calendar shows only what your tray knows about today.",
+    "signIn": "Sign in…",
+    "notThere": [
+      "Sync now",
+      "Sign out"
+    ],
+    "registration": "App registration",
+    "registrationSays": "The default (CodeMie). Your IT can register another.",
+    "change": "Change…",
+    "chat": "Meeting chat"
+  },
+  "deliver": {
+    "route": "#settings/deliver",
+    "heading": "Sends to you",
+    "rows": [
+      [
+        "Teams",
+        "Your chat with yourself. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ],
+      [
+        "Mail",
+        "Your own mailbox — or the addresses a plugin was given. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ]
+    ],
+    "test": "Send a test"
+  },
+  "plugins": {
+    "route": "#settings/plugins",
+    "heading": "Plugins",
+    "installed": "Installed",
+    "discover": "Discover",
+    "markets": "Marketplaces",
+    "none": "No plugins yet — Discover lists what your marketplaces offer.",
+    "marketsLine": "Where plugins come from.",
+    "builtIn": "built in",
+    "readAgain": "Read again",
+    "more": "More",
+    "hide": "Hide its plugins from Discover",
+    "show": "Show its plugins in Discover",
+    "remove": "Remove — installed plugins stay, without updates",
+    "hidden": "hidden",
+    "add": "Add a marketplace",
+    "source": "Marketplace",
+    "sourceHint": "owner/repo, a git address, or a folder",
+    "name": "Name",
+    "nameHint": "Name (optional)",
+    "addButton": "Add",
+    "read": "{n} plugin · read today",
+    "search": "Search plugins",
+    "all": "All",
+    "nothing": "Nothing matches.",
+    "install": "Install",
+    "installedMark": "Installed ✓",
+    "sheet": "Install {name} {version}?",
+    "from": "from {market} · commit local-",
+    "warn": "Listed by {market} — Echo hasn’t reviewed it. Install it only if you trust who made it.",
+    "able": "It will be able to",
+    "usesNothing": "Uses nothing of Echo's.",
+    "cancel": "Cancel",
+    "detail": "{version} · from {market} · commit local-",
+    "ownSettings": "Its settings",
+    "canDo": "What it can do",
+    "removeAsk": "Remove…",
+    "removeLine": "Remove {name}? Its settings and data can stay for when you install it again.",
+    "keepData": "Remove, keep data",
+    "withData": "Remove with data",
+    "on": "{name} on",
+    "cliKeys": [
+      "busy",
+      "discover",
+      "errors",
+      "installed",
+      "markets"
+    ],
+    "added": "Added {name}: 1 plugins",
+    "dataFolder": ".echo/plugins",
+    "settingsFile": "settings.json",
+    "opacity": {
+      "off": "0.6",
+      "on": "1"
+    }
+  },
+  "notices": {
+    "ok": "OK"
+  },
+  "speech": {
+    "recordings": "tests/fixtures/recordings.py",
+    "makeAudio": "tests/fixtures/audio/make_audio.py",
+    "files": [
+      "transcript.md",
+      "segments.json",
+      "expected.json",
+      "meta.json"
+    ],
+    "audio": ".wav",
+    "transcript": "transcript.md",
+    "segments": "segments.json",
+    "expected": "expected.json",
+    "meta": "meta.json",
+    "captureErr": "capture.err",
+    "transcribeOut": "transcribe.out",
+    "speakers": {
+      "me": "Me",
+      "remote": "Remote"
+    },
+    "turnLine": "^\\*\\*(\\S+)\\*\\* \\[(\\d\\d:\\d\\d:\\d\\d)\\]",
+    "modelLine": "**Model:** {model}",
+    "languageLine": "^  language: ",
+    "language": "  language: {lang}",
+    "hint": "vocabulary hint: {terms}",
+    "noSpeech": "debug: no_speech",
+    "built": "{n} turns",
+    "models": "models",
+    "testModels": "ECHOCTL_TEST_MODELS",
+    "debug": "ECHOCTL_DEBUG"
+  },
+  "today": {
+    "meetings": "{n} meetings",
+    "prepare": "Prepare",
+    "record": "Record when it starts",
+    "dontRecord": "Don't record",
+    "now": "Now {time}"
+  },
+  "cal": {
+    "routes": {
+      "day": "day",
+      "week": "week"
+    },
+    "day": "Day",
+    "week": "Week",
+    "notice": "Showing today's meetings only. Connect Microsoft 365 from the menu-bar octopus (Calendar) to see your week.",
+    "when": "Today · {start}–{end}",
+    "kind": "Kind of meeting",
+    "addThread": "+ Thread",
+    "people": "People",
+    "organizer": "organizer",
+    "close": "Close",
+    "willRecord": "Will record",
+    "starts": "Echo starts recording a minute before it begins, transcribed as English.",
+    "scheduled": ".echo/scheduled.json",
+    "colours": {
+      "now": "--recording",
+      "recorded": "--me",
+      "scheduled": "--recording"
+    },
+    "from": -1,
+    "days": 7,
+    "inMin": "{when} · in {n} min",
+    "inHours": "{when} · in {n} h",
+    "everyMeeting": "Every meeting of this series",
+    "language": "Language",
+    "recordWhen": "Record when it starts",
+    "recordButtons": [
+      "Record when it starts",
+      "Join & record",
+      "Record",
+      "Record it"
+    ],
+    "notYet": "Recording isn't available for {app} meetings yet.",
+    "armRefused": "Error: “{subject}” is a {app} meeting: recording isn't available for {app} meetings yet",
+    "importButton": "Import Teams transcript",
+    "notSignedIn": "not signed in to Microsoft 365 — `echoctl calendar login`",
+    "showPrep": "Show prep",
+    "prepareAgain": "Prepare again",
+    "prepare": "Prepare",
+    "prepareLine": "Prepare writes last time, what is open, what is new and who is coming.",
+    "apps": [
+      "Zoom",
+      "Google Meet"
+    ]
+  },
+  "threads": {
+    "routes": {
+      "found": "#found",
+      "tab": "#project/{id}/{tab}",
+      "projects": "#projects",
+      "call": "#call/",
+      "minutesEnd": "-{folder}/minutes"
+    },
+    "tabs": {
+      "brief": "brief",
+      "work": "work",
+      "calls": "calls",
+      "profile": "profile",
+      "callsTab": "Calls",
+      "profileTab": "Profile",
+      "briefTab": "Brief",
+      "overview": "overview"
+    },
+    "found": "Found for you",
+    "foundLine": "From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.",
+    "foundNothing": "Nothing found right now. Echo suggests a thread when two or more calls that are in none share a meeting series, one outside organisation, or a Teams chat.",
+    "foundAnswers": [
+      "Accept",
+      "Reject"
+    ],
+    "newThreadPlaceholder": "New thread — name it, Echo finds its calls",
+    "hide": "Hide its threads",
+    "show": "Show its threads",
+    "threads": "Threads",
+    "rows": {
+      "stage": "Stage",
+      "client": "Client",
+      "orgs": "Organisations",
+      "since": "Since",
+      "history": "History",
+      "calls": "Calls",
+      "meetings": "Meetings",
+      "sources": "Sources",
+      "notes": "Notes for Claude",
+      "look": "Look",
+      "ai": "AI"
+    },
+    "noSeries": "No meeting series yet. A meeting that recurs in this thread shows here.",
+    "brainOff": "Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Knowledge. Meeting chats, and mail already added here, are read into the work either way.",
+    "footStart": "Saved as you change it",
+    "foot": "Saved as you change it · projects/{id}/ · Delete in ⋯",
+    "orgHint": "Who this thread is with besides its client: ",
+    "addOrg": "+ Organisation",
+    "organisation": "Organisation",
+    "add": "+ Add",
+    "remove": "Remove",
+    "ruleKind": "Kind of rule",
+    "rulePlaceholder": "a meeting's subject (empty for the client's people)",
+    "why": {
+      "pinned": "added by hand",
+      "subject": "its subject",
+      "series": "its meeting series",
+      "people": "the client's people"
+    },
+    "rowLine": "{day}, {time} · {why}",
+    "noMinutes": "no minutes yet",
+    "unpin": "Unpin",
+    "takeOut": "Take out",
+    "takenOut": "{n} call taken out by hand.",
+    "noCalls": "No calls match yet. Add a rule on Profile — a meeting series, the client's people, a Teams chat — or open a call and add it from its header.",
+    "whatItIs": "What it is",
+    "edit": "Edit",
+    "briefEmpty": "Nothing yet — say what this thread is for, so the minutes and Claude know.",
+    "latest": "Latest calls",
+    "cancel": "Cancel",
+    "save": "Save",
+    "briefHint": "⌘S / Ctrl+S saves, Esc cancels.",
+    "sinceFirst": "From its first call",
+    "notesEmpty": "What the minutes and Claude should know — what people call things, what to leave out",
+    "aiDefault": "The default · Claude Code (as configured)",
+    "aiProfile": "AI profile",
+    "aiOptions": [
+      "The default (Claude Code (as configured))",
+      "Claude Code (as configured)"
+    ],
+    "model": "model: the profile's minutes model",
+    "colour": "Colour {c}",
+    "stageSince": "{stage} since {day}",
+    "closed": "Closed · {n}",
+    "idleClients": "Without threads · {n}",
+    "noClient": "No client — internal work, or not set",
+    "noClientOption": "No client",
+    "noClientGroup": "No client",
+    "newClient": "+ New client…",
+    "domains": "its domains: {d}",
+    "clientName": "Client name",
+    "mailDomains": "Mail domains",
+    "addButton": "Add",
+    "deleteItem": "Delete…",
+    "deleteAsk": "Delete {name}? Its brief, profile and work go to the trash; its calls stay.",
+    "moveToTrash": "Move to trash",
+    "rowLineMinutes": "{day}, {time} · {why} · {minutes}",
+    "tabCount": "{tab}{n}",
+    "partOf": "Part of {thread}? {why}",
+    "suggestAdd": "Add",
+    "notThis": "Not this",
+    "olderNot": "· nothing older is read",
+    "teamsChat": "its Teams chat",
+    "newThread": "New thread",
+    "foundCount": "Found for you {n}",
+    "orgHintFull": "Who this thread is with besides its client: their people are theirs in People, and the people rule counts their domains",
+    "counts": {
+      "match": "^(\\d+) calls? match",
+      "pinned": "(\\d+) pinned",
+      "takenOut": "(\\d+) taken out by hand"
+    },
+    "headCalls": "{n} calls · since {since}",
+    "addTo": "Add to a thread",
+    "callCount": {
+      "one": "{n} call",
+      "many": "{n} calls"
+    }
+  },
+  "runVars": {
+    "headless": "ECHOCTL_HEADLESS",
+    "task": "ECHOCTL_RUN_TASK",
+    "profile": "ECHOCTL_RUN_PROFILE",
+    "call": "ECHOCTL_RUN_CALL"
+  },
+  "links": {
+    "route": "#link={link}",
+    "call": "echo://call/{c}",
+    "callAt": "echo://call/{c}?t={t}",
+    "thread": "echo://thread/{id}",
+    "client": "echo://client/{id}",
+    "person": "echo://person/{email}",
+    "task": "echo://task/{thread}/{id}",
+    "prep": "echo://prep/{id}",
+    "callRoute": "#call/{c}/{tab}"
+  },
+  "ledgerJson": {
+    "merge": "suggest_merge",
+    "move": "suggest_move",
+    "pending": "pending",
+    "accept": "accept",
+    "reject": "reject",
+    "undo": "undo",
+    "merged": "merged",
+    "deleted": "deleted",
+    "open": "open",
+    "done": "done",
+    "todo": "todo",
+    "create": "create",
+    "human": "human",
+    "edit": "edit",
+    "link": "link",
+    "acSet": "ac_set",
+    "delete": "delete",
+    "merge_op": "merge",
+    "badOps": [
+      "undo",
+      "accept",
+      "reject"
+    ],
+    "people": "people",
+    "pinned": "pinned",
+    "badNode": "T999"
+  },
+  "m365": {
+    "token": "graph.json"
+  },
+  "callStates": {
+    "_about": "A call's Minutes and Transcript tabs in each state, its header, What moved, Chat, Screens, live notes in My notes (S-23)",
+    "icons": {
+      "minutes": "Minutes",
+      "transcript": "Transcript",
+      "transcribing": "Transcribing",
+      "failed": "Failed",
+      "audio": "Audio",
+      "memo": "Memo",
+      "recording": "Recording"
+    },
+    "chip": "⏱ {n} min",
+    "chipPattern": "^⏱ (\\d+) min$",
+    "chipTitle": "Minutes at {time}",
+    "minutesIn": "Minutes in {n} min ({time})",
+    "minutesInPattern": "^Minutes in (\\d+) min \\((.+)\\)$",
+    "ring": "{n}min",
+    "ringPattern": "^\\d+min$",
+    "autoLine": "Echo writes them 15 minutes after the call or your last note, so what you add in My notes goes in.",
+    "movedNotes": "Moved: you edited your notes at {time}.",
+    "movedNotYet": "Moved: you said not yet.",
+    "modelLine": "Claude Code writes them with {profile} ({model}), with your Claude account.",
+    "modelSelect": "Model for these minutes",
+    "writeNow": "Write now",
+    "notYet": "Not yet ▾",
+    "notYetItems": [
+      "15 minutes more",
+      "Until I say — I'll click Write minutes"
+    ],
+    "later": "Minutes when you say",
+    "laterLine": "You asked for these later: Echo won't write them by itself.",
+    "autoAgain": "Write them automatically again",
+    "writeMinutes": "Write minutes",
+    "session": "Or in a Claude Code session:",
+    "command": "/echo:process-call {folder}",
+    "copy": "Copy",
+    "prepNoSummary": "its threads run on different AI profiles: no summary, the facts only",
+    "prepWritten": "Written {time}",
+    "barWords": [
+      "didn't finish",
+      "Updating",
+      "waits its turn"
+    ],
+    "lastFailed": "The last update didn't finish: {why}",
+    "exitError": "Claude Code exited with an error (exit 1)",
+    "tryAgain": "Try again",
+    "showLog": "Show log",
+    "signIn": "Sign in…",
+    "signInAgain": "Sign in again…",
+    "couldnt": "Couldn't write the minutes",
+    "skipped": "No minutes for this call",
+    "tooShort": "less than 1,500 characters of transcript",
+    "needsSignIn": "Claude Code needs you to sign in",
+    "signInFirst": "Sign in to Claude (out) first",
+    "notSignedIn": "{profile} isn't signed in.",
+    "readyAgain": "Ready to try again",
+    "lastTry": "The last try said: Sign in to Claude first",
+    "signedInNow": "{profile} is signed in as {account} now — click Try again.",
+    "notAuto": "No minutes written automatically",
+    "thin": "The call is too thin for them ({why}). Write them anyway if you want them.",
+    "noMinutes": "No minutes yet",
+    "ready": "The transcript is ready.",
+    "starting": "Starting the minutes…",
+    "startingLine": "Echo is starting them now.",
+    "noTranscript": "No transcript, so no minutes",
+    "failedLine": "Transcribing this call failed: {error}",
+    "again": "Transcribe it again in a terminal:",
+    "transcribe": "echoctl transcribe {folder}",
+    "notTranscribed": "This recording isn't transcribed yet. Echo transcribes it on this computer; the minutes can be written after that.",
+    "noTranscriptTab": "No transcript for this call.",
+    "afterCall": "Minutes come after the call",
+    "afterCallLine": "Echo writes them 15 minutes after the call. Add your own notes in the Notes tab meanwhile: the minutes are written around them.",
+    "facts": "About this call",
+    "memo": "Memo",
+    "duration": "{n} min",
+    "fromTeams": "from Teams transcript",
+    "fromTeamsHint": "Made from the meeting's Teams transcript: no audio, no live notes",
+    "invite": "From the meeting's invite — the minutes may settle it",
+    "kindSelect": "Kind of meeting",
+    "more": "{names} and {n} more",
+    "tabCount": "{tab}{n}",
+    "tabs": {
+      "prep": "Prep",
+      "minutes": "Minutes",
+      "transcript": "Transcript",
+      "chat": "Chat",
+      "screens": "Screens"
+    },
+    "routeEnd": {
+      "prep": "/prep",
+      "minutes": "/minutes",
+      "transcript": "/transcript"
+    },
+    "whatMoved": "What moved",
+    "whatMovedCount": "What moved · {n} changes",
+    "changes": "{n} changes",
+    "details": "Details",
+    "unread": "hasn't read this call yet",
+    "readsSoon": "reads this call within a few minutes",
+    "syncNow": "Sync now",
+    "shared": "Shared screen at {t}",
+    "sharedLarge": "Shared screen",
+    "find": "Find in transcript",
+    "liveNotes": "Live notes",
+    "askClaude": "Ask Claude about this call",
+    "now": "Now",
+    "ended": "The call ended",
+    "liveMark": "✦",
+    "asked": "Asked about this call",
+    "liveMenu": "Live notes menu",
+    "callModel": "Model for this call",
+    "withAccount": "with your Claude account",
+    "pause": "Pause live notes",
+    "editNote": "Edit this note",
+    "deleteNote": "Delete this note",
+    "notesList": "Your notes",
+    "foundFrom": "Found from what you said",
+    "notThread": "Not {thread}",
+    "inbox": "Inbox",
+    "minutesFailed": "Minutes failed: {title}",
+    "writeAgain": "Write again",
+    "nothingMatches": "Nothing matches \"{q}\".",
+    "callActions": "Call actions",
+    "callsFolder": "calls"
+  },
+  "offPath": {
+    "_about": "Notes, transcripts, settings and Today off the happy path (S-29): the app's words",
+    "transcribing": "Transcribing on this computer. This takes about a quarter of the call length.",
+    "segments": "segments.json",
+    "markDone": "Mark done",
+    "markToDo": "Mark to do",
+    "saved": "Saved",
+    "notSaved": "Not saved yet",
+    "editHint": "Enter to save · Esc to cancel",
+    "save": "Save",
+    "cancel": "Cancel",
+    "question": "? Question",
+    "pop": "A note on what was said",
+    "comment": "Comment",
+    "yourNote": "Your note",
+    "addNote": "Add note",
+    "addNoteAt": "Add note at {t}…",
+    "copy": "Copy",
+    "quote": "{t} “{q}”",
+    "goesTo": "Goes to My notes at {t}",
+    "goesToOn": "Goes to My notes at {t} · on “{s}”",
+    "dot": "Question: {text}",
+    "unreadable": "Your notes for this call (my-notes.md) can't be read: {error}. Fix or replace the file, and they show here again.",
+    "showFolder": "Show folder",
+    "kept": "^The file was changed outside Echo while you typed: your text is saved, the other version is in (my-notes\\.\\d{6}\\.md)\\.$",
+    "config": {
+      "file": ".echo/config.json",
+      "broken": "{ \"languages\": [",
+      "error": "EOF while parsing a list at line 1 column 16",
+      "cli": "Error: {error}",
+      "page": "Echo's settings (config.json) can't be read: {error}",
+      "appearance": "Appearance",
+      "autoCant": "Automatic minutes can't start",
+      "autoWhy": "Echo's settings can't be read: {error}"
+    },
+    "card": {
+      "status": "deliver status",
+      "sent": "Sent",
+      "gotIt": "Got it",
+      "about": "{about} · {time}",
+      "ai": "Written by AI (Claude, sonnet) from Echo's data — it can contain mistakes. Check what matters before you act on it.",
+      "file": ".echo/today-cards.json"
+    },
+    "calendar": {
+      "agenda": ".echo/agenda.json",
+      "config": ".echo/config.json",
+      "failed": ".echo/calendar-failed.json",
+      "cleared": "agenda: 0 meeting(s)",
+      "reason": "calendar command failed",
+      "notice": "The calendar couldn’t be read today: today’s meetings may be missing.",
+      "openCall": "the call",
+      "record": "Record when it starts",
+      "command": [
+        "python3",
+        "-c",
+        "raise SystemExit(1)"
+      ]
+    },
+    "general": "Start at login and the command line are this computer’s, whichever data folder Echo uses; Claude Code is the one Echo’s PATH finds.",
+    "dataFolder": "Data folder",
+    "health": "What Echo needs from this computer — the same whichever data folder it uses.",
+    "claudeCode": "Claude Code",
+    "checking": "Checking…",
+    "claudeRow": "{version} · {path}",
+    "plugin": "Echo plugin",
+    "pluginLine": "Claude Code lists it (every session).",
+    "older": "An older Echo plugin",
+    "olderVersion": "0.0.1 (user)",
+    "noticeOk": "OK",
+    "mark": "✓",
+    "badMark": "✗",
+    "healthRoute": "#settings/health",
+    "noteRow": "• {text}",
+    "quoted": "{row} “{q}”"
+  },
+  "hostile": {
+    "_about": "The views S-27 opens on the hostile set and the controls it presses (none that runs, sends or changes)",
+    "routes": {
+      "calendarDay": "#calendar/day",
+      "calls": "#calls",
+      "today": "#today",
+      "projects": "#projects",
+      "thread": "#project/{id}/{tab}",
+      "client": "#client/{id}/{tab}",
+      "tasks": "#tasks",
+      "plugins": "#settings/plugins",
+      "plugin": "#settings/plugins/{id}",
+      "templates": "#settings/templates",
+      "layout": "#settings/layout",
+      "transcription": "#settings/transcription",
+      "recording": "#settings/recording",
+      "ai": "#settings/ai",
+      "minutes": "/minutes/{folder}",
+      "callsApi": "/api/calls"
+    },
+    "tabs": {
+      "brief": "brief",
+      "profile": "profile",
+      "people": "people",
+      "work": "work",
+      "calls": "calls",
+      "overview": "overview"
+    },
+    "week": "Week",
+    "prep": "Prep",
+    "inShort": "In short",
+    "newSince": "New since then",
+    "found": "Found for you",
+    "threadActions": "Thread actions",
+    "brief": "The thread's brief",
+    "about": "About {name}",
+    "list": "List",
+    "map": "Map",
+    "org": "Org chart",
+    "tree": "Tree",
+    "board": "Board",
+    "details": "Details",
+    "installed": "Installed",
+    "discover": "Discover",
+    "marketplaces": "Marketplaces",
+    "skills": "Skills",
+    "minutes": "Minutes",
+    "types": "Meeting types",
+    "vocabulary": "Vocabulary",
+    "reset": "Reset",
+    "editAsText": "Edit as text",
+    "timeline": "← Timeline",
+    "transcript": "Transcript",
+    "chat": "Chat",
+    "find": "Find in transcript",
+    "accountSelect": "AI profile",
+    "organisation": "Organisation",
+    "kindSelect": "Kind of meeting",
+    "action": "Action",
+    "every": "Every call",
+    "learned": "Learned from calls",
+    "asked": "Asked about this call",
+    "liveNotes": "Live notes",
+    "moreLike": "more like these",
+    "open": "Open",
+    "headings": "h1,h2,h3,h4",
+    "madeTags": "h1,h2,h3,img,script,iframe",
+    "imgTags": "img,script,iframe",
+    "hidden": "img,script,a",
+    "showPrep": "Show prep",
+    "tabNames": {
+      "brief": "Brief",
+      "profile": "Profile"
+    },
+    "viewGroup": "View",
+    "layoutGroup": "Layout",
+    "people": "People",
+    "more": "^\\+ \\d+$",
+    "notesButton": "My notes",
+    "closePanel": "Close the panel",
+    "kinds": "Kind of meeting",
+    "callProfile": "Model for this call",
+    "minutesProfile": "Model for these minutes",
+    "palette": "ControlOrMeta+k",
+    "frameHeading": "h1",
+    "tryAgain": "Try again",
+    "showLog": "Show log",
+    "lightboxSkip": "#lightbox",
+    "hostileTitle": "Hostile call",
+    "scriptTags": "script,iframe,object,embed",
+    "callRoute": "^#call/{day}_090000-",
+    "callsGroup": "Calls",
+    "metaTitle": "Title",
+    "transcriptEnd": "/transcript",
+    "chatEnd": "/chat",
+    "loadedImgs": "img[src^=\"http\"]",
+    "noteMade": "li li img, li li script, .mynote img, .mynote script, .mynote a",
+    "imgs": "img",
+    "bigHeadings": "h1",
+    "callsList": "Calls",
+    "paletteDialog": "Actions",
+    "paletteBox": "Action"
+  },
+  "recording": {
+    "_about": "Calls recorded from files and the recordings prepared once a build (S-17, S-18): the CLI's words and the files it writes",
+    "call": "tests/fixtures/call.py",
+    "noCall": "no call",
+    "recording": "● recording ",
+    "track": "^  {file} — ([\\d.]+)s, [\\d.]+s padded, (\\d+) restart\\(s\\)$",
+    "restarting": "restarting",
+    "tracks": [
+      "mic.wav",
+      "remote.wav"
+    ],
+    "remote": "remote.wav",
+    "stop": {
+      "user": "user",
+      "duration": "duration",
+      "recovered": "recovered",
+      "callEnded": "call_ended"
+    },
+    "writeFailed": "write_failed",
+    "captureExit": "capture.exit",
+    "captureOut": "capture.out",
+    "during": "during.ls",
+    "after": "after.ls",
+    "configAfter": "config.after.json",
+    "callFolder": "call",
+    "callPath": "/calls/\\d{4}-\\d\\d-\\d\\d_\\d{6}-{slug}$",
+    "audioDeleted": "deleted after transcription",
+    "model": "  model: {model}",
+    "doneIn": "^done in \\d+s$",
+    "openLog": "open.log",
+    "reveal": "-R {path}",
+    "minutesPage": "{title}-minutes.html",
+    "menu": {
+      "inBrowser": "Open minutes in browser",
+      "inFinder": "Show minutes in Finder",
+      "showFolder": "Show folder"
+    }
+  },
+  "app": {
+    "_about": "The Echo app run on the test data (`echoctl app run --no-tray --background`) and the CLI that drives it: arm, stop, quit, a second start, the data folder, `up`",
+    "armed": "armed — recording starts when the call begins (expires in 15 min)",
+    "armedInCall": "armed — call in progress, recording starts within a second",
+    "disarmed": "disarmed (nothing was recording)",
+    "nothingToStop": "nothing to stop",
+    "stopping": "stopping {folder}",
+    "busy": "(Echo is busy for the moment; it stops as soon as it is free)",
+    "stopped": "Echo stopped (was pid {pid})",
+    "started": "Echo started (pid {pid})",
+    "alreadyRunning": "Error: Echo is already running (pid {pid}) — `echoctl app quit` stops it",
+    "dataFolder": "data folder: {path}",
+    "chosen": "chosen",
+    "noted": "noted in {path}",
+    "dialogProcess": "osascript",
+    "notesFile": "my-notes.md",
+    "up": {
+      "doctor": "run the doctor skill",
+      "systemAudio": [
+        "system-audio"
+      ]
+    },
+    "events": {
+      "callStarted": "call_started",
+      "callEnded": "call_ended",
+      "callResumed": "call_resumed",
+      "recordingStarted": "recording_started",
+      "recordingStopped": "recording_stopped",
+      "transcribed": "transcribed",
+      "armExpired": "arm_expired"
+    },
+    "armedFile": "armed.json",
+    "stopRequest": "stop.request",
+    "stateDir": ".echo",
+    "notePlaceholder": "^Note at \\d+:\\d\\d — Enter to add$",
+    "flag": "⚑ Flag",
+    "noteHint": "The time is taken when you start typing.",
+    "recordingTab": "Recording Transcript",
+    "timedNote": "^- \\[(\\d\\d):(\\d\\d)\\] {text}$",
+    "timedRow": "^• (\\d\\d):(\\d\\d) {text}$",
+    "untimedNote": "- {text}",
+    "untimedRow": "• {text}",
+    "autoRun": "Echo starts Claude Code to write the minutes (automatically)",
+    "runEnded": [
+      "failed",
+      "done"
+    ],
+    "checkedBy": "app",
+    "statuses": [
+      "granted",
+      "denied",
+      "not_determined",
+      "unknown"
+    ],
+    "marks": {
+      "granted": "✓",
+      "denied": "✗",
+      "not_determined": "?",
+      "unknown": "?"
+    },
+    "permissions": "Permissions",
+    "health": "#settings/health",
+    "due": {
+      "off": "off",
+      "before": "before",
+      "at": "at"
+    },
+    "runDone": "done",
+    "actionsFile": "actions.json",
+    "runCommand": "^\\d\\d:\\d\\d:\\d\\d  → Bash echoctl (\\S+)",
+    "runCommands": [
+      "context",
+      "type",
+      "actions",
+      "title"
+    ],
+    "neverRun": [
+      "m365",
+      "compose",
+      "deliver"
+    ],
+    "modelLog": "model/model-log.jsonl",
+    "added": "added {name} ({id})",
+    "defaultSet": "new calls use {name}",
+    "liveOn": "live notes during calls: on",
+    "liveOff": "live notes during calls: off",
+    "liveLocal": "local",
+    "liveNotesFile": "live-notes.json",
+    "liveRow": "Live notes during calls",
+    "liveNotWith": "Not with {name}: its model runs on this computer, where it would slow your calls down.",
+    "aiRoute": "#settings/ai",
+    "logLine": "^\\d\\d:\\d\\d:\\d\\d  {text}$",
+    "homeVar": "ECHOCTL_HOME",
+    "writtenLine": "^\\d\\d:\\d\\d:\\d\\d  Minutes written\\. \\(\\d+s\\)$",
+    "armedWhileRecording": "armed — Echo is recording this call; the next call is recorded when it begins (expires in 15 min)",
+    "runNoTray": "app run --background --no-tray"
+  },
+  "widgets": {
+    "_about": "Today's widgets (S-24 stages 41–52): the catalog `echoctl widget list` gives, Today as it comes (`echoctl today`), the widgets' names on the page, edit mode and Add a widget, and the CLI's refusals",
+    "catalog": [
+      {
+        "about": "where you'll be, a reason on each line",
+        "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:calendar.agenda",
+        "kind": "day",
+        "label": "Your day · agenda",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "by the hour, overlaps side by side",
+        "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:calendar.calendar",
+        "kind": "day",
+        "label": "Your day · calendar",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the whole day in one bar",
+        "height": "hug",
+        "heights": [
+          1
+        ],
+        "id": "core:calendar.strip",
+        "kind": "day",
+        "label": "Your day · strip",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "meetings at once and invites to answer, with what Echo suggests",
+        "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:calendar.choices",
+        "kind": "choices",
+        "label": "The day's choices",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what to walk in knowing, who's coming",
+        "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:calendar.next",
+        "kind": "next",
+        "label": "Next meeting",
+        "params": [],
+        "part": "Calendar",
+        "sizes": [
+          "S",
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "a bar a thread: done this week, to do, waiting",
+        "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:tasks.glance",
+        "kind": "glance",
+        "label": "Threads at a glance",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
+        "part": "Tasks",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "how many tasks were done since Monday, and which",
+        "height": "hug",
+        "heights": [
+          1
+        ],
+        "id": "core:tasks.done",
+        "kind": "glance",
+        "label": "Done this week",
+        "params": [
+          {
+            "default": "week",
+            "key": "period",
+            "label": "Period",
+            "options": [
+              "week",
+              "month"
+            ],
+            "type": "choice"
+          }
+        ],
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "calls recorded since Monday, their time, how many have minutes",
+        "height": "hug",
+        "heights": [
+          1
+        ],
+        "id": "core:calls.week",
+        "kind": "calls",
+        "label": "Recorded this week",
+        "params": [],
+        "part": "Calls",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "late first, then by date; whose each one is",
+        "height": "fill",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:tasks.mine",
+        "kind": "work",
+        "label": "My work · this week",
+        "params": [],
+        "part": "Tasks",
+        "sizes": [
+          "S",
+          "M"
+        ],
+        "temporal": false
+      },
+      {
+        "about": "the last 24 hours, where you watch",
+        "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:needs.now",
+        "kind": "needs",
+        "label": "Needs you now",
+        "params": [],
+        "part": "Needs you",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      },
+      {
+        "about": "what your routines delivered to Today, until read",
+        "height": "hug",
+        "heights": [
+          1,
+          2
+        ],
+        "id": "core:routines.cards",
+        "kind": "cards",
+        "label": "Routine cards",
+        "params": [],
+        "part": "Routines",
+        "sizes": [
+          "M",
+          "L"
+        ],
+        "temporal": true
+      }
+    ],
+    "default": [
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.agenda"
+      },
+      {
+        "row": true,
+        "size": "S",
+        "widget": "core:calendar.next"
+      },
+      {
+        "size": "M",
+        "widget": "core:needs.now"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:calendar.choices"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:routines.cards"
+      },
+      {
+        "row": true,
+        "size": "M",
+        "widget": "core:tasks.mine"
+      }
+    ],
+    "id": {
+      "agenda": "core:calendar.agenda",
+      "calendar": "core:calendar.calendar",
+      "strip": "core:calendar.strip",
+      "choices": "core:calendar.choices",
+      "next": "core:calendar.next",
+      "glance": "core:tasks.glance",
+      "done": "core:tasks.done",
+      "week": "core:calls.week",
+      "mine": "core:tasks.mine",
+      "needs": "core:needs.now",
+      "cards": "core:routines.cards",
+      "nope": "core:nope"
+    },
+    "name": {
+      "yourDay": "Your day",
+      "strip": "Your day, the strip",
+      "next": "Next meeting",
+      "needs": "Needs you now",
+      "choices": "The day's choices",
+      "work": "My work · this week",
+      "glance": "Threads at a glance",
+      "done": "Done this week",
+      "week": "Recorded this week",
+      "cards": "Routine cards"
+    },
+    "unknown": "Error: no widget \"{id}\": `echoctl widget list` names them",
+    "takesNot": "Error: {id} takes {sizes}, not {size}",
+    "layoutFile": "today-layout.json",
+    "sizes": {
+      "wide": {
+        "width": 1440,
+        "height": 1000
+      },
+      "short": {
+        "width": 1440,
+        "height": 900
+      },
+      "narrow": {
+        "width": 700,
+        "height": 1000
+      },
+      "tall": {
+        "width": 1440,
+        "height": 1700
+      }
+    },
+    "next": {
+      "since": "Now · since {time}",
+      "comingIn": "^Next · {time} · in \\d+ min$",
+      "person": "{n} person",
+      "people": "{n} people",
+      "sep": " · ",
+      "records": "records when it starts",
+      "walkIn": "Walk in knowing",
+      "youOwe": "You owe: {title}",
+      "waitsFor": "{from} waits for: {title}",
+      "openPrep": "Open prep",
+      "showPrep": "Show prep",
+      "join": "Join & record",
+      "ask": "Ask Claude about it",
+      "coming": "Who's coming",
+      "askThem": "Ask them",
+      "newcomer": "{name}, {role}, is new to this thread.",
+      "answered": "{name}, {answer}",
+      "recording": "● Recording starts with the call",
+      "expected": "Expected from you: {list}",
+      "listSep": "; ",
+      "prepRoute": "#upcoming/{id}",
+      "claudeTab": "Claude",
+      "notStarted": "Claude didn't start — send it again once the panel shows Claude.",
+      "teams": "teams",
+      "declined": "declined",
+      "reply": "reply",
+      "show": 3,
+      "askShown": 2
+    },
+    "day": {
+      "now": "now",
+      "next": "next",
+      "maybe": "maybe",
+      "skipped": "skipped",
+      "showSkipped": "^Show \\d+ skipped$",
+      "hideSkipped": "Hide the skipped",
+      "atOnce": "^\\d+ others at once$",
+      "workPrefix": "Your work: ",
+      "meetingTab": "Meeting",
+      "showDetails": "Show details",
+      "close": "Close",
+      "people": "People",
+      "when": "Today · ",
+      "colours": {
+        "next": "--accent",
+        "choice": "--warn",
+        "going": "--me",
+        "maybe": "--accent",
+        "noReply": "--text-3",
+        "newMinutes": "--accent"
+      },
+      "minutesRoute": "^#call/[^/]+/minutes$",
+      "nowPrefix": "Now "
+    },
+    "calendar": {
+      "stripHeading": "Your day {n} meetings",
+      "from": 9,
+      "to": 18,
+      "tick": 2,
+      "calendarSize": "M",
+      "stripSize": "L"
+    },
+    "api": {
+      "meeting": "meeting",
+      "noReply": "notResponded",
+      "maybe": "tentativelyAccepted",
+      "organizer": "organizer"
+    },
+    "edit": {
+      "parts": [
+        "All",
+        "Calendar",
+        "Tasks",
+        "Calls",
+        "Needs you",
+        "Routines"
+      ],
+      "onlyWhile": " — shows only while it has something",
+      "moves": {
+        "up": "to a row above",
+        "down": "to a row below",
+        "left": "before the one beside it",
+        "right": "after the one beside it"
+      },
+      "tab": "Add a widget",
+      "search": "calen",
+      "showPrep": "Show prep",
+      "preview": "Preview of "
+    },
+    "choices": {
+      "heading": "The day's choices {n}",
+      "atOnce": "At once: {names}",
+      "or": " or ",
+      "invite": "Invite: {subject}",
+      "accepted": "You accepted {n} at once. Echo suggests {pick} — {why}",
+      "keep": "Keep {name}",
+      "notAnswered": "{subject} not answered",
+      "suggests": "Echo suggests: {how} — {why}",
+      "answers": [
+        "Accept",
+        "Maybe",
+        "Decline"
+      ],
+      "sending": "Sending…",
+      "confirm": "Decline {names}? The organisers are told.",
+      "yours": "Yours — {names} — stays: cancel it in Outlook.",
+      "namesSep": ", ",
+      "declineThem": "Decline them",
+      "cancel": "Cancel",
+      "refused": "not signed in to Microsoft 365 — echoctl calendar login",
+      "command": "echoctl calendar login",
+      "within": 15
+    },
+    "glance": {
+      "line": "{name}: {done} done this week, {todo} to do, {waiting} waiting",
+      "segments": [
+        [
+          "done",
+          "{n} done this week",
+          "--me"
+        ],
+        [
+          "todo",
+          "{n} to do",
+          "--warn"
+        ],
+        [
+          "waiting",
+          "{n} waiting",
+          "--danger"
+        ]
+      ],
+      "key": [
+        "done this week",
+        "to do",
+        "waiting"
+      ],
+      "atM": 5,
+      "atL": 10,
+      "more": "{n} more in Threads",
+      "threadsRoute": "#projects",
+      "workRoute": "#project/{id}/work",
+      "doneCount": "task{s} since Monday",
+      "doneShown": 4,
+      "glanceSize": "M",
+      "doneSize": "M",
+      "large": "L",
+      "small": "S"
+    },
+    "week": {
+      "fields": [
+        "since",
+        "today",
+        "calls",
+        "memos",
+        "recorded_min",
+        "with_minutes",
+        "days"
+      ],
+      "calls": "calls, {n} of them memos",
+      "hours": "hours recorded",
+      "minutes": "minutes recorded",
+      "withMinutes": "with minutes",
+      "callsButton": "Calls",
+      "day": "^{weekday}: {n} calls?{today}$",
+      "todayMark": " \\(today\\)",
+      "callsRoute": "^#call(s$|/)",
+      "memo": "memo",
+      "meta": "meta.json",
+      "notes": "notes.md",
+      "S": "S",
+      "M": "M"
+    },
+    "plugin": {
+      "folder": "tests/fixtures/plugins",
+      "market": "test-plugins",
+      "id": "widget-demo",
+      "name": "Widget demo",
+      "version": "0.4.0",
+      "sheet": [
+        "Runs its own code in Echo and in the Echo window, with your rights",
+        "Adds 8 widgets you can put on Today"
+      ],
+      "installed": "Installed Widget demo 0.4.0",
+      "prefix": "plugin:widget-demo:",
+      "widgets": {
+        "open": "Open tickets",
+        "sprint": "Sprint",
+        "trend": "Calls a day",
+        "builds": "Last builds",
+        "ci": "CI",
+        "note": "Note",
+        "broken": "Broken",
+        "board": "Sprint board"
+      },
+      "order": [
+        "open",
+        "sprint",
+        "trend",
+        "builds",
+        "ci",
+        "note",
+        "broken",
+        "board"
+      ],
+      "warn": "{\"state\":\"warn\"}",
+      "bad": "{\"state\":\"bad\"}",
+      "ciCmd": "ci",
+      "noteCmd": "note",
+      "clearNote": "clear-note",
+      "open": {
+        "value": "12",
+        "label": "open tickets"
+      },
+      "ci": {
+        "title": "CI",
+        "failed": "main #42 failed",
+        "green": "main is green",
+        "openLink": "Open",
+        "rerun": "Re-run",
+        "ask": "Open ci.example in the browser? Click Open again · Cancel",
+        "cancel": "Cancel",
+        "askStart": "Open ci.example in the browser?"
+      },
+      "broken": "Couldn't draw this — a stat needs value",
+      "sprint": [
+        [
+          "21",
+          "done",
+          "--me"
+        ],
+        [
+          "8",
+          "to do",
+          null
+        ],
+        [
+          "2",
+          "blocked",
+          "--danger"
+        ]
+      ],
+      "builds": [
+        [
+          "Branch main",
+          null
+        ],
+        [
+          "main #41 passed",
+          "2 min ago"
+        ],
+        [
+          "Open the task",
+          null
+        ],
+        [
+          "<img src=x onerror=alert(1)> kept as text",
+          null
+        ]
+      ],
+      "taskStaysOn": "#today",
+      "taskTitle": "Send the SSO checklist",
+      "taskLink": "echo://task/acme-rollout/T001",
+      "note": {
+        "title": "Release notes",
+        "text": "Ship Friday.\nTell support."
+      },
+      "listKind": "list",
+      "trend": {
+        "bars": 5,
+        "first": "Mon",
+        "last": "Fri · 4 calls",
+        "note": "Busiest on Tuesday.",
+        "hover": "Tue: 7 calls",
+        "kind": "chart",
+        "type": "bar"
+      },
+      "badColour": "--danger",
+      "progress": "12 of 20",
+      "ids": {
+        "open": "plugin:widget-demo:open",
+        "sprint": "plugin:widget-demo:sprint",
+        "trend": "plugin:widget-demo:trend",
+        "builds": "plugin:widget-demo:builds",
+        "ci": "plugin:widget-demo:ci",
+        "note": "plugin:widget-demo:note",
+        "broken": "plugin:widget-demo:broken",
+        "board": "plugin:widget-demo:board"
+      },
+      "place": [
+        [
+          "open",
+          "S",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:open"
+        ],
+        [
+          "broken",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ],
+        [
+          "sprint",
+          "M",
+          "--above",
+          "core:needs.now"
+        ],
+        [
+          "builds",
+          "M",
+          "--after",
+          "plugin:widget-demo:sprint"
+        ],
+        [
+          "note",
+          "M"
+        ]
+      ],
+      "drawn": [
+        "open",
+        "ci",
+        "broken",
+        "sprint",
+        "builds",
+        "note"
+      ],
+      "notPlaced": [
+        "trend",
+        "board"
+      ],
+      "chartPlace": [
+        [
+          "trend",
+          "M",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        [
+          "ci",
+          "S",
+          "--after",
+          "plugin:widget-demo:trend"
+        ],
+        [
+          "open",
+          "S",
+          "--after",
+          "plugin:widget-demo:ci"
+        ]
+      ],
+      "board": {
+        "place": [
+          "M",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        "heading": "Sprint board",
+        "boxes": [
+          "5 To do",
+          "2 Doing",
+          "9 <i>Done</i>"
+        ],
+        "theme": "light",
+        "large": "L"
+      }
+    },
+    "routines": {
+      "cards": [
+        {
+          "title": "Morning brief",
+          "about": "Routine · Morning brief",
+          "text": "# Brief\n\n- The day's first thing\n",
+          "id": "^core:routines\\.card\\.routine-morning-brief-[0-9a-f]+$"
+        },
+        {
+          "title": "Friday review",
+          "about": "Routine · Friday review",
+          "text": "Review the week.\n",
+          "id": "^core:routines\\.card\\.routine-friday-review-[0-9a-f]+$"
+        }
+      ],
+      "sent": "Sent",
+      "part": "Routines",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "gotIt": "Got it",
+      "size": "M"
+    },
+    "size": {
+      "S": "S",
+      "M": "M",
+      "L": "L"
+    },
+    "side": {
+      "above": "above",
+      "below": "below",
+      "before": "before",
+      "after": "after"
+    },
+    "settings": {
+      "_about": "A widget's settings (S-24 stage 54, today/TC-032): Done this week's period, Last builds' branch (the test plugin's)",
+      "place": [
+        [
+          "core:tasks.done",
+          "S",
+          "--above",
+          "core:calendar.agenda"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "M",
+          "--after",
+          "core:tasks.done"
+        ]
+      ],
+      "refusals": [
+        [
+          "core:tasks.done",
+          "period",
+          "year",
+          "Error: core:tasks.done's period doesn't take \"year\" (week, month)"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "branch",
+          "dev",
+          "Error: plugin:widget-demo:builds's branch doesn't take \"dev\" (main, release)"
+        ],
+        [
+          "plugin:widget-demo:builds",
+          "color",
+          "red",
+          "Error: plugin:widget-demo:builds has no setting \"color\" (it has branch, thread)"
+        ],
+        [
+          "core:tasks.mine",
+          "period",
+          "month",
+          "Error: core:tasks.mine has no setting \"period\""
+        ]
+      ],
+      "gear": "{label}: settings",
+      "period": {
+        "key": "period",
+        "label": "Period",
+        "week": "week",
+        "month": "month"
+      },
+      "branch": {
+        "key": "branch",
+        "label": "Branch",
+        "main": "main",
+        "release": "release",
+        "line": "Branch {branch}"
+      },
+      "heading": {
+        "week": "Done this week",
+        "month": "Done this month"
+      },
+      "count": {
+        "week": "task{s} since Monday",
+        "month": "task{s} this month"
+      }
+    }
+  }
+}

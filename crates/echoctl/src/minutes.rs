@@ -70,13 +70,36 @@ fn title_of(dir: &Path) -> String {
         .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
+/// The HTML from its first element that isn't a paragraph (`<p>…</p>`, blanks between).
+fn skip_paragraphs(html: &str) -> &str {
+    let mut rest = html;
+    loop {
+        let t = rest.trim_start();
+        match t.strip_prefix("<p>").or_else(|| t.strip_prefix("<p ")).and_then(|_| t.find("</p>")) {
+            Some(end) => rest = &t[end + 4..],
+            None => return t,
+        }
+    }
+}
+
 /// The page of the call in `dir` (it needs `notes.md`), and its CSP; `embed`: the copy the
 /// window's Minutes tab shows (one more script: timestamps and links talk to the window).
 fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
     let md = fs::read_to_string(dir.join("notes.md")).with_context(|| format!("{} has no minutes yet", dir.display()))?;
     let load = |name: &str| frame_bytes(dir, name);
-    // The model is named only while the minutes are as the run that wrote them left them.
-    Ok(render_page(&md, &title_of(dir), crate::notes::minutes_model(dir).as_deref(), &load, &kept_frames(dir), embed))
+    // The model is named only while the minutes are as the run that wrote them left them. In the window, the template
+    // they follow too ("· Default template"): a page sent to others doesn't need it.
+    let mut by = crate::notes::minutes_model(dir);
+    if embed {
+        if let Some(t) = crate::notes::minutes_template(dir) {
+            let mut name = t.replace('-', " ");
+            if let Some(c) = name.get_mut(0..1) {
+                c.make_ascii_uppercase();
+            }
+            by = Some(by.map(|m| format!("{m} · {name} template")).unwrap_or_else(|| format!("{name} template")));
+        }
+    }
+    Ok(render_page(&md, &title_of(dir), by.as_deref(), &load, &kept_frames(dir), embed))
 }
 
 /// The page for the window's Minutes tab, rendered now (no file written), and its CSP.
@@ -90,17 +113,18 @@ pub fn render_for_window(dir: &Path) -> Result<(String, String)> {
 /// diagrams follow. Anything else: as the system says.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn with_theme(html: String, theme: Option<&str>) -> String {
-    let (media, js) = match theme {
-        Some("dark") => ("@media all", "true"),
-        Some("light") => ("@media not all", "false"),
+    // The diagrams read it from `<html data-theme>`: a script is never rewritten after its CSP hash was taken.
+    let (media, attr) = match theme {
+        Some("dark") => ("@media all", "<html data-theme=\"dark\" "),
+        Some("light") => ("@media not all", "<html data-theme=\"default\" "),
         _ => return html,
     };
-    html.replace("@media (prefers-color-scheme: dark)", media).replace("matchMedia('(prefers-color-scheme: dark)').matches", js)
+    html.replacen("<html ", attr, 1).replace("@media (prefers-color-scheme: dark)", media)
 }
 
 /// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-const RENDER_VERSION: u32 = 8;
+const RENDER_VERSION: u32 = 9;
 
 /// A short hash of exactly what the page is rendered from: the minutes and the kept frames (size
 /// and time), the title, the model it names, the renderer. The Minutes tab reloads its frame only
@@ -261,9 +285,15 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
     top.push_str(&format!(
         "<p class=\"note\">Written by AI ({by}) from an automatic transcript. Check names, figures and commitments before you share it.</p>"
     ));
-    // Under the notes' own title, else under one made from the call's.
+    // Under the notes' own title, else under one made from the call's. In the window, without the lines between that
+    // title and the first section (the template's header: date, duration, people…): the call's own header shows them.
     let main = match body.html.find("</h1>") {
-        Some(i) => format!("{}{top}{}", &body.html[..i + 5], &body.html[i + 5..]),
+        Some(i) => {
+            let rest = &body.html[i + 5..];
+            // Only the header's own paragraphs go; a list, a figure or anything else before the first section stays.
+            let rest = if embed { skip_paragraphs(rest) } else { rest };
+            format!("{}{top}{rest}", &body.html[..i + 5])
+        }
         None => format!("<h1>{}</h1>{top}{}", esc(title), body.html),
     };
 
@@ -416,7 +446,6 @@ struct Body {
 
 /// Markdown as safe HTML for the Echo window (Settings → About me): the minutes' own writer — raw
 /// HTML shown as text, https links only, no images.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn markdown_html(md: &str) -> String {
     let load = |_: &str| None;
     let mut images = Images { load: &load, frames: &[], embedded: vec![], left: 0 };
@@ -499,17 +528,60 @@ fn wikilinks_as_links(md: &str) -> String {
     out
 }
 
+/// How the notes' Markdown is read, for the page and for finding its diagrams (`mermaid_blocks`).
+fn md_options() -> Options {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+    opts
+}
+
+/// A ```mermaid block of the notes, numbered as the page draws them (`body`'s rule: the fence's first word,
+/// any case): where its source is, and whether that source is one piece of the file (not so inside a quote, whose
+/// lines carry `>`), so it can be replaced there.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub(crate) struct MermaidBlock {
+    pub range: std::ops::Range<usize>,
+    pub whole: bool,
+}
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub(crate) fn mermaid_blocks(md: &str) -> Vec<MermaidBlock> {
+    let mut out = vec![];
+    let mut cur: Option<(Option<std::ops::Range<usize>>, String)> = None;
+    for (ev, r) in Parser::new_ext(md, md_options()).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(l))) if l.split_whitespace().next().unwrap_or("").eq_ignore_ascii_case("mermaid") => {
+                cur = Some((None, String::new()));
+            }
+            Event::Text(t) => {
+                if let Some((range, text)) = cur.as_mut() {
+                    *range = Some(range.as_ref().map_or(r.clone(), |a| a.start..r.end));
+                    text.push_str(&t);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((range, text)) = cur.take() {
+                    let range = range.unwrap_or(r.start..r.start);
+                    let whole = md.get(range.clone()) == Some(text.as_str());
+                    out.push(MermaidBlock { range, whole });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The notes' Markdown as HTML. Raw HTML in it is shown as text.
 fn body(md: &str, images: &mut Images) -> Body {
     body_mode(md, images, None, false)
 }
 
-/// The writer: the minutes' (`page: None`) or a vault page's (links and images decided by `page`).
+/// The writer shared by minutes and vault pages, with links decided by the page caller.
 fn body_mode(md: &str, images: &mut Images, page: Option<PageLinks>, breaks: bool) -> Body {
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    opts.insert(Options::ENABLE_TASKLISTS);
+    let opts = md_options();
     let mut b = Body { html: String::new(), mermaid: false };
     let out = &mut b.html;
     let mut text = String::new(); // a run of text, written once complete (so `[mm:ss]` is whole)
@@ -789,7 +861,47 @@ fn diagram_source(src: &str) -> String {
         }
         out.push(l);
     }
-    out.join("\n")
+    no_tags(&out.join("\n"))
+}
+
+/// A diagram's text with no markup: mermaid measures a label through `innerHTML` even with HTML labels
+/// off, so a `<tag` in it would become an element (#112). Every `<` that opens a tag (a letter, `/`, `!` or
+/// `?` after it) is mermaid's entity `#lt;`, whatever comes before it; the `>` that closes that same token
+/// (no bracket, quote, pipe or line break between) is `#gt;`. Kept as they are: line breaks (`<br>`,
+/// `<br/>`, `<br />`), a class annotation `<<word>>` (one word: no attributes), arrows (`<-->`, `<|--`) and a bare `<` (`1 < 2`).
+fn no_tags(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut close: Option<usize> = None;
+    let annotation = |i: usize| {
+        // `<<word>>`: i is either `<` of the pair.
+        let start = if b.get(i + 1) == Some(&b'<') { i + 2 } else if i > 0 && b[i - 1] == b'<' { i + 1 } else { return false };
+        let n = b[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'_').count();
+        n > 0 && b[start + n..].starts_with(b">>")
+    };
+    for (i, c) in src.char_indices() {
+        if close == Some(i) {
+            out.push_str("#gt;");
+            close = None;
+            continue;
+        }
+        if c != '<' {
+            out.push(c);
+            continue;
+        }
+        let after = &src[i + 1..]; // `<` is one byte
+        let br = ["br>", "br/>", "br />"].iter().any(|t| after.get(..t.len()).is_some_and(|a| a.eq_ignore_ascii_case(t)));
+        let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
+        if tag && !br && !annotation(i) {
+            out.push_str("#lt;");
+            close = after.find(['>', '[', ']', '(', ')', '{', '}', '"', '|', '<', '\n'])
+                .filter(|&k| after.as_bytes()[k] == b'>' && !matches!(after.as_bytes()[k.saturating_sub(1)], b'-' | b'=' | b'.'))
+                .map(|k| i + 1 + k);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// `[mm:ss]` / `[h:mm:ss]` anchors in (already escaped) text as timestamps.
@@ -837,7 +949,24 @@ fn esc(s: &str) -> String {
 /// Draws the page's ```mermaid blocks. `strict`, no HTML labels (and a diagram may not change that:
 /// `secure`, plus `diagram_source`) — but a diagram's `click … href` still links, so PAGE_JS lets
 /// links and windows go to https: only, and the CSP lets no form submit.
-const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', htmlLabels: false, flowchart: {htmlLabels: false}})";
+const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: false, suppressErrorRendering: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'), htmlLabels: false, flowchart: {htmlLabels: false}});
+(function () {
+  var pres = [].slice.call(document.querySelectorAll('pre.mermaid'));
+  var srcs = pres.map(function (p) { return p.textContent; });
+  mermaid.run({ nodes: pres, suppressErrors: true }).then(function () {
+    pres.forEach(function (p, i) {
+      if (p.querySelector('svg')) return;
+      mermaid.parse(srcs[i]).then(function () {}, function (e) {
+        var msg = String((e && e.message) || e).split('\\n').slice(0, 4).join('\\n');
+        var note = document.createElement('div'); note.className = 'diagram-err';
+        note.textContent = 'This diagram couldn\\u2019t be drawn: ' + msg.split('\\n')[0].replace(/:\\s*$/, '');
+        var code = document.createElement('code'); code.textContent = srcs[i];
+        p.textContent = ''; p.className = 'diagram-src'; p.appendChild(note); p.appendChild(code);
+        document.dispatchEvent(new CustomEvent('echo-diagram', { detail: { index: i, error: msg } }));
+      });
+    });
+  });
+})();";
 
 /// The page's own behaviour: links and windows only to https: (the notes' links already are; a
 /// diagram's could be file: or an app's scheme) — clicks and window.open refused, and any other
@@ -883,6 +1012,8 @@ const PAGE_JS: &str = "(function () {
 const EMBED_JS: &str = "(function () {
   document.documentElement.className += ' embedded';
   var post = function (m) { try { window.parent.postMessage(m, '*'); } catch (e) {} };
+  // A diagram mermaid couldn't parse (MERMAID_INIT): the window has it repaired (`diagrams::repair`).
+  document.addEventListener('echo-diagram', function (e) { post({ echo: 'diagram', index: e.detail.index, error: e.detail.error }); });
   var XLINK = 'http://www.w3.org/1999/xlink';
   document.addEventListener('click', function (e) {
     var el = e.target && e.target.closest ? e.target : null;
@@ -914,13 +1045,16 @@ const EMBED_JS: &str = "(function () {
     var block = el && el.closest('li, p, td, figure, blockquote, h1, h2, h3, h4');
     if (!block) return;
     e.preventDefault();
-    var ts = block.querySelector('.ts');
+    var ts = block.querySelector(':scope > .ts');
     var sel = String(window.getSelection ? window.getSelection() : '').replace(/\\s+/g, ' ').trim();
     var top = block;
     while (top.parentElement && top.parentElement.tagName !== 'MAIN') top = top.parentElement;
     var h = top;
     while (h && !/^H[1-3]$/.test(h.tagName)) h = h.previousElementSibling;
-    post({ echo: 'note', t: ts ? secs(ts) : null, quote: (sel || block.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 300),
+    // The line's own words: not its time chip, the user's notes shown under it, nor its sub-items.
+    var own = block.cloneNode(true), extra = own.querySelectorAll('.ts, .mynote, :scope > ul, :scope > ol');
+    for (var k = 0; k < extra.length; k++) extra[k].remove();
+    post({ echo: 'note', t: ts ? secs(ts) : null, quote: (sel || own.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 300),
       section: h ? h.textContent.trim().slice(0, 80) : '', x: e.clientX, y: e.clientY });
   }, true);
   // The user's own notes (from the window, never in the page itself): each under the line with its
@@ -973,7 +1107,7 @@ const CSS: &str = "
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
-main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; overflow-wrap: break-word; }
 h1 { font-size: 28px; line-height: 1.25; margin: 0 0 18px; }
 h2 { font-size: 20px; margin: 44px 0 14px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); }
 h3 { font-size: 17px; margin: 32px 0 8px; color: var(--accent); }
@@ -1003,6 +1137,8 @@ figure img { display: block; width: 100%; height: auto; cursor: zoom-in; }
 figcaption { background: var(--soft); color: var(--fg); font-size: 13px; padding: 8px 12px; border-top: 1px solid var(--line); }
 figure.diagram { background: var(--bg); padding: 14px; text-align: center; }
 figure.diagram pre.mermaid { background: none; margin: 0; }
+figure.diagram pre.diagram-src { text-align: left; margin: 0; white-space: pre-wrap; font-size: 12px; }
+figure.diagram .diagram-err { font-family: inherit; color: var(--muted, #888); margin-bottom: 6px; white-space: normal; }
 .figref { font-size: 12px; color: var(--muted); }
 #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center;
   justify-content: center; z-index: 10; cursor: zoom-out; padding: 16px; }
@@ -1012,7 +1148,7 @@ figure.diagram pre.mermaid { background: none; margin: 0; }
 ";
 
 /// Every minutes page — the file opened in a browser and the window's Minutes tab — in Echo's own
-/// design: its colour tokens (`ui/app.css`, light and dark) and type (`.doc`), times as the window's
+/// design: its colour tokens (`ui/css/00-base.css`, light and dark) and type (`.doc`), times as the window's
 /// chips. Laid over `CSS`, which keeps the page's structure (tables, figures, print).
 const ECHO_CSS: &str = "
 :root {
@@ -1054,8 +1190,9 @@ code { font-size: 12px; }
 /// its own (the call's header shows it).
 const EMBED_CSS: &str = "
 body { background: var(--bg); }
-main { max-width: 1280px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
+main { max-width: 1280px; margin: 0; padding: 14px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
 main > h1:first-child { display: none; }
+main > h1:first-child + .note { margin-top: 0; }
 .mynote { margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5;
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
 .mynote b { font-weight: 600; margin-right: 2px; }
@@ -1066,6 +1203,21 @@ main > h1:first-child { display: none; }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_leaves_out_the_minutes_header_the_page_keeps_it() {
+        let md = "# Sync\n\n2026-11-03 · 17 min · Dana, Lee\n\nSince last time: more\n\n## Summary\nWe met.\n";
+        let load = |_: &str| None;
+        let (page, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], false);
+        assert!(page.contains("17 min") && page.contains("Since last time") && page.contains("We met."));
+        let (window, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], true);
+        assert!(!window.contains("17 min") && !window.contains("Since last time"), "the call's header shows them");
+        assert!(window.contains("Written by AI (Echo, sonnet)") && window.contains("We met."));
+        // Anything but the header's paragraphs before the first section stays: a list of the user's, a figure.
+        let md2 = "# Sync\n\n**When:** 2026-11-03\n\n- a point of mine\n\n## Summary\nWe met.\n";
+        let (w2, _) = render_page(md2, "Sync", None, &load, &[], true);
+        assert!(!w2.contains("2026-11-03") && w2.contains("a point of mine"), "{w2}");
+    }
 
     #[test]
     fn a_profile_renders_line_by_line_and_safely() {
@@ -1117,6 +1269,29 @@ mod tests {
     }
 
     #[test]
+    fn a_diagram_label_carries_no_markup_but_line_breaks_and_arrows_stay() {
+        let t = |a: &str, want: &str| assert_eq!(no_tags(a), want, "{a}");
+        // Tags, whatever precedes their `<`.
+        t("A[\"x <img src=x onerror=alert(1)> <script>alert(1)</script>\"]-->B", "A[\"x #lt;img src=x onerror=alert(1)> #lt;script#gt;alert(1)#lt;/script#gt;\"]-->B");
+        t("A[\"<<img src=x onerror=alert(1)>\"]-->B", "A[\"<#lt;img src=x onerror=alert(1)>\"]-->B");
+        t("A[a<<script>] --> B[<<<img src=x>]", "A[a<#lt;script#gt;] --> B[<<#lt;img src=x#gt;]");
+        t("A[<a href='javascript:x'>o</a> <!-- c]", "A[#lt;a href='javascript:x'#gt;o#lt;/a#gt; #lt;!-- c]");
+        // Only the exact line breaks stay.
+        t("C[a<br>b<br/>c<BR />d] <--> D", "C[a<br>b<br/>c<BR />d] <--> D");
+        t("C[<br/onmouseover=alert(1)>]", "C[#lt;br/onmouseover=alert(1)>]");
+        // Arrows, annotations, comparisons, generics, and a node shape after an escaped `<` on its line.
+        t("E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]", "E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]");
+        t("J[List<String>]", "J[List#lt;String#gt;]");
+        // Text beyond ASCII next to an escaped tag, and an annotation-like pair with attributes.
+        t("graph TD; A[café — Q3 → <b>plan</b> 🚀]-->B[Привіт]", "graph TD; A[café — Q3 → #lt;b#gt;plan#lt;/b#gt; 🚀]-->B[Привіт]");
+        t("A[<<svg onload>>] --> B[<<img src x>>]", "A[<#lt;svg onload#gt;>] --> B[<#lt;img src x#gt;>]");
+        t("A[a<br>b] <--> B(x <y) --> C>flag]", "A[a<br>b] <--> B(x #lt;y) --> C>flag]");
+        t("graph LR; A(#x <b)-->B; C(<i) ==> D", "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
+        let html = render("# T\n\n```mermaid\ngraph TD; A[\"<img src=x onerror=alert(1)>\"]-->B\n```\n", "T", None, &load, &[]);
+        assert!(html.contains("A[&quot;#lt;img src=x onerror=alert(1)&gt;&quot;]--&gt;B"));
+    }
+
+    #[test]
     fn diagrams_bring_mermaid_and_old_notes_still_render() {
         let html = render("# T\n\nA line.\n\n```mermaid\nflowchart TD\n  A[a<br>b] --> B\n```\n", "T", None, &load, &[]);
         assert!(html.contains("<pre class=\"mermaid\">flowchart TD\n  A[a&lt;br&gt;b] --&gt; B</pre>"));
@@ -1145,10 +1320,10 @@ mod tests {
     #[test]
     fn a_diagram_cant_change_the_pages_settings() {
         let src = "---\nconfig:\n  flowchart:\n    htmlLabels: true\n---\n%%{init: {\"flowchart\": {\"htmlLabels\": true}}}%%\nflowchart TD\n  %%{init:\n    {\"x\": 1}}%%\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]\n";
-        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]");
+        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"#lt;form action='http://x.example/'#gt;#lt;/form#gt;\"]");
         let html = render(&format!("# T\n\n```mermaid\n{src}```\n"), "T", None, &load, &[]);
         assert!(!html.contains("htmlLabels: true") && !html.contains("&quot;htmlLabels&quot;"));
-        assert!(html.contains("A[&quot;&lt;form action=&#39;http://x.example/&#39;&gt;&lt;/form&gt;&quot;]"));
+        assert!(html.contains("A[&quot;#lt;form action=&#39;http://x.example/&#39;#gt;#lt;/form#gt;&quot;]"));
     }
 
     #[test]
@@ -1207,6 +1382,20 @@ mod tests {
         assert!(html.contains("<figcaption>Options<span class=\"ts\">01:08</span></figcaption>"));
         assert!(html.contains("Again: <span class=\"figref\">[Options<span class=\"ts\">01:08</span>]</span>"));
         assert!(!html.contains("<h2>Screens</h2>"));
+    }
+
+    #[test]
+    fn a_chosen_theme_keeps_every_script_within_the_pages_policy() {
+        let html = render("# T\n\n```mermaid\nflowchart TD\n  A --> B\n```\n", "T", None, &load, &[]);
+        let csp = html.split("Content-Security-Policy\" content=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        for (theme, mermaid) in [("dark", "dark"), ("light", "default")] {
+            let themed = with_theme(html.clone(), Some(theme));
+            assert!(themed.contains(&format!("<html data-theme=\"{mermaid}\" lang=")), "{theme}");
+            for body in themed.split("<script>").skip(1).map(|s| s.split("</script>").next().unwrap()) {
+                assert!(csp.contains(&format!("'sha256-{}'", B64.encode(Sha256::digest(body.as_bytes())))), "{theme}: a script the policy blocks");
+            }
+        }
+        assert_eq!(with_theme(html.clone(), None), html);
     }
 
     #[test]

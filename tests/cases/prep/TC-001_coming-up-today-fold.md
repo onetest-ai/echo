@@ -1,0 +1,46 @@
+---
+id: TC-001
+title: Coming up today counts the meetings still to come and unfolds into rows
+priority: high
+type: functional
+requirements: [F-PREP-01]
+module: prep
+run: agent
+platform: any
+tags: [prep, calls]
+auto: [tests/auto/specs/S-10.spec.mjs]
+---
+
+# TC-001: Coming up today counts the meetings still to come and unfolds into rows
+
+**Module:** Prep | **Priority:** High | **Type:** Functional
+
+## Preconditions
+- Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
+- The data puts the meetings to come 1 h, 1.5 h and 2.5 h ahead; built after about 20:20 the later ones start sooner, in the same order and over by 23:59, the accepted ones still 30 min (the unanswered Industry webinar then shorter); built after about 21:50 all three start sooner, and at 22:50 Globex design review starts 8 minutes after the build (tests/fixtures/README.md, #364).
+
+## Test Data
+
+| Field | Value |
+|-------|-------|
+| Meetings to come | Globex design review (Kim Park), Acme demo (Dana Lee) |
+| Not listed | Industry webinar (not accepted) |
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" | The list starts with a row "Coming up today" with the number 2 |
+| 2 | Read that row | It names the next meeting: "Next HH:MM" (the time of Globex design review) and "Globex design review"; no meeting row is shown under it (folded) |
+| 3 | Click the row "Coming up today" | `aria-expanded` becomes true; two rows appear: "Globex design review" with "30 min" and "Kim Park", and "Acme demo" with "30 min" and "Dana Lee", each with a start time; "Industry webinar" is not among them |
+| 4 | Read a row's tooltip (`title`) | "No prep yet" |
+| 5 | Type "Acme" into `[aria-label="Search calls"]` | The row "Coming up today" is gone while the search is on; clear the search and it returns |
+
+## Expected Final State
+Coming up today is unfolded with two meetings and the search box is empty.
+
+## Teardown
+- Click "Coming up today" to fold it again
+
+## Notes
+- Creates or changes nothing.

@@ -1,0 +1,57 @@
+{
+ "prefix": "SKILL",
+ "name": "Skills",
+ "order": 150,
+ "status": "stable",
+ "notes": "Settings → Templates → Skills",
+ "features": [
+  {
+   "id": "F-SKILL-01",
+   "feature": "Templates → Skills lists each skill: name, Built in / Customized / Yours, ⚠ problem count, an on/off switch, its description",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "skill.kind",
+    "skill.on",
+    "skill.problems"
+   ]
+  },
+  {
+   "id": "F-SKILL-02",
+   "feature": "A skill shows its SKILL.md as written, what its folder holds, \"in Claude as /my-skills:<id>\", and what to fix before Claude can use it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "skill.problems"
+   ]
+  },
+  {
+   "id": "F-SKILL-03",
+   "feature": "Customize copies a built-in skill to the user's folder; Reset takes the copy away; Delete moves one of the user's to the trash",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "skill.kind"
+   ]
+  },
+  {
+   "id": "F-SKILL-04",
+   "feature": "A skill off or with problems is left out of Claude and out of the Claude dialog's list",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "skill.on",
+    "skill.problems"
+   ]
+  },
+  {
+   "id": "F-SKILL-05",
+   "feature": "New skill makes its folder with a SKILL.md and opens it; Open in VS Code and Show in Finder open the folder; a skill changed since the panel's session started shows \"Restart to update\"",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "skill.kind"
+   ]
+  }
+ ]
+}

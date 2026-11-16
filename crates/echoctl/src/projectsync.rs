@@ -74,7 +74,7 @@ pub fn run(id: &str) -> Result<Value> {
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
     let pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).take(MAX_ITEMS).collect();
-    let claims = ledger::verify_prep(id, false)?.len();
+    let claims = ledger::verify_count(id)?;
     // The people pass reads calls the work sync already read (threads synced before it existed too).
     let people_read = read_people(id);
     let for_people: Vec<String> = pending
@@ -94,6 +94,9 @@ pub fn run(id: &str) -> Result<Value> {
     if pending.is_empty() && claims == 0 && for_people.is_empty() {
         let v = json!({"state": "done", "at": started.to_rfc3339(), "message": "nothing new", "written": written.len(), "processed": 0});
         save_state(id, &v);
+        // Announced as a sync that read the calls is (new mail or chat may have been written).
+        #[cfg(feature = "js")]
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": 0, "left": 0}));
         return Ok(v);
     }
     save_state(id, &json!({"state": "running", "at": started.to_rfc3339(), "message": format!("reading {} call{}", pending.len(), if pending.len() == 1 { "" } else { "s" })}));
@@ -137,7 +140,7 @@ pub fn run(id: &str) -> Result<Value> {
             };
         }
         let _ = fs::remove_file(&settings);
-        let left = ledger::pending(id)?.len();
+        let left = ledger::pending_count(id)?;
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
                   "processed": before.saturating_sub(left), "left": left, "message": format!("{extract_report}\n{verify_report}\n{people_report}").trim().to_string()}))
     })();
@@ -149,6 +152,11 @@ pub fn run(id: &str) -> Result<Value> {
         }
     };
     save_state(id, &v);
+    // A thread whose work was read again: the plugins that asked hear it (its id, how many were read, how many wait).
+    #[cfg(feature = "js")]
+    if v["state"] == "done" {
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": v["processed"], "left": v["left"]}));
+    }
     if v["state"] == "failed" {
         bail!("{}", v["message"].as_str().unwrap_or("the sync failed"));
     }
@@ -213,6 +221,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
     a.push("Skill(echo:project-sync)".into());
     a.push(format!("Read({}/**)", abs(&dunce::canonicalize(plugin.join("skills").join("project-sync")).unwrap_or_else(|_| plugin.join("skills").join("project-sync")))));
     a.extend(clis.iter().flat_map(|cli| guard::PROJECT_STEPS.iter().map(move |s| format!("Bash({cli} project ledger {id} {s}:*)"))));
+    crate::ai::guard_ready(profile, cwd, "sync a thread")?;
     let child = notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, cwd, false)?;
         c.env(guard::RUN_MODE, "project").env(guard::RUN_LEDGER, &ledger).env(guard::RUN_DIR, run_dir).env(guard::RUN_PROJECT, id).env(guard::RUN_CLIS, clis.join("\n"));
@@ -234,8 +243,10 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Set when the time limit stopped it: then that is why it ended, not what Claude Code printed.
+    let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
-        let done = done.clone();
+        let (done, timed_out) = (done.clone(), timed_out.clone());
         std::thread::spawn(move || {
             let t = Instant::now();
             while t.elapsed() < timeout {
@@ -244,6 +255,7 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
                 }
                 std::thread::sleep(Duration::from_secs(1));
             }
+            timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::ai::stop_group(pid);
         });
     }
@@ -261,7 +273,7 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
                 stopped = Some(format!("Claude Code is too old to {what} — update it to {x}.{y}.{z} or later"));
                 crate::ai::stop_group(pid);
             }
-            for l in notes::describe(&ev) {
+            for l in crate::run_log::describe(&ev) {
                 let _ = writeln!(log, "{}  {l}", Local::now().format("%H:%M:%S"));
             }
             if ev["type"] == "result" {
@@ -281,6 +293,11 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
     }
     if notes::quitting() {
         bail!("{quit}");
+    }
+    if result.is_none() && timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+        let s = timeout.as_secs();
+        let limit = if s >= 60 && s.is_multiple_of(60) { format!("{} min", s / 60) } else { format!("{s} s") };
+        bail!("stopped after {limit} without finishing (its time limit); its steps are in the run's log");
     }
     let r = result.ok_or_else(|| anyhow!("Claude Code ended without a result{}", err.lines().find(|l| !l.trim().is_empty()).map(|l| format!(": {l}")).unwrap_or_default()))?;
     let text = r["result"].as_str().unwrap_or("").trim().to_string();
@@ -352,4 +369,48 @@ pub fn start(id: &str) -> bool {
         }
     });
     true
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(unix)] // every test here runs a Unix shell fake
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_past_its_time_limit_says_it_ran_out_of_time_not_its_first_stderr_line() {
+        let (_env, root) = crate::paths::testenv::folders("run-time-limit");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("slow", None, &crate::ai::fake::signed_in("pat@example.com"));
+        fs::write(crate::ai::fake::file(&p, "p.hang"), "[claude-code:unrecognized_model] {\"model\":\"qwen3.8:27b\"}\n").unwrap();
+        let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+        let mut log = fs::File::create(root.join("log.txt")).unwrap();
+        let e = finish_run_result(child, &mut log, Duration::from_secs(1), "sync a thread", "quit").unwrap_err().to_string();
+        assert!(e.contains("stopped after 1 s without finishing"), "{e}");
+        assert!(!e.contains("unrecognized_model"), "the warning stays in the log: {e}");
+        assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("unrecognized_model"));
+    }
+
+    /// #215: routines' and plugins' runs (`claudejob::run`) finish here, so a Claude Code older than
+    /// `guard::MIN_CLAUDE` is stopped for them too — even when it goes on to answer.
+    #[cfg(unix)]
+    #[test]
+    fn a_run_finished_here_on_a_claude_code_too_old_for_the_guard_is_stopped() {
+        let (_env, root) = crate::paths::testenv::folders("run-too-old");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("old", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let run = |version: &str| {
+            let init = serde_json::json!({"type": "system", "subtype": "init", "claude_code_version": version});
+            let result = serde_json::json!({"type": "result", "result": "the answer", "is_error": false});
+            fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
+            let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+            let mut log = fs::File::create(root.join("log.txt")).unwrap();
+            finish_run_result(child, &mut log, Duration::from_secs(30), "run a plugin's job", "quit").map(|(text, _)| text)
+        };
+        let e = run("2.1.200").unwrap_err().to_string();
+        assert!(e.contains("too old to run a plugin's job"), "{e}");
+        let [x, y, z] = guard::MIN_CLAUDE;
+        assert_eq!(run(&format!("{x}.{y}.{z}")).unwrap(), "the answer");
+        assert!(run("").unwrap_err().to_string().contains("too old"), "an unknown version is stopped too");
+    }
 }

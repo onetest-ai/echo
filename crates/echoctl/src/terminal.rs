@@ -326,6 +326,9 @@ fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Optio
             let at = files.iter().filter_map(|f| mtime(f)).max();
             out.push((format!("Skills from the {name} plugin changed"), h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at));
         }
+        // The user's own skills (Settings → Templates → Skills): made, changed, switched on or off since it started.
+        let (h, at) = crate::skills::fingerprint();
+        out.push(("Your skills changed".to_string(), h, at));
     }
     out
 }
@@ -591,6 +594,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
         args.push("--dangerously-skip-permissions".into());
     }
     // Channels plugins asked for (Telegram…): the session listens to them while it is open.
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))] // only the plugins' channels (`js`) add to it
     let mut extra_env: Vec<(&str, String)> = vec![];
     #[cfg(feature = "js")]
     let channels = crate::jshost::channels();
@@ -601,8 +605,26 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     }
     // What plugins add to Echo's sessions (never the user's own Claude Code): their Claude Code plugin
     // (skills) and the folders the user gave them to read (an Obsidian vault…).
-    for d in crate::grants::session_plugins() {
+    let session_plugins = crate::grants::session_plugins();
+    for d in &session_plugins {
         args.extend(["--plugin-dir".into(), d.display().to_string()]);
+    }
+    // The commands plugins let Echo's sessions run (`uses.sessions.commands`): no prompt for them here either.
+    let mut clis = crate::grants::session_clis(&session_plugins);
+    if let Some(d) = crate::notes::plugin_dir() {
+        clis.extend(crate::notes::run_clis(&d));
+    }
+    let commands = crate::plugins::session_commands();
+    for cli in &clis {
+        for (id, c) in &commands {
+            args.extend(["--allowedTools".into(), format!("Bash({cli} plugin call {id} {c}:*)")]);
+        }
+    }
+    // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
+    // context until one is used; Send to Claude on a task names one.
+    match crate::skills::plugin() {
+        Ok(d) => args.extend(["--plugin-dir".into(), d.display().to_string()]),
+        Err(e) => eprintln!("skills: {e:#}"),
     }
     // Echo's own plugin (status line, record / minutes / doctor skills): installed in this folder's project scope it
     // reaches Claude Code as the user set it up; a profile of its own reads only its own settings, so it gets the
@@ -624,7 +646,10 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     let folder = paths::config_dir().join("minutes-run");
     std::fs::create_dir_all(&folder)?;
     let settings = folder.join("session-folder.json");
-    std::fs::write(&settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": crate::view::hook_settings(&std::env::current_exe()?)}))?)?;
+    let exe = std::env::current_exe()?;
+    let mut hooks = crate::view::hook_settings(&exe);
+    hooks["PreToolUse"] = crate::view::onedrive_hook(&exe);
+    std::fs::write(&settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": hooks}))?)?;
     args.splice(0..0, ["--settings".to_string(), settings.display().to_string()]);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "brain")]

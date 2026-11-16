@@ -1,0 +1,7 @@
+/* A colleague's photo in place of the initials (07-photos.js): last, over each face's own colours */
+:is(.bd-av, .pp-av, .td-av).ph { background: var(--ph) center / cover no-repeat; color: transparent; }
+.bd-av.ph[data-ini]::before { color: transparent; }
+/* On the people map a face's colour is its stance: with a photo, a ring of it */
+.pp-av.ph.champion { box-shadow: 0 0 0 2px #3ccf91; } .pp-av.ph.supporter { box-shadow: 0 0 0 2px #6cc4f0; }
+.pp-av.ph.neutral { box-shadow: 0 0 0 2px #a9a9b4; } .pp-av.ph.sceptic { box-shadow: 0 0 0 2px #f0a24a; }
+.pp-av.ph.blocker { box-shadow: 0 0 0 2px #ff6b81; }

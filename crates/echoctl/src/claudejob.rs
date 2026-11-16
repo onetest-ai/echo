@@ -64,6 +64,17 @@ pub struct Spec {
     /// Where the run's files go.
     pub run_dir: PathBuf,
     pub timeout: Duration,
+    /// More plugins for the run (`--plugin-dir`): Yolo's task gets the user's skills.
+    pub plugins: Vec<PathBuf>,
+    /// Yolo's task (`<project>/<node>`): the run may edit that one task (`guard::RUN_TASK`; the CLI's other headless
+    /// limits stay), and a profile of its own gets Echo's plugin (manage, Microsoft 365), as the panel does.
+    pub task: Option<String>,
+    /// Yolo's thread (a task's, or an item of Needs you now's): the run reads its data — brief, people, work, calls
+    /// pinned to the run's profile (`guard::RUN_THREAD`).
+    pub thread: Option<String>,
+    /// Echo's plugin (manage, Microsoft 365) for a profile of its own, as the panel has it: Yolo's runs, a task's or an
+    /// item of Needs you now's (with or without a thread).
+    pub echo_plugin: bool,
 }
 
 impl Spec {
@@ -91,6 +102,10 @@ impl Spec {
             tools: Tools::parse(&s("tools"))?,
             run_dir: store.join(rel),
             timeout: Duration::from_secs(minutes * 60),
+            plugins: vec![],
+            task: None,
+            thread: None,
+            echo_plugin: false,
         })
     }
 }
@@ -173,9 +188,16 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let mut settings_file = None;
     // What plugins add to Echo's sessions: their skills, and folders to read (also for a read-only run).
     let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
+    // The commands plugins let Echo's sessions run, by the CLI their skills name too.
+    let session_commands = crate::plugins::session_commands();
+    let mut clis = clis;
+    clis.extend(crate::grants::session_clis(&session_plugins));
     if spec.tools != Tools::None {
-        for d in &session_plugins {
+        for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
+        }
+        if spec.echo_plugin && profile.kind.managed() {
+            a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
         }
     }
     match spec.tools {
@@ -205,6 +227,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
                 a.push("Skill".into());
             }
             a.extend(clis.iter().flat_map(|cli| guard::ROUTINE_COMMANDS.iter().map(move |c| format!("Bash({cli} {}:*)", c.split(" *").next().unwrap_or(c)))));
+            a.extend(clis.iter().flat_map(|cli| session_commands.iter().map(move |(id, c)| format!("Bash({cli} plugin call {id} {c}:*)"))));
             a.push("mcp__echo".into());
             settings_file = Some(f);
         }
@@ -219,16 +242,25 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             }
         }
     }
-    let child = notes::admit_child(|| {
+    let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
+        // A mail the run writes (`echoctl compose`) is noted here, for its outcome (`drafts::of_run`).
+        c.env(crate::drafts::RUN_DRAFTS, spec.run_dir.join("drafts.jsonl"));
+        if let Some(t) = &spec.task {
+            c.env(guard::RUN_TASK, t).env(guard::RUN_PROFILE, &profile.id);
+        }
+        if let Some(t) = &spec.thread {
+            c.env(guard::RUN_THREAD, t).env(guard::RUN_PROFILE, &profile.id);
+        }
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));
             c.env(guard::RUN_READ, session_read.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n"));
             c.env(guard::RUN_SKILLS, crate::grants::skill_names(&session_plugins).join("\n"));
+            c.env(guard::RUN_PLUGIN_COMMANDS, session_commands.iter().map(|(id, c)| format!("{id} {c}")).collect::<Vec<_>>().join("\n"));
         }
         Ok(c.spawn()?)
-    });
+    }));
     let out = child.and_then(|c| crate::projectsync::finish_run_result(c, &mut log, spec.timeout, "run a plugin's job", "Echo quit during the run"));
     if let Some(f) = settings_file {
         let _ = fs::remove_file(f);

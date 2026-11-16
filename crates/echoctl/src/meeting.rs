@@ -10,6 +10,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::apps::MeetingApp;
+
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Person {
     pub name: String,
@@ -49,11 +51,60 @@ pub struct MeetingContext {
     /// The AI profile chosen for this recording (the window's Record menu); none = the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_profile: Option<String>,
+    /// The user's answer to the invite (Graph `responseStatus.response`: accepted, organizer, tentativelyAccepted,
+    /// notResponded, none); none when the source doesn't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    /// How each invited person answered (Graph `status.response`, by lowercased address): accepted,
+    /// tentativelyAccepted, declined, notResponded, none.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub answers: std::collections::BTreeMap<String, String>,
+    /// How each person is invited (Graph `type`, by lowercased address): required or optional (rooms left out).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub invited_as: std::collections::BTreeMap<String, String>,
+    /// Those who declined: not among `attendees`, shown last in the call's header.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declined: Vec<Person>,
 }
 
 pub const FILE: &str = "meeting.json";
 
 impl MeetingContext {
+    /// One the user accepted (or organises), one that asked for no answer (Graph's `none`: a town hall, a list's
+    /// invite), or one whose source doesn't say: what Today and Coming up today list. Not: tentative, not answered.
+    pub fn accepted(&self) -> bool {
+        self.response.as_deref().is_none_or(|r| matches!(r, "accepted" | "organizer" | "none"))
+    }
+
+    /// The app the meeting is in, from its join link; none without a link or with one of no app Echo knows.
+    pub fn app(&self) -> Option<MeetingApp> {
+        self.join_url.as_deref().and_then(MeetingApp::from_url)
+    }
+
+    /// Itself when Echo can record it: a Teams meeting, one of no known app (recorded as a Teams call, as before
+    /// #228), or a Google Meet one on a Mac (in Chrome, #230). A Zoom meeting, or a Meet one elsewhere, is refused with
+    /// why: recording isn't available for it yet.
+    pub fn recordable(&self) -> Result<&Self> {
+        match self.app() {
+            Some(MeetingApp::Meet) if cfg!(target_os = "macos") => Ok(self),
+            Some(app @ (MeetingApp::Zoom | MeetingApp::Meet)) => {
+                let title = self.subject.as_deref().filter(|s| !s.trim().is_empty()).unwrap_or("This meeting");
+                anyhow::bail!("“{title}” is a {} meeting: recording isn't available for {} meetings yet", app.name(), app.name())
+            }
+            _ => Ok(self),
+        }
+    }
+
+    /// Whether a call in `app` can be this meeting's: a meeting of no known app is any app's.
+    pub fn is_in(&self, app: crate::apps::TargetApp) -> bool {
+        self.app().is_none_or(|a| a == app.meeting_app())
+    }
+
+    /// Its join link when Teams' own features may use it (its transcript, Join & record): not a Zoom or Google Meet one.
+    pub fn teams_join_url(&self) -> Option<&str> {
+        self.join_url.as_deref().filter(|_| self.is_in(crate::apps::TargetApp::Teams))
+    }
+
     pub fn load(call_dir: &Path) -> Result<Option<Self>> {
         let p = call_dir.join(FILE);
         if !p.exists() {
@@ -106,7 +157,6 @@ impl MeetingContext {
     }
 
     /// Everyone on the invite, organizer first, de-duplicated.
-    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
     pub fn people(&self) -> Vec<&str> {
         let mut out: Vec<&str> = vec![];
         for p in self.organizer.iter().chain(self.attendees.iter()) {
@@ -144,5 +194,36 @@ mod tests {
         let group = MeetingContext { attendees: vec![me.clone(), p("A", "a@x.com"), p("B", "b@x.com")], ..Default::default() };
         assert_eq!(group.sole_other(Some(&me)), None);
         assert_eq!(MeetingContext::default().sole_other(Some(&me)), None);
+    }
+
+    #[test]
+    fn a_zoom_meeting_is_refused_for_recording_and_a_google_meet_one_only_off_a_mac() {
+        let with = |url: Option<&str>| MeetingContext { subject: Some("Umbrella check-in".into()), join_url: url.map(str::to_owned), ..Default::default() };
+        let zoom = with(Some("https://umbrella.zoom.us/j/81234567890"));
+        let e = zoom.recordable().unwrap_err().to_string();
+        assert_eq!(e, "“Umbrella check-in” is a Zoom meeting: recording isn't available for Zoom meetings yet");
+        let meet = with(Some("https://meet.google.com/abc-defg-hij"));
+        if cfg!(target_os = "macos") {
+            assert!(meet.recordable().is_ok(), "recorded in Chrome");
+        } else {
+            assert!(meet.recordable().unwrap_err().to_string().contains("recording isn't available for Google Meet meetings yet"));
+        }
+        assert_eq!(zoom.teams_join_url(), None, "no Teams features on it");
+        assert_eq!(meet.teams_join_url(), None, "no Teams features on it");
+        for ok in [Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), Some("https://teams.example/ev-1"), None] {
+            assert!(with(ok).recordable().is_ok(), "{ok:?}: Teams, or no app known, as before");
+            assert_eq!(with(ok).teams_join_url(), ok);
+        }
+    }
+
+    #[test]
+    fn a_meeting_is_a_call_of_its_own_app_or_any_without_one() {
+        use crate::apps::TargetApp::{Meet, Teams};
+        let with = |url: Option<&str>| MeetingContext { join_url: url.map(str::to_owned), ..Default::default() };
+        let (meet, teams) = (with(Some("https://meet.google.com/abc-defg-hij")), with(Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0")));
+        assert!(meet.is_in(Meet) && !meet.is_in(Teams));
+        assert!(teams.is_in(Teams) && !teams.is_in(Meet));
+        assert!(with(None).is_in(Teams) && with(None).is_in(Meet), "no link: either");
+        assert!(with(Some("https://teams.example/ev-1")).is_in(Meet), "no app known: either");
     }
 }

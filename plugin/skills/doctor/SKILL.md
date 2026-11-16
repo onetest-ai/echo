@@ -15,7 +15,8 @@ permission for the user (open the page and explain), and never download a model 
    won't start, show the last lines of `<home>/.echo/app.log`.
 2. **Data folder** (`echoctl app` → `home_source: default`): ask where calls should live
    (default `~/Echo`), then `echoctl home set <path>`.
-3. **Permissions** belong to the app, not the terminal: `echoctl doctor --json`.
+3. **Permissions** belong to the app, not the terminal: `echoctl doctor --json --no-ai` (the AI
+   part loads models: step 6 checks it once).
    - `os_supported` false → say `os_requirement` and stop.
    - Each check not `granted`: explain `why` in a sentence. `not_determined` →
      `echoctl doctor --request` and tell them to click **Allow**; `denied` →
@@ -26,14 +27,24 @@ permission for the user (open the page and explain), and never download a model 
 4. **Speech model** (none `active` in `echoctl model list --json`): offer the `recommended` one
    with its `reason` and `size_mb`, plus one larger and one smaller; on a yes,
    `echoctl model download <name>`.
-5. **Languages**, if the transcript came out in the wrong language: `echoctl config --languages
-   en,uk` (detection is limited to this list).
+5. **Languages**, if the transcript came out in the wrong language: the call was started in
+   another one (Echo never detects it). `echoctl language <code> <call>` changes it: while the call
+   records, the rest and then the whole call are in the new one; after, it is transcribed again
+   while its audio is kept (refused once the audio is gone). The default for new calls is the first
+   of `echoctl config --languages ru,en`.
 6. **Minutes** missing or failed for a call: `<call>/notes-run.json` (`state`, `message`) and the
    end of `<call>/claude.log` say why; `echoctl attention` lists minutes that failed or wait, and
    what they wait for. `echoctl notes <call>` writes them now.
    Minutes need Claude Code: `echoctl claude` → its `check`. No `path` or an `error`: Claude Code
    isn't installed or doesn't start (https://claude.com/claude-code). `terminal.ok` false:
    `echoctl claude path`. `plugin_installed` false: `echoctl claude connect`.
+   A local AI profile (a model on Ollama): `echoctl doctor --json` → `ai`; tell the user each of
+   its `warnings` (the server gives the model too little context: long calls' minutes miss parts;
+   `OLLAMA_CONTEXT_LENGTH` is set on that server, not in Echo) and `problems` (the model isn't
+   there or couldn't load); for each model in `unreported` (this Ollama doesn't show the context),
+   suggest updating Ollama, or setting `OLLAMA_CONTEXT_LENGTH` on that server to be safe. This
+   loads each local model for up to 2 minutes: run it once, with a Bash timeout of 2 minutes per
+   local model (minutes and live-notes models count separately) plus one.
 7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);

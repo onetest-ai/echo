@@ -1,0 +1,93 @@
+{
+ "prefix": "LIVE",
+ "name": "Live notes",
+ "order": 190,
+ "status": "stable",
+ "notes": "Live notes during and after a call",
+ "features": [
+  {
+   "id": "F-LIVE-01",
+   "feature": "During a call with live notes on, the Transcript tab is the live transcript alone at full width, kept at its end; Now, Decisions, Action items and Open questions go into My notes, each with a time jump; the first after about 90 s",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "live.enabled",
+    "live.state"
+   ]
+  },
+  {
+   "id": "F-LIVE-02",
+   "feature": "My notes' live box shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, local, ended) and usage in one muted line under Now, and what to do about a sign-in or settings problem; its ⋯ menu holds the model for the call, Pause / Resume and Ask Claude about this call",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "live.state",
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-LIVE-03",
+   "feature": "After the call the live notes stay in My notes beside the final transcript (searchable, full width) and go into `transcript.md` as a \"Live notes\" draft",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  },
+  {
+   "id": "F-LIVE-04",
+   "feature": "With live notes off a recording call says how to turn them on, and nothing is sent to a model",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "live.enabled"
+   ]
+  },
+  {
+   "id": "F-LIVE-05",
+   "feature": "\"Last time\" (still to do, highlights) shows in My notes' live box during a recurring call; Ask Claude about this call (its ⋯ menu) opens the Claude panel",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  },
+  {
+   "id": "F-LIVE-06",
+   "feature": "My notes is one timeline: Now pinned on top, then the user's notes (•, their kinds) and the live notes' items (✦, as ! decision, ☐ to-do with its owner, ? question) in time order — the user's never moved, a live item with no time last; live items are read-only and their chips jump to the transcript; answers follow under \"Asked about this call\"; with live notes off or none kept the panel is as without them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  },
+  {
+   "id": "F-LIVE-07",
+   "feature": "While a call records, live notes don't run on a profile whose model is on this computer (it would take the GPU from the call): `live show` says `local` from the start, nothing is sent, and Settings → AI says so next to \"Live notes during calls\" when the default profile is such a one. Claude and model servers on other computers still summarise",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.enabled",
+    "live.state"
+   ]
+  },
+  {
+   "id": "F-LIVE-08",
+   "feature": "While a call records, the window draws only what changed: new transcript turns are added (the others stay as they are), the clock counts by itself, the recording dot pulses on the compositor (opacity)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.state"
+   ]
+  },
+  {
+   "id": "F-LIVE-09",
+   "feature": "On Claude (an account or Claude Code as configured), a recording's live notes are kept by one Claude Code session that loops on its own with two tools bound to the call (wait for new lines, update the notes: checked like any notes, action items as proposals); it starts with the recording, ends after it, and its text is never read",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.state"
+   ]
+  }
+ ]
+}

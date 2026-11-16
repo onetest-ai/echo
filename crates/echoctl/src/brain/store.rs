@@ -285,7 +285,7 @@ fn blob(v: &[f32]) -> Vec<u8> {
 }
 
 fn floats(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect()
+    b.as_chunks::<4>().0.iter().map(|&c| f32::from_le_bytes(c)).collect()
 }
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
@@ -729,7 +729,7 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         }
     } else {
-        note = Some("keywords only: no embedding server is set (Settings → Brain)".into());
+        note = Some("keywords only: no embedding server is set (Settings → Knowledge)".into());
     }
     // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
     // is within that thread.

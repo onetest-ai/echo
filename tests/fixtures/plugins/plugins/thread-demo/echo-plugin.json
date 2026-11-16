@@ -1,0 +1,9 @@
+{
+  "id": "thread-demo",
+  "name": "Thread demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a row in each thread's Profile and a value kept per thread (tests/cases/plugins/TC-023).",
+  "main": "main.js",
+  "client": "client.js",
+  "uses": { "events": { "on": ["threads_changed"] } }
+}

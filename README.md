@@ -1,6 +1,6 @@
 # Echo
 
-**Echo records the Teams calls you choose, turns them into text on your own Mac, and gives you
+**Echo records the Teams calls you choose (and, on a Mac, Google Meet calls in Chrome), turns them into text on your own Mac, and gives you
 minutes and action items afterwards.** No bot joins the call, nothing is uploaded for
 transcription, and the audio is deleted as soon as the transcript is ready.
 
@@ -39,8 +39,10 @@ included: [docs/install.md](docs/install.md).
 Echo never records on its own. You decide, per call, in one of two ways:
 
 - **Right now:** click the octopus, then **Record next call**. Echo starts when the Teams call
-  starts and stops when it ends. In the Echo window, the small **EN ▾** on the button picks the
-  call's language (or **Detect**, to let Echo pick among your languages).
+  starts and stops when it ends. A Google Meet call in Chrome (Mac only) works the same way: Echo
+  knows it by Meet's tab in the front of a Chrome window, or by a calendar meeting with a Meet link,
+  and records everything Chrome plays — every tab's sound, so keep other tabs quiet. In the Echo window, the small **EN ▾** on the button picks the
+  call's language (your default one unless you pick another).
 - **Ahead of time:** open the calendar (step 4) and click **Record** on a meeting. Echo arms
   itself a minute before it starts.
 
@@ -210,16 +212,19 @@ claude plugin install echo@onetest --scope user      # or: project (shared) / lo
 **Teams didn't get recorded.** Menu → **Health** shows what's missing, usually a permission.
 Permissions belong to Echo in System Settings → Privacy & Security.
 
-**Can I use another language?** Yes. Echo detects the language for each sentence. Menu →
-Settings → Languages limits it to the ones you speak, which avoids mix-ups between similar
-languages.
+**Can I use another language?** Yes. A call is in one language, the one you pick when it starts
+(Settings → Recording → Languages: the ones offered, and the default). Echo never guesses it: picked
+the wrong one? `echoctl language <code>` while the call records changes it, and the whole call is
+transcribed again in it at the end. Echo uses the downloaded model best at the call's language:
+Parakeet v3 for English, Whisper for the others.
 
 **Transcription is slow on my laptop.** Without a graphics card, Whisper takes a long time.
 Two ways out:
 
-- **A faster model.** Menu → **Speech models → NVIDIA Nemotron → nemotron-3.5-0.6b**: download
-  it (742 MB) and choose **Use this model**. It runs several times faster than real time on a
-  plain CPU and covers English, Spanish, Russian, Ukrainian and about 20 other languages.
+- **A lighter model.** Menu → **Speech models → parakeet-tdt-0.6b-v3**: download it (714 MB) and
+  choose **Use this model**. It runs several times faster than real time on a plain CPU and is the
+  most accurate here on English calls (Whisper is deprecated; calls in other languages keep using
+  it while it is downloaded, until a lighter model replaces it).
 - **A faster computer** on your network, such as a Mac with Apple Silicon or a PC with a
   graphics card, does the work:
   1. On the fast computer, open the Echo menu and choose **Settings → Transcribe for other
@@ -283,7 +288,7 @@ LOCAL=1 scripts/package-macos.sh # no Apple developer account: an ad-hoc signed 
 scripts/package-windows.ps1      # .msi installer + .zip for Windows
 ```
 Checks: `cargo clippy`, `cargo test`, `cargo check --target x86_64-pc-windows-msvc
---no-default-features`, `scripts/check-mod.sh`. Design notes per area: `.ai-run/guides/design/README.md`.
+--no-default-features`, `scripts/check-mod.sh`. Rules per area: `.ai-run/guides/` (index in `AGENTS.md`).
 
 Windows 10 2004+: double-click `echo-<version>-windows-x64.msi` (per user, no administrator
 rights: Start menu, PATH, start at login; upgrades quit and restart Echo; uninstall from

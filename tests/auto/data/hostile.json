@@ -1,0 +1,405 @@
+{
+  "_about": "What tests/fixtures/make_data.py --set hostile builds, as S-27 reads it: each piece is its marker (HOSTILE-NN) and one kind of others' text (make_data.py HOSTILE_KINDS). Change it with the fixture.",
+  "kinds": {
+    "html": "<img src=x onerror=alert(1)> <script>alert(1)</script> <a href=\"javascript:alert(1)\">open</a> [open](javascript:alert(1))",
+    "long": "W",
+    "longLength": 10000,
+    "rtl": "שלום مرحبا ‮evil.exe‬ Z̷̢͓a̸l̶g̵o̴ é́́",
+    "emoji": "🎉🔥👨‍👩‍👧 Привіт, світ! Здравствуйте",
+    "markdown": "# Heading [click me](https://evil.example/x) ![img](https://evil.example/i.png) **bold** <https://evil.example>"
+  },
+  "markup": "<img src=x onerror=alert(1)>",
+  "script": "<script>alert(1)</script>",
+  "jsText": "javascript:alert(1)",
+  "mdLink": "[click me](https://evil.example/x)",
+  "evil": "https://evil.example",
+  "cyrillic": "Привіт",
+  "pieces": {
+    "01": "emoji",
+    "02": "html",
+    "03": "rtl",
+    "04": "html",
+    "05": "markdown",
+    "06": "html",
+    "07": "html",
+    "08": "html",
+    "09": "rtl",
+    "10": "emoji",
+    "11": "html",
+    "12": "markdown",
+    "13": "html",
+    "14": "html",
+    "15": "markdown",
+    "16": "long",
+    "17": "html",
+    "18": "rtl",
+    "19": "emoji",
+    "20": "html",
+    "21": "html",
+    "22": "markdown",
+    "23": "html",
+    "24": "long",
+    "25": "markdown",
+    "26": "rtl",
+    "27": "html",
+    "28": "emoji",
+    "29": "html",
+    "30": "rtl",
+    "31": "html",
+    "32": "markdown",
+    "33": "html",
+    "34": "rtl",
+    "35": "emoji",
+    "36": "long",
+    "37": "long",
+    "38": "html",
+    "39": "rtl",
+    "40": "html",
+    "41": "html",
+    "42": "rtl",
+    "43": "markdown",
+    "44": "emoji",
+    "45": "long",
+    "46": "html",
+    "47": "markdown",
+    "48": "html",
+    "49": "rtl",
+    "50": "emoji",
+    "51": "long",
+    "52": "markdown",
+    "53": "html",
+    "54": "html",
+    "55": "rtl",
+    "56": "markdown",
+    "57": "html",
+    "58": "long",
+    "59": "html",
+    "60": "rtl",
+    "61": "html",
+    "62": "html",
+    "63": "html",
+    "64": "long",
+    "65": "long",
+    "66": "rtl",
+    "67": "rtl",
+    "68": "emoji",
+    "69": "emoji",
+    "70": "markdown",
+    "71": "markdown",
+    "72": "markdown",
+    "73": "html",
+    "74": "html",
+    "75": "markdown",
+    "76": "long",
+    "77": "rtl",
+    "78": "emoji",
+    "79": "html",
+    "80": "html",
+    "81": "markdown",
+    "82": "rtl",
+    "83": "long",
+    "84": "emoji",
+    "85": "html",
+    "86": "html",
+    "87": "html",
+    "88": "long",
+    "89": "long",
+    "90": "long",
+    "91": "rtl",
+    "92": "rtl",
+    "93": "rtl",
+    "94": "emoji",
+    "95": "emoji",
+    "96": "emoji",
+    "97": "markdown",
+    "98": "markdown",
+    "99": "markdown",
+    "100": "html",
+    "101": "markdown",
+    "102": "rtl",
+    "103": "long",
+    "104": "html",
+    "105": "rtl",
+    "106": "html",
+    "107": "markdown",
+    "108": "html",
+    "109": "long",
+    "110": "rtl",
+    "111": "emoji",
+    "112": "markdown",
+    "113": "html",
+    "114": "html",
+    "115": "long",
+    "116": "rtl",
+    "117": "html",
+    "118": "html",
+    "119": "rtl",
+    "120": "markdown",
+    "121": "long",
+    "122": "emoji",
+    "123": "html"
+  },
+  "calendar": {
+    "meeting": "48",
+    "organizer": "49",
+    "people": [
+      "50",
+      "51"
+    ],
+    "past": "52",
+    "prepMeeting": "Umbrella security Q&A",
+    "prep": {
+      "inShort": "57",
+      "new": "54",
+      "from": "55",
+      "snippet": "56"
+    },
+    "week": "Week",
+    "base": "Meeting"
+  },
+  "call": {
+    "marker": "61",
+    "title": "Hostile call",
+    "day": 1,
+    "found": 2
+  },
+  "longCall": "115",
+  "rtlCall": "116",
+  "found": "117",
+  "thread": {
+    "id": "thread-hostile-21-img-src-x-onerror-alert-1-script-alert-1-s",
+    "name": "21",
+    "client": "Umbrella",
+    "notes": "22",
+    "brief": [
+      "23",
+      "24",
+      "25"
+    ],
+    "rule": "26",
+    "source": "27",
+    "people": "29",
+    "role": "30",
+    "calls": [
+      "61",
+      "115",
+      "116"
+    ],
+    "base": "Thread",
+    "peopleBase": "Person"
+  },
+  "clients": {
+    "globex": "globex",
+    "about": [
+      "05",
+      "06"
+    ],
+    "aboutHeading": "About Globex",
+    "acme": "acme",
+    "alias": "28",
+    "umbrella": "umbrella",
+    "umbrellaPeople": [
+      "62",
+      "66",
+      "70",
+      "85",
+      "91",
+      "94",
+      "97",
+      "108",
+      "110",
+      "111"
+    ],
+    "umbrellaLong": [
+      "88",
+      "109"
+    ],
+    "globexName": "Globex"
+  },
+  "people": {
+    "thread": "acme-rollout",
+    "person": "41",
+    "title": "42",
+    "about": "43",
+    "group": "44",
+    "office": "45",
+    "fact": "46",
+    "quote": "47",
+    "org": "04",
+    "orgBase": "Org"
+  },
+  "work": {
+    "thread": "acme-rollout",
+    "task": [
+      "T026",
+      "31"
+    ],
+    "long": [
+      "T027",
+      "37"
+    ],
+    "question": [
+      "Q004",
+      "39"
+    ],
+    "desc": [
+      "32",
+      "33"
+    ],
+    "link": "34",
+    "linkUrl": "https://acme.example/x",
+    "waitWho": "35",
+    "owner": "38",
+    "taskBase": "Task"
+  },
+  "inbox": [
+    "53",
+    "59",
+    "60",
+    "117",
+    "13"
+  ],
+  "needs": [
+    "118",
+    "119",
+    "120",
+    "121",
+    "122",
+    "123"
+  ],
+  "plugins": {
+    "id": "standup-notes",
+    "name": "08",
+    "summary": "09",
+    "label": "10",
+    "category": "11",
+    "value": "12",
+    "markets": [
+      "onetest",
+      "acme-tools",
+      "broken"
+    ],
+    "marketError": "echo-marketplace.json"
+  },
+  "templates": {
+    "skill": "Hostile skill",
+    "skillDesc": "14",
+    "skillMd": [
+      "15",
+      "16"
+    ],
+    "template": "Hostile template",
+    "header": "17",
+    "section": "18",
+    "type": "19",
+    "typeAbout": "20",
+    "call": "Acme weekly sync"
+  },
+  "vocabulary": {
+    "every": "01",
+    "learned": "02",
+    "subject": "03"
+  },
+  "minutes": {
+    "title": "73",
+    "heading": "74",
+    "summary": "75",
+    "long": "76",
+    "cells": [
+      "77",
+      "78"
+    ],
+    "diagram": "79",
+    "asText": [
+      "javascript:alert(1)",
+      "<iframe src=\"javascript:alert(3)\"></iframe>",
+      "<script>alert('minutes')</script>"
+    ],
+    "csp": [
+      "default-src 'none'",
+      "form-action 'none'",
+      "base-uri 'none'"
+    ],
+    "unsafe": "'unsafe-inline'",
+    "plain": [
+      "a link",
+      "another"
+    ],
+    "chip": "00:05"
+  },
+  "notes": {
+    "heading": "80",
+    "rows": [
+      "81",
+      "82",
+      "83",
+      "84"
+    ],
+    "callout": "81"
+  },
+  "transcript": {
+    "speakers": [
+      "62",
+      "64",
+      "66",
+      "68",
+      "70"
+    ],
+    "texts": [
+      "63",
+      "65",
+      "67",
+      "69",
+      "71",
+      "72"
+    ],
+    "rtl": "67",
+    "find": "63"
+  },
+  "chat": {
+    "count": 5,
+    "pieces": [
+      "85",
+      "86",
+      "87",
+      "88",
+      "89",
+      "90",
+      "91",
+      "92",
+      "93",
+      "94",
+      "95",
+      "96",
+      "97",
+      "98",
+      "99"
+    ],
+    "long": [
+      "88",
+      "89",
+      "90"
+    ]
+  },
+  "live": {
+    "pieces": [
+      "100",
+      "101",
+      "102",
+      "103",
+      "104"
+    ],
+    "long": "103",
+    "run": "114"
+  },
+  "ai": {
+    "profile": "07",
+    "base": "Qwen"
+  },
+  "mdWords": "click me",
+  "personMarkup": "<img src=x onerror=alert>",
+  "_people": "People's names show as Echo shows names (people::display): their \"(…)\" and \"[…]\" parts dropped (the markup reads <img src=x onerror=alert>) and a \"Last, First\" turned round (the emoji names' words move): matched by marker then",
+  "foundBase": "Found",
+  "marker": "HOSTILE-",
+  "ltr": "ltr"
+}

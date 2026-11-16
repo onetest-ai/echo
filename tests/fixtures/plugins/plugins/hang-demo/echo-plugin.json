@@ -1,0 +1,10 @@
+{
+  "id": "hang-demo",
+  "name": "Hang demo",
+  "version": "0.1.0",
+  "summary": "A test plugin whose one widget never answers (today/TC-034).",
+  "main": "main.js",
+  "widgets": [
+    { "id": "hang", "label": "Never answers", "about": "A widget whose plugin never answers its ask.", "kind": "stat", "sizes": ["S", "M"] }
+  ]
+}

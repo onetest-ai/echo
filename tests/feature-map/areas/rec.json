@@ -1,0 +1,177 @@
+{
+ "prefix": "REC",
+ "name": "Recording and capture",
+ "order": 200,
+ "status": "stable",
+ "notes": "Arm, record, stop, memos, tracks, frames, chat, tray",
+ "features": [
+  {
+   "id": "F-REC-01",
+   "feature": "The Record pill offers Record next call (Record this call while in one), its language and profile, and Memo; while a call records, the pill holds its language, changed there when it's wrong; \"Writing the transcript…\" shows beside it while a call is transcribed",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "app.record",
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-REC-02",
+   "feature": "Record arms Echo: the pill says \"Armed — records the next call\" with Cancel; the arm records the next call or expires after 15 minutes",
+   "priority": "critical",
+   "check": "person",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-03",
+   "feature": "Nothing records without an arm and a call; Ask mode shows Echo's own \"Record?\" dialog per call (a next call while one records isn't, while the agenda offers a meeting of that call's app — a Google Meet meeting offers nothing to a Teams call), Manual only records when asked",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "set.when_record"
+   ]
+  },
+  {
+   "id": "F-REC-04",
+   "feature": "A meeting about to start shows in the pill with its time and Record it",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-05",
+   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again; a capture device that hangs (listing, opening or closing it) or Core Audio's list of the app's audio processes that hangs never holds up Stop: the recording ends within seconds, and the call is told from the last answer meanwhile; a Stop while Echo is busy for a moment is kept and ends the recording once it is free, never disarming the next meeting",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-06",
+   "feature": "A memo records the user's mic alone; Stop ends it without asking; its threads come from what was said",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-REC-07",
+   "feature": "A call is two tracks, the mic and the call app's audio (Teams', or Chrome's for Google Meet); a recording's folder is never reused",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-REC-08",
+   "feature": "A short drop and rejoin stays one recording; the call's end stops it after 10 s; a confirmed other call back to back starts a new one",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-REC-09",
+   "feature": "Switching audio devices keeps recording in sync; a track that fails to write notifies once",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-10",
+   "feature": "Muted in Teams, the mic track records silence (with Follow Teams' mute and Read the Teams window on)",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-REC-11",
+   "feature": "The Mac sleeping closes the recording; after a crash the recording is repaired and transcribed on the next start",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-12",
+   "feature": "Shared screens (opt-in) are kept only while someone else shares, one frame per change; frames the minutes don't cite go to the trash for 30 days",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-REC-13",
+   "feature": "The tray icon shows idle, armed and recording; its menu has status, Record, Stop, recent calls and Echo's flows",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-14",
+   "feature": "At first launch macOS asks for Microphone and System Audio Recording up front, and every prompt names Echo",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-REC-15",
+   "feature": "A missing Microphone or System Audio permission is flagged before and during a call, and the other track is still recorded",
+   "priority": "critical",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-16",
+   "feature": "Recording and transcription work without Microsoft 365 (no Chat tab, no calendar title)",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-17",
+   "feature": "After the call app hangs up, the mic track doesn't fall back to another microphone (the room isn't recorded in the grace or a longer capture)",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-18",
+   "feature": "A recording that starts before the call app holds a mic records silence on the mic track until the app holds one Echo can open; if the app reports none for 10 s (a virtual mic, a listen-only join) it takes the default input and says so in the log",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-REC-19",
+   "feature": "Quitting Echo while a call's transcript is still being finished ends cleanly (no crash at exit): that transcript is made at the next start",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-REC-20",
+   "feature": "A meeting set to record (or armed for that meeting) starts recording only on that meeting's call: the call window naming the meeting, or a call begun from 10 min before it, is its call; a call begun before that whose window doesn't name it (another name, a channel's, none) is another — Echo waits (event arm_waits_other_call, one notification \"Waiting to record …\"), looks again every few seconds, keeps the arm until the meeting ends, and starts once the user is on its call. A name alone (a renamed or channel meeting) never makes it wait; a window it can't read changes nothing; \"Record\" on a call already going on records that call",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-REC-21",
+   "feature": "A Google Meet call in Chrome is recorded on a Mac like a Teams call (arm, Record this call, Ask mode, a meeting with a Meet link): Chrome holding the mic is its call only while a Chrome window's title is a Meet tab (\"Meet – …\"), or Google Meet installed as an app from Chrome is open — a source of its own, \"Google Meet app\" (`meta.json` `app` \"meet-app\"; its window shows no meeting, so the app being open is its sign; a Meet tab's title wins over the app open beside it; its sound is still Chrome's, every tab's, and its dialog and notification say so) — a calendar meeting with a Meet link goes on (10 min before it to its end) or the arm is for a Meet meeting, and stays its call while Chrome holds the mic; Teams on the mic wins; Chrome on the mic for anything else isn't offered or recorded. The remote track is everything Chrome plays (every tab: \"Record?\" and a notification at the start say so), meta.json's app is \"meet\", and nothing is read from Teams for it (no mute, names, shared screens or chat). A meeting's arm starts only on a call of its own app. While a recording is open (its grace after a hang-up too), another app taking the mic is a new call, recorded once that recording has ended (its first seconds may be missed). Two Meet calls back to back are not told apart (one recording)",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
+  }
+ ]
+}

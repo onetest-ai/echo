@@ -1,0 +1,89 @@
+{
+ "prefix": "M365",
+ "name": "Microsoft 365",
+ "order": 230,
+ "status": "stable",
+ "notes": "Sign-in, calendar, chat, sends",
+ "features": [
+  {
+   "id": "F-M365-01",
+   "feature": "Sign in… opens the browser and comes back signed in; Sign out forgets the token and the calendar falls back to today's agenda; another app id or tenant can be set",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-M365-02",
+   "feature": "The calendar's week comes from Microsoft 365 without blocking the window",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-M365-03",
+   "feature": "A recorded meeting's chat (and an ad-hoc call's) is kept with the call",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "m365.signin",
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-M365-04",
+   "feature": "Send a test and `deliver send` go only to the user's own Teams chat and mailbox (or a plugin's way), with no address to name; a routine also mails the addresses the user set on it",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "deliver.way"
+   ]
+  },
+  {
+   "id": "F-M365-05",
+   "feature": "`echoctl m365` sends nothing without `--yes`: it answers what would be sent",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-M365-06",
+   "feature": "Thread mail and chats are read only from the user, colleagues and trusted, authenticated senders; others wait in the Inbox",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "thread.sources"
+   ]
+  },
+  {
+   "id": "F-M365-07",
+   "feature": "Mail sent from a thread's item (`m365 mail send|reply --task <thread>/<item>`, the follow-up-mail skill) is followed by it: replies in its conversation (no source rule; trusted senders only) come back as the thread's evidence saying which item they answer, and the sync clears or updates its wait",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "thread.sources"
+   ]
+  },
+  {
+   "id": "F-M365-08",
+   "feature": "A run Echo started (Yolo) may leave a mail draft in Microsoft 365 Drafts, never send, reply or post; its outcome names where each draft is and links to a Microsoft 365 one",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-M365-09",
+   "feature": "`echoctl m365 drive where <path>`: whether a path is in the user's OneDrive on this computer, its path online, whether it is here and online, what to do (a synced folder: work with it here; online only: sync it, don't make it here; here only: not uploaded), and for a folder in both places how many names are only here, only online and in both, with the first 20 of each — compared by Echo, reads only",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

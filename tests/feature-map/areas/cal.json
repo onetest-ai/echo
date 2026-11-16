@@ -1,0 +1,175 @@
+{
+ "prefix": "CAL",
+ "name": "Calendar",
+ "order": 50,
+ "status": "stable",
+ "notes": "Day and week, event cards, scheduling, series, Teams transcript import",
+ "features": [
+  {
+   "id": "F-CAL-01",
+   "feature": "Calendar shows a rolling Week (yesterday, today, 5 ahead) or a Day; `#calendar` opens Week; the heading names the day or the range",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-02",
+   "feature": "Earlier ‹, Today and Later › move by a day or a week",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CAL-03",
+   "feature": "Today's column has the line \"now\"; hours are sized to fit the working day; overlapping meetings sit side by side, as many as there are; four or more side by side show their names from the first letter, with name and time in the tooltip",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-04",
+   "feature": "A meeting block shows recorded (green), \"Will record\", past, and opens its card; a recorded call with no meeting shows as its own block that opens the call; a meeting's call is the one of its event recorded at its time — saved with this start (an arm, however early it was joined) or started from 10 min before it to its end, at least 30 min after its start; the one being recorded first, else the nearest its start — so a call of the same event at another time (a meeting moved or held again) is a block of its own, never the meeting's",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.recorded",
+    "meeting.scheduled",
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-05",
+   "feature": "Declined and cancelled meetings are greyed, \"No notetakers\" and \"Transcript\" (Teams has one) are tagged, all-day events sit in their own row",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "meeting.flags",
+    "meeting.transcript"
+   ]
+  },
+  {
+   "id": "F-CAL-06",
+   "feature": "Without Microsoft 365 the calendar says \"Showing today's meetings only…\" and shows today's agenda; a read error says \"Can't read the calendar\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-CAL-07",
+   "feature": "A meeting's card: its title with × (Close), when and how far off (Today · HH:MM–HH:MM · in N min / now · N min left / recording / recorded / over), its kind and thread chips; one action strip (the main button and its prep side by side as pills, a line saying what happens or what it was recorded as); People (the organizer, then up to three names and +N more of all invited, or \"N invited\" without names; who declined left out), the series rule and Last time under small headings; it stays open across Day / Week; kept inside the calendar's grid — a block with no room either side gets it over its right part (#338)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.recorded"
+   ]
+  },
+  {
+   "id": "F-CAL-08",
+   "feature": "The card offers one action by the meeting's state: Open notes, Import Teams transcript, Don't record (with the language it will use), Join & record + Record (without joining), Record it / Record when it starts; nothing for a declined, cancelled, no_notetakers or offline one; for a Zoom or Google Meet one only the line \"Recording isn't available for Zoom (Google Meet) meetings yet.\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.action",
+    "meeting.flags",
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-09",
+   "feature": "Record when it starts schedules a coming meeting (`scheduled.json`), and Don't record takes it back",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.scheduled"
+   ]
+  },
+  {
+   "id": "F-CAL-10",
+   "feature": "A scheduled meeting arms itself a minute before it starts and records when joined; it leaves the list once its recording starts, its arm is cancelled, its start fails or it ends",
+   "priority": "critical",
+   "check": "person",
+   "axes": [
+    "meeting.scheduled"
+   ]
+  },
+  {
+   "id": "F-CAL-11",
+   "feature": "The card's kind chip sets the type for every meeting of its series (\"You set this — for every meeting of the series\")",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.type_by"
+   ]
+  },
+  {
+   "id": "F-CAL-12",
+   "feature": "\"+ Thread\" on a card adds the meeting to a thread (× takes a hand-added one out) or makes a new thread from it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.threads"
+   ]
+  },
+  {
+   "id": "F-CAL-13",
+   "feature": "A recurring meeting's card sets \"Every meeting of this series\": Record / Ask / Don't record (the default), the rule's own state shown and a pressed choice changing nothing, and its language; Record puts each occurrence in Record when it starts once",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "series.record",
+    "series.languages"
+   ]
+  },
+  {
+   "id": "F-CAL-14",
+   "feature": "Join and record opens the meeting in Teams and records as soon as the user is in",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "meeting.action"
+   ]
+  },
+  {
+   "id": "F-CAL-15",
+   "feature": "Import Teams transcript on an ended, unrecorded Teams meeting makes a call from its transcript and chat (Importing…, its error, a notification); refused when Teams has none or a call exists",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.transcript",
+    "meeting.recorded"
+   ]
+  },
+  {
+   "id": "F-CAL-16",
+   "feature": "Right-click on a meeting opens a menu at the pointer with what its card offers: its main action, its prep, Add to a thread…, the series rule, Copy the Teams link (the Zoom or Google Meet link for such a meeting), Show details; arrow keys, Home and End move in it; Escape, a click elsewhere, a wheel or a resize close it, and the focus goes back to the meeting",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CAL-17",
+   "feature": "A meeting whose invite has a Zoom or Google Meet join link (in Microsoft 365's online meeting, its location or its body; a look-alike host is not taken) is kept like a Teams meeting: it shows in the calendar and in Today with a small label naming its app (\"Zoom\", \"Google Meet\"); a Teams meeting has no label",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.flags"
+   ]
+  },
+  {
+   "id": "F-CAL-18",
+   "feature": "Echo records Teams meetings, and Google Meet ones on a Mac (in Chrome, F-REC-21): a Zoom meeting (or a Google Meet one off a Mac) is never armed — its card and Today row say \"Recording isn't available for Zoom (Google Meet) meetings yet.\" instead of Record, `echoctl arm` / `echoctl join` with one fail with that message and arm nothing, and Record when it starts, a series set to Record, the \"Record?\" offer at its start and the tray's Upcoming leave it out; no Teams transcript is offered for a Zoom or Google Meet meeting; `echoctl join` opens a Google Meet meeting in Chrome",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.flags",
+    "meeting.action"
+   ]
+  }
+ ]
+}

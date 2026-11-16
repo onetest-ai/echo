@@ -1,0 +1,197 @@
+{
+ "prefix": "TODAY",
+ "name": "Today",
+ "order": 290,
+ "status": "rework",
+ "notes": "Top-level features only",
+ "features": [
+  {
+   "id": "F-TODAY-01",
+   "feature": "Today greets by the time of day and About me's first name, with the date, the meetings, the tasks on the user and how many are late",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-02",
+   "feature": "Your day lists where you'll be: today's meetings (but declined ones) and calls in time order with the line \"now\", a line each — time (violet the next — 'now' when it is under way — the line holding the first meeting you go to that isn't over, the one Next meeting shows — amber a choice), a bar (solid: going; dashed: no reply, maybe), its threads and its reason: next, no reply, maybe, \"instead of …\" and \"N skipped\" for an overlap one you accepted wins, \"N others at once\" for two you accepted, your work in a free gap of 45 minutes or more, its minutes (new minutes with what they hold, writing, at HH:MM, failed — try again; a call or memo whose transcription failed says so and why — how to retry, never \"transcribing\" for good; the call being recorded says recording…), prep, import the Teams transcript, recording not available for Zoom/Meet; Show N skipped; ⋯ or right-click opens Calendar's menu for it, a click (or the menu's Show details / Add to a thread…) Calendar's card for it as a popover beside the line clicked (right of it, else left, level with it, inside Today; × closes it, as does a click on the same line again); a meeting's call is the one of its event recorded at its time — saved with this start (an arm, however early it was joined) or started from 10 min before it to its end, at least 30 min after its start; the one being recorded first, else the nearest its start — so a meeting moved or held again later the same day is one line for that recording, and a call of the same event at another time is a line of its own with its own minutes, never the meeting's; the greeting counts the meetings you go to; the skipped, shown, in time order; a list cut by its card fades at the bottom while there is more; it opens with the row before now whole at its top (late in the day, the nearest whole row)",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-03",
+   "feature": "My work · this week lists the tasks due by the week's end or late (late first) with whose they are, a date icon and the thread; a card opens its details; its icons close it (asking first) or open the Claude dialog",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-04",
+   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply (Teams' logo or an envelope) and My work's ✦: its Claude dialog on the item itself (no task made) — Work on it types the item's link (echo://needs/<id>, read with `echoctl read`) into the Claude panel, Yolo hands it over in the background; either way it then leaves the list; I'll do it (a task in a thread) and Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item) from ⌘K; each action named in its label and tooltip",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-05",
+   "feature": "Cards sent to Today by routines or plugins show until Got it",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-06",
+   "feature": "A day with nothing says \"A quiet day\"; ⌘K on Today acts on its items",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-07",
+   "feature": "Won't do runs Claude in the background with no tools (the item's thread's AI profile or the default), the item's words as data and the comment as the only instructions; Today → Asks shows \"Won't do · for X: why\", working, or why it failed; no message unless the comment asks for one",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-08",
+   "feature": "A Won't do whose comment asks for a reply or a forward gets a draft in Asks, back by the item's own Teams chat or mail, with Send, Edit and Drop: nothing goes out before Send (through Microsoft 365, as Read and reply); Drop leaves nothing",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-09",
+   "feature": "After a failed calendar sync (it keeps the last agenda) Your day lists no meeting of an earlier day as today's, and once a sync has failed today with no good one today it says the calendar couldn't be read today (not before the day's first sync)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-10",
+   "feature": "Today's widgets: echoctl widget list gives the catalog (id, part, label, kind, sizes S/M/L, heights 1/2 rows, hug or fill, temporal) and widget show a widget's data — the same Today gets (/api/today is made from the widgets' providers; /api/widgets the catalog); a temporal widget's data says empty when it has nothing; an unknown id names widget list",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-11",
+   "feature": "Today's layout on this computer (today-layout.json): which widgets, in what order, rows, sizes and heights (1 or 2 rows); echoctl today shows it, add / move (before, after, above, below) / size / height / remove / reset change it, refusing an unknown widget, a size or height it doesn't take, one not drawn on Today yet; the page draws its parts in that order, a row's widgets side by side; the default is Today as it was",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-12",
+   "feature": "Today lays itself out by its own width: 1–3 columns (fold under 340 px a column, unfold at 380), each row of its layout filling the width by its widgets' sizes (S 1, M 2, L 3), a row too wide narrowing its widest first then wrapping, an empty temporal widget taking no space and the widgets after it moving up into its place while they fit at their size (not a fill one, not into a fill line, not beside a two-rows-high one; edit mode shows the layout as set); re-laid when the menu, the right panel or the window changes it; nothing reorders; a line keeps its widgets' spans, a fill one too (a lone S is a third of three columns, Your day at M two thirds) — only a page of one line takes the whole width",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-13",
+   "feature": "Next meeting on Today (core:calendar.next, put on with echoctl today): S the time, subject and buttons (Show prep or Prepare, Join & record with its language); M also what is expected from you; L the prep brought to the front — walk in knowing (In short, up to 3 expected), who's coming (the invite's answers, a newcomer named), ask them (up to 2 open questions), records with the call, Open prep / Ask Claude about it; under way it says Now; none left today, no widget and no gap",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-14",
+   "feature": "Your day as a calendar (core:calendar.calendar: the hours down, 9–18 at least, a block a meeting in its lane, overlaps side by side, not answered / maybe dashed, the line now, opens scrolled to now) and as a strip (core:calendar.strip: the day in one bar, two at once half height, hour ticks, the line now), put on Today with echoctl today; their blocks act as Your day's lines: click (or Enter) → Calendar's card as a popover beside the block clicked, right-click → Calendar's menu",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-15",
+   "feature": "Edit Today: a pencil in the head frames each widget (grip, name, its sizes, its heights 1 / 2 when it takes both, ×; content inert; an empty temporal one says what it is); drag a widget onto another's top or bottom quarter for a new row above / below, its left or right half to sit before / after it, or onto the end for a last row; Add a widget on the right (search, parts, a row a widget with Add or on Today, the picked one previewed at a size it takes, Add at that size or drag it in); Reset to the default; Done; every change is the layout file echoctl today edits; by keyboard each frame's ← ↑ ↓ → move it (the focus stays on the moved widget's button), × leaves the focus on a neighbour, \"Add a widget\" in the head brings the panel back; a frame never overflows its row",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-16",
+   "feature": "The day's choices (core:calendar.choices, temporal, put on with echoctl today): meetings you accepted at once (not over) with the one Echo suggests and why — only for a reason that sets exactly one apart (you organise it, you're a required attendee where the others aren't required, a promise of yours in its thread is due, a client's), else 'your call' and none suggested; Keep buttons — Keep declines the others after a second click naming them; invites still to answer with Echo's suggestion (decline when you go elsewhere then, naming the one it suggests keeping; accept when free) and Accept / Maybe / Decline; an answer goes to the organiser through Echo's Microsoft 365 sign-in only on the click (m365::event_respond, refused in runs), the agenda takes it at once; a failure says why",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-17",
+   "feature": "Threads at a glance (core:tasks.glance, M/L) and Done this week (core:tasks.done, S/M), put on with echoctl today: each open thread's tasks as a traffic-light bar — done this week (green), to do (amber), waiting on someone or blocked (red) — and its total, busiest first (M 5, L 10, the rest in Threads), its name opening its Work; the tasks done since Monday counted, at M the latest four with their thread, each opening its details; echoctl widget show gives the same data",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-18",
+   "feature": "Recorded this week (core:calls.week, S/M, put on with echoctl today): since Monday (local time), the calls recorded — memos counted, as in the Calls list — the time recorded (minutes under an hour, else hours to one decimal) and how many of them have minutes; at M a bar a day, Monday to Sunday, as tall as its calls, today marked, each day read as text; a week with none says so, zeros and empty bars; a click opens Calls; echoctl widget show gives the same data",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-19",
+   "feature": "A plugin's widgets on Today: declared in echo-plugin.json `widgets` (id, label, about, kind stat|stats|list|status|card, sizes, heights (1 and / or 2 rows; 1 when not said), height, refresh at least 60 s; checked at install; the sheet says 'Adds N widgets you can put on Today'), in the catalog as plugin:<id>:<widget> under the plugin's name, put on with echoctl today or Add a widget; data from the host half's ctx.widgets.provide (asked by Echo in the background, 5 s, again after refresh; given the size the widget has on Today — S, M or L, off Today the first it takes — and asked again when it is resized) or set / clear (cleared: off Today), the last answer drawn at once (a failed ask keeps it, dated); Echo draws each kind, the plugin's text escaped, links only to echo://, data it can't draw says why; one its plugin hasn't answered yet holds its place with a placeholder (the answer fills it, nothing else moves); one never answered whose ask failed keeps its frame and label with 'Couldn't get its data — <why>' (escaped) until its plugin answers; one answered with nothing takes no place",
+   "priority": "high",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "today/TC-034"
+   ]
+  },
+  {
+   "id": "F-TODAY-20",
+   "feature": "Each source that sends Today a card (a routine's about line, else its title) is a widget of its own, core:routines.card.<name> under Routines (its words and a short hash), sizes M/L, on Today while it has an unread card: put where you want it, its card drawn there with Got it; Routine cards shows the rest",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-21",
+   "feature": "Today as it comes (TodayResponsive A / TodayDense): Your day's list holding the first column (as tall as what's beside it; the list stays in view as Today scrolls, the view's height at most, opened on now, scrolling inside); beside it Next meeting and Needs you now side by side, the day's choices, routine cards, My work; at 2 columns Your day keeps the first and the rest stack in the second; at 1 column Your day becomes the strip on top; a fill widget alone on the layout's first row at size S holds a column in any layout",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-22",
+   "feature": "A plugin's widget kinds beyond the first five: chart (bar, bars, line — points titled with their value, the last one marked), a stat's progress bar, and on any kind a link (echo:// opens in Echo; https asks 'Open <host> in the browser?' before it leaves) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-23",
+   "feature": "A widget's settings: Echo's (Threads at a glance and Done this week: period week or month) and a plugin's (declared in its manifest's widget `params`: choice, bool, thread, client), set in edit mode (⚙ on the frame) or with echoctl today set <widget> <key> <value> — refused when it isn't one the widget takes — kept on Today's layout, defaults filled in; a plugin's provider gets them as params and is asked again when one changes; a widget set to a thread or a client (a setting of that type) names it in its header — \"Last builds · Acme rollout\" — whatever the plugin",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-24",
+   "feature": "A plugin's own page as a widget (kind page, the manifest needing a window half): its window half draws it with ctx.widgets.draw(widget, ({data, size, theme}) => HTML) inside Echo's frame, from the data its host half gives (provide / set); the plugin escapes its text (ctx.ui.esc); unloaded with the plugin (off: not drawn, its place kept); until its window half is loaded, a placeholder holds its place",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [],
+   "cases": [
+    "today/TC-034"
+   ]
+  },
+  {
+   "id": "F-TODAY-25",
+   "feature": "A widget two rows high (height 2: Your day, My work, Needs you now, Next meeting, the day's choices, Threads at a glance, Routine cards; a plugin's that declares it, with 1) takes its row and the next: on the left when it is first in its row, on the right when it is last (nothing reorders), the rest of its row and the next row laid beside it in the columns left, its content scrolling inside when taller than they are; in the middle of its row, in the rows another one takes, with no room beside it (one column, or as wide as the page) or nothing beside it, it is one row high, and its edit header says so (2 pressed, 'drawn one row here'); a height written by hand that isn't 1 or 2 is 1",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-26",
+   "feature": "My work shows a task that looks done (F-WORK-18) with its \"Looks done — …” line and Close / Not yet on its card, also when it isn't due this week; a guessed due (F-WORK-19) neither puts a task in My work nor makes it late there",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

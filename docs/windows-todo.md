@@ -4,7 +4,7 @@ The macOS app is the reference. On Windows the app builds, records (WASAPI proce
 `ms-teams.exe` + mic), transcribes, shows the tray and the Echo window, and talks to Microsoft
 365. What follows is either not built yet or never run on a real Windows machine. Build and
 test on Windows itself: `cargo build --release -p echoctl` (with whisper.cpp), then
-`scripts\package-windows.ps1`, and the cases in `tests/10-windows.md`.
+`scripts\package-windows.ps1`, and the cases in `tests/cases/windows/`.
 
 Code markers: `git grep "TODO(windows)"`.
 
@@ -104,7 +104,7 @@ Code markers: `git grep "TODO(windows)"`.
   from npm, `app::find_program`), `--plugin-dir` points at the plugin next to `echoctl.exe`,
   the `//C:/…` permission-rule paths match Claude Code's Windows path format, the run's
   `PATH` puts `echoctl.exe` first, Show log opens `claude.log` in Notepad, and the signed-out
-  and bad-model messages appear (TC-CLA-009 … 013).
+  and bad-model messages appear (`tests/cases/claude/`, once TC-CLA-009 … 013).
 - **Plugin script** `plugin/scripts/echoctl.cmd` and the mod (`plugin/hooks/register.tsx`):
   finding the CLI, starting the app, the live pane.
 - **Dialogs** (WScript popup, PowerShell InputBox for Minutes model and other text prompts) and

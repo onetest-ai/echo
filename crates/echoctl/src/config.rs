@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::paths;
 
 /// Call languages a new data folder starts with (the team's: English, Ukrainian, Russian,
-/// Spanish). `echoctl config --languages any` clears them.
+/// Spanish), English its calls' default. `echoctl config --languages any` clears them (English only).
 pub const DEFAULT_LANGUAGES: &[&str] = &["en", "uk", "ru", "es"];
 
 fn default_languages() -> Vec<String> {
@@ -28,19 +28,23 @@ impl Default for Config {
 pub struct Config {
     /// Active transcription model (a catalog name, e.g. "large-v3-turbo-q5_0")
     pub model: Option<String>,
-    /// Languages spoken in this workspace's calls (ISO codes, e.g. ["en", "uk", "ru"]).
-    /// Language detection runs per utterance and may only pick from this list, which stops
-    /// Whisper confusing close languages (uk/ru) or drifting to unrelated ones. Empty = any;
-    /// a new data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
+    /// The languages offered when a call's language is chosen (ISO codes, e.g. ["en", "uk", "ru"]); the first is a
+    /// new call's when nothing chose one (`call_language::default_language`). Nothing detects a call's language. A new
+    /// data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
+    /// Announcements already answered (`announce::LIST`, by id): never shown again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub announcements_seen: Vec<String>,
     /// Terms for every call (names, products, acronyms the user wants always): `echoctl vocab
     /// add --always`. Learned terms live in `learned`, each tied to its meetings (`vocab.rs`).
     #[serde(default)]
     pub vocabulary: Vec<String>,
     /// Terms learned from calls, each with the subjects and people it came up with; used only
-    /// in calls like those. None = not yet migrated from the old one-list `vocabulary`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// in calls like those. None = a config from before learned terms (no `learned` key), whose
+    /// one-list `vocabulary` `vocab::migrate` scopes once. Always written, `[]` for None: a config
+    /// this build saved is never taken for an old one, or its every-call terms would be moved (#106).
+    #[serde(default, serialize_with = "learned_always")]
     pub learned: Option<Vec<crate::vocab::Learned>>,
     /// Calls not on the agenda: "ask" (prompt when the call starts) or "manual" (never prompt;
     /// the user says "record" → `echoctl arm`). Default: ask.
@@ -72,6 +76,17 @@ pub struct Config {
     /// default: a full menu bar hides icons, and Echo then looked gone.
     #[serde(default)]
     pub hide_dock_icon: bool,
+    /// Windows: no system title bar — Echo's strip is the top of the window, with its own minimise, maximise and close
+    /// (#76). Default on (unset = on); off only when the user turned it off — and only then written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_title_bar: Option<bool>,
+    /// Where a mail draft goes (`drafts::setting`): `m365`, `mail-app` or `app:<name or program>`. Unset: Microsoft 365
+    /// Drafts when signed in, else the default mail app (#135).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drafts: Option<String>,
+    /// The folder OneDrive keeps on this computer (`onedrive::root`): unset finds it, `none` turns it off (#469).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onedrive: Option<String>,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,7 +96,8 @@ pub struct Config {
     #[serde(default)]
     pub scheduled: Option<String>,
     /// Command printing calendar events as JSON (msgraph shape) for `agenda sync`; default: the
-    /// msgraph skill's CLI when installed. Empty = use the default.
+    /// msgraph skill's CLI when installed. Empty = no skill calendar (test data: never the user's real one); Echo's
+    /// own Microsoft 365 sign-in, when this config folder has one, still syncs.
     #[serde(default)]
     pub calendar_command: Option<Vec<String>>,
     /// Run whisper.cpp on the GPU: true / false; unset = the GPU unless it failed its check
@@ -94,14 +110,19 @@ pub struct Config {
     /// The user (name/email) — splits attendees into colleagues vs external in notes.
     #[serde(default)]
     pub me: Option<crate::meeting::Person>,
-    /// Record the call app's window text during calls (`<call>/ui.jsonl`, macOS Accessibility),
-    /// used to name remote speakers. Default on (when Accessibility is granted).
+    /// Read the call app's window during calls (Accessibility): who speaks (`<call>/ui.jsonl`), mute sync, the call's
+    /// name and when it began. Off: Echo doesn't touch the call app's window at all (Teams answers every read itself,
+    /// on its own CPU); shared-screen snapshots keep their own switch. Default on (when Accessibility is granted).
     #[serde(default)]
     pub capture_ui: Option<bool>,
     /// Read the meeting's Teams chat during calls (`<call>/chat.json`, needs the Microsoft 365
     /// sign-in). Default on.
     #[serde(default)]
     pub capture_chat: Option<bool>,
+    /// Show colleagues' photos (from Microsoft 365, their own sign-in: `graph::login_photos`) in place of initials.
+    /// Default off.
+    #[serde(default)]
+    pub people_photos: Option<bool>,
     /// Microsoft 365 app registration (public client) the calendar sign-in uses; default
     /// CodeMie's. An organisation may register its own public client with redirect http://localhost
     /// and delegated Calendars.Read, and put its id here.
@@ -155,6 +176,10 @@ impl Config {
     pub fn notes_model_label(&self) -> String {
         self.notes_model.clone().filter(|m| !m.trim().is_empty()).unwrap_or_else(|| DEFAULT_NOTES_MODEL.into())
     }
+}
+
+fn learned_always<S: serde::Serializer>(l: &Option<Vec<crate::vocab::Learned>>, s: S) -> Result<S::Ok, S::Error> {
+    l.as_deref().unwrap_or(&[]).serialize(s)
 }
 
 fn path() -> PathBuf {
@@ -220,9 +245,40 @@ impl Config {
     }
 }
 
+/// The user lets Echo read the call app's window (`Config::capture_ui`, default on): names, mute sync, the call's
+/// name. Off, the call watcher doesn't touch the call app's window at all.
+pub fn reads_call_window() -> bool {
+    !fed_from_files() && Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true)
+}
+
+/// A test call (debug builds: fed from files, `ECHOCTL_TEST_CALL_FILE`, or the TestCall app, `ECHOCTL_CALL_APP_BUNDLE`):
+/// the real Teams on this computer is never read or captured for it (test data must never hold the user's own screens
+/// and names).
+pub fn fed_from_files() -> bool {
+    let fed = std::env::var("ECHOCTL_TEST_CALL_FILE").is_ok_and(|v| !v.is_empty()) || crate::apps::test_call_app().is_some();
+    cfg!(debug_assertions) && fed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_call_window_is_read_only_when_allowed_and_never_for_a_call_fed_from_files() {
+        let (_env, _root) = crate::paths::testenv::folders("config-call-window");
+        assert!(reads_call_window(), "on by default");
+        let mut c = Config::load().unwrap();
+        c.capture_ui = Some(false);
+        c.save().unwrap();
+        assert!(!reads_call_window(), "the user turned it off");
+        c.capture_ui = Some(true);
+        c.save().unwrap();
+        std::env::set_var("ECHOCTL_TEST_CALL_FILE", _root.join("in-call"));
+        let fed = (reads_call_window(), fed_from_files());
+        std::env::remove_var("ECHOCTL_TEST_CALL_FILE");
+        let debug = cfg!(debug_assertions);
+        assert_eq!(fed, (!debug, debug), "a test call never reads the real Teams window, nor captures its screens");
+    }
 
     #[test]
     fn automatic_minutes_count_from_when_they_were_turned_on() {

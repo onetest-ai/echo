@@ -95,7 +95,9 @@ echoctl project ledger <id> edit '{"op":"undo","target":"<mid of the edit>"}'
 - `kind`: epic, story, task, risk, decision, question. A task's `parent` is a story; a story's, an epic.
 - `set` fields: title, state (open, in_progress, blocked, done, cancelled), internal_owner, client_owner, due
   (YYYY-MM-DD), parent, type (action, session, dependency), client_owed, waiting_for, links (`[{title, url}]`,
-  https), description, delegated_by, decided_by, likelihood / impact (low, med, high).
+  https), description, delegated_by, decided_by, likelihood / impact (low, med, high); who does a task — mode
+  (claude, manual), how (≤ 200 characters, by hand), prompt (≤ 600, what Claude hands back), skill (a skill's id).
+  Until the user sets a mode, Echo guesses one (`echoctl classify`); `echoctl read` on a task says which.
 - "Done", "Me", owners: use the names the tree uses. The user is "Me".
 
 ## Calls
