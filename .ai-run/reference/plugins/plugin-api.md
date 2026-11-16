@@ -41,7 +41,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
 | `files.read` | other apps' files, each named in full, read with `ctx.system.readFile(entry)` |
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
-| `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); `["dictionary"]` to add to the dictionary |
+| `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -137,8 +137,41 @@ plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source` (`calls` is named on the sheet but not served yet). `ctx.echo.dictionary.add(...)` under
+`source` (`calls` is named on the sheet but not served yet); a `threads` row is `{id, name, client, stage, group}` of
+an open thread (`group`: `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under
 `uses.echo.write: ["dictionary"]`. Evidence: `plugins::ECHO_READS`, `share::dictionary_add`
+
+What `uses.echo.write` may name, and the sheet's line for each (`plugins::ECHO_WRITES`):
+
+| Write | Sheet | Calls |
+|---|---|---|
+| `dictionary` | Adds names to your Echo dictionary | `ctx.echo.dictionary.add` |
+| `thread_stage` | Changes your threads' stage | `ctx.threads.setStage` |
+| `tasks` | Adds and updates tasks in your threads | `ctx.tasks.upsert`, `ctx.tasks.close` |
+
+Each is refused while Claude prepares and asks, and in a Yolo run on another thread than its own.
+
+- `ctx.threads.setStage(thread, stage, reason)` → `{applied, why?}`. `stage` one of `lead`, `proposal`, `negotiation`,
+  `kickoff`, `active`, `on_hold`, `wrap_up`, `done`, `lost`, `cancelled`; the stage history keeps the plugin's id,
+  name and reason (≤ 300 chars). Once the user changes the stage away from what this plugin set last (a stage set before
+  its first write doesn't count), `{applied: false, why: "the user set this thread's stage themselves"}` until the user
+  lets it set the stage again (`echoctl project set <id> --stage-back-to <plugin>`, the Profile's button). The same
+  stage again: `{applied: true}`, nothing written. Evidence: `projects::plugin_set_stage`, `projects::stage_held_from`
+- `ctx.tasks.upsert(thread, {key, title, due?, owner?, state?, url?, reason?, propose?})` →
+  `{task, applied, proposed, ignored, why?}`: the plugin's task of that `key` (≤ 120 chars, its own id), created in a
+  story named after the plugin in the thread's first workstream, or updated. `title` ≤ 200 chars; `due` `YYYY-MM-DD` or
+  null; `owner` a name ≤ 80 chars; `state` `open`, `in_progress`, `blocked`, `done`, `cancelled`; `url` https, shown as
+  the task's link titled with the plugin's name. A field left out stays as it is. The same values again write nothing;
+  `ignored` lists the fields the user set (kept as they are), and a task the user deleted or merged takes no write
+  (`why`). Closing a key never added: `{task: null, applied: false, why: "no open task of that key"}`.
+- `ctx.tasks.close(thread, key, reason, {propose})` — the task done, with why.
+- `propose: true`: the write waits in the thread's Work → To review and the Inbox for the user's Yes (`task: null`
+  until then for a new one); a newer proposal of the key replaces the pending one; after No the same write answers
+  `{proposed: false, why: "the user said no to this"}` (a change proposes again); closing a key never added withdraws
+  its proposal.
+
+Each write is in the task's History as the plugin's, with its reason. Evidence: `ledger::plugin_upsert`,
+`ledger::plugin_close`
 
 ## Folders and files
 

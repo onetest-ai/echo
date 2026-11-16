@@ -23,9 +23,27 @@ function workOpenCount() {
   if (!w || !w.nodes) return 0
   return Object.values(w.nodes).filter((n) => (n.kind === 'story' || n.kind === 'task') && !CLOSED_STATES.includes(n.state)).length
 }
-/** What waits for the user: suggested moves and merges, and "done" claims the verifier only half-believed. */
+/** A plugin's proposed write (`ledger::plugin_upsert`, propose) as one line of text: "Acme Tracker suggests a task: Send
+ *  the quote · due 2026-11-21" or "Acme Tracker suggests for Send the quote: done". Plain text: the caller escapes it. */
+function proposalText(p) {
+  const s = p.set || {}
+  const parts = [s.state ? STATE_LABEL[s.state] || s.state : '', 'due' in s ? (s.due ? `due ${s.due}` : 'no due date') : '', s.internal_owner ? `owner ${s.internal_owner}` : '', s.links && s.links.length ? 'its link' : '']
+  const who = p.plugin_name || p.plugin
+  if (p.op === 'create') return `${who} suggests a task: ${s.title || ''}${parts.filter(Boolean).filter((x) => x !== STATE_LABEL.open).map((x) => ` · ${x}`).join('')}`
+  return `${who} suggests for ${p.title || p.node}: ${[s.title ? `title “${s.title}”` : '', ...parts].filter(Boolean).join(' · ')}`
+}
+/** A plugin's write in a task's history: "Acme Tracker created it — stage moved" / "Acme Tracker: done · kept yours: due". */
+function pluginHistory(h) {
+  const who = h.plugin_name || h.plugin || 'A plugin'
+  const s = h.set || {}
+  const what = h.op === 'create' ? 'created it' : Object.keys(s).filter((k) => !(h.ignored || []).includes(k)).map((k) => k === 'state' ? STATE_LABEL[s.state] || s.state : k === 'due' ? (s.due ? `due ${s.due}` : 'no due date') : k === 'internal_owner' ? `owner ${s.internal_owner || 'nobody'}` : k === 'links' ? 'its link' : `title “${s.title}”`).join(' · ')
+  const kept = (h.ignored || []).length ? ` · kept yours: ${h.ignored.map((k) => k === 'internal_owner' ? 'owner' : k === 'links' ? 'link' : k).join(', ')}` : ''
+  return `${who}${h.op === 'create' ? ' ' : ': '}${what || 'nothing changed'}${kept}${h.reason ? ` — ${h.reason}` : ''}`
+}
+/** What waits for the user: suggested moves and merges, "done" claims the verifier only half-believed, and plugins'
+ *  proposed tasks and changes. */
 function workToReview(w) {
-  const out = []
+  const out = (w.proposals || []).map((p) => ({ p }))
   for (const n of Object.values(w.nodes || {})) {
     for (const s of n.suggestions || []) if (s.status === 'pending') out.push({ n, s })
     const last = (n.history || []).filter((h) => h.type === 'agent' && h.effect).slice(-1)[0]
@@ -312,20 +330,26 @@ function projectWork(p) {
   // The plugins' items of this thread sit under the bar in every layout (none, board, tree).
   const head = `${viewTabs()}<div class="wk-bar">${layoutChip}${kindChip}${ownerChip}<button class="fchip${V.open ? ' on' : ''}" data-pj="open-only" aria-pressed="${!!V.open}">Open only</button>${V.layout === 'board' ? boardChips() : ''}<span class="grow"></span><span class="wk-sync">${syncText}</span><button class="link-btn" data-pj="sync"${sync.state === 'running' ? ' disabled' : ''}>Sync now</button></div>${threadWorkRows(w)}`
   const { pass, board } = workFilter(V, w.me || {})
-  if (!all.length) {
-    return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
-  }
   // To review: one quiet panel — its head once ("To review · 3", folds it), a row each on one line: the question and the
   // words it came from cut with … (whole in the tooltip), its two buttons.
   const rv = (html, whole, yes, no) => `<div class="wk-rv" role="group" aria-label="To review"><span class="wk-rv-q" title="${esc(whole)}">${html}</span>${yes}${no}</div>`
+  const decide = (mid) => `<button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: mid }))}'>Yes</button>`
+  const refuse = (mid) => `<button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: mid }))}'>No</button>`
   const reviewList = review.length ? `<div class="wk-review${S.pj.reviewFolded ? ' folded' : ''}"><button class="wk-rv-h" data-pj="review-fold" aria-expanded="${!S.pj.reviewFolded}">${CHEV(!S.pj.reviewFolded)} <span class="wk-warn">To review</span> <span class="wk-rv-n">${review.length}</span></button>${S.pj.reviewFolded ? '' : review.map((r) => {
+    if (r.p) {
+      const q = proposalText(r.p)
+      return rv(`${esc(q)}${r.p.reason ? ` <span class="set-sub">${esc(r.p.reason)}</span>` : ''}`, `${q}${r.p.reason ? ` — ${r.p.reason}` : ''}`, decide(r.p.mid), refuse(r.p.mid))
+    }
     if (r.s) {
       const q = `${r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under'} ${(N[r.s.to] || {}).title || r.s.to}?`, w = `${r.n.title} — ${r.s.quote ? `“${r.s.quote}”` : r.s.note || ''}`
-      return rv(`${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(w)}</span>`, `${q} ${w}`, `<button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button>`, `<button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button>`)
+      return rv(`${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(w)}</span>`, `${q} ${w}`, decide(r.s.mid), refuse(r.s.mid))
     }
     const w = `“${r.weak.quote || ''}”`
     return rv(`Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">${esc(w)}</span>`, `Is ${r.n.title} done? ${w}`, `<button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button>`, `<button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button>`)
   }).join('')}</div>` : ''
+  if (!all.length) {
+    return `${head}${reviewList}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
+  }
   if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, board)}`
   const rows = []
   const walk = (id, level) => {
@@ -418,12 +442,14 @@ function workPanel() {
     const what = h.op === 'looks' ? h.what : h.by === 'human' && (h.op === 'xref' || h.op === 'unxref') ? `${h.op === 'xref' ? 'you linked it to' : 'you unlinked'} ${(projById(h.thread) || {}).name || h.thread} · ${h.target}${h.op === 'xref' ? (h.kind === 'same' ? (h.master === 'here' ? ' (the same work, done here)' : ' (the same work, done there)') : h.kind === 'depends_on' ? ' (waits on it)' : ' (it waits on this)') : ''}`
       : h.from ? `${h.effect || h.op} · heard in ${(projById(h.from.thread) || {}).name || h.from.thread}`
       : h.by === 'human' ? humanHistory(h, rt && rt.word, (id) => (N[id] && N[id].title) || '')
+      : h.by === 'plugin' ? pluginHistory(h)
       // A routine's or Yolo's run (#590): applied as yours, said as its own.
       : h.by === 'run' ? humanHistory(h, rt && rt.word, (id) => (N[id] && N[id].title) || '').replace(/^you /, "Echo's run ")
       : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
       : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
       : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${(N[h.depends_on] && N[h.depends_on].title) || 'another item'}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
     const mark = h.by === 'human' || h.by === 'run' ? (h.mid && h.op !== 'create' ? `<button class="link-btn" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'undo', target: h.mid }))}'>undo</button>` : '')
+      : h.by === 'plugin' ? ''
       : h.applied === false && h.verdict === 'supports' ? '<span class="wk-v weak">kept yours</span>'
       : h.verdict === 'supports' || (h.op === 'create') ? '<span class="wk-v supports">verified</span>'
       : h.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>' : h.verdict === 'wrong' ? '<span class="wk-v wrong">wrong</span>'

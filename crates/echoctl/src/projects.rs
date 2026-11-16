@@ -319,6 +319,9 @@ pub struct Project {
     /// Every stage it was in, oldest first (the first is where it started).
     #[serde(default)]
     pub stages: Vec<StageChange>,
+    /// When the user let a plugin set the stage again after changing it themselves, by plugin id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_handed: BTreeMap<String, String>,
     /// `YYYY-MM-DD`: calls before it don't belong.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
@@ -710,7 +713,8 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         color: COLORS[n % COLORS.len()].to_string(),
         icon: None,
         stage,
-        stages: vec![StageChange { stage, at: now.clone(), reason: None }],
+        stages: vec![StageChange { stage, at: now.clone(), reason: None, by: None, by_name: None }],
+        stage_handed: BTreeMap::new(),
         since: None,
         history_before: None,
         rules: vec![],
@@ -743,7 +747,7 @@ pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Pr
     f(&mut p)?;
     p.id = id.to_string();
     if p.stage != stage {
-        p.stages.push(StageChange { stage: p.stage, at: Utc::now().to_rfc3339(), reason: None });
+        p.stages.push(StageChange { stage: p.stage, at: Utc::now().to_rfc3339(), reason: None, by: None, by_name: None });
     }
     check(&p, &clients()?)?;
     write_json(&profile_path(id)?, &p)?;
@@ -1537,6 +1541,7 @@ mod tests {
             icon: None,
             stage: Stage::Active,
             stages: vec![],
+            stage_handed: BTreeMap::new(),
             since: None,
         history_before: None,
             rules: vec![Rule::People { domains: vec![] }],

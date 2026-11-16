@@ -1,0 +1,13 @@
+{
+  "id": "tracker-demo",
+  "name": "Tracker Demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: moves a thread's stage and keeps its own tasks in a thread, as a tracker would (tests/cases/plugins/TC-054, TC-055).",
+  "main": "main.js",
+  "uses": {
+    "echo": {
+      "read": ["threads"],
+      "write": ["thread_stage", "tasks"]
+    }
+  }
+}

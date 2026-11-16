@@ -15,6 +15,16 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
 `ledger::human_event` records the user's own edit: it pins the field, and an agent's later evidence lands in history
 without changing it; each such edit can be undone.
 
+## A plugin's writes
+
+- `ledger::plugin_upsert` / `ledger::plugin_close` write a plugin's own tasks (events `by: plugin`, its id and key):
+  a new one a `create` in the plugin's story (made by `plugin_story` on its first applied task), a change a `plugin`
+  event `set`; `fold` applies a field unless the user pinned it, and only to the task of that plugin and key. With
+  `propose` the event waits in `Tree::proposals` until the user's `accept` (`reject`: `Tree::refused`, the same again
+  stays quiet).
+- `projects::plugin_set_stage`: a `StageChange` with `by` and `by_name`; `projects::stage_held_from` says when the user
+  overrode it, `Project::stage_handed` when they let it set the stage again (`projects::hand_stage_back`).
+
 ## Threads and clients
 
 - A thread (project) changes through `projects::update`: projects lock, load, `check`, write. A client through

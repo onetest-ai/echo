@@ -329,12 +329,19 @@ pub(super) fn describe_folders(v: &Value) -> Result<String> {
 /// What `uses.echo.read` may name, with how the sheet says it.
 pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("clients", "the names of your clients"),
-    ("threads", "the names of your threads"),
+    ("threads", "your threads' names and stages"),
     ("people", "who the people in your threads are"),
     ("dictionary", "your dictionary"),
     ("sources", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
     ("source", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
     ("calls", "your calls' minutes and transcripts"),
+];
+
+/// What `uses.echo.write` may name, with the sheet's line for each.
+pub(super) const ECHO_WRITES: &[(&str, &str)] = &[
+    ("dictionary", "Adds names to your Echo dictionary"),
+    ("thread_stage", "Changes your threads' stage"),
+    ("tasks", "Adds and updates tasks in your threads"),
 ];
 
 pub(super) fn describe_echo(v: &Value) -> Result<String> {
@@ -353,13 +360,15 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
             }
         }
     }
-    let unknown: Vec<&str> = read.iter().chain(&write).map(String::as_str).filter(|k| !ECHO_READS.iter().any(|(x, _)| x == k) && *k != "dictionary").collect();
+    let unknown: Vec<&str> = read.iter().filter(|k| !ECHO_READS.iter().any(|(x, _)| *x == k.as_str())).chain(write.iter().filter(|k| !ECHO_WRITES.iter().any(|(x, _)| *x == k.as_str()))).map(String::as_str).collect();
     let mut lines = vec![];
     if !said.is_empty() {
         lines.push(format!("Reads {} in Echo", join_words(&said)));
     }
-    if write.iter().any(|w| w == "dictionary") {
-        lines.push("Adds names to your Echo dictionary".to_string());
+    for (k, line) in ECHO_WRITES {
+        if write.iter().any(|w| w == k) {
+            lines.push(line.to_string());
+        }
     }
     if !unknown.is_empty() {
         lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
@@ -386,6 +395,15 @@ pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sheet_says_each_write_to_echos_data_and_names_one_it_doesnt_know() {
+        let line = describe_echo(&serde_json::json!({"read": ["threads"], "write": ["thread_stage", "tasks"]})).unwrap();
+        assert_eq!(line, "Reads your threads' names and stages in Echo. Changes your threads' stage. Adds and updates tasks in your threads");
+        let only = describe_echo(&serde_json::json!({"write": ["tasks"]})).unwrap();
+        assert_eq!(only, "Adds and updates tasks in your threads", "a sheet that adds one asks again: its line differs");
+        assert!(describe_echo(&serde_json::json!({"write": ["calendar"]})).unwrap().contains("Asks for things this Echo doesn't have yet: calendar"));
+    }
 
     #[test]
     fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {

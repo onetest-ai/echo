@@ -145,6 +145,9 @@ const PRELUDE: &str = r#"
       get: (thread, key) => call('threads.get', [String(thread), String(key)]),
       set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
       list: (key) => call('threads.list', String(key)),
+      /** A thread's stage (uses.echo.write: thread_stage): a stage id, with why — {applied, why?}; once the user changed
+       *  the stage away from this plugin's, not applied until they let it set the stage again. */
+      setStage: (thread, stage, reason) => call('threads.set_stage', [String(thread), String(stage), reason == null ? null : String(reason)]),
     },
     /** Values the plugins of its marketplace share, one for the computer: get(key) → the value or null, set(key, value)
      *  (null removes it; created when it isn't there). `key` is `<ns>.<name>`, `ns` the marketplace's declared name in
@@ -189,6 +192,13 @@ const PRELUDE: &str = r#"
       read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
       /** Names for one thing into the user's dictionary (uses.echo.write: dictionary): {name, synonyms, spellings, kind, client}. */
       dictionary: { add: (term) => call('echo.dictionary.add', term) },
+    },
+    /** Its own tasks in a thread (uses.echo.write: tasks), by its key: upsert {key, title, due?, owner?, state?, url?,
+     *  reason?, propose?} → {task, applied, proposed, ignored, why?}; again with the same values writes nothing; a
+     *  field the user set stays theirs (ignored). propose: the user's Yes first. */
+    tasks: {
+      upsert: (thread, task) => call('tasks.upsert', [String(thread), task || {}]),
+      close: (thread, key, reason, opts) => call('tasks.close', [String(thread), String(key), reason == null ? null : String(reason), !!(opts && opts.propose)]),
     },
     /** The folders the user gave this plugin (Echo's picker), read-only: paths relative to one of them. */
     fs: {
@@ -1208,7 +1218,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "people" => crate::share::people()?,
                 "dictionary" => crate::share::dictionary()?,
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
-                "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client})).collect::<Vec<_>>()),
+                "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group()})).collect::<Vec<_>>()),
                 o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source)"),
             }
         }
@@ -1218,6 +1228,27 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 bail!("{id} didn't ask to add to your dictionary when it was installed");
             }
             crate::share::dictionary_add(id, arg)?
+        }
+        "threads.set_stage" | "tasks.upsert" | "tasks.close" => {
+            read_only_here("changing your threads")?;
+            let what = if op == "threads.set_stage" { "thread_stage" } else { "tasks" };
+            if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == what)) {
+                bail!("{id} didn't ask to change your threads' {} when it was installed", if what == "tasks" { "tasks" } else { "stage" });
+            }
+            let thread = arg[0].as_str().unwrap_or("");
+            // A Yolo run changes only its own thread.
+            if crate::guard::run_thread().is_some_and(|t| t != thread) {
+                bail!("a run on one thread can't change another");
+            }
+            let pname = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
+            let out = match op {
+                "threads.set_stage" => crate::projects::plugin_set_stage(thread, id, &pname, crate::projects::Stage::parse(arg[1].as_str().unwrap_or(""))?, arg[2].as_str())?,
+                "tasks.upsert" => crate::ledger::plugin_upsert(thread, id, &pname, &arg[1])?,
+                _ => crate::ledger::plugin_close(thread, id, &pname, arg[1].as_str().unwrap_or(""), arg[2].as_str(), arg[3] == true)?,
+            };
+            // A proposal waits in the Inbox: shown now, not at its next look.
+            crate::attention::stale();
+            out
         }
         "fs.folders" => {
             uses(id, "folders")?;
@@ -3233,6 +3264,82 @@ mod tests {
         plugins::remove("kit", false).unwrap();
         sync();
         assert!(!dir.exists() && crate::grants::session_plugins().is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says_and_never_while_claude_prepares() {
+        let (_env, root) = paths::testenv::folders("jshost-thread-writes");
+        let mk = root.join("market");
+        for (id, write) in [("tracker", json!(["thread_stage", "tasks"])), ("reader", json!([]))] {
+            let d = mk.join(format!("plugins/{id}"));
+            std::fs::create_dir_all(&d).unwrap();
+            let uses = json!({"echo": {"read": ["threads"], "write": write}});
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": if id == "tracker" { "Acme Tracker" } else { "Reader" }, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+            std::fs::write(
+                d.join("main.js"),
+                r#"
+                export function apply(ctx) {
+                  ctx.command('stage', (a) => ctx.threads.setStage(a.thread, a.stage, 'moved in the tracker'))
+                  ctx.command('task', (a) => ctx.tasks.upsert(a.thread, a.task))
+                  ctx.command('close', (a) => ctx.tasks.close(a.thread, a.key, 'won', { propose: a.propose }))
+                  ctx.command('threads', () => ctx.echo.read('threads'))
+                }
+                "#,
+            )
+            .unwrap();
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "tracker", "source": "./plugins/tracker"}, {"id": "reader", "source": "./plugins/reader"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("tracker", Some(&name)).unwrap().uses;
+        assert!(agreed.iter().any(|l| l.contains("Changes your threads' stage") && l.contains("Adds and updates tasks in your threads") && l.contains("your threads' names and stages")), "{agreed:?}");
+        plugins::install("tracker", Some(&name), &agreed).unwrap();
+        let agreed = plugins::review("reader", Some(&name)).unwrap().uses;
+        plugins::install("reader", Some(&name), &agreed).unwrap();
+        sync();
+        let t = crate::projects::create("Aurora", None, Some(crate::projects::Stage::Lead)).unwrap().id;
+        let other = crate::projects::create("Borealis", None, None).unwrap().id;
+        let run = |p: &str, cmd: &str, a: Value| -> Result<Value, String> {
+            let mut last = String::new();
+            for _ in 0..50 {
+                match call(p, cmd, &a) {
+                    Ok(v) => return Ok(v),
+                    Err(e) if format!("{e:#}").contains("isn't loaded") || format!("{e:#}").contains("not loaded") => last = format!("{e:#}"),
+                    Err(e) => return Err(format!("{e:#}")),
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(last)
+        };
+        let rows = run("tracker", "threads", json!({})).unwrap();
+        let row = rows.as_array().unwrap().iter().find(|r| r["id"] == t.as_str()).unwrap().clone();
+        assert_eq!((row["stage"].as_str(), row["group"].as_str()), (Some("lead"), Some("pursuit")));
+        // The stage, with the plugin's name and reason in its history.
+        assert_eq!(run("tracker", "stage", json!({"thread": t, "stage": "proposal"})).unwrap()["applied"], true);
+        let p = crate::projects::load(&t).unwrap();
+        let last = p.stages.last().unwrap();
+        assert_eq!((p.stage, last.by.as_deref(), last.by_name.as_deref(), last.reason.as_deref()), (crate::projects::Stage::Proposal, Some("tracker"), Some("Acme Tracker"), Some("moved in the tracker")));
+        // A task, by its key.
+        let r = run("tracker", "task", json!({"thread": t, "task": {"key": "P-7", "title": "Send the quote", "due": "2026-11-21"}})).unwrap();
+        assert_eq!(r["applied"], true, "{r}");
+        assert_eq!(run("tracker", "close", json!({"thread": t, "key": "P-7"})).unwrap()["applied"], true);
+        // Not asked for on its sheet: refused, named.
+        assert!(run("reader", "stage", json!({"thread": t, "stage": "negotiation"})).unwrap_err().contains("didn't ask to change your threads' stage"));
+        assert!(run("reader", "task", json!({"thread": t, "task": {"key": "k", "title": "x"}})).unwrap_err().contains("didn't ask to change your threads' tasks"));
+        // While Claude prepares and asks: nothing changes.
+        {
+            let _m = EnvVar::set(crate::guard::RUN_MODE, "routine");
+            assert!(run("tracker", "stage", json!({"thread": t, "stage": "negotiation"})).unwrap_err().contains("while Claude prepares and asks"));
+            assert!(run("tracker", "task", json!({"thread": t, "task": {"key": "P-8", "title": "x"}})).unwrap_err().contains("while Claude prepares and asks"));
+        }
+        // A Yolo run on one thread: never another thread.
+        {
+            let _t = EnvVar::set(crate::guard::RUN_THREAD, &t);
+            assert!(run("tracker", "task", json!({"thread": other, "task": {"key": "P-9", "title": "x"}})).unwrap_err().contains("can't change another"));
+            assert_eq!(run("tracker", "task", json!({"thread": t, "task": {"key": "P-9", "title": "Book the demo"}})).unwrap()["applied"], true);
+        }
+        assert_eq!(crate::projects::load(&t).unwrap().stage, crate::projects::Stage::Proposal);
     }
 
     #[test]
