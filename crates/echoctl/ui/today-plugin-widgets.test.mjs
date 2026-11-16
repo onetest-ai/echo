@@ -27,6 +27,37 @@ test('never answered and its ask failed: why, escaped; answered with nothing, be
   assert.equal(failedView({ empty: true, error: err, at: '2026-11-11T10:00:00Z' }), '', 'cleared, then a failed ask: still no place')
 })
 
+test('a table or list draws the rows its height holds, then "+N more"; all of them with Show less; bars by height (the provider is told the same: today_layout::fits)', () => {
+  const fits = new Function('esc', 'CHEV', 'linkHost', `${src.slice(a, b)}\nreturn pluginFits`)(esc, CHEV, linkHost)
+  assert.deepEqual(fits('M', 1), { rows: 8, items: 5, bars: 6 })
+  assert.deepEqual(fits('L', 2), { rows: 16, items: 20, bars: 24 })
+  assert.deepEqual(fits('S', 2), { rows: 16, items: 6, bars: 8 })
+  const table = { columns: [{ key: 'name', label: 'Project' }], rows: Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, cells: { name: `Project ${i}` } })) }
+  const rows = (h) => (h.match(/<tr>/g) || []).length - 1
+  const one = draw('table', table, 'M', [], 1)
+  assert.equal(rows(one), 8)
+  assert.ok(one.includes('Project 0') && one.includes('Project 7') && !one.includes('Project 8<'), 'the first ones, in the plugin\'s order')
+  assert.ok(one.includes('data-pw-all aria-expanded="false">+12 more</button>'))
+  assert.equal(rows(draw('table', table, 'M', [], 2)), 16)
+  const every = draw('table', table, 'M', [], 1, true)
+  assert.equal(rows(every), 20)
+  assert.ok(every.includes('aria-expanded="true">Show less</button>'))
+  assert.ok(!draw('table', { ...table, rows: table.rows.slice(0, 8) }, 'M', [], 1).includes('data-pw-all'), 'all fit: no line')
+  assert.ok(!draw('table', { ...table, rows: table.rows.slice(0, 10) }, 'M', [], 2, true).includes('data-pw-all'), 'all fit at its height: no Show less either')
+  // Grouped: the cap counts rows in the order drawn; a group's count stays its whole.
+  const grouped = { columns: table.columns, groups: [{ id: 'a', label: 'Late' }, { id: 'b', label: 'On track' }], rows: table.rows.map((r, i) => ({ ...r, group: i < 5 ? 'a' : 'b' })) }
+  const g = draw('table', grouped, 'M', [], 1)
+  assert.ok(g.includes('Late <span class="mono">5</span>') && g.includes('On track <span class="mono">15</span>') && g.includes('+12 more'), g)
+  const list = { items: Array.from({ length: 9 }, (_, i) => ({ title: `Item ${i}` })) }
+  assert.equal((draw('list', list, 'M', [], 1).match(/role="listitem"/g) || []).length, 5)
+  assert.ok(draw('list', list, 'M', [], 1).includes('+4 more'))
+  assert.equal((draw('list', list, 'M', [], 2).match(/role="listitem"/g) || []).length, 9)
+  assert.equal((draw('list', list, 'M', [], 1, true).match(/role="listitem"/g) || []).length, 9)
+  assert.throws(() => draw('list', { items: [...list.items, { title: { not: 'text' } }] }, 'M', [], 1), /item 10's title is not text/, 'an item past the fold is checked too')
+  const many = { type: 'bars', points: Array.from({ length: 30 }, (_, i) => ({ label: `B${i}`, value: i + 1 })) }
+  for (const [size, h, n] of [['S', 1, 4], ['M', 1, 6], ['M', 2, 12], ['L', 2, 24]]) assert.equal((draw('chart', many, size, [], h).match(/class="pc-rl"/g) || []).length, n, `${size} h${h}`)
+})
+
 test('a stat: the value big, its label; a tone colours it', () => {
   const h = draw('stat', { value: 42, label: 'open tickets', tone: 'warn' }, 'M')
   assert.match(h, /<b class="tone-warn">42<\/b>/)
@@ -40,7 +71,7 @@ test('stats: up to 2 at S, 4 at M, 6 at L', () => {
   refused('stats', {}, 'need items')
 })
 
-test('a list: titles (an echo:// link opens in Echo, any other is text), 3 / 5 / 10 by size, its empty line', () => {
+test('a list: titles (an echo:// link opens in Echo, any other is text), 3 / 5 / 10 by size, the rest behind +N more, its empty line', () => {
   const h = draw('list', { items: [{ title: 'Deploy', link: 'echo://task/acme/T1' }, { title: 'Phish', link: 'https://evil.example' }, { title: 'Plain', sub: 'note' }] }, 'M')
   assert.match(h, /<a class="link-btn" href="echo:\/\/task\/acme\/T1">Deploy<\/a>/)
   assert.ok(!h.includes('evil.example'), 'an outside link is not drawn')

@@ -23,7 +23,7 @@ tags: [plugins, dashboards, presets]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `$E plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `$E plugin install board-demo --from test-plugins` | The sheet has "Adds 3 widgets you can put on Today" and, apart from the lines, "Offers dashboards: Staffing (clients), Pursuit (threads)"; it asks for `--yes` |
+| 1 | `$E plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `$E plugin install board-demo --from test-plugins` | The sheet has "Adds 4 widgets you can put on Today" and, apart from the lines, "Offers dashboards: Staffing (clients), Pursuit (threads)"; it asks for `--yes` |
 | 2 | `$E plugin install board-demo --from test-plugins --yes`; `$E dashboard list --client`; `$E dashboard presets --client` | Installed; no dashboards (none added by itself); one preset: "Staffing", `"added": false`, "Board Demo" |
 | 3 | Load `{{base_url}}/#client/acme/overview`; click "+" after the tabs (`[data-board-add="client"]`) | The name field "Dashboard name" with a menu under it, "From plugins": "Staffing — Board Demo" |
 | 4 | Press Tab (the row "Staffing — Board Demo" takes the focus, the menu stays), then Enter | A tab "Staffing" after Overview, open: "Staffing", "On every client, each showing its own"; a wide "Team glance · Acme" "3 people at acme", under it "People · Acme" with "Dana Lee" (lead) and "Omar Haddad" (engineer) |

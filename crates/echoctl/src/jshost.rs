@@ -1526,15 +1526,15 @@ mod tests {
         let d = mk.join("plugins/ci");
         std::fs::create_dir_all(&d).unwrap();
         let widgets = json!([
-            {"id": "builds", "label": "Builds", "about": "the last builds", "kind": "list", "sizes": ["M", "L"]},
-            {"id": "health", "label": "CI health", "kind": "status", "params": [{"key": "branch", "label": "Branch", "type": "choice", "options": ["main", "dev"], "default": "main"}]},
+            {"id": "builds", "label": "Builds", "about": "the last builds", "kind": "list", "sizes": ["M", "L"], "heights": [1, 2]},
+            {"id": "health", "label": "CI health", "kind": "status", "params": [{"key": "branch", "label": "Branch", "type": "choice", "options": ["main", "dev"], "default": "main"}], "heights": [1, 2]},
         ]);
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "ci", "name": "CI", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"
             export function apply(ctx) {
-              ctx.widgets.provide('builds', ({ size }) => ({ items: [{ title: 'main #41 passed', sub: `at ${size}` }] }))
+              ctx.widgets.provide('builds', ({ size, height, fits }) => ({ items: [{ title: 'main #41 passed', sub: `at ${size}` }, { title: `height ${height}, ${fits.items} items, ${fits.rows} rows, ${fits.bars} bars` }] }))
               ctx.widgets.provide('health', ({ params }) => ({ state: 'ok', title: `CI on ${params.branch}` }))
               ctx.command('green', () => { ctx.widgets.set('health', { state: 'ok', title: 'All green' }); return 1 })
               ctx.command('stranger', () => ctx.widgets.set('nope', { state: 'ok' }))
@@ -1560,8 +1560,9 @@ mod tests {
         assert_eq!(green, Some(json!(1)));
         assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "All green");
         assert!(call("ci", "stranger", &json!({})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
-        // A `set` stays: Today doesn't take it for a resize and ask the provider over it.
+        // A `set` stays: Today doesn't take it for a resize and ask the provider over it — two rows high too.
         crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
+        crate::today_layout::set_height("plugin:ci:health", 2).unwrap();
         widget_ask_now("ci", "health");
         call("ci", "green", &json!({})).unwrap();
         crate::widgets::data("plugin:ci:health", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
@@ -1595,6 +1596,18 @@ mod tests {
         crate::today_layout::resize("plugin:ci:builds", "M").unwrap();
         crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
         assert_eq!(wait_size("ci", "builds", "at M"), "at M", "resized to M");
+        // Its height too: what it draws (and is told it draws) doubles, and it is asked again for it.
+        let fits = || widget_last("ci", "builds").and_then(|l| l["data"]["items"][1]["title"].as_str().map(str::to_owned)).unwrap_or_default();
+        assert_eq!(fits(), "height 1, 5 items, 8 rows, 6 bars");
+        crate::today_layout::set_height("plugin:ci:builds", 2).unwrap();
+        crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        for _ in 0..100 {
+            if fits().starts_with("height 2") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(fits(), "height 2, 10 items, 16 rows, 12 bars");
         // Its settings: declared in the manifest, set on Today, given to its provider.
         crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
         widget_ask_now("ci", "health");

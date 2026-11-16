@@ -283,7 +283,8 @@ fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crat
     let every = w.refresh.max(60);
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     // Resized since its provider was last asked: asked again for the new size.
-    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on(page, &format!("plugin:{plugin}:{widget}")).as_str()));
+    let id = format!("plugin:{plugin}:{widget}");
+    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on(page, &id).as_str()) || l["height"].as_u64().unwrap_or(1) != u64::from(crate::today_layout::height_on(page, &id)));
     // Its settings changed since (`echoctl today set`, Filters): asked again with them (an answer kept before
     // settings were noted: not).
     let reset = last.as_ref().and_then(|l| l.get("params")).is_some_and(|p| *p != Value::Object(crate::today_layout::params_on(page, &format!("plugin:{plugin}:{widget}"))));

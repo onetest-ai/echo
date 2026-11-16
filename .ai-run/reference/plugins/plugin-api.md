@@ -300,8 +300,10 @@ takes. Evidence: `plugins::check_params`
 
 ### Giving data
 
-- `ctx.widgets.provide(id, ({size, params}) => data)` — Echo asks it in the background, answered within 5 s, again
-  after `refresh`; or `ctx.widgets.set(id, data)` pushes it, and `ctx.widgets.clear(id)` takes the widget off Today and
+- `ctx.widgets.provide(id, ({size, height, fits, params}) => data)` — Echo asks it in the background, answered within
+  5 s, again after `refresh` and when its size or height changes; `height` is the rows of the grid it takes there (1,
+  2) and `fits` what Echo draws of it at that size and height, `{rows, items, bars}` (§ Data by kind): send that many
+  — the most important first for a table or list, the last for bars — and count the rest yourself; or `ctx.widgets.set(id, data)` pushes it, and `ctx.widgets.clear(id)` takes the widget off Today and
   every dashboard; only ids the manifest declares, 64 KB of data at most. Evidence: `jshost::widget_ask`
 - A widget with `params` gets its data only by `provide`: each copy — on Today or a dashboard — is asked with its own
   settings; a `set` replaces them all with one (`set` and `clear` reach every copy).
@@ -320,6 +322,11 @@ takes. Evidence: `plugins::check_params`
 
 ### Data by kind
 
+No widget scrolls inside the page: the wheel over it always scrolls Today or the dashboard. A table or list draws what
+its size and height hold (below), then "+N more" — a click shows all of it in place, "Show less" folds it back; a
+`fill` widget is at least its line's height and grows past it with what it shows; a wide table scrolls only sideways
+(hide columns at M with `hide`). At height 2 every count doubles.
+
 Text is plain (Echo escapes it); a text field given as anything but a string or a number is refused, text past its
 limit cut. `tone` is `good`, `warn` or `bad` (a table's cell and a chart's series also `muted`). A list's or card's
 `link` goes only to `echo://`; a table row's and a `stats` item's `link` also to `https://`.
@@ -330,10 +337,10 @@ Evidence: `pluginWidgetHtml`, `pluginTableHtml` (window script)
 | `stat` | `{value, unit?, label?, tone?, note?, progress?: {used, of}}` | `note` hidden at S | value 24, unit 12, label 80, note 200 | no `value`; `used` or `of` not a number |
 | `stats` | `{items: [{label, value, tone?, trend?, link?}]}`; `trend`: numbers, the last 30 drawn as a sparkline under the value (none with fewer than 2) | first 2 / 4 / 6 items | value 24, label 60 | `items` not a list; a `trend` not a list of numbers |
 | `chart` | § Charts | § Charts | § Charts | § Charts |
-| `list` | `{items: [{title, sub?, link?}], empty?}` | first 3 / 5 / 10 items | title 200, sub 200 | `items` not a list |
+| `list` | `{items: [{title, sub?, link?}], empty?}` | the first 3 / 5 / 10 items a row of height (`fits.items`), then "+N more" (100 at most) | title 200, sub 200 | `items` not a list |
 | `status` | `{state, title, text?}`, `state` `ok`, `warn` or `bad` | the same | title 80, text 300 | another `state` |
 | `card` | `{title?, text?, link?}` | the same | title 120, text 2000 | neither `title` nor `text` |
-| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill` or `date`; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns; a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
+| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill` or `date`; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M; the first 8 rows a row of height (`fits.rows`; in the order drawn, a group's header and count kept whole), then "+N more" | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns; a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
 | `page` | the plugin's, drawn by its client half (§ Client half) | the draw gets `size` | the plugin's | — |
 
 ### Charts
@@ -347,8 +354,8 @@ refused). All series share one y-axis and the `unit`. Evidence: `pluginChartHtml
 | `area` | a filled line | the last 60 | 1–6 | refused |
 | `bar` | upright bars | the last 24 | 1–6 | below zero |
 | `stacked` | upright stacked bars | the last 24 | 1–6 | refused |
-| `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
-| `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
+| `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
+| `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
 | `pie`, `donut` | slices | all read; up to 6 drawn in the given order, those under 3% and past the 6th folded into one Other after them (all zero: "Nothing to show yet") | one | refused |
 | `funnel` | stages | the first 8 in the given order, each with its share of the one before | one | refused |
 
@@ -429,7 +436,7 @@ Evidence: `jshost::work::check_rows`
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
-- `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
+- `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is

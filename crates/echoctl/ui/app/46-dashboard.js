@@ -56,7 +56,8 @@ function dashboardView(head = '') {
   const size = Object.fromEntries(d.layout.map((i) => [i.widget, i.size]))
   const parts = {}
   const sizeAt = (id) => size[id] || (typeof twPickSize === 'function' && twPickSize((S.tdCatalog || []).find((x) => x.id === id))) || 'M'
-  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id))
+  const heightOf = Object.fromEntries(d.layout.map((i) => [i.widget, i.height || 1]))
+  for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeAt(id), heightOf[id] || 1)
   // Echo's own, drawn as on Today (with the page's thread or client).
   const now = new Date()
   const OWN = {
