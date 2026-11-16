@@ -38,5 +38,13 @@ export function apply(ctx) {
     { label: 'high', value: 2, tone: 'warn', link: 'https://staffing.acme.example/?urgency=high' },
     { label: 'on hold', value: 1 },
   ] }))
+  // A scorecard (today/TC-053): each unit's trend, its deals' stage mix, new deals in each of 12 weeks, and a total.
+  const weeks = Array.from({ length: 12 }, (_, i) => ({ key: `w${i + 1}`, label: `W${i + 1}`, kind: 'heat', group: 'New deals by week' }))
+  const units = [['Data', [2, 4, 3, 6], [5, 3, 1], [3, 0, 1, 4, 2, 0, 5, 6, 2, 1, 0, 3]], ['Cloud', [5, 3, 3, 2], [2, 2, 2], [1, 1, 0, 0, 2, 1, 0, 0, 1, 0, 0, 1]], ['Security', [1, 1, 2, 4], [1, 4, 0], [0, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 2]]]
+  ctx.widgets.provide('scorecard', () => ({
+    columns: [{ key: 'unit', label: 'Unit' }, { key: 'trend', label: 'Requests', kind: 'spark' }, { key: 'mix', label: 'Stage mix', kind: 'mix', series: [{ key: 'q', label: 'Qualified' }, { key: 'p', label: 'Proposal' }, { key: 'lost', label: 'Lost', tone: 'bad' }] }, ...weeks],
+    rows: units.map(([unit, trend, [q, p, lost], ws]) => ({ id: unit, cells: { unit, trend: { values: trend, text: String(trend[trend.length - 1]) }, mix: { parts: [{ key: 'q', value: q }, { key: 'p', value: p }, { key: 'lost', value: lost }], text: String(q + p + lost) }, ...Object.fromEntries(ws.map((v, i) => [`w${i + 1}`, v])) } })),
+    total: { cells: Object.fromEntries(weeks.map((w, i) => [w.key, units.reduce((a, u) => a + u[3][i], 0)])) },
+  }))
   ctx.widgets.provide('wrong', () => ({ columns: [{ key: 'start', label: 'Start', kind: 'date' }], rows: [{ id: 1, cells: { start: '15/11/2026' } }] }))
 }
