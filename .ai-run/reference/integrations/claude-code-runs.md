@@ -44,6 +44,18 @@ routing-policy check.
   start it (`claude_command`: the login shell), names no Claude Code. `ai.json` keeps the absolute path
   (`wrapper.command`) and the plugin that offered it (`wrapper.offered_by`); a stored one without a full path fails
   only that profile's jobs.
+- A plugin's offer (`uses.ai.wrapper`, plugin API reference): `ai::offered` lists the enabled plugins' offers with the
+  profile taken from each and, when the plugin now names another program than that profile took
+  (`wrapper.offered_command`), its `update`; `ai::add_offered_wrapper` adds one with the same checks, its id made from
+  the plugin's; `ai::update_wrapper` takes the new program on the user's yes. Settings → AI & minutes: offers, Add a
+  wrapper… (Check shows the path and version found, then Add profile), Use it on a profile its plugin's update changed
+  (`wrapper_check`, `wrapper_add` — it adds only the path Check showed, `wrapper_update`, their outcome in the settings
+  snapshot's `wrapper`). The profile keeps the plugin's id, marketplace and name (`wrapper.offered_by`,
+  `offered_market`, `offered_name`); an offer whose program is a wrapper profile already isn't shown.
+- Inside a run Echo started, a wrapper profile is never made the default (`ai default`), a call's (`set_call_profile`),
+  a thread's (`project set --profile`) or the next recording's (`arm --ai`, an `arm --meeting` file's `ai_profile`,
+  `memo start --ai`) (`ai::wrapper_in_run`); a plugin's job names one only when it is the user's
+  default (`ai::plugin_may_name`).
 - Every start uses that path (`ai::program_for`): a missing file fails the job. `claude plugin …` (a plugin's
   `claude.has_plugin` / `install_plugin`) runs the bare `claude`, so a wrapper keeping its own Claude Code folder
   answers about another one.

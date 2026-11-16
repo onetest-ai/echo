@@ -30,6 +30,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "work", ready: true, describe: describe_work },
     Capability { id: "signin", ready: true, describe: describe_signin },
     Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
+    Capability { id: "ai", ready: true, describe: describe_ai },
 ];
 
 /// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.
@@ -207,6 +208,26 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
     };
     let shown: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
     Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo, and installs Claude Code's {p} plugin for it"))
+}
+
+/// `uses.ai.wrapper` `{name, command}`: a wrapper profile it offers (echo-plugins R24) — one program name, no
+/// arguments, found on the user's PATH when they add it (never a file of the plugin: `ai::wrapper::admit`).
+pub(super) fn describe_ai(v: &Value) -> Result<String> {
+    let w = &v["wrapper"];
+    if !w.is_object() || v.as_object().is_some_and(|o| o.keys().any(|k| k != "wrapper")) {
+        bail!("“ai” offers only a wrapper: {{\"wrapper\": {{\"name\": …, \"command\": …}}}}");
+    }
+    if w.as_object().is_some_and(|o| o.keys().any(|k| k != "name" && k != "command")) {
+        bail!("“ai.wrapper” holds only its name and command");
+    }
+    let command = w["command"].as_str().filter(|c| crate::ai::wrapper::program_name(c)).ok_or_else(|| anyhow!("“ai.wrapper.command” is one program name (letters, digits, “.”, “_”, “-”) with no arguments, never a path"))?;
+    wrapper_name(w).ok_or_else(|| anyhow!("“ai.wrapper.name” is a name of up to 40 characters"))?;
+    Ok(format!("Offers an AI profile that starts {command} — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it"))
+}
+
+/// A wrapper offer's name: up to 40 characters, one line.
+pub(crate) fn wrapper_name(w: &Value) -> Option<String> {
+    w["name"].as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 40 && !n.chars().any(char::is_control)).map(str::to_owned)
 }
 
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {
@@ -410,6 +431,27 @@ mod tests {
         assert!(describe_channel(&serde_json::json!({"plugin": "telegram@claude-plugins-official"})).unwrap().contains("Telegram"));
         for bad in ["telegram-@claude-plugins-official", "-x@claude-plugins-official", "a--b@claude-plugins-official", "@claude-plugins-official", "x@other"] {
             assert!(describe_channel(&serde_json::json!({"plugin": bad})).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_plugin_offers_a_wrapper_as_one_program_name_and_the_sheet_says_what_it_sees() {
+        let line = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude"}})).unwrap();
+        assert_eq!(line, "Offers an AI profile that starts acme-claude — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it");
+        let other = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude2"}})).unwrap();
+        assert_ne!(line, other, "an update that changes the program asks again: its line differs");
+        for bad in [
+            serde_json::json!({"wrapper": {"name": "A", "command": "acme-claude --x"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "./bin/acme-claude"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "/usr/local/bin/acme-claude"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "node"}, "key": "x"}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "acme", "args": ["-x"]}}),
+            serde_json::json!({"wrapper": {"name": "", "command": "acme"}}),
+            serde_json::json!({"wrapper": {"name": "x".repeat(41), "command": "acme"}}),
+            serde_json::json!({"wrapper": {"name": "A\nB", "command": "acme"}}),
+            serde_json::json!({"gateway": "https://x"}),
+        ] {
+            assert!(describe_ai(&bad).is_err(), "{bad}");
         }
     }
 }

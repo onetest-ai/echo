@@ -385,6 +385,10 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             show(&projects::create(&name, client.as_deref(), stage)?)?
         }
         ProjectCmd::Set { id, name, client, stage, reason, stage_back_to, since, history_before, color, notes, profile, model, brief, icon, logo } => {
+            // Before any change: a run Echo started never pins a thread to a wrapper profile.
+            if let Some(a) = profile.as_deref().filter(|a| !a.trim().is_empty()) {
+                crate::ai::wrapper_in_run(&crate::ai::Settings::load()?, a.trim(), crate::notes::headless())?;
+            }
             if let Some(f) = logo {
                 projects::set_logo(&id, (!f.as_os_str().is_empty()).then_some(f.as_path()))?;
             }
