@@ -1,8 +1,0 @@
-<!doctype html><html><head><link rel="stylesheet" href="all.css"><style>html,body{margin:0;height:800px} .wrap{height:800px;display:flex;flex-direction:column}</style></head><body>
-<div class="wrap"><div class="td" id="td"><div class="td-head"><h1>Today</h1></div>
-<div class="td-grid" id="fill"><section class="td-sec dc-sec" id="day"><h2>Your day</h2><div class="dc-scroll" id="dcs"><div class="dc-grid" style="min-height:960px">x</div></div></section><section class="td-sec pw-sec k-list" id="pw"><h2>L</h2><div class="pw-list" id="lst"><div class="pw-li" role="listitem"><span>Item 1</span></div><div class="pw-li" role="listitem"><span>Item 2</span></div><div class="pw-li" role="listitem"><span>Item 3</span></div><div class="pw-li" role="listitem"><span>Item 4</span></div><div class="pw-li" role="listitem"><span>Item 5</span></div></div></section></div><div class="td-grid td-hug" id="next"><section class="td-sec">s</section></div>
-</div></div>
-<script>
-const r=(id)=>{const e=document.getElementById(id);if(!e)return id+': -';const b=e.getBoundingClientRect();return id+': '+Math.round(b.top)+'-'+Math.round(b.bottom)};
-document.body.setAttribute('data-out',['fill','day','dcs','pw','lst','next','td'].map(r).join(' | ')+' | dcs scroll '+(document.getElementById('dcs')||{}).scrollHeight+'/'+(document.getElementById('dcs')||{}).clientHeight);
-</script></body></html>
