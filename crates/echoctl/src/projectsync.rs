@@ -9,10 +9,11 @@
 //! default: the default profile, its minutes model). The first sync of a project reads its last 20
 //! calls; later ones what came since, at most `MAX_ITEMS` a run, oldest first.
 //!
-//! State: `<project>/ledger/sync.json` (`{state, at, message, run, processed, verdicts}`); each
-//! run's files and log in `<project>/ledger/runs/<run>/`. The app's scheduler syncs projects with new
-//! calls ended ≥ 15 min ago (`config.project_sync`, default on); `echoctl project ledger <id> run`
-//! or the window's Sync now does it at once.
+//! State: `<project>/ledger/sync.json` (`{state, at, message, run, processed, left, usage}`); each
+//! run's files and log in `<project>/ledger/runs/<run>/`, what each pass used in `ledger/sync-usage.jsonl`. The app's
+//! scheduler (`config.project_sync`, default on) syncs projects with new calls ended ≥ 15 min ago, and their mail and
+//! chat as a batch (`batch_ready`: the first waited 2 h, or 5 wait, or with a call); `echoctl project ledger <id> run`
+//! or the window's Sync now reads everything at once, `run --scheduled` as the scheduler does.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -55,7 +56,84 @@ fn save_state(id: &str, v: &Value) {
 }
 
 /// Sync one project now: evidence, extract, verify. One at a time per project.
+/// Sync now (the window's, `ledger <id> run`): everything waiting is read at once, mail and chat too.
 pub fn run(id: &str) -> Result<Value> {
+    run_with(id, false)
+}
+
+/// As the app's scheduler syncs (`echoctl project ledger <id> run --scheduled`): mail and chat wait for their batch.
+pub fn run_scheduled(id: &str) -> Result<Value> {
+    run_with(id, true)
+}
+
+/// Mail and chat wait for one another: a thread's sync reads them once the first has waited `BATCH_WAIT`, or
+/// `BATCH_ITEMS` wait, or with a call; calls keep their own settle time (`SETTLE`).
+const BATCH_WAIT: chrono::Duration = chrono::Duration::hours(2);
+const BATCH_ITEMS: usize = 5;
+
+/// When each mail or chat item still waiting was first seen waiting (`ledger/waiting.json`): a chat read again
+/// once it changed waits from then, not from its first message.
+const WAITING: &str = "waiting.json";
+
+fn mail_or_chat(id: &str) -> bool {
+    id.starts_with("mail-") || id.starts_with("chat-")
+}
+
+/// The thread's mail and chat items waiting to be read, each with when it was first seen waiting (kept in
+/// `ledger/waiting.json`, under its own lock, re-read inside it), oldest first. An item read since its kept time (a
+/// chat re-queued once it changed) waits from now, as does one whose kept time can't be read.
+fn waiting(id: &str, now: chrono::DateTime<Local>) -> Vec<(String, chrono::DateTime<Local>)> {
+    let Ok(pending) = ledger::pending(id) else { return vec![] };
+    let read_at: BTreeMap<String, chrono::DateTime<Local>> = ledger::Ledger::of(id)
+        .and_then(|l| l.events())
+        .unwrap_or_default()
+        .iter()
+        .filter(|e| e["type"] == "processed")
+        .filter_map(|e| Some((e["evidence"].as_str()?.to_string(), chrono::DateTime::parse_from_rfc3339(e["at"].as_str()?).ok()?.with_timezone(&Local))))
+        .fold(BTreeMap::new(), |mut m, (i, t)| {
+            if m.get(&i).is_none_or(|old| *old < t) {
+                m.insert(i, t);
+            }
+            m
+        });
+    let file = ledger_dir(id).join(WAITING);
+    let lock = ledger_dir(id).join(".waiting.lock");
+    let t = Instant::now();
+    let _held = loop {
+        match crate::app::FileLock::try_take(&lock) {
+            Ok(Some(l)) => break Some(l),
+            Ok(None) if t.elapsed() < Duration::from_secs(5) => std::thread::sleep(Duration::from_millis(20)),
+            _ => break None,
+        }
+    };
+    let known: BTreeMap<String, String> = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let parse = |t: &str| chrono::DateTime::parse_from_rfc3339(t).ok().map(|t| t.with_timezone(&Local));
+    let mut now_waiting: BTreeMap<String, chrono::DateTime<Local>> = BTreeMap::new();
+    for i in pending.iter().filter_map(|x| x["id"].as_str()).filter(|i| mail_or_chat(i)) {
+        let since = known.get(i).and_then(|t| parse(t)).filter(|t| read_at.get(i).is_none_or(|r| r < t)).unwrap_or(now);
+        now_waiting.insert(i.to_string(), since);
+    }
+    let kept: BTreeMap<String, String> = now_waiting.iter().map(|(i, t)| (i.clone(), t.to_rfc3339())).collect();
+    if _held.is_some() && kept != known {
+        let _ = paths::write_atomic(&file, &serde_json::to_vec(&kept).unwrap_or_default());
+    }
+    let mut v: Vec<(String, chrono::DateTime<Local>)> = now_waiting.into_iter().collect();
+    v.sort_by_key(|(_, t)| *t);
+    v
+}
+
+/// "N mail or chat items wait: read at HH:MM or once 5 wait".
+fn waits(n: usize, at: chrono::DateTime<Local>) -> String {
+    format!("{n} mail or chat item{} wait{}: read at {} or once {BATCH_ITEMS} wait", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }, at.format("%H:%M"))
+}
+
+/// Mail and chat are due a read: the first has waited `BATCH_WAIT`, or `BATCH_ITEMS` wait.
+fn batch_ready(w: &[(String, chrono::DateTime<Local>)], now: chrono::DateTime<Local>) -> bool {
+    w.len() >= BATCH_ITEMS || w.first().is_some_and(|(_, t)| now.signed_duration_since(*t) >= BATCH_WAIT)
+}
+
+/// A sync; `batch`: mail and chat wait for their batch unless a call is read anyway.
+fn run_with(id: &str, batch: bool) -> Result<Value> {
     let p = projects::load(id)?;
     fs::create_dir_all(ledger_dir(id))?;
     let _one = crate::app::FileLock::try_take(&ledger_dir(id).join(".sync.lock"))?.ok_or_else(|| anyhow!("{} is being synced already", p.name))?;
@@ -74,7 +152,17 @@ pub fn run(id: &str) -> Result<Value> {
     }
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
-    let pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).take(MAX_ITEMS).collect();
+    let mut pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).collect();
+    // Mail and chat held for their batch, unless a call is read now anyway (they go with it).
+    let mut held = None;
+    if batch && pending.iter().all(|i| mail_or_chat(i)) {
+        let w = waiting(id, started);
+        if !batch_ready(&w, started) {
+            held = w.first().map(|(_, t)| (w.len(), *t + BATCH_WAIT));
+            pending.clear();
+        }
+    }
+    pending.truncate(MAX_ITEMS);
     let claims = ledger::verify_count(id)?;
     // The people pass reads calls the work sync already read (threads synced before it existed too).
     let people_read = read_people(id);
@@ -93,7 +181,8 @@ pub fn run(id: &str) -> Result<Value> {
         .take(MAX_ITEMS)
         .collect();
     if pending.is_empty() && claims == 0 && for_people.is_empty() {
-        let v = json!({"state": "done", "at": started.to_rfc3339(), "message": "nothing new", "written": written.len(), "processed": 0});
+        let message = held.map(|(n, at)| waits(n, at)).unwrap_or_else(|| "nothing new".to_string());
+        let v = json!({"state": "done", "at": started.to_rfc3339(), "message": message, "written": written.len(), "processed": 0});
         save_state(id, &v);
         // Announced as a sync that read the calls is (new mail or chat may have been written).
         #[cfg(feature = "js")]
@@ -149,7 +238,8 @@ pub fn run(id: &str) -> Result<Value> {
         let _ = fs::remove_file(&settings);
         let left = ledger::pending_count(id)?;
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
-                  "processed": before.saturating_sub(left), "left": left, "usage": used, "message": format!("{extract_report}\n{verify_report}\n{people_report}").trim().to_string()}))
+                  "processed": before.saturating_sub(left), "left": left, "usage": used,
+                  "message": format!("{extract_report}\n{verify_report}\n{people_report}\n{}", held.map(|(n, at)| waits(n, at)).unwrap_or_default()).trim().to_string()}))
     })();
     let v = match outcome {
         Ok(v) => v,
@@ -435,8 +525,8 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
     Ok((text, r))
 }
 
-/// Projects whose new calls are due a sync: not closed; a call of theirs ended ≥ 15 min ago and
-/// isn't read yet (or nothing was ever read: the backfill).
+/// Projects due a sync: not closed, and a call of theirs ended ≥ 15 min ago and isn't read yet (or nothing was ever
+/// read: the backfill), a mail or chat source due a fetch, or their mail and chat's batch ready.
 fn due() -> Vec<String> {
     let now = Local::now();
     projects::list()
@@ -445,13 +535,18 @@ fn due() -> Vec<String> {
         .filter(|p| {
             let Ok(l) = ledger::Ledger::of(&p.id) else { return false };
             let known = l.evidence();
-            let processed: std::collections::BTreeSet<String> = l.events().unwrap_or_default().iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str().map(str::to_owned)).collect();
+            let events = l.events().unwrap_or_default();
+            let processed: std::collections::BTreeSet<String> = events.iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str().map(str::to_owned)).collect();
             let failed_recently = state(&p.id)["state"] == "failed" && state(&p.id)["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| now.signed_duration_since(t) < chrono::Duration::hours(1));
             if failed_recently {
                 return false;
             }
-            // A meeting chat or a mail source due a read, or an item of theirs not read yet.
-            if ledger::chat_due(p) || ledger::mail_due(p) || known.keys().any(|k| (k.starts_with("chat-") || k.starts_with("mail-")) && !processed.contains(k)) {
+            // A meeting chat or a mail source due a fetch (no model run unless its batch is ready), or mail and chat
+            // whose batch is ready: `waiting` (its lookups, its lock) only for a thread with unread mail or chat,
+            // re-queues counted.
+            let read = ledger::processed(&events);
+            let unread_mail = known.keys().any(|k| mail_or_chat(k) && !read.contains(k));
+            if ledger::chat_due(p) || ledger::mail_due(p) || (unread_mail && batch_ready(&waiting(&p.id, now), now)) {
                 return true;
             }
             projects::calls_of(p).unwrap_or_default().iter().rev().take(BACKFILL).any(|(d, _)| {
@@ -477,7 +572,7 @@ pub fn start_scheduler() {
             if notes::quitting() {
                 break;
             }
-            if let Err(e) = run(&id) {
+            if let Err(e) = run_scheduled(&id) {
                 eprintln!("project sync {id}: {e:#}");
             }
         }
@@ -593,6 +688,107 @@ mod tests {
         let passes = &stats["days"][0]["passes"];
         assert_eq!((passes["extract"]["failed"].as_u64(), passes["extract"]["tokens"].as_u64(), passes["extract"]["cost_usd"].as_f64()), (Some(1), Some(320980), Some(2.5)));
         assert_eq!((passes["verify"]["runs"].as_u64(), passes["verify"]["failed"].as_u64(), passes["verify"]["tokens"].as_u64()), (Some(1), Some(1), Some(0)));
+    }
+
+    /// A mail or chat item of `project`, as `mail_sync` / `chat_sync` write one.
+    fn mail_item(project: &str, id: &str) {
+        let dir = ledger_dir(project).join("evidence");
+        fs::create_dir_all(&dir).unwrap();
+        let at = Local::now() - chrono::Duration::days(1);
+        fs::write(dir.join(format!("{id}.json")), json!({"id": id, "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": "Acme rollout status"}).to_string()).unwrap();
+        fs::write(dir.join(format!("{id}.md")), "Test mail, nothing real.").unwrap();
+    }
+
+    #[test]
+    fn mail_and_chat_are_due_once_the_first_has_waited_two_hours_or_five_wait() {
+        let now = Local::now();
+        let w = |n: usize, mins: i64| (0..n).map(|i| (format!("mail-{i}"), now - chrono::Duration::minutes(mins))).collect::<Vec<_>>();
+        assert!(!batch_ready(&[], now));
+        assert!(!batch_ready(&w(4, 119), now), "four items, under two hours");
+        assert!(batch_ready(&w(5, 0), now), "five wait");
+        assert!(batch_ready(&w(1, 120), now), "the first has waited two hours");
+    }
+
+    #[test]
+    fn an_item_waits_from_when_it_was_first_seen_waiting_and_leaves_once_read() {
+        let (_env, _root) = crate::paths::testenv::folders("sync-waiting");
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        mail_item(&id, "mail-a");
+        let t0 = Local::now() - chrono::Duration::hours(3);
+        let first = waiting(&id, t0);
+        assert_eq!(first.len(), 1);
+        // Seen again later: still waiting since then (its own sent time, a day ago, doesn't count).
+        mail_item(&id, "mail-b");
+        let later = waiting(&id, Local::now());
+        assert_eq!(later.iter().map(|(i, _)| i.as_str()).collect::<Vec<_>>(), ["mail-a", "mail-b"]);
+        assert_eq!(later[0].1.timestamp(), t0.timestamp());
+        assert!(batch_ready(&later, Local::now()), "mail-a has waited three hours");
+        ledger::mark_processed(&id, "mail-a", "read").unwrap();
+        let after = waiting(&id, Local::now());
+        assert_eq!(after.iter().map(|(i, _)| i.as_str()).collect::<Vec<_>>(), ["mail-b"], "read: no longer waiting");
+        assert!(!batch_ready(&after, Local::now()));
+    }
+
+    #[test]
+    fn a_chat_read_and_queued_again_waits_from_then_not_from_before() {
+        let (_env, _root) = crate::paths::testenv::folders("sync-requeue");
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        mail_item(&id, "chat-2026-11-16");
+        let long_ago = Local::now() - chrono::Duration::hours(5);
+        assert_eq!(waiting(&id, long_ago)[0].1.timestamp(), long_ago.timestamp());
+        // Read (by Sync now, say — the scheduler's waiting() never saw it go), then queued again: the chat changed.
+        ledger::mark_processed(&id, "chat-2026-11-16", "read").unwrap();
+        let requeue = json!({"type": "reprocess", "evidence": "chat-2026-11-16", "why": "the chat changed", "at": Local::now().to_rfc3339()});
+        fs::OpenOptions::new().append(true).open(ledger_dir(&id).join("events.jsonl")).and_then(|mut f| writeln!(f, "{requeue}")).unwrap();
+        let now = Local::now();
+        let w = waiting(&id, now);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].1.timestamp(), now.timestamp(), "waits from now, not from five hours ago");
+        assert!(!batch_ready(&w, now), "alone and new: it waits");
+        // A kept time that can't be read waits from now too, and is written again.
+        fs::write(ledger_dir(&id).join(WAITING), r#"{"chat-2026-11-16": "not a time"}"#).unwrap();
+        let later = Local::now();
+        assert_eq!(waiting(&id, later)[0].1.timestamp(), later.timestamp());
+        let kept: BTreeMap<String, String> = serde_json::from_slice(&fs::read(ledger_dir(&id).join(WAITING)).unwrap()).unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(&kept["chat-2026-11-16"]).is_ok());
+    }
+
+    #[test]
+    fn the_scheduler_looks_at_waiting_mail_only_for_a_thread_with_unread_mail_or_chat() {
+        let (_env, _root) = crate::paths::testenv::folders("sync-due-cheap");
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        assert!(!due().contains(&id));
+        assert!(!ledger_dir(&id).join(".waiting.lock").exists() && !ledger_dir(&id).join(WAITING).exists(), "nothing unread: never looked");
+        mail_item(&id, "mail-a");
+        assert!(!due().contains(&id));
+        assert!(ledger_dir(&id).join(WAITING).exists(), "unread mail: looked at");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_scheduler_holds_a_lone_new_mail_and_sync_now_reads_it() {
+        let (_env, root) = crate::paths::testenv::folders("sync-batch");
+        // Never the real Claude Code: the fake records what it was asked.
+        let _fake = crate::ai::fake::install(&root);
+        let asked = || fs::read(root.join("user/.claude/p.args")).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        let id = projects::create("Acme rollout", None, None).unwrap().id;
+        mail_item(&id, "mail-a");
+        assert!(!due().contains(&id), "one mail, just seen: not due");
+        let v = run_with(&id, true).unwrap();
+        assert_eq!(v["state"], "done");
+        assert_eq!(v["processed"], 0);
+        assert!(v["message"].as_str().unwrap().starts_with("1 mail or chat item waits: read at "), "{v}");
+        assert!(asked().is_empty(), "no model run while it waits");
+        for i in ["mail-b", "mail-c", "mail-d", "mail-e"] {
+            mail_item(&id, i);
+        }
+        assert!(due().contains(&id), "five wait");
+        // Sync now doesn't wait: the extract run is asked to read the new mail.
+        let one = projects::create("Globex pilot", None, None).unwrap().id;
+        mail_item(&one, "mail-z");
+        let _ = run(&one);
+        let args = asked();
+        assert!(args.contains("Mode: extract.") && args.contains("mail-z"), "{args}");
     }
 
     #[cfg(unix)]
