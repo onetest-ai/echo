@@ -207,22 +207,24 @@ pub fn claude_version(path: &Path) -> Result<String> {
         wrapper: Some(Wrapper { command: path.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None }) };
     let mut child = super::claude_command(&p, &["--version".into()], &paths::home(), false).map_err(|e| anyhow!("{} can't be started: {e:#}", path.display()))?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).with_context(|| format!("asking {} its version", path.display()))?;
-    version_line(&out).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))
+    let v = version_line(&out).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))?;
+    if !v.contains("(Claude Code") && !crate::guard::new_enough(&v) {
+        let [a, b, c] = crate::guard::MIN_CLAUDE;
+        bail!("{} starts Claude Code {v} — Echo's guard needs {a}.{b}.{c} or later", path.display());
+    }
+    Ok(v)
 }
 
-/// The line of a `--version` answer that names Claude Code, or a bare version of Claude Code's 2.x as its only line
-/// ("2.1.325": a wrapper passing on the Claude Code it starts) when the guard's Claude Code is that new. A line naming
-/// another program never, nor another program's bare version ("10.9.2").
+/// The line of a `--version` answer that names Claude Code, or a bare version of Claude Code's 2.x as its last line
+/// ("2.1.325": a wrapper passing on the Claude Code it starts, after what a login shell's startup files printed). A line
+/// naming another program never, nor another program's bare version ("10.9.2"). How new it is: `guard::new_enough`.
 pub(crate) fn version_line(out: &str) -> Option<String> {
-    let lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if let Some(l) = lines.iter().find(|l| l.contains("(Claude Code")) {
-        return Some((*l).to_owned());
+    let mut lines = out.lines().map(str::trim).filter(|l| !l.is_empty());
+    if let Some(l) = lines.clone().find(|l| l.contains("(Claude Code")) {
+        return Some(l.to_owned());
     }
-    let bare = |l: &str| l.split('.').count() == 3 && l.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
-    match lines.as_slice() {
-        [l] if bare(l) && l.starts_with("2.") && crate::guard::new_enough(l) => Some((*l).to_owned()),
-        _ => None,
-    }
+    let bare = |l: &str| l.starts_with("2.") && l.split('.').count() == 3 && l.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    lines.next_back().filter(|l| bare(l)).map(str::to_owned)
 }
 
 /// The checks before a wrapper profile is added (R13): resolved, outside Echo's folders, answering as Claude Code.
@@ -1110,10 +1112,12 @@ printf '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}
     }
 
     #[test]
-    fn a_bare_version_is_claude_codes_only_alone_and_new_enough() {
+    fn a_bare_version_is_claude_codes_only_as_the_last_line_and_2_x() {
         assert_eq!(version_line("2.1.325\n").as_deref(), Some("2.1.325"));
+        assert_eq!(version_line("Now using node v24.15.0\n\n2.1.325\n").as_deref(), Some("2.1.325"), "after a login shell's own output");
+        assert_eq!(version_line("2.1.200\n").as_deref(), Some("2.1.200"), "how new: the caller's");
         assert_eq!(version_line("\n 2.1.400 (Claude Code)\nmore\n").as_deref(), Some("2.1.400 (Claude Code)"));
-        for no in ["2.1.200\n", "10.9.2\n", "3.0.0\n", "1.4.0 (Gemini CLI)\n", "v2.1.325\n", "2.1.325\nsomething else\n", "2.1\n", "2.1.325-beta\n", ""] {
+        for no in ["10.9.2\n", "3.0.0\n", "1.4.0 (Gemini CLI)\n", "v2.1.325\n", "2.1.325\nsomething else\n", "2.1\n", "2.1.325-beta\n", ""] {
             assert_eq!(version_line(no), None, "{no:?}");
         }
     }
