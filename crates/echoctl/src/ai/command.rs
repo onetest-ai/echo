@@ -144,7 +144,7 @@ pub fn wrapper_in_run(s: &Settings, id: &str, in_run: bool) -> Result<()> {
 pub fn plugin_may_name(s: &Settings, id: &str, thread_pin: Option<&str>) -> Result<()> {
     let wrapper = s.profiles.iter().any(|p| p.id == id && p.kind == Kind::Wrapper);
     if wrapper && s.default_id() != id && thread_pin != Some(id) {
-        bail!("a plugin's run can't choose the wrapper profile “{id}”: it runs on one only when it is your default or the thread's");
+        bail!("a plugin's run can't choose the wrapper profile “{id}”: it runs on one only when it is your default");
     }
     Ok(())
 }

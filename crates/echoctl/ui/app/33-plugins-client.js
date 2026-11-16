@@ -281,7 +281,8 @@ document.addEventListener('click', (e) => {
     render()
   })
   const go = (msg, then) => { send(msg); setTimeout(() => poll(then), 400) }
-  const done = (w) => { if (w.added || w.updated) { S.wrapForm = null; loadState().then(render) } }
+  // Added or updated: the form goes; what was done stays said in Echo's notice.
+  const done = (w) => { if (w.added || w.updated) { S.wrapForm = null; S.notice = (wrapperState(w) || {}).text; loadState().then(render) } }
   if (at('[data-wrap-form]')) { S.wrapForm = S.wrapForm && !S.wrapForm.plugin ? null : { command: '', name: '' }; return render() }
   if (at('[data-wrap-cancel]')) { S.wrapForm = null; return render() }
   const offer = at('[data-wrap-offer]')

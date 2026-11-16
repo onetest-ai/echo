@@ -69,7 +69,7 @@ Evidence: `plugins::agent::lay_out`, `plugins::agent::render`, `guard`
 
 A plugin's client half runs in the window's own page and can send the page's actions as the user would; "only the user
 adds" a plugin's offer (a wrapper profile, a dashboard) holds for what a plugin can do through its manifest, `ctx`
-services, jobs and the CLI inside runs, not against its own page code.
+services, jobs and the CLI inside runs, not against its own page code or its scripts (programs run with your rights).
 
 ## Dashboards
 

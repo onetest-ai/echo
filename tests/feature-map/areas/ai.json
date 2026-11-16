@@ -147,7 +147,7 @@
   },
   {
    "id": "F-AI-16",
-   "feature": "Inside a run Echo started, a wrapper profile is never made the default, a call's or a thread's (`ai default`, a call's profile, `project set --profile`); a plugin's job (`ctx.claude.run({profile})`) runs on one only when it is the user's default",
+   "feature": "Inside a run Echo started, a wrapper profile is never made the default, a call's or a thread's or the next recording's (`ai default`, a call's profile, `project set --profile`, `arm --ai` or a meeting file's, `memo start --ai`); a plugin's job (`ctx.claude.run({profile})`) runs on one only when it is the user's default",
    "priority": "high",
    "check": "agent",
    "axes": [
