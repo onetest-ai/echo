@@ -1,0 +1,96 @@
+{
+ "model": {
+  "context_length": 32768
+ },
+ "rules": [
+  {
+   "when": [
+    "Yolo: the user gave you this task to do on your own",
+    "echo://task/acme-rollout/T010"
+   ],
+   "vars": {
+    "cli": "Echo's CLI is `([^`]+)`"
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "{cli} read echo://task/acme-rollout/T010",
+      "description": "Read the task"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "{cli} project work acme-rollout '{\"op\":\"edit\",\"node\":\"T010\",\"set\":{\"state\":\"done\"}}'",
+      "description": "Close the task"
+     }
+    },
+    {
+     "text": "Booked the workshop room for Thursday (virtual model) and closed the task."
+    }
+   ]
+  },
+  {
+   "when": [
+    "Yolo: the user gave you this task to do on your own",
+    "echo://task/globex-pilot/T001"
+   ],
+   "vars": {
+    "cli": "Echo's CLI is `([^`]+)`"
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "{cli} read echo://task/globex-pilot/T001",
+      "description": "Read the task"
+     }
+    },
+    {
+     "text": "Didn't collect the user list: nobody has sent it yet (virtual model). Left for you: ask Kim Park for it."
+    }
+   ]
+  },
+  {
+   "when": [
+    "Yolo: the user gave you this message to handle on your own",
+    "echo://needs/mail:globex-redlines"
+   ],
+   "vars": {
+    "cli": "Echo's CLI is `([^`]+)`"
+   },
+   "steps": [
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "{cli} read echo://needs/mail:globex-redlines",
+      "description": "Read the mail"
+     }
+    },
+    {
+     "tool": "Bash",
+     "input": {
+      "command": "{cli} compose --to kim@globex.example --subject 'Re: Contract redlines for the Globex pilot' --body 'Hi Kim, thanks for the redlines: I will go through them by Friday.'",
+      "description": "Draft the reply"
+     }
+    },
+    {
+     "text": "Drafted a reply to Kim Park about the redlines (virtual model). Left for you: send the draft."
+    }
+   ]
+  },
+  {
+   "when": [
+    "Yolo: the user gave you this task to do on your own",
+    "echo://task/acme-rollout/T016"
+   ],
+   "steps": [
+    {
+     "error": 400,
+     "message": "virtual model: this run fails (Yolo runs' Failed)"
+    }
+   ]
+  }
+ ]
+}

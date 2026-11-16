@@ -302,7 +302,7 @@ pub fn list_value() -> serde_json::Value {
 
 /// What a session on `profile` loads only at start, by content: Echo's plugin as installed in that profile's Claude
 /// Code (its `echo@…` entries — not the file, which any plugin install rewrites), and for the folder session the
-/// skills Echo's plugins give it. `(what changed, fingerprint, when)`.
+/// user's own skills (a plugin's load when Claude first reads its folder). `(what changed, fingerprint, when)`.
 fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Option<std::time::SystemTime>)> {
     use sha2::Digest as _;
     let hash = |b: &[u8]| sha2::Sha256::digest(b).iter().take(8).map(|x| format!("{x:02x}")).collect::<String>();
@@ -313,37 +313,11 @@ fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Optio
     let echo: Vec<(&String, &serde_json::Value)> = v["plugins"].as_object().into_iter().flatten().filter(|(k, _)| k.starts_with("echo@")).collect();
     out.push(("Echo's plugin for Claude Code was updated".to_string(), hash(serde_json::json!(echo).to_string().as_bytes()), mtime(&installed)));
     if folder {
-        for d in crate::grants::session_plugins() {
-            let mut files = vec![];
-            collect_files(&d, 3, &mut files);
-            files.sort();
-            let mut h = sha2::Sha256::new();
-            for f in &files {
-                h.update(f.strip_prefix(&d).unwrap_or(f).to_string_lossy().as_bytes());
-                h.update(std::fs::read(f).unwrap_or_default());
-            }
-            let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let at = files.iter().filter_map(|f| mtime(f)).max();
-            out.push((format!("Skills from the {name} plugin changed"), h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at));
-        }
         // The user's own skills (Settings → Templates → Skills): made, changed, switched on or off since it started.
         let (h, at) = crate::skills::fingerprint();
         out.push(("Your skills changed".to_string(), h, at));
     }
     out
-}
-
-/// The files under `dir`, `depth` levels down.
-fn collect_files(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        if e.file_type().is_ok_and(|t| t.is_dir()) {
-            if depth > 0 {
-                collect_files(&e.path(), depth - 1, out);
-            }
-        } else {
-            out.push(e.path());
-        }
-    }
 }
 
 /// The user's own Claude Code folder: `CLAUDE_CONFIG_DIR` when Echo has it, else `~/.claude`.
@@ -586,13 +560,6 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     choose_session(&format!("{}:folder", p.id), pick)?;
     let (mut args, _, forget) = session_args(&format!("{}:folder", p.id));
     let session = args[1].clone();
-    if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
-        args.extend(["--model".into(), m]);
-    }
-    // The user's choice (Settings → AI & minutes): no permission prompts in this session only.
-    if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) {
-        args.push("--dangerously-skip-permissions".into());
-    }
     // Channels plugins asked for (Telegram…): the session listens to them while it is open.
     #[cfg_attr(not(feature = "js"), allow(unused_mut))] // only the plugins' channels (`js`) add to it
     let mut extra_env: Vec<(&str, String)> = vec![];
@@ -603,60 +570,14 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
         args.extend(["--channels".into(), format!("plugin:{}", ch.spec)]);
         extra_env.extend(ch.env.iter().map(|(k, v)| (k.as_str(), v.clone())));
     }
-    // What plugins add to Echo's sessions (never the user's own Claude Code): their Claude Code plugin
-    // (skills) and the folders the user gave them to read (an Obsidian vault…).
-    let session_plugins = crate::grants::session_plugins();
-    for d in &session_plugins {
-        args.extend(["--plugin-dir".into(), d.display().to_string()]);
-    }
-    // The commands plugins let Echo's sessions run (`uses.sessions.commands`): no prompt for them here either.
-    let mut clis = crate::grants::session_clis(&session_plugins);
-    if let Some(d) = crate::notes::plugin_dir() {
-        clis.extend(crate::notes::run_clis(&d));
-    }
-    let commands = crate::plugins::session_commands();
-    for cli in &clis {
-        for (id, c) in &commands {
-            args.extend(["--allowedTools".into(), format!("Bash({cli} plugin call {id} {c}:*)")]);
-        }
-    }
-    // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
-    // context until one is used; Send to Claude on a task names one.
-    match crate::skills::plugin() {
-        Ok(d) => args.extend(["--plugin-dir".into(), d.display().to_string()]),
-        Err(e) => eprintln!("skills: {e:#}"),
-    }
-    // Echo's own plugin (status line, record / minutes / doctor skills): installed in this folder's project scope it
-    // reaches Claude Code as the user set it up; a profile of its own reads only its own settings, so it gets the
-    // plugin shipped with the app.
-    if p.kind.managed() {
-        if let Some(d) = crate::notes::plugin_dir() {
-            args.extend(["--plugin-dir".into(), d.display().to_string()]);
-        }
-    }
-    for d in crate::grants::session_read() {
-        args.extend(["--add-dir".into(), d.display().to_string()]);
-    }
-    // The user's knowledge vaults on this profile (spec K9-04).
+    // The user's knowledge vaults on this profile.
     for d in folder_vault_dirs(&p.id) {
         args.extend(["--add-dir".into(), d.display().to_string()]);
     }
-    // What the window shows, before each prompt: a settings file of its own with only that hook (the
-    // user's own settings apply as ever).
-    let folder = paths::config_dir().join("minutes-run");
-    std::fs::create_dir_all(&folder)?;
-    let settings = folder.join("session-folder.json");
     let exe = std::env::current_exe()?;
-    let mut hooks = crate::view::hook_settings(&exe);
-    hooks["PreToolUse"] = crate::view::onedrive_hook(&exe);
-    std::fs::write(&settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": hooks}))?)?;
-    args.splice(0..0, ["--settings".to_string(), settings.display().to_string()]);
-    // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
-    #[cfg(feature = "brain")]
-    if let Some(f) = brain_mcp_config(&std::env::current_exe()?, &["--profile".into(), p.id.clone(), "--who".into(), "folder".into()]) {
-        args.splice(0..0, ["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo".into()]);
-    }
-    let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
+    let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten();
+    args.extend(crate::folder_args::session(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder", model.as_deref(), crate::folder_args::Who::Folder)?);
+    let mut env = crate::folder_args::env(&p.id);
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
     open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget), Some(session))
@@ -1014,6 +935,23 @@ mod tests {
     }
 
     #[test]
+    fn a_test_never_reaches_this_computers_own_claude_code_folder() {
+        // testenv points the user's home and Claude Code folder into its own (#604's follow-up): every place Echo
+        // looks for the user's Claude Code setup is inside the test's folder, never the real `~/.claude`.
+        let (_env, root) = crate::paths::testenv::folders("own-claude-folder");
+        let inside = |p: &std::path::Path| assert!(p.starts_with(&root), "{} reaches outside the test", p.display());
+        inside(&own_claude_folder());
+        inside(&crate::paths::user_home().join(".claude"));
+        // Claude Code's install record read from there: an Echo plugin recorded in the test's folder is the one found.
+        let plugin = root.join("installed-echo");
+        std::fs::create_dir_all(&plugin).unwrap();
+        let record = own_claude_folder().join("plugins/installed_plugins.json");
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(&record, serde_json::json!({"plugins": {"echo@test": [{"scope": "user", "installPath": plugin}]}}).to_string()).unwrap();
+        assert_eq!(crate::app::plugin_root(), Some(plugin));
+    }
+
+    #[test]
     fn a_panel_starts_a_new_conversation_and_goes_back_to_an_old_one() {
         let (_env, root) = crate::paths::testenv::folders("terminal-conversations");
         let key = "system:folder";
@@ -1156,6 +1094,41 @@ mod tests {
         assert!(session().contains("--dangerously-skip-permissions"), "{}", session());
         close(pty);
         crate::knowledge::chat::reset();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_folder_session_gets_plugins_through_the_core_not_as_plugin_folders() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-folder-plugins");
+        let d = root.join("market/plugins/kit");
+        std::fs::create_dir_all(d.join("skills/staffing/scripts")).unwrap();
+        std::fs::write(d.join("skills/staffing/SKILL.md"), "---\nname: staffing\ndescription: Staffing.\n---\n\nRun scripts/read.sh.\n").unwrap();
+        std::fs::write(d.join("skills/staffing/scripts/read.sh"), "#!/bin/sh\necho read\n").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), serde_json::json!({"id": "kit", "name": "Kit", "version": "0.1.0", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": [{"skill": "staffing", "script": "scripts/read.sh"}]}}).to_string()).unwrap();
+        std::fs::write(root.join("market/echo-marketplace.json"), serde_json::json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(root.join("market").to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("kit", Some(&name)).unwrap().uses;
+        crate::plugins::install("kit", Some(&name), &agreed).unwrap();
+        let exe = Path::new("/Apps/Echo.app/echoctl");
+        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), crate::folder_args::Who::Folder).unwrap();
+        // No plugin's folder as a Claude Code plugin: its part waits in the data folder for Claude to Read it.
+        let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
+        let session = paths::config_dir().join("plugins/session");
+        assert!(dirs.iter().all(|d| !Path::new(d).starts_with(&session) && !Path::new(d).starts_with(paths::home())), "{dirs:?}");
+        // Its script stays allowed, by its launcher's path there.
+        let script = crate::plugins::agent::folder("kit").join(".claude/skills/kit-staffing/scripts/read.sh");
+        assert!(args.contains(&format!("Bash({}:*)", script.display())), "{args:?}");
+        // The settings file: the window's hooks, and the core's SessionStart hook.
+        assert_eq!(args[0], "--settings");
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
+        let starts: Vec<String> = v["hooks"]["SessionStart"].as_array().unwrap().iter().map(|h| h["hooks"][0]["command"].as_str().unwrap().to_string()).collect();
+        assert_eq!(starts, ["'/Apps/Echo.app/echoctl' view-hook", "'/Apps/Echo.app/echoctl' core --hook"]);
+        assert_eq!(v["hooks"]["SessionStart"][1]["matcher"], "startup|resume|compact|clear");
+        // Before a write: the OneDrive check, and none into `.plugins/`.
+        let pre: Vec<String> = v["hooks"]["PreToolUse"].as_array().unwrap().iter().map(|h| h["hooks"][0]["command"].as_str().unwrap().to_string()).collect();
+        assert_eq!(pre, ["'/Apps/Echo.app/echoctl' onedrive-hook", "'/Apps/Echo.app/echoctl' plugins-hook"]);
+        crate::plugins::remove("kit", true).unwrap();
     }
 
     #[test]

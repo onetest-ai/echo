@@ -12,6 +12,46 @@ function patch(el, html) {
   if (kept.some(([t, l]) => t > 0 || l > 0)) [...el.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) { if (kept[i][0]) x.scrollTop = kept[i][0]; if (kept[i][1]) x.scrollLeft = kept[i][1] } })
 }
 
+/** A region drawn widget by widget (each marked `data-wkey`): only a widget whose markup changed is replaced; the others,
+ *  and the layout around them, stay as they are while the layout's own markup is the same. A changed layout (a widget
+ *  moved, added, resized): the whole region, as `patch`. */
+function patchKeyed(el, html) {
+  if (!el || el._html === html) return
+  const t = document.createElement('template')
+  t.innerHTML = html
+  // The outermost marked elements: a widget's own (one inside another goes with it).
+  const marked = [...t.content.querySelectorAll('[data-wkey]')].filter((n) => !(n.parentElement && n.parentElement.closest('[data-wkey]')))
+  const parts = new Map()
+  for (const n of marked) {
+    parts.set(n.dataset.wkey, n.outerHTML)
+    const slot = document.createElement('i')
+    slot.dataset.wslot = n.dataset.wkey
+    n.replaceWith(slot)
+  }
+  const skel = t.innerHTML
+  // A whole redraw: the region emptied or drawn by another view since (its `_html` reset), a changed layout, a widget
+  // not where it was drawn, or the same widget twice.
+  const at = (k) => el.querySelector(`[data-wkey="${CSS.escape(k)}"]`)
+  let whole = el._html == null || el._skel !== skel || !el._parts || marked.length !== parts.size || [...parts.keys()].some((k) => !at(k))
+  if (!whole) {
+    for (const [k, h] of parts) {
+      if (el._parts.get(k) === h) continue
+      const old = at(k)
+      // Its scrolled lists keep where they were (as `patch` keeps them for a whole region).
+      const kept = [...old.querySelectorAll('.rows, [data-keep-scroll]')].map((x) => [x.scrollTop, x.scrollLeft])
+      const nt = document.createElement('template')
+      nt.innerHTML = h
+      const fresh = nt.content.firstElementChild
+      old.replaceWith(nt.content)
+      if (fresh && kept.some(([a, b]) => a > 0 || b > 0)) [...fresh.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) { if (kept[i][0]) x.scrollTop = kept[i][0]; if (kept[i][1]) x.scrollLeft = kept[i][1] } })
+    }
+  }
+  if (whole) { el._html = null; patch(el, html) }
+  el._html = html
+  el._skel = skel
+  el._parts = parts
+}
+
 // ── what the user sees, for Echo's Claude terminals (`view.rs`: a UserPromptSubmit hook adds it to
 // each prompt, so "this" means what is open or selected here). Sent when it changes, and every minute.
 let viewSent = '', viewTimer = null, frameSel = ''
@@ -31,7 +71,7 @@ function viewState() {
     else if (S.pj.client) { const cl = projClient(S.pj.client); v.client = { id: S.pj.client, name: cl ? cl.name : S.pj.client, tab: S.pj.ctab } }
     else if (S.pj.sel) { const p = projById(S.pj.sel); v.thread = { id: S.pj.sel, name: p ? p.name : S.pj.sel, tab: S.pj.tab } }
   }
-  if (S.view === 'tasks') v.filter = `Tasks across threads${S.tk.project ? ` · only ${(projById(S.tk.project) || {}).name || S.tk.project}` : ''}`
+  if (S.view === 'tasks') { const k = tkPicks(); v.filter = `Tasks across threads${k.project ? ` · only ${(projById(k.project) || {}).name || k.project}` : k.client ? ` · only ${(((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === k.client) || {}).name || k.client}'s` : ''}` }
   if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
   if (S.view === 'brain') v.filter = `Knowledge · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
   if (S.view === 'calendar') {
@@ -96,6 +136,8 @@ function renderNow() {
   const key = `${S.view}|${S.selected}|${S.tab}`
   const entering = key !== lastKey
   lastKey = key
+  // Your day's place the user scrolled to is Today's only: in another view it is forgotten, and Today opens on now.
+  if (S.view !== 'today') S.tdScrolledAt = 0
   const focused = document.activeElement
   const focus = focused && focused.id
   const caret = focus && focused.selectionStart
@@ -131,7 +173,7 @@ function renderNow() {
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
   patch($('#r-ann'), announcement())
-  patch($('#r-dlg'), todayDialogs())
+  patch($('#r-dlg'), todayDialogs() + whatsNewDialog())
   todayDialogsKeep()
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite" aria-label="Notices">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : '') + Kn.overlay())
   Kn.syncDrops()
@@ -213,8 +255,9 @@ function placeDetail() {
 
 // ── fingerprint: what the screen depends on ──────────────────────────────────────────────────
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
-// (the Inbox too: its badge and open panel; the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, NY.data, Math.floor(Date.now() / 60000)])
+// (the Inbox too: its badge and open panel; a thread's or client's dashboard: its widgets' answers, #598; the minute
+// too: the pill's "meeting soon" comes and goes with the clock)
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, S.dash, NY.data, Math.floor(Date.now() / 60000)])
 // end of the fingerprint block
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.
@@ -263,9 +306,8 @@ CLICKS.push(
   { sel: '[data-signin-accept]', area: 'settings', when: (t) => t.dataset.signinAccept, run: (t) => { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') } },
   { sel: '[data-signin-check]', area: 'settings', when: (t) => t.dataset.signinCheck, run: (t) => { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') } },
   { sel: 'a[data-ext]', area: 'page', when: (t) => t.dataset.ext !== undefined, run: (t, e) => { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return } },
-  // A plugin's work row's page (https only), in the browser once the user confirms it (its host asked first).
-  { sel: '[data-open-url]', area: 'page', when: (t) => /^https:\/\//.test(t.dataset.openUrl || ''), run: (t, e) => { e.preventDefault(); return workRowOpen(t.dataset.openUrl, t.dataset.openWhere || '') } },
-  { sel: '[data-open-url-no]', area: 'page', when: (t) => t.dataset.openUrlNo !== undefined, run: (t, e) => { e.preventDefault(); S.wrOpen = null; return render() } },
+  // A plugin's work row's page (https only), in the browser on the click.
+  { sel: '[data-open-url]', area: 'page', when: (t) => /^https:\/\//.test(t.dataset.openUrl || ''), run: (t, e) => { e.preventDefault(); return workRowOpen(t.dataset.openUrl) } },
   // Settings
   { sel: '[data-me-edit]', area: 'settings', when: (t) => t.dataset.meEdit !== undefined, run: (t) => { S.meEdit = (S.settings && S.settings.me_profile && S.settings.me_profile.text) || ''; render(); const ta = $('#me-profile'); if (ta) ta.focus(); return } },
   { sel: '[data-me-cancel]', area: 'settings', when: (t) => t.dataset.meCancel !== undefined, run: (t) => { S.meEdit = null; return render() } },
@@ -275,6 +317,10 @@ CLICKS.push(
     let val; try { val = JSON.parse(t.dataset.val) } catch { val = t.dataset.val }
     return setSetting(t.dataset.set, val)
   } },
+  // What's new (`whatsNewDialog`): closed by × or Got it; Show me opens the item's place; ⌘K and Settings open it again.
+  { sel: '[data-wn-close]', area: 'shell', when: (t) => t.dataset.wnClose !== undefined, run: (t) => { S.wn = null; return render() } },
+  { sel: '[data-wn-go]', area: 'shell', when: (t) => t.dataset.wnGo, run: (t) => whatsNewGo(t.dataset.wnGo) },
+  { sel: '[data-wn-open]', area: 'shell', when: (t) => t.dataset.wnOpen !== undefined, run: (t) => whatsNewOpen() },
   { sel: '[data-announce]', area: 'shell', when: (t) => t.dataset.announce !== undefined, run: (t) => { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id }); if (t.dataset.announce) send({ cmd: 'settings_action', action: t.dataset.announce, arg: t.dataset.arg || '' }); return render() } },
   { sel: '[data-act]', area: 'settings', when: (t) => t.dataset.act, run: (t) => { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return } },
   { sel: '[data-lang-del]', area: 'settings', when: (t) => t.dataset.langDel, run: (t) => { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() } },
@@ -403,6 +449,14 @@ CLICKS.push(
     if (!TPL.data) loadTemplates().then(render)
     return render()
   } },
+  // Ignore: off Needs you now at once, nothing else (no task, no comment, no Claude).
+  { sel: '[data-needs-ignore]', area: 'today', when: (t) => t.dataset.needsIgnore, run: (t) => {
+    const id = t.dataset.needsIgnore
+    send({ cmd: 'needs_decide', id, how: 'ignore' })
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  } },
   { sel: '[data-needs-todo-ok]', area: 'today', when: (t) => t.dataset.needsTodoOk, run: (t) => {
     const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
     if (!thread) { const el = $('#nd-thread'); if (el) el.focus(); return }
@@ -442,8 +496,11 @@ CLICKS.push(
     S.todayClose = null
     send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' }, note: note.trim() || undefined } })
     // Gone from My work at once; Today is read again once the ledger has it.
-    if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
-    setTimeout(() => loadToday().then(render), 800)
+    const gone = (w) => { if (w) for (const k of ['mine', 'owed', 'waiting']) if (w[k]) w[k].items = (w[k].items || []).filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project)) }
+    gone(S.today && S.today.work)
+    gone(S.today && S.today.scoped && S.today.scoped['core:tasks.mine'])
+    gone(S.dash && S.dash.core && S.dash.core['core:tasks.mine'])
+    setTimeout(() => (S.view === 'today' ? loadToday() : loadDashboard()).then(render), 800)
     return render()
   } },
   { sel: '[data-today-seen]', area: 'today', when: (t) => t.dataset.todaySeen, run: (t) => { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() } },

@@ -56,6 +56,20 @@ fn chosen_home() -> Option<PathBuf> {
     Some(dunce::simplified(&p.home).to_path_buf())
 }
 
+/// The user's Downloads folder (the window's exports go there): `ECHOCTL_DOWNLOADS` in its place when set (the test
+/// data's env sets it), and on test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) without it the data folder's own `Downloads`,
+/// never the user's.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn downloads_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("ECHOCTL_DOWNLOADS").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d);
+    }
+    if std::env::var_os("ECHOCTL_TEST_OPEN_LOG_ONLY").is_some_and(|v| !v.is_empty()) {
+        return home().join("Downloads");
+    }
+    dirs::download_dir().unwrap_or_else(|| user_home().join("Downloads"))
+}
+
 /// The data folder: calls + state.
 pub fn home() -> PathBuf {
     std::env::var_os("ECHOCTL_HOME").map(PathBuf::from).or_else(chosen_home).unwrap_or_else(config_dir)
@@ -152,7 +166,7 @@ pub mod testenv {
     pub struct Env {
         _lock: MutexGuard<'static, ()>,
         root: PathBuf,
-        before: [(&'static str, Option<std::ffi::OsString>); 2],
+        before: [(&'static str, Option<std::ffi::OsString>); 5],
     }
 
     impl Drop for Env {
@@ -182,7 +196,9 @@ pub mod testenv {
     }
 
     /// A fresh `<tmp>/echo-test-<name>-<pid>` with `home/` (ECHOCTL_HOME) and `config/`
-    /// (ECHOCTL_CONFIG_DIR), until the returned guard drops.
+    /// (ECHOCTL_CONFIG_DIR), until the returned guard drops. The user's own home and Claude Code folder are its
+    /// `user/` and `user/.claude` (HOME, CLAUDE_CONFIG_DIR; ZDOTDIR unset): no test reads this computer's Claude Code
+    /// setup or the user's shell files.
     pub fn folders(name: &str) -> (Env, PathBuf) {
         let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         crate::livenotes::forget_all();
@@ -190,9 +206,14 @@ pub mod testenv {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("home/calls")).unwrap();
         std::fs::create_dir_all(root.join("config")).unwrap();
-        let before = ["ECHOCTL_HOME", "ECHOCTL_CONFIG_DIR"].map(|k| (k, std::env::var_os(k)));
+        std::fs::create_dir_all(root.join("user/.claude")).unwrap();
+        let before = ["ECHOCTL_HOME", "ECHOCTL_CONFIG_DIR", "HOME", "CLAUDE_CONFIG_DIR", "ZDOTDIR"].map(|k| (k, std::env::var_os(k)));
         std::env::set_var("ECHOCTL_HOME", root.join("home"));
         std::env::set_var("ECHOCTL_CONFIG_DIR", root.join("config"));
+        std::env::set_var("HOME", root.join("user"));
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.join("user/.claude"));
+        // A login shell a test starts reads no rc file of the user's own (zsh's from ZDOTDIR when set).
+        std::env::remove_var("ZDOTDIR");
         (Env { _lock: lock, root: root.clone(), before }, root)
     }
 }

@@ -29,6 +29,7 @@ mod assets;
 mod knowledge;
 mod call;
 mod calendar;
+mod export;
 mod settings;
 mod threads;
 mod today;
@@ -70,6 +71,11 @@ impl EchoWindow {
     /// Go where an echo:// link points (the page asks `/api/link` and routes).
     pub fn open_link(&self, link: &str) {
         let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.openLink({})", json!(link)));
+    }
+
+    /// What's new over the view the window is on (as ⌘K opens it).
+    pub fn whats_new(&self) {
+        let _ = self.webview.evaluate_script("window.echo && window.echo.whatsNew()");
     }
 
     /// Show a call (`name` = its folder name).
@@ -145,6 +151,10 @@ fn exe_icon(size: u32) -> Option<tao::window::Icon> {
     tao::window::Icon::from_rgba(img.into_raw(), size, size).ok()
 }
 
+/// The tray's What's new, as the start of a window (`open`): the window's place for it (`route` in the window script
+/// shows it over Today).
+pub const WHATS_NEW: &str = "#whats-new";
+
 /// Open the window. `ipc` receives each message the page posts (JSON text).
 pub fn open<T: 'static>(
     target: &EventLoopWindowTarget<T>,
@@ -186,6 +196,8 @@ pub fn open<T: 'static>(
     let url = match start_call {
         // An echo:// link: the page routes it as it loads (`#link=…`).
         Some(c) if c.starts_with("echo://") => format!("{}#link={}", base_url(), urlencode(c)),
+        // The tray's What's new: the window opens on Today with it.
+        Some(WHATS_NEW) => format!("{}{WHATS_NEW}", base_url()),
         Some(c) => format!("{}#call/{}", base_url(), urlencode(c)),
         None => base_url().to_string(),
     };
@@ -461,8 +473,17 @@ fn read_json(p: &Path) -> Value {
 
 fn state() -> Value {
     let w = watch::running_watcher();
+    let plugins = crate::plugins::stamp();
+    #[cfg(feature = "js")]
+    if let Some(s) = &plugins {
+        crate::jshost::follow(s);
+    }
     json!({
         "version": env!("CARGO_PKG_VERSION"),
+        // Moves when the Inbox may have changed (a sign-in check settled, a job ended): the window reads it again.
+        "attention": crate::attention::generation(),
+        // What is installed and on: the window's plugin parts follow its change.
+        "plugins": plugins,
         "recording": w.as_ref().and_then(|w| w.recording.clone()),
         "recording_memo": w.as_ref().is_some_and(|w| w.memo),
         // The recording call's language, which the pill changes (`call_language::change`).
@@ -478,6 +499,8 @@ fn state() -> Value {
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
         // A release's one-time banner, until answered (`announce.rs`).
         "announcement": crate::announce::current(),
+        // After an update, what the versions since the last one seen bring (`whats_new.rs`), until the page shows it.
+        "whats_new": crate::whats_new::pending(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
         "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },
@@ -600,6 +623,9 @@ pub fn handle(msg: &str) -> Handled {
     if let Some(r) = terminals::handle(&v) {
         return r;
     }
+    if let Some(r) = export::handle(&v) {
+        return r;
+    }
     #[cfg(feature = "brain")]
     if let Some(r) = brain::handle(&v) {
         return r;
@@ -632,6 +658,7 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
     let app = false;
     #[cfg(feature = "js")]
     if app {
+        crate::plugins::agent::sync_all();
         crate::jshost::as_app();
         crate::jshost::sync();
     }
@@ -857,7 +884,7 @@ mod tests {
         assert!(get_json("/api/kn/twin/page?path=..%2F..%2Fx.md")["error"].is_string(), "a bad path is an error, not a page");
         let js = respond(&Request::builder().uri("echo://localhost/assets/knowledge.js").body(Vec::new()).unwrap());
         assert_eq!(js.status(), 200);
-        assert!(index_html().find("assets/knowledge.js").unwrap() < index_html().find("assets/app.js").unwrap(), "Knowledge's script loads before app.js");
+        assert!(assets::index_html().find("assets/knowledge.js").unwrap() < assets::index_html().find("assets/app.js").unwrap(), "Knowledge's script loads before app.js");
         let img = respond(&Request::builder().uri("echo://localhost/api/kn/twin/asset?path=knowledge%2Fnope.png").body(Vec::new()).unwrap());
         assert_eq!(img.status(), 404);
     }
@@ -948,6 +975,38 @@ mod tests {
         assert_eq!((names(&found).len(), found["total"].as_u64()), (2, Some(2)));
         assert_eq!(names(&calls_page("q=hannah")), ["2026-10-21_100000-b"], "by the people in it");
         assert_eq!(names(&calls_page("q=harbor%20tom")), ["2026-10-22_100000-c"], "every word");
+    }
+
+    #[test]
+    fn a_calls_faces_are_who_joined_when_teams_listed_them_else_the_invite() {
+        let (_env, _root) = crate::paths::testenv::folders("window-calls-joined");
+        let invite = json!({"organizer": {"name": "Omar Haddad", "email": "omar@acme.example"}, "attendees": [{"name": "Ivan Petrov", "email": "ivan@acme.example"}]});
+        for (name, log) in [("2026-10-20_100000-review", true), ("2026-10-21_100000-sync", false), ("2026-10-22_100000-alone", true)] {
+            let d = crate::paths::calls_dir().join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), json!({"title": name, "started_at": "2026-10-20T10:00:00+02:00", "ended_at": "2026-10-20T10:30:00+02:00"}).to_string()).unwrap();
+            fs::write(d.join("meeting.json"), invite.to_string()).unwrap();
+            let lines: &[&str] = if name.ends_with("alone") {
+                // The user alone in the call: their own tile and row; the invitees "No response".
+                &[r#"{"v":2}"#, r#"{"t":0.5,"k":"tile:Sam Rivera","n":"Sam Rivera","me":true,"add":["a"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:0","n":"Sam Rivera","add":["t:unmuted"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:1","n":"Omar Haddad","add":["t:no response"],"del":[]}"#]
+            } else {
+                &[r#"{"v":2}"#, r#"{"t":0.5,"k":"roster:1","n":"Haddad, Omar (Acme)","add":["t:unmuted"],"del":[]}"#,
+                  r#"{"t":0.5,"k":"roster:2","n":"Ivan Petrov","add":["t:no response"],"del":[]}"#,
+                  r#"{"t":9.0,"k":"roster:3","n":"Gomez, Rita (Acme)","add":["t:muted"],"del":[]}"#]
+            };
+            if log {
+                fs::write(d.join(crate::meeting::UI_LOG), lines.join("\n")).unwrap();
+            }
+        }
+        let people = |v: &Value, name: &str| v["calls"].as_array().unwrap().iter().find(|c| c["name"] == name).unwrap()["people"].clone();
+        let page = calls_page("");
+        // Ivan was invited and never came; Rita came uninvited; Omar by the invite's name.
+        assert_eq!(people(&page, "2026-10-20_100000-review"), json!(["Omar Haddad", "Rita Gomez"]));
+        assert_eq!(people(&page, "2026-10-21_100000-sync"), json!(["Omar Haddad", "Ivan Petrov"]), "no participants list: the invite");
+        assert_eq!(people(&page, "2026-10-22_100000-alone"), json!([]), "nobody else joined: no faces, not the invite");
+        assert_eq!(call_detail(&crate::paths::calls_dir().join("2026-10-20_100000-review"))["people"], json!(["Omar Haddad", "Rita Gomez"]), "the header: the same");
     }
 
     #[test]

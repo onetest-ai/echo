@@ -175,7 +175,7 @@ pub fn series(cmd: SeriesCmd) -> Result<()> {
         SeriesCmd::List { thread: Some(t) } => series::of_thread(&t)?,
         SeriesCmd::List { thread: None } => serde_json::to_value(series::load())?,
         SeriesCmd::Set { key, json, subject } => {
-            anyhow::ensure!(std::env::var_os("ECHOCTL_HEADLESS").is_none(), "not inside a run Echo started");
+            anyhow::ensure!(!crate::notes::run_limited(), "not inside a run Echo started");
             let patch: serde_json::Value = anyhow::Context::context(serde_json::from_str(&json), "the change isn't JSON")?;
             serde_json::json!({"rule": series::set(&key, subject.as_deref(), &patch)?})
         }
@@ -190,7 +190,7 @@ pub fn prep(call: String, upcoming: bool, show: Option<String>, write: Option<St
     } else if let Some(id) = show {
         prep::load(&id).ok_or_else(|| anyhow::anyhow!("no prep {id:?}"))?
     } else if let Some(id) = write {
-        anyhow::ensure!(std::env::var_os("ECHOCTL_HEADLESS").is_none(), "not inside a run Echo started");
+        anyhow::ensure!(!crate::notes::run_limited(), "not inside a run Echo started");
         prep::write(&prep::meeting(&id).ok_or_else(|| anyhow::anyhow!("that meeting isn't in today's calendar"))?)?
     } else {
         calls::prep(&calls::resolve_call(&call)?)

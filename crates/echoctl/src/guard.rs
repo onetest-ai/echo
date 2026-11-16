@@ -58,6 +58,8 @@ pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
 /// A read-only routine may run these plugin commands (`echoctl plugin call <id> <command> …`), one `<id> <command>`
 /// per line: those the enabled plugins name in `uses.sessions.commands` (the user agreed on their sheets).
 pub const RUN_PLUGIN_COMMANDS: &str = "ECHOCTL_RUN_PLUGIN_COMMANDS";
+/// A routine's plugin scripts marked readonly, by their launchers' full paths, one a line (`grants::session_scripts`).
+pub const RUN_PLUGIN_SCRIPTS: &str = "ECHOCTL_RUN_PLUGIN_SCRIPTS";
 /// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
 pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
 /// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
@@ -115,6 +117,8 @@ pub struct Scope {
     skills: Vec<String>,
     /// …and run these plugin commands, `(plugin, command)` (`RUN_PLUGIN_COMMANDS`).
     plugin_commands: Vec<(String, String)>,
+    /// …and these plugin scripts, by full path (`RUN_PLUGIN_SCRIPTS`).
+    plugin_scripts: Vec<String>,
     /// A run in a knowledge vault (`RUN_MODE=vault`, `ingest`, `lint`): judged by its own rules alone.
     vault: Option<VaultScope>,
 }
@@ -296,7 +300,7 @@ impl Scope {
     pub(crate) fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
         if let Some(mode) = var(RUN_MODE).and_then(|m| m.into_string().ok()).filter(|m| matches!(m.as_str(), "vault" | "ingest" | "lint")) {
             let v = VaultScope::from_vars(&mode, &var)?;
-            return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: Some(v) });
+            return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![], vault: Some(v) });
         }
         let clis_of = |v: Option<std::ffi::OsString>| -> Vec<String> { v.and_then(|c| c.into_string().ok()).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect() };
         if var(RUN_MODE).is_some_and(|m| m == "project") {
@@ -312,7 +316,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![], vault: None });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -327,7 +331,8 @@ impl Scope {
             let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
             let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
             let plugin_commands = var(RUN_PLUGIN_COMMANDS).map(|v| v.to_string_lossy().lines().filter_map(|l| l.split_once(' ').map(|(p, c)| (p.to_string(), c.to_string()))).collect()).unwrap_or_default();
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, plugin_commands, vault: None });
+            let plugin_scripts = var(RUN_PLUGIN_SCRIPTS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
+            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, plugin_commands, plugin_scripts, vault: None });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -340,7 +345,7 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None })
+        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![], vault: None })
     }
 
     /// The answer to a tool call. Only a run in a vault is ever asked about; the other runs are allowed or refused.
@@ -364,6 +369,15 @@ impl Scope {
         }
         let tool = call["tool_name"].as_str().unwrap_or("");
         let input = &call["tool_input"];
+        // What plugins tell Claude (`.plugins/` in the data folder) is Echo's to write: a session there loads it.
+        if matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
+            let raw = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str());
+            if let Ok(p) = resolve(raw) {
+                if crate::plugins::agent::inside_root(&p) {
+                    return Err(format!("{} is what a plugin tells Claude: only Echo writes there", p.display()));
+                }
+            }
+        }
         if let Some(ps) = &self.project {
             return self.judge_project(ps, call, tool, input);
         }
@@ -549,6 +563,10 @@ impl Scope {
     fn bash(&self, line: &str) -> Result<(), String> {
         let words = shell_words(line)?;
         let (cli, rest) = words.split_first().ok_or("an empty command")?;
+        // A plugin script marked readonly, by its full path, with plain words: never through an interpreter.
+        if self.routine && self.plugin_scripts.iter().any(|s| s == cli) {
+            return Ok(());
+        }
         if !self.clis.iter().any(|c| c == cli) {
             return Err(format!("only the Echo CLI runs here, not {cli}"));
         }
@@ -1418,7 +1436,9 @@ mod tests {
             routine: false,
             extra: vec![],
             skills: vec![],
-            plugin_commands: vec![], vault: None,
+            plugin_commands: vec![],
+            plugin_scripts: vec![],
+            vault: None,
         }
     }
 
@@ -1618,6 +1638,7 @@ mod tests {
             RUN_READ => Some(v2.clone().into_os_string()),
             RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
             RUN_PLUGIN_COMMANDS => Some("obsidian search\nobsidian backlinks".into()),
+            RUN_PLUGIN_SCRIPTS => Some("/cfg/plugins/session/kit/skills/staffing/scripts/read.sh".into()),
             o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
         };
         let s = Scope::from_vars(vars).unwrap();
@@ -1637,6 +1658,20 @@ mod tests {
         ok("Bash", json!({"command": r#"echoctl plugin call obsidian search '{"q":"Dana"}'"#})).unwrap();
         ok("Bash", json!({"command": "echoctl plugin call obsidian backlinks"})).unwrap();
         for no in ["echoctl plugin call obsidian rename_plan", "echoctl plugin call other search", "echoctl plugin call obsidian", "echoctl plugin install obsidian"] {
+            assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
+        }
+        // A plugin's script marked readonly, by its full path with plain words; never another, an interpreter or more.
+        ok("Bash", json!({"command": "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh --project 'ACME 1'"})).unwrap();
+        for no in [
+            "/cfg/plugins/session/kit/skills/staffing/scripts/write.sh",
+            "node /cfg/plugins/session/kit/skills/staffing/scripts/read.sh",
+            "sh /cfg/plugins/session/kit/skills/staffing/scripts/read.sh",
+            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh | sh",
+            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh > /tmp/x",
+            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh $(id)",
+            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh; rm -rf ~",
+            "echoctl plugin script kit staffing scripts/write.sh",
+        ] {
             assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
         }
         ok("mcp__echo__search_sources", json!({"query": "budget"})).unwrap();
@@ -1680,7 +1715,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], vault: None };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![], vault: None };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),
@@ -1746,6 +1781,38 @@ mod tests {
         // Reading one is no harm (it was there before the run): the CLAUDE.md files under calls/
         // aren't loaded (`claudeMdExcludes`).
         s.judge(&tool("Read", json!({"file_path": call.join("CLAUDE.md").display().to_string()}))).unwrap();
+    }
+
+    #[test]
+    fn a_read_only_routine_reads_what_plugins_tell_claude_and_loads_their_laid_out_skills() {
+        let (_env, root) = crate::paths::testenv::folders("guard-routine-plugins");
+        let home = dunce::canonicalize(root.join("home")).unwrap();
+        fs::create_dir_all(home.join(".plugins/kit/.claude/skills/kit-staffing")).unwrap();
+        fs::write(home.join(".plugins/kit/CLAUDE.md"), "# Kit").unwrap();
+        let s = Scope { call: home.clone(), previous: None, clis: vec!["echoctl".into()], ask: true, project: None, routine: true, extra: vec![], skills: vec!["kit-staffing".into()], plugin_commands: vec![], plugin_scripts: vec![], vault: None };
+        s.judge(&tool("Read", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string()}))).unwrap();
+        s.judge(&tool("Glob", json!({"path": home.join(".plugins").display().to_string(), "pattern": "**/CLAUDE.md"}))).unwrap();
+        s.judge(&tool("Skill", json!({"skill": "kit-staffing"}))).unwrap();
+        assert!(s.judge(&tool("Skill", json!({"skill": "kit-other"}))).is_err());
+        assert!(s.judge(&tool("Write", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string(), "content": "x"}))).is_err());
+    }
+
+    #[test]
+    fn what_plugins_tell_claude_is_never_written_by_a_run() {
+        let (_env, root) = crate::paths::testenv::folders("guard-plugins");
+        let kit = dunce::canonicalize(root.join("home")).unwrap().join(".plugins/kit");
+        fs::create_dir_all(kit.join(".claude/skills/x")).unwrap();
+        fs::write(kit.join("CLAUDE.md"), "# Kit").unwrap();
+        // Even a run whose own folder it were: a write there is Echo's alone.
+        let s = Scope { call: kit.clone(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![], vault: None };
+        for (t, f) in [("Write", "notes.md"), ("Edit", "CLAUDE.md"), ("Write", ".claude/skills/x/SKILL.md"), ("MultiEdit", "notes.md")] {
+            let e = s.judge(&tool(t, json!({"file_path": kit.join(f).display().to_string(), "content": "x"}))).unwrap_err();
+            assert!(e.contains("only Echo writes there"), "{t} {f}: {e}");
+        }
+        let e = s.judge(&tool("NotebookEdit", json!({"notebook_path": kit.join("n.ipynb").display().to_string()}))).unwrap_err();
+        assert!(e.contains("only Echo writes there"), "{e}");
+        // Reading it is what a session does.
+        s.judge(&tool("Read", json!({"file_path": kit.join("CLAUDE.md").display().to_string()}))).unwrap();
     }
 
     #[test]

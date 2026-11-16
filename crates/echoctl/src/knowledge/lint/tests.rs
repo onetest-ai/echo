@@ -146,6 +146,7 @@ fn three_findings_one_kept_two_dropped() {
     let (_env, root) = paths::testenv::folders("kn-lint-kept");
     let _fake = fake::install(&root);
     let _clean = clean();
+    let _git = git::tests::isolated(&root, true);
     let (v, p) = vault(&root, true);
     let before = health::view(&v, None).unwrap();
     assert_eq!(before["score"]["code_only"], true);
@@ -244,6 +245,7 @@ fn lint_never_writes_the_vault() {
     let (_env, root) = paths::testenv::folders("kn-lint-never");
     let _fake = fake::install(&root);
     let _clean = clean();
+    let _git = git::tests::isolated(&root, true);
     let (v, p) = vault(&root, true);
     let before = fixture::snapshot(&v.root);
     script(&p, "lint.jsonl", &[init(), read_call("toolu_1", TOPIC), findings(&p, 1, three()), result()]);

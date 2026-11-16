@@ -654,6 +654,7 @@ scenario(test, 'S-25', 'Who owes what on a full board: Tasks, piles, filters, ba
     await tasks.fold(t.iOwe, fill(t.more, { n: data.set.s25.folds[t.iOwe] })).click()
     await expect(tasks.blockedWords(t.iOwe)).toHaveCount(data.set.s25.blocked)
     const red = await tasks.themeColour(t.colours.late)
-    for (const word of await tasks.blockedWords(t.iOwe).all()) expect(await tasks.colourOf(word)).toBe(red)
+    // All of them at once, retried: a poll's redraw may replace the cards between a lookup and a read.
+    await expect.poll(() => tasks.blockedWords(t.iOwe).evaluateAll((els) => els.map((e) => getComputedStyle(e).color))).toEqual(Array(data.set.s25.blocked).fill(red))
   })
 })

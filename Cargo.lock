@@ -836,7 +836,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "echoctl"
-version = "0.9.4"
+version = "0.9.9"
 dependencies = [
  "aec3",
  "anyhow",
@@ -847,6 +847,7 @@ dependencies = [
  "clap",
  "cpal",
  "ctrlc",
+ "dirs",
  "dunce",
  "embed-resource",
  "getrandom 0.3.4",

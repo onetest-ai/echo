@@ -24,7 +24,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/plugins` | The heading "Plugins" shows with the tabs "Installed", "Discover" and "Marketplaces" with the count `1`; "Discover" is selected |
+| 1 | Navigate to `{{base_url}}/#settings/plugins` | The heading "Plugins" shows with the tabs "Installed", "Discover" and "Marketplaces" with the count `2`; "Discover" is selected |
 | 2 | Click the tab "Installed" | It is selected and the page says "No plugins yet — Discover lists what your marketplaces offer." |
 | 3 | Read the tab "Installed" | It has no count |
 

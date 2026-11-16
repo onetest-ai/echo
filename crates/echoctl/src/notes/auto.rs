@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// The calls being transcribed now: their marker held by a process that is alive (any Echo, the CLI's too).
+pub(crate) fn calls_transcribing() -> Vec<PathBuf> {
+    calls::all_calls()
+        .into_iter()
+        .filter(|d| {
+            fs::read_to_string(d.join(crate::transcribe_marker()))
+                .ok()
+                .and_then(|t| t.split_whitespace().next().and_then(|p| p.parse::<u32>().ok()))
+                .is_some_and(crate::app::process_alive)
+        })
+        .collect()
+}
+
 // ── automatic minutes ────────────────────────────────────────────────────────────────────────
 
 /// Why a call isn't due for automatic minutes.

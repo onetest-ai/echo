@@ -77,10 +77,14 @@ node crates/echoctl/ui/own-title-bar.test.mjs
 node crates/echoctl/ui/selftest-terminal.test.mjs
 # Where the octopus lives, in the platform's words: the menu bar on macOS, the notification area on Windows (trayWords, #420).
 node crates/echoctl/ui/tray-words.test.mjs
+# What's new after an update: its heading, where Show me goes, once per version (WhatsNew).
+node crates/echoctl/ui/whats-new.test.mjs
 # A mail sent from an item: its row says when, to whom, and whether it was answered (sentMailLine, #92).
 node crates/echoctl/ui/sent-mail.test.mjs
 # Where mail drafts go: the setting's line and a run's draft as its outcome says it (draftsNow, draftLine, #135).
 node crates/echoctl/ui/drafts.test.mjs
+# Yolo runs: which runs the filters let through, their choices, and the list's words (the yolo runs block).
+node crates/echoctl/ui/yolo-runs.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
@@ -94,13 +98,17 @@ node crates/echoctl/ui/today-calendar.test.mjs
 node crates/echoctl/ui/today-edit.test.mjs
 # The day's choices: overlaps you accepted, what Echo suggests, invites to answer (dayChoices).
 node crates/echoctl/ui/today-choices.test.mjs
+# Your day's scroll: the user's or Today's own placing it (tdScrollIsUser).
+node crates/echoctl/ui/today-scroll.test.mjs
 # A meeting of Your day opened as Calendar's popover: which one, beside which of its forms (tdFormOf, tdPick).
 node crates/echoctl/ui/today-popover.test.mjs
 # A plugin's widget drawn by its kind: shapes, escaping, echo:// links only (pluginWidgetHtml).
 node crates/echoctl/ui/today-plugin-widgets.test.mjs
+# A dashboard exported as HTML: the file and its data tables (the export file block).
+node crates/echoctl/ui/export.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
-# make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418).
+# make_data.py builds with the debug binary cargo makes on this OS (echoctl.exe on Windows, #418), and as of any --now (#550).
 python3 tests/fixtures/make_data_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then

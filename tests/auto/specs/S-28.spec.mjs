@@ -236,10 +236,14 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     await clients.goto(linkRoute(fill(k.thread, { id: l.thread.id })))
     await expect.poll(() => clients.hash()).toBe(fill(data.text.threads.routes.tab, { id: l.thread.id, tab: l.tabs.brief }))
     await expect(clients.heading(l.thread.name)).toBeVisible()
+    await clients.aboutFold.click() // What it is folds: opened first
     await expect(clients.paragraph(l.thread.brief)).toHaveText(l.thread.brief)
 
     await clients.goto(linkRoute(fill(k.client, { id: l.client.id })))
     await expect.poll(() => clients.hash()).toBe(fill(data.text.clients.routes.client, { id: l.client.id, tab: data.text.clients.tabIds.overview }))
+    // About folds (F-CLIENT-02): its head shows; opened, its text.
+    await expect(clients.aboutFold).toHaveAttribute('aria-expanded', 'false')
+    await clients.aboutFold.click()
     await expect(clients.paragraph(l.client.about)).toBeVisible()
     for (const name of l.client.cards) await expect(clients.overviewCard(name)).toBeVisible()
 
@@ -486,7 +490,9 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     await expect(work.treeRow(x.move.node)).toContainText(x.tree.pinned)
     for (const id of [x.move.node, x.link, x.id]) expect(await work.indent(id)).toBeGreaterThan(await work.indent(x.story))
     await expect(work.treeRow(x.id)).toContainText(x.edit.title)
-    await expect(work.treeRow(x.id)).toContainText(x.tree.meta)
+    // Whose and when — the date with its weekday while it is within a week ("Me · Fri, Nov 20").
+    const [who, when] = x.tree.meta.split(' · ')
+    await expect(work.treeRow(x.id)).toContainText(new RegExp(`${who} · (\\w{3}, )?${when}`))
     // Under Data migration, not under SSO for the Berlin pilot: the rows between the story and the next story.
     const order = await work.treeOrder()
     const story = order.indexOf(x.story)

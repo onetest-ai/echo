@@ -1,0 +1,97 @@
+---
+name: build
+description: "Use when the user wants a widget, chart, dashboard or plugin of their own in Echo — \"make me a widget that shows…\", \"put a chart of … on my Today\", \"a dashboard for the Acme thread\", \"build a plugin that…\", \"change my widget\" — even without saying Echo. Makes (or changes) the user's own Echo plugin in My plugins, their Echo data folder; checks its widgets' data; installs or updates it once the user agrees to what Echo's permission sheet says; places the widgets on Today or a thread's or client's dashboard. Installing others' plugins or setting one up: the manage skill."
+argument-hint: "[what it should show, and where]"
+---
+
+# echo: build
+
+The user's own plugins live in **My plugins**: a folder in their Echo data folder, one subfolder a plugin, its
+folder name its id. Echo offers each there to install, and each change to its files as an update — always with the
+permission sheet when it asks for something new. Echo installs a copy; editing the folder changes nothing until updated.
+
+CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`), with plain words — no pipes, redirects or `$`.
+Inside a run Echo started (`ECHOCTL_HEADLESS` is set) do nothing: say this is done in the user's own session.
+
+## 1. What, where, how big
+
+Settle with the user, in a line each: what the widget shows (a number, a few numbers, a list, a table, a chart —
+which type), where its data comes from (a web API, a file or folder on this computer, Echo itself), how often it
+changes, and where it goes: Today, or one thread's or client's dashboard (a widget there needs a `thread` or
+`client` setting — the page fills it in). Ask only what you can't infer.
+
+## 2. The rules
+
+`echoctl plugin guide` prints Echo's plugin authoring rules, then the plugin API reference they point to (the
+manifest, `uses` and the permission sheet, the widget kinds and their data — `stat`, `stats`, `chart` of every type,
+`list`, `status`, `card`, `table` — the host half's `ctx`, settings, secrets). Read the rules and the parts of the
+reference you need before writing; follow them exactly. Never
+put a secret (token, password) in a file: declare a setting of type `secret` and let the user fill it in Settings.
+
+## 3. The plugin
+
+`echoctl plugin mine` gives the folder (`folder`) and what Echo reads there. Write only inside
+`<folder>/<id>/`, `id` lower-case letters, digits and `-` (check `plugins` there that it isn't taken). The least that
+works — `echo-plugin.json`:
+
+```json
+{"id": "team-pulse", "name": "Team pulse", "version": "0.1.0", "summary": "Open items by owner",
+ "main": "main.js",
+ "widgets": [{"id": "open", "label": "Open items", "about": "how many are open", "kind": "stat", "sizes": ["S", "M"]}]}
+```
+
+and `main.js` (the host half: one file, no imports):
+
+```js
+export function apply(ctx) {
+  ctx.widgets.provide('open', async ({ size, params }) => {
+    return { value: 12, label: 'open items' }
+  })
+}
+```
+
+A chart: `kind: "chart"` and data `{type, points, series?, headline?}` (the reference's Charts). A widget for a thread's or
+client's dashboard: `params: [{key: "thread", label: "Thread", type: "thread"}]` (or `client`); read it from `params`.
+Ask for a `uses` line (network hosts, folders, Claude…) only when the widget needs it — each is a line the user agrees to.
+
+Its part for Claude in Echo — every plugin you make has one: `"agent": {"summary": "<one line: what it gives Claude and
+when to turn to it>", "prefix": "<2–4 of a–z, 0–9>"}` in `echo-plugin.json` (the prefix names its skills; pick one no
+plugin from another marketplace uses — `echoctl plugin list` gives each installed plugin's `prefix`; your own plugins
+may share one), and `agent/CLAUDE.md` (8 KB at most): what the plugin gives Claude, when
+to use it, its commands (`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl plugin call <id> <command>`, each named in
+`uses.sessions.commands`) and its widgets. Echo lays it out in the data folder's `.plugins/<id>/` and lists it in the
+core every session of Echo's folder starts with; Claude reads it only when it works with the plugin. Add, only when
+the plugin needs them: a skill for a fixed procedure in `agent/skills/<name>/SKILL.md` (frontmatter `name` and a
+one-line `description` only; Claude in Echo sees it as `<prefix>-<name>`, so name it that way in `CLAUDE.md`), rules in `agent/rules/*.md`, long references in `agent/guides/*.md` that `CLAUDE.md`
+names. No `.claude` folder anywhere in `agent/` or a skill folder. `echoctl plugin check`
+names any limit you break.
+
+## 4. Check, install
+
+1. `echoctl plugin check <folder>/<id>` — Echo's checks of the package, as an install does them: fix every problem it
+   names and run it again until it says `ok` (exit 0). Never offer an install or an update before that.
+2. `echoctl plugin mine` — your plugin is listed with no `error` (else fix what it says). (No data folder chosen yet:
+   it says so — the user picks one in Settings first.)
+3. `echoctl plugin install <id> --from my-plugins` — without `--yes`: Echo prints what it asks (the sheet). Tell the user
+   those lines in your own words and ask; only after their yes, run it again with `--yes`.
+4. `echoctl widget show plugin:<id>:<widget>` — the data Echo gets from your provider; fix the plugin until it has no
+   `error` and shows what the user wanted. (A change → `echoctl plugin update <id>`; when it asks for something new,
+   it stops and prints it — `--yes` only after the user's yes.) If Echo wasn't running, it picks the plugin up when it starts.
+
+## 5. Place it
+
+- On Today: `echoctl today add plugin:<id>:<widget> --size M` (`--above`, `--below`, `--before`, `--after <widget>`
+  to say where; `echoctl today` lists what is there).
+- On a thread's or client's dashboard: the same with `--thread <thread id>` or `--client <client id>`
+  (`echoctl project list`, `echoctl client list` give the ids).
+- On a dashboard of its own beside every thread's Brief (every client's Overview), e.g. "a Staffing dashboard for my clients": `echoctl dashboard add --client Staffing` (it prints its id), then the same with `--client <a client id> --board <its id>` — its layout is every client's, each showing its own
+- A setting: `echoctl today set plugin:<id>:<widget> <key> <value>` (with `--thread` / `--client` for a dashboard).
+- One setting on every widget of a page that has it (what the Filters widget does): `echoctl today filter <key> <value>` (`""` for all threads or clients; `echoctl today filter` lists them; with `--thread` / `--client` / `--board` for a dashboard). Give a widget a setting (`params`) when people will want to slice it, and name it as other widgets do (`thread`, `client`, or the same choice key), so one filter reaches them all.
+
+Say where it is and how to change it: Edit on Today or ✎ on the dashboard; or ask you again.
+
+## Changing it later
+
+Edit the files in `<folder>/<id>/` — keep `agent/CLAUDE.md` and `agent.summary` true to what it does now —, run
+`echoctl plugin check <folder>/<id>` until it says `ok`, then `echoctl plugin update <id>` (asking for something new: the user's yes, `--yes`), then
+`echoctl widget show …` again. Removing: `echoctl plugin remove <id>`; the folder stays until the user deletes it.

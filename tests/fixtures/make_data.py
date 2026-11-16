@@ -440,6 +440,8 @@ def write_call(d, c):
                 fh.write(PNG)
             lines.append(json.dumps({"t": t, "file": f, "change": 1.0, "shared_by": c.get("shared_by")}))
         d.write(f"{p}/frames.jsonl", "\n".join(lines) + "\n")
+    if c.get("ui_log"):  # what Echo read of Teams' call window while recording (`ax::SpeakingLog`): tiles and the participants list
+        d.write(f"{p}/speaking.jsonl", "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in c["ui_log"]))
     if c.get("my_notes") is not None:
         if c["my_notes"] is False:  # unreadable: a folder where the file should be
             os.makedirs(f"{p}/my-notes.md")
@@ -679,7 +681,9 @@ def setup_env(d, stale_plugin=True, test_market=True):
              # here, as the stand-in logs it, instead of opening anything — on any OS (`app::open_log_only`).
              "ECHOCTL_TEST_OPEN_LOG": f"{b}/open.log",
              # A development build writes a mail draft's mailto: link here instead of opening a mail app (`drafts::open`, any OS).
-             "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log"}
+             "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log",
+             # The window's Export as HTML saves here, never into the user's Downloads (`paths::downloads_dir`).
+             "ECHOCTL_DOWNLOADS": f"{b}/downloads"}
     d.env.update(extra)
     with open(f"{b}/env", "a") as f:
         f.write(f"export PATH={sh(b + '/bin')}:\"$PATH\" " + " ".join(f"{k}={sh(v)}" for k, v in extra.items() if k != "PATH") + "\n")
@@ -1082,7 +1086,15 @@ def build_calls(d, H):
          thread_by="people globex-pilot")
     call("acme-security-review", day(1, 11), 40, "Acme security review", [p["omar"], p["ivan"]], LONG_TALK, ("transcript", "failed", "tried"), ("call", "one", "guess"),
          run={"state": "failed", "profile": "work", "model": "sonnet", "started_at": iso(day(1, 12)), "finished_at": iso(day(1, 12, 1)),
-              "message": "Claude Code exited with an error (exit 1)", "pid": None, "session_id": None}, pin=["acme-rollout"])
+              "message": "Claude Code exited with an error (exit 1)", "pid": None, "session_id": None}, pin=["acme-rollout"],
+         # Teams' participants list, read during the call: Omar came, Ivan was invited and never did, Rita came uninvited
+         # (written as the directory has her: "Last, First (Org)"); the user by their own tile and row.
+         ui_log=[{"v": 2}, {"t": 0.5, "k": "tile:Sam Rivera", "n": "Sam Rivera", "me": True, "add": ["tile"], "del": []},
+                 {"t": 0.5, "k": "tile:Omar Haddad", "n": "Omar Haddad", "add": ["tile", "t:muted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:sam", "n": "Sam Rivera", "add": ["t:unmuted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:omar", "n": "Omar Haddad", "add": ["t:muted"], "del": []},
+                 {"t": 3.0, "k": "roster:8:orgid:ivan", "n": "Ivan Petrov", "add": ["t:in a meeting", "t:no response"], "del": []},
+                 {"t": 240.0, "k": "roster:8:orgid:rita", "n": "Gomez, Rita (Acme)", "add": ["t:unmuted"], "del": []}])
     call("vandelay-vendor", day(1, 16), 30, "Vendor call with Vandelay", [p["kai"]], LONG_TALK, ("transcript", "needs_login", "tried"), ("call", "none", "guess"),
          ai_profile="out", run={"state": "needs_login", "profile": "out", "model": None, "started_at": None, "finished_at": None, "message": "Sign in to Claude (out) first", "pid": None, "session_id": None})
     # This week.
@@ -1904,6 +1916,11 @@ MEETING_TITLES = ["Acme design review", "Globex office hours", "Umbrella pricing
                   "Initech town hall", "Acme go-live check", "Globex sponsor update", "Umbrella contract call", "Initech guild", "Acme demo", "Globex design review"]
 
 
+def to_come(now):
+    """When every meeting still to come starts: 37 minutes after the build. They run 25 or 30 minutes."""
+    return (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
+
+
 def prep_id(event):
     import hashlib
     return hashlib.sha256(event.encode()).hexdigest()[:16]
@@ -1917,7 +1934,7 @@ def build_agenda(d, H):
     at = day_clock(now)
     # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
     # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:50: they end by 23:57).
-    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
+    soon = to_come(now)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -2011,7 +2028,7 @@ def build_agenda(d, H):
         # is squeezed earlier, it is laid back into the free time 21–36 minutes after the build (the free invite then
         # folds under it).
         h_start, h_end = now + timedelta(minutes=72), now + timedelta(minutes=96)
-        if h_end > at(1.75):
+        if h_end > invite_times(now, at)["ev-zoom-pricing"][0]:
             h_start, h_end = (now + timedelta(minutes=21)).replace(second=0, microsecond=0) + timedelta(minutes=1), soon
         events.append({"id": "ev-hostile", "subject": H.text(place, "Meeting", kind="html", one_line=True, where="agenda subject"), "start": iso(h_start), "end": iso(h_end),
                        "organizer": {"name": H.text(place, "", kind="rtl", one_line=True, where="agenda organizer"), "email": "org@umbrella.example"},
@@ -2081,12 +2098,34 @@ OTHER_APP_INVITES = [
 ]
 
 
+def invite_times(now, at):
+    """The Zoom and Meet invites' times: at their hours after the build (`at`), one after the other; but never before the
+    meetings to come are over (`to_come` + 30 minutes), or they would be at once with them (The day's choices, S-24
+    stage 48). Built late, when `at` squeezes them back into that time, they share what is left of the day up to 23:59
+    instead, in order and shorter (a minute each at 22:50)."""
+    times = {i: (at(h), at(h + 0.5)) for i, _, h, *_ in OTHER_APP_INVITES}
+    after = to_come(now) + timedelta(minutes=30)
+    if all(start >= after for start, _ in times.values()):
+        return times
+    slot = (now.replace(hour=23, minute=59, second=0, microsecond=0) - after) / len(OTHER_APP_INVITES)
+    return {i: (after + k * slot, after + (k + 1) * slot) for k, (i, *_) in enumerate(OTHER_APP_INVITES)}
+
+
 def other_app_invites(d, at):
     """Today's Zoom and Google Meet invites (OTHER_APP_INVITES) through `echoctl agenda sync` (calendar::convert), with a
     calendar command that prints them for that one sync: the agenda meetings Echo makes of them. A sync that drops one, or
-    takes another link, stops the build."""
+    takes another link, stops the build.
+
+    The sync keeps only meetings of the real today not yet over, by the real clock, while the data's clock is d.now
+    (`--now`, #550): each invite goes to the sync starting at the real now (two minutes ahead, before 23:59), its length kept, and the meeting it makes gets
+    the invite's own times back."""
     utc = lambda t: {"dateTime": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.0000000"), "timeZone": "UTC"}
-    graph = [{"id": i, "subject": s, "isOnlineMeeting": False, "start": utc(at(h)), "end": utc(at(h + 0.5)), "isAllDay": False, "isCancelled": False,
+    utc_iso = lambda t: t.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    when = invite_times(d.now, at)
+    # A minute or two ahead, but never past 23:59: a sync started just before midnight still sees it today.
+    now = datetime.now().astimezone().replace(microsecond=0)
+    real = min(now + timedelta(minutes=2), now.replace(hour=23, minute=59, second=0))
+    graph = [{"id": i, "subject": s, "isOnlineMeeting": False, "start": utc(real), "end": utc(real + (when[i][1] - when[i][0])), "isAllDay": False, "isCancelled": False,
               "organizer": {"emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}, "responseStatus": {"response": "accepted"},
               "attendees": [{"type": "required", "status": {"response": "accepted"}, "emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}],
               "location": {"displayName": ""}, "bodyPreview": body} for i, s, h, who, _, _, body in OTHER_APP_INVITES]
@@ -2103,6 +2142,7 @@ def other_app_invites(d, at):
     for i, s, _, _, app, link, _ in OTHER_APP_INVITES:
         if got.get(i, {}).get("join_url") != link:
             raise SystemExit(f"the calendar sync didn't keep the {app} invite {s!r} with its link {link} (got {got.get(i)})")
+        got[i]["start"], got[i]["end"] = map(utc_iso, when[i])
         d.axis(f"meeting.flags={app} link only in the body", f"agenda {i}")
     return [got[i] for i, *_ in OTHER_APP_INVITES]
 
@@ -2488,6 +2528,11 @@ def main():
     ap.add_argument("--clock", choices=["real", "fast"], default="real",
                     help="fast: the debug build's test clock in <dir>/env (ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90: automatic "
                     "minutes 90 s after the call or the last note instead of 15 minutes), for the recording and minutes scenarios")
+    ap.add_argument("--whats-new-seen", default="running", metavar="VERSION",
+                    help="the last version whose What's new the window showed (whats-new-seen.json in the config folder): "
+                    "running (the default: this build's, nothing to show), previous (the entry before this build's in "
+                    "crates/echoctl/whats-new.json: an update to this one), a version (e.g. 0.0.1: every entry), or none "
+                    "(no file: a fresh install, or an Echo from before What's new)")
     a = ap.parse_args()
     global NOW, AI, AI_URL, AI_MODEL
     AI, AI_URL, AI_MODEL = a.ai or "fake", (a.ai_url or "").rstrip("/") or None, a.ai_model
@@ -2507,7 +2552,8 @@ def main():
         sys.exit(f"{base} already holds test data: give an empty folder")
     d = Data(base, a.set)
     # Today holds calls hours ago and meetings hours ahead, relative to now.
-    # The meetings to come start 37 minutes after the build and run 30: after 22:50 they would end tomorrow. Before
+    # The meetings to come start 37 minutes after the build and run 30, and the Zoom and Meet invites need a minute each
+    # after them (`invite_times`): after 22:50 they would end tomorrow, out of Today. Before
     # 06:00 there is too little of the day behind (calls 6 hours ago would be yesterday's).
     late = (d.now.hour, d.now.minute) > (22, 50)
     if d.now.hour < 6 or late:
@@ -2551,6 +2597,7 @@ def main():
     cfg = json.load(open(cfg_file)) if os.path.exists(cfg_file) else {}
     cfg["calendar_command"] = []
     d.write_json(cfg_file, cfg)
+    whats_new_seen(d, a.whats_new_seen)
     d.manifest["ai"] = AI
     if a.clock == "fast":
         with open(os.path.join(base, "env"), "a") as f:
@@ -2560,6 +2607,14 @@ def main():
     global BUILT
     BUILT = True
     print(f"test data ({a.set}) in {base} (. {base}/env)")
+
+
+def whats_new_seen(d, seen):
+    """What's new as seen up to `seen` (`--whats-new-seen`, tests/fixtures/whats_new_seen.py): by default this build's
+    version, so no case meets the dialog unless it asks for it (lifecycle/TC-011…TC-016)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import whats_new_seen as wns
+    wns.write(d.config, d.bin, seen)
 
 
 def model_server(model):

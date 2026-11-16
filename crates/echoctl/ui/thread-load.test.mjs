@@ -20,8 +20,8 @@ async function open(tab, work = null) {
     return {}
   }
   const noop = async () => {}
-  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople',
-    `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'loadDashboard',
+    `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, noop)
   await loadProject()
   return { S, asked }
 }
@@ -56,7 +56,7 @@ async function reload(boardAt, served) {
   const S = { pj: { sel: 'acme-rollout', tab: 'brief', work: { nodes: {} }, boardAt, detail: { id: 'acme-rollout', board: { views: [{ id: 'board', layout: 'tree' }] } } } }
   const get = async (url) => url === 'api/project/acme-rollout' ? { id: 'acme-rollout', call_count: 2, board: served } : {}
   const noop = async () => {}
-  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'loadDashboard', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, noop)
   await loadProject()
   return S.pj.detail
 }
@@ -84,7 +84,7 @@ test('a thread just opened (no detail yet) takes its own board, whatever was cha
   const S = { pj: { sel: 'acme-rollout', tab: 'brief', work: { nodes: {} }, boardAt: Date.now(), detail: null } }
   const get = async (url) => url === 'api/project/acme-rollout' ? { id: 'acme-rollout', board: OLD } : {}
   const noop = async () => {}
-  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'loadDashboard', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, noop)
   await loadProject()
   assert.equal(S.pj.detail.board, OLD)
 })
@@ -99,7 +99,7 @@ test("a thread's Work tab waits for its plugins' rows: read again soon, until th
     return url.endsWith('/work') ? answers[Math.min(asked.filter((u) => u.endsWith('/work')).length - 1, 1)] : { id: 'acme-rollout' }
   }
   const noop = async () => {}
-  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'render', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, () => drawn++)
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'loadDashboard', 'render', `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, noop, () => drawn++)
   await loadProject()
   assert.equal(S.pj.work.plugin_rows_pending, true)
   await new Promise((r) => setTimeout(r, 800))

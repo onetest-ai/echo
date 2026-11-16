@@ -92,7 +92,7 @@
   },
   {
    "id": "F-THR-10",
-   "feature": "Brief shows the thread's own Markdown (or \"Nothing yet…\") and its 5 latest calls; Edit, ⌘S saves, Esc cancels",
+   "feature": "Brief shows the thread's own Markdown (or \"Nothing yet…\") and its 5 latest calls; Edit, ⌘S saves, Esc cancels; What it is with text is an accordion, folded at first: its name opens or folds it, remembered per thread on this computer; Edit opens it; the Brief uses the pane's full width",
    "priority": "high",
    "check": "agent",
    "axes": [

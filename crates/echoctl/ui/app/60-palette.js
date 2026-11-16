@@ -67,7 +67,8 @@ function paletteItems(target) {
       else if (x.app_url || x.chat) add('Needs you now', `Reply in Teams: ${name}`, () => press({ needsOpen: x.app_url || '', chat: x.chat || '' }), { keywords: 'teams answer chat' })
       add('Needs you now', `Claude: ${name}`, () => press({ needsClaude: x.id }), { keywords: 'ask work on it yolo skill' })
       add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
-      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
+      add('Needs you now', `Ignore: ${name}`, () => press({ needsIgnore: x.id }), { keywords: 'dismiss hide skip' })
+      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'not mine who for' })
     }
     // The meetings you go to (Your day also lists the ones not answered and the maybes).
     for (const x of (d.day || []).filter((x) => x.response !== 'notResponded' && x.response !== 'tentativelyAccepted')) {
@@ -83,9 +84,9 @@ function paletteItems(target) {
       add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
       add('My work', `Claude: ${t.title}`, () => press({ claudeTask: t.id, today: '1', ...attrs }), { keywords: 'ask send change move due later work on it skill follow-up mail session' })
     }
-    // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does — asked first on its row.
+    // The plugins' items (`ctx.work.provide`): open each in the browser, as its title does.
     for (const r of (w.plugins || []).filter((r) => /^https:\/\//.test(r.url || ''))) {
-      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url, openWhere: workRowWhere(r) }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: [r.source_name, linkHost(r.url)].filter(Boolean).join(' · '), icon: workRowIcon(r) })
+      add('My work', `Open: ${r.title}`, () => press({ openUrl: r.url }), { keywords: `task ${r.kind || ''} ${r.where || ''} ${r.source_name || ''}`, hint: [r.source_name, linkHost(r.url)].filter(Boolean).join(' · '), icon: workRowIcon(r) })
     }
   }
   // Echo's own
@@ -104,9 +105,11 @@ function paletteItems(target) {
   add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
   add('Echo', 'Expand or fold the sidebar', flipBar, { keywords: 'activity bar labels names drawer', hint: BAR_KEY })
   add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
+  add('Echo', "What's new", () => press({ wnOpen: '' }), { keywords: 'release notes changes update version news' })
   add('Echo', 'Ask for permissions', () => press({ act: 'ask_permissions' }), { keywords: 'microphone screen accessibility health' })
   // Go to
   for (const a of shownActivities()) add('Go to', a.label, () => goActivity(a.id))
+  add('Go to', 'Yolo runs', () => press({ yoloRuns: '' }), { keywords: 'claude on its own what did claude do history log runs' })
   for (const p of (S.pj.data && S.pj.data.projects) || []) {
     const st = ProjectArt.stage(p.stage)
     add('Threads', p.name, () => go(`project/${p.id}/brief`), { keywords: `thread project ${p.client_name || ''} ${st.label} ${st.group}`, hint: st.label })
@@ -130,7 +133,11 @@ function paletteOpen() {
   paletteDraw()
   $('#pal-q').focus()
 }
-function paletteClose() { PAL.open = false; const el = $('#palette'); if (el) el.remove() }
+function paletteClose() {
+  PAL.open = false; const el = $('#palette'); if (el) el.remove()
+  // Opened over What's new: the keyboard goes back into that dialog.
+  if (S.wn) whatsNewFocus()
+}
 function paletteDraw() {
   const t = PAL.target
   $('#pal-target').innerHTML = t ? `<button class="pal-chip" data-pal-untarget title="Act on Echo itself instead">On: ${esc(t.label.length > 32 ? t.label.slice(0, 31) + '…' : t.label)} ×</button>` : ''

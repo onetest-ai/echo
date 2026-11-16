@@ -504,6 +504,10 @@ scenario(test, 'S-26', 'Ten threads in every stage: membership, people and clien
     const c = data.text.clients
     const clients = new ClientsPage(page, data)
     await clients.openClient(a.acme.id, c.tabIds.overview)
+    // Folded at first (F-CLIENT-02): its head opens it.
+    await expect(clients.aboutFold).toHaveAttribute('aria-expanded', 'false')
+    await expect(clients.heading(a.acme.heading)).toHaveCount(0)
+    await clients.aboutFold.click()
     await expect(clients.heading(a.acme.heading)).toBeVisible()
     await expect(clients.paragraph(a.acme.paragraph)).toHaveText(a.acme.paragraph)
     await expect(clients.bold).toHaveText(a.acme.bold)

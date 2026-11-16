@@ -31,12 +31,13 @@ fn week_start(today: NaiveDate) -> NaiveDate {
 
 /// Each open thread with tasks: done in the period (this week from Monday, or `month`: from the 1st), to do, waiting
 /// (on someone, or blocked), the total; busiest first. And the tasks done in the period across them (`done`: their
-/// titles, newest first, with their thread).
-pub fn view(today: NaiveDate, period: &str) -> Value {
+/// titles, newest first, with their thread). `scope`: only these threads (a widget set to a thread or a client).
+pub fn view(today: NaiveDate, period: &str, scope: Option<&[String]>) -> Value {
     let from = if period == "month" { today.with_day(1).unwrap_or(today) } else { week_start(today) };
     let mut threads = vec![];
     let mut done: Vec<(NaiveDate, Value)> = vec![];
-    for p in projects::list().iter().filter(|p| !p.stage.closed()) {
+    // Every open thread; set to a thread or a client, those (a closed thread's own page counts it too).
+    for p in projects::list().iter().filter(|p| scope.map_or(!p.stage.closed(), |s| s.contains(&p.id))) {
         let Ok(t) = ledger::fold_linked(&p.id) else { continue };
         let (mut d, mut todo, mut waiting) = (0, 0, 0);
         // A mirror counts once, in its master's thread (as Tasks shows it), unless that thread is closed.
@@ -66,17 +67,18 @@ pub fn view(today: NaiveDate, period: &str) -> Value {
 
 /// Today's view for a period (`view` for the local date), read again at most every 30 s a period: Today asks for it on
 /// each refresh, and each thread's work is folded for it.
-pub fn today(period: &str) -> Value {
+pub fn today(period: &str, scope: Option<&[String]>) -> Value {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
     static LAST: Mutex<Vec<(String, Instant, Value)>> = Mutex::new(Vec::new());
+    let key = format!("{period}|{}", scope.map(|s| s.join(",")).unwrap_or_else(|| "*".into()));
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, _, v)) = last.iter().find(|(p, at, _)| p == period && at.elapsed() < Duration::from_secs(30)) {
+    if let Some((_, _, v)) = last.iter().find(|(p, at, _)| *p == key && at.elapsed() < Duration::from_secs(30)) {
         return v.clone();
     }
-    let v = view(Local::now().date_naive(), period);
-    last.retain(|(p, _, _)| p != period);
-    last.push((period.to_string(), Instant::now(), v.clone()));
+    let v = view(Local::now().date_naive(), period, scope);
+    last.retain(|(p, at, _)| *p != key && at.elapsed() < Duration::from_secs(30));
+    last.push((key, Instant::now(), v.clone()));
     v
 }
 
@@ -100,7 +102,7 @@ mod tests {
         ledger::human_event(&id, &json!({"op": "edit", "node": b, "set": {"state": "blocked"}})).unwrap();
         ledger::human_event(&id, &json!({"op": "edit", "node": c, "set": {"waiting_for": {"who": "Dana", "what": "the list"}}})).unwrap();
         let today = Local::now().date_naive();
-        let v = view(today, "week");
+        let v = view(today, "week", None);
         let t = &v["threads"][0];
         assert_eq!((t["done"].as_u64(), t["todo"].as_u64(), t["waiting"].as_u64(), t["total"].as_u64()), (Some(1), Some(1), Some(2), Some(4)), "{v}");
         assert_eq!(v["done"][0]["title"], "Book the room");
@@ -110,11 +112,43 @@ mod tests {
         held.history = vec![json!({"effect": "held", "date": today.to_string(), "applied": true})];
         assert_eq!(done_on(&held), Some(today));
         // This month counts from the 1st: today's done is in it.
-        let m = view(today, "month");
+        let m = view(today, "month", None);
         assert_eq!((m["period"].as_str(), m["done"].as_array().map(Vec::len)), (Some("month"), Some(1)));
         assert_eq!(m["since"].as_str().unwrap().get(8..), Some("01"));
         // Next week, that one was done last week: not counted, not listed.
-        let v = view(today + chrono::Duration::days(7), "week");
+        let v = view(today + chrono::Duration::days(7), "week", None);
         assert_eq!((v["threads"][0]["done"].as_u64(), v["done"].as_array().map(Vec::len)), (Some(0), Some(0)), "{v}");
+        // Set to a thread or a client (a widget's setting, or its dashboard's page): only its threads.
+        let acme = projects::add_client("Acme", &[], false).unwrap();
+        let other = projects::create("Ledger", Some(&acme.id), None).unwrap().id;
+        ledger::ensure_first_epic(&ledger::Ledger::of(&other).unwrap()).unwrap();
+        ledger::human_event(&other, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Close"})).unwrap();
+        ledger::human_event(&other, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Sign the SOW"})).unwrap();
+        let names = |v: &Value| v["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(names(&view(today, "week", None)).len(), 2);
+        assert_eq!(names(&view(today, "week", Some(std::slice::from_ref(&id)))), vec![id.clone()]);
+        let mut by_client = serde_json::Map::new();
+        by_client.insert("client".into(), json!(acme.id));
+        let g = crate::widgets::glance_for(&by_client);
+        assert_eq!((names(&g), g["scope"].as_str()), (vec![other.clone()], Some("Acme")));
+        let page = crate::today_layout::Page::Thread(id.clone());
+        crate::today_layout::add_on(&page, "core:tasks.done", None, None).unwrap();
+        assert_eq!(crate::today_layout::params_on(&page, "core:tasks.done")["thread"], id.as_str(), "its page sets it");
+        assert!(crate::today_layout::add_on(&page, "core:tasks.glance", None, None).is_err(), "a thread's page doesn't offer Threads at a glance");
+        // On a client's page a widget's thread is one of the client's.
+        let cpage = crate::today_layout::Page::Client(acme.id.clone());
+        crate::today_layout::add_on(&cpage, "core:tasks.done", None, None).unwrap();
+        assert!(crate::today_layout::set_param_on(&cpage, "core:tasks.done", "thread", &id).unwrap_err().to_string().contains("isn't one of this client's threads"));
+        crate::today_layout::set_param_on(&cpage, "core:tasks.done", "thread", &other).unwrap();
+        // On Today set to a thread, then to none again: every thread.
+        crate::today_layout::add_on(&crate::today_layout::Page::Today, "core:tasks.done", None, None).unwrap();
+        crate::today_layout::set_param_on(&crate::today_layout::Page::Today, "core:tasks.done", "thread", &other).unwrap();
+        assert_eq!(crate::today_layout::params_of("core:tasks.done")["thread"], other.as_str());
+        crate::today_layout::set_param_on(&crate::today_layout::Page::Today, "core:tasks.done", "thread", "").unwrap();
+        assert!(!crate::today_layout::params_of("core:tasks.done").contains_key("thread"), "unset");
+        // A closed thread's own page still counts it (none set: only the open ones).
+        projects::set_stage(&other, projects::Stage::Done, None).unwrap();
+        assert_eq!(names(&view(today, "week", Some(std::slice::from_ref(&other)))), vec![other.clone()]);
+        assert!(!names(&view(today, "week", None)).contains(&other));
     }
 }

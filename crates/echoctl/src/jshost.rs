@@ -23,8 +23,18 @@ use serde_json::{json, Value};
 use crate::{paths, plugins};
 
 mod test_hosts;
+mod service_async;
+mod widgets;
 pub mod work;
 
+#[cfg(test)]
+pub use widgets::widget_last;
+#[cfg(test)]
+use widgets::widget_ask_now_on;
+pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
+use widgets::widget_store;
+
+use service_async::service_async;
 use test_hosts::test_host;
 #[cfg(test)]
 use test_hosts::test_host_in;
@@ -115,6 +125,9 @@ const PRELUDE: &str = r#"
       provide: (id, fn) => { commands['__widget:' + id] = (a) => fn(a || {}) },
       set: (id, data) => call('widgets.set', [String(id), data === undefined ? null : data]),
       clear: (id) => call('widgets.clear', String(id)),
+      /** It read something new: Echo asks its provider again now — widget `id`'s, or each one's — every copy (Today's
+       *  and each dashboard's) with its own settings. Not heard from inside a provider; at most once in 10 s a widget. */
+      changed: (id) => call('widgets.changed', id === undefined || id === null ? null : String(id)),
     },
     /** Its items on Today → My work and in threads' Work (uses.work): `provide(({scope, thread}) => rows)` answers
      *  Echo's ask — scope "me" (My work) or "thread" (that thread's Work tab) — with [{id, title, kind, where?, url?,
@@ -133,13 +146,26 @@ const PRELUDE: &str = r#"
       set: (thread, key, value) => call('threads.set', [String(thread), String(key), value === undefined ? null : value]),
       list: (key) => call('threads.list', String(key)),
     },
+    /** Values the plugins of its marketplace share, one for the computer: get(key) → the value or null, set(key, value)
+     *  (null removes it; created when it isn't there). `key` is `<ns>.<name>`, `ns` the marketplace's declared name in
+     *  lower case; every plugin reads it, only its marketplace's plugins set it. ctx.threads takes such a key too: one
+     *  value per thread for all of them. */
+    shared: {
+      get: (key) => call('shared.get', String(key)),
+      set: (key, value) => call('shared.set', [String(key), value === undefined ? null : value]),
+    },
     profiles: () => call('profiles'),
+    /** Its package skills' scripts declared in uses.scripts: run(skill, script, args, {timeout}) → {status, stdout,
+     *  stderr, truncated?, timed_out?} — no shell, args a list of strings, timeout at most the declared one. */
+    scripts: {
+      run: (skill, script, args, opts) => later('scripts.run', [String(skill), String(script), (args || []).map(String), opts || {}]),
+    },
     claude: {
       run: (opts) => later('claude.run', opts),
-      /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? */
+      /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
       hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
-      /** Install it there (user scope of that profile's Claude Code). */
-      installPlugin: (spec, profile) => later('claude.install_plugin', [spec, profile || '']),
+      /** Install it (user scope of the default profile's Claude Code): only the one `uses.channel.plugin` names. */
+      installPlugin: (spec) => later('claude.install_plugin', [spec, '']),
     },
     /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
      *  it is open, with `env` (the channel's own keys; Claude and Anthropic ones are refused). */
@@ -153,6 +179,9 @@ const PRELUDE: &str = r#"
     },
     /** A line for Claude when a client or thread is open in the window: [{client | thread, text}] (replaces all). */
     view: { hints: (list) => call('view.hints', list || []) },
+    /** Its part for Claude in Echo (the manifest's `agent`): {summary?, entries: [{name, summary, guide}]} — each
+     *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
+    agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
      *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
@@ -401,6 +430,11 @@ pub fn as_app() {
     APP.store(true, Ordering::Relaxed);
 }
 
+/// Whether this process is the app (`as_app`).
+pub fn is_app() -> bool {
+    APP.load(Ordering::Relaxed)
+}
+
 fn host() -> &'static Host {
     HOST.get_or_init(|| {
         let (tx, rx) = channel();
@@ -412,6 +446,28 @@ fn host() -> &'static Host {
 
 /// Load every enabled plugin's host half (the app at start, and after an install or a switch).
 pub fn sync() {
+    if let (Ok(mut s), Some(now)) = (SYNCED.lock(), plugins::stamp()) {
+        *s = now;
+    }
+    sync_some(None)
+}
+
+/// What was installed and on at the last `sync` (`plugins::stamp`).
+static SYNCED: Mutex<String> = Mutex::new(String::new());
+
+/// The app's host halves load again when what is installed and on changed since the last sync — once per change,
+/// whoever notices it first (the window's state, the watcher's `plugins.request`, the page's own operation).
+pub fn follow(stamp: &str) {
+    if !is_app() {
+        return;
+    }
+    {
+        let Ok(mut s) = SYNCED.lock() else { return };
+        if *s == stamp {
+            return;
+        }
+        *s = stamp.to_string();
+    }
     sync_some(None)
 }
 
@@ -485,6 +541,9 @@ pub fn event_each(name: &str, payload: &Value, each: &serde_json::Map<String, Va
     }
 }
 
+/// Events told only to the plugins their `each` names (not every plugin that hears them).
+const ADDRESSED: &[&str] = &["shared_changed"];
+
 /// This process is the app and runs the plugins' host: an event sent here reaches the plugins the user sees.
 pub fn hosts_here() -> bool {
     HOST.get().is_some() && APP.load(Ordering::Relaxed)
@@ -505,6 +564,8 @@ struct Current {
     /// Its work provider runs now (Echo's `__work` ask, until that slice ends): a `ctx.work.changed()` from it is not
     /// heard — the answer it is giving is the change (heard, every ask would ask again).
     providing: bool,
+    /// One of its widget providers runs now (`__widget:<id>`): a `ctx.widgets.changed()` from it is not heard.
+    widget: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -560,6 +621,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             }
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
+                plugins::scripts::stop_plugin(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
@@ -575,6 +637,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 p.calls.insert(n, reply);
                 set_current(&current, &plugin);
                 current.lock().unwrap().providing = command == "__work";
+                current.lock().unwrap().widget = command.starts_with("__widget:");
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -586,6 +649,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     })
                 });
                 current.lock().unwrap().providing = false;
+                current.lock().unwrap().widget = false;
             }
             Ok(Msg::Forget(plugin, n)) => {
                 if let Some(p) = plugins.get_mut(&plugin) {
@@ -602,7 +666,9 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             }
             Ok(Msg::EventEach(name, base, each)) => {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
-                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
+                // An event addressed to some plugins (`shared_changed`: its namespace's) reaches only those `each` names.
+                let to = |id: &str| !ADDRESSED.contains(&name.as_str()) || each.contains_key(id);
+                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name)) && to(id)) {
                     let mut payload = base.clone();
                     for (k, v) in each.get(id).and_then(Value::as_object).into_iter().flatten() {
                         payload[k] = v.clone();
@@ -628,7 +694,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             // What another process changed (a thread deleted with `echoctl project delete`): the app's plugins hear
             // it — the app's alone, never a terminal's host.
             if APP.load(Ordering::Relaxed) {
-                plugins::thread_values::take_queued(event_each);
+                plugins::thread_values::take_queued(|event, payload, each| if event == widgets::WIDGETS_CHANGED { widgets::take_changed(each) } else { event_each(event, payload, each) });
             }
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
@@ -720,7 +786,8 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
         }
         return json!({"value": null}).to_string();
     }
-    if op == "work.changed" && current.lock().is_ok_and(|c| c.providing) {
+    // A provider's own answer is the change: heard, each ask would ask again.
+    if (op == "work.changed" && current.lock().is_ok_and(|c| c.providing)) || (op == "widgets.changed" && current.lock().is_ok_and(|c| c.widget)) {
         return json!({"value": null}).to_string();
     }
     match service(&id, op, &arg) {
@@ -776,11 +843,22 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
     m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
 }
 
-/// A plugin command a read-only routine ran (`echoctl plugin call`, its environment inherited): it reads, it changes
+/// `ctx.claude.hasPlugin` / `installPlugin`: only for the Claude Code plugin the plugin's manifest names as its channel
+/// (`uses.channel.plugin`, what its install sheet shows).
+fn may_touch_claude_plugin(id: &str, spec: &str) -> Result<()> {
+    let named = plugins::read_manifest(&package_dir(id)?)?.uses.get("channel").and_then(|c| c["plugin"].as_str()).map(str::to_owned);
+    if named.as_deref() != Some(spec) {
+        bail!("{id} may ask about or install only the Claude Code plugin its install sheet named (uses.channel.plugin), not “{spec}”");
+    }
+    Ok(())
+}
+
+/// A plugin command run while Claude prepares and asks — a read-only routine's, or a routine's or Yolo's run with the
+/// user's choice "Claude acts on its own" off (`echoctl plugin call`, its environment inherited): it reads, it changes
 /// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
 fn read_only_here(what: &str) -> Result<()> {
     if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
-        bail!("{what} isn't allowed in a read-only routine");
+        bail!("{what} isn't allowed while Claude prepares and asks");
     }
     Ok(())
 }
@@ -965,11 +1043,15 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "widgets.set" => {
-            widget_store(id, &s(&arg[0]), Some(&arg[1]), None, None)?;
+            widget_store(id, &s(&arg[0]), &crate::today_layout::Page::Today, Some(&arg[1]), None, None, None)?;
+            Value::Null
+        }
+        "widgets.changed" => {
+            widgets::widgets_changed(id, arg.as_str())?;
             Value::Null
         }
         "widgets.clear" => {
-            widget_store(id, &s(arg), None, None, None)?;
+            widget_store(id, &s(arg), &crate::today_layout::Page::Today, None, None, None, None)?;
             Value::Null
         }
         "work.provide" => {
@@ -981,13 +1063,52 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             work::changed(id);
             Value::Null
         }
-        "threads.get" => plugins::thread_values::get(id, &s(&arg[0]), &s(&arg[1]))?,
+        // A key `<ns>.<name>` is the namespace's, shared (`plugins::shared`); one without a dot the plugin's own.
+        "threads.get" => {
+            let key = s(&arg[1]);
+            match plugins::shared::store_of(&key)? {
+                Some(st) if !plugins::shared::owned(&st) => Value::Null,
+                st => plugins::thread_values::get(&st.unwrap_or_else(|| id.to_string()), &s(&arg[0]), &key)?,
+            }
+        }
         "threads.set" => {
             read_only_here("changing files or settings")?;
-            plugins::thread_values::set(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
+            let key = s(&arg[1]);
+            let store = match plugins::shared::store_of(&key)? {
+                Some(st) => {
+                    plugins::shared::may_set(id, &st)?;
+                    st
+                }
+                None => id.to_string(),
+            };
+            let thread = s(&arg[0]);
+            // A shared key's change is the namespace's other plugins' news (`shared_changed`); the same value isn't.
+            // Not readable (a damaged file, which the set moves aside): taken as changed.
+            let before = plugins::shared::store_of(&key)?.map(|_| plugins::thread_values::get(&store, &thread, &key).ok());
+            plugins::thread_values::set(&store, &thread, &key, &arg[2])?;
+            if before.is_some_and(|b| b.as_ref() != Some(&arg[2])) {
+                plugins::shared::tell_changed(id, &key, Some(&thread));
+            }
             Value::Null
         }
-        "threads.list" => plugins::thread_values::list(id, &s(arg))?,
+        "threads.list" => {
+            let key = s(arg);
+            match plugins::shared::store_of(&key)? {
+                Some(st) if !plugins::shared::owned(&st) => json!([]),
+                st => plugins::thread_values::list(&st.unwrap_or_else(|| id.to_string()), &key)?,
+            }
+        }
+        "shared.get" => plugins::shared::get(&s(arg))?,
+        "shared.set" => {
+            read_only_here("changing files or settings")?;
+            let key = s(&arg[0]);
+            let before = plugins::shared::get(&key).ok();
+            plugins::shared::set(id, &key, &arg[1])?;
+            if before.as_ref() != Some(&arg[1]) {
+                plugins::shared::tell_changed(id, &key, None);
+            }
+            Value::Null
+        }
         "inbox.clear" => {
             inbox_set(id, &s(arg), None)?;
             Value::Null
@@ -1058,6 +1179,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             uses_flag(id, "sessions", "read")?;
             let dirs: Vec<String> = arg.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
             crate::grants::set_session_read(id, &dirs)?;
+            Value::Null
+        }
+        "agent.set" => {
+            read_only_here("changing files or settings")?;
+            plugins::agent::set_runtime(id, arg)?;
             Value::Null
         }
         "view.hints" => {
@@ -1212,245 +1338,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
     })
 }
 
-fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
-    match op {
-        // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
-        "claude.run" => {
-            read_only_here("a Claude run")?;
-            // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
-            plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
-            let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
-            let (answer, model, usage) = crate::claudejob::run(&spec)?;
-            Ok(json!({"answer": answer, "model": model, "usage": usage}))
-        }
-        // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
-        "signin.get" => {
-            let host = arg[0].as_str().unwrap_or("");
-            plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
-            read_only_here("reading your sign-in")?;
-            let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses).then_some(id);
-            Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
-        }
-"http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
-        "system.pick_folder" => {
-            uses(id, "folders")?;
-            let name = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
-            let prompt: String = format!("{} — {}", name, arg.as_str().unwrap_or("Choose a folder")).chars().take(200).collect();
-            Ok(match crate::app::choose_folder(&prompt) {
-                Some(dir) => json!(crate::grants::grant(id, &dir)?.display().to_string()),
-                None => Value::Null,
-            })
-        }
-        "fs.read_many" => {
-            uses(id, "folders")?;
-            let root = arg[0].as_str().unwrap_or("").to_string();
-            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
-            let mut out = vec![];
-            for rel in arg[1].as_array().into_iter().flatten().take(5000) {
-                let text = crate::grants::resolve(id, &root, rel.as_str().unwrap_or("")).ok().and_then(|f| {
-                    use std::io::Read;
-                    let mut buf = vec![];
-                    std::fs::File::open(f).ok()?.take(max).read_to_end(&mut buf).ok()?;
-                    Some(String::from_utf8_lossy(&buf).into_owned())
-                });
-                out.push(json!(text));
-            }
-            Ok(json!(out))
-        }
-        "fs.walk" => {
-            uses(id, "folders")?;
-            let root = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), "")?;
-            let o = &arg[1];
-            let base = match o["path"].as_str().filter(|p| !p.is_empty()) {
-                Some(rel) => crate::grants::resolve(id, &root.display().to_string(), rel)?,
-                None => root.clone(),
-            };
-            let hidden = o["hidden"].as_bool().unwrap_or(false);
-            let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(20_000).min(100_000) as usize;
-            let exts: Vec<String> = o["ext"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|e| e.trim_start_matches('.').to_lowercase())).collect()).unwrap_or_default();
-            let mut out = vec![];
-            let mut stack = vec![base];
-            while let Some(dir) = stack.pop() {
-                // A folder swapped for a link since it was listed: not read.
-                if !dunce::canonicalize(&dir).is_ok_and(|real| real.starts_with(&root)) {
-                    continue;
-                }
-                let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-                for e in rd.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let Ok(t) = e.file_type() else { continue };
-                    // Links aren't followed: one could lead out of the folder.
-                    if t.is_symlink() || (!hidden && name.starts_with('.')) {
-                        continue;
-                    }
-                    let p = e.path();
-                    if t.is_dir() {
-                        stack.push(p);
-                    } else if exts.is_empty() || p.extension().is_some_and(|x| exts.contains(&x.to_string_lossy().to_lowercase())) {
-                        let m = e.metadata().ok();
-                        let rel = p.strip_prefix(&root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
-                        let mtime = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-                        out.push(json!({"path": rel, "size": m.map(|m| m.len()).unwrap_or(0), "mtime": mtime}));
-                        if out.len() >= max {
-                            return Ok(json!(out));
-                        }
-                    }
-                }
-            }
-            Ok(json!(out))
-        }
-        "claude.has_plugin" | "claude.install_plugin" => {
-            let spec = arg[0].as_str().unwrap_or("");
-            if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
-                bail!("“{spec}” isn't a Claude Code plugin (name@marketplace)");
-            }
-            let profile = Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id);
-            let ready = crate::ai::ready(&profile)?;
-            let args: Vec<String> = if op == "claude.has_plugin" { vec!["plugin".into(), "list".into(), "--json".into()] } else { vec!["plugin".into(), "install".into(), spec.into(), "--scope".into(), "user".into()] };
-            let out = crate::ai::claude_command(ready.profile(), &args, &paths::home(), false)?.wait_with_output()?;
-            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-            if op == "claude.has_plugin" {
-                // On and seen from the data folder (where Echo's sessions run): user scope, or this folder's project.
-                let list: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|_| anyhow!("Claude Code's plugin list can't be read"))?;
-                let home = dunce::canonicalize(paths::home()).unwrap_or_else(|_| paths::home());
-                let usable = list.iter().any(|x| {
-                    x["id"] == spec
-                        && x["enabled"] == true
-                        && (x["scope"] == "user" || x["projectPath"].as_str().and_then(|p| dunce::canonicalize(p).ok()).is_some_and(|p| p == home))
-                });
-                return Ok(json!(usable));
-            }
-            if !out.status.success() {
-                bail!("Claude Code couldn't install {spec}: {}", text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no reason given").trim());
-            }
-            Ok(Value::Null)
-        }
-        "deliver.send" => {
-            read_only_here("sending")?;
-            let kind = arg[0].as_str().unwrap_or("");
-            // Only the ways its install sheet named, or its own.
-            plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;
-            let m = &arg[1];
-            let s = |k: &str| m[k].as_str().map(str::to_owned);
-            let to: Vec<String> = m["mail_to"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
-            let (title, markdown, about, ai) = (s("title").unwrap_or_default(), s("markdown").unwrap_or_default(), s("about"), s("ai"));
-            crate::deliver::ready(kind)?;
-            crate::deliver::send(kind, &crate::deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to })?;
-            Ok(Value::Null)
-        }
-        o => bail!("Echo has no service “{o}”"),
-    }
-}
-
-// ── the plugins' Today widgets ──
-
-fn widgets_file(id: &str) -> PathBuf {
-    plugins::data_dir(id).join("widgets.json")
-}
-
-/// A widget's last data (`None`: cleared), or why its provider couldn't answer (the data before kept) — one the
-/// plugin declares, at most 64 KB; `size`: the size its provider was asked for.
-fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str>, size: Option<&str>) -> Result<()> {
-    let declared = plugins::enabled_manifests().into_iter().find(|(p, _)| p == id).is_some_and(|(_, m)| m.widgets.iter().any(|w| w.id == widget));
-    if !declared {
-        bail!("{widget:?} isn't a widget this plugin declares (`widgets` in its manifest)");
-    }
-    if data.is_some_and(|d| d.to_string().len() > 64 * 1024) {
-        bail!("a widget's data is 64 KB at most");
-    }
-    let f = widgets_file(id);
-    let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
-    let mut all: serde_json::Map<String, Value> = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    // `at`: when its data was given (Today's "from HH:MM"); `asked`: when Echo last asked its provider (or found it
-    // had none), for the next ask; `error`: why the last ask failed, its data kept.
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut last = all.get(widget).cloned().unwrap_or_else(|| json!({"data": null}));
-    match (data, error) {
-        (_, Some("")) => {
-            last["asked"] = json!(now);
-        }
-        (_, Some(e)) => {
-            last["error"] = json!(e);
-            last["asked"] = json!(now);
-        }
-        (d, None) => {
-            // A `set` keeps the size its provider was last asked for (else Today would take it for a resize).
-            let kept = last.get("size").cloned();
-            last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
-            if let Some(k) = kept {
-                last["size"] = k;
-            }
-        }
-    }
-    if let Some(size) = size {
-        last["size"] = json!(size);
-    }
-    all.insert(widget.into(), last);
-    std::fs::create_dir_all(plugins::data_dir(id))?;
-    paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    Ok(())
-}
-
-static WIDGETS: Mutex<()> = Mutex::new(());
-/// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
-static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Widgets asked for again while being asked: one more ask once this one is in.
-static AGAIN: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
-
-/// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
-/// `{data, at, asked, error?}`.
-pub fn widget_last(plugin: &str, widget: &str) -> Option<Value> {
-    let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
-    all.get(widget).cloned()
-}
-
-/// Ask a widget's provider for its data in the background (5 s, as a command), keeping the answer — or, when it has
-/// no provider (it only `set`s) or fails, its last data with why.
-pub fn widget_ask(plugin: &str, widget: &str) {
-    let key = format!("{plugin}:{widget}");
-    {
-        let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
-        if asking.contains(&key) {
-            // Asked while an ask is on its way (a setting just changed): asked once more after it.
-            AGAIN.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
-            return;
-        }
-        asking.push(key.clone());
-    }
-    let (plugin, widget) = (plugin.to_string(), widget.to_string());
-    std::thread::spawn(move || {
-        loop {
-            widget_ask_now(&plugin, &widget);
-            if !AGAIN.lock().unwrap_or_else(|e| e.into_inner()).remove(&key) {
-                break;
-            }
-        }
-        ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
-    });
-}
-
-/// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
-pub fn widget_ask_now(plugin: &str, widget: &str) {
-    // Its settings as Today has them (defaults, then the user's), given to the provider.
-    // and the size it has there (S, M, L), so it can give as much as fits.
-    let id = format!("plugin:{plugin}:{widget}");
-    let (params, size) = (crate::today_layout::params_of(&id), crate::today_layout::size_on_today(&id));
-    let size = Some(size.as_str());
-    match call_within(plugin, &format!("__widget:{widget}"), &json!({ "params": params, "size": size }), Duration::from_secs(5)) {
-        // Kept — or, refused (over 64 KB), why, its data before kept.
-        Ok(v) => {
-            if let Err(e) = widget_store(plugin, widget, Some(&v), None, size) {
-                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")), size);
-            }
-        }
-        // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
-        // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
-        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""), size)),
-        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")), size)),
-    }
-}
-
-// ── the plugins' Inbox items ──
+// ── the plugins' Today widgets (widgets.rs) ──
 
 fn inbox_file(id: &str) -> PathBuf {
     plugins::data_dir(id).join("inbox.json")
@@ -1506,6 +1394,96 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         got_size(plugin, widget)
+    }
+
+    #[test]
+    fn a_widget_on_a_dashboard_is_asked_for_its_page_and_kept_apart() {
+        use crate::today_layout::{self as l, Page};
+        let (_env, root) = paths::testenv::folders("jshost-dashboards");
+        let mk = root.join("market");
+        let d = mk.join("plugins/staff");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "open", "label": "Open positions", "kind": "stat", "params": [{"key": "thread", "label": "Thread", "type": "thread"}, {"key": "client", "label": "Client", "type": "client"}]},
+            {"id": "all", "label": "Everything", "kind": "stat"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "staff", "name": "Staff", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.widgets.provide('open', ({ params }) => ({ value: 1, label: `${params.thread || '-'} / ${params.client || '-'}` }))
+              ctx.widgets.provide('all', () => ({ value: 9 }))
+              ctx.command('push', () => { ctx.widgets.set('open', { value: 7, label: 'pushed' }); return 1 })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "staff", "source": "./plugins/staff"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("staff", Some(&name)).unwrap().uses;
+        plugins::install("staff", Some(&name), &agreed).unwrap();
+        sync();
+        let acme = crate::projects::add_client("Acme", &[], false).unwrap();
+        let t = crate::projects::create("Aurora", Some(&acme.id), None).unwrap();
+        let (thread, client) = (Page::Thread(t.id.clone()), Page::Client(acme.id.clone()));
+        // What each page offers: a thread's, widgets with a thread setting; a client's, with a client setting.
+        assert!(l::add_on(&thread, "plugin:staff:all", None, None).unwrap_err().to_string().contains("no thread setting"));
+        l::add_on(&thread, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add_on(&client, "plugin:staff:open", Some("M"), None).unwrap();
+        l::add("plugin:staff:open", Some("M"), None).unwrap();
+        assert!(l::load().iter().any(|i| i.widget == "plugin:staff:open") && l::load_on(&thread).len() == 1, "each page its own layout");
+        // The page fills them: a thread's page its thread and the thread's client; a client's page its client.
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["thread"], t.id.as_str());
+        assert_eq!(l::params_on(&thread, "plugin:staff:open")["client"], acme.id.as_str());
+        assert_eq!(l::params_on(&client, "plugin:staff:open")["client"], acme.id.as_str());
+        assert!(l::set_param_on(&thread, "plugin:staff:open", "thread", "other").unwrap_err().to_string().contains("this page's"));
+        // Each place asked with its page's settings, its answer kept apart; Today's untouched.
+        let ask = |p: &Page| {
+            let mut last = String::new();
+            (0..100)
+                .find_map(|_| {
+                    widget_ask_now_on("staff", "open", p);
+                    match widget_last_on("staff", "open", p).and_then(|l| l["data"]["label"].as_str().map(str::to_owned)) {
+                        Some(v) => Some(v),
+                        None => {
+                            last = format!("{:?}", widget_last_on("staff", "open", p));
+                            std::thread::sleep(Duration::from_millis(50));
+                            None
+                        }
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        assert_eq!(ask(&thread), format!("{} / {}", t.id, acme.id));
+        assert_eq!(ask(&client), format!("- / {}", acme.id));
+        assert_eq!(ask(&Page::Today), "- / -");
+        assert_eq!(widget_last_on("staff", "open", &thread).unwrap()["data"]["label"], format!("{} / {}", t.id, acme.id), "not overwritten by the others");
+        // The plugin's own `set` reaches every copy: the dashboards' answers give way to it until asked again.
+        call("staff", "push", &json!({})).unwrap();
+        for p in [&thread, &client, &Page::Today] {
+            assert_eq!(widget_last_on("staff", "open", p).unwrap()["data"]["label"], "pushed", "{p:?}");
+        }
+        // The dashboard API's data comes from the page's own copy.
+        let i = crate::widgets::Inputs { tasks: &json!({}) };
+        assert_eq!(crate::widgets::data_on(&thread, "plugin:staff:open", &i).unwrap()["kind"], "stat");
+        // A page that never answered shows nothing of Today's (another thread's, or every one): it waits for its own.
+        let other = crate::projects::create("Borealis", None, None).unwrap();
+        let bare = Page::Thread(other.id.clone());
+        l::add_on(&bare, "plugin:staff:open", Some("M"), None).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none(), "not Today's answer");
+        assert!(crate::widgets::data_on(&bare, "plugin:staff:open", &i).unwrap()["pending"] == true);
+        // A thread with no client: its client setting is the page's too (its default, none), not the user's.
+        assert!(l::set_param_on(&bare, "plugin:staff:open", "client", &acme.id).unwrap_err().to_string().contains("this page's"));
+        assert_eq!(ask(&bare), format!("{} / -", other.id));
+        // Off the page, or the thread deleted: its answer and its dashboard go.
+        l::remove_on(&client, "plugin:staff:open").unwrap();
+        assert!(widget_last_on("staff", "open", &client).is_none());
+        crate::projects::delete(&other.id).unwrap();
+        assert!(widget_last_on("staff", "open", &bare).is_none() && l::load_on(&bare).is_empty(), "a new thread with its id starts clean");
+        plugins::remove("staff", false).unwrap();
+        sync();
     }
 
     #[test]
@@ -1592,6 +1570,41 @@ mod tests {
         widget_ask_now("ci", "health");
         assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "CI on dev");
         assert!(crate::today_layout::set_param("plugin:ci:health", "branch", "prod").is_err());
+        // An answer kept for another kind (an update changed the widget's kind; or kept before kinds were noted) is
+        // never drawn as this one: its place held, its provider asked now, the new answer kept with its kind.
+        assert_eq!(widget_last("ci", "builds").unwrap()["kind"], "list", "kept with its kind");
+        let f = plugins::data_dir("ci").join("widgets.json");
+        let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+        all["builds"]["kind"] = json!("table");
+        std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
+        let v = crate::widgets::data("plugin:ci:builds", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();
+        assert_eq!((v["pending"].as_bool(), v["empty"].as_bool()), (Some(true), Some(true)), "not drawn as a list");
+        let again = (0..100).find_map(|_| widget_last("ci", "builds").filter(|l| l["kind"] == "list").or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(again.unwrap()["data"]["items"][0]["title"], "main #41 passed", "asked again at once");
+        // Its ask failing (or a widget with no provider): the other kind's data goes, never stamped as this one.
+        for err in ["timed out", ""] {
+            let mut all: serde_json::Map<String, Value> = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+            all["builds"]["kind"] = json!("table");
+            std::fs::write(&f, serde_json::to_vec(&all).unwrap()).unwrap();
+            widgets::widget_store("ci", "builds", &crate::today_layout::Page::Today, None, Some(err), None, None).unwrap();
+            let l = widget_last("ci", "builds").unwrap();
+            assert_eq!((l["kind"].as_str(), l["data"].is_null()), (Some("list"), true), "{err:?}: {l}");
+        }
+        // Asked with settings: kept with them. A failed ask with other settings: the data for the old ones goes (the
+        // error shows); a failed ask with the same: the data stays.
+        let page = crate::today_layout::Page::Today;
+        let with = |b: &str| json!({ "branch": b }).as_object().unwrap().clone();
+        let data = json!({"items": [{"title": "main #41 passed"}]});
+        widgets::widget_store("ci", "builds", &page, Some(&data), None, Some("M"), Some(&with("main"))).unwrap();
+        assert_eq!(widget_last("ci", "builds").unwrap()["params"]["branch"], "main");
+        widgets::widget_store("ci", "builds", &page, None, Some("timed out"), Some("M"), Some(&with("main"))).unwrap();
+        assert!(!widget_last("ci", "builds").unwrap()["data"].is_null(), "the same settings: kept");
+        widgets::widget_store("ci", "builds", &page, None, Some("timed out"), Some("M"), Some(&with("release"))).unwrap();
+        let l = widget_last("ci", "builds").unwrap();
+        assert_eq!((l["data"].is_null(), l["params"]["branch"].as_str(), l["error"].as_str()), (true, Some("release"), Some("timed out")), "{l}");
         plugins::remove("ci", false).unwrap();
         sync();
     }
@@ -1611,6 +1624,14 @@ mod tests {
             plugins::read_manifest(&d).map(|_| ()).map_err(|e| e.to_string())
         };
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat"}), true).is_ok());
+        // 24 widgets at most.
+        let many = |n: usize| {
+            let ws: Vec<Value> = (0..n).map(|i| json!({"id": format!("w{i}"), "label": format!("W {i}"), "kind": "stat"})).collect();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": "p", "name": "P", "version": "0.1.0", "main": "main.js", "widgets": ws}).to_string()).unwrap();
+            plugins::read_manifest(&d).map(|_| ()).map_err(|e| e.to_string())
+        };
+        assert!(many(24).is_ok());
+        assert!(many(25).unwrap_err().contains("more than 24 widgets"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "map"}), true).unwrap_err().contains("kind Echo doesn't draw"));
         assert!(with(json!({"id": "A b", "label": "A", "kind": "stat"}), true).unwrap_err().contains("plain, unique id"));
         assert!(with(json!({"id": "a", "label": "A", "kind": "stat", "sizes": ["XL"]}), true).unwrap_err().contains("sizes of S, M and L"));
@@ -1626,6 +1647,10 @@ mod tests {
         assert!(param(json!({"key": "team", "label": "Team", "type": "colour"})).unwrap_err().contains("type Echo doesn't know"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice"})).unwrap_err().contains("choice of 1–12 options"));
         assert!(param(json!({"key": "k", "label": "K", "type": "choice", "options": ["a"], "default": "b"})).unwrap_err().contains("default isn't one it takes"));
+        // One thread and one client setting at most: a dashboard sets it.
+        let two = |t: &str| with(json!({"id": "a", "label": "A", "kind": "stat", "params": [{"key": "x", "label": "X", "type": t}, {"key": "y", "label": "Y", "type": t}]}), true);
+        assert!(two("thread").unwrap_err().contains("more than one thread setting"));
+        assert!(two("client").unwrap_err().contains("more than one client setting"));
     }
 
     #[test]
@@ -1895,7 +1920,7 @@ mod tests {
             std::env::set_var(crate::guard::RUN_MODE, "routine");
             for command in ["get", "fresh"] {
                 match call("gh-ish", command, &json!({"host": "signin-jshost.example"})) {
-                    Err(e) => assert!(e.to_string().contains("isn't allowed in a read-only routine"), "{e}"),
+                    Err(e) => assert!(e.to_string().contains("isn't allowed while Claude prepares and asks"), "{e}"),
                     Ok(_) => panic!("a read-only routine was handed a sign-in"),
                 }
             }
@@ -2009,7 +2034,7 @@ mod tests {
             std::env::set_var(crate::guard::RUN_MODE, "routine");
             for command in ["keep", "forget"] {
                 let e = call("keeper", command, &token).unwrap_err().to_string();
-                assert!(e.contains("isn't allowed in a read-only routine"), "{command}: {e}");
+                assert!(e.contains("isn't allowed while Claude prepares and asks"), "{command}: {e}");
             }
         }
         // Installed again from its marketplace: its sign-in stays. A version that no longer says `keep`, or the same id
@@ -2383,6 +2408,143 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_installs_only_the_claude_code_plugin_its_sheet_named_and_never_in_a_routine() {
+        let (_env, root) = paths::testenv::folders("jshost-install-claude-plugin");
+        let mk = root.join("market");
+        let d = mk.join("plugins/chan");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "chan", "name": "Chan", "version": "0.1.0", "main": "main.js", "uses": {"channel": {"plugin": "telegram@claude-plugins-official"}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('install', (a) => ctx.claude.installPlugin(a.spec)); ctx.command('has', (a) => ctx.claude.hasPlugin(a.spec)) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "chan", "source": "./plugins/chan"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("chan", Some(&name)).unwrap();
+        assert!(review.uses.iter().any(|l| l.contains("installs Claude Code's telegram@claude-plugins-official plugin")), "the sheet says it: {:?}", review.uses);
+        plugins::install("chan", Some(&name), &review.uses).unwrap();
+        sync();
+        let err = (0..50).find_map(|_| match call("chan", "install", &json!({"spec": "evil@somewhere"})) {
+            Err(e) if !e.to_string().contains("not loaded") => Some(e.to_string()),
+            _ => { std::thread::sleep(Duration::from_millis(50)); None }
+        }).unwrap();
+        assert!(err.contains("may ask about or install only the Claude Code plugin its install sheet named"), "{err}");
+        assert!(may_touch_claude_plugin("chan", "telegram@claude-plugins-official").is_ok(), "the named one passes the gate");
+        assert!(call("chan", "has", &json!({"spec": "evil@somewhere"})).unwrap_err().to_string().contains("may ask about or install only"), "nor asked about another");
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = call("chan", "install", &json!({"spec": "telegram@claude-plugins-official"}));
+        std::env::remove_var(crate::guard::RUN_MODE);
+        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
+        plugins::remove("chan", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_gives_claude_guides_at_run_time_and_never_from_a_read_only_routine() {
+        let (_env, root) = paths::testenv::folders("jshost-agent-set");
+        let mk = root.join("market");
+        let d = mk.join("plugins/vaults");
+        std::fs::create_dir_all(d.join("agent")).unwrap();
+        std::fs::write(d.join("agent/CLAUDE.md"), "# Vaults\n").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "agent": {"summary": "Your notes vaults"}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('set', (a) => { try { ctx.agent.set(a); return { ok: true } } catch (e) { return { error: String(e.message || e) } } }) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "vaults", "source": "./plugins/vaults"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("vaults", Some(&name)).unwrap().uses;
+        plugins::install("vaults", Some(&name), &agreed).unwrap();
+        sync();
+        let set = |v: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("vaults", "set", &v) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        let dir = plugins::agent::folder("vaults");
+        let v = set(json!({"summary": "Two vaults: Work and Home", "entries": [
+            {"name": "work", "summary": "The Work vault", "guide": "# Work\nAt ${CLAUDE_PLUGIN_ROOT}/work."},
+            {"name": "home", "summary": "The Home vault", "guide": "# Home"},
+        ]}));
+        assert_eq!(v["ok"], true, "{v}");
+        assert_eq!(std::fs::read_to_string(dir.join("work/CLAUDE.md")).unwrap(), format!("# Work\nAt {}/work.", dir.display().to_string().replace('\\', "/")));
+        let rows = plugins::agent::rows();
+        assert_eq!(rows.iter().map(|r| (r.what.as_str(), r.read.as_str())).collect::<Vec<_>>(), [
+            ("Two vaults: Work and Home", ".plugins/vaults/CLAUDE.md"),
+            ("The Work vault", ".plugins/vaults/work/CLAUDE.md"),
+            ("The Home vault", ".plugins/vaults/home/CLAUDE.md"),
+        ]);
+        // The whole set each time: an entry no longer given goes; the manifest's summary is back without one.
+        assert_eq!(set(json!({"entries": [{"name": "work", "summary": "The Work vault", "guide": "# Work"}]}))["ok"], true);
+        assert!(!dir.join("home").exists() && dir.join("work/CLAUDE.md").is_file());
+        assert_eq!(plugins::agent::rows()[0].what, "Your notes vaults");
+        // Its names, sizes and shape are checked; nothing changes then.
+        for (bad, why) in [
+            (json!({"entries": [{"name": "Work Vault", "summary": "x", "guide": "y"}]}), "lowercase words"),
+            (json!({"entries": [{"name": "scripts", "summary": "x", "guide": "y"}]}), "not guides or scripts"),
+            (json!({"entries": [{"name": "w", "summary": "x".repeat(201), "guide": "y"}]}), "1–200"),
+            (json!({"entries": [{"name": "w", "summary": "x", "guide": "y".repeat(16 * 1024 + 1)}]}), "16 KB"),
+            (json!({"entries": (0..21).map(|i| json!({"name": format!("v{i}"), "summary": "x", "guide": "y"})).collect::<Vec<_>>()}), "at most 20"),
+            (json!({"hooks": "x"}), "has no “hooks”"),
+        ] {
+            let e = set(bad)["error"].as_str().unwrap_or("").to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        assert!(dir.join("work/CLAUDE.md").is_file());
+        // A read-only routine sets nothing.
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = call("vaults", "set", &json!({"entries": []}));
+        std::env::remove_var(crate::guard::RUN_MODE);
+        let refused = refused.map(|v| v["error"].as_str().unwrap_or("").to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(refused.contains("while Claude prepares and asks"), "{refused}");
+        assert!(dir.join("work/CLAUDE.md").is_file());
+        plugins::remove("vaults", true).unwrap();
+        sync();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_routine_preparing_and_asking_runs_no_plugin_command_that_sends_and_one_acting_on_its_own_does() {
+        let (_env, root) = paths::testenv::folders("jshost-run-sends");
+        let mk = root.join("market");
+        let d = mk.join("plugins/notifier");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "notifier", "name": "Notifier", "version": "0.1.0", "main": "main.js", "uses": {"deliver": {"to": ["teams"]}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('send', async () => { try { await ctx.deliver.send('teams', { title: 'Hi', markdown: 'Hi' }); return { ok: true } } catch (e) { return { error: String(e.message || e) } } }) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "notifier", "source": "./plugins/notifier"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("notifier", Some(&name)).unwrap().uses;
+        plugins::install("notifier", Some(&name), &sheet).unwrap();
+        sync();
+        let send = || {
+            (0..50)
+                .find_map(|_| match call("notifier", "send", &json!({})) {
+                    Ok(v) => Some(v["error"].as_str().unwrap_or("").to_string()),
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        // Preparing and asking (Echo set the read-only marker for its run): refused before anything is sent.
+        std::env::set_var(crate::guard::RUN_MODE, "routine");
+        let refused = send();
+        std::env::remove_var(crate::guard::RUN_MODE);
+        assert!(refused.contains("isn't allowed while Claude prepares and asks"), "{refused}");
+        // Acting on its own (no marker): the send goes on — here it stops only for want of a Teams sign-in.
+        let tried = send();
+        assert!(!tried.contains("while Claude prepares and asks"), "{tried}");
+        plugins::remove("notifier", true).unwrap();
+        sync();
+    }
+
+    #[test]
     fn a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes() {
         let (_env, root) = paths::testenv::folders("jshost-threads");
         let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
@@ -2435,7 +2597,7 @@ mod tests {
         let refused = call("repos", "map", &json!({"thread": beta, "repos": ["acme-test/web"]}));
         let read = call("repos", "get", &json!({"thread": alpha}));
         std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("read-only routine"));
+        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
         assert_eq!(read.unwrap(), json!(["acme-test/api"]));
         // A host that isn't the app's (this one, until it is marked): it hears nothing and takes nothing queued.
         let born = |id: &str| json!(crate::projects::load(id).unwrap().stages[0].at);
@@ -2487,6 +2649,264 @@ mod tests {
         assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
         APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_shared_value_changed_is_told_to_its_namespaces_other_plugins_once_it_changes() {
+        // #612: `shared_changed` {namespace, key, thread?, by} — to the namespace's plugins (its owner's source) that
+        // hear it, not the one that set it; the same value again is no news; from another process, by the app's queue.
+        let (_env, root) = paths::testenv::folders("jshost-shared-changed");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let main = r#"
+            export function apply(ctx) {
+              const heard = []
+              ctx.on('shared_changed', (p) => { heard.push(p) })
+              ctx.command('tset', (a) => ctx.threads.set(a.thread, a.key, a.value))
+              ctx.command('sset', (a) => ctx.shared.set(a.key, a.value))
+              ctx.command('heard', () => heard)
+            }
+        "#;
+        let market = |dir: &str, name: &str, ids: &[&str]| {
+            let mk = root.join(dir);
+            for id in ids {
+                let d = mk.join("plugins").join(id);
+                std::fs::create_dir_all(&d).unwrap();
+                std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"events": {"on": ["shared_changed"]}}}).to_string()).unwrap();
+                std::fs::write(d.join("main.js"), main).unwrap();
+            }
+            let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+            std::fs::write(mk.join("echo-marketplace.json"), json!({"name": name, "plugins": plugins}).to_string()).unwrap();
+            let m = plugins::market_add(mk.to_str().unwrap(), Some(dir)).unwrap();
+            plugins::refresh(&m).unwrap();
+            for id in ids {
+                let r = plugins::review(id, Some(&m)).unwrap();
+                plugins::install(id, Some(&m), &r.uses).unwrap();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        market("acme", "Acme", &["a", "b"]);
+        market("acme-copy", "Acme", &["c"]);
+        sync();
+        as_app();
+        let call_ok = |id: &str, cmd: &str, a: Value| (0..50).find_map(|_| call(id, cmd, &a).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        let heard = |id: &str| call_ok(id, "heard", json!({})).unwrap();
+        call_ok("a", "sset", json!({"key": "acme.watch", "value": ["ACME-1"]})).unwrap();
+        call_ok("a", "tset", json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI"]})).unwrap();
+        // The same value again, and a's own key (no dot): no news.
+        call_ok("a", "sset", json!({"key": "acme.watch", "value": ["ACME-1"]})).unwrap();
+        call_ok("a", "tset", json!({"thread": alpha, "key": "codes", "value": "mine"})).unwrap();
+        let want = json!([
+            {"namespace": "acme", "key": "acme.watch", "by": "a"},
+            {"namespace": "acme", "key": "acme.codes", "by": "a", "thread": alpha},
+        ]);
+        crate::paths::testenv::eventually("b hears both changes", || heard("b") == want);
+        assert_eq!(heard("a"), json!([]), "not the plugin that set it");
+        assert_eq!(heard("c"), json!([]), "another source calling itself Acme doesn't share it");
+        // Another process (a terminal's `plugin call`): queued for the app, to b and a only.
+        APP.store(false, Ordering::Relaxed);
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": []})).unwrap();
+        let mut got = vec![];
+        plugins::thread_values::take_queued(|e, p, each| got.push((e.to_string(), p.clone(), each.keys().cloned().collect::<Vec<_>>())));
+        assert_eq!(got, [("shared_changed".to_string(), json!({"namespace": "acme", "key": "acme.watch", "by": "b"}), vec!["a".to_string()])]);
+        // A damaged file: the set still moves it aside and goes on (what was there unread: taken as changed).
+        std::fs::write(plugins::data_dir("@acme").join("shared.json"), "not json").unwrap();
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": ["ACME-2"]})).unwrap();
+        assert_eq!(plugins::shared::get("acme.watch").unwrap(), json!(["ACME-2"]));
+        for id in ["a", "b", "c"] {
+            plugins::remove(id, true).unwrap();
+        }
+        sync();
+    }
+
+    #[test]
+    fn widgets_changed_asks_each_copy_again_with_its_own_settings_at_most_once_a_gap() {
+        // #612: `ctx.widgets.changed(id)` — Today's copy and a dashboard's asked again (each with its page's settings),
+        // a long `refresh` notwithstanding; changes within the gap asked once at its end; one from inside the provider
+        // isn't heard; from another process, marked due and queued for the app.
+        use crate::today_layout::{self as l, Page};
+        let (_env, root) = paths::testenv::folders("jshost-widgets-changed");
+        let mk = root.join("market");
+        let d = mk.join("plugins/pulse");
+        std::fs::create_dir_all(&d).unwrap();
+        let widgets = json!([
+            {"id": "open", "label": "Open", "kind": "stat", "refresh": 3600, "params": [{"key": "thread", "label": "Thread", "type": "thread"}]},
+            {"id": "all", "label": "All", "kind": "stat", "refresh": 3600},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "pulse", "name": "Pulse", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              let asks = 0
+              ctx.widgets.provide('open', ({ params }) => { asks++; ctx.widgets.changed('open'); return { value: asks, label: params.thread || '-' } })
+              ctx.command('changed', (a) => { ctx.widgets.changed(a.id); return 1 })
+              let all = 0
+              ctx.widgets.provide('all', () => ({ value: ++all }))
+              ctx.command('asks', () => asks)
+              ctx.command('all', () => all)
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "pulse", "source": "./plugins/pulse"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("pulse", Some(&name)).unwrap().uses;
+        plugins::install("pulse", Some(&name), &agreed).unwrap();
+        sync();
+        as_app();
+        let t = crate::projects::create("Aurora", None, None).unwrap();
+        let thread = Page::Thread(t.id.clone());
+        l::add("plugin:pulse:open", Some("M"), None).unwrap();
+        l::add_on(&thread, "plugin:pulse:open", Some("M"), None).unwrap();
+        let asks = || (0..50).find_map(|_| call("pulse", "asks", &json!({})).ok().or_else(|| { std::thread::sleep(Duration::from_millis(50)); None })).unwrap().as_u64().unwrap();
+        let value = |p: &Page| widget_last_on("pulse", "open", p).map(|l| (l["data"]["value"].as_u64().unwrap_or(0), l["data"]["label"].as_str().unwrap_or("").to_string()));
+        for p in [&Page::Today, &thread] {
+            widget_ask_now_on("pulse", "open", p);
+        }
+        widget_ask_now_on("pulse", "all", &Page::Today);
+        assert_eq!(asks(), 2, "each copy asked once; the provider's own changed() not heard");
+        let all = || call("pulse", "all", &json!({})).unwrap().as_u64().unwrap();
+        assert_eq!(all(), 1);
+        assert!(call("pulse", "changed", &json!({"id": "nope"})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
+        call("pulse", "changed", &json!({"id": "open"})).unwrap();
+        crate::paths::testenv::eventually("both copies asked again", || asks() == 4);
+        crate::paths::testenv::eventually("each answer kept", || value(&Page::Today).is_some_and(|v| v.0 >= 3) && value(&thread).is_some_and(|v| v.0 >= 3));
+        assert_eq!(value(&Page::Today).unwrap().1, "-", "Today's settings");
+        assert_eq!(value(&thread).unwrap().1, t.id, "the dashboard's own");
+        // With no id: every widget it declares. Twice more within open's gap: open asked once, at its end — nothing
+        // before it; `all` (not changed before) at once, then once more at the end of its own gap.
+        call("pulse", "changed", &json!({})).unwrap();
+        call("pulse", "changed", &json!({})).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(asks(), 4, "not before the gap's end");
+        crate::paths::testenv::eventually("all asked at once", || all() == 2);
+        crate::paths::testenv::eventually("asked at the gap's end", || asks() == 6 && all() == 3);
+        std::thread::sleep(Duration::from_millis(900));
+        assert_eq!((asks(), all()), (6, 3), "once: the second change in the gap, and the provider's own, add nothing");
+        // Another process: each copy marked due now, the ask left for the app.
+        APP.store(false, Ordering::Relaxed);
+        call("pulse", "changed", &json!({"id": "open"})).unwrap();
+        for p in [&Page::Today, &thread] {
+            assert_eq!(widget_last_on("pulse", "open", p).unwrap()["asked"], "1970-01-01T00:00:00Z", "{p:?} due");
+        }
+        let mut got = vec![];
+        plugins::thread_values::take_queued(|e, _, each| got.push((e.to_string(), Value::Object(each.clone()))));
+        assert_eq!(got, [(widgets::WIDGETS_CHANGED.to_string(), json!({"pulse": {"widget": "open"}}))]);
+        assert_eq!(asks(), 6, "not asked in this process");
+        plugins::remove("pulse", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_marketplaces_plugins_share_values_under_its_name_and_only_they_set_them() {
+        let (_env, root) = paths::testenv::folders("jshost-shared");
+        let alpha = crate::projects::create("Alpha", None, None).unwrap().id;
+        let main = r#"
+            export function apply(ctx) {
+              const heard = []
+              ctx.on('threads_changed', (p) => { heard.push(p) })
+              ctx.command('tset', (a) => ctx.threads.set(a.thread, a.key, a.value))
+              ctx.command('tget', (a) => ctx.threads.get(a.thread, a.key))
+              ctx.command('tlist', (a) => ctx.threads.list(a.key))
+              ctx.command('sset', (a) => ctx.shared.set(a.key, a.value))
+              ctx.command('sget', (a) => ctx.shared.get(a.key))
+              ctx.command('heard', () => heard)
+            }
+        "#;
+        // Two marketplaces that call themselves "Acme" (a, b in the first; c in its copy) and one called "Other" (d).
+        let market = |dir: &str, name: &str, ids: &[&str]| {
+            let mk = root.join(dir);
+            for id in ids {
+                let d = mk.join("plugins").join(id);
+                std::fs::create_dir_all(&d).unwrap();
+                std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": {"events": {"on": ["threads_changed"]}}}).to_string()).unwrap();
+                std::fs::write(d.join("main.js"), main).unwrap();
+            }
+            let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+            std::fs::write(mk.join("echo-marketplace.json"), json!({"name": name, "plugins": plugins}).to_string()).unwrap();
+            let m = plugins::market_add(mk.to_str().unwrap(), Some(dir)).unwrap();
+            plugins::refresh(&m).unwrap();
+        };
+        let install = |id: &str, m: &str| {
+            let r = plugins::review(id, Some(m)).unwrap();
+            plugins::install(id, Some(m), &r.uses).unwrap();
+            std::thread::sleep(Duration::from_millis(5)); // each its own install time
+        };
+        market("acme", "Acme", &["a", "b"]);
+        market("acme-copy", "Acme", &["c"]);
+        market("other", "Other", &["d"]);
+        // a, then the copy's c, then b: before any value is read or set, a removed and put back — b keeps the name for
+        // Acme, never the copy (installed before b).
+        install("a", "acme");
+        install("c", "acme-copy");
+        install("b", "acme");
+        install("d", "other");
+        plugins::remove("a", true).unwrap();
+        install("a", "acme");
+        sync();
+        let call_ok = |id: &str, cmd: &str, a: Value| (0..50).find_map(|_| call(id, cmd, &a).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        // Per thread: a sets it, b reads the same value, any plugin reads it; c (same name, another source) and d can't set it.
+        call_ok("a", "tset", json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI"]})).unwrap();
+        for id in ["a", "b", "c", "d"] {
+            assert_eq!(call_ok(id, "tget", json!({"thread": alpha, "key": "acme.codes"})).unwrap(), json!(["NWB-PAI"]), "{id} reads it");
+        }
+        assert_eq!(call("b", "tlist", &json!({"key": "acme.codes"})).unwrap(), json!([{"thread": alpha, "value": ["NWB-PAI"]}]));
+        call("b", "tset", &json!({"thread": alpha, "key": "acme.codes", "value": ["NWB-PAI", "ACME-2"]})).unwrap();
+        assert_eq!(call("a", "tget", &json!({"thread": alpha, "key": "acme.codes"})).unwrap(), json!(["NWB-PAI", "ACME-2"]), "one value");
+        for id in ["c", "d"] {
+            let err = call(id, "tset", &json!({"thread": alpha, "key": "acme.codes", "value": 1})).unwrap_err().to_string();
+            assert!(err.contains("only the plugins of the marketplace that owns “acme”"), "{id}: {err}");
+        }
+        assert!(call("d", "tset", &json!({"thread": alpha, "key": "nobody.x", "value": 1})).unwrap_err().to_string().contains("no installed marketplace is named “nobody”"));
+        assert_eq!(call("d", "tget", &json!({"thread": alpha, "key": "nobody.x"})).unwrap(), Value::Null, "nobody's namespace reads empty");
+        assert_eq!(call("d", "sget", &json!({"key": "nobody.x"})).unwrap(), Value::Null);
+        assert!(call("a", "tset", &json!({"thread": alpha, "key": "Acme.x", "value": 1})).unwrap_err().to_string().contains("<namespace>.<name>"));
+        // A key without a dot stays each plugin's own.
+        call("a", "tset", &json!({"thread": alpha, "key": "codes", "value": "a's"})).unwrap();
+        assert_eq!(call("b", "tget", &json!({"thread": alpha, "key": "codes"})).unwrap(), Value::Null);
+        // One for the computer: created by a set, read by all, set only by the owner's plugins; a plain key refused.
+        assert_eq!(call("b", "sget", &json!({"key": "acme.watch"})).unwrap(), Value::Null);
+        call("b", "sset", &json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        assert_eq!(call("d", "sget", &json!({"key": "acme.watch"})).unwrap(), json!(["NWB-PAI"]));
+        assert!(call("c", "sset", &json!({"key": "acme.watch", "value": []})).is_err());
+        assert!(call("a", "sset", &json!({"key": "watch", "value": []})).unwrap_err().to_string().contains("<namespace>.<name>"));
+        assert!(call("a", "sset", &json!({"key": "acme.big", "value": "x".repeat(17 * 1024)})).unwrap_err().to_string().contains("16 KB"));
+        call("a", "sset", &json!({"key": "acme.watch", "value": null})).unwrap();
+        assert_eq!(call("b", "sget", &json!({"key": "acme.watch"})).unwrap(), Value::Null, "null removes it");
+        call("a", "sset", &json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        // The thread deleted: its shared values go; a and b each hear them with their own, c and d don't.
+        as_app();
+        crate::projects::delete(&alpha).unwrap();
+        let heard = |id: &str| (0..60).find_map(|_| {
+            let v = call(id, "heard", &json!({})).unwrap();
+            if v.as_array().is_some_and(|a| !a.is_empty()) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(heard("a").unwrap()[0]["values"], json!({"codes": "a's", "acme.codes": ["NWB-PAI", "ACME-2"]}));
+        assert_eq!(heard("b").unwrap()[0]["values"], json!({"acme.codes": ["NWB-PAI", "ACME-2"]}));
+        assert_eq!(call("c", "heard", &json!({})).unwrap()[0]["values"], json!({}), "same name, another source: not its values");
+        assert_eq!(call("d", "tlist", &json!({"key": "acme.codes"})).unwrap(), json!([]));
+        // One of the owner's plugins removed: the other keeps the name, the copy still only reads.
+        plugins::remove("a", true).unwrap();
+        sync();
+        call_ok("b", "sset", json!({"key": "acme.watch", "value": ["NWB-PAI"]})).unwrap();
+        assert!(call("c", "sset", &json!({"key": "acme.watch", "value": []})).is_err(), "not the copy's while b is there");
+        // The owner's plugins all removed: the copy takes the name; the value for the computer stays.
+        plugins::remove("b", true).unwrap();
+        sync();
+        assert_eq!(call_ok("c", "sget", json!({"key": "acme.watch"})).unwrap(), json!(["NWB-PAI"]), "left by the removed plugins");
+        call("c", "sset", &json!({"key": "acme.watch", "value": []})).unwrap();
+        APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
+        for id in ["c", "d"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 
@@ -2624,6 +3044,198 @@ mod tests {
     // A release build has no ECHOCTL_PICK_FOLDER: there `pickFolder` would open the real folder picker.
     #[cfg(debug_assertions)]
     #[test]
+    #[cfg(unix)]
+    fn a_plugins_package_skill_reaches_the_sessions_and_its_declared_script_runs() {
+        let (_env, root) = paths::testenv::folders("jshost-scripts");
+        let mk = root.join("market");
+        let d = mk.join("plugins/kit");
+        let sk = d.join("skills/staffing");
+        std::fs::create_dir_all(sk.join("scripts")).unwrap();
+        std::fs::write(sk.join("SKILL.md"), "---\nname: staffing\ndescription: Reads a project's staffing.\n---\n\nRun scripts/read.sh.\n").unwrap();
+        // No mode bits on purpose: a package from git or a tarball may lose them; Echo makes declared scripts runnable.
+        std::fs::write(sk.join("scripts/read.sh"), "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\necho \"script=$ECHO_PLUGIN_SCRIPT claude=${CLAUDE_TEST_LEAK:-none} cache=$ECHO_PLUGIN_CACHE pwd=$(pwd)\"\n").unwrap();
+        std::fs::write(sk.join("scripts/slow.sh"), "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\nhead -c 1100000 /dev/zero | tr '\\0' a\n").unwrap();
+        std::fs::write(sk.join("scripts/write.sh"), "#!/bin/sh\necho wrote\n").unwrap();
+        std::fs::write(sk.join("scripts/other.sh"), "#!/bin/sh\necho other\n").unwrap();
+        let scripts = json!([
+            {"skill": "staffing", "script": "scripts/read.sh", "readonly": true},
+            {"skill": "staffing", "script": "scripts/slow.sh", "readonly": true, "timeout": 20},
+            {"skill": "staffing", "script": "scripts/big.sh", "readonly": true},
+            {"skill": "staffing", "script": "scripts/write.sh"},
+        ]);
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.1.0", "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": scripts}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              const run = async (a) => { try { return await ctx.scripts.run('staffing', a.script, a.args, a.opts) } catch (e) { return { error: String(e.message || e) } } }
+              ctx.command('run', run)
+              ctx.command('twice', async () => {
+                const both = await Promise.allSettled([1, 2].map(() => ctx.scripts.run('staffing', 'scripts/slow.sh', [], { timeout: 2 })))
+                return both.map((r) => r.status === 'fulfilled' ? r.value : { error: String(r.reason.message || r.reason) })
+              })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
+        let line = agreed.iter().find(|l| l.starts_with("Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh” (read-only routines may run it; Echo can't check it only reads)")).unwrap_or_else(|| panic!("{agreed:?}")).clone();
+        assert!(line.contains("“staffing/scripts/write.sh”") && !line.contains("other.sh") && line.contains("(their files: "), "{line}");
+        plugins::install("kit", Some(&name), &agreed).unwrap();
+        // In Echo's sessions each declared script's path holds Echo's launcher of it; the original stays in the package.
+        let sp = crate::grants::session_plugins();
+        let wrapper = std::fs::read_to_string(sp[0].join("skills/staffing/scripts/read.sh")).unwrap();
+        assert!(wrapper.starts_with("#!/bin/sh\n") && wrapper.contains("plugin script 'kit' 'staffing' 'scripts/read.sh' -- \"$@\""), "{wrapper}");
+        assert_eq!(std::fs::read_to_string(sp[0].join("skills/staffing/scripts/other.sh")).unwrap(), "#!/bin/sh\necho other\n", "an undeclared file is copied as it is");
+        let ro = crate::grants::session_scripts(true);
+        assert!(ro.iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/read.sh")) && !ro.iter().any(|p| p.ends_with("write.sh") || p.ends_with("other.sh")), "{ro:?}");
+        assert!(crate::grants::session_scripts(false).iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/write.sh")));
+        sync();
+        let leak = EnvVar::set("CLAUDE_TEST_LEAK", "secret");
+        let run = |script: &str, args: Value, opts: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("kit", "run", &json!({"script": script, "args": args, "opts": opts})) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        // Plain words, no shell; the user's environment without Claude's; its cache folder; in its session copy.
+        let v = run("scripts/read.sh", json!(["$(id)", "a b; rm -rf ~"]), json!({}));
+        assert_eq!(v["status"], 0, "{v}");
+        let cache = plugins::data_dir("kit").join("cache");
+        let cwd = dunce::canonicalize(sp[0].join("skills/staffing")).unwrap();
+        assert_eq!(v["stdout"], format!("$(id)\na b; rm -rf ~\nscript=1 claude=none cache={} pwd={}\n", cache.display(), cwd.display()));
+        drop(leak);
+        assert!(run("scripts/other.sh", json!([]), json!({}))["error"].as_str().unwrap().contains("didn't declare the script “staffing/scripts/other.sh”"));
+        assert!(run("../../../bin/sh", json!([]), json!({}))["error"].as_str().unwrap().contains("didn't declare"));
+        assert!(run("scripts/read.sh", json!([]), json!({"timeout": 301}))["error"].as_str().unwrap().contains("300 s at most"));
+        // Its time runs out: stopped with what it started, no status.
+        let t = std::time::Instant::now();
+        let v = run("scripts/slow.sh", json!([]), json!({"timeout": 1}));
+        assert!(v["timed_out"] == true && v["status"].is_null() && t.elapsed() < Duration::from_secs(10), "{v}");
+        // Output past 1 MB is cut and said so.
+        let v = run("scripts/big.sh", json!([]), json!({}));
+        assert!(v["truncated"] == true && v["stdout"].as_str().unwrap().len() == 1 << 20 && v["status"] == 0, "{}", v["status"]);
+        // One run of a script at a time.
+        let v = call("kit", "twice", &json!({})).unwrap();
+        let busy = v.as_array().unwrap().iter().filter(|r| r["error"].as_str().is_some_and(|e| e.contains("is already running"))).count();
+        let ran = v.as_array().unwrap().iter().filter(|r| r["timed_out"] == true).count();
+        assert_eq!((busy, ran), (1, 1), "{v}");
+        // Whichever process runs it, a script's run holds its lock: Echo stops it from anywhere (a removal, an update).
+        let runner = std::thread::spawn(|| plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false));
+        let held = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false).is_err_and(|e| e.to_string().contains("already running"))
+        });
+        assert!(held, "the running script holds its lock");
+        let t = std::time::Instant::now();
+        plugins::scripts::stop_plugin("kit");
+        let v = runner.join().unwrap().unwrap();
+        assert!(v["status"].is_null() && v["timed_out"].is_null() && t.elapsed() < Duration::from_secs(5), "{v}");
+        // A read-only routine runs only a script marked readonly.
+        assert!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, true).unwrap_err().to_string().contains("isn't marked readonly"));
+        assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, false).unwrap()["stdout"], "wrote\n");
+        // A version changing a file of that skill folder asks again.
+        std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\necho small\n").unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.2.0", "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": scripts}}).to_string()).unwrap();
+        plugins::refresh(&name).unwrap();
+        assert!(plugins::update("kit", &[]).unwrap_err().to_string().contains("asks for more: Runs programs from its package"));
+        plugins::remove("kit", false).unwrap();
+        sync();
+        assert!(crate::grants::session_plugins().is_empty() && crate::grants::session_scripts(false).is_empty());
+    }
+
+    #[test]
+    fn a_plugins_package_skill_reaches_the_sessions_beside_its_runtime_skills() {
+        let (_env, root) = paths::testenv::folders("jshost-package-skills");
+        let mk = root.join("market");
+        let d = mk.join("plugins/kit");
+        let write = |version: &str, body: &str| {
+            std::fs::create_dir_all(d.join("skills/staffing/references")).unwrap();
+            std::fs::write(d.join("skills/staffing/SKILL.md"), format!("---\nname: staffing\ndescription: Reads a project's staffing.\n---\n\n{body}\n")).unwrap();
+            std::fs::write(d.join("skills/staffing/references/fields.md"), "# Fields").unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": version, "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"sessions": {"skills": true}}}).to_string()).unwrap();
+        };
+        write("0.1.0", "Read it.");
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('set', (a) => { ctx.sessions.skills(a.list); return true })
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "kit", "source": "./plugins/kit"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
+        assert!(agreed.iter().any(|l| l.starts_with("Tells Claude in Echo how to work with it (the skill “staffing”), loaded only when you work with it (its files: ")), "{agreed:?}");
+        plugins::install("kit", Some(&name), &agreed).unwrap();
+        // Copied at install, before its host half ever ran: the folder as the package ships it, in Echo's config folder.
+        let sp = crate::grants::session_plugins();
+        assert_eq!(sp.len(), 1);
+        assert!(sp[0].starts_with(paths::config_dir()) && !sp[0].starts_with(plugins::data_dir("kit")));
+        assert_eq!(crate::grants::skill_names(&sp), vec!["echo-kit:staffing".to_string()]);
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it."));
+        assert_eq!(std::fs::read_to_string(sp[0].join("skills/staffing/references/fields.md")).unwrap(), "# Fields");
+        // Its runtime skills go beside it; a runtime skill of the package's name is refused; an empty list keeps the package's.
+        sync();
+        let set = |list: Value| {
+            let mut last = String::new();
+            (0..50)
+                .find_map(|_| match call("kit", "set", &json!({"list": list})) {
+                    Ok(v) => Some(Ok(v)),
+                    Err(e) if e.to_string().contains("package") => Some(Err(e.to_string())),
+                    Err(e) => {
+                        last = format!("{e:#}");
+                        std::thread::sleep(Duration::from_millis(50));
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{last}"))
+        };
+        set(json!([{"name": "notes", "description": "Notes.", "body": "Text."}])).unwrap();
+        let mut names = crate::grants::skill_names(&crate::grants::session_plugins());
+        names.sort();
+        assert_eq!(names, ["echo-kit:notes", "echo-kit:staffing"]);
+        assert!(set(json!([{"name": "staffing", "description": "Mine.", "body": "x"}])).unwrap_err().contains("package has a skill of that name"));
+        set(json!([])).unwrap();
+        assert_eq!(crate::grants::skill_names(&crate::grants::session_plugins()), vec!["echo-kit:staffing".to_string()]);
+        // An update copies the new version's folder (a changed skill asks again); a copy older than the installed files
+        // is copied again.
+        write("0.2.0", "Read it again.");
+        plugins::refresh(&name).unwrap();
+        let again = plugins::review("kit", Some(&name)).unwrap().new_uses;
+        assert!(again.len() == 1 && again[0].starts_with("Tells Claude in Echo"), "{again:?}");
+        plugins::update("kit", &again).unwrap().unwrap();
+        let sp = crate::grants::session_plugins();
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it again."));
+        std::fs::write(sp[0].join("skills/staffing/SKILL.md"), "stale").unwrap();
+        std::fs::write(sp[0].join(".package.json"), r#"{"files": "older", "skills": ["staffing"]}"#).unwrap();
+        let sp = crate::grants::session_plugins();
+        assert!(std::fs::read_to_string(sp[0].join("skills/staffing/SKILL.md")).unwrap().contains("Read it again."));
+        // Switched off: not in a session; removed: its folder goes.
+        plugins::set_enabled("kit", false).unwrap();
+        assert!(crate::grants::session_plugins().is_empty());
+        plugins::set_enabled("kit", true).unwrap();
+        let dir = crate::grants::session_plugins()[0].clone();
+        plugins::remove("kit", false).unwrap();
+        sync();
+        assert!(!dir.exists() && crate::grants::session_plugins().is_empty());
+    }
+
+    #[test]
     fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
         let (_env, root) = paths::testenv::folders("jshost-sessions");
         let vault = root.join("vault");
@@ -2634,7 +3246,7 @@ mod tests {
         let d = mk.join("plugins/vaults");
         std::fs::create_dir_all(&d).unwrap();
         let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true, "commands": ["search", "backlinks"]}, "echo": {"read": ["clients"]}});
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses, "agent": {"prefix": "vlt"}}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"

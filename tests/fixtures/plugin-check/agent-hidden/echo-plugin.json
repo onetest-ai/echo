@@ -1,0 +1,10 @@
+{
+  "id": "agent-hidden",
+  "name": "Agent hidden",
+  "version": "0.1.0",
+  "summary": "A test package for `echoctl plugin check` (tests/cases/plugins/TC-037): skills hidden in nested .claude folders, which Echo refuses.",
+  "agent": {
+    "summary": "Hides skills on purpose",
+    "prefix": "hid"
+  }
+}

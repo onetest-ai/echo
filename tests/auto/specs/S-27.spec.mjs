@@ -128,6 +128,8 @@ scenario(test, 'S-27', "Others' words everywhere: nothing runs, nothing breaks",
     await row.click()
     await h.tab(v().tabNames.brief).click()
     await expect(h.headingStarting(`${t.base} ${h.piece(t.name)}`)).toBeVisible()
+    // What it is folds (F-THR-10): opened first.
+    await page.locator('[data-pj="about-fold"]').click()
     const brief = h.region(v().brief)
     await expect(h.shows(t.brief[0], brief)).toBeVisible()
     await expect(h.showsText(H().markup, brief)).toBeVisible()
@@ -146,6 +148,8 @@ scenario(test, 'S-27', "Others' words everywhere: nothing runs, nothing breaks",
     await expect(h.menuItemEnding(t.client)).toBeVisible()
     await page.keyboard.press(data.text.shell.keys.escape)
     await h.goto(client(H().clients.globex, v().tabs.overview))
+    // About folds (F-CLIENT-02): opened first.
+    await page.locator('[data-pj="about-fold"]').click()
     const about = h.region(fill(v().about, { name: H().clients.globexName }))
     for (const id of H().clients.about) await expect(h.shows(id, about)).toBeVisible()
     await expect(h.showsText(H().markup, about)).toBeVisible()

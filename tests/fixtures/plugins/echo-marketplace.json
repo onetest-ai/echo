@@ -20,6 +20,42 @@
     {
       "id": "signin-demo",
       "source": "./plugins/signin-demo"
+    },
+    {
+      "id": "table-demo",
+      "source": "./plugins/table-demo"
+    },
+    {
+      "id": "chart-demo",
+      "source": "./plugins/chart-demo"
+    },
+    {
+      "id": "share-a",
+      "source": "./plugins/share-a"
+    },
+    {
+      "id": "share-b",
+      "source": "./plugins/share-b"
+    },
+    {
+      "id": "chan-demo",
+      "source": "./plugins/chan-demo"
+    },
+    {
+      "id": "agent-demo",
+      "source": "./plugins/agent-demo"
+    },
+    {
+      "id": "fill-demo",
+      "source": "./plugins/fill-demo"
+    },
+    {
+      "id": "pulse-demo",
+      "source": "./plugins/pulse-demo"
+    },
+    {
+      "id": "event-demo",
+      "source": "./plugins/event-demo"
     }
   ]
 }

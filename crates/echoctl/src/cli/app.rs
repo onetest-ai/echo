@@ -316,11 +316,11 @@ pub fn config(args: ConfigArgs) -> Result<()> {
     let mut cfg = config::Config::load()?;
     if let Some(d) = drafts {
         // The app named here is run with each draft: never chosen by a run Echo started.
-        anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: where drafts go is the user's to choose");
+        anyhow::ensure!(!crate::notes::run_limited(), "refused inside a run Echo started: where drafts go is the user's to choose");
         cfg.drafts = crate::drafts::setting(&d)?;
     }
     if let Some(o) = onedrive {
-        anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: where OneDrive is is the user's to say");
+        anyhow::ensure!(!crate::notes::run_limited(), "refused inside a run Echo started: where OneDrive is is the user's to say");
         cfg.onedrive = crate::onedrive::setting(&o)?;
     }
     if let Some(m) = live_model {

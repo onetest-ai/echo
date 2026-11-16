@@ -38,6 +38,45 @@ fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static 
     Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), heights: Cow::Borrowed(&[1]), temporal, refresh: 0, params: vec![] }
 }
 
+/// A thread or a client a widget shows (Today's ⚙, or set by a dashboard's page).
+fn scoped(kind: &str) -> crate::plugins::ParamDef {
+    let label = if kind == "thread" { "Thread" } else { "Client" };
+    crate::plugins::ParamDef { key: kind.into(), label: label.into(), kind: kind.into(), options: vec![], default: None }
+}
+
+/// The threads a widget's settings narrow it to: its thread, else its client's open threads (none set: every thread),
+/// and the name it then says ("Done this week · Aurora").
+pub fn scope_of(params: &serde_json::Map<String, Value>) -> Option<(Vec<String>, String)> {
+    if let Some(t) = params.get("thread").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+        let name = crate::projects::load(t).map(|p| p.name).unwrap_or_else(|_| t.to_string());
+        return Some((vec![t.to_string()], name));
+    }
+    let c = params.get("client").and_then(Value::as_str).filter(|c| !c.is_empty())?;
+    let name = crate::projects::clients().ok().and_then(|all| all.into_iter().find(|x| x.id == c)).map(|x| x.name).unwrap_or_else(|| c.to_string());
+    let threads = crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(c) && !p.stage.closed()).map(|p| p.id).collect();
+    Some((threads, name))
+}
+
+/// Threads at a glance / Done this week for a widget's settings: its period, its thread or client (`scope` named).
+pub fn glance_for(params: &serde_json::Map<String, Value>) -> Value {
+    let scope = scope_of(params);
+    let mut v = crate::glance::today(params.get("period").and_then(Value::as_str).unwrap_or("week"), scope.as_ref().map(|s| s.0.as_slice()));
+    if let Some((_, name)) = scope {
+        v["scope"] = json!(name);
+    }
+    v
+}
+
+/// Recorded this week for a widget's settings: its thread's or client's calls (`scope` named), else every call.
+pub fn calls_for(params: &serde_json::Map<String, Value>) -> Value {
+    let scope = scope_of(params);
+    let mut v = crate::calls_week::today(scope.as_ref().map(|s| s.0.as_slice()));
+    if let Some((_, name)) = scope {
+        v["scope"] = json!(name);
+    }
+    v
+}
+
 /// The period Threads at a glance and Done this week count: this week (from Monday) or this month.
 fn period() -> crate::plugins::ParamDef {
     crate::plugins::ParamDef { key: "period".into(), label: "Period".into(), kind: "choice".into(), options: vec!["week".into(), "month".into()], default: Some(json!("week")) }
@@ -55,17 +94,18 @@ pub fn core() -> Vec<Widget> {
         w
     };
     vec![
-    two(w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false)),
-    two(w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false)),
-    w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
+    two(with(w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
+    two(with(w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
+    with(w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false), vec![scoped("thread"), scoped("client")]),
     two(w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true)),
-    two(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true)),
-    two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period()])),
-    with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period()]),
-    w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false),
-    two(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false)),
+    two(with(w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true), vec![scoped("thread"), scoped("client")])),
+    two(with(w("core:tasks.glance", "Tasks", "Threads at a glance", "a bar a thread: done this week, to do, waiting", "glance", &["M", "L"], "hug", false), vec![period(), scoped("client")])),
+    with(w("core:tasks.done", "Tasks", "Done this week", "how many tasks were done since Monday, and which", "glance", &["S", "M"], "hug", false), vec![period(), scoped("thread"), scoped("client")]),
+    with(w("core:calls.week", "Calls", "Recorded this week", "calls recorded since Monday, their time, how many have minutes", "calls", &["S", "M"], "hug", false), vec![scoped("thread"), scoped("client")]),
+    two(with(w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false), vec![scoped("thread"), scoped("client")])),
     two(w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true)),
     two(w("core:routines.cards", "Routines", "Routine cards", "what your routines delivered to Today, until read", "cards", &["M", "L"], "hug", true)),
+    w(crate::today_layout::FILTERS, "Filters", "Filters", "one setting for every widget beside it that has it", "filters", &["S", "M", "L"], "hug", false),
     ]
 }
 
@@ -126,22 +166,62 @@ pub struct Inputs<'a> {
 
 /// A widget's data. A temporal widget's says `empty` when it has nothing (Today takes no space for it).
 pub fn data(id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, true, &crate::today_layout::Page::Today, false)
+}
+
+/// A widget's data for the whole of Today — every thread, whatever it is set to (Today's head counts the day's
+/// meetings and the user's tasks from it).
+pub fn data_whole(id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, true, &crate::today_layout::Page::Today, true)
+}
+
+/// A widget's data as a dashboard shows it (a plugin's asked with that page's settings, its answer kept apart).
+pub fn data_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, true, page, false)
+}
+
+/// A widget not on Today, for Add a widget's preview: as [`data`], but a plugin's is its last answer — its provider asked
+/// only when it never answered, not again each time it is stale (nobody looks at it on Today).
+pub fn preview_data(id: &str, i: &Inputs) -> Result<Value> {
+    preview_on(&crate::today_layout::Page::Today, id, i)
+}
+
+/// [`preview_data`] for a dashboard: asked with that page's settings, its answer kept as the page's.
+pub fn preview_on(page: &crate::today_layout::Page, id: &str, i: &Inputs) -> Result<Value> {
+    data_as(id, i, false, page, false)
+}
+
+fn data_as(id: &str, i: &Inputs, placed: bool, page: &crate::today_layout::Page, whole: bool) -> Result<Value> {
     let w = find(id)?;
     if let Some(rest) = id.strip_prefix("plugin:") {
         let (plugin, widget) = rest.split_once(':').unwrap_or((rest, ""));
-        return Ok(plugin_data(plugin, widget, &w));
+        return Ok(plugin_data(plugin, widget, &w, placed, page));
     }
+    // Set to a thread or a client (Today's ⚙, a dashboard's page): only its threads' meetings, calls and tasks.
+    let scope = if whole || w.params.is_empty() { None } else { scope_of(&crate::today_layout::params_on(page, id)) };
+    let threads = scope.as_ref().map(|s| s.0.as_slice());
     let mut v = match w.kind.as_ref() {
-        "day" | "choices" => day(),
-        "next" => next_meeting(&crate::today::day()),
-        "work" => crate::today::work(i.tasks),
+        "day" | "choices" => {
+            let mut v = day();
+            if let Some(t) = threads {
+                let all: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
+                v["day"] = json!(day_in(all, t));
+            }
+            v
+        }
+        "next" => next_meeting(&threads.map_or_else(crate::today::day, |t| day_in(crate::today::day(), t))),
+        "work" => threads.map_or_else(|| crate::today::work(i.tasks), |t| work_in(crate::today::work(i.tasks), t)),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
         "card1" => json!({ "cards": crate::today::cards().into_iter().filter(|c| id.strip_prefix(CARD) == c["slug"].as_str()).collect::<Vec<_>>() }),
-        "glance" => crate::glance::today(crate::today_layout::params_of(id).get("period").and_then(Value::as_str).unwrap_or("week")),
-        "calls" => crate::calls_week::today(),
+        "glance" => glance_for(&crate::today_layout::params_on(page, id)),
+        "calls" => calls_for(&crate::today_layout::params_on(page, id)),
+        "filters" => crate::today_layout::filters_on(page),
         k => return Err(anyhow!("widget {id}: no provider for kind {k}")),
     };
+    if let (Some((_, name)), true) = (&scope, matches!(w.kind.as_ref(), "day" | "next" | "work")) {
+        v["scope"] = json!(name);
+    }
     if w.temporal {
         let empty = match w.kind.as_ref() {
             "next" => v["next"].is_null(),
@@ -159,18 +239,19 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
 /// its provider again, in the background, once that is older than the widget's `refresh` (60 s at least). Never waits
 /// for the plugin: Today draws the last answer at once.
 #[cfg(not(feature = "js"))]
-fn plugin_data(_plugin: &str, _widget: &str, w: &Widget) -> Value {
-    json!({"kind": w.kind, "label": label_for(w), "data": null, "empty": true})
+fn plugin_data(_plugin: &str, _widget: &str, w: &Widget, _placed: bool, page: &crate::today_layout::Page) -> Value {
+    json!({"kind": w.kind, "label": label_for(w, page), "height": w.height, "data": null, "empty": true})
 }
 
 /// Its label on Today: one set to a thread or a client (a setting of type `thread` / `client`) names it — "GitHub at
 /// a glance · Echo" — so a widget showing one thread says which. Whatever the plugin is.
-/// [`label_on_today`] with its settings as Today has them — read only for a widget that has a thread or client setting.
-fn label_for(w: &Widget) -> String {
+/// [`label_on_today`] with its settings as the page drawn has them (a dashboard's own thread or client named, as Echo's
+/// own widgets name it) — read only for a widget that has a thread or client setting.
+fn label_for(w: &Widget, page: &crate::today_layout::Page) -> String {
     if !w.params.iter().any(|p| p.kind == "thread" || p.kind == "client") {
         return w.label.to_string();
     }
-    label_on_today(w, &crate::today_layout::params_of(&w.id))
+    label_on_today(w, &crate::today_layout::params_on(page, &w.id))
 }
 
 fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
@@ -195,18 +276,26 @@ fn label_on_today(w: &Widget, set: &serde_json::Map<String, Value>) -> String {
 }
 
 #[cfg(feature = "js")]
-fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
-    let last = crate::jshost::widget_last(plugin, widget);
+fn plugin_data(plugin: &str, widget: &str, w: &Widget, placed: bool, page: &crate::today_layout::Page) -> Value {
+    // Data kept for another kind (the plugin changed it in an update, or kept before kinds were noted): not drawn as
+    // this one — its place held and its provider asked now. With no data (a failed ask, nothing to show) it stands.
+    let last = crate::jshost::widget_last_on(plugin, widget, page).filter(|l| l["data"].is_null() || l["kind"].as_str() == Some(w.kind.as_ref()));
     let every = w.refresh.max(60);
     let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     // Resized since its provider was last asked: asked again for the new size.
-    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on_today(&format!("plugin:{plugin}:{widget}")).as_str()));
-    if stale || resized {
-        crate::jshost::widget_ask(plugin, widget);
+    let resized = last.as_ref().is_some_and(|l| l["size"].as_str() != Some(crate::today_layout::size_on(page, &format!("plugin:{plugin}:{widget}")).as_str()));
+    // Its settings changed since (`echoctl today set`, Filters): asked again with them (an answer kept before
+    // settings were noted: not).
+    let reset = last.as_ref().and_then(|l| l.get("params")).is_some_and(|p| *p != Value::Object(crate::today_layout::params_on(page, &format!("plugin:{plugin}:{widget}"))));
+    // Not on Today (a preview): asked only when it never answered.
+    if if placed { stale || resized || reset } else { last.is_none() } {
+        crate::jshost::widget_ask_on(plugin, widget, page);
     }
+    // An answer for other settings isn't drawn as this one's: its place held until it is asked again.
+    let last = if placed && reset { None } else { last };
     let data = last.as_ref().map(|l| l["data"].clone()).unwrap_or(Value::Null);
     // Never answered yet (being asked now): Today holds its place until the answer comes.
-    json!({"kind": w.kind, "label": label_for(w), "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
+    json!({"kind": w.kind, "label": label_for(w, page), "height": w.height, "data": data, "at": last.as_ref().map(|l| l["at"].clone()), "error": last.as_ref().map(|l| l["error"].clone()), "empty": data.is_null(), "pending": last.is_none()})
 }
 
 /// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
@@ -221,6 +310,39 @@ fn has_choices(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> bool {
     }
     let yes: Vec<_> = open.iter().filter(|(x, _)| !matches!(x["response"].as_str(), Some("tentativelyAccepted" | "declined"))).map(|(_, s)| *s).collect();
     yes.iter().enumerate().any(|(i, a)| yes[i + 1..].iter().any(|b| a.0 < b.1 && b.0 < a.1))
+}
+
+/// A widget on Today set to a thread or a client (`params`): its data cut from the day Today already read — Your
+/// day's lines, the next of them — or, for My work, its own; None when it isn't set to one.
+pub fn scoped_from(id: &str, day: &[Value], params: &serde_json::Map<String, Value>, i: &Inputs) -> Option<Value> {
+    let (threads, name) = scope_of(params)?;
+    let mut v = match id {
+        "core:calendar.next" => next_meeting(&day_in(day.to_vec(), &threads)),
+        "core:tasks.mine" => work_in(crate::today::work(i.tasks), &threads),
+        _ => json!({"day": day_in(day.to_vec(), &threads)}),
+    };
+    v["scope"] = json!(name);
+    Some(v)
+}
+
+/// The day's meetings and calls in these threads: a meeting the threads' rules put it in, a call recorded in one.
+fn day_in(day: Vec<Value>, threads: &[String]) -> Vec<Value> {
+    let call_in = crate::calls_week::call_in(threads);
+    let ours = |x: &Value| x["threads"].as_array().is_some_and(|ts| ts.iter().any(|t| t["id"].as_str().is_some_and(|id| threads.iter().any(|x| x == id))));
+    day.into_iter().filter(|x| ours(x) || x["call"].as_str().is_some_and(|c| call_in(&crate::paths::calls_dir().join(c)))).collect()
+}
+
+/// My work in these threads: Echo's tasks of theirs, the plugins' rows that name one (a row with no thread isn't).
+fn work_in(mut v: Value, threads: &[String]) -> Value {
+    let ours = |x: &Value, k: &str| x[k].as_str().is_some_and(|id| threads.iter().any(|t| t == id));
+    for pile in ["mine", "owed", "waiting"] {
+        let items: Vec<Value> = v[pile]["items"].as_array().into_iter().flatten().filter(|x| ours(x, "project")).cloned().collect();
+        v[pile] = json!({"total": items.len(), "items": items});
+    }
+    if let Some(rows) = v["plugins"].as_array() {
+        v["plugins"] = json!(rows.iter().filter(|r| ours(r, "thread")).cloned().collect::<Vec<_>>());
+    }
+    v
 }
 
 /// Your day (agenda, calendar and strip show the same day): its meetings and calls, and whether the calendar
@@ -272,6 +394,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_day_and_my_work_set_to_threads_keep_only_theirs() {
+        let (_env, _) = crate::paths::testenv::folders("widgets-scope");
+        let ts = vec!["aurora".to_string()];
+        let day = vec![
+            json!({"kind": "meeting", "subject": "Aurora sync", "threads": [{"id": "aurora"}]}),
+            json!({"kind": "meeting", "subject": "Ledger sync", "threads": [{"id": "ledger"}]}),
+            json!({"kind": "meeting", "subject": "No thread", "threads": []}),
+            json!({"kind": "call", "subject": "A call in no thread", "call": "2026-11-13_100000-x"}),
+        ];
+        let kept: Vec<_> = day_in(day, &ts).into_iter().map(|x| x["subject"].clone()).collect();
+        assert_eq!(kept, vec![json!("Aurora sync")]);
+        let w = json!({"mine": {"items": [{"project": "aurora"}, {"project": "ledger"}], "total": 2}, "owed": {"items": [{"project": "ledger"}], "total": 1},
+                       "waiting": {"items": [], "total": 0}, "plugins": [{"id": "r1", "thread": "aurora"}, {"id": "r2"}]});
+        let v = work_in(w, &ts);
+        assert_eq!((v["mine"]["total"].as_u64(), v["owed"]["total"].as_u64()), (Some(1), Some(0)));
+        assert_eq!(v["plugins"], json!([{"id": "r1", "thread": "aurora"}]), "a plugin row that names no thread isn't one of theirs");
+    }
+
+    #[test]
     fn a_widget_set_to_a_thread_or_a_client_names_it_in_its_label() {
         let (_env, _) = crate::paths::testenv::folders("widgets-label-names-thread");
         let echo = crate::projects::create("Echo", None, None).unwrap();
@@ -285,6 +426,16 @@ mod tests {
         assert_eq!(label_on_today(&wd, &set(json!({"thread": "gone-thread"}))), "GitHub at a glance", "a thread that isn't there: its own label");
         wd.params.push(param("client", "client"));
         assert_eq!(label_on_today(&wd, &set(json!({"thread": echo.id, "client": acme.id}))), "GitHub at a glance · Echo · Acme");
+        // Each page's own settings, never Today's: Today set to Echo; another thread's Brief names that thread, a
+        // client's Overview that client (a thread of another client set there by hand isn't its).
+        use crate::today_layout::Page;
+        let beta = crate::projects::create("Beta", None, None).unwrap();
+        let done = find("core:tasks.done").unwrap();
+        crate::today_layout::add("core:tasks.done", None, None).unwrap();
+        crate::today_layout::set_param("core:tasks.done", "thread", &echo.id).unwrap();
+        assert_eq!(label_for(&done, &Page::Today), "Done this week · Echo");
+        assert_eq!(label_for(&done, &Page::Thread(beta.id.clone())), "Done this week · Beta", "the Brief's thread, not Today's");
+        assert_eq!(label_for(&done, &Page::Client(acme.id.clone())), "Done this week · Acme");
     }
 
     #[cfg(feature = "js")]
@@ -301,11 +452,22 @@ mod tests {
         }).to_string()).unwrap();
         let mut wd = w("plugin:mix-demo:hang", "plugins", "Never answers", "x", "stat", &["S", "M"], "hug", false);
         wd.refresh = 3600;
-        let v = plugin_data("mix-demo", "hang", &wd);
+        let v = plugin_data("mix-demo", "hang", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["at"].as_str()), (Some(true), Some(false), None), "{v}");
         assert_eq!(v["error"], "mix-demo didn't answer __widget:hang within 5 s");
-        let v = plugin_data("mix-demo", "none", &wd);
+        let v = plugin_data("mix-demo", "none", &wd, true, &crate::today_layout::Page::Today);
         assert_eq!((v["empty"].as_bool(), v["pending"].as_bool(), v["error"].is_null()), (Some(true), Some(false), true), "{v}");
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_plugin_widgets_data_carries_its_declared_height() {
+        // Today lays a `fill` widget out as tall as its line, like Your day (#523).
+        let (_env, _) = crate::paths::testenv::folders("widgets-plugin-height");
+        let mut wd = w("plugin:mix-demo:tall", "plugins", "Tall", "x", "table", &["M", "L"], "hug", false);
+        assert_eq!(plugin_data("mix-demo", "tall", &wd, true, &crate::today_layout::Page::Today)["height"], "hug");
+        wd.height = "fill".into();
+        assert_eq!(plugin_data("mix-demo", "tall", &wd, true, &crate::today_layout::Page::Today)["height"], "fill");
     }
 
     #[test]

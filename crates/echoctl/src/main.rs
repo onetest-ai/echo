@@ -40,6 +40,7 @@ mod meeting;
 #[cfg(feature = "tray")]
 mod diagrams;
 mod drafts;
+mod folder_args;
 mod onedrive;
 mod minutes;
 mod notes;
@@ -58,7 +59,9 @@ mod taskmodes;
 mod glance;
 mod today;
 mod today_layout;
+mod boards;
 mod widgets;
+mod yolo;
 mod teams_transcript;
 mod view;
 mod vocab;
@@ -97,6 +100,8 @@ mod terminal;
 #[cfg(feature = "tray")]
 mod window;
 mod update;
+#[cfg(feature = "tray")]
+mod whats_new;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -242,10 +247,26 @@ enum Cmd {
     /// Minutes templates (JSON): each one's words, header and sections, the {values} they may use, and the folder for
     /// your own (a template there named like a built-in changes it)
     Templates,
-    /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it
+    /// Today's page on this computer: its widgets in order (`today`), add / move / size / remove one, reset it;
+    /// with --thread or --client, that thread's or client's dashboard instead (--board: one of its own dashboards)
     Today {
+        /// A thread's dashboard (its Brief) instead of Today
+        #[arg(long, global = true)]
+        thread: Option<String>,
+        /// A client's dashboard (its Overview) instead of Today
+        #[arg(long, global = true, conflicts_with = "thread")]
+        client: Option<String>,
+        /// One of the dashboards beside the Brief (the Overview), by its id (`echoctl dashboard list`): its layout is
+        /// every thread's (client's), shown here with this one's data
+        #[arg(long, global = true)]
+        board: Option<String>,
         #[command(subcommand)]
         cmd: Option<cli::widget::TodayCmd>,
+    },
+    /// The dashboards beside every thread's Brief or every client's Overview: list, add, rename, move, remove
+    Dashboard {
+        #[command(subcommand)]
+        cmd: cli::widget::DashboardCmd,
     },
     /// Today's widgets: `list` the catalog, `show <id>` a widget's data (JSON, as Today gets it)
     Widget {
@@ -314,6 +335,12 @@ enum Cmd {
     /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
     /// a thread, a client, a person, a mail's facts. Read-only
     Read { link: String },
+    /// What Claude in Echo's folder session starts with (Markdown): who Echo is, its rules and the plugins with a guide
+    /// to Read first; --hook: as a SessionStart hook's JSON (each plugin's folder laid out again first if it changed)
+    Core {
+        #[arg(long)]
+        hook: bool,
+    },
     /// Input bundle for writing a call's notes (JSON): sizes, languages, attendees, gate
     Context {
         #[arg(default_value = "latest")]
@@ -351,9 +378,12 @@ enum Cmd {
         cc: Vec<String>,
         #[arg(long)]
         subject: String,
-        /// Plain-text body
+        /// Plain-text body, from a file
+        #[arg(long, required_unless_present = "body", conflicts_with = "body")]
+        body_file: Option<std::path::PathBuf>,
+        /// Plain-text body, as given (a run that writes no files)
         #[arg(long)]
-        body_file: std::path::PathBuf,
+        body: Option<String>,
         /// A model wrote it (its name): the draft says so
         #[arg(long)]
         ai: Option<String>,
@@ -445,6 +475,10 @@ enum Cmd {
     /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
     #[command(hide = true)]
     ViewHook,
+    /// (internal) The folder session and Yolo's runs ask it before a write: never into `.plugins/`, which Echo lays out
+    /// from the installed plugins; exit 2 refuses it
+    #[command(hide = true)]
+    PluginsHook,
     /// (internal) Echo's Claude terminals ask it before a write: never a folder here that OneDrive keeps online but
     /// doesn't sync to this computer (`onedrive.rs`); exit 2 refuses it
     #[command(hide = true)]
@@ -667,7 +701,9 @@ fn main() -> Result<()> {
         }
         return app::run(apps::TargetApp::Teams, true, true);
     }
-    match Cli::parse().cmd {
+    // What a command an unattended run makes changes or sends is noted for its outcome (`notes::note_action`).
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let out = match Cli::parse().cmd {
         Cmd::Attention => {
             cli::print_json(&attention::peek());
             Ok(())
@@ -697,7 +733,8 @@ fn main() -> Result<()> {
         Cmd::Needs { refresh } => cli::calendar::needs(refresh),
         Cmd::Widget { cmd } => cli::widget::widget(cmd),
         Cmd::Work { cmd } => cli::widget::work(cmd),
-        Cmd::Today { cmd } => cli::widget::today(cmd),
+        Cmd::Today { thread, client, board, cmd } => cli::widget::today(thread.as_deref(), client.as_deref(), board.as_deref(), cmd),
+        Cmd::Dashboard { cmd } => cli::widget::dashboard(cmd),
         Cmd::Series { cmd } => cli::calendar::series(cmd),
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),
@@ -709,6 +746,14 @@ fn main() -> Result<()> {
             print!("{}", links::read(&link)?);
             Ok(())
         }
+        Cmd::Core { hook } => {
+            if hook {
+                std::process::exit(plugins::agent::hook());
+            }
+            print!("{}", plugins::agent::core());
+            Ok(())
+        }
+        Cmd::PluginsHook => std::process::exit(plugins::agent::write_hook()),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Classify => cli::calls::classify(),
@@ -723,8 +768,13 @@ fn main() -> Result<()> {
         Cmd::Delete { call } => calls::delete(&call),
         Cmd::Frames { call, keep } => calls::prune_frames(&call, &keep),
         Cmd::Html { call, open, auto } => minutes::command(&call, open, auto),
-        Cmd::Compose { to, cc, subject, body_file, ai } => {
-            let v = drafts::compose(&to, &cc, &subject, &body_file, ai.as_deref())?;
+        Cmd::Compose { to, cc, subject, body_file, body, ai } => {
+            let body = match (body, body_file) {
+                (Some(b), _) => b,
+                (None, Some(f)) => std::fs::read_to_string(&f).map_err(|e| anyhow::anyhow!("reading {}: {e}", f.display()))?,
+                (None, None) => anyhow::bail!("give the mail's text: --body or --body-file"),
+            };
+            let v = drafts::compose(&to, &cc, &subject, &body, ai.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
@@ -784,5 +834,8 @@ fn main() -> Result<()> {
         Cmd::Status => watch::status(),
         Cmd::Up => cli::app::up(),
         Cmd::Agenda { cmd } => cli::calendar::agenda(cmd),
-    }
+    };
+    // A change that failed is noted too, with why.
+    notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+    out
 }

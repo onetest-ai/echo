@@ -162,7 +162,9 @@ pub(super) fn human_event_here(project: &str, body: &Value) -> Result<Value> {
     let last = t.order.last().cloned();
     let now = Local::now().to_rfc3339();
     let date = last.as_ref().and_then(|c| s(&t.evidence[c]["date"])).unwrap_or_else(|| now[..10].to_string());
-    let mut e = json!({"type": "human", "op": op, "by": "human", "evidence": last, "date": date, "at": now});
+    // Made inside a routine's or Yolo's run: Echo's run, not the user, though applied as theirs would be.
+    let by = if crate::notes::session_run() { "run" } else { "human" };
+    let mut e = json!({"type": "human", "op": op, "by": by, "evidence": last, "date": date, "at": now});
     // The user's own words with an edit (why they closed it), kept in its history.
     if let Some(note) = body["note"].as_str().map(str::trim).filter(|t| !t.is_empty()) {
         e["note"] = json!(note.chars().take(500).collect::<String>());
@@ -183,7 +185,7 @@ pub(super) fn human_event_here(project: &str, body: &Value) -> Result<Value> {
             bail!("description is text of at most {MAX_DESC} characters");
         }
         let c = evs.iter().filter(|x| x["type"] == "create" && x["kind"] == k).count() + 1;
-        e = json!({"type": "create", "id": new_id(k, c), "kind": k, "by": "human", "evidence": last, "date": date, "at": now,
+        e = json!({"type": "create", "id": new_id(k, c), "kind": k, "by": by, "evidence": last, "date": date, "at": now,
                    "fields": {"title": body["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("Untitled"),
                               "parent": if k == "epic" { None } else { par }, "type": body["type"].as_str().or(if k == "task" { Some("action") } else { None }),
                               "ac": body["ac"].as_array().cloned().unwrap_or_default(), "plan": if k == "epic" { Some("Off-plan") } else { None },
@@ -239,7 +241,7 @@ pub(super) fn status_moves(x: &Node) -> Vec<Value> {
 /// When a history entry happened, comparable across entries: a call's day and time for an agent's, the
 /// moment the user acted for theirs.
 pub(super) fn when(h: &Value) -> String {
-    match h["at"].as_str().filter(|_| h["by"] == "human") {
+    match h["at"].as_str().filter(|_| super::by_hand(h)) {
         Some(at) => at.chars().take(19).collect(),
         None => format!("{}T{}", h["date"].as_str().unwrap_or(""), h["ts"].as_str().unwrap_or("00:00:00")),
     }
@@ -410,7 +412,7 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let mut out: Vec<Value> = vec![];
     let (me, modes) = (crate::tasks::Me::of(crate::config::Config::load().ok().and_then(|c| c.me).as_ref()), crate::taskmodes::guesses());
     for n in t.nodes.values().filter(|n| n.state != "merged" && n.state != "deleted" && n.kind != "epic") {
-        for h in n.history.iter().filter(|h| h["evidence"] == stamp && h["by"] != "human" && h["effect"] != "mention" && !h["op"].as_str().is_some_and(|o| o.starts_with("suggest_"))) {
+        for h in n.history.iter().filter(|h| h["evidence"] == stamp && !super::by_hand(h) && h["effect"] != "mention" && !h["op"].as_str().is_some_and(|o| o.starts_with("suggest_"))) {
             let mut c = h.clone();
             c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
                                "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref()),

@@ -28,6 +28,9 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | `echo://call/$A?t=43` | `#call/$A/transcript`, scrolled so the turn at 0:43 is in the middle |
 | `echo://thread/acme-rollout` | `#project/acme-rollout/brief` |
 | `echo://client/acme` | `#client/acme/overview` |
+| `echo://thread/acme-rollout/profile` | `#project/acme-rollout/profile` (a thread on one of its tabs) |
+| `echo://client/acme/profile` | `#client/acme/profile` |
+| `echo://thread/acme-rollout/overview` | a notice, nothing opened (not one of a thread's tabs) |
 | `echo://person/dana@acme.example` | `#project/acme-renewal/people` (the first thread she is placed in: Acme renewal, then Acme rollout) with Dana Lee's panel |
 | `echo://task/acme-rollout/T001` | `#project/acme-rollout/work` with T001's Details |
 | `echo://prep/e11de173ab857a8b` | `#upcoming/e11de173ab857a8b` (Globex sponsor update, still to come) |
@@ -40,7 +43,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fcall%2F<A>%3Ft%3D43`, wait 2 s, then run `browser_evaluate` with `() => { const p = document.querySelector('#pane').getBoundingClientRect(); const t = [...document.querySelectorAll('.turn')].find((e) => e.dataset.t.startsWith('43.')); const r = t.getBoundingClientRect(); return { hash: location.hash, h: document.querySelector('main h1, main h2').innerText, inView: r.top >= p.top && r.bottom <= p.bottom } }` | `hash` is `#call/<A>/transcript`; `h` is "Acme weekly sync"; `inView` is `true`: the turn at 0:43 (Dana Lee) is in view in the transcript pane |
 | 2 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fthread%2Facme-rollout` | The hash becomes `#project/acme-rollout/brief`; the thread "Acme rollout" is open on its Brief tab ("Rolling out single sign-on and the data migration for Acme, Berlin first.") |
-| 3 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fclient%2Facme` | The hash becomes `#client/acme/overview`; the client Acme's Overview: its About ("A manufacturer of everything, 4,000 people across Europe.") and under THREADS, among them, "Acme renewal" (Negotiation) and "Acme rollout" (Active) ("Acme hackathon" (Cancelled) is listed too) |
+| 3 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fclient%2Facme` | The hash becomes `#client/acme/overview`; the client Acme's Overview: its About folded (click its name: "A manufacturer of everything, 4,000 people across Europe.") and under THREADS, among them, "Acme renewal" (Negotiation) and "Acme rollout" (Active) ("Acme hackathon" (Cancelled) is listed too) |
 | 4 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fperson%2Fdana%40acme.example` | The hash becomes `#project/acme-renewal/people` (a person link opens the first thread the person is placed in, `links::person_thread`; Dana Lee is in Acme renewal and Acme rollout); the right panel shows "Person" with "Dana Lee", "Delivery manager · Acme" and `dana@acme.example · Acme` |
 | 5 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Ftask%2Facme-rollout%2FT001` | The hash becomes `#project/acme-rollout/work`; the right panel shows "Details" with "T001", "task", the title "Send the SSO checklist" and Status "done" |
 | 6 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fprep%2Fe11de173ab857a8b` | The hash becomes `#upcoming/e11de173ab857a8b`; the heading "Globex sponsor update" with its one tab, Prep; the Prep shows "IN SHORT" and "Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late." |

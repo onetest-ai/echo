@@ -139,7 +139,8 @@
       "toReview": "--warn"
     },
     "statusWord": "● {word}",
-    "callsToRead": "\\d+ calls? to read"
+    "callsToRead": "\\d+ calls? to read",
+    "runSet": "Echo's run set {field}"
   },
   "prep": {
     "inShort": "In short",
@@ -983,7 +984,7 @@
     "liveNotes": "Live notes",
     "liveOn": "Live notes on",
     "autoMinutes": "Write minutes automatically",
-    "skipRow": "Claude in the window: no permission prompts",
+    "skipRow": "Claude acts on its own",
     "skipFlag": "--dangerously-skip-permissions",
     "skipSays": [
       "runs any command and tool without asking",
@@ -1048,7 +1049,8 @@
     "more": "More",
     "hide": "Hide its plugins from Discover",
     "show": "Show its plugins in Discover",
-    "remove": "Remove — installed plugins stay, without updates",
+    "remove": "Remove…",
+    "removeMarket": "Remove",
     "hidden": "hidden",
     "add": "Add a marketplace",
     "source": "Marketplace",
@@ -1797,7 +1799,18 @@
         "id": "core:calendar.agenda",
         "kind": "day",
         "label": "Your day · agenda",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1815,7 +1828,18 @@
         "id": "core:calendar.calendar",
         "kind": "day",
         "label": "Your day · calendar",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1832,7 +1856,18 @@
         "id": "core:calendar.strip",
         "kind": "day",
         "label": "Your day · strip",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "M",
@@ -1868,7 +1903,18 @@
         "id": "core:calendar.next",
         "kind": "next",
         "label": "Next meeting",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calendar",
         "sizes": [
           "S",
@@ -1897,6 +1943,11 @@
               "month"
             ],
             "type": "choice"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
           }
         ],
         "part": "Tasks",
@@ -1925,6 +1976,16 @@
               "month"
             ],
             "type": "choice"
+          },
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
           }
         ],
         "part": "Tasks",
@@ -1943,7 +2004,18 @@
         "id": "core:calls.week",
         "kind": "calls",
         "label": "Recorded this week",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Calls",
         "sizes": [
           "S",
@@ -1961,7 +2033,18 @@
         "id": "core:tasks.mine",
         "kind": "work",
         "label": "My work · this week",
-        "params": [],
+        "params": [
+          {
+            "key": "thread",
+            "label": "Thread",
+            "type": "thread"
+          },
+          {
+            "key": "client",
+            "label": "Client",
+            "type": "client"
+          }
+        ],
         "part": "Tasks",
         "sizes": [
           "S",
@@ -2004,6 +2087,24 @@
           "L"
         ],
         "temporal": true
+      },
+      {
+        "about": "one setting for every widget beside it that has it",
+        "height": "hug",
+        "heights": [
+          1
+        ],
+        "id": "core:filters",
+        "kind": "filters",
+        "label": "Filters",
+        "params": [],
+        "part": "Filters",
+        "sizes": [
+          "S",
+          "M",
+          "L"
+        ],
+        "temporal": false
       }
     ],
     "default": [
@@ -2160,7 +2261,8 @@
         "Tasks",
         "Calls",
         "Needs you",
-        "Routines"
+        "Routines",
+        "Filters"
       ],
       "onlyWhile": " — shows only while it has something",
       "moves": {
@@ -2305,9 +2407,9 @@
         "green": "main is green",
         "openLink": "Open",
         "rerun": "Re-run",
-        "ask": "Open ci.example in the browser? Click Open again · Cancel",
-        "cancel": "Cancel",
-        "askStart": "Open ci.example in the browser?"
+        "openTitle": "Open in the browser (ci.example)",
+        "url": "https://ci.example/run/42",
+        "askStart": "in the browser?"
       },
       "broken": "Couldn't draw this — a stat needs value",
       "sprint": [
@@ -2356,7 +2458,7 @@
       "trend": {
         "bars": 5,
         "first": "Mon",
-        "last": "Fri · 4 calls",
+        "last": "Fri",
         "note": "Busiest on Tuesday.",
         "hover": "Tue: 7 calls",
         "kind": "chart",
@@ -2532,7 +2634,7 @@
           "core:tasks.mine",
           "period",
           "month",
-          "Error: core:tasks.mine has no setting \"period\""
+          "Error: core:tasks.mine has no setting \"period\" (it has thread, client)"
         ]
       ],
       "gear": "{label}: settings",

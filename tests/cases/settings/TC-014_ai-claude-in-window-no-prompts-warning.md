@@ -24,7 +24,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/ai`; find the card "Claude in the window" | A row "Claude in the window: no permission prompts" shows |
+| 1 | Navigate to `{{base_url}}/#settings/ai`; find the card "Claude in the window" | A row "Claude acts on its own" shows |
 | 2 | Read the row's text | It names `--dangerously-skip-permissions` and says Claude "runs any command and tool without asking" and "Takes effect the next time the session starts." |
 | 3 | Read the row's switch | It is off; the row does not show the text "On." |
 | 4 | Run `. <dir>/env && grep -n '"folder_skip_permissions"' "$ECHOCTL_HOME/.echo/config.json"` | Prints `"folder_skip_permissions": false,` |

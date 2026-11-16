@@ -130,22 +130,42 @@ function pluginCtx(id) {
   }
 }
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
-async function loadPluginClients(snapshot) {
+// One load at a time: a later one (a fresher list) waits for the one running, never applying a half twice.
+let pluginLoads = Promise.resolve()
+function loadPluginClients(snapshot) {
+  pluginLoads = pluginLoads.then(() => loadPluginClientsNow(snapshot), () => loadPluginClientsNow(snapshot))
+  return pluginLoads
+}
+async function loadPluginClientsNow(snapshot) {
   let p = snapshot
   if (!p) try { p = await get('api/plugins') } catch { return }
   const want = (p.installed || []).filter((x) => x.enabled && x.client)
-  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && x.version === Plugins.loaded[id])) unloadPlugin(id)
+  // Drawn again only when a client half came or went (nothing changed: nothing to draw).
+  let changed = false
+  // An update changes its commit (a local plugin's, with its files), its version not always: the new half replaces the old.
+  const key = (x) => `${x.version}@${x.commit || ''}`
+  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && key(x) === Plugins.loaded[id])) { unloadPlugin(id); changed = true }
   for (const x of want) {
     if (Plugins.loaded[x.id]) continue
-    Plugins.loaded[x.id] = x.version
+    changed = true
+    Plugins.loaded[x.id] = key(x)
     try {
-      const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(x.version)}`, location.href).href)
+      const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(key(x))}`, location.href).href)
       if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
       await m.apply(pluginCtx(x.id))
       Plugins.applied[x.id] = true
       delete Plugins.errors[x.id]
     } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
   }
+  if (changed) render()
+}
+// A plugin installed, updated, switched on or off, or removed (here or in a terminal; `state.plugins` changed): its
+// client half, its widgets in Add a widget and on the page.
+async function pluginsChanged() {
+  await loadPluginClients()
+  if (S.tdEdit) { try { S.tdCatalog = await get('api/widgets') } catch { /* app restarting */ } }
+  if (S.view === 'today') await loadToday()
+  if (S.dash) await loadDashboard()
   render()
 }
 function unloadPlugin(id) {
@@ -272,7 +292,7 @@ const SETTINGS_BODY = {
       draftsRow(st),
       setRow('Command line', st.cli ? '<code>echoctl</code> is on your PATH.' : 'Install <code>echoctl</code> so scripts and Claude Code can drive Echo.', st.cli ? '<span class="set-ok">Installed ✓</span>' : actBtn('install_cli', 'Install…')),
       setRow('Claude Code plugin', "Echo's skills in your own Claude Code: record, minutes, doctor.", claudePluginCtl(st.claude_code)),
-      setRow(`Echo ${esc(st.version)}`, st.update ? `Version ${esc(st.update)} is available.` : 'Echo checks for updates every 6 hours.', upd),
+      setRow(`Echo ${esc(st.version)}`, st.update ? `Version ${esc(st.update)} is available.` : 'Echo checks for updates every 6 hours.', `<button class="btn ghost" data-wn-open>What's new</button>${upd}`),
     ])
   },
   recording(st) {
@@ -346,7 +366,7 @@ const SETTINGS_BODY = {
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
       ]) +
       setCard('Claude in the window', [
-        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts'), '', 'Claude in the window: no permission prompts'),
+        setRow('Claude acts on its own', `In the window, routines and Yolo alike. On: Claude starts with <code>--dangerously-skip-permissions</code>: it runs any command and tool without asking — it can talk to your other sessions, close your tasks in other systems and send — and a routine's or Yolo's outcome lists what it changed and sent. Off: it prepares and asks — in the window it asks you first; a routine or Yolo reads, edits Echo's own work, leaves mail as drafts and says what it couldn't do. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude acts on its own'), '', 'Claude acts on its own'),
       ])
   },
   calendar(st) {

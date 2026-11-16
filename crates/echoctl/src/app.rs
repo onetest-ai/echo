@@ -88,6 +88,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     if !paths::home_chosen() {
         first_run();
     }
+    // Decided once, at start: an Echo with no calls and no What's new seen has nothing to compare with.
+    #[cfg(feature = "tray")]
+    crate::whats_new::at_start();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?; // SIGINT + SIGTERM
@@ -102,6 +105,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::prep::start_scheduler();
     // Today → Needs you now: Teams and mail of the last day, every 5 minutes (`needs.rs`).
     crate::needs::start_scheduler();
+    // What plugins tell Claude, in the data folder (`.plugins/`): as installed and on now.
+    crate::plugins::agent::sync_all();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
     {

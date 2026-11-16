@@ -313,7 +313,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       near(h.besideWidth, 2 * h.width)
       near(h.column, h.beside)
       expect(h.height).toBeLessThanOrEqual(h.view)
-      expect(await today.nowInView()).toBe(true)
+      await expect.poll(() => today.nowInView()).toBe(true) // placed on now once its column has its height (a frame later)
       expect((await today.inner(n.yourDay)).scrolls).toBe(true)
       expect(await today.rows(rest)).toEqual([[n.next, n.needs], [n.choices], [n.work]])
       const [next, needs, choices] = [await today.box(n.next), await today.box(n.needs), await today.box(n.choices)]
@@ -339,7 +339,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       const two = await today.hold()
       expect(two.held).toBe(true)
       near(two.besideWidth, two.width)
-      expect(await today.nowInView()).toBe(true)
+      await expect.poll(() => today.nowInView()).toBe(true) // placed on now once its column has its height (a frame later)
       expect(await today.rows(rest)).toEqual(rest.map((x) => [x]))
       for (const x of rest.slice(1)) near((await today.box(x)).x, (await today.box(n.next)).x)
       // The panel closed: the widths of three columns again, nothing moved.
@@ -376,8 +376,63 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await page.setViewportSize(w.sizes.wide)
       await today.reloadToday()
       await threeColumns()
+      // Late in the evening, whenever the run is (the window's clock at 23:45, the line now at or near the list's end):
+      // Your day still shows now, and again after a task's Details came and went (its rows reflow at each width).
+      const late = new Date()
+      late.setHours(23, 45, 0, 0)
+      await page.clock.setFixedTime(late)
+      await today.reloadToday()
+      const detailsComeAndGo = async (check) => {
+        await today.openTaskCard(first)
+        await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+        await expect.poll(async () => (await today.hold()).width).not.toBeCloseTo(wide.width, 0)
+        await check()
+        await today.closePanel(today.rightPanel).click()
+        await expect.poll(async () => (await today.hold()).width).toBeCloseTo(wide.width, 0)
+        await check()
+      }
+      const onNow = () => expect.poll(() => today.nowInView()).toBe(true)
+      await onNow()
+      await detailsComeAndGo(onNow)
+      // Scrolled by the user (to its top, away from now): kept while a task's Details come and go; 11 minutes later the
+      // next draw puts it back on now.
+      const yd = await today.box(n.yourDay)
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      expect(await today.nowInView()).toBe(false)
+      await detailsComeAndGo(async () => expect((await today.inner(n.yourDay)).top).toBe(0))
+      await page.clock.setFixedTime(new Date(+late + 11 * 60_000))
+      await today.openTaskCard(first)
+      await expect(today.panelTab(today.rightPanel, data.text.work.details)).toHaveAttribute('aria-selected', 'true')
+      await onNow()
+      await today.closePanel(today.rightPanel).click()
+      await onNow()
+      // Scrolled again, then Today left for Calls and opened again: on now.
+      const [todayIs, callsIs] = data.text.shell.activities
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      await today.activity(callsIs).click()
+      await expect(today.widget(n.yourDay)).toHaveCount(0)
+      await today.activity(todayIs).click()
+      await onNow()
+      // Scrolled on Today, then a thread's dashboard with Your day (a list of its own, and a scroll there), then straight
+      // to Today: on now. (The thread's day fits its card, so the scroll there is the list's scroll event, sent.)
+      const thread = data.set.needs.chatThread.id
+      expect(data.cli('today', '--thread', thread, 'add', id.agenda).code).toBe(0)
+      await page.mouse.move(yd.x + yd.width / 2, yd.y + yd.height / 2)
+      await page.mouse.wheel(0, -5000)
+      await expect.poll(async () => (await today.inner(n.yourDay)).top).toBe(0)
+      await page.evaluate((h) => { location.hash = h }, `#project/${thread}/brief`)
+      await expect(today.widget(n.yourDay)).toBeVisible()
+      await today.onWidget(n.yourDay, (el) => el.querySelector('.td-rows').dispatchEvent(new Event('scroll')))
+      await today.activity(todayIs).click()
+      await expect(today.editToday.or(today.done).first()).toBeVisible()
+      await onNow()
     } finally {
       data.cli('today', 'reset')
+      data.cli('today', '--thread', data.set.needs.chatThread.id, 'reset')
     }
     expect(layout()).toEqual(w.default)
   })
@@ -589,8 +644,10 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       ticks.slice(1).forEach((t, i) => expect(t - ticks[i]).toBe(c2.tick))
       expect(await today.blockLook(n.strip, s.maybe)).toMatchObject({ border: 'dashed' })
       // Two at once: each a part of the bar's height, one under the other.
-      const [a, b] = [await today.block(n.strip, s.choice).first().boundingBox(), await today.block(n.strip, s.folded[0]).first().boundingBox()]
-      const bar = await today.stripBar().boundingBox()
+      // (A box read again while a redraw replaces the block: the page redraws once its data comes.)
+      const boxOf = async (l) => { for (let i = 0; i < 20; i++) { const bb = await l.boundingBox(); if (bb) return bb; await seconds(0.1) } return l.boundingBox() }
+      const [a, b] = [await boxOf(today.block(n.strip, s.choice).first()), await boxOf(today.block(n.strip, s.folded[0]).first())]
+      const bar = await boxOf(today.stripBar())
       expect(a.height).toBeLessThan(bar.height)
       expect(a.y === b.y).toBe(false)
       // The calendar: the hours down, a block a meeting at its time with its subject and time, overlapping ones side by
@@ -707,12 +764,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect.poll(() => at(id.glance)).toBe(-1)
       await expect(today.catalogAdd(glance)).toBeVisible()
       await page.setViewportSize(w.sizes.wide)
-      // The strip takes M and L: S greyed; Add at M puts it on a new last row.
+      // The strip takes M and L: S greyed; L picked under its preview, then its row's Add puts it on a new last row at L.
       await today.catalogRow(strip).click()
       await expect(today.pickSize(w.size.S)).toBeDisabled()
-      await today.pickSize(w.size.M).click()
-      await today.addAt(w.size.M).click()
-      await expect.poll(() => layout().at(-1)).toEqual({ row: true, size: w.size.M, widget: id.strip })
+      await today.pickSize(w.size.L).click()
+      await today.catalogAdd(strip).click()
+      await expect.poll(() => layout().at(-1)).toEqual({ row: true, size: w.size.L, widget: id.strip })
       // Today read again after the add (the panel then says "on Today"), before typing: a refresh while the search has
       // the keyboard takes it away (reported, not this case's step).
       await expect(today.catalogOn(strip)).toBeVisible()
@@ -1045,7 +1102,9 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       expect(await today.textColour(label.open, x.open.value)).toBe(warn)
       await expect(today.widgetSays(label.open, x.open.label)).toBeVisible()
       expect(await today.dotColour(label.ci)).toBe(warn)
-      await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(2) // its heading and its status' title
+      // Its heading (its name, then its update stamp) and its status' title.
+      await expect(today.widget(label.ci).getByRole('heading', { level: 2, name: new RegExp(`^${x.ci.title}\\b`) })).toBeVisible()
+      await expect(today.widgetSays(label.ci, x.ci.title)).toHaveCount(1)
       await expect(today.widgetSays(label.ci, x.ci.failed)).toBeVisible()
       await expect(today.widgetSays(label.broken, x.broken)).toBeVisible()
       for (const [value, what, colour] of x.sprint) {
@@ -1140,7 +1199,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     for (const card of x.cards) await expect(today.widget(card.title)).toHaveCount(0)
   })
 
-  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link asked before it leaves Echo, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
+  test("53 · A plugin widget's chart (each point titled) and a stat's progress bar; its outside link opened on the first click, its actions run the plugin's command", covers('today/TC-031', 'F-TODAY-22'), async ({ page }) => {
     const w = data.text.widgets
     const x = w.plugin
     const t = x.trend
@@ -1164,27 +1223,23 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.widgetSays(x.widgets.open, x.open.value)).toBeVisible()
       await expect(today.widgetSays(x.widgets.open, x.open.label)).toBeVisible()
       await expect(today.widgetImages(x.widgets.open)).toHaveAccessibleName(x.progress)
-      // Calls a day: five bars, the last one stronger; "Mon" and "Fri · 4 calls" under them, the note; a hover on each
-      // says its point.
+      // Calls a day: five bars in Echo's violet (one colour: one series), "Mon" … "Fri" under them, the note; a hover on
+      // each says its point.
       const marks = await today.chartMarks(x.widgets.trend)
       expect(marks).toHaveLength(t.bars)
       expect(marks.map((m) => m.says)).toContain(t.hover)
-      const rest = marks.slice(0, -1)
-      for (const m of rest) expect(m.fill === marks.at(-1).fill && m.opacity === marks.at(-1).opacity).toBe(false)
-      for (const m of rest.slice(1)) expect([m.fill, m.opacity]).toEqual([rest[0].fill, rest[0].opacity])
+      for (const m of marks.slice(1)) expect([m.fill, m.opacity]).toEqual([marks[0].fill, marks[0].opacity])
       for (const text of [t.first, t.last, t.note]) await expect(today.widgetSays(x.widgets.trend, text)).toBeVisible()
       // CI failed: a red dot, its text, Open and Re-run.
       expect(await today.dotColour(x.widgets.ci)).toBe(await today.themeColour(w.plugin.badColour))
       await expect(today.widgetSays(x.widgets.ci, x.ci.failed)).toBeVisible()
       await expect(today.widgetButton(x.widgets.ci, x.ci.rerun)).toBeVisible()
-      // Open: nothing leaves Echo, the question under it; Cancel takes it away.
+      // Open: its host in the tooltip; one click opens it (only into open.log here), nothing asked first.
+      expect(data.env.ECHOCTL_TEST_OPEN_LOG_ONLY, 'never a real browser: the data\'s env sends links to open.log').toBe('1')
+      await expect(today.widgetButton(x.widgets.ci, x.ci.openLink)).toHaveAttribute('title', x.ci.openTitle)
       await today.widgetButton(x.widgets.ci, x.ci.openLink).click()
-      await expect(today.widgetMatch(x.widgets.ci, x.ci.askStart)).toBeVisible()
-      await expect(today.widget(x.widgets.ci)).toContainText(x.ci.ask)
-      expect(opened()).toBe(before)
-      await today.widgetButton(x.widgets.ci, x.ci.cancel).click()
+      await expect.poll(opened).toBe(before + x.ci.url + '\n')
       await expect(today.widgetMatch(x.widgets.ci, x.ci.askStart)).toHaveCount(0)
-      expect(opened()).toBe(before)
       // Re-run: the plugin's command runs, CI is green, no Re-run.
       await today.widgetButton(x.widgets.ci, x.ci.rerun).click()
       await expect(today.widgetSays(x.widgets.ci, x.ci.green)).toBeVisible()
@@ -1303,7 +1358,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await today.openToday()
       await drawn()
       // In Echo's frame, its label on top: three boxes, the <i> shown as text, nothing italic; its box the size and theme.
-      await expect(today.widgetHeading(board, x.heading, 2)).toBeVisible()
+      // Its heading: its name, then when its data came (the update stamp).
+      await expect(today.widget(board).getByRole('heading', { level: 2, name: new RegExp(`^${x.heading}\\b`) })).toBeVisible()
       expect(await today.pageWidget(board)).toEqual({ size: w.size.M, theme: x.theme, boxes: x.boxes, italic: false })
       // At L: drawn again at L.
       const big = data.cli('today', 'size', p.ids.board, x.large)
@@ -1345,11 +1401,12 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.taskTitle).toHaveValue(n.mailTitle)
     await today.taskTitle.fill(t.title)
     await today.taskThread.selectOption({ label: t.thread.name })
-    // A minute on, Today is drawn again (its line "now" moves): its content is replaced, the dialog isn't.
-    const content = await today.main.elementHandle()
+    // A minute on, Today is drawn again (its line "now" moves): the widgets whose content moved are replaced (only
+    // those, #549), the dialog isn't.
+    const widgets = await page.locator('[data-wkey="core:calendar.agenda"]').elementHandles() // Your day: its line "now" moves
     const button = await today.addToTasks.elementHandle()
     await today.minutePasses()
-    await expect.poll(() => content.evaluate((el) => el.isConnected)).toBe(false)
+    await expect.poll(async () => (await Promise.all(widgets.map((w) => w.evaluate((el) => el.isConnected)))).some((c) => !c)).toBe(true)
     expect(await button.evaluate((el) => el.isConnected)).toBe(true)
     await expect(today.taskTitle).toHaveValue(t.title)
     await expect(today.taskThread).toHaveValue(t.thread.id)
@@ -1368,7 +1425,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     const t = data.text.needs
     const today = new TodayPage(page, data)
     await today.open()
-    expect(await today.itemButtons(n.chat, n.chatLine)).toEqual(['Reply in Teams', t.claude])
+    // Reply, Claude, and Ignore (takes it off Needs you now for good).
+    expect(await today.itemButtons(n.chat, n.chatLine)).toEqual(['Reply in Teams', t.claude, 'Ignore — take it off Needs you now'])
     const before = data.read(data.home, 'projects', n.chatThread.id, 'ledger/events.jsonl')
     await today.claude(n.chat, n.chatLine)
     await expect(today.claudeDialog).toContainText(`${n.chatThread.name} · ${n.chat} — ${n.chatLine}`)

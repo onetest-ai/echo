@@ -8,8 +8,12 @@ const src = appSource()
 const a = src.indexOf('// ── plugin widget:'), b = src.indexOf('// end of the plugin widget block', a)
 assert.ok(a >= 0 && b > a, 'the plugin widget block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const draw = new Function('esc', `${src.slice(a, b)}\nreturn pluginWidgetHtml`)(esc)
-const failedView = new Function('esc', `${src.slice(a, b)}\nreturn pluginWidgetFailed`)(esc)
+// The app's drawn chevron (10-shell.js), as the window has it.
+const chevAt = src.indexOf('const CHEV = '), CHEV = new Function(`${src.slice(chevAt, src.indexOf('\n', chevAt))}\nreturn CHEV`)()
+// An outside link's host (the work rows block's `linkHost`, one script with this one in the window).
+const hostAt = src.indexOf('const linkHost = '), linkHost = new Function(`${src.slice(hostAt, src.indexOf('\n', hostAt))}\nreturn linkHost`)()
+const draw = new Function('esc', 'CHEV', 'linkHost', `${src.slice(a, b)}\nreturn pluginWidgetHtml`)(esc, CHEV, linkHost)
+const failedView = new Function('esc', 'CHEV', 'linkHost', `${src.slice(a, b)}\nreturn pluginWidgetFailed`)(esc, CHEV, linkHost)
 const tests = []
 const test = (name, f) => tests.push([name, f])
 const refused = (kind, data, why) => assert.throws(() => draw(kind, data, 'M'), (e) => e.message.includes(why), `${kind}: ${why}`)
@@ -68,13 +72,122 @@ test('a chart: bar and line as SVG with each point titled, bars as rows; wrong p
   assert.equal((bar.match(/<rect /g) || []).length, 3)
   assert.match(bar, /<title>Tue: 7 calls<\/title>/)
   assert.match(draw('chart', { type: 'line', points }, 'M'), /<polyline points="/)
-  assert.equal((draw('chart', { type: 'bars', points }, 'M').match(/class="pw-bl"/g) || []).length, 3)
-  refused('chart', { type: 'pie', points }, 'type: bar, bars or line')
+  assert.equal((draw('chart', { type: 'bars', points }, 'M').match(/class="pc-rl"/g) || []).length, 3)
+  refused('chart', { type: 'radar', points }, 'type: line, area, bar')
   refused('chart', { type: 'bar', points: [{ label: 'x', value: 'many' }] }, "point 1's value is not a number")
   assert.ok(!draw('chart', { type: 'bar', points: [{ label: '<b>x</b>', value: 1 }] }, 'M').includes('<b>x'), 'labels escaped')
 })
 
-test("a stat's progress; any kind's open (echo:// a link, https a button that asks) and actions (its plugin's commands)", () => {
+test("a chart's series: Echo's palette in order, a tone for meaning, a legend for 2+ (none at S); dates as Echo writes them", () => {
+  const series = [{ key: 'rec', label: 'recorded' }, { key: 'min', label: 'with minutes', tone: 'good' }]
+  const points = [{ label: '2026-11-02', values: { rec: 12, min: 8 } }, { label: '2026-11-09', values: { rec: 20 } }]
+  const line = draw('chart', { type: 'line', series, points }, 'M')
+  assert.equal((line.match(/<polyline /g) || []).length, 2)
+  assert.match(line, /stroke:var\(--chart-1\)/)
+  assert.match(line, /stroke:var\(--me\)/, 'a tone colours its series')
+  assert.match(line, /<title>Nov 9 · with minutes: 0<\/title>/, 'a missing key is 0, the date as Echo writes it')
+  assert.match(line, /class="pc-lg"/)
+  assert.ok(!draw('chart', { type: 'line', series, points }, 'S').includes('pc-lg'), 'no legend at S')
+  assert.ok(!draw('chart', { type: 'line', points: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }] }, 'M').includes('pc-lg'), 'one series: no legend')
+  const area = draw('chart', { type: 'area', series, points }, 'M')
+  assert.equal((area.match(/class="pc-area"/g) || []).length, 2)
+  refused('chart', { type: 'line', series: Array.from({ length: 7 }, (_, i) => ({ key: `k${i}`, label: 'x' })), points }, '6 series at most')
+  refused('chart', { type: 'pie', series, points }, 'a pie takes one series')
+  refused('chart', { type: 'line', series, points: [{ label: 'a', value: 3 }] }, 'point 1 needs values')
+  refused('chart', { type: 'line', series: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], points }, 'unique')
+})
+
+test('a chart cuts its points (the last kept) and takes negatives only on line and bar', () => {
+  const many = Array.from({ length: 80 }, (_, i) => ({ label: `p${i}`, value: i }))
+  const line = draw('chart', { type: 'line', points: many }, 'M')
+  assert.ok(line.includes('p79') && !line.includes('<title>p19:'), 'the last 60 on a line')
+  assert.equal((draw('chart', { type: 'bar', points: many }, 'M').match(/<rect /g) || []).length, 24)
+  for (const [size, n] of [['S', 4], ['M', 6], ['L', 12]]) assert.equal((draw('chart', { type: 'bars', points: many }, size).match(/class="pc-rl"/g) || []).length, n, `bars at ${size}`)
+  const neg = draw('chart', { type: 'bar', points: [{ label: 'a', value: -3 }, { label: 'b', value: 5 }] }, 'M')
+  assert.match(neg, /<title>a: -3<\/title>/)
+  refused('chart', { type: 'bars', points: [{ label: 'a', value: -3 }] }, 'no negative values')
+  refused('chart', { type: 'pie', points: [{ label: 'a', value: -3 }] }, 'no negative values')
+})
+
+test('stacked and stacked-bars, percent; pie and donut fold small slices into Other; a funnel says each share', () => {
+  const series = [{ key: 'o', label: 'open' }, { key: 'b', label: 'booked' }]
+  const points = [{ label: 'W1', values: { o: 6, b: 2 } }, { label: 'W2', values: { o: 3, b: 9 } }]
+  assert.equal((draw('chart', { type: 'stacked', series, points }, 'M').match(/<rect /g) || []).length, 4)
+  const pct = draw('chart', { type: 'stacked-bars', series, points, percent: true }, 'M')
+  assert.match(pct, /W1 · open: 75%/)
+  assert.match(pct, /<span class="mono pc-rn">75%<\/span>/, 'its first series\' share at the end')
+  const slices = [['A', 40], ['B', 30], ['C', 10], ['D', 8], ['E', 6], ['F', 3], ['G', 2], ['H', 1]].map(([label, value]) => ({ label, value }))
+  const pie = draw('chart', { type: 'pie', points: slices }, 'M')
+  assert.equal((pie.match(/<path /g) || []).length, 7, 'six slices and Other')
+  assert.match(pie, /Other<em class="pc-share"[^]*?<b>3%<\/b>/, 'G and H under 3% fold into Other')
+  const donut = draw('chart', { type: 'donut', points: slices.slice(0, 3), center: { value: 80, label: 'positions' } }, 'M')
+  assert.match(donut, /class="pc-center"><b>80<\/b><span>positions<\/span>/)
+  assert.ok(!draw('chart', { type: 'pie', points: slices, center: { value: 1 } }, 'M').includes('pc-center'), 'center only in a donut')
+  const fun = draw('chart', { type: 'funnel', points: [{ label: 'Leads', value: 120 }, { label: 'Won', value: 30 }] }, 'M')
+  assert.match(fun, /<span class="mono pc-rn dim">25%<\/span>/)
+})
+
+test("a chart's headline: the value, what it is, the change (arrow by sign, tone by good); stats' trend as a sparkline", () => {
+  const points = [{ label: 'a', value: 1 }, { label: 'b', value: 2 }]
+  const up = draw('chart', { type: 'line', points, unit: 'h', headline: { value: '24 h', label: 'this week', change: { by: 2, than: 'last week', good: true } } }, 'M')
+  assert.match(up, /<div class="pc-head"><b>24 h<\/b><span class="set-sub">this week<\/span><span class="pc-ch good">↑ 2 h vs last week<\/span><\/div>/)
+  assert.match(draw('chart', { type: 'line', points, headline: { value: 7, change: { by: -3, good: false } } }, 'M'), /<span class="pc-ch bad">↓ 3<\/span>/)
+  assert.match(draw('chart', { type: 'line', points, headline: { value: 7, change: { by: 0 } } }, 'M'), /<span class="pc-ch">→ 0<\/span>/)
+  refused('chart', { type: 'line', points, headline: { label: 'x' } }, 'headline needs value')
+  refused('chart', { type: 'line', points, headline: { value: 1, change: { by: 'lots' } } }, 'headline.change.by is not a number')
+  const st = draw('stats', { items: [{ label: 'calls', value: 23, trend: [1, 4, 2, 6] }, { label: 'one', value: 1, trend: [5] }] }, 'M')
+  assert.equal((st.match(/class="pc-spark"/g) || []).length, 1, 'a trend of 2+ numbers only')
+  refused('stats', { items: [{ label: 'x', value: 1, trend: [1, 'b'] }] }, "item 1's trend 2 is not a number")
+})
+
+test("a chart's edges: a funnel's first 8, a pie reads all its slices, zeros, one slice, one point, many points, tones by own name", () => {
+  const stages = Array.from({ length: 30 }, (_, i) => ({ label: `s${i}`, value: 100 - i }))
+  const fun = draw('chart', { type: 'funnel', points: stages }, 'M')
+  assert.ok(fun.includes('>s0<') && fun.includes('>s7<') && !fun.includes('>s8<'), 'its first 8 stages')
+  const slices = Array.from({ length: 30 }, (_, i) => ({ label: `p${i}`, value: i < 6 ? 20 : 1 }))
+  const pie = draw('chart', { type: 'pie', points: slices }, 'M')
+  assert.ok(pie.includes('>p0<') && pie.includes('>p5<') && pie.includes('>Other<'), 'the first six, the rest in Other')
+  assert.match(pie, /p0<em[^]*?<b>14%<\/b>/, 'shares of the whole (20 of 144)')
+  assert.match(draw('chart', { type: 'donut', points: [{ label: 'a', value: 0 }, { label: 'b', value: 0 }] }, 'M'), /Nothing to show yet/, 'all zeros: no fake Other')
+  const one = draw('chart', { type: 'pie', points: [{ label: 'only', value: 5 }] }, 'M')
+  assert.equal((one.match(/<path /g) || []).length, 1)
+  assert.ok(!one.includes('pc-lg'), 'one slice: no legend')
+  assert.match(draw('chart', { type: 'line', points: [{ label: 'a', value: 3 }] }, 'M'), /<line class="pc-dot" x1="240\.0"/, 'one point in the middle')
+  const many = draw('chart', { type: 'line', points: Array.from({ length: 40 }, (_, i) => ({ label: `d${i}`, value: i })) }, 'M')
+  assert.match(many, /style="stroke:var\(--chart-1\);opacity:0" vector-effect="non-scaling-stroke"><title>d39: 39<\/title>/, 'many points: dots unseen but still hovered')
+  assert.match(draw('chart', { type: 'line', points: [{ label: 'a', value: -3 }, { label: 'b', value: 4 }] }, 'M'), /<title>a: -3<\/title>/)
+  const odd = draw('chart', { type: 'line', series: [{ key: 'toString', label: 'x', tone: 'constructor' }, { key: 'b', label: 'y' }], points: [{ label: 'a', values: { b: 1 } }] }, 'M')
+  assert.ok(!odd.includes('function') && odd.includes('stroke:var(--chart-1)'), 'an unknown tone is no colour of its own')
+  assert.match(odd, /a · x: 0/, 'a missing key named like a builtin is 0')
+  assert.match(draw('chart', { type: 'stacked-bars', series: [{ key: 'a', label: 'A' }], points: [{ label: 'z', values: { a: 0 } }], percent: true }, 'M'), /<span class="mono pc-rn">0%<\/span>/)
+  assert.ok(!draw('chart', { type: 'stacked', series: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], points: [{ label: 'z', values: { a: 1, b: 3 } }], percent: 'no' }, 'M').includes('25%'), 'percent only when true')
+  refused('chart', { type: 'line', points: [{ label: 'a', value: 1.7e308 }] }, 'up to 10^15')
+  const bars = draw('chart', { type: 'bar', points: [{ label: 'Q1', value: 1 }, { label: 'Q2', value: 2 }] }, 'M')
+  assert.match(bars, /<span style="left:25\.00%;max-width:40\.0%">Q1<\/span><span style="left:75\.00%;max-width:40\.0%">Q2<\/span>/, "a bar's label under its bar, no wider than its slot")
+  const longs = draw('chart', { type: 'bar', points: Array.from({ length: 24 }, (_, i) => ({ label: `a long label ${i}`, value: i })) }, 'M')
+  assert.match(longs, /<span class="first" style="left:0\.00%;max-width:[\d.]+%">a long label 0<\/span>/, 'many bars: the first from the left edge')
+  assert.match(longs, /<span class="last" style="right:0\.00%;max-width:[\d.]+%">a long label 23<\/span>/, 'and the last to the right edge')
+  // No two labels overlap, whatever the count: each label's span from its style, side by side in order.
+  for (const n of [7, 8, 9, 10, 11, 24]) {
+    const h = draw('chart', { type: 'bar', points: Array.from({ length: n }, (_, i) => ({ label: `l${i}`, value: 1 })) }, 'M')
+    const spans = [...h.matchAll(/<span (?:class="(first|last)" )?style="(left|right):([\d.]+)%;max-width:([\d.]+)%">/g)].map(([, edge, side, at, w]) => {
+      const x = +at, mw = +w
+      return edge === 'first' ? [x, x + mw] : edge === 'last' ? [100 - x - mw, 100 - x] : [x - mw / 2, x + mw / 2]
+    })
+    for (let k = 1; k < spans.length; k++) assert.ok(spans[k][0] >= spans[k - 1][1] - 0.11, `${n} bars: label ${k} clear of label ${k - 1} (${spans[k - 1]} / ${spans[k]})`)
+    assert.ok(spans[0][0] >= -0.01 && spans[spans.length - 1][1] <= 100.01, `${n} bars: inside the card`)
+  }
+  refused('chart', { type: 'line', points: [{ label: 'a', value: 1 }], headline: { value: 1, change: { by: 1e300 } } }, 'over 10^15')
+})
+
+test("a chart's text is escaped wherever it shows", () => {
+  const x = '"><img src=x>'
+  const h = draw('chart', { type: 'line', unit: x, note: x, series: [{ key: 'a', label: x }, { key: 'b', label: 'b' }], points: [{ label: x, values: { a: 1, b: 2 } }], headline: { value: x, label: x, change: { by: 1, than: x } } }, 'M')
+  const d = draw('chart', { type: 'donut', center: { value: x, label: x }, points: [{ label: x, value: 1 }, { label: 'y', value: 2 }] }, 'M')
+  for (const out of [h, d]) assert.ok(!out.includes('<img'), 'no tag from the plugin')
+})
+
+test("a stat's progress; any kind's open (echo:// a link, https a button that opens it) and actions (its plugin's commands)", () => {
   assert.match(draw('stat', { value: '$500', progress: { used: 300, of: 800 } }, 'M'), /width:37\.5%/)
   assert.match(draw('stat', { value: 1, open: 'echo://task/acme/T1' }, 'M'), /<a class="link-btn" href="echo:\/\/task\/acme\/T1">Open<\/a>/)
   const https = draw('stat', { value: 1, open: 'https://ci.example/run/1' }, 'M')
@@ -88,6 +201,82 @@ test("a stat's progress; any kind's open (echo:// a link, https a button that as
   assert.match(draw('list', { items: [], actions: [{ label: 'Refresh', command: 'refresh' }] }, 'M'), /data-pw-cmd="refresh"/, 'an empty list keeps its actions')
   assert.ok(!draw('stat', { value: 1, open: 'https://good.example\\@evil.example' }, 'M').includes('data-pw-open'), 'a backslash link is dropped')
   refused('chart', { type: 'bar', points: [{ label: 'x', value: null }] }, "point 1's value is not a number")
+})
+
+const table = {
+  columns: [
+    { key: 'urgency', label: 'Urgency', kind: 'pill' }, { key: 'pos', label: 'Position' }, { key: 'start', label: 'Start', kind: 'date' },
+    { key: 'cand', label: 'Candidates', kind: 'number' }, { key: 'why', label: 'Why', hide: 'M' },
+  ],
+  groups: [{ id: 'nwb', label: 'NWB · Northwind' }, { id: 'ctl', label: 'CTL · Contoso' }],
+  rows: [
+    { id: 'p3', group: 'ctl', cells: { urgency: { text: 'High', tone: 'warn' }, pos: 'P-3', start: '2026-11-24', cand: 4, why: 'not booked' } },
+    { id: 'p1', group: 'nwb', link: 'https://staffing.acme.example/p/1', cells: { urgency: { text: 'Critical', tone: 'bad' }, pos: 'P-1', start: '2026-11-15', cand: 3 }, detail: [{ text: 'Dana Example', sub: 'Proposed' }] },
+    { id: 'p9', cells: { urgency: 'Low', pos: 'P-9', start: '', cand: 0, why: { text: 'on hold', tone: 'muted' } }, link: 'echo://thread/acme' },
+  ],
+}
+
+test("a table's date: \"Nov 15\" this year, with its year in another (#588)", () => {
+  const y = new Date().getFullYear()
+  const h = draw('table', { columns: [{ key: 'd', label: 'D', kind: 'date' }], rows: [{ id: 1, cells: { d: `${y}-11-15` } }, { id: 2, cells: { d: `${y + 1}-12-19` } }, { id: 3, cells: { d: `${y - 1}-01-05` } }] }, 'M')
+  assert.match(h, new RegExp(`<time datetime="${y}-11-15">Nov 15</time>`), 'this year: no year')
+  assert.match(h, new RegExp(`<time datetime="${y + 1}-12-19">Dec 19, ${y + 1}</time>`), 'next year: its year')
+  assert.match(h, new RegExp(`<time datetime="${y - 1}-01-05">Jan 5, ${y - 1}</time>`), 'last year: its year')
+})
+
+test('a table: its columns (a pill, a date, a number at the end), rows under their group in the groups\' order, the rest last', () => {
+  const h = draw('table', table, 'L')
+  assert.match(h, /<th scope="col" class="k-pill">Urgency<\/th>/)
+  assert.match(h, /<span class="pw-pill tone-bad">Critical<\/span>/)
+  assert.match(h, /<td class="k-number">3<\/td>/)
+  const at = (t) => h.indexOf(t)
+  assert.ok(at('NWB · Northwind') < at('P-1') && at('P-1') < at('CTL · Contoso') && at('CTL · Contoso') < at('P-3') && at('P-3') < at('Other') && at('Other') < at('P-9'), 'groups in their order, the rest last')
+  assert.match(h, /NWB · Northwind <span class="mono">1<\/span>/, "a group's count")
+  assert.match(h, /<td class="k-text tone-muted" title="on hold">on hold<\/td>/)
+})
+
+test('a table at M leaves out the columns hidden at M; at L it has them', () => {
+  assert.ok(!draw('table', table, 'M').includes('>Why<'))
+  assert.ok(draw('table', table, 'L').includes('>Why<'))
+})
+
+test("a table row's link is on its first text cell (https opens in the browser, echo:// opens in Echo, anything else is text); its details show when opened", () => {
+  const h = draw('table', table, 'M')
+  assert.match(h, /<td class="k-text" title="P-1"><button type="button" class="link-btn" data-pw-open="https:\/\/staffing\.acme\.example\/p\/1" title="Open in the browser \(staffing\.acme\.example\)">P-1<\/button><\/td>/)
+  assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">P-9<\/a>/)
+  const evil = draw('table', { columns: [{ key: 'a', label: 'A' }], rows: [{ id: 1, link: 'javascript:alert(1)', cells: { a: 'x' } }] }, 'M')
+  assert.ok(!evil.includes('javascript') && evil.includes('<td class="k-text" title="x">x</td>'))
+  assert.match(h, /data-pw-row="p1" aria-expanded="false" aria-label="Show details"><svg class="chev"/)
+  assert.ok(!h.includes('Dana Example'), 'closed: no details')
+  const open = draw('table', table, 'M', ['p1'])
+  assert.match(open, /aria-expanded="true" aria-label="Hide details"><svg class="chev open"/)
+  assert.match(open, /<span>Dana Example<\/span><span class="set-sub">Proposed<\/span>/)
+})
+
+test('a table with no rows says its empty text; its text is escaped; wrong data refused with what is wrong', () => {
+  assert.match(draw('table', { columns: [{ key: 'a', label: 'A' }], rows: [], empty: 'Every position is assigned.' }, 'M'), /Every position is assigned\./)
+  const evil = '<img src=x onerror=alert(1)>'
+  const h = draw('table', { columns: [{ key: 'a', label: evil, kind: 'pill' }], groups: [{ id: 'g', label: evil }], rows: [{ id: 1, group: 'g', cells: { a: evil }, detail: [{ text: evil, sub: evil }] }] }, 'M', ['1'])
+  assert.ok(!h.includes('<img'), h)
+  const cols = [{ key: 'a', label: 'A' }]
+  refused('table', { rows: [] }, 'needs 1–10 columns')
+  refused('table', { columns: Array.from({ length: 11 }, (_, i) => ({ key: `c${i}`, label: 'x' })), rows: [] }, 'needs 1–10 columns')
+  refused('table', { columns: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], rows: [] }, 'column 2 needs a plain, unique key')
+  refused('table', { columns: [{ key: 'a', label: 'A', kind: 'money' }], rows: [] }, 'kind is text, number, pill or date')
+  refused('table', { columns: cols, rows: Array.from({ length: 201 }, (_, i) => ({ id: i })) }, '200 rows at most')
+  refused('table', { columns: cols, rows: [{ id: 1 }, { id: 1 }] }, 'row 2 needs a unique id')
+  refused('table', { columns: cols, rows: [{ id: 1, group: 'nope' }] }, "row 1's group “nope” isn't in groups")
+  refused('table', { columns: [{ key: 'n', label: 'N', kind: 'number' }], rows: [{ id: 1, cells: { n: 'many' } }] }, "row 1's cell “n” isn't a number")
+  refused('table', { columns: [{ key: 'd', label: 'D', kind: 'date' }], rows: [{ id: 1, cells: { d: '15/11/2026' } }] }, "row 1's cell “d” isn't a date (YYYY-MM-DD)")
+  refused('table', { columns: cols, rows: [{ id: 1, cells: { a: { text: 'x', tone: 'red' } } }] }, 'tone is good, warn, bad or muted')
+  refused('table', { columns: cols, rows: [{ id: 1, detail: Array(7).fill({ text: 'x' }) }] }, "row 1's detail is a list of 6 lines at most")
+})
+
+test("a stats item's link: Details › (echo:// in Echo, https opens in the browser, anything else none)", () => {
+  const h = draw('stats', { items: [{ label: 'critical', value: 4, link: 'echo://thread/acme' }, { label: 'high', value: 8, link: 'https://staffing.acme.example/?u=high' }, { label: 'x', value: 1, link: 'javascript:x' }] }, 'M')
+  assert.match(h, /<a class="link-btn" href="echo:\/\/thread\/acme">Details ›<\/a>/)
+  assert.match(h, /data-pw-open="https:\/\/staffing\.acme\.example\/\?u=high" title="Open in the browser \(staffing\.acme\.example\)">Details ›/)
+  assert.equal((h.match(/Details ›/g) || []).length, 2)
 })
 
 let failed = 0

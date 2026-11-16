@@ -18,15 +18,12 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
-use crate::app::NoWindow;
 use crate::paths;
 
 pub mod addresses;
@@ -37,6 +34,17 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+pub mod agent;
+pub mod scripts;
+pub mod shared;
+mod settings;
+pub use settings::*;
+mod sources;
+use sources::*;
+mod snapshot;
+pub use snapshot::snapshot;
+pub mod mine;
+pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod signin;
@@ -44,6 +52,14 @@ pub mod signin;
 /// Our public marketplace, always listed (it can be hidden, not removed).
 pub const BUILT_IN: &str = "onetest-ai/echo-plugins";
 const BUILT_IN_NAME: &str = "onetest";
+/// "My plugins": the user's own, the folder `plugins/` in their Echo data folder — a subfolder with a manifest a
+/// plugin, its folder name its id, no catalog file. Always listed; never removed.
+pub const MINE: &str = "my-plugins";
+
+/// My plugins' folder (made when first asked for).
+pub fn mine_dir() -> PathBuf {
+    paths::home().join("plugins")
+}
 /// The marketplace's catalog file at the root of its repository.
 const CATALOG: &str = "echo-marketplace.json";
 /// A plugin's manifest at the root of its folder.
@@ -87,13 +103,42 @@ pub struct Manifest {
     /// (`ctx.widgets.provide` / `set` / `clear`), drawn by Echo by their kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widgets: Vec<WidgetDef>,
+    /// Its package skills: folders in its package (`skills/<name>`, Agent Skills format: `SKILL.md`, `scripts/`,
+    /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// The hash of the skill folders its scripts are in (`scripts::check`): on the sheet, so a change asks again.
+    /// Always Echo's: `read_manifest` sets it, whatever the file says (kept in the catalog it writes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts_digest: Option<String>,
     /// Its icon: an `.svg` in its folder (16 KB at most), shown only as an image (`<img>`, never inlined) — beside its
     /// work rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Its part for Claude in Echo: `{"summary": "<one line>"}`, with the folder `agent/` in its package (`agent.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Value>,
+    /// The hash of what its package tells Claude — its `agent/` folder and its package skills' folders: on the sheet,
+    /// so a version changing any of it asks again. Always Echo's, as `scripts_digest`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_digest: Option<String>,
+    /// The skills its package gives Claude in Echo (the manifest's `skills` and `agent/skills/`), by name. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_names: Vec<String>,
+    /// What is wrong with its part for Claude (`agent/`, its package skills and their scripts), by a rule its installed
+    /// copy may predate: the plugin still runs, Claude in Echo gets none of that part. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_problems: Vec<String>,
 }
 
-/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `list`, `status`, `card`) at the sizes it takes.
+/// A problem with a plugin package: the file it is in (relative to the package) and what is wrong.
+#[derive(Debug, Clone, Serialize)]
+pub struct Problem {
+    pub file: String,
+    pub what: String,
+}
+
+/// A widget a plugin declares: Echo draws `kind` (`stat`, `stats`, `chart`, `list`, `status`, `card`, `table`) at the sizes it takes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WidgetDef {
     pub id: String,
@@ -142,6 +187,9 @@ impl ParamDef {
     }
 }
 
+/// The widgets one plugin may declare.
+const MAX_WIDGETS: usize = 24;
+
 /// A widget's settings, checked: plain unique keys, labels, a type Echo knows, a choice's options, a default it takes.
 pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
     let mut keys = std::collections::HashSet::new();
@@ -168,6 +216,12 @@ pub fn check_params(widget: &str, params: &[ParamDef]) -> Result<()> {
             }
         }
     }
+    // A dashboard sets its thread / client setting: one of each, so it knows which.
+    for k in ["thread", "client"] {
+        if params.iter().filter(|p| p.kind == k).count() > 1 {
+            bail!("widget “{widget}” has more than one {k} setting");
+        }
+    }
     Ok(())
 }
 
@@ -182,7 +236,7 @@ fn widget_heights() -> Vec<u8> {
 }
 
 /// The kinds of widget Echo draws for a plugin (its data's shape: `today-plugin-widgets.test.mjs`).
-pub const WIDGET_KINDS: [&str; 7] = ["stat", "stats", "chart", "list", "status", "card", "page"];
+pub const WIDGET_KINDS: [&str; 8] = ["stat", "stats", "chart", "list", "status", "card", "table", "page"];
 
 /// Each enabled plugin's manifest (one it can't read is left out).
 pub fn enabled_manifests() -> Vec<(String, Manifest)> {
@@ -226,96 +280,212 @@ fn needs_echo(req: &str) -> Result<String> {
     Ok(v.to_string())
 }
 
-/// Read and check a manifest: its fields, settings and capability values (`describe`).
+/// Read and check a manifest: its fields, settings and capability values (`describe`), its widgets — refused with the
+/// first problem there — and its part for Claude (`agent/`, its skills and scripts), whose problems it only notes
+/// (`part_problems`): a plugin installed before a newer rule keeps running. An install refuses them (`read_package`).
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
+    // An installed copy changes only by an install, which forgets it here: read and walked once, not on each look.
+    let installed = dir.starts_with(plugins_dir().join("installed"));
+    let stamp = fs::metadata(dir.join(MANIFEST)).and_then(|m| m.modified()).ok();
+    if installed {
+        if let Some((_, m)) = READ.lock().ok().and_then(|c| c.get(dir).cloned()).filter(|(s, _)| *s == stamp) {
+            return Ok(m);
+        }
+    }
+    let (m, problems) = check_package(dir)?;
+    if let Some(p) = problems.into_iter().find(|p| !m.part_problems.contains(&p.what)) {
+        bail!("{}", p.what);
+    }
+    if installed {
+        if let Ok(mut c) = READ.lock() {
+            c.insert(dir.to_path_buf(), (stamp, m.clone()));
+        }
+    }
+    Ok(m)
+}
+
+/// A package as an install, an update and a marketplace's offer take it: every problem refuses it, its part for Claude's
+/// too.
+pub fn read_package(dir: &Path) -> Result<Manifest> {
+    let m = read_manifest(dir)?;
+    if let Some(p) = m.part_problems.first() {
+        bail!("{p}");
+    }
+    Ok(m)
+}
+
+/// Installed copies' manifests as read (`read_manifest`), by folder, with the manifest's time then.
+static READ: Mutex<BTreeMap<PathBuf, (Option<std::time::SystemTime>, Manifest)>> = Mutex::new(BTreeMap::new());
+
+/// An installed copy replaced or removed: read it again next time.
+pub(super) fn forget_read(id: &str) {
+    if let Ok(mut c) = READ.lock() {
+        c.retain(|d, _| !d.starts_with(installed_dir(id)));
+    }
+}
+
+/// Read a manifest and find every problem of its package (`echoctl plugin check` shows them all; an install refuses
+/// the first). Errs only when the manifest can't be read at all.
+pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).with_context(|| format!("no {MANIFEST}"))?;
-    let m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
-    if !valid_id(&m.id) {
-        bail!("its id “{}” isn't a plain name (a–z, 0–9, -)", m.id);
-    }
-    if m.name.trim().is_empty() || m.name.chars().count() > 60 {
-        bail!("its name must be 1–60 characters");
-    }
-    if !crate::update::valid_version(&m.version) {
-        bail!("its version “{}” isn't like 1.2.3", m.version);
-    }
-    if m.summary.chars().count() > 240 {
-        bail!("its summary is longer than 240 characters");
-    }
-    if let Some(r) = &m.echo {
-        needs_echo(r)?;
-    }
+    let mut m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
+    let mut out: Vec<Problem> = vec![];
+    let mut put = |file: &str, r: Result<()>| {
+        if let Err(e) = r {
+            out.push(Problem { file: file.into(), what: format!("{e:#}") });
+        }
+    };
+    let man = MANIFEST;
+    put(man, (|| {
+        if !valid_id(&m.id) {
+            bail!("its id “{}” isn't a plain name (a–z, 0–9, -)", m.id);
+        }
+        // Echo's own plugin's skills are `echo:<name>`.
+        if m.id == "echo" {
+            bail!("its id “echo” is Echo's own");
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if m.name.trim().is_empty() || m.name.chars().count() > 60 {
+            bail!("its name must be 1–60 characters");
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if !crate::update::valid_version(&m.version) {
+            bail!("its version “{}” isn't like 1.2.3", m.version);
+        }
+        Ok(())
+    })());
+    put(man, (|| {
+        if m.summary.chars().count() > 240 {
+            bail!("its summary is longer than 240 characters");
+        }
+        Ok(())
+    })());
+    put(man, m.echo.as_deref().map_or(Ok(()), |r| needs_echo(r).map(|_| ())));
     let mut keys = std::collections::HashSet::new();
     for s in &m.settings {
-        if !valid_id(&s.key.replace('_', "-")) || !keys.insert(s.key.clone()) {
-            bail!("setting “{}” needs a plain, unique key", s.key);
-        }
-        if !SETTING_KINDS.contains(&s.kind.as_str()) {
-            bail!("setting “{}” has a type Echo doesn't know ({})", s.key, SETTING_KINDS.join(", "));
+        put(man, (|| {
+            if !valid_id(&s.key.replace('_', "-")) || !keys.insert(s.key.clone()) {
+                bail!("setting “{}” needs a plain, unique key", s.key);
+            }
+            if !SETTING_KINDS.contains(&s.kind.as_str()) {
+                bail!("setting “{}” has a type Echo doesn't know ({})", s.key, SETTING_KINDS.join(", "));
+            }
+            Ok(())
+        })());
+    }
+    put(man, describe(&m.uses).map(|_| ()));
+    // Its part for Claude in Echo (`agent` and `agent/`); the skills of `agent/skills/` with its other package skills;
+    // their scripts. Noted apart (`part_problems`).
+    let mut part = agent::problems(dir, &m);
+    let agent_ok = part.is_empty();
+    let (skills, skill_problems, unread) = agent::skill_problems(dir, &m);
+    // A skill it can't read just now isn't checked further (its scripts, the sheet's hash): no rule is broken.
+    let skills_ok = skill_problems.is_empty() && unread.is_empty();
+    part.extend(skill_problems);
+    m.skill_names = skills.iter().map(|(n, _)| n.clone()).collect();
+    // Two of its own skills laid out alike (`x` and `<prefix>-x`): as an install would refuse it.
+    if let Some(p) = agent::prefix_of(&m).filter(|p| agent::valid_prefix(p)) {
+        if let Err(e) = agent::own_clash(&m.id, &p, &m.skill_names) {
+            part.push(Problem { file: man.into(), what: format!("{e:#}") });
         }
     }
-    describe(&m.uses)?;
+    // Its skills are named with its prefix in Echo's sessions.
+    if !skills.is_empty() && agent::prefix_of(&m).is_none() {
+        part.push(Problem { file: man.into(), what: "it has skills: “agent.prefix” (2–4 of a–z, 0–9) names them in Echo's sessions".into() });
+    }
+    m.agent_digest = (agent_ok && skills_ok).then(|| agent::digest(dir, &m)).flatten();
+    m.scripts_digest = None;
+    if skills_ok {
+        match scripts::check(dir, &m) {
+            Ok(d) => m.scripts_digest = d,
+            Err(e) => part.push(Problem { file: man.into(), what: format!("{e:#}") }),
+        }
+    }
     for k in m.uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten() {
         let k = k.as_str().unwrap_or("");
-        match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
-            None => bail!("network.hosts_from names “{k}”, which isn't a string setting of the plugin"),
-            Some(s) if s.default.is_some() => bail!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter"),
-            Some(_) => {}
-        }
+        put(man, match m.settings.iter().find(|s| s.key == k && s.kind == "string") {
+            None => Err(anyhow!("network.hosts_from names “{k}”, which isn't a string setting of the plugin")),
+            Some(s) if s.default.is_some() => Err(anyhow!("network.hosts_from names “{k}”, which has a default: the addresses are the user's to enter")),
+            Some(_) => Ok(()),
+        });
     }
     let mut ids = std::collections::HashSet::new();
-    if m.widgets.len() > 12 {
-        bail!("it declares more than 12 widgets");
-    }
+    put(man, (|| {
+        if m.widgets.len() > MAX_WIDGETS {
+            bail!("it declares more than {MAX_WIDGETS} widgets");
+        }
+        Ok(())
+    })());
     for w in &m.widgets {
-        if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
-            bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
-        }
-        if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
-            bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
-        }
-        if !WIDGET_KINDS.contains(&w.kind.as_str()) {
-            bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
-        }
-        let mut seen = std::collections::HashSet::new();
-        if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
-            bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
-        }
-        if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
-            bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
-        }
-        if !["hug", "fill"].contains(&w.height.as_str()) {
-            bail!("widget “{}” is hug or fill high", w.id);
-        }
-        if w.refresh.is_some_and(|r| r < 60) {
-            bail!("widget “{}” is asked again every 60 s at most often", w.id);
-        }
-        if m.main.is_none() {
-            bail!("widget “{}” needs a host half (main) to give its data", w.id);
-        }
-        if w.kind == "page" && m.client.is_none() {
-            bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
-        }
-        check_params(&w.id, &w.params)?;
+        put(man, check_widget(w, &m, &mut ids));
     }
     // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
     // only, ending `.svg` — what the window serves as an image.
     if let Some(i) = &m.icon {
-        if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
-            bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
-        }
-        if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
-            bail!("its icon {i} must be an .svg of 16 KB at most");
-        }
+        put(man, (|| {
+            if !i.ends_with(".svg") || !i.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-' | b'/')) {
+                bail!("its icon {i} must be an .svg named with a–z, 0–9, “.”, “_”, “-” and “/” only");
+            }
+            if fs::metadata(inside_plugin(dir, i)?)?.len() > 16 * 1024 {
+                bail!("its icon {i} must be an .svg of 16 KB at most");
+            }
+            Ok(())
+        })());
     }
     for f in [&m.main, &m.client].into_iter().flatten() {
-        let p = inside_plugin(dir, f)?;
-        if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
-            bail!("{f} isn't a JavaScript module (.js)");
-        }
+        put(f, (|| {
+            let p = inside_plugin(dir, f)?;
+            if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
+                bail!("{f} isn't a JavaScript module (.js)");
+            }
+            Ok(())
+        })());
     }
-    Ok(m)
+    m.part_problems = part.iter().map(|p| p.what.clone()).collect();
+    out.extend(part);
+    Ok((m, out))
+}
+
+/// One widget of the manifest, checked (`ids`: the ones seen so far).
+fn check_widget(w: &WidgetDef, m: &Manifest, ids: &mut std::collections::HashSet<String>) -> Result<()> {
+    if !valid_id(&w.id) || !ids.insert(w.id.clone()) {
+        bail!("widget “{}” needs a plain, unique id (a–z, 0–9, -)", w.id);
+    }
+    if w.label.trim().is_empty() || w.label.chars().count() > 40 || w.about.chars().count() > 120 {
+        bail!("widget “{}” needs a label of 1–40 characters (and an about of 120 at most)", w.id);
+    }
+    if !WIDGET_KINDS.contains(&w.kind.as_str()) {
+        bail!("widget “{}” has a kind Echo doesn't draw ({})", w.id, WIDGET_KINDS.join(", "));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if w.sizes.is_empty() || !w.sizes.iter().all(|s| ["S", "M", "L"].contains(&s.as_str()) && seen.insert(s.clone())) {
+        bail!("widget “{}” takes sizes of S, M and L, each once", w.id);
+    }
+    // A table needs room for its columns: M and L.
+    if w.kind == "table" && w.sizes.iter().any(|s| s == "S") {
+        bail!("widget “{}” is a table: it takes sizes M and L", w.id);
+    }
+    if !matches!(w.heights.as_slice(), [1] | [1, 2] | [2, 1]) {
+        bail!("widget “{}” takes heights of 1 and 2 rows, each once, with 1", w.id);
+    }
+    if !["hug", "fill"].contains(&w.height.as_str()) {
+        bail!("widget “{}” is hug or fill high", w.id);
+    }
+    if w.refresh.is_some_and(|r| r < 60) {
+        bail!("widget “{}” is asked again every 60 s at most often", w.id);
+    }
+    if m.main.is_none() {
+        bail!("widget “{}” needs a host half (main) to give its data", w.id);
+    }
+    if w.kind == "page" && m.client.is_none() {
+        bail!("widget “{}” is a page: it needs a window half (client) to draw it", w.id);
+    }
+    check_params(&w.id, &w.params)
 }
 
 /// A file of the plugin's own: a relative path inside its folder that exists.
@@ -347,6 +517,59 @@ pub fn inside_plugin_dir(dir: &Path, rel: &str) -> Result<PathBuf> {
     Ok(d)
 }
 
+/// The most skills a plugin gives Echo's sessions, its package and runtime ones together.
+pub const MAX_SKILLS: usize = 10;
+
+/// Its package skills, checked: `(name, folder in the package)` — the manifest's `skills` folders, then with an `agent`
+/// part each folder of `agent/skills/`. Each is a folder inside the plugin named as a skill (a–z, 0–9, -), once; its
+/// `SKILL.md` frontmatter holds only `name` (the folder's name) and a one-line `description`, and no `!` command
+/// anywhere in it (Claude Code runs one when the skill loads).
+pub fn package_skills(dir: &Path, m: &Manifest) -> Result<Vec<(String, PathBuf)>> {
+    let (skills, problems, unread) = agent::skill_problems(dir, m);
+    if let Some(p) = problems.into_iter().next() {
+        bail!("{}", p.what);
+    }
+    // One it can't read just now: an error, not a rule broken (`agent::lay_out` tries again).
+    if let Some(u) = unread.into_iter().next() {
+        bail!("{u}");
+    }
+    Ok(skills)
+}
+
+/// A skill's name: lowercase words with dashes, up to 40 characters.
+pub fn valid_skill_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A package skill's `SKILL.md`: frontmatter of `name` (= `name`) and a one-line `description` only, no `!` command.
+pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
+    let text = text.replace("\r\n", "\n");
+    let rest = text.strip_prefix("---\n").ok_or_else(|| anyhow!("SKILL.md starts with its frontmatter (---)"))?;
+    let (front, _) = rest.split_once("\n---").ok_or_else(|| anyhow!("SKILL.md's frontmatter has no end (---)"))?;
+    let (mut got_name, mut got_desc) = (None, None);
+    for line in front.lines().filter(|l| !l.trim().is_empty()) {
+        let (k, v) = line.split_once(':').ok_or_else(|| anyhow!("SKILL.md's frontmatter holds only name and description"))?;
+        let v = v.trim();
+        let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(v);
+        match k {
+            "name" if got_name.is_none() => got_name = Some(v.to_string()),
+            "description" if got_desc.is_none() => got_desc = Some(v.to_string()),
+            _ => bail!("SKILL.md's frontmatter holds only name and description (not “{}”)", k.trim()),
+        }
+    }
+    if got_name.as_deref() != Some(name) {
+        bail!("SKILL.md's name is its folder's, “{name}”");
+    }
+    let desc = got_desc.unwrap_or_default();
+    if desc.is_empty() || desc.chars().count() > 1024 || matches!(desc.as_str(), "|" | ">" | "|-" | ">-") {
+        bail!("SKILL.md needs a description of one line, up to 1024 characters");
+    }
+    if text.contains("!`") {
+        bail!("“!`…`” runs a command in Claude Code; a plugin's SKILL.md runs none");
+    }
+    Ok(())
+}
+
 /// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
 pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
     let mut lines = describe(&m.uses)?;
@@ -355,6 +578,28 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
         (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
         (None, None) => {}
+    }
+    // Its scripts' line carries their skill folders' hash: a version changing any of those files asks again.
+    if let Some(d) = &m.scripts_digest {
+        for l in lines.iter_mut().filter(|l| l.starts_with("Runs programs from its package")) {
+            l.push_str(&format!(" (their files: {d})"));
+        }
+    }
+    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
+    // a version changing any of it asks again.
+    if agent::has_guide(m) || !m.skill_names.is_empty() {
+        let mut what = vec![];
+        if agent::has_guide(m) {
+            what.push("a guide".to_string());
+        }
+        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
+        match names.len() {
+            0 => {}
+            1 => what.push(format!("the skill {}", names[0])),
+            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
+        }
+        let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
+        lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
     }
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
     match m.widgets.len() {
@@ -366,7 +611,7 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
 }
 
 /// Why this Echo can't install it (`None` = it can).
-fn why_not(m: &Manifest) -> Option<String> {
+pub(crate) fn why_not(m: &Manifest) -> Option<String> {
     let here = env!("CARGO_PKG_VERSION");
     if let Some(v) = m.echo.as_deref().and_then(|r| needs_echo(r).ok()) {
         if crate::update::newer(&v, here) {
@@ -401,6 +646,10 @@ pub struct Installed {
     pub installed_at: String,
     /// The permission sheet the user agreed to.
     pub uses: Vec<String>,
+    /// Its marketplace's source when it was installed (`owner/repo`, a URL, a folder): what holds its skills prefix,
+    /// even once that marketplace is removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -449,12 +698,42 @@ impl Registry {
     /// Every marketplace, the built-in one first.
     pub fn all_markets(&self) -> Vec<(Market, bool)> {
         let mut v = vec![(Market { name: BUILT_IN_NAME.into(), source: built_in_source(), hidden: self.built_in_hidden }, true)];
+        // My plugins: only with a data folder chosen (else it would be Echo's own plugins folder), and not when the user
+        // already has a marketplace by that name.
+        if paths::home_chosen() && !self.markets.iter().any(|m| m.name.eq_ignore_ascii_case(MINE)) {
+            v.push((Market { name: MINE.into(), source: mine_dir().display().to_string(), hidden: false }, true));
+        }
         v.extend(self.markets.iter().cloned().map(|m| (m, false)));
         v
     }
 
     fn market(&self, name: &str) -> Option<Market> {
         self.all_markets().into_iter().map(|(m, _)| m).find(|m| m.name == name)
+    }
+}
+
+/// The marketplace a person means on the command line: its name in any case, or its source (`owner/repo`, a URL, a
+/// folder); none or several → why, with the names there are.
+pub fn market_named(said: &str) -> Result<String> {
+    let said = said.trim();
+    let all: Vec<Market> = Registry::load()?.all_markets().into_iter().map(|(m, _)| m).collect();
+    if let Some(m) = all.iter().find(|m| m.name == said) {
+        return Ok(m.name.clone());
+    }
+    // A folder only when what was said is one (as `market add` reads it), never a name that happens to be a subfolder.
+    let folder = match parse_source(said) {
+        Ok(Source::Local(p)) => Some(p),
+        _ => None,
+    };
+    let same_folder = |src: &str| folder.as_ref().is_some_and(|f| dunce::canonicalize(src).is_ok_and(|s| &s == f));
+    let hits: Vec<&Market> = all.iter().filter(|m| m.name.eq_ignore_ascii_case(said) || m.source == said || sources::without_credentials(&m.source) == said || same_folder(&m.source)).collect();
+    match hits.as_slice() {
+        [m] => Ok(m.name.clone()),
+        _ => {
+            let names: Vec<&str> = all.iter().map(|m| m.name.as_str()).collect();
+            let what = if hits.is_empty() { "no marketplace" } else { "more than one marketplace is" };
+            bail!("{what} “{said}” — the marketplaces: {}", names.join(", "))
+        }
     }
 }
 
@@ -474,265 +753,6 @@ pub(crate) fn wait_lock_for(path: &Path, what: &str, wait: std::time::Duration) 
             bail!("another Echo is changing {what} — try again in a moment");
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
-// ── sources and fetching ──
-
-#[derive(Debug, PartialEq)]
-enum Source {
-    Github { repo: String, git_ref: Option<String> },
-    Git { url: String, git_ref: Option<String> },
-    Local(PathBuf),
-}
-
-fn plain_ref(r: &str) -> bool {
-    !r.is_empty() && r.len() <= 100 && !r.starts_with('-') && r.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b)) && !r.contains("..")
-}
-
-fn parse_source(s: &str) -> Result<Source> {
-    let s = s.trim();
-    if s.starts_with("https://") || s.starts_with("ssh://") || s.starts_with("git@") {
-        let (url, r) = match s.rsplit_once('#') {
-            Some((u, r)) => (u, Some(r)),
-            None => (s, None),
-        };
-        if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            bail!("“{s}” isn't a git address");
-        }
-        if let Some(r) = r.filter(|r| !plain_ref(r)) {
-            bail!("“{r}” isn't a plain branch, tag or commit");
-        }
-        return Ok(Source::Git { url: url.into(), git_ref: r.map(str::to_string) });
-    }
-    let local = s.starts_with('/') || s.starts_with('.') || s.starts_with('~') || Path::new(s).is_absolute();
-    if local {
-        let p = if let Some(rest) = s.strip_prefix("~/") { paths::user_home().join(rest) } else { PathBuf::from(s) };
-        let p = dunce::canonicalize(&p).with_context(|| format!("no folder {s}"))?;
-        if !p.is_dir() {
-            bail!("{s} isn't a folder");
-        }
-        return Ok(Source::Local(p));
-    }
-    let (repo, r) = match s.split_once('@') {
-        Some((repo, r)) => (repo, Some(r)),
-        None => (s, None),
-    };
-    let ok = |p: &str| !p.is_empty() && p.len() <= 100 && !p.starts_with('.') && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
-    match repo.split_once('/') {
-        Some((o, n)) if ok(o) && ok(n) => {}
-        _ => bail!("“{s}” isn't owner/repo, a git address (https://…) or a folder"),
-    }
-    if let Some(r) = r.filter(|r| !plain_ref(r)) {
-        bail!("“{r}” isn't a plain branch, tag or commit");
-    }
-    Ok(Source::Github { repo: repo.into(), git_ref: r.map(str::to_string) })
-}
-
-/// A fetched tree: where its files are, and the commit they are (`local-<hash>` for a folder).
-struct Snapshot {
-    dir: PathBuf,
-    commit: String,
-}
-
-fn hex40(s: &str) -> Option<String> {
-    let s = s.trim();
-    (s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())).then(|| s.to_ascii_lowercase())
-}
-
-fn run_out(c: &mut Command) -> Result<Vec<u8>> {
-    let out = c.output().with_context(|| format!("{:?} can't start", c.get_program()))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        bail!("{}", err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("failed").trim());
-    }
-    Ok(out.stdout)
-}
-
-/// GitHub: the commit a ref (default: the default branch) points to.
-fn github_commit(repo: &str, git_ref: Option<&str>) -> Result<String> {
-    let r = git_ref.unwrap_or("HEAD");
-    let api = format!("https://api.github.com/repos/{repo}/commits/{r}");
-    let curl = run_out(Command::new("curl").no_window().args(["-fsSL", "-H", "Accept: application/vnd.github.sha", &api]));
-    if let Some(sha) = curl.as_ref().ok().and_then(|o| hex40(&String::from_utf8_lossy(o))) {
-        return Ok(sha);
-    }
-    // A private repository: the user's own `gh` sign-in.
-    let gh = crate::app::find_program("gh");
-    let out = run_out(Command::new(&gh).no_window().args(["api", "-H", "Accept: application/vnd.github.sha", &format!("repos/{repo}/commits/{r}")]))
-        .map_err(|e| anyhow!("can't read {repo} on GitHub ({}; gh: {e})", curl.err().map(|e| e.to_string()).unwrap_or_else(|| "no commit".into())))?;
-    hex40(&String::from_utf8_lossy(&out)).ok_or_else(|| anyhow!("GitHub gave no commit for {repo}@{r}"))
-}
-
-/// Unpack a GitHub commit's tarball into `dest` (empty, created).
-fn github_unpack(repo: &str, sha: &str, dest: &Path, work: &Path) -> Result<()> {
-    let tgz = work.join("tree.tar.gz");
-    let url = format!("https://codeload.github.com/{repo}/tar.gz/{sha}");
-    let curl = Command::new("curl").no_window().args(["-fsSL", "--max-filesize", "200000000", "-o"]).arg(&tgz).arg(&url).status();
-    if !curl.is_ok_and(|s| s.success()) {
-        let gh = crate::app::find_program("gh");
-        let bytes = run_out(Command::new(&gh).no_window().args(["api", &format!("repos/{repo}/tarball/{sha}")])).with_context(|| format!("downloading {repo}"))?;
-        fs::write(&tgz, bytes)?;
-    }
-    fs::create_dir_all(dest)?;
-    // bsdtar (macOS, Windows 10+) and GNU tar both drop absolute paths and refuse `..`; links are
-    // refused after, by `check_tree`.
-    run_out(Command::new("tar").no_window().arg("-xzf").arg(&tgz).arg("-C").arg(dest).arg("--strip-components").arg("1")).context("unpacking")?;
-    let _ = fs::remove_file(&tgz);
-    Ok(())
-}
-
-fn git_fetch(url: &str, git_ref: Option<&str>, dest: &Path) -> Result<String> {
-    let git = crate::app::find_program("git");
-    let mut c = Command::new(&git).no_window();
-    c.args(["clone", "--quiet", "--depth", "1", "--no-tags", "-c", "core.symlinks=false"]);
-    if let Some(r) = git_ref {
-        c.args(["--branch", r]);
-    }
-    c.arg("--").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0");
-    run_out(&mut c).with_context(|| format!("git can't fetch {url}"))?;
-    let sha = run_out(Command::new(&git).no_window().arg("-C").arg(dest).args(["rev-parse", "HEAD"]))?;
-    let sha = hex40(&String::from_utf8_lossy(&sha)).ok_or_else(|| anyhow!("git gave no commit"))?;
-    fs::remove_dir_all(dest.join(".git"))?;
-    Ok(sha)
-}
-
-/// Files, bytes: refuses links, special files and anything over the limit.
-fn check_tree(dir: &Path, limit: Limit) -> Result<(usize, u64)> {
-    let (mut files, mut bytes) = (0usize, 0u64);
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d)? {
-            let e = e?;
-            if e.file_name() == ".git" {
-                continue;
-            }
-            let md = fs::symlink_metadata(e.path())?;
-            let rel = e.path().strip_prefix(dir).unwrap_or(&e.path()).display().to_string();
-            if md.file_type().is_symlink() {
-                bail!("it holds a link ({rel}) — refused");
-            } else if md.is_dir() {
-                stack.push(e.path());
-            } else if md.is_file() {
-                files += 1;
-                bytes += md.len();
-            } else {
-                bail!("it holds a special file ({rel})");
-            }
-            if files > limit.files || bytes > limit.bytes {
-                bail!("it is too big (over {} files or {} MB)", limit.files, limit.bytes >> 20);
-            }
-        }
-    }
-    Ok((files, bytes))
-}
-
-/// sha256 over the tree's files in path order (path, size, bytes); what an install records.
-fn tree_hash(dir: &Path) -> Result<String> {
-    let mut list = vec![];
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d)? {
-            let p = e?.path();
-            if p.file_name().is_some_and(|n| n == ".git") {
-                continue;
-            }
-            let md = fs::symlink_metadata(&p)?;
-            if md.is_dir() {
-                stack.push(p);
-            } else if md.is_file() {
-                list.push(p);
-            }
-        }
-    }
-    let rel = |p: &Path| p.strip_prefix(dir).unwrap_or(p).components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
-    list.sort_by_key(|p| rel(p));
-    let mut h = Sha256::new();
-    for p in list {
-        let b = fs::read(&p)?;
-        h.update(rel(&p).as_bytes());
-        h.update([0]);
-        h.update((b.len() as u64).to_le_bytes());
-        h.update(&b);
-    }
-    Ok(format!("{:x}", h.finalize()))
-}
-
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
-    fs::create_dir_all(to)?;
-    for e in fs::read_dir(from)? {
-        let e = e?;
-        if e.file_name() == ".git" {
-            continue;
-        }
-        let md = fs::symlink_metadata(e.path())?;
-        let dest = to.join(e.file_name());
-        if md.is_dir() {
-            copy_tree(&e.path(), &dest)?;
-        } else if md.is_file() {
-            fs::copy(e.path(), &dest)?;
-        }
-    }
-    Ok(())
-}
-
-/// A folder name for a marketplace (its files and lock).
-fn market_key(name: &str) -> String {
-    let k: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' }).collect();
-    let h = format!("{:x}", Sha256::digest(name.as_bytes()));
-    format!("{}-{}", k.trim_matches('-').chars().take(40).collect::<String>(), &h[..8])
-}
-
-/// Fetch a source into `<base>/<commit>/` (kept if already there); older commits are removed.
-fn fetch(source: &str, base: &Path, limit: Limit) -> Result<Snapshot> {
-    match parse_source(source)? {
-        Source::Local(p) => {
-            check_tree(&p, limit)?;
-            Ok(Snapshot { commit: format!("local-{}", &tree_hash(&p)?[..12]), dir: p })
-        }
-        src => {
-            fs::create_dir_all(base)?;
-            let work = base.join(format!(".fetch-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&work);
-            fs::create_dir_all(&work)?;
-            let tree = work.join("tree");
-            let got = (|| -> Result<String> {
-                match &src {
-                    Source::Github { repo, git_ref } => {
-                        let sha = github_commit(repo, git_ref.as_deref())?;
-                        if base.join(&sha).is_dir() {
-                            return Ok(sha);
-                        }
-                        github_unpack(repo, &sha, &tree, &work)?;
-                        Ok(sha)
-                    }
-                    Source::Git { url, git_ref } => git_fetch(url, git_ref.as_deref(), &tree),
-                    Source::Local(_) => unreachable!(),
-                }
-            })();
-            let sha = match got {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = fs::remove_dir_all(&work);
-                    return Err(e);
-                }
-            };
-            let dir = base.join(&sha);
-            if !dir.is_dir() {
-                if let Err(e) = check_tree(&tree, limit) {
-                    let _ = fs::remove_dir_all(&work);
-                    return Err(e);
-                }
-                fs::rename(&tree, &dir)?;
-            }
-            let _ = fs::remove_dir_all(&work);
-            for e in fs::read_dir(base)?.flatten() {
-                if e.path() != dir && e.file_name().to_string_lossy().len() == 40 {
-                    let _ = fs::remove_dir_all(e.path());
-                }
-            }
-            Ok(Snapshot { dir, commit: sha })
-        }
     }
 }
 
@@ -779,6 +799,9 @@ pub struct Offer {
     pub categories: Vec<String>,
     #[serde(default)]
     pub featured: bool,
+    /// Its place in the marketplace's `featured` list: Discover's Featured in that order (#589).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub featured_at: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest: Option<Manifest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -820,18 +843,37 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     let _lock = wait_lock(&base.join(".lock"))?;
     let now = chrono::Local::now().to_rfc3339();
     let got = (|| -> Result<Catalog> {
-        let snap = fetch(&m.source, &base, MARKET_LIMIT)?;
-        let text = fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?;
+        // My plugins: read as it is, plugin by plugin (each checked on its own below; a missing folder is no plugins, never
+        // made here), never a catalog file in it.
+        let (snap, text) = if m.name == MINE {
+            (Snapshot { commit: String::new(), dir: mine_dir() }, mine_catalog(&mine_dir())?)
+        } else {
+            let snap = fetch(&m.source, &base, MARKET_LIMIT)?;
+            let text = fs::read_to_string(snap.dir.join(CATALOG)).with_context(|| format!("it has no {CATALOG} at its root"))?;
+            (snap, text)
+        };
         let file: CatalogFile = serde_json::from_str(&text).with_context(|| format!("its {CATALOG} isn't valid"))?;
         let mut plugins = vec![];
         let mut seen = std::collections::HashSet::new();
         for e in file.plugins.into_iter().take(200) {
+            // In My plugins a folder whose name isn't an id is listed with why (elsewhere: left out).
+            if m.name == MINE && !valid_id(&e.id) && seen.insert(e.id.clone()) {
+                plugins.push(Offer { id: e.id, categories: vec![], featured: false, featured_at: None, manifest: None, error: Some("its folder name isn't a plugin id: lower-case letters, digits and -".into()), dir: PathBuf::new(), commit: String::new() });
+                continue;
+            }
             if !valid_id(&e.id) || !seen.insert(e.id.clone()) {
                 continue;
             }
-            let featured = file.featured.contains(&e.id);
+            let featured_at = file.featured.iter().position(|f| *f == e.id);
+            let featured = featured_at.is_some();
             let at = (|| -> Result<(PathBuf, String)> {
                 match &e.source {
+                    // My plugins: each plugin by its own files (a change to one is its update, not the others').
+                    Value::String(rel) if m.name == MINE => {
+                        let dir = inside(&snap.dir, rel)?;
+                        let h = tree_hash(&dir)?;
+                        Ok((dir, format!("local-{}", &h[..12])))
+                    }
                     Value::String(rel) => Ok((inside(&snap.dir, rel)?, snap.commit.clone())),
                     Value::Object(o) => {
                         let repo = o.get("github").and_then(Value::as_str).ok_or_else(|| anyhow!("its source names no github repository"))?;
@@ -854,14 +896,14 @@ pub fn refresh(name: &str) -> Result<Catalog> {
             })();
             let offer = match at.and_then(|(dir, commit)| {
                 check_tree(&dir, PLUGIN_LIMIT)?;
-                let m = read_manifest(&dir)?;
+                let m = read_package(&dir)?;
                 if m.id != e.id {
                     bail!("its manifest says “{}”", m.id);
                 }
                 Ok((dir, commit, m))
             }) {
-                Ok((dir, commit, m)) => Offer { id: e.id, categories: e.categories, featured, manifest: Some(m), error: None, dir, commit },
-                Err(err) => Offer { id: e.id, categories: e.categories, featured, manifest: None, error: Some(format!("{err:#}")), dir: PathBuf::new(), commit: String::new() },
+                Ok((dir, commit, m)) => Offer { id: e.id, categories: e.categories, featured, featured_at, manifest: Some(m), error: None, dir, commit },
+                Err(err) => Offer { id: e.id, categories: e.categories, featured, featured_at, manifest: None, error: Some(format!("{err:#}")), dir: PathBuf::new(), commit: String::new() },
             };
             plugins.push(offer);
         }
@@ -879,6 +921,21 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     };
     paths::write_atomic(&base.join("catalog.json"), serde_json::to_string_pretty(&c)?.as_bytes())?;
     Ok(c)
+}
+
+/// My plugins' catalog: each subfolder holding a manifest, by its folder name (no catalog file to keep).
+fn mine_catalog(dir: &Path) -> Result<String> {
+    // A folder with a manifest is a plugin (one whose name isn't an id is listed, and says so when installed).
+    let mut ids: Vec<String> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !e.file_name().to_string_lossy().starts_with('.') && e.path().join(MANIFEST).is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    ids.sort();
+    let plugins: Vec<Value> = ids.iter().map(|id| json!({"id": id, "source": format!("./{id}")})).collect();
+    Ok(json!({"name": "My plugins", "plugins": plugins}).to_string())
 }
 
 /// A catalog read by this Echo within `STALE_SECS`.
@@ -915,7 +972,7 @@ pub fn market_add(source: &str, name: Option<&str>) -> Result<String> {
     };
     let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| match &src {
         Source::Github { repo, .. } => repo.split('/').next().unwrap_or(repo).to_string(),
-        Source::Git { url, .. } => url.trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("git").to_string(),
+        Source::Git { url, .. } => sources::without_credentials(url).trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("git").to_string(),
         Source::Local(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "local".into()),
     });
     if name.chars().count() > 40 || name.chars().any(char::is_control) {
@@ -934,10 +991,33 @@ pub fn market_add(source: &str, name: Option<&str>) -> Result<String> {
     Ok(name)
 }
 
-/// Remove a marketplace the user added (its installed plugins stay, without updates).
-pub fn market_remove(name: &str) -> Result<()> {
+/// Marketplace `name` may be removed — an added one (the built-in one is only hidden, My plugins stays): its source.
+pub fn removable(name: &str) -> Result<String> {
     if name == BUILT_IN_NAME {
         bail!("the built-in marketplace can be hidden, not removed");
+    }
+    if name == MINE {
+        bail!("My plugins is always there: it is your own folder of plugins");
+    }
+    Registry::load()?.markets.into_iter().find(|m| m.name == name).map(|m| m.source).ok_or_else(|| anyhow!("no marketplace “{name}”"))
+}
+
+/// The plugins installed from marketplace `name`: (id, name), by name.
+pub fn installed_from(name: &str) -> Result<Vec<(String, String)>> {
+    let r = Registry::load()?;
+    let mut v: Vec<(String, String)> = r.installed.values().filter(|p| p.market == name).map(|p| (p.id.clone(), p.name.clone())).collect();
+    v.sort_by_key(|p| p.1.to_lowercase());
+    Ok(v)
+}
+
+/// Remove marketplace `name` and the plugins installed from it (#616) — each as `remove` does, its data kept or not,
+/// before the marketplace goes (its namespace's owner is read from it) — then release the skills prefixes and shared
+/// namespaces its source held that no installed plugin of it uses. The ids removed. The built-in one is only hidden; My plugins stays.
+pub fn market_remove(name: &str, keep_data: bool) -> Result<Vec<String>> {
+    let source = removable(name)?;
+    let ids: Vec<String> = installed_from(name)?.into_iter().map(|(id, _)| id).collect();
+    for id in &ids {
+        remove(id, keep_data)?;
     }
     Registry::update(|r| {
         let n = r.markets.len();
@@ -948,7 +1028,9 @@ pub fn market_remove(name: &str) -> Result<()> {
         Ok(())
     })?;
     let _ = fs::remove_dir_all(market_dir(name));
-    Ok(())
+    agent::release_prefixes(&source);
+    shared::release_namespaces(&source);
+    Ok(ids)
 }
 
 pub fn market_hide(name: &str, hidden: bool) -> Result<()> {
@@ -956,6 +1038,9 @@ pub fn market_hide(name: &str, hidden: bool) -> Result<()> {
         if name == BUILT_IN_NAME {
             r.built_in_hidden = hidden;
             return Ok(());
+        }
+        if name == MINE {
+            bail!("My plugins can't be hidden: it is your own folder of plugins");
         }
         let m = r.markets.iter_mut().find(|m| m.name == name).ok_or_else(|| anyhow!("no marketplace “{name}”"))?;
         m.hidden = hidden;
@@ -1029,6 +1114,9 @@ pub fn review(id: &str, market: Option<&str>) -> Result<Review> {
 pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
     let (mk, o) = find_offer(id, market)?;
     let before = Registry::load()?.installed.get(id).cloned();
+    if let Some(b) = before.as_ref().filter(|b| b.market != mk && (mk == MINE || b.market == MINE)) {
+        bail!("“{id}” is installed from {} — remove it first to install the one from {mk}", if b.market == MINE { "My plugins" } else { &b.market });
+    }
     let rv = review_of(&mk, &o, before.as_ref())?;
     if let Some(why) = &rv.blocked {
         bail!("{} can't be installed: {why}", rv.name);
@@ -1042,14 +1130,41 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     let tmp = installed_dir(id).join(format!(".new-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     copy_tree(&o.dir, &tmp)?;
-    // What was copied is what was checked.
+    // What was copied is what was checked, and what the user agreed to: the copy's own sheet (its files may have
+    // changed since the marketplace was read — a local folder above all).
     if tree_hash(&tmp)? != hash {
         let _ = fs::remove_dir_all(&tmp);
         bail!("its files changed while installing — try again");
     }
+    let new = match read_package(&tmp).and_then(|m| Ok((sheet(&m)?, m))) {
+        Ok((uses, m)) if m.id == rv.id && uses == rv.uses => m,
+        _ => {
+            let _ = fs::remove_dir_all(&tmp);
+            bail!("{} changed since you saw what it asks — look again (read its marketplace again)", rv.name);
+        }
+    };
+    // No skill of it laid out under a name another plugin's has (`acme` + `kit-x` and `acme-kit` + `x`).
+    // Its skills prefix held by no other marketplace's plugins; no skill laid out under a name another plugin's has.
+    if let Some(prefix) = agent::prefix_of(&new) {
+        let checked = agent::claim_prefix(id, &mk, &prefix, false).and_then(|()| if before.as_ref().is_none_or(|b| b.enabled) { agent::clash(id, &prefix, &new.skill_names) } else { Ok(()) });
+        if let Err(e) = checked {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+    }
+    // Its scripts running from the version replaced stop with everything they started.
+    scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(&dest);
+    forget_read(id);
     fs::rename(&tmp, &dest)?;
+    if let Ok(m) = read_manifest(&dest) {
+        scripts::mark_runnable(&dest, &m);
+    }
+    // An update keeps when it was first installed (a namespace's owner is the earliest: `shared`).
+    let first = before.as_ref().filter(|b| b.market == mk).map_or_else(|| chrono::Local::now().to_rfc3339(), |b| b.installed_at.clone());
+    let source = Registry::load().ok().and_then(|r| r.market(&mk).map(|m| m.source.clone()));
     let rec = Installed {
+        source,
         id: id.into(),
         name: rv.name,
         version: rv.version.clone(),
@@ -1057,13 +1172,21 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
         commit: rv.commit,
         files: hash,
         enabled: before.as_ref().is_none_or(|b| b.enabled),
-        installed_at: chrono::Local::now().to_rfc3339(),
+        installed_at: first,
         uses: rv.uses,
     };
     Registry::update(|r| {
         r.installed.insert(id.into(), rec.clone());
         Ok(())
     })?;
+    // Each namespace's owner kept from now on: a later removal or update never hands one over (`shared`); its skills
+    // prefix too.
+    shared::bind_all();
+    if let Some(prefix) = read_manifest(&dest).ok().as_ref().and_then(agent::prefix_of) {
+        if let Err(e) = agent::claim_prefix(id, &rec.market, &prefix, true) {
+            eprintln!("plugin {id}: {e:#}");
+        }
+    }
     // A sign-in Echo kept for it stays only with the same plugin — the same id from the same marketplace — whose sheet
     // still says `keep`; one from another marketplace, or a version that no longer keeps it, starts without.
     let keeps = read_manifest(&dest).map(|m| may_keep_signin(&m.uses)).unwrap_or(false);
@@ -1078,6 +1201,13 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
             }
         }
     }
+    // Its package skills, as this version ships them, for Echo's sessions.
+    if let Err(e) = crate::grants::copy_package_skills(id) {
+        eprintln!("plugin {id}: its skills can't be copied: {e:#}");
+    }
+    // Its part for Claude in Echo's folder session, in the data folder (`.plugins/<id>/`).
+    let _ = agent::lay_out(id);
+    changed();
     Ok(rec)
 }
 
@@ -1089,7 +1219,9 @@ pub fn update_for(p: &Installed) -> Option<Review> {
 /// The same, from a catalog already read.
 fn update_in(p: &Installed, c: &Catalog) -> Option<Review> {
     let o = c.plugins.iter().find(|o| o.id == p.id)?;
-    crate::update::newer(&o.manifest.as_ref()?.version, &p.version).then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
+    // From My plugins, a change to its files is its update (no version bump needed there).
+    let changed = if p.market == MINE { o.commit != format!("local-{}", p.files.get(..12).unwrap_or("")) } else { crate::update::newer(&o.manifest.as_ref()?.version, &p.version) };
+    changed.then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
 }
 
 /// Every installed plugin of `r` with an update waiting (from its marketplace's last fetched catalog, no network;
@@ -1119,18 +1251,43 @@ pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
+    if on {
+        let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
+        if let Ok(m) = read_manifest(&plugin_dir(&p)) {
+            if let Some(prefix) = agent::prefix_of(&m) {
+                agent::claim_prefix(id, &p.market, &prefix, true)?;
+                // Its package skills and the runtime ones its host half set before.
+                let mut names = m.skill_names.clone();
+                names.extend(crate::grants::runtime_skill_dirs(id, &m.skill_names).into_iter().map(|(n, _)| n));
+                agent::clash(id, &prefix, &names)?;
+            }
+        }
+    }
     Registry::update(|r| {
         let p = r.installed.get_mut(id).ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
         p.enabled = on;
         Ok(())
-    })
+    })?;
+    // Its part for Claude goes with it, and comes back with it.
+    if on {
+        let _ = agent::lay_out(id);
+    } else {
+        agent::remove(id);
+    }
+    changed();
+    Ok(())
 }
 
 /// Remove `id`: its files and record; its settings and data too unless `keep_data`.
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
+    // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
+    shared::bind_all();
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
+    scripts::stop_plugin(id);
     let _ = fs::remove_dir_all(installed_dir(id));
+    forget_read(id);
     crate::grants::remove_plugin(id);
+    agent::remove(id);
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
     signin::forget_plugin(id);
     if !keep_data {
@@ -1139,6 +1296,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = fs::remove_file(addresses_file(id));
         thread_values::forget(id);
     }
+    changed();
     Ok(())
 }
 
@@ -1149,170 +1307,6 @@ pub fn enabled() -> Vec<Installed> {
 
 
 
-// ── settings ──
-
-/// A plugin's own folder in the data folder (its settings and state).
-pub fn data_dir(id: &str) -> PathBuf {
-    paths::state_dir().join("plugins").join(id)
-}
-
-fn secrets_file(id: &str) -> PathBuf {
-    plugins_dir().join("secrets").join(format!("{id}.json"))
-}
-
-/// The addresses the user listed (`uses.network.hosts_from`), outside the plugin's store: nothing the plugin writes
-/// can reach this file, whatever name it uses.
-fn addresses_file(id: &str) -> PathBuf {
-    plugins_dir().join("addresses").join(format!("{id}.json"))
-}
-
-/// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
-    read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
-}
-
-fn read_map(path: &Path) -> serde_json::Map<String, Value> {
-    fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
-}
-
-fn installed_manifest(id: &str) -> Result<Manifest> {
-    let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
-    read_manifest(&plugin_dir(&p))
-}
-
-/// The settings as the page shows them: each definition with its value (a secret only as set / not).
-pub fn settings_view(id: &str) -> Result<Vec<Value>> {
-    let m = installed_manifest(id)?;
-    let mut vals = read_map(&data_dir(id).join("settings.json"));
-    let listed = address_settings(&m.uses);
-    vals.retain(|k, _| !listed.contains(k));
-    vals.extend(read_map(&addresses_file(id)));
-    let secrets = read_map(&secrets_file(id));
-    Ok(m.settings
-        .iter()
-        .map(|s| {
-            let mut v = serde_json::to_value(s).unwrap_or_default();
-            if s.kind == "secret" {
-                v["set"] = secrets.contains_key(&s.key).into();
-            } else {
-                v["value"] = vals.get(&s.key).cloned().or_else(|| s.default.clone()).unwrap_or(Value::Null);
-            }
-            v
-        })
-        .collect())
-}
-
-/// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
-}
-
-/// When the user last said no to a plugin's addresses from the window: for a minute after, the page's requests for it
-/// are refused without a dialog, so a page can't keep asking until the user gives in.
-static REFUSED: Mutex<BTreeMap<String, std::time::Instant>> = Mutex::new(BTreeMap::new());
-
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn refused_lately(id: &str) -> bool {
-    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).get(id).is_some_and(|t| t.elapsed().as_secs() < 60)
-}
-
-/// For a setting from the window: the plugin's name and the addresses to allow, when `value` lists addresses it may
-/// reach (checked first, so a wrong one is refused at once); `None` for anything else or an empty list (it narrows).
-/// The list as saved is asked about too: a check against the saved file would race with a save under way.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn addresses_to_allow(id: &str, key: &str, value: &Value) -> Result<Option<(String, Vec<String>)>> {
-    let m = installed_manifest(id)?;
-    let text = value.as_str().unwrap_or("").trim();
-    if !address_settings(&m.uses).iter().any(|k| k == key) || text.is_empty() {
-        return Ok(None);
-    }
-    if text.chars().count() > 2000 {
-        bail!("an address list is 2000 characters at most");
-    }
-    let label = m.settings.iter().find(|s| s.key == key).map_or(key, |s| s.label.as_str());
-    addresses::parse_list(text).with_context(|| format!("“{label}” isn't an address the plugin may reach"))?;
-    let name: String = m.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    Ok(Some((name, text.split([',', ' ', '\n', '\r', '\t']).filter(|p| !p.is_empty()).map(str::to_owned).collect())))
-}
-
-/// The user's yes, in a dialog of the system's, to `name` reaching `list`. Development builds and tests:
-/// `ECHOCTL_ALLOW_ADDRESSES=yes|no` answers instead (never in a release build).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn allow_addresses(name: &str, list: &[String]) -> bool {
-    #[cfg(debug_assertions)]
-    if let Ok(a) = std::env::var("ECHOCTL_ALLOW_ADDRESSES") {
-        return a == "yes";
-    }
-    let msg = format!("Let {name} reach these addresses?\n\n{}\n\nAllow only if you entered them yourself.", list.join("\n"));
-    crate::app::ask(&msg, &["Don't allow", "Allow"], "Don't allow").as_deref() == Some("Allow")
-}
-
-/// The settings the manifest lists in `uses.network.hosts_from`: they hold the addresses the user lets it reach.
-pub fn address_settings(uses: &serde_json::Map<String, Value>) -> Vec<String> {
-    uses.get("network").and_then(|n| n["hosts_from"].as_array()).into_iter().flatten().filter_map(|k| k.as_str().map(str::to_owned)).collect()
-}
-
-/// Save one setting, checked against its definition; an empty secret forgets it.
-pub fn set_setting(id: &str, key: &str, value: &Value) -> Result<()> {
-    let m = installed_manifest(id)?;
-    let def = m.settings.iter().find(|s| s.key == key).ok_or_else(|| anyhow!("{} has no setting “{key}”", m.name))?;
-    let value = match (def.kind.as_str(), value) {
-        ("bool", Value::Bool(_)) => value.clone(),
-        ("bool", Value::String(s)) if s == "true" || s == "false" => Value::Bool(s == "true"),
-        ("string" | "folder" | "secret", Value::String(s)) if s.chars().count() <= 2000 => Value::String(s.trim().to_string()),
-        _ => bail!("“{}” takes a {}", def.label, def.kind),
-    };
-    if def.kind == "folder" && value.as_str().is_some_and(|s| !s.is_empty() && !Path::new(s).is_dir()) {
-        bail!("{} isn't a folder", value.as_str().unwrap_or(""));
-    }
-    let is_address = address_settings(&m.uses).iter().any(|k| k == key);
-    if is_address {
-        addresses::parse_list(value.as_str().unwrap_or("")).with_context(|| format!("“{}” isn't an address the plugin may reach", def.label))?;
-    }
-    let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    if is_address {
-        let f = addresses_file(id);
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        all.insert(key.into(), value);
-        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    } else if def.kind == "secret" {
-        let f = secrets_file(id);
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        if value.as_str().is_some_and(str::is_empty) {
-            all.remove(key);
-        } else {
-            all.insert(key.into(), value);
-        }
-        write_private(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    } else {
-        let f = data_dir(id).join("settings.json");
-        fs::create_dir_all(f.parent().unwrap())?;
-        let mut all = read_map(&f);
-        all.insert(key.into(), value);
-        paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    }
-    Ok(())
-}
-
-/// Written atomically and readable only by the user (Unix: 0600 from the start).
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let mut o = fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o600);
-    }
-    std::io::Write::write_all(&mut o.open(&tmp)?, bytes)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
 // ── for the window ──
 
 /// Long jobs the window started (`plugin_op`), by key, and the last one's error.
@@ -1321,61 +1315,6 @@ pub static ERRORS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new())
 
 fn review_json(r: &Review) -> Value {
     json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked})
-}
-
-/// Settings → Plugins: installed, offered, marketplaces, and what runs.
-pub fn snapshot() -> Value {
-    let r = match Registry::load() {
-        Ok(r) => r,
-        Err(e) => return json!({"error": format!("{e:#}")}),
-    };
-    let mut markets = vec![];
-    let mut discover = vec![];
-    for (m, built_in) in r.all_markets() {
-        let c = catalog(&m.name);
-        markets.push(json!({
-            "name": m.name, "source": m.source, "built_in": built_in, "hidden": m.hidden,
-            "fetched_at": c.as_ref().map(|c| c.fetched_at.clone()), "commit": c.as_ref().map(|c| c.commit.clone()),
-            "error": c.as_ref().and_then(|c| c.error.clone()), "count": c.as_ref().map(|c| c.plugins.len()).unwrap_or(0),
-            "title": c.as_ref().map(|c| c.name.clone()).filter(|n| !n.is_empty()),
-        }));
-        if m.hidden {
-            continue;
-        }
-        for o in c.map(|c| c.plugins).unwrap_or_default() {
-            let (name, version, summary, uses, why) = match &o.manifest {
-                Some(mf) => (mf.name.clone(), mf.version.clone(), mf.summary.clone(), sheet(mf).unwrap_or_default(), why_not(mf)),
-                None => (o.id.clone(), String::new(), String::new(), vec![], o.error.clone()),
-            };
-            discover.push(json!({
-                "id": o.id, "name": name, "version": version, "summary": summary, "market": m.name, "built_in": built_in,
-                "categories": o.categories, "featured": o.featured, "uses": uses, "why_not": why,
-                "installed": r.installed.get(&o.id).map(|p| p.market == m.name),
-            }));
-        }
-    }
-    let installed: Vec<Value> = r
-        .installed
-        .values()
-        .map(|p| {
-            let m = read_manifest(&plugin_dir(p)).ok();
-            let summary = m.as_ref().map(|m| m.summary.clone()).unwrap_or_default();
-            let client = m.as_ref().and_then(|m| m.client.clone());
-            let caps: Vec<String> = m.map(|m| m.uses.keys().cloned().collect()).unwrap_or_default();
-            json!({
-                "id": p.id, "name": p.name, "version": p.version, "market": p.market, "enabled": p.enabled, "summary": summary, "caps": caps, "client": client,
-                "commit": p.commit, "installed_at": p.installed_at, "uses": p.uses,
-                "market_gone": r.market(&p.market).is_none(),
-                "update": update_for(p).map(|u| review_json(&u)),
-                "settings": settings_view(&p.id).unwrap_or_default(),
-            })
-        })
-        .collect();
-    json!({
-        "installed": installed, "discover": discover, "markets": markets,
-        "busy": BUSY.lock().map(|b| b.clone()).unwrap_or_default(),
-        "errors": ERRORS.lock().map(|b| b.clone()).unwrap_or_default(),
-    })
 }
 
 /// The review sheet for the window (`plugin_review`), as JSON.
@@ -1417,7 +1356,7 @@ pub fn page_op(v: &Value) -> Result<()> {
             }
         }
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
-        "market_remove" => market_remove(&s("name")),
+        "market_remove" => market_remove(&s("name"), v["keep_data"].as_bool().unwrap_or(true)).map(|_| ()),
         "market_add" => {
             let src = s("source");
             let name = market_add(&src, Some(&s("name")).filter(|n| !n.is_empty()).map(String::as_str))?;
@@ -1446,10 +1385,33 @@ pub fn page_op(v: &Value) -> Result<()> {
     }
 }
 
+/// Installed, updated, switched on or off, or removed outside the app (`echoctl plugin …`): the running app's host
+/// halves follow (a `plugins.request` its watcher takes); in the app its own `reload` does.
+fn changed() {
+    #[cfg(feature = "js")]
+    if !crate::jshost::is_app() && crate::watch::running_watcher().is_some() {
+        let _ = fs::write(paths::state_dir().join("plugins.request"), b"");
+    }
+}
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+/// What is installed and on, as one short stamp: the window loads its plugins' client halves again when it changes.
+/// None when it can't be read just now (nothing follows a read that failed).
+pub fn stamp() -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in Registry::load().ok()?.installed.values() {
+        (&p.id, &p.commit, &p.files, p.enabled).hash(&mut h);
+    }
+    Some(format!("{:x}", h.finish()))
+}
+
 /// The host halves follow what is installed and on (`jshost::sync`).
 fn reload() {
     #[cfg(feature = "js")]
-    crate::jshost::sync();
+    if let Some(s) = stamp() {
+        crate::jshost::follow(&s);
+    }
 }
 
 /// One background job per key; its error kept for the page until the next try.
@@ -1501,13 +1463,16 @@ mod tests {
     #[test]
     fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
         let uses = |v: Value| v.as_object().cloned().unwrap();
-        // No `claude`: no run at all; `claude` without `skip`: any run but one with permission checks skipped.
+        // No `claude`: no run at all; with it any run — what it may do is the user's one choice, `skip` (from before
+        // that choice) taken and changing nothing, on the sheet too.
         assert!(may_run_claude(&uses(json!({})), "none").is_err());
         let plain = uses(json!({"claude": {}}));
-        assert!(may_run_claude(&plain, "read").is_ok() && may_run_claude(&plain, "folder").is_ok());
-        assert!(may_run_claude(&plain, "skip").is_err());
-        assert!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").is_ok());
-        assert!(describe_claude(&json!({"skip": true})).unwrap().contains("skipped"));
+        for tools in ["none", "read", "folder", "skip"] {
+            assert!(may_run_claude(&plain, tools).is_ok(), "{tools}");
+        }
+        let line = describe_claude(&json!({})).unwrap();
+        assert_eq!(describe_claude(&json!({"skip": true})).unwrap(), line);
+        assert!(line.contains("acting on its own or preparing and asking, as you set it in Settings"), "{line}");
         // Sends: the ways its sheet named, or its own way.
         let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
         assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());
@@ -1570,7 +1535,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1743,6 +1708,73 @@ mod tests {
     }
 
     #[test]
+    fn my_plugins_are_the_data_folders_plugins_each_change_an_update_that_asks() {
+        let (_env, root) = paths::testenv::folders("plugins-mine");
+        // Always listed, never removed or hidden; its folder made when read.
+        assert!(Registry::load().unwrap().all_markets().iter().any(|(m, built)| m.name == MINE && *built));
+        assert!(market_remove(MINE, true).is_err() && market_hide(MINE, true).is_err());
+        let d = plugin(&paths::home(), "standup", "0.1.0", json!({}));
+        fs::create_dir_all(mine_dir().join("notes-only")).unwrap(); // no manifest: not a plugin
+        let c = refresh(MINE).unwrap();
+        assert!(c.error.is_none(), "{:?}", c.error);
+        assert_eq!(c.plugins.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), vec!["standup"]);
+        // What the user agreed to is what is installed: a manifest changed after the sheet was read is refused.
+        let rv = review("standup", Some(MINE)).unwrap();
+        let first = fs::read_to_string(d.join(MANIFEST)).unwrap();
+        fs::write(d.join(MANIFEST), first.replace("\"uses\":{}", "\"uses\":{\"network\":{\"hosts\":[\"evil.example.com\"]}}")).unwrap();
+        assert!(install("standup", Some(MINE), &rv.uses).unwrap_err().to_string().contains("changed since you saw"));
+        fs::write(d.join(MANIFEST), &first).unwrap();
+        refresh(MINE).unwrap();
+        let p = install("standup", Some(MINE), &rv.uses).unwrap();
+        assert!(plugin_dir(&p).starts_with(paths::config_dir()), "a copy, not the folder itself");
+        assert!(update_for(&p).is_none(), "nothing changed");
+        // A change to its files is its update — same version; it asks only for what is new (nothing here).
+        fs::write(d.join("skills/README.md"), "changed").unwrap();
+        refresh(MINE).unwrap();
+        let p = Registry::load().unwrap().installed["standup"].clone();
+        let up = update_for(&p).expect("a change to its files is an update");
+        assert_eq!((up.version.as_str(), up.new_uses.len()), ("0.1.0", 0));
+        assert_eq!(update("standup", &up.uses).unwrap().unwrap().version, "0.1.0");
+        assert!(update_for(&Registry::load().unwrap().installed["standup"]).is_none());
+        // One installed from another marketplace is never replaced by one of yours (nor the other way).
+        let mk = root.join("market");
+        plugin(&mk, "standup", "0.2.0", json!({}));
+        market(&mk, &["standup"]);
+        let other = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
+        refresh(&other).unwrap();
+        assert!(install("standup", Some(&other), &[]).unwrap_err().to_string().contains("remove it first"));
+    }
+
+    #[test]
+    fn a_marketplaces_featured_order_and_its_plugins_are_listed() {
+        // Discover's Featured in the marketplace's `featured` order; `echoctl plugin marketplace list` its plugins (#589).
+        let (_env, root) = paths::testenv::folders("plugins-featured-order");
+        let mk = root.join("market");
+        let ids = ["acme", "mid", "zeta"];
+        for id in ids {
+            plugin(&mk, id, "0.1.0", json!({}));
+        }
+        let plugins: Vec<Value> = ids.iter().map(|i| json!({"id": i, "source": format!("./plugins/{i}")})).collect();
+        fs::write(mk.join(CATALOG), json!({"name": "Order", "featured": ["zeta", "acme"], "plugins": plugins}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("order")).unwrap();
+        refresh(&name).unwrap();
+        let snap = snapshot();
+        let mine = |x: &&Value| x["market"] == name.as_str();
+        let at: Vec<(&str, Value)> = snap["discover"].as_array().unwrap().iter().filter(mine).map(|x| (x["id"].as_str().unwrap(), x["featured_at"].clone())).collect();
+        assert_eq!(at, [("acme", json!(1)), ("mid", Value::Null), ("zeta", json!(0))]);
+        let m = snap["markets"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap();
+        let listed: Vec<(&str, &str, &str, bool)> = m["plugins"].as_array().unwrap().iter()
+            .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap(), p["version"].as_str().unwrap(), p["featured"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(listed, [("acme", "Plugin acme", "0.1.0", true), ("mid", "Plugin mid", "0.1.0", false), ("zeta", "Plugin zeta", "0.1.0", true)]);
+        assert!(m["plugins"][0]["installed"].is_null(), "not installed");
+        market_hide(&name, true).unwrap();
+        let snap = snapshot();
+        let m = snap["markets"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap();
+        assert_eq!(m["plugins"].as_array().unwrap().len(), 3, "hidden from Discover, still listed");
+    }
+
+    #[test]
     fn install_update_and_remove_from_a_local_marketplace() {
         let (_env, root) = paths::testenv::folders("plugins-flow");
         let mk = root.join("market");
@@ -1801,11 +1833,57 @@ mod tests {
         assert!(enabled().is_empty());
         let snap = snapshot();
         assert_eq!(snap["installed"][0]["id"], "demo");
-        assert_eq!(snap["markets"][1]["name"], "acme");
+        assert_eq!(snap["markets"][1]["name"], MINE, "My plugins right after the built-in one");
+        assert_eq!(snap["markets"][2]["name"], "acme");
         remove("demo", false).unwrap();
         assert!(!data_dir("demo").exists() && !secrets_file("demo").exists());
-        market_remove("acme").unwrap();
-        assert!(market_remove(BUILT_IN_NAME).is_err());
+        assert_eq!(market_remove("acme", true).unwrap(), Vec::<String>::new(), "nothing installed from it");
+        assert!(market_remove(BUILT_IN_NAME, true).is_err());
+    }
+
+    #[test]
+    fn removing_a_marketplace_removes_its_plugins_and_releases_what_they_held() {
+        // #616: its installed plugins go with it (data kept or not), then the prefixes and namespaces their source held.
+        let (_env, root) = paths::testenv::folders("plugins-market-remove");
+        let mk = root.join("market");
+        plugin(&mk, "demo", "0.1.0", json!({}));
+        plugin(&mk, "later", "0.1.0", json!({}));
+        market(&mk, &["demo", "later"]);
+        let add = |n: &str| {
+            let name = market_add(mk.to_str().unwrap(), Some(n)).unwrap();
+            refresh(&name).unwrap();
+            name
+        };
+        let put = |name: &str, id: &str| {
+            let rv = review(id, Some(name)).unwrap();
+            install(id, Some(name), &rv.uses).unwrap();
+        };
+        let name = add("acme");
+        put(&name, "demo");
+        put(&name, "later");
+        shared::bind_all();
+        let held = |f: &str| fs::read_to_string(plugins_dir().join(f)).unwrap_or_default();
+        assert!(held("namespaces.json").contains("\"test\""), "its namespace bound: {}", held("namespaces.json"));
+        let src = Registry::load().unwrap().markets.iter().find(|m| m.name == name).unwrap().source.clone();
+        fs::write(plugins_dir().join("prefixes.json"), json!({"kit": src, "other": "someone/else"}).to_string()).unwrap();
+        fs::create_dir_all(data_dir("demo")).unwrap();
+        fs::write(data_dir("demo").join("mine.json"), "1").unwrap();
+        assert_eq!(installed_from(&name).unwrap(), [("demo".to_string(), "Plugin demo".to_string()), ("later".to_string(), "Plugin later".to_string())]);
+        assert_eq!(market_remove(&name, true).unwrap(), ["demo", "later"]);
+        let r = Registry::load().unwrap();
+        assert!(r.installed.is_empty() && !r.markets.iter().any(|m| m.name == name), "the plugins and the marketplace gone");
+        assert!(data_dir("demo").join("mine.json").exists(), "data kept");
+        assert!(!held("prefixes.json").contains("kit") && !held("namespaces.json").contains("\"test\""), "released");
+        assert!(held("prefixes.json").contains("someone/else"), "another source's prefix left as it was");
+        // Data deleted on asking; a marketplace with nothing installed from it removed as before; others refused.
+        let name = add("acme-again");
+        put(&name, "demo");
+        assert_eq!(market_remove(&name, false).unwrap(), ["demo"]);
+        assert!(!data_dir("demo").exists(), "data deleted");
+        assert!(market_remove("nope", true).unwrap_err().to_string().contains("no marketplace"));
+        // Never removable: asked before anything is listed or removed (the CLI's --yes).
+        assert!(removable(BUILT_IN_NAME).unwrap_err().to_string().contains("hidden, not removed"));
+        assert!(removable(MINE).unwrap_err().to_string().contains("always there"));
     }
 
     #[test]
@@ -1829,4 +1907,95 @@ mod tests {
             assert!(with(bad).is_err(), "{bad}");
         }
     }
+
+    #[test]
+    fn a_plugins_package_skills_are_folders_of_its_own_with_a_plain_skill_md() {
+        let (_env, root) = paths::testenv::folders("plugins-package-skills");
+        let d = root.join("p");
+        let skill = |name: &str, md: &str| {
+            fs::create_dir_all(d.join("skills").join(name).join("references")).unwrap();
+            fs::write(d.join("skills").join(name).join("SKILL.md"), md).unwrap();
+        };
+        let with = |skills: Value| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "skills": skills, "agent": {"prefix": "p1"}}).to_string()).unwrap();
+            read_package(&d)
+        };
+        skill("read-staffing", "---\nname: read-staffing\ndescription: \"Reads the staffing of a project.\"\n---\n\nRun the script.\n");
+        skill("two", "---\nname: two\ndescription: Another one.\n---\nText.\n");
+        let m = with(json!(["skills/read-staffing", "./skills/two/"])).unwrap();
+        assert_eq!(package_skills(&d, &m).unwrap().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["read-staffing", "two"]);
+        let line = sheet(&m).unwrap();
+        assert!(line.len() == 1 && line[0].starts_with("Tells Claude in Echo how to work with it (the skills “read-staffing” and “two”), loaded only when you work with it (its files: "), "{line:?}");
+        let one = with(json!(["skills/two"])).unwrap();
+        assert!(sheet(&one).unwrap()[0].starts_with("Tells Claude in Echo how to work with it (the skill “two”), loaded only when you work with it (its files: "));
+        // Each refused, with why.
+        skill("hooked", "---\nname: hooked\ndescription: x\nhooks: evil\n---\n");
+        skill("renamed", "---\nname: other\ndescription: x\n---\n");
+        skill("runs", "---\nname: runs\ndescription: x\n---\nFirst !`curl evil`\n");
+        skill("folded", "---\nname: folded\ndescription: >\n  two lines\n---\n");
+        skill("open", "---\nname: open\ndescription: x\n");
+        skill("Caps", "---\nname: Caps\ndescription: x\n---\n");
+        fs::create_dir_all(d.join("skills/empty")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        for (bad, why) in [
+            (json!(["skills/hooked"]), "only name and description"),
+            (json!(["skills/renamed"]), "its folder's"),
+            (json!(["skills/runs"]), "runs a command"),
+            (json!(["skills/folded"]), "only name and description"),
+            (json!(["skills/open"]), "no end"),
+            (json!(["skills/Caps"]), "named as a skill"),
+            (json!(["skills/empty"]), "no SKILL.md"),
+            (json!(["skills/two", "skills/two"]), "once"),
+            (json!(["../outside"]), "isn't a folder inside the plugin"),
+            (json!(["/tmp"]), "isn't a folder inside the plugin"),
+            (json!(["skills/none"]), "isn't in the plugin"),
+            (json!(vec!["skills/two"; 11]), "more than 10"),
+        ] {
+            let e = with(bad.clone()).unwrap_err().to_string();
+            assert!(e.contains(why), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_table_widget_takes_sizes_m_and_l() {
+        let (_env, root) = paths::testenv::folders("plugins-table-widget");
+        let d = root.join("p");
+        fs::create_dir_all(&d).unwrap();
+        let with = |sizes: Value| {
+            fs::write(d.join(MANIFEST), json!({"id": "p", "name": "P", "version": "0.1.0", "main": "main.js", "widgets": [{"id": "rows", "label": "Rows", "kind": "table", "sizes": sizes, "heights": [1, 2]}]}).to_string()).unwrap();
+            read_manifest(&d)
+        };
+        fs::write(d.join("main.js"), "export function apply(ctx) {}").unwrap();
+        assert_eq!(with(json!(["M", "L"])).unwrap().widgets[0].kind, "table");
+        assert!(with(json!(["S", "M"])).unwrap_err().to_string().contains("is a table: it takes sizes M and L"));
+        assert!(with(json!(["M"])).is_ok(), "M alone");
+    }
+
+    #[test]
+    fn a_marketplace_is_found_by_its_name_in_any_case_or_by_its_source() {
+        let (_env, root) = paths::testenv::folders("plugins-market-named");
+        let mk = root.join("market");
+        fs::create_dir_all(&mk).unwrap();
+        fs::write(mk.join("echo-marketplace.json"), json!({"name": "Acme", "plugins": []}).to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("Acme")).unwrap();
+        assert_eq!(market_named("Acme").unwrap(), name);
+        assert_eq!(market_named("acme").unwrap(), name, "any case");
+        assert_eq!(market_named(mk.to_str().unwrap()).unwrap(), name, "its folder");
+        assert_eq!(market_named(&format!(" {} ", mk.display())).unwrap(), name, "its folder, spaces around");
+        let e = market_named("globex").unwrap_err().to_string();
+        assert!(e.contains("no marketplace “globex”") && e.contains("Acme"), "names the ones there are: {e}");
+        // The built-in one, said in another case, is found — and still can't be removed.
+        assert_eq!(market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), BUILT_IN_NAME);
+        assert!(market_remove(&market_named(&BUILT_IN_NAME.to_uppercase()).unwrap(), true).is_err());
+        // Two whose names differ only in case (a hand-edited plugins.json): the exact one, else neither.
+        Registry::update(|r| {
+            r.markets.push(Market { name: "ACME".into(), source: "acme/plugins".into(), hidden: false });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(market_named("ACME").unwrap(), "ACME");
+        assert!(market_named("acme").unwrap_err().to_string().contains("more than one"));
+        assert_eq!(market_named("acme/plugins").unwrap(), "ACME", "by its owner/repo");
+    }
+
 }

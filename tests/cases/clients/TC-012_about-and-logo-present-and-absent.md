@@ -31,7 +31,7 @@ auto: [tests/auto/specs/S-26.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#client/acme/overview` | The block "About Acme" has the rendered Markdown of the table and a button "Edit"; the link "their site" has `href` `https://acme.example` |
+| 1 | Navigate to `{{base_url}}/#client/acme/overview`; the block "About Acme" is folded (› before its name, only Edit beside it); click its name | It opens (⌄); it has the rendered Markdown of the table and a button "Edit"; the link "their site" has `href` `https://acme.example` |
 | 2 | Read the head of the page | The client's logo is an `img` (`src` `api/client/acme/logo?v=<n>`, relative); the tag reads "client" |
 | 3 | Run `curl -s -o /dev/null -w "%{http_code} %{content_type}" {{base_url}}/api/client/acme/logo` and the same for globex | Acme: `200 image/png`; Globex: `404` |
 | 4 | Navigate to `{{base_url}}/#client/acme/profile` and read the row "Logo" | The image, "Change logo…" and "Remove"; the line "PNG, JPEG or WebP, up to 512 KB — shown beside its name and on its threads that wear it." |

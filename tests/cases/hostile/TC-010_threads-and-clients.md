@@ -59,7 +59,7 @@ auto: [tests/auto/specs/S-27.spec.mjs]
 | 10 | Run `browser_evaluate` with `() => ({ lit: document.querySelector('main').innerText.includes('<script>alert(1)</script>'), sw: document.documentElement.scrollWidth <= window.innerWidth })` | `lit` and `sw` are `true` |
 | 11 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 12 | Click the thread's "Thread actions" menu `[aria-label="Thread actions"]`, then Escape | The menu opens and closes; its "Open Umbrella" label is a normal client name |
-| 13 | Navigate to `{{base_url}}/#client/globex/overview` | The page shows "About Globex" with the About text |
+| 13 | Navigate to `{{base_url}}/#client/globex/overview`; click "About Globex" (it is folded) | The page shows "About Globex" with the About text |
 | 14 | Run `browser_evaluate` with `() => { const d = document.querySelector('.me-doc'); return { text: d.innerText.includes('HOSTILE-05') && d.innerText.includes('HOSTILE-06'), lit: d.innerText.includes('<img src=x onerror=alert(1)>'), bad: d.querySelectorAll('img,script,iframe').length, heads: [...d.querySelectorAll('h1,h2,h3,h4')].map((h) => h.innerText) } }` | `text` and `lit` are `true`; `bad` is 0; `heads` is exactly `["About Globex"]`: the About file's own `## About Globex` line is a real heading, and HOSTILE-05's `# Heading` stays text inside its paragraph |
 | 15 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 16 | Navigate to `{{base_url}}/#client/acme/profile` | Profile of Acme shows "Other names" as chips |

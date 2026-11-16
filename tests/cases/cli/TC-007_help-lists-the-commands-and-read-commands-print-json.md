@@ -33,7 +33,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `target/debug/echoctl --help` | Exit code 0; the first line is "Records the calls you opt in to and transcribes them on this computer (tray app + CLI)"; "Usage: echoctl <COMMAND>"; under "Commands:" one line per command, each a name and its description, among them `project`, `client`, `org`, `series`, `config`, `read`, `m365`, `context`, `actions`, `action`, `title`, `type`, `note`, `html`, `delete`, `restore`, `language`, and the last is `help` |
-| 2 | Run `target/debug/echoctl project --help` | Exit code 0; "Usage: echoctl project <COMMAND>"; the commands `list`, `show`, `create`, `set`, `rule`, `source`, `include`, `exclude`, `reset`, `term`, `person`, `of`, `people`, `tasks`, `found`, `link`, `delete`, `ledger`, `help`, in that order |
+| 2 | Run `target/debug/echoctl project --help` | Exit code 0; "Usage: echoctl project <COMMAND>"; the commands `list`, `show`, `create`, `set`, `rule`, `source`, `include`, `exclude`, `reset`, `term`, `person`, `of`, `people`, `tasks`, `found`, `link`, `delete`, `work`, `ledger`, `help`, in that order |
 | 3 | Run `target/debug/echoctl project ledger acme-rollout edit --help` | Exit code 0; the line "An edit of yours (JSON: {op: edit\|ac_add\|ac_set\|link\|unlink\|merge\|delete\|accept\|reject\|undo\|create, …})" and "Usage: echoctl project ledger <ID> edit <JSON>" |
 | 4 | Run `target/debug/echoctl help series` | Exit code 0; the same text as `echoctl series --help`: "Usage: echoctl series <COMMAND>" with `list`, `set`, `help` |
 | 5 | Run `target/debug/echoctl --version` | Exit code 0; one line `echoctl <x.y.z>`, the version Settings → General shows as "Echo <x.y.z>" |

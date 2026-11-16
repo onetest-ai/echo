@@ -1,0 +1,30 @@
+[
+  {
+    "version": "0.9.9",
+    "items": [
+      { "icon": "plugin", "title": "Claude knows your plugins", "text": "Claude in Echo now sees which plugins you have and reads each one's guide only when it works with it.", "open": "settings/plugins" },
+      { "icon": "sparkle", "title": "Routines and Yolo act like you", "text": "Routines and Yolo now get the same knowledge and permissions as your Claude session, set by one choice in Settings.", "open": "settings" },
+      { "icon": "sparkle", "title": "See what Yolo did", "text": "Yolo runs lists every run with what it changed, sent or drafted, so you can check what Claude did on its own.", "open": "yolo" },
+      { "icon": "record", "title": "Calls show who really came", "text": "A recorded Teams call now shows the people who were in the meeting, not everyone who was invited.", "open": "calls" },
+      { "icon": "sparkle", "title": "What's new after each update", "text": "After an update Echo shows what changed, and you can open it again from the menu bar, ⌘K or Settings.", "open": "settings" },
+      { "icon": "fix", "title": "Smaller fixes", "text": "Dates in another year show the year, plugin widgets fill their row, and Sign in to Claude shows at once." }
+    ]
+  },
+  {
+    "version": "0.9.8",
+    "items": [
+      { "icon": "plugin", "title": "Plugins share a setting", "text": "Plugins from the same marketplace can share a value, like a project code, so you set it once for all of them.", "open": "settings/plugins" },
+      { "icon": "shield", "title": "Safer plugin installs", "text": "A plugin can add to your Claude Code only the one plugin its install sheet names, nothing else.", "open": "settings/plugins" },
+      { "icon": "thread", "title": "Widgets name the right page", "text": "A widget on a thread's Brief or a client's Overview now shows that thread or client in its header.", "open": "projects" }
+    ]
+  },
+  {
+    "version": "0.9.7",
+    "items": [
+      { "icon": "filter", "title": "One filter for a whole dashboard", "text": "Add Filters to Today and set the period, thread or client once for every widget beside it.", "open": "today" },
+      { "icon": "export", "title": "Export a dashboard", "text": "Export, beside ✎, saves the page as one HTML file that opens anywhere.", "open": "today" },
+      { "icon": "layout", "title": "Pages use the full width", "text": "Brief, Overview and dashboards now fill the window, and long text stays easy to read.", "open": "projects" },
+      { "icon": "link", "title": "Plugin links open on one click", "text": "A plugin's web link opens on the first click, and its address shows when you point at it." }
+    ]
+  }
+]

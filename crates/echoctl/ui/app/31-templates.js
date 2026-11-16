@@ -164,7 +164,7 @@ document.addEventListener('click', (e) => {
   }
   if (t.dataset.claudeTask) {
     // A task Claude can do comes with its own words (what to hand back) and skill (`taskmodes`).
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', hint: t.dataset.hint || '', open: !t.dataset.skill }
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', hint: t.dataset.hint || '', hintBy: t.dataset.hintBy || '', hintSkill: t.dataset.hintSkill || '', open: !t.dataset.skill }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }

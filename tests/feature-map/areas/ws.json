@@ -66,7 +66,7 @@
   },
   {
    "id": "F-WS-08",
-   "feature": "An `echo://` link opens its place in the window (a call at a moment, a thread, a client, a person, a task, a prep)",
+   "feature": "An `echo://` link opens its place in the window (a call at a moment, a thread, a client — either on one of its tabs, `echo://thread/<id>/profile` — a person, a task, a prep)",
    "priority": "medium",
    "check": "agent",
    "axes": []

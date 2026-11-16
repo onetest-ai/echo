@@ -1,0 +1,8 @@
+{
+  "id": "chan-demo",
+  "name": "Channel demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: names a Claude Code channel plugin and tries to install others (tests/cases/plugins/TC-034).",
+  "main": "main.js",
+  "uses": { "channel": { "plugin": "telegram@claude-plugins-official" } }
+}

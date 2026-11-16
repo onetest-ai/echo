@@ -74,7 +74,10 @@ async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
 }
 async function loadToday() {
-  try { S.today = await get('api/today') } catch { /* app restarting */ }
+  // Editing Today: every widget's data too (Add a widget previews each one). A plain read that comes back after editing
+  // began is dropped: the edit's own read (todayEditOpen) brings every widget's.
+  const all = !!S.tdEdit
+  try { const t = await get(all ? 'api/today?all=1' : 'api/today'); if (all || !S.tdEdit) S.today = t } catch { /* app restarting */ }
   todayWaitForPlugins()
 }
 /** A plugin's widget not answered yet (`pending`) holds its place (#410), and My work's plugin rows may wait for an
@@ -120,6 +123,7 @@ async function loadProject() {
     const id = S.pj.client
     try { const d = await get('api/client/' + encodeURIComponent(id)); if (S.pj.client === id) S.pj.cdata = d } catch { /* app restarting */ }
     if (S.pj.ctab === 'people') await loadPeople()
+    if (S.pj.ctab === 'overview' || String(S.pj.ctab).startsWith('b-')) await loadDashboard()
     return
   }
   const id = S.pj.sel
@@ -132,6 +136,7 @@ async function loadProject() {
     if (S.pj.sel === id) S.pj.detail = S.pj.boardAt > asked - BOARD_SETTLE_MS && S.pj.detail ? { ...d, board: S.pj.detail.board } : d
   } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
+  if (!S.pj.tab || S.pj.tab === 'brief' || String(S.pj.tab).startsWith('b-')) await loadDashboard()
   if (S.pj.tab === 'profile') {
     try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
   }
@@ -239,6 +244,9 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); replaceUrl('#settings/plugins') } return }
   if (h === 'tasks') { S.view = 'tasks'; return }
+  if (h === 'yolo') { S.view = 'yolo'; return }
+  // The tray's What's new: over Today, the address left on Today (a reload doesn't open it again).
+  if (h === 'whats-new') { replaceUrl('#today'); S.view = 'today'; setTimeout(whatsNewOpen); return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
   // Knowledge: your vaults (`#kn/<vault>/<tab>/<page>`, knowledge.js), Recall's tabs and the plugins'
@@ -249,13 +257,13 @@ function route() {
   if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'brain'; Kn.setSource('vault'); return }
   if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; S.plRoute = bm[2] || ''; Kn.setSource(String(S.br.tab).includes(':') ? 'plugin' : 'recall'); return }
   if (h === 'found') { S.view = 'projects'; S.pj.found = true; S.pj.client = null; S.pj.sel = null; S.pj.detail = null; return }
-  const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/(\w+))?$/)
+  const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/([\w-]+))?$/)
   if (cm2) {
     S.view = 'projects'; S.pj.found = false
     if (S.pj.client !== cm2[1]) { S.pj.cdata = null; S.pj.briefEdit = null; S.pj.person = null }
     S.pj.client = cm2[1]; S.pj.ctab = cm2[2] || S.pj.ctab || 'overview'; S.pj.sel = null; S.pj.detail = null; S.pj.adding = null; return
   }
-  const pm = h.match(/^projects?(?:\/([a-z0-9-]+))?(?:\/(\w+))?$/)
+  const pm = h.match(/^projects?(?:\/([a-z0-9-]+))?(?:\/([\w-]+))?$/)
   if (pm) {
     S.view = 'projects'
     S.pj.found = false

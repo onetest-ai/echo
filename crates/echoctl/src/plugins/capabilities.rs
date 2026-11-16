@@ -29,6 +29,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "files", ready: true, describe: describe_files },
     Capability { id: "work", ready: true, describe: describe_work },
     Capability { id: "signin", ready: true, describe: describe_signin },
+    Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
 ];
 
 /// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.
@@ -54,6 +55,7 @@ pub const EVENTS: &[(&str, &str)] = &[
     ("thread_synced", "a thread's work is updated from its calls and mail"),
     ("sources_changed", "Echo's sources (calls, mail, channels) change"),
     ("threads_changed", "a thread is renamed, merged or deleted"),
+    ("shared_changed", "a value its marketplace's plugins share changes"),
 ];
 
 pub(super) fn describe_events(v: &Value) -> Result<String> {
@@ -113,21 +115,18 @@ pub(super) fn join_words(w: &[&str]) -> String {
     }
 }
 
-pub(super) fn describe_claude(v: &Value) -> Result<String> {
-    Ok(if v["skip"].as_bool() == Some(true) {
-        "Runs Claude Code on your AI profiles, with the permissions you pick — or with every permission check skipped".into()
-    } else {
-        "Runs Claude Code on your AI profiles, with the permissions you pick".into()
-    })
+/// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
+/// before that choice) is still taken and changes nothing.
+pub(super) fn describe_claude(_: &Value) -> Result<String> {
+    Ok("Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings".into())
 }
 
-/// May a plugin with these `uses` start a Claude Code run with `tools` (`claudejob::Spec`)? Only with `claude` on its
-/// install sheet; skipping every permission check only when the sheet said so too (`claude.skip`).
+/// May a plugin with these `uses` start a Claude Code run (`claudejob::Spec`)? Only with `claude` on its install sheet.
+/// What it may do there is the user's one choice, whatever `tools` it asks (`claudejob`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn may_run_claude(uses: &serde_json::Map<String, Value>, tools: &str) -> Result<()> {
-    let Some(c) = uses.get("claude") else { bail!("it didn't ask to run Claude Code when it was installed") };
-    if tools == "skip" && c["skip"].as_bool() != Some(true) {
-        bail!("it didn't ask to run Claude Code with permission checks skipped when it was installed");
+pub fn may_run_claude(uses: &serde_json::Map<String, Value>, _tools: &str) -> Result<()> {
+    if uses.get("claude").is_none() {
+        bail!("it didn't ask to run Claude Code when it was installed");
     }
     Ok(())
 }
@@ -203,11 +202,11 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
     let p = v["plugin"].as_str().unwrap_or("");
     // Claude Code's own channel plugins only, from Anthropic's marketplace (an org allowlist would
     // refuse any other anyway).
-    let Some(name) = p.strip_suffix("@claude-plugins-official").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else {
+    let Some(name) = p.strip_suffix("@claude-plugins-official").filter(|n| n.split('-').all(|w| !w.is_empty()) && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else {
         bail!("“channel” must name a channel plugin of claude-plugins-official, e.g. telegram@claude-plugins-official");
     };
     let shown: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join(" ");
-    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo"))
+    Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo, and installs Claude Code's {p} plugin for it"))
 }
 
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {
@@ -382,4 +381,17 @@ pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
 /// The capabilities a manifest uses that this Echo doesn't implement yet.
 pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
     uses.keys().filter(|k| CAPABILITIES.iter().find(|c| c.id == k.as_str()).is_none_or(|c| !c.ready)).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {
+        assert!(describe_channel(&serde_json::json!({"plugin": "telegram@claude-plugins-official"})).unwrap().contains("Telegram"));
+        for bad in ["telegram-@claude-plugins-official", "-x@claude-plugins-official", "a--b@claude-plugins-official", "@claude-plugins-official", "x@other"] {
+            assert!(describe_channel(&serde_json::json!({"plugin": bad})).is_err(), "{bad}");
+        }
+    }
 }

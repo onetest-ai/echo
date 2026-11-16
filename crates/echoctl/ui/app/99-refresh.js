@@ -7,14 +7,24 @@ async function tick() {
   const before = JSON.stringify(S.state)
   await loadState()
   const changed = JSON.stringify(S.state) !== before
+  // Against the last stamp read (a tick whose read failed has none and changes nothing).
+  const plugins = S.state && S.state.plugins
+  if (plugins && S.pluginsSeen && plugins !== S.pluginsSeen) await pluginsChanged()
+  if (plugins) S.pluginsSeen = plugins
   if (changed || ticks % 3 === 0) await loadCalls()
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
   if (ticks % 15 === 0 && [...Terms.values()].some((e) => e.id != null && !e.exited)) await loadPtyInfo() // Restart to update
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
   // While a transcript is imported, every few seconds: the call shows once it is there.
   if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()
-  if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
-  if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
+  // The Inbox: every 10th tick, sooner while a decision works, and at once when the app says it changed (#513).
+  const inbox = S.state && S.state.attention
+  const moved = inbox != null && S.inboxSeen != null && inbox !== S.inboxSeen
+  if (inbox != null) S.inboxSeen = inbox
+  // Moved: a fresh read, not one already on its way (it may have left before the change).
+  if (moved) await loadAttention(true)
+  else if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
+  if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); await loadBoards(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   if (S.view === 'brain' && Kn.active()) await Kn.tick()
   Kn.feedQueued()
@@ -101,6 +111,8 @@ window.echo = {
     else render()
   },
   openCall(name) { go(`call/${name}/minutes`) },
+  /** The tray's What's new, in an open window: over the view it is on, as ⌘K opens it. */
+  whatsNew() { return whatsNewOpen() },
   /** Windows, Echo's own title bar: the window was maximised or restored. */
   maximized(on) { if (S.maximized !== on) { S.maximized = on; render() } },
   /** Windows: Echo's own title bar as saved (after a load, or a switch whose save failed: the switch goes back). */
@@ -266,8 +278,9 @@ window.echo = {
 ;(async () => {
   route()
   render()
-  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention()])
+  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention(), loadBoards()])
   await loadPluginClients()
+  render() // what has loaded shows at once (the rest follows)
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
   if (S.view === 'today') await loadToday()

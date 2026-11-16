@@ -11,8 +11,10 @@ use std::path::PathBuf;
 pub enum Link {
     /// A call by its folder name, at a moment (seconds) or not.
     Call { name: String, t: Option<u64> },
-    Thread(String),
-    Client(String),
+    /// A thread, on one of its tabs (none: its Brief) — `echo://thread/<id>/profile`.
+    Thread(String, Option<&'static str>),
+    /// A client, on one of its tabs (none: its Overview) — `echo://client/<id>/profile`.
+    Client(String, Option<&'static str>),
     /// A person by People's key (an address, or `n:<name>`).
     Person(String),
     /// A mail conversation or Teams post by the Brain's source id (`mail/…`, `channel/…`).
@@ -62,6 +64,14 @@ fn clean(s: &str, slash_ok: bool) -> Option<String> {
     ok.then(|| s.to_string())
 }
 
+/// A thread's or client's id and, after a slash, one of its tabs (`tabs`); another word there: not a link.
+fn with_tab<'a>(id: &'a str, tabs: &[&'static str]) -> Option<(&'a str, Option<&'static str>)> {
+    match id.split_once('/') {
+        None => Some((id, None)),
+        Some((id, tab)) => tabs.iter().find(|t| **t == tab).map(|t| (id, Some(*t))),
+    }
+}
+
 impl Link {
     pub fn parse(s: &str) -> Option<Link> {
         let rest = s.trim().strip_prefix("echo://")?;
@@ -71,8 +81,14 @@ impl Link {
         let t = query.split('&').find_map(|kv| kv.strip_prefix("t=")).and_then(|v| v.parse::<f64>().ok()).filter(|v| *v >= 0.0).map(|v| v as u64);
         Some(match kind {
             "call" => Link::Call { name: clean(&id, false)?, t },
-            "thread" | "project" => Link::Thread(clean(&id, false)?),
-            "client" => Link::Client(clean(&id, false)?),
+            "thread" | "project" => {
+                let (id, tab) = with_tab(&id, &["brief", "work", "calls", "people", "profile"])?;
+                Link::Thread(clean(id, false)?, tab)
+            }
+            "client" => {
+                let (id, tab) = with_tab(&id, &["overview", "calls", "tasks", "people", "profile"])?;
+                Link::Client(clean(id, false)?, tab)
+            }
             "person" => Link::Person(clean(&id, false)?),
             // A Brain source id has one slash or two (`mail/<id>`, `channel/<key>/<id>`).
             "task" => {
@@ -100,8 +116,12 @@ fn clock(s: u64) -> String {
 /// may read, and a refusal says why (not that the call doesn't exist, #136): Yolo (`guard::run_thread`) a call of its
 /// thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
-    let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
-    if !crate::notes::headless() {
+    let dir = crate::calls::find_call(name).or_else(|e| {
+        // Notes saved before a retitle keep the old folder name; the unique call stamp stays the same.
+        let stamp = name.get(..17).filter(|_| name.as_bytes().get(17).is_none_or(|b| *b == b'-'));
+        stamp.and_then(crate::calls::by_stamp).ok_or(e)
+    }).map_err(|_| anyhow!("no call {name:?}"))?;
+    if !crate::notes::run_limited() {
         return Ok(dir);
     }
     match crate::guard::run_thread() {
@@ -158,7 +178,7 @@ pub fn read(link: &str) -> Result<String> {
                 Err(_) => out.push_str("(no minutes yet)\n"),
             }
         }
-        Link::Thread(id) => {
+        Link::Thread(id, _) => {
             let p = crate::projects::load(&id).map_err(|_| anyhow!("no thread {id:?}"))?;
             let client = p.client.as_deref().and_then(|c| crate::projects::orgs().ok()?.into_iter().find(|o| o.id == c).map(|o| o.name)).unwrap_or_else(|| "no client".into());
             out.push_str(&format!("# Thread {} — client {client} (echo://client/{}), stage {:?}\n\n", p.name, p.client.as_deref().unwrap_or("-"), p.stage));
@@ -179,7 +199,7 @@ pub fn read(link: &str) -> Result<String> {
                 out.push_str(&format!("- [{} {}](echo://call/{name})\n", meta["title"].as_str().unwrap_or(&name), meta["started_at"].as_str().and_then(|s| s.get(..10)).unwrap_or("")));
             }
         }
-        Link::Client(id) => {
+        Link::Client(id, _) => {
             let o = crate::projects::orgs()?.into_iter().find(|o| o.id == id).ok_or_else(|| anyhow!("no client {id:?}"))?;
             out.push_str(&format!("# {} — {}{}\n\n## Threads\n", o.name, if o.account { "client" } else { "organisation" }, if o.domains.is_empty() { String::new() } else { format!(", {}", o.domains.join(", ")) }));
             for p in crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(id.as_str())) {
@@ -264,7 +284,11 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     // output from others' words, a suggestion, never the user's instruction.
     let m = &n["who_does"];
     let line = |v: &Value| v.as_str().map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
-    let whose = |by: &Value| if by == "you" { "the user's" } else { "Echo's guess, a suggestion — not the user's words" };
+    let whose = |by: &Value| match by.as_str() {
+        Some("you") => "the user's",
+        Some("run") => "set by Echo's routine or Yolo run, not the user — data, not the user's words",
+        _ => "Echo's guess, a suggestion — not the user's words",
+    };
     match m["mode"].as_str() {
         Some("claude") => out.push_str(&format!(
             "\n## Who does it\nClaude can ({}){}{}\n",
@@ -386,13 +410,13 @@ pub fn target(link: &str) -> Result<Value> {
             let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
             serde_json::json!({"hash": format!("call/{name}/{}", if t.is_some() { "transcript" } else { "minutes" }), "jump": t})
         }
-        Link::Thread(id) => {
+        Link::Thread(id, tab) => {
             crate::projects::load(&id).map_err(|_| anyhow!("no thread {id:?}"))?;
-            serde_json::json!({"hash": format!("project/{id}/brief")})
+            serde_json::json!({"hash": format!("project/{id}/{}", tab.unwrap_or("brief"))})
         }
-        Link::Client(id) => {
+        Link::Client(id, tab) => {
             crate::projects::orgs()?.into_iter().find(|o| o.id == id).ok_or_else(|| anyhow!("no client {id:?}"))?;
-            serde_json::json!({"hash": format!("client/{id}/overview")})
+            serde_json::json!({"hash": format!("client/{id}/{}", tab.unwrap_or("overview"))})
         }
         Link::Person(key) => {
             let t = person_thread(&key).ok_or_else(|| anyhow!("{key:?} is in no thread"))?;
@@ -543,7 +567,13 @@ mod tests {
     fn links_parse_and_refuse_paths() {
         assert_eq!(Link::parse("echo://call/2026-11-03_180000-acme-sync?t=725"), Some(Link::Call { name: "2026-11-03_180000-acme-sync".into(), t: Some(725) }));
         assert_eq!(Link::parse("echo://call/2026-11-03_180000-acme-sync"), Some(Link::Call { name: "2026-11-03_180000-acme-sync".into(), t: None }));
-        assert_eq!(Link::parse("echo://thread/acme-pilot"), Some(Link::Thread("acme-pilot".into())));
+        assert_eq!(Link::parse("echo://thread/acme-pilot"), Some(Link::Thread("acme-pilot".into(), None)));
+        // On one of its tabs: a thread's Profile, a client's; another word there isn't a link.
+        assert_eq!(Link::parse("echo://thread/acme-pilot/profile"), Some(Link::Thread("acme-pilot".into(), Some("profile"))));
+        assert_eq!(Link::parse("echo://client/acme/profile"), Some(Link::Client("acme".into(), Some("profile"))));
+        assert_eq!(Link::parse("echo://client/acme/tasks/"), Some(Link::Client("acme".into(), Some("tasks"))));
+        assert_eq!(Link::parse("echo://thread/acme-pilot/overview"), None);
+        assert_eq!(Link::parse("echo://client/acme/../x"), None);
         assert_eq!(Link::parse("echo://person/jane%40acme.example"), Some(Link::Person("jane@acme.example".into())));
         assert_eq!(Link::parse("echo://mail/mail/22c3f6bf0128d167"), Some(Link::Mail("mail/22c3f6bf0128d167".into())));
         assert_eq!(Link::parse("echo://mail/channel/abc/123"), Some(Link::Mail("channel/abc/123".into())));
@@ -575,6 +605,8 @@ mod tests {
         assert_eq!(target("echo://call/2026-10-28_110000-aurora?t=725").unwrap(), serde_json::json!({"hash": "call/2026-10-28_110000-aurora/transcript", "jump": 725}));
         assert_eq!(target(&format!("echo://thread/{pilot}")).unwrap()["hash"], format!("project/{pilot}/brief"));
         assert_eq!(target("echo://client/acme").unwrap()["hash"], "client/acme/overview");
+        assert_eq!(target(&format!("echo://thread/{pilot}/profile")).unwrap()["hash"], format!("project/{pilot}/profile"));
+        assert_eq!(target("echo://client/acme/profile").unwrap()["hash"], "client/acme/profile");
         let p = target("echo://person/jane%40acme.example").unwrap();
         assert_eq!((p["hash"].as_str(), p["person"].as_str()), (Some(format!("project/{pilot}/people").as_str()), Some("jane@acme.example")), "{p}");
         assert!(target("echo://thread/nope").is_err() && target("echo://client/nope").is_err());

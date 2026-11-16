@@ -1,0 +1,121 @@
+{
+  "id": "chart-demo",
+  "name": "Chart demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a chart of every type, with a headline, and stats with a trend (tests/cases/today/TC-047). Made-up data.",
+  "main": "main.js",
+  "widgets": [
+    {
+      "id": "calls",
+      "label": "Calls by week",
+      "about": "two series, a line",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "hours",
+      "label": "Billable hours",
+      "about": "one series, an area",
+      "kind": "chart",
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "deals",
+      "label": "Deals by quarter",
+      "about": "grouped bars",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "staffing",
+      "label": "Staffing by week",
+      "about": "stacked bars",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "status",
+      "label": "Project status",
+      "about": "100% stacks, horizontal",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "tasks",
+      "label": "Open tasks by thread",
+      "about": "horizontal bars",
+      "kind": "chart",
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "time",
+      "label": "Time by kind",
+      "about": "a pie",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "positions",
+      "label": "Positions",
+      "about": "a donut",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "pipeline",
+      "label": "Pipeline",
+      "about": "a funnel",
+      "kind": "chart",
+      "sizes": [
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "week",
+      "label": "This week",
+      "about": "numbers with a trend",
+      "kind": "stats",
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ]
+    },
+    {
+      "id": "broken",
+      "label": "Broken chart",
+      "about": "data Echo can't draw",
+      "kind": "chart",
+      "sizes": [
+        "M"
+      ]
+    }
+  ]
+}

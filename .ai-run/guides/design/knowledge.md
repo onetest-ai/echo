@@ -1116,4 +1116,4 @@ page shows it through `esc()` or the safe writer (X-T10).
 
 ## Main refresh integration
 
-Knowledge’s CLI is in `cli/knowledge.rs`, its window routes and IPC in `window/knowledge.rs`, and its UI hooks in the corresponding `ui/app/` parts. `drawBrain` selects the vault renderer before Recall; the compiled assets retain Knowledge’s separate script and stylesheet. `knowledge/chat/tests.rs` holds the conversation tests, moved unchanged when adopting the source size gate.
+Knowledge’s CLI is in `cli/knowledge.rs`, its window routes and IPC in `window/knowledge.rs`, and its UI hooks in the corresponding `ui/app/` parts. `drawBrain` selects the vault renderer before Recall; the compiled assets retain Knowledge’s separate script and stylesheet. `knowledge/chat/tests.rs` holds the conversation tests, moved unchanged when adopting the source size gate. `notes/auto.rs::calls_transcribing` is shared by minutes admission and Knowledge runs. Ask and live notes keep separate streaming modes in the Claude fake, and Git-backed Knowledge tests use an isolated test identity.

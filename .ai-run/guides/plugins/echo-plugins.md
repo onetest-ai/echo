@@ -1,39 +1,45 @@
 # Echo Plugins
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: plugin manifest, host half services, grants, client-half ctx and slots, marketplaces
+**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: the rules for Echo's side of plugins: capabilities, host services, grants, client-half ctx and slots, widget kinds, scripts, marketplaces
+
+What Echo's side does today — the store's files and locks, script runs, sessions, the `.plugins` layout, dashboards —
+is the reference `.ai-run/reference/plugins/echo-host.md` ("Host § <section>" below); the API plugins see is
+`.ai-run/reference/plugins/plugin-api.md` ("API § <section>"). A change to either goes with the code it describes.
 
 ## Plugin host
 
 ### Rules
 - R1. Add a capability plugins may ask for as a `Capability` in `plugins::CAPABILITIES` with its own `describe` writing the sheet's words in Echo, never the plugin's; keep `ready: false` until the host implements it. Evidence: `plugins::CAPABILITIES`
-- R2. Add a host-half service in three places: the `ctx` object in `jshost::PRELUDE`, then an arm in `jshost::service` (returns at once) or `jshost::service_async` (spawns a process, waits on the network or a dialog). Evidence: `jshost::PRELUDE`
+- R2. Add a host-half service in two places: the `ctx` object in `jshost::PRELUDE`, then an arm in `jshost::service` (returns at once) or `jshost::service_async` (spawns a process, waits on the network or a dialog). Evidence: `jshost::PRELUDE`
 - R3. A host service that reaches Echo data, granted folders, sessions or the network checks the manifest first with `jshost::uses` / `jshost::uses_flag` or the capability's own list (`network.hosts`, `channel.plugin`, `deliver_provider.kinds`, `signin.hosts`). Evidence: `jshost::uses_flag`, `plugins::may_use_signin`
 - R4. Resolve a plugin's own files with `plugins::inside_plugin` / `inside_plugin_dir`, its store with `jshost::store_path`, granted folders with `grants::resolve` (reads) and `grants::writable` (writes: never a link, the deepest existing folder inside the root), and other apps' files only as named in `uses.files.read` (`plugins::app_file`); each refuses absolute paths and `..`. Evidence: `plugins::inside_plugin`
 - R5. Validate a manifest only in `plugins::read_manifest`; a new manifest field gets its check there. Evidence: `plugins::read_manifest`
 - R6. A host half's command or tick that runs JavaScript for over 5 s is interrupted (`jshost::SLICE`); move bulk file reads to the async services (`ctx.fs.readMany`, `ctx.fs.walk`), which run off the slice. Evidence: `jshost::SLICE`
-- R7. Add a client-half slot by listing it in `SLOTS` in `app.js` and drawing it with `slotItems` — a slot of rows its own way, each plugin's row drawn on its own (`thread.profile`: `threadSlotRows`, `threadSlotAfter`); register everything a plugin adds under its id so `unloadPlugin` takes it out. Evidence: `unloadPlugin` (window script)
+- R7. Add a client-half slot by listing it in `SLOTS` (window script) and drawing it with `slotItems` — a slot of rows its own way, each plugin's row drawn on its own (`thread.profile`: `threadSlotRows`, `threadSlotAfter`); register everything a plugin adds under its id so `unloadPlugin` takes it out. Evidence: `unloadPlugin` (window script)
 - R8. A new `ctx.echo.read` kind goes in `plugins::ECHO_READS` (the sheet's words) and the `echo.read` arm of `jshost::service`, its data from `share.rs`; an unknown kind is named on the sheet and granted nothing. Evidence: `plugins::ECHO_READS`
 - R9. A plugin's Claude runs only through `claudejob::run` on one of the user's AI profiles, with the Brain narrowed to it; never a plugin's own key or account. Evidence: `claudejob::run`
-- R10. A plugin's session skills go only to Echo's sessions and `claudejob` runs, never to the user's own Claude Code. Evidence: `grants::set_session_skills`
+- R10. A plugin's session skills (its runtime text skills and its package skills) go only to Echo's sessions, never to the user's own Claude Code (Host § Sessions). Evidence: `grants::set_session_skills`, `folder_args::build`
 - R11. Never let a channel's env set a `CLAUDE*` or `ANTHROPIC*` key. Evidence: `jshost::service`
 - R12. Deliver only to the user and the addresses the user set on a routine, never to an address a model picked; anything a model wrote carries `ai_notice`. Evidence: `deliver::send`
-- R13. Add a kind of plugin widget in three places: `plugins::WIDGET_KINDS`, its drawing in `pluginWidgetHtml` (the window script: every text through `esc`, a link only to `echo://`, data it can't draw throws with what is wrong), and its cases in `today-plugin-widgets.test.mjs`; a plugin's widget data is read from its last answer, never by waiting on the plugin while Today draws. Evidence: `widgets::plugin_data`
-- R14. A plugin's store is the plugin's to clean; Echo removes only what lay in its `cache/` over 7 days and its own half-written downloads (`.part`) over an hour, when its host half starts. Echo also keeps the plugin's `threads.json` and `work.json` there, each changed under its own lock across processes (`.locks/<id>.threads.lock`, `.locks/<id>.work.lock`), and moves a `threads.json` that isn't JSON aside as `threads.json.bad-<time>`; the plugin can neither write nor remove them, nor `settings.json`, nor the store folder itself. Evidence: `jshost::sweep_store`, `jshost::not_echos`
-- R15. Echo's sessions run a plugin's commands only as its manifest names them in `uses.sessions.commands` (the sheet says so): the folder session allows them, a read-only routine's guard checks them against `guard::RUN_PLUGIN_COMMANDS`; no other `plugin call`. Evidence: `plugins::session_commands`
+- R13. Add a kind of plugin widget in three places: `plugins::WIDGET_KINDS`, its drawing in `pluginWidgetHtml` (the window script: every text through `esc`, a link only where API § Open, actions and links lets it go, data it can't draw throws with what is wrong), and its cases in `today-plugin-widgets.test.mjs`; a plugin's widget data is read from its last answer, never by waiting on the plugin while Today draws. Evidence: `widgets::plugin_data`
+- R14. Echo's own files in a plugin's store (Host § Store) change only through Echo's services, each under its own lock across processes, and the plugin can neither write nor remove them; Echo removes nothing else of the store but what it sweeps (`cache/`, its `.part` downloads). A marketplace namespace's shared values are no plugin's store and never removed with one. Evidence: `jshost::sweep_store`, `jshost::not_echos`
+- R15. Echo's sessions run a plugin's commands only as its manifest names them in `uses.sessions.commands` (the sheet says so); no other `plugin call` (Host § Sessions). Evidence: `plugins::session_commands`
+- R16. A plugin's package skills reach Echo's sessions only as Echo copies them from the installed package, checked as API § Claude in Echo sets them; the host half can neither write nor remove them (Host § Sessions). Evidence: `grants::copy_package_skills`
+- R17. Echo runs a plugin's script only as `uses.scripts` names it, never through a shell, its arguments as plain words, every run through `plugins::scripts::run`; a run preparing and asking runs only a `readonly` one (Host § Script runs). Evidence: `plugins::scripts::run`
+- R18. A script runs isolated: no stdin, in its own process group killed whole when its time is up or its plugin goes, its output capped, one run of a script at a time across processes, and without Echo's secrets or any `CLAUDE*` / `ANTHROPIC*` key in its environment (Host § Script runs, API § Scripts). Evidence: `plugins::scripts::run`, `plugins::scripts::stop_plugin`
+- R19. The sheet names each script and what it may do, and an update that adds a script or changes any file of a skill folder that has one asks again (API § `uses` and the permission sheet). Evidence: `plugins::scripts::describe_scripts`, `plugins::scripts::check`
+- R20. A dashboard fills its widgets' `thread` / `client` settings itself and offers only the widgets that have them; each place a widget is on is asked, and its answer kept, on its own (Host § Dashboards). Evidence: `today_layout::params_on`, `today_layout::Page::holds_thread`
+- R21. Plugins reach Claude in Echo only through what Echo lays out at `.plugins/<id>/` and one line each in Echo's core; guarded runs never write under `.plugins/`, and the sessions' pre-tool hook refuses writes there (Host § Layout). Evidence: `plugins::agent::lay_out`, `guard`
 
 ### Constraints
 | Do not | Do instead | Evidence |
 |---|---|---|
-| Put a link or special file in a plugin or marketplace tree | Ship plain files within 400 files / 20 MB a plugin, 5000 / 64 MB a marketplace | `plugins::check_tree` |
+| Put a link or special file in a plugin or marketplace tree | Ship plain files within the tree limits (API § Package and manifest) | `plugins::check_tree` |
 | Fetch from a host the manifest doesn't name, or over plain http outside the user's own network | `ctx.http.fetch` to `https://` hosts listed in `uses.network.hosts`, or to what the addresses the user listed in a setting named by `uses.network.hosts_from` match (plain http only inside their own network) | `jshost::fetch`, `plugins::addresses` |
 | Let a plugin set the addresses it may reach (`ctx.settings.set`, its `settings.json`, a manifest `default`) | Only the user enters them, in the window or the CLI; Echo keeps them outside the plugin's store | `plugins::listed_addresses` |
 | Serve a plugin's store to the window beyond audio and pictures | `/plugin/<id>/store/<file>`, media kinds only, kept inside the store | `window::plugins::store_file` |
-| Give Echo's sessions a skill with frontmatter, hooks or `!` commands | Pass `[{name, description, body}]` to `ctx.sessions.skills`; Echo writes the plugin around them | `grants::set_session_skills` |
+| Let a plugin write a runtime skill's frontmatter or hooks | Runtime text: pass `[{name, description, body}]` to `ctx.sessions.skills`, Echo writes the plugin around them; fixed text and scripts: a package skill (R16) | `grants::set_session_skills` |
+| Let a plugin start a program any other way (a shell line, a path it builds, a file in its store) | A script it ships, named in `uses.scripts`, run from the copied folder | `plugins::scripts::run` |
 
 ### Read first
-| When you are | Exemplar | Tests |
-|---|---|---|
-| adding a host service | `jshost::service` | `jshost::a_host_half_gets_echos_services_and_answers_commands` |
-| adding to the client-half `ctx` | `pluginCtx` (window script) | no covering test |
-| changing install, update or remove | `plugins::install` | `plugins::install_update_and_remove_from_a_local_marketplace` |
-| letting a plugin run Claude | `claudejob::Spec::from_value` | `claudejob::a_spec_stays_in_the_plugins_store` |
+Host § Where things are.

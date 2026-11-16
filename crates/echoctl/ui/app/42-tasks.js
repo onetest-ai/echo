@@ -4,6 +4,19 @@ const TASK_PILES = [['mine', 'I owe'], ['owed', 'Owed to me'], ['waiting', 'Wait
 const TASK_SORTS = [['due', 'Due'], ['quiet', 'Quiet longest'], ['project', 'Thread']]
 const TASK_SHOWN = 6
 const projById = (id) => ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === id)
+/** Tasks' Client and Thread as they hold now (nothing changed while drawing): a client with a thread here still, a
+ *  thread still here and of that client — else none. */
+function tkPicks() {
+  const projects = (S.tk.data && S.tk.data.projects) || [], clientOf = (id) => (projById(id) || {}).client
+  const client = S.tk.client && projects.some((p) => clientOf(p.id) === S.tk.client) ? S.tk.client : ''
+  const project = S.tk.project && projects.some((p) => p.id === S.tk.project && (!client || clientOf(p.id) === client)) ? S.tk.project : ''
+  return { client, project }
+}
+/** Whether a card's thread passes Tasks' filters (`k`: `tkPicks()`): the thread picked, else the client's, else all. */
+function tkShows(project, k) {
+  if (k.project) return project === k.project
+  return !k.client || (projById(project) || {}).client === k.client
+}
 const dueText = (c) => c.due && c.due_guessed ? `<span class="tk-due guessed" title="Nobody said this date: never late">${esc(fmtDay(c.due))} · ${esc(dueFrom(c.due_from))}</span>`
   : c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
 /** Who a card is about (the user's rules, 2026-11-02): what you owe — its story, and what blocks
@@ -39,37 +52,43 @@ function tasksView() {
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
   if (d.error) return `<div class="tk"><p class="error">${esc(d.error)}</p></div>`
   const projects = d.projects || []
-  const pick = S.tk.project && projects.some((p) => p.id === S.tk.project) ? S.tk.project : ''
+  // A client narrows Thread to its threads (#533); a thread of another client picked before doesn't hold.
+  const clients = ((S.pj.data && S.pj.data.clients) || []).filter((c) => projects.some((p) => (projById(p.id) || {}).client === c.id))
+  const picks = tkPicks(), client = picks.client, pick = picks.project
+  const ofClient = projects.filter((p) => !client || (projById(p.id) || {}).client === client)
   const name = (id) => (projById(id) || { name: id }).name
   const sorts = {
     due: () => 0,
     quiet: (a, b) => (b.quiet || 0) - (a.quiet || 0),
     project: (a, b) => name(a.project).localeCompare(name(b.project)),
   }
-  const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">All threads</option>${projects.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
+  const cname = (id) => (clients.find((c) => c.id === id) || { name: id }).name
+  const clientChip = clients.length ? `<label class="fchip${client ? ' on' : ''}">${esc(client ? cname(client) : 'All clients')} ▾<select data-tk-client aria-label="Client"><option value="">All clients</option>${clients.map((c) => `<option value="${esc(c.id)}"${client === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''
+  const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : client ? `All of ${cname(client)}'s` : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">${esc(client ? `All of ${cname(client)}'s` : 'All threads')}</option>${ofClient.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
   const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   // Who does it (`taskmodes`): your tasks Claude can do, or the ones by hand.
   const MODES = [['', 'Anyone'], ['claude', 'Claude can do'], ['manual', 'By hand']]
   const modeChip = `<label class="fchip${S.tk.mode ? ' on' : ''}">${esc((MODES.find(([k]) => k === S.tk.mode) || MODES[0])[1])} ▾<select data-tk-mode aria-label="Who does it">${MODES.map(([k, l]) => `<option value="${k}"${S.tk.mode === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${modeChip}${sortChip}</header>`
+  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${clientChip}${projChip}${modeChip}${sortChip}</header>`
   if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
   const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0) + ((d.piles || {}).others || []).length
   if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
   const cols = TASK_PILES.map(([k, label]) => {
-    const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
+    const all = ((d.piles || {})[k] || []).filter((c) => tkShows(c.project, picks) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
     return `<section class="tk-col" aria-label="${esc(label)}"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
-  const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
+  const others = ((d.piles || {}).others || []).filter((c) => tkShows(c.project, picks) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
   return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div>${othersPile(others, 'others')}</div>`
 }
 /** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
  *  and what we wait on them for. */
 function asksPanel() {
   const d = S.tk.data
-  const asks = ((d && d.asks) || []).map((a) => ({ ...a, items: a.items.filter((c) => !S.tk.project || c.project === S.tk.project) })).filter((a) => a.items.length)
+  const k = tkPicks()
+  const asks = ((d && d.asks) || []).map((a) => ({ ...a, items: a.items.filter((c) => tkShows(c.project, k)) })).filter((a) => a.items.length)
   const when = (n) => {
     if (!n || !n.start) return 'no meeting this week'
     const s = new Date(n.start), t = new Date()
@@ -120,6 +139,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const t = e.target
   if (t.matches && t.matches('[data-tk-project]')) { S.tk.project = t.value; render() }
+  if (t.matches && t.matches('[data-tk-client]')) { S.tk.client = t.value; S.tk.project = ''; render() }
   if (t.matches && t.matches('[data-tk-sort]')) { S.tk.sort = t.value; render() }
   if (t.matches && t.matches('[data-tk-mode]')) { S.tk.mode = t.value; render() }
 })
@@ -159,7 +179,10 @@ function projectBrief(p) {
   }
   const body = p.brief && p.brief.trim() ? `<div class="doc me-doc" role="region" aria-label="The thread's brief">${p.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — say what this thread is for, so the minutes and Claude know.</div>'
   const recent = (p.calls || []).slice(0, 5).map((c) => `<button class="pj-call" data-call="${esc(c.name)}"><span class="pj-call-d">${c.started_at ? esc(dayLabel(new Date(c.started_at))) : ''}</span><span class="t">${esc(c.title || c.name)}</span>${c.minutes ? '' : '<span class="set-sub">no minutes yet</span>'}</button>`).join('')
-  return `${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>What it is</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${body}</div></section>${pjLinked(p)}
+  // An accordion as a client's About (folded by default), when there is something to fold.
+  const key = `thread:${p.id}`, open = aboutIsOpen(key), has = !!(p.brief && p.brief.trim())
+  const title = has ? `<button type="button" class="about-fold" data-pj="about-fold" data-client="${esc(key)}" aria-expanded="${open}">${CHEV(open)} <b>What it is</b></button>` : '<div><b>What it is</b></div>'
+  return `${dashboardView()}${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card${has ? ` about-acc${open ? ' open' : ''}` : ''}"><div class="set-row">${title}<div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${!has || open ? body : ''}</div></section>${pjLinked(p)}
     <section class="set-sec"><h3>Latest calls</h3><div class="set-card pj-calls">${recent || '<div class="set-row"><div class="set-sub">No calls yet: add a rule on Profile, or put a call in from its header.</div></div>'}</div></section>`
 }
 
@@ -421,14 +444,14 @@ function clientView(data) {
     : ps.length ? `<span class="pf-sub">A client with threads stays: move or delete them first.</span>` : `<button class="btn ghost danger" data-pj="delete-ask">Remove this client…</button>`
   const cd = S.pj.cdata && S.pj.cdata.client && S.pj.cdata.client.id === c.id ? S.pj.cdata : null
   const openTasks = cd && cd.work ? TASK_PILES.reduce((n, [k]) => n + ((cd.work.piles || {})[k] || []).length, 0) : 0
-  const tabs = clientTabs(cd && cd.calls, openTasks, peopleCount())
+  const tabs = withBoards('client', clientTabs(cd && cd.calls, openTasks, peopleCount()))
   const tab = tabs.some(([t]) => t === S.pj.ctab) ? S.pj.ctab : 'overview'
   const head = `<header class="pj-head"><div class="pj-title">${clientIcon(c, 34) || `<span class="pj-ic pf-cic" style="--pj:#8a8a95;width:34px;height:34px">${esc(c.name.slice(0, 1).toUpperCase())}</span>`}<div style="min-width:0"><div class="pj-name"><h2>${esc(c.name)}</h2><span class="tag">${c.internal ? 'your company' : 'client'}</span></div><div class="facts"><span>${ps.length} thread${ps.length === 1 ? '' : 's'}${c.domains.length ? ` · ${esc(c.domains.join(', '))}` : ''}</span></div></div><span class="grow"></span><button class="btn" data-claude-about title="Claude, with Recall, about ${esc(c.name)}">Claude about ${esc(c.name)}</button></div>
-    <div class="tabs" role="tablist">${tabs.map(([t, label]) => `<button class="tab" role="tab" data-pj="ctab" data-tab-id="${t}" aria-selected="${tab === t}">${label}</button>`).join('')}</div></header>`
+    <div class="tabs" role="tablist">${boardTabRow('client', tabs, tab, 'ctab')}</div></header>`
   if (tab !== 'profile') {
     if (!cd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
     if (cd.error) return `${head}<div class="pane pj-pane"><p class="error">${esc(cd.error)}</p></div>`
-    return `${head}<div class="pane pj-pane${tab === 'tasks' || tab === 'people' ? ' wide' : ''}">${tab === 'calls' ? clientCalls(cd) : tab === 'tasks' ? clientTasks(cd) : tab === 'people' ? peopleView() : clientOverview(cd, c)}</div>`
+    return `${head}<div class="pane pj-pane${tab === 'tasks' || tab === 'people' || boardOfTab('client', tab) || tab === 'overview' ? ' wide' : ''}">${tab === 'calls' ? clientCalls(cd) : tab === 'tasks' ? clientTasks(cd) : tab === 'people' ? peopleView() : boardOfTab('client', tab) ? boardPage('client', boardOfTab('client', tab)) : clientOverview(cd, c)}</div>`
   }
   return `${head}
   <div class="pane pj-pane"><div class="pf-card">
@@ -442,6 +465,20 @@ function clientView(data) {
   </div><p class="pf-foot">Saved as you change it · <code>projects/clients.json</code></p></div>`
 }
 
+/** Which clients' About and threads' What it is (`thread:<id>`) are open (this computer's; folded when not said). */
+const aboutStored = () => { try { return JSON.parse(localStorage.getItem('echo.aboutOpen') || '{}') || {} } catch { return {} } }
+/** Whether client `id`'s About is open: this window's choice, else this computer's (own keys only). */
+const aboutIsOpen = (id) => (S.aboutOpen && Object.hasOwn(S.aboutOpen, id) ? S.aboutOpen[id] : Object.hasOwn(aboutStored(), id) && aboutStored()[id] === true)
+function aboutFold(id) {
+  const open = !aboutIsOpen(id)
+  // In memory (a window without storage still folds and opens it), and on this computer when it can.
+  S.aboutOpen = { ...(S.aboutOpen || {}), [id]: open }
+  const o = aboutStored()
+  if (open) o[id] = true
+  else delete o[id]
+  try { localStorage.setItem('echo.aboutOpen', JSON.stringify(o)) } catch { /* storage off: this window only */ }
+}
+
 /** A client's Overview: its description (the user's, edited in place as a thread's brief) and a card
  *  per thread — stage, calls, stories done, open tasks by who has to move, the latest decisions,
  *  what's open (risks, questions). */
@@ -449,7 +486,13 @@ function clientOverview(cd, c) {
   const desc = S.pj.briefEdit != null
     ? `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b><div class="set-sub">Yours: who they are, what you do for them, who matters. Markdown.</div></div><div class="set-ctl"><button class="btn ghost" data-pj="brief-cancel">Cancel</button><button class="btn primary" data-pj="brief-save">Save</button></div></div>
       <div class="me-edit"><textarea id="pj-brief" spellcheck="true" aria-label="About the client (Markdown)">${esc(S.pj.briefEdit)}</textarea><div class="set-sub">⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
-    : `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${cd.brief && cd.brief.trim() ? `<div class="doc me-doc" role="region" aria-label="${esc(`About ${c.name}`)}">${cd.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — who they are, what you do for them, who matters.</div>'}</div></section>`
+    : cd.brief && cd.brief.trim()
+      // An accordion: folded by default (the threads below in view), each client's open or folded remembered.
+      ? (() => {
+        const open = aboutIsOpen(c.id)
+        return `<section class="set-sec"><div class="set-card about-acc${open ? ' open' : ''}"><div class="set-row"><button type="button" class="about-fold" data-pj="about-fold" data-client="${esc(c.id)}" aria-expanded="${open}">${CHEV(open)} <b>About ${esc(c.name)}</b></button><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${open ? `<div class="doc me-doc" role="region" aria-label="${esc(`About ${c.name}`)}">${cd.brief_html}</div>` : ''}</div></section>`
+      })()
+      : `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div><div class="me-doc set-sub">Nothing yet — who they are, what you do for them, who matters.</div></div></section>`
   const PILE_SHORT = { mine: 'I owe', owed: 'owed to me', waiting: 'waiting', nobody: 'nobody named', others: 'others' }
   const card = (p) => {
     const s = p.summary || {}, pl = s.piles || {}
@@ -471,7 +514,7 @@ function clientOverview(cd, c) {
     </div>`
   }
   const open = cd.threads.filter((p) => p.group !== 'closed'), closed = cd.threads.filter((p) => p.group === 'closed')
-  return `${insightsBlock('client', c.id, c.name)}${desc}<section class="set-sec"><h3>Threads</h3>${cd.threads.length ? `<div class="cl-grid">${open.map(card).join('')}${closed.map(card).join('')}</div>` : '<div class="set-card"><div class="set-row"><div class="set-sub">No threads for this client yet — add one on Profile.</div></div></div>'}</section>`
+  return `${dashboardView()}${insightsBlock('client', c.id, c.name)}${desc}<section class="set-sec"><h3>Threads</h3>${cd.threads.length ? `<div class="cl-grid">${open.map(card).join('')}${closed.map(card).join('')}</div>` : '<div class="set-card"><div class="set-row"><div class="set-sub">No threads for this client yet — add one on Profile.</div></div></div>'}</section>`
 }
 /** Every call of the client's threads, newest first, with the threads each is in. */
 function clientCalls(cd) {

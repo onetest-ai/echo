@@ -12,6 +12,13 @@ the user opts in to, transcribes them on the computer, and has Claude Code write
 (vanilla JS, `crates/echoctl/ui/`) shown in a webview — and the same page can be served on localhost, which is how an
 agent tests it. This file is given to every manual-qa role; where it differs from a role's own rules, **this wins**.
 
+The agents and the Playwright MCP are installed in `tests/` (`tests/install.sh`) and load only in a session started
+there (`cd tests && claude`), so a relative path given to a tool resolves from `tests/`. Paths in this file, the
+cases and the scenarios are from the repo root (`tests/fixtures/…`, `tests/cases/…`, `target/debug/echoctl`): every
+tool gets them **absolute**, the repo root in front (Read, Glob, Grep, Write, Edit, the Playwright MCP's `filename`:
+`<repo root>/tests/reports/screenshots/…`), and every Bash call starts at the root, `cd "$(git rev-parse
+--show-toplevel)"` first. The installed agents' own paths are absolute already (`tests/install.sh`).
+
 ## Rules
 
 1. **Made-up data only.** Every run builds its own data folder with `tests/fixtures/make-data.sh <empty dir>`:
@@ -36,8 +43,10 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    tries them. A case or scenario that is `run: agent` but needs the user for a moment (a macOS prompt, a password,
    System Settings, a logout) lists those moments in `user_steps:`, and its steps say "**The user does:** …".
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
-7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
-   per scenario, and **the browser stays open** from one runner to the next — never close the browser while a run goes on.
+7. **A full run executes scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
+   per scenario. The functional gate runs a touched case inside its scenario with only the scenario's prelude and the
+   stages it depends on, never the whole scenario (`.ai-run/guides/quality-gates.md` R2). In both, **the browser stays
+   open** from one runner to the next — never close the browser while a run goes on.
    **Clean up after yourself:** when a scenario (or a one-off check) is done, close its tab and stop its server
    (`serve.sh down <dir>`); at the end of a run only one blank tab is left and no test server runs (the user's own
    ports never touched).
@@ -343,7 +352,7 @@ reads none of it.
   config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `echoctl model use
   large-v3-turbo-q5_0`). No TestCall, BlackHole, ffmpeg or permission: several runs can record on one Mac at once,
   each in its own data folder.
-- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
+- **Prelude** (each Bash call is a fresh shell): `cd "$(git rev-parse --show-toplevel)"; . <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
 - **A call recorded by `echoctl capture`** (no app running): `$C start acme-sync; target/debug/echoctl capture
   --seconds 38 --title "<title>"`. The last line `capture` prints is the call folder. `capture` reads the feeds
   whether or not a call is on; with one on, it starts at the call's clock.
@@ -500,7 +509,7 @@ table above — a case that needs more adds it in its Preconditions with the `ec
 
 A **case** is one behaviour (the unit of coverage, `tests/cases/`). A **scenario** is a user's journey that chains
 cases in one run (`tests/scenarios/S-NN_<slug>.md`): its frontmatter lists the case files in order (`cases:`), and its
-**Stages** table gives each stage's case, the stages it depends on, and any glue step before it. Agent runs execute
+**Stages** table gives each stage's case, the stages it depends on, and any glue step before it. Full agent runs execute
 scenarios: far fewer runners than cases, and the cases meet each other the way a user meets them.
 
 **Running one (the runner):**

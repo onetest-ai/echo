@@ -229,7 +229,7 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
         let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
         return brain::mcp::serve(Some(access), who);
     }
-    if notes::headless() {
+    if notes::run_limited() {
         anyhow::bail!("the Brain isn't changed from a run Echo started");
     }
     match cmd {

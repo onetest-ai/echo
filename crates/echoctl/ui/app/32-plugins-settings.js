@@ -96,6 +96,7 @@ function plDetail(p, x) {
   if (card && x.enabled && !sec) { try { own = card.render() } catch (e) { own = `<p class="error">${esc(String(e))}</p>` } }
   const broke = (Plugins.errors[x.id] ? `<p class="error">Its window part didn't load: ${esc(Plugins.errors[x.id])}</p>` : '')
     + (x.work_error && x.enabled ? `<p class="set-sub">Its items in ${esc(x.work_error.place)} weren't updated the last time: ${esc(x.work_error.error)}</p>` : '')
+    + (x.claude_problem && x.enabled ? `<p class="set-sub">Claude in Echo doesn't get its guide and skills: ${esc(x.claude_problem)}</p>` : '')
   return `<section class="pl-detail" aria-label="${esc(x.name)}">
     <div class="pl-dhead">${plTile(x, true)}<div style="flex:1;min-width:0"><div class="pl-dn">${esc(x.name)}</div><div class="set-sub">${esc(x.version)} · from <b>${esc(x.market)}</b>${x.market_gone ? ' (removed — no updates)' : ''} · commit <code>${esc((x.commit || '').slice(0, 10))}</code></div></div>
       <button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button></div>
@@ -108,11 +109,15 @@ function plDetail(p, x) {
   </section>`
 }
 function plDiscover(p) {
+  // Featured: by marketplace (as listed), each in its own `featured` order, not by name (#589).
+  const markets = (p.markets || []).map((m) => m.name)
+  const at = (x) => (x.featured_at == null ? Infinity : x.featured_at)
+  const featuredOrder = (a, b) => (markets.indexOf(a.market) - markets.indexOf(b.market)) || (at(a) - at(b)) || 0
   const all = (p.discover || []).filter(plMatch)
   const cats = [...new Set((p.discover || []).flatMap((x) => x.categories || []))].sort()
   const cat = cats.includes(S.plCat) ? S.plCat : ''
   const list = all.filter((x) => !cat || (x.categories || []).includes(cat))
-    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
+    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || (a.featured && featuredOrder(a, b)) || a.name.localeCompare(b.name))
   const chips = cats.length ? `<div class="pl-cats" role="group" aria-label="Categories">${['', ...cats].map((k) => `<button class="pl-cat${k === cat ? ' on' : ''}" data-pl-cat="${esc(k)}">${esc(k ? k[0].toUpperCase() + k.slice(1) : 'All')}</button>`).join('')}</div>` : ''
   const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
   if (!list.length) return chips + reading + `<p class="set-sub">${S.plQuery || cat ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
@@ -151,26 +156,38 @@ function plSheet(sh) {
 function plMarkets(p) {
   const rows = p.markets.map((m) => {
     const busy = plBusy(p, `market:${m.name}`)
-    const state = busy ? esc(busy) : m.error ? `<span class="error">Can’t be read: ${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
+    const state = busy ? esc(busy) : m.error ? '' : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(m.fetched_at))}` : 'Not read yet'
     const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
-    const menu = S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
-    return `<div class="pl-mrow" role="group" aria-label="${esc(m.name)}">${plTile({ id: m.name, name: m.name })}<div class="pl-txt"><div class="pl-n">${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div><div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
-      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button><span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span></div>`
+    // My plugins: the user's own folder — no menu (never hidden or removed), a word on what goes there.
+    const mine = m.name === 'my-plugins'
+    const menu = mine ? '' : S.plMenu === m.name ? `<div class="pl-pop" role="menu"><button role="menuitem" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button role="menuitem" class="danger" data-pl-mask-remove="${esc(m.name)}">Remove…</button>`}</div>` : ''
+    const label = mine ? 'My plugins' : m.name
+    // Removing it removes the plugins installed from it (#616): asked first, naming them, their data kept or not.
+    // Every plugin installed from it, whether its catalog still lists it or not: all of them go (`installed_from`).
+    const ours = (p.installed || []).filter((x) => x.market === m.name).sort((a, b) => a.name.localeCompare(b.name))
+    const names = ours.map((x) => x.name).join(', ')
+    const danger = 'style="background:var(--danger);border-color:var(--danger)"'
+    const ask = S.plMRemove !== m.name ? '' : ours.length
+      ? `<div class="confirm"><span>Remove ${esc(m.name)}? Its ${ours.length} installed plugin${ours.length === 1 ? '' : 's'} go${ours.length === 1 ? 'es' : ''} with it: ${esc(names)}.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn" data-pl-mremove="${esc(m.name)}" data-keep="1">Remove, keep their data</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="0">Remove with their data</button></div>`
+      : `<div class="confirm"><span>Remove ${esc(m.name)}? Its plugins leave Discover.</span><button class="btn" data-pl-mremove-cancel>Cancel</button><button class="btn primary" ${danger} data-pl-mremove="${esc(m.name)}" data-keep="1">Remove</button></div>`
+    const what = mine ? '<div class="pl-s">Your own plugins and widgets, a folder each — ask Claude to make one (the build skill).</div>' : ''
+    return `<div class="pl-mrow" role="group" aria-label="${esc(label)}">${plTile({ id: m.name, name: label })}<div class="pl-txt"><div class="pl-n">${esc(label)}${!mine && m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div>${what}<div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div>${m.error && !busy ? `<div class="error pl-msg">${esc(m.error)}</div>` : ''}</div>
+      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>${mine ? '' : `<span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span>`}</div>${ask}`
   })
   const add = `<section class="pl-add"><b>Add a marketplace</b>
     <div class="pl-addrow"><input class="set-in" id="pl-msrc" placeholder="owner/repo, a git address, or a folder" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="Name (optional)" aria-label="Name" spellcheck="false"><button class="btn primary" data-pl-madd>Add</button></div>
     <div class="set-sub">It needs <code>echo-marketplace.json</code> at its root. Private repositories use your own git sign-in. Plugins from it say who listed them when you install.</div></section>`
   return `<p class="set-sub">Where plugins come from. Echo’s own is built in; add your team’s or company’s catalog — a GitHub repository, any git address, or a folder.</p>
-    <section class="pl-list pl-mlist">${rows.join('')}</section>${Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('')}${add}`
+    <section class="pl-list pl-mlist">${rows.join('')}</section>${Object.keys(p.errors || {}).filter((k) => k.startsWith('market:') && !p.markets.some((m) => `market:${m.name}` === k && m.error)).map((k) => plErr(p, k)).join('')}${add}`
 }
 // The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-mask-remove],[data-pl-mremove-cancel],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
   if (!t) { if (S.plMenu) { S.plMenu = null; render() } return }
   const d = t.dataset
   // The sheet's backdrop closes it; a click inside the sheet doesn't.
   if ('plSheetCancel' in d && t.classList.contains('pl-scrim') && e.target.closest('.pl-sheet')) return
-  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; return render() }
+  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; S.plRemove = null; S.plMRemove = null; return render() }
   if (d.plEnable) { e.stopPropagation(); return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' }) }
   if (d.plSel) { S.plSel = d.plSel; S.plRemove = null; return render() }
   if (d.plCat != null && t.classList.contains('pl-cat')) { S.plCat = d.plCat; return render() }
@@ -196,7 +213,9 @@ document.addEventListener('click', (e) => {
   if (d.plRemove) { S.plRemove = null; return pluginOp('remove', { id: d.plRemove, keep_data: d.keep === '1' }) }
   if (d.plMrefresh) return pluginOp('market_refresh', { name: d.plMrefresh })
   if (d.plMhide) return pluginOp('market_hide', { name: d.plMhide, hidden: d.hidden === 'true' })
-  if (d.plMremove) return pluginOp('market_remove', { name: d.plMremove })
+  if (d.plMaskRemove) { S.plMRemove = d.plMaskRemove; S.plMenu = null; return render() }
+  if ('plMremoveCancel' in d) { S.plMRemove = null; return render() }
+  if (d.plMremove) { S.plMRemove = null; return pluginOp('market_remove', { name: d.plMremove, keep_data: d.keep !== '0' }) }
   if ('plMadd' in d) {
     const source = ($('#pl-msrc') || {}).value || '', name = ($('#pl-mname') || {}).value || ''
     if (source.trim()) pluginOp('market_add', { source: source.trim(), name: name.trim() })
@@ -212,7 +231,7 @@ document.addEventListener('input', (e) => {
 })
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
-const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
+const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error pl-msg">${esc(p.errors[key])}</div>` : ''
 async function loadDeliver() {
   try { S.deliver = await get('api/deliver') } catch { /* app restarting */ }
 }

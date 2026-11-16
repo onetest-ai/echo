@@ -23,6 +23,8 @@ pub fn widget(cmd: WidgetCmd) -> Result<()> {
             // A plugin's widget: its provider asked now, waited for (its author sees the answer it gives).
             #[cfg(feature = "js")]
             if let Some((plugin, widget)) = id.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                // A terminal's host: it answers this and ends, so the plugin skips its start-up work (`ctx.terminal`).
+                crate::jshost::no_timers();
                 crate::jshost::widget_ask_now(plugin, widget);
             }
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -51,7 +53,11 @@ pub fn work(cmd: WorkCmd) -> Result<()> {
                 crate::projects::load(t)?;
             }
             #[cfg(feature = "js")]
-            print_json(&crate::jshost::work::show(thread.as_deref()));
+            {
+                // A terminal's host (see `widget show`).
+                crate::jshost::no_timers();
+                print_json(&crate::jshost::work::show(thread.as_deref()));
+            }
             #[cfg(not(feature = "js"))]
             anyhow::bail!("this build runs no plugins");
         }
@@ -110,23 +116,99 @@ pub enum TodayCmd {
     Height { widget: String, height: u8 },
     /// Set one of a widget's settings: `echoctl today set core:tasks.glance period month`
     Set { widget: String, key: String, value: String },
+    /// The settings the widgets here share (Filters), or set one on all of them: `echoctl today --client acme filter
+    /// thread acme-rollout` ("" for a thread or client: all)
+    Filter { key: Option<String>, value: Option<String> },
     /// Take a widget off Today
     Remove { widget: String },
     /// Today as it comes: Needs you now, the routines' cards, Your day beside My work
     Reset,
 }
 
-pub fn today(cmd: Option<TodayCmd>) -> Result<()> {
+pub fn today(thread: Option<&str>, client: Option<&str>, board: Option<&str>, cmd: Option<TodayCmd>) -> Result<()> {
+    let page = layout::Page::of(thread, client)?.on_board(board)?;
     let items = match cmd.unwrap_or(TodayCmd::Show) {
-        TodayCmd::Show => layout::load(),
-        TodayCmd::Add { widget, size, target } => layout::add(&widget, size.as_deref(), target.get())?,
-        TodayCmd::Move { widget, target } => layout::move_to(&widget, target.get())?,
-        TodayCmd::Size { widget, size } => layout::resize(&widget, &size)?,
-        TodayCmd::Height { widget, height } => layout::set_height(&widget, height)?,
-        TodayCmd::Set { widget, key, value } => layout::set_param(&widget, &key, &value)?,
-        TodayCmd::Remove { widget } => layout::remove(&widget)?,
-        TodayCmd::Reset => layout::reset()?,
+        TodayCmd::Show => layout::load_on(&page),
+        TodayCmd::Add { widget, size, target } => layout::add_on(&page, &widget, size.as_deref(), target.get())?,
+        TodayCmd::Move { widget, target } => layout::move_on(&page, &widget, target.get())?,
+        TodayCmd::Size { widget, size } => layout::resize_on(&page, &widget, &size)?,
+        TodayCmd::Height { widget, height } => layout::set_height_on(&page, &widget, height)?,
+        TodayCmd::Set { widget, key, value } => layout::set_param_on(&page, &widget, &key, &value)?,
+        TodayCmd::Filter { key: None, .. } => {
+            print_json(&layout::filters_on(&page)["filters"]);
+            return Ok(());
+        }
+        TodayCmd::Filter { key: Some(key), value } => {
+            let value = value.ok_or_else(|| anyhow::anyhow!("filter {key}: say the value (\"\" for all)"))?;
+            let set = layout::set_filter_on(&page, &key, &value)?;
+            // Each plugin widget among them is asked again when the page is next read (its settings changed).
+            print_json(&serde_json::json!({ "set": set }));
+            return Ok(());
+        }
+        TodayCmd::Remove { widget } => layout::remove_on(&page, &widget)?,
+        TodayCmd::Reset => layout::reset_on(&page)?,
     };
     print_json(&serde_json::json!(items));
+    Ok(())
+}
+
+#[derive(Subcommand)]
+pub enum DashboardCmd {
+    /// The dashboards in their order (JSON), beside every thread's Brief (--thread) or every client's Overview (--client)
+    List {
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// A new dashboard, last: `echoctl dashboard add --client Staffing` (then `echoctl today --client <id> --board <its id> add …`)
+    Add {
+        name: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Rename one (its id stays)
+    Rename {
+        id: String,
+        name: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Put one at a place: 1 is first after the Brief (the Overview)
+    Move {
+        id: String,
+        to: usize,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Remove one from every thread (client), its layout with it
+    Remove {
+        id: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+}
+
+pub fn dashboard(cmd: DashboardCmd) -> Result<()> {
+    use crate::boards::{self, Kind};
+    let kind = |client: bool| if client { Kind::Client } else { Kind::Thread };
+    match cmd {
+        DashboardCmd::List { client, .. } => print_json(&serde_json::to_value(boards::list(kind(client)))?),
+        DashboardCmd::Add { name, client, .. } => print_json(&serde_json::to_value(boards::add(kind(client), &name)?)?),
+        DashboardCmd::Rename { id, name, client, .. } => print_json(&serde_json::to_value(boards::rename(kind(client), &id, &name)?)?),
+        DashboardCmd::Move { id, to, client, .. } => print_json(&serde_json::to_value(boards::move_to(kind(client), &id, to.saturating_sub(1))?)?),
+        DashboardCmd::Remove { id, client, .. } => {
+            boards::remove(kind(client), &id)?;
+            print_json(&serde_json::to_value(boards::list(kind(client)))?)
+        }
+    }
     Ok(())
 }

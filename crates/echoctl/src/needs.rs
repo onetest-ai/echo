@@ -41,6 +41,17 @@ fn save(v: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Change `needs.json` under its lock, read again inside it: a read of Teams and mail (minutes long) never writes back a
+/// copy older than a decision made meanwhile, from this process or another.
+fn update<T>(f: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+    fs::create_dir_all(paths::state_dir())?;
+    let _lock = crate::plugins::wait_lock_for(&paths::state_dir().join("needs.lock"), "Needs you now", std::time::Duration::from_secs(30))?;
+    let mut st = load();
+    let out = f(&mut st)?;
+    save(&st)?;
+    Ok(out)
+}
+
 fn at(v: &Value) -> Option<DateTime<Utc>> {
     v.as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc))
 }
@@ -280,6 +291,17 @@ fn confirm(p: &crate::projects::Project, texts: &[(String, String)]) -> Result<V
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
+/// What a read found: its items, what it asked the model, its errors — written over only those, never the decisions.
+fn keep_read(items: Vec<Value>, asked: serde_json::Map<String, Value>, errors: Vec<String>) -> Result<()> {
+    update(|st| {
+        st["items"] = json!(items);
+        st["asked"] = Value::Object(asked);
+        st["checked_at"] = json!(Utc::now().to_rfc3339());
+        st["errors"] = json!(errors);
+        Ok(())
+    })
+}
+
 /// Read Teams and mail again (the app, every 5 minutes; Today's Refresh). Nothing without a Microsoft 365 sign-in.
 pub fn refresh() -> Result<()> {
     if graph::account().is_none() || RUNNING.swap(true, Ordering::SeqCst) {
@@ -288,32 +310,38 @@ pub fn refresh() -> Result<()> {
     let r = (|| -> Result<()> {
         let since = Utc::now() - Duration::hours(WINDOW_HOURS);
         let me = my_id().ok_or_else(|| anyhow!("your Microsoft 365 account couldn't be read"))?;
-        let mut st = load();
-        let mut asked = st["asked"].as_object().cloned().unwrap_or_default();
-        let mut tagged = vec![];
-        let mut errors = vec![];
-        match teams_tagged(&me, since) {
-            Ok(v) => tagged.extend(v),
-            Err(e) => errors.push(format!("Teams: {e:#}")),
-        }
-        match mail_tagged(since) {
-            Ok(v) => tagged.extend(v),
-            Err(e) => errors.push(format!("mail: {e:#}")),
-        }
-        let mut items = waiting_on_me(tagged, &mut asked);
-        items.extend(hot(&me, since, &mut asked));
-        if asked.len() > 200 {
-            let keep: BTreeMap<String, Value> = asked.into_iter().rev().take(200).collect();
-            asked = keep.into_iter().collect();
-        }
-        st["items"] = json!(items);
-        st["asked"] = Value::Object(asked);
-        st["checked_at"] = json!(Utc::now().to_rfc3339());
-        st["errors"] = json!(errors);
-        save(&st)
+        read_and_keep(|asked| read_graph(&me, since, asked))
     })();
     RUNNING.store(false, Ordering::SeqCst);
     r
+}
+
+/// A read: what was asked of the model so far in, `read` (slow: Teams, mail, the model) out, then only what it found
+/// kept (`keep_read`, under the lock) — never a copy of the file from before the read.
+fn read_and_keep(read: impl FnOnce(&mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>)) -> Result<()> {
+    let mut asked = load()["asked"].as_object().cloned().unwrap_or_default();
+    let (items, errors) = read(&mut asked);
+    if asked.len() > 200 {
+        let keep: BTreeMap<String, Value> = asked.into_iter().rev().take(200).collect();
+        asked = keep.into_iter().collect();
+    }
+    keep_read(items, asked, errors)
+}
+
+fn read_graph(me: &str, since: DateTime<Utc>, asked: &mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>) {
+    let mut tagged = vec![];
+    let mut errors = vec![];
+    match teams_tagged(me, since) {
+        Ok(v) => tagged.extend(v),
+        Err(e) => errors.push(format!("Teams: {e:#}")),
+    }
+    match mail_tagged(since) {
+        Ok(v) => tagged.extend(v),
+        Err(e) => errors.push(format!("mail: {e:#}")),
+    }
+    let mut items = waiting_on_me(tagged, asked);
+    items.extend(hot(me, since, asked));
+    (items, errors)
 }
 
 /// What Today shows: the open items, newest first — hot first — leaving out those decided (I'll do it, Won't do).
@@ -346,12 +374,15 @@ pub fn item(id: &str) -> Option<Value> {
         .or_else(|| Some(st["decided"][id]["item"].clone()).filter(|v| v.is_object()))
 }
 
-/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here), `wont` (gone; Won't do's
-/// comment kept as its `note`) or `claude` (handed to Claude, from the dialog: Work on it or Yolo). Gives the task
+/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here), `ignore` (gone, nothing else),
+/// `wont` (gone; Won't do's comment kept as its `note`) or `claude` (handed to Claude, from the dialog: Work on it or Yolo). Gives the task
 /// made and the item as it was.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, note: Option<&str>) -> Result<Value> {
-    let mut st = load();
+    update(|st| decide_in(st, id, how, thread, title, note))
+}
+
+fn decide_in(st: &mut Value, id: &str, how: &str, thread: Option<&str>, title: Option<&str>, note: Option<&str>) -> Result<Value> {
     let item = st["items"].as_array().into_iter().flatten().find(|x| x["id"].as_str() == Some(id)).cloned().ok_or_else(|| anyhow!("that item is gone"))?;
     let mut made = Value::Null;
     if how == "todo" {
@@ -361,8 +392,8 @@ pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, no
         let note = format!("From {}{}: {}", item["from"].as_str().unwrap_or("someone"), item["where"].as_str().map(|w| format!(" ({w})")).unwrap_or_default(), item["line"].as_str().unwrap_or(""));
         let story = follow_ups(&thread)?;
         made = crate::ledger::human_event(&thread, &json!({"op": "create", "kind": "task", "parent": story, "title": title.chars().take(200).collect::<String>(), "internal_owner": me, "description": note.chars().take(1200).collect::<String>(), "due": Utc::now().format("%Y-%m-%d").to_string()}))?;
-    } else if how != "wont" && how != "claude" {
-        anyhow::bail!("decide: todo, wont or claude");
+    } else if !matches!(how, "wont" | "claude" | "ignore") {
+        anyhow::bail!("decide: todo, wont, claude or ignore");
     }
     let mut d = st["decided"].as_object().cloned().unwrap_or_default();
     let mut dv = json!({"how": how, "at": Utc::now().to_rfc3339(), "item": item});
@@ -374,7 +405,6 @@ pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, no
     let cut = Utc::now() - Duration::hours(48);
     d.retain(|_, v| at(&v["at"]).is_none_or(|t| t >= cut));
     st["decided"] = Value::Object(d);
-    save(&st)?;
     Ok(json!({"made": made, "item": item}))
 }
 
@@ -450,6 +480,23 @@ mod tests {
     }
 
     #[test]
+    fn a_decision_made_while_teams_and_mail_are_read_is_kept() {
+        let (_env, _) = paths::testenv::folders("needs-race");
+        let now = Utc::now().to_rfc3339();
+        let item = json!({"id": "mail:c1", "kind": "tagged", "at": now, "line": "Off-site plan", "from": "Dana Kowal", "where": "Mail to you"});
+        save(&json!({"items": [item.clone()]})).unwrap();
+        // A read of Teams and mail begins and finds the item; meanwhile (the read is slow) the user ignores it.
+        read_and_keep(|_| {
+            decide("mail:c1", "ignore", None, None, None).unwrap();
+            (vec![item], vec![])
+        })
+        .unwrap();
+        assert_eq!(load()["decided"]["mail:c1"]["how"], "ignore", "the read keeps the decision made meanwhile");
+        assert!(view()["items"].as_array().unwrap().is_empty(), "ignored: off Needs you now, though the read found it again");
+        assert!(load()["decided"]["mail:c1"].get("note").is_none(), "nothing else kept: no comment, no task");
+    }
+
+    #[test]
     fn decided_items_leave_the_view() {
         let (_env, _) = paths::testenv::folders("needs-view");
         let now = Utc::now().to_rfc3339();
@@ -469,7 +516,7 @@ mod tests {
         assert_eq!(item("hot:x").unwrap()["line"], "Checkout is down");
         assert!(decide("hot:x", "claude", None, None, None).unwrap()["made"].is_null());
         assert_eq!((load()["decided"]["hot:x"]["how"].as_str(), view()["items"].as_array().unwrap().len()), (Some("claude"), 0));
-        assert!(decide("mail:old", "maybe", None, None, None).is_err(), "todo, wont or claude only");
+        assert!(decide("mail:old", "maybe", None, None, None).is_err(), "todo, wont, claude or ignore only");
         // The next read drops it from the list; its link still reads it, from the decision's copy.
         let mut st = load();
         st["items"] = json!([]);

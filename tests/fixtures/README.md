@@ -28,8 +28,9 @@ laid back from 23:59, each over by the next one's start, the unanswered Industry
 minute at 22:50; `at.chain`, #364); built after about 21:50 all three start sooner, and at 22:50 the first, Globex
 design review, starts 8 minutes after the build, so run what needs it still to come at once, or build earlier. The
 hostile set's own meeting (HOSTILE-48) is never at once with a meeting you go to (#371): 72–96 minutes after the
-build, or, built after about 21:35, laid back into the free time 21–36 minutes after it. The standard set's Zoom and Meet invites are squeezed whole, ends too (shorter
-late, never overlapping). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
+build, or, built after about 21:35, laid back into the free time 21–36 minutes after it. The standard set's Zoom and Meet invites come after the meetings to come are over, one
+after the other (`invite_times`): built late, they share what is left of the day up to 23:59, shorter (a minute each at
+22:50), so they are never at once with them or each other and The day's choices keep their lines at any hour. The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
 after it, so the cases' timings hold; after 22:50 those would end tomorrow, and before 06:00 the calls of the last
 6 hours would be yesterday's, so the generator refuses. For checks that don't need Today to match the real
 clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).
@@ -147,8 +148,8 @@ exactly, and costs nothing. `serve.sh down` stops the server; with `make_data.py
   (`model_server.py`'s docstring). The default (`VIRTUAL_SCRIPT` in `make_data.py`) writes minutes the way process-call
   does: `echoctl context`, Read the transcript, Write `notes.md` and the run's action list, `echoctl actions --apply`.
   A case that needs other answers copies one from `tests/fixtures/model-scripts/` (`guard-probe.json`: a model that
-  tries to leave its call; `prep-summary.json`, `yolo-task.json`, `thread-sync.json`: a meeting's prep, Yolo on a task and
-  a thread's sync on the `standard` set, S-33) before its run.
+  tries to leave its call; `prep-summary.json`, `yolo-task.json`, `yolo-asks.json`, `yolo-runs.json`, `thread-sync.json`: a meeting's prep, Yolo on a
+  task (and on an item of Needs you now, for Yolo runs) and a thread's sync on the `standard` set, S-33) before its run.
 - **The log** is `<dir>/model/model-log.jsonl`, one line per request: the system prompt, the messages (tool results
   included), the tool names offered, the rule and step that answered. A case checks there what Echo gave the model and
   what it was told back.

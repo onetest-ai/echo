@@ -1,0 +1,8 @@
+{
+  "id": "agent-double",
+  "name": "Agent double",
+  "version": "0.1.0",
+  "summary": "A test package for `echoctl plugin check` (tests/cases/plugins/TC-037): two skills laid out alike with its prefix (kb-x and x).",
+  "skills": ["skills/kb-x", "skills/x"],
+  "agent": {"prefix": "kb"}
+}

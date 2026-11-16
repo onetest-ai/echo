@@ -24,40 +24,105 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
             json_reply(crate::graph::message(&id).map(|m| json!({"subject": m["subject"], "from": m["from"], "at": m["at"], "text": m["text"], "url": m["url"]})).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
+        // Yolo runs (#603): every run Claude did on its own, newest first; a run's details (`?id=`): its log's end, as text the page escapes, and what it changed and sent.
+        "/api/yolo" => json_reply(json!({"runs": crate::yolo::runs(), "keep_days": crate::yolo::KEEP_DAYS})),
+        "/api/yolo/log" => {
+            let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
+            json_reply(crate::yolo::details(&id).unwrap_or_else(|| json!({"error": "that run's log is gone"})))
+        }
         // The widgets Today can show (the catalog: Echo's, later the plugins').
         "/api/widgets" => json_reply(json!(crate::widgets::catalog())),
+        // The dashboards beside every thread's Brief and every client's Overview, in their order.
+        "/api/boards" => json_reply(json!({"thread": crate::boards::list(crate::boards::Kind::Thread), "client": crate::boards::list(crate::boards::Kind::Client)})),
+        // A thread's or a client's dashboard (`page=thread:<id>`): its layout, each plugin widget's data as that page asks
+        // it (`all=1`, editing: every widget it offers, previewed), and the ids it offers.
+        "/api/dashboard" => {
+            let q = req.uri().query().unwrap_or("");
+            let page = match crate::today_layout::Page::parse(&query_param(q, "page").unwrap_or_default()) {
+                Ok(p) if p != crate::today_layout::Page::Today => p,
+                _ => return Some(json_reply(json!({"error": "a dashboard is a thread's or a client's page"}))),
+            };
+            let layout = crate::today_layout::load_on(&page);
+            let offered: Vec<String> = crate::widgets::catalog().into_iter().filter(|w| page.offers(w)).map(|w| w.id.to_string()).collect();
+            let all = query_param(q, "all").is_some_and(|a| a == "1");
+            // My work reads the Tasks view (only when it is drawn here).
+            let mine = offered.iter().any(|id| id == "core:tasks.mine") && (all || layout.iter().any(|l| l.widget == "core:tasks.mine"));
+            let tasks = if mine { tasks_view() } else { json!({}) };
+            let i = crate::widgets::Inputs { tasks: &tasks };
+            // Echo's own widgets it offers (those that learn a thread or a client): their data with the page's settings.
+            let core: serde_json::Map<String, Value> = offered
+                .iter()
+                .filter(|id| id.starts_with("core:") && (all || layout.iter().any(|l| &l.widget == *id)))
+                .filter_map(|id| crate::widgets::data_on(&page, id, &i).ok().map(|d| (id.clone(), d)))
+                .collect();
+            // Your day's lines with a Teams transcript being imported, as on Today.
+            let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
+            let mut core = core;
+            for d in core.values_mut() {
+                for x in d["day"].as_array_mut().into_iter().flatten() {
+                    if let Some(st) = x["event"].as_str().and_then(|e| imports.get(e)) {
+                        x["import"] = st.clone();
+                    }
+                }
+            }
+            let plugins: serde_json::Map<String, Value> = offered
+                .iter()
+                .filter(|id| id.starts_with("plugin:"))
+                .filter_map(|id| {
+                    let placed = layout.iter().any(|l| &l.widget == id);
+                    let d = if placed { crate::widgets::data_on(&page, id, &i) } else if all { crate::widgets::preview_on(&page, id, &i) } else { return None };
+                    d.ok().map(|d| (id.clone(), d))
+                })
+                .collect();
+            json_reply(json!({"page": page.key(), "layout": layout, "offered": offered, "core": core, "plugins": plugins}))
+        }
         "/api/today" => {
-            let mut v = crate::today::view(&tasks_view());
+            let tasks = tasks_view();
+            let mut v = crate::today::view(&tasks);
             // Which widgets Today shows, in what order and rows (this computer's `today-layout.json`).
             let layout = crate::today_layout::load();
+
+            // `all=1` (Today's edit mode, Add a widget's previews): every widget's data, placed or not.
+            let all = query_param(req.uri().query().unwrap_or(""), "all").is_some_and(|a| a == "1");
+            let ids: Vec<String> = if all { crate::widgets::catalog().into_iter().map(|w| w.id.to_string()).collect() } else { layout.iter().map(|i| i.widget.clone()).collect() };
+            let wants = |id: &str| ids.iter().any(|i| i == id);
             // Next meeting only when it is on Today: its prep and the invite's answers are read for it.
-            if layout.iter().any(|i| i.widget == "core:calendar.next") {
+            if wants("core:calendar.next") {
                 let day: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
                 v["next"] = crate::widgets::next_meeting(&day)["next"].clone();
             }
             // Threads at a glance and Done this week only when one is on Today (each thread's work is read for them).
             // Each with its own period (a widget's setting): `glances` by widget.
-            let glances: serde_json::Map<String, Value> = layout
-                .iter()
-                .filter(|i| i.widget == "core:tasks.glance" || i.widget == "core:tasks.done")
-                .map(|i| (i.widget.clone(), crate::glance::today(crate::today_layout::params_of(&i.widget).get("period").and_then(Value::as_str).unwrap_or("week"))))
+            let glances: serde_json::Map<String, Value> = ["core:tasks.glance", "core:tasks.done"]
+                .into_iter()
+                .filter(|id| wants(id))
+                .map(|id| (id.to_string(), crate::widgets::glance_for(&crate::today_layout::params_of(id))))
                 .collect();
             if !glances.is_empty() {
                 v["glances"] = json!(glances);
             }
             // Plugins' widgets on Today: their last data, by id (each asked again in the background when stale).
             let tasks = json!({});
-            let plugins: serde_json::Map<String, Value> = layout
+            let plugins: serde_json::Map<String, Value> = ids
                 .iter()
-                .filter(|i| i.widget.starts_with("plugin:"))
-                .filter_map(|i| crate::widgets::data(&i.widget, &crate::widgets::Inputs { tasks: &tasks }).ok().map(|d| (i.widget.clone(), d)))
+                .filter(|id| id.starts_with("plugin:"))
+                .filter_map(|id| {
+                    let i = crate::widgets::Inputs { tasks: &tasks };
+                    // On Today: asked again when stale; only previewed (edit mode): its last answer.
+                    let d = if layout.iter().any(|l| &l.widget == id) { crate::widgets::data(id, &i) } else { crate::widgets::preview_data(id, &i) };
+                    d.ok().map(|d| (id.clone(), d))
+                })
                 .collect();
             if !plugins.is_empty() {
                 v["plugins"] = json!(plugins);
             }
+            // Filters, only when it is on Today: the settings Today's widgets share.
+            if wants(crate::today_layout::FILTERS) {
+                v["filters"] = crate::today_layout::filters_on(&crate::today_layout::Page::Today);
+            }
             // Recorded this week, only when it is on Today.
-            if layout.iter().any(|i| i.widget == "core:calls.week") {
-                v["calls_week"] = crate::calls_week::today();
+            if wants("core:calls.week") {
+                v["calls_week"] = crate::widgets::calls_for(&crate::today_layout::params_of("core:calls.week"));
             }
             v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
@@ -66,6 +131,18 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 if let Some(st) = x["event"].as_str().and_then(|e| imports.get(e)) {
                     x["import"] = st.clone();
                 }
+            }
+            // Your day, Next meeting and My work set to a thread or a client (⚙): each its own data, by widget, cut
+            // from the day just read (its imports said); the head and the others keep the whole day.
+            let day: Vec<Value> = v["day"].as_array().cloned().unwrap_or_default();
+            let i = crate::widgets::Inputs { tasks: &tasks };
+            let scoped: serde_json::Map<String, Value> = ["core:calendar.agenda", "core:calendar.calendar", "core:calendar.strip", "core:calendar.next", "core:tasks.mine"]
+                .into_iter()
+                .filter(|id| layout.iter().any(|l| l.widget == *id))
+                .filter_map(|id| crate::widgets::scoped_from(id, &day, &crate::today_layout::params_of(id), &i).map(|d| (id.to_string(), d)))
+                .collect();
+            if !scoped.is_empty() {
+                v["scoped"] = json!(scoped);
             }
             json_reply(v)
         }
@@ -81,7 +158,12 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
-        // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
+        // A thread's or client's own dashboards: add (last), rename, move (to a place), remove — as `echoctl dashboard`.
+        "board_op" => match board_op(v) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Today → Needs you now: I'll do it (a task, in a thread), Won't do or Ignore; Refresh reads Teams and mail again.
         "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str(), None) {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
@@ -144,6 +226,19 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
 }
 
 /// A change to Today's layout from edit mode (`{cmd: "today_layout", op, widget, size?, target?, side?}`).
+fn board_op(v: &Value) -> anyhow::Result<()> {
+    use crate::boards::{self, Kind};
+    let kind = Kind::parse(v["kind"].as_str().unwrap_or(""))?;
+    let (id, name) = (v["id"].as_str().unwrap_or(""), v["name"].as_str().unwrap_or(""));
+    match v["op"].as_str().unwrap_or("") {
+        "add" => boards::add(kind, name).map(|_| ()),
+        "rename" => boards::rename(kind, id, name).map(|_| ()),
+        "move" => boards::move_to(kind, id, v["to"].as_u64().unwrap_or(0) as usize).map(|_| ()),
+        "remove" => boards::remove(kind, id),
+        o => anyhow::bail!("unknown dashboard operation {o:?}"),
+    }
+}
+
 fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> {
     use crate::today_layout::{self as l, Side};
     let w = v["widget"].as_str().unwrap_or("");
@@ -155,22 +250,37 @@ fn today_layout_op(v: &Value) -> anyhow::Result<Vec<crate::today_layout::Item>> 
         _ => None,
     };
     let target = v["target"].as_str().filter(|t| !t.is_empty()).zip(side);
+    // Today's, or a thread's or client's dashboard (`page`: `thread:<id>`, `client:<id>`).
+    let page = l::Page::parse(v["page"].as_str().unwrap_or(""))?;
     match v["op"].as_str().unwrap_or("") {
-        "add" => l::add(w, v["size"].as_str(), target),
-        "move" => l::move_to(w, target),
+        "add" => l::add_on(&page, w, v["size"].as_str(), target),
+        "move" => l::move_on(&page, w, target),
         "params" => {
-            let items = l::set_param(w, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
+            let items = l::set_param_on(&page, w, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
             // A plugin's widget is asked again at once with its new settings.
             #[cfg(feature = "js")]
             if let Some((plugin, widget)) = w.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
-                crate::jshost::widget_ask(plugin, widget);
+                crate::jshost::widget_ask_on(plugin, widget, &page);
             }
             Ok(items)
         }
-        "size" => l::resize(w, v["size"].as_str().unwrap_or("")),
-        "height" => l::set_height(w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),
-        "remove" => l::remove(w),
-        "reset" => l::reset(),
+        // Filters: one setting on every widget here that has it, each plugin widget among them asked again at once.
+        "filter" => {
+            let set = l::set_filter_on(&page, v["key"].as_str().unwrap_or(""), &match &v["value"] { Value::String(s) => s.clone(), x => x.to_string() })?;
+            #[cfg(feature = "js")]
+            for w in &set {
+                if let Some((plugin, widget)) = w.strip_prefix("plugin:").and_then(|r| r.split_once(':')) {
+                    crate::jshost::widget_ask_on(plugin, widget, &page);
+                }
+            }
+            #[cfg(not(feature = "js"))]
+            let _ = set;
+            Ok(l::load_on(&page))
+        }
+        "size" => l::resize_on(&page, w, v["size"].as_str().unwrap_or("")),
+        "height" => l::set_height_on(&page, w, v["height"].as_u64().and_then(|h| u8::try_from(h).ok()).unwrap_or(0)),
+        "remove" => l::remove_on(&page, w),
+        "reset" => l::reset_on(&page),
         op => anyhow::bail!("Today's layout: no change {op:?}"),
     }
 }

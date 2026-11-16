@@ -270,6 +270,8 @@ pub(super) fn route(path: &str, _req: &Request<Vec<u8>>) -> Option<Response<Cow<
         "/api/settings" => json_reply(settings_snapshot()),
         // Settings → Templates: the minutes templates, Echo's and the user's.
         "/api/templates" => json_reply(crate::calls::templates_view()),
+        // What's new: every version's entry (⌘K and Settings → General open it again).
+        "/api/whats-new" => json_reply(crate::whats_new::all()),
         _ => return None,
     })
 }
@@ -298,6 +300,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         }
         // A release's one-time banner, answered with one of its buttons (`announce::answer`).
         "announcement" => match crate::announce::answer(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // What's new was shown: the running version counts as seen, never shown again.
+        "whats_new_seen" => match crate::whats_new::mark_seen() {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },

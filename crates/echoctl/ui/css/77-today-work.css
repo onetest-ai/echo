@@ -6,7 +6,6 @@
 .wr-letter { display: inline-grid; place-items: center; font: 600 9px var(--sans, inherit); color: var(--bg); background: var(--text-3); }
 .wr-late { color: var(--danger); font-size: 12px; }
 .wr-stale { flex: none; color: var(--warn, var(--text-3)); }
-.td-plug .pw-ask { grid-column: 1 / -1; }
 .wk-plug { margin: 0 0 12px; }
 .wk-plug .td-tasks { overflow: visible; }
 .pal-label .wr-ic { display: inline-grid; margin-right: 6px; vertical-align: -1px; }
