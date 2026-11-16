@@ -174,7 +174,7 @@ folder) lists them all, one JSON line each — Read it; its `file` is relative t
 (`frames/42m10s.jpg` → Read `<dir>/frames/42m10s.jpg`). Look at the frames with Read: the sample, and on a longer call
 also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section (a fixed template's own, step 3): one bullet per
-meaningful frame, `[mm:ss]`, the frame's file name without its folder, as plain text (`05m07s.jpg`, not a path or a link) and what it showed, only facts visible in the image: describe what
+meaningful frame, starting `- [mm:ss]`, then the frame's file name without its folder, as plain text (`05m07s.jpg`, not a path or a link), and what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
 should show; if you can't tell, write "shared screen" and nothing more. A frame's `shared_by`
 says whose screen it was, not who presented it. Skip frames that are just video tiles or the
