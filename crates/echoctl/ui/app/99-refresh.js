@@ -70,7 +70,7 @@ const selftestTerm = (windows) => windows
 window.echo = {
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
-  templateSaved(id, created, which) {
+  templateSaved(id, created, which, gen) {
     loadTemplates(true).then(() => {
       if (which === 'sk') {
         const rm = TPL.skRemoving
@@ -89,14 +89,15 @@ window.echo = {
         return render()
       }
       const list = (TPL.data && TPL.data.templates) || []
-      const rm = TPL.removing
-      TPL.removing = null
+      // A removal ends only with its own answer (no id): a save answered meanwhile leaves it pending.
+      const rm = id === null ? TPL.removing : null
+      if (id === null) TPL.removing = null
       if (created && id) { const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x); TPL.scrollTo = true } }
       else if (id === null && rm) {
         // Deleted: nothing chosen. Reset: Echo's own again, in the editor.
         const x = !rm.del && list.find((y) => y.id === rm.id)
         TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null
-      } else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
+      } else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) Object.assign(TPL.draft, { kind: x.kind }, TplSave.saved(TPL.draft, id, x, gen)) }
       render()
     })
   },

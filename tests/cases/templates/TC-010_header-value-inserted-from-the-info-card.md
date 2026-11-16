@@ -27,7 +27,7 @@ auto: [tests/auto/specs/S-11.spec.mjs]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/templates` and click the row "Status sync" | The editor shows "Header — how the minutes start" |
-| 2 | Click the button "Values and how a header is read" | A note lists the buttons {title}, {date}, {time}, {duration}, {participants}, {colleagues}, {external}, {organizer}, {type}, {thread}, {client}, {previous}, {me}, {language} |
+| 2 | Click the button "Values and how a header is read" | A note lists the buttons {title}, {date}, {time}, {end}, {duration}, {participants}, {colleagues}, {external}, {organizer}, {type}, {thread}, {client}, {previous}, {me}, {language} |
 | 3 | Click the button {language} | The header box now ends with `{language}`; the row has the tag "Edited" |
 | 4 | Run `grep -c '{language}' "$ECHOCTL_HOME/.echo/templates"/status-sync.md` in Bash (`. <dir>/env` first) | Prints `1` |
 

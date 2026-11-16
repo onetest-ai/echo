@@ -46,6 +46,8 @@ node crates/echoctl/ui/org-chart.test.mjs
 node crates/echoctl/ui/skill-fit.test.mjs
 # Send to Claude's Escape: the skill list folds, then the dialog closes (ScKeys).
 node crates/echoctl/ui/send-claude.test.mjs
+# A template's save: Keep every section is sent until the file has it, never with other edits (TplSave).
+node crates/echoctl/ui/templates-save.test.mjs
 # A client page's tabs: a count only when there is something to count (clientTabs).
 node crates/echoctl/ui/client-tabs.test.mjs
 # Where a Work board column's menu goes, over the board (colMenuSpot).

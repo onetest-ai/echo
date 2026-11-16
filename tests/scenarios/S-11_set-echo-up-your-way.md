@@ -41,6 +41,8 @@ cases:
   - tests/cases/vocabulary/TC-008_remove-forgets-a-learned-term.md
   - tests/cases/vocabulary/TC-009_learned-filter-appears-past-six-terms.md
   - tests/cases/window/TC-025_a-releases-announcement-shows-once.md
+  - tests/cases/templates/TC-019_keep-every-section-keeps-a-template-s-sections-and-shows-all-kept.md
+  - tests/cases/templates/TC-020_a-new-template-keeps-every-section-when-created-with-it.md
 auto: [tests/auto/specs/S-11.spec.mjs]
 ---
 
@@ -106,9 +108,11 @@ auto: [tests/auto/specs/S-11.spec.mjs]
 | 35 | `vocabulary/TC-008_remove-forgets-a-learned-term.md` | — | — |
 | 36 | `vocabulary/TC-009_learned-filter-appears-past-six-terms.md` | — | — |
 | 37 | `window/TC-025_a-releases-announcement-shows-once.md` | — | The speech models and the NeMo-Speech runtime linked into the run's config (its preconditions); keep its teardown |
+| 38 | `templates/TC-019_keep-every-section-keeps-a-template-s-sections-and-shows-all-kept.md` | — | Keep its teardown (Default back to built-in) |
+| 39 | `templates/TC-020_a-new-template-keeps-every-section-when-created-with-it.md` | 38 | On stage 38's view (Settings → Templates): in step 1 skip the navigation. Keep its teardown |
 
 ## Notes
 - The stages share state instead of undoing it: a switch, a language choice, the name and the profile stay as their stage set them when no later stage reads them (stages 4, 5, 8–11), and an edit stays for the next stage that would make it again (stages 15→16, 22→23, 26→27, 30→31, 33→34). Teardowns that a later stage's first check needs are kept: the template Resets (stages 17–21, so each starts from Echo's Status sync and stage 28 reads it built in), the vocabulary removals before a CLI step, and the two choices kept in the browser (stages 3 and 7).
-- Each section is opened once for the stages on it: Recording (4–9), About me (10–11), Templates (12–27), the Vocabulary panel (29–32).
+- Each section is opened once for the stages on it: Recording (4–9), About me (10–11), Templates (12–27; again for 38–39), the Vocabulary panel (29–32).
 - The sections stage and the About me stages never assert the General and Health values (they read the real machine); no screenshot of those two sections is kept.
 - Stage 30's step 5 runs `echoctl vocab list` with two terms in Every call: they stay there (#106).

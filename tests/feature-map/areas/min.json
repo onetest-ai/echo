@@ -213,6 +213,20 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-MIN-23",
+   "feature": "Minutes in a fixed template have its sections in order (conditional ones only when they apply), empty ones as `_None recorded._` or the section's own words, no heading cap; On screen / In the chat go in the template's own sections, else after the last; the user's note headings go inside the sections (under one `## Notes` only when no section is left); the header can show when the call ended (`{end}`)",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-MIN-24",
+   "feature": "Screenshots go under the minutes' On screen section (a heading starting or ending with On screen): the one a bullet names by file, else the nearest unnamed one within 30 s; a named one is never given to another bullet",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

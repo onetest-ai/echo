@@ -28,7 +28,7 @@ auto: [tests/auto/specs/S-11.spec.mjs]
 | 2 | Read the ids under `templates` | `default`, `discussion`, `status-sync`, `memo`, each with `"kind": "builtin"` |
 | 3 | Read the ids under `meeting_types` | `client`, `partner`, `one-on-one`, `internal`, `industry`, `other` |
 | 4 | Read `skills` | One skill, id `follow-up-mail`, `"kind": "builtin"`, `"on": true` |
-| 5 | Read the names under `values` | title, date, time, duration, participants, colleagues, external, organizer, type, thread, client, previous, me, language |
+| 5 | Read the names under `values` | title, date, time, end, duration, participants, colleagues, external, organizer, type, thread, client, previous, me, language |
 
 ## Expected Final State
 The CLI shows the same four, six and one items as the window.

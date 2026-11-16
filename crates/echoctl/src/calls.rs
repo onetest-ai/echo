@@ -355,6 +355,8 @@ pub struct Template {
     /// What comes before its first section (`## `): the minutes' start — title line, participants, frontmatter.
     pub header: String,
     pub sections: Vec<Value>,
+    /// Keep every section (`fixed: true` in its frontmatter): the minutes keep all its sections, in order. Never the memo's.
+    pub fixed: bool,
     #[serde(skip)]
     keywords: Vec<String>,
 }
@@ -449,6 +451,12 @@ const MIN_MEMO_CHARS: usize = 20;
 
 /// `echoctl context <call>`: the input bundle for writing notes, as JSON.
 pub fn context(call: &str) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(&context_value(call)?)?);
+    Ok(())
+}
+
+/// What `echoctl context` prints.
+fn context_value(call: &str) -> Result<Value> {
     let dir = resolve_call(call)?;
     let meta = read_json(&dir.join("meta.json"));
     let meeting = MeetingContext::load(&dir)?;
@@ -494,11 +502,14 @@ pub fn context(call: &str) -> Result<()> {
     }
     let subject = subject_of(&dir);
     let previous = previous_subject(&dir).and_then(|s| previous_with_notes(&s, Some(&dir)));
+    let template = if memo { memo_template() } else { template_for(&dir) };
+    let fixed = template.as_ref().is_some_and(|t| t.fixed);
 
     let out = json!({
         "dir": dir.display().to_string(),
         "title": subject,
         "started_at": meta["started_at"],
+        "ended_at": meta["ended_at"],
         "duration_min": (duration_min * 10.0).round() / 10.0,
         "speech_min": (speech_s / 6.0).round() / 10.0,
         "me": cfg.me,
@@ -515,11 +526,12 @@ pub fn context(call: &str) -> Result<()> {
         "dominant_language": dominant_language,
         "user_notes": user_notes.exists().then(|| user_notes.display().to_string()),
         "user_headings": user_headings,
-        "heading_budget": heading_budget(chars),
+        // null for a template that keeps every section.
+        "heading_budget": (!fixed).then(|| heading_budget(chars)),
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
-        "template": if memo { memo_template() } else { template_for(&dir) },
+        "template": template,
         // What `{date}`, `{participants}`… in it stand for.
         "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
@@ -540,8 +552,7 @@ pub fn context(call: &str) -> Result<()> {
         // the previous meeting of the series, the people Echo knows by address.
         "links": minutes_links(&dir, meeting.as_ref(), previous.as_deref()),
     });
-    println!("{}", serde_json::to_string_pretty(&out)?);
-    Ok(())
+    Ok(out)
 }
 
 /// The echo:// links a call's minutes may carry: `{threads, clients, previous, people}`, each with its `link`. People
@@ -1218,7 +1229,7 @@ mod tests {
         assert_eq!(kind("discussion").as_deref(), Some("builtin"));
         // A built-in changed: edited, and the minutes follow the change.
         let secs = vec![json!({"heading": "Decisions", "instruction": "Who owns each.\n## Not a heading"}), json!({"heading": "  ", "instruction": "dropped"})];
-        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs).unwrap();
+        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs, None).unwrap();
         assert_eq!(kind("discussion").as_deref(), Some("edited"));
         let t = pick_in(&all_templates(), Some("Sprint retro x")).unwrap().0.clone();
         assert_eq!(t.name, "discussion");
@@ -1227,11 +1238,11 @@ mod tests {
         assert_eq!(t.header, "# {title}\n### not a section", "the header kept, before the sections");
         assert!(t.text.starts_with("# {title}") && t.text.contains("## Decisions"), "the whole template for the skill");
         // A new one of the user's: its id from its name, not a taken one, at least one section.
-        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs).unwrap(), "client-kickoff");
+        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs, None).unwrap(), "client-kickoff");
         assert!(!template_id(&"word ".repeat(30)).ends_with('-'), "a long name cut at a word's end");
         assert_eq!(kind("client-kickoff").as_deref(), Some("yours"));
-        assert!(template_save(None, "client kickoff", &[], "", &secs).is_err(), "taken");
-        assert!(template_save(None, "Empty", &[], "", &[]).is_err(), "no section");
+        assert!(template_save(None, "client kickoff", &[], "", &secs, None).is_err(), "taken");
+        assert!(template_save(None, "Empty", &[], "", &[], None).is_err(), "no section");
         assert_eq!(pick_in(&all_templates(), Some("Acme kickoff")).unwrap().0.name, "client-kickoff");
         // A call: its title's template, then the one chosen for it (Write again with…), and why.
         let d = root.join("home/calls/2026-11-04_100000-weekly-sync");
@@ -1256,7 +1267,7 @@ mod tests {
         fs::write(templates_dir().join("our-minutes.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
         assert_eq!(kind("discussion").as_deref(), Some("edited"));
         assert_eq!(kind("our-minutes"), None);
-        template_save(Some("discussion"), "", &["y".into()], "", &secs).unwrap();
+        template_save(Some("discussion"), "", &["y".into()], "", &secs, None).unwrap();
         assert!(fs::read_to_string(templates_dir().join("our-minutes.md")).unwrap().contains("match: [y]"), "its own file");
         assert!(!templates_dir().join("discussion.md").exists());
         template_remove("discussion").unwrap();
@@ -1264,9 +1275,9 @@ mod tests {
         template_remove("ours").unwrap();
         // A new one never writes over a file that is there, whatever its frontmatter says.
         fs::write(templates_dir().join("kickoff.md"), "---\nname: something-else\nmatch: []\n---\n## A\nb\n").unwrap();
-        assert!(template_save(None, "Kickoff", &[], "", &secs).is_err());
+        assert!(template_save(None, "Kickoff", &[], "", &secs, None).is_err());
         // Nothing outside the folder.
-        assert!(template_save(Some("../../x"), "", &[], "", &secs).is_err());
+        assert!(template_save(Some("../../x"), "", &[], "", &secs, None).is_err());
         assert!(template_remove("../x").is_err() && template_remove("C:notes").is_err() && template_remove("default").is_err());
         assert_eq!(template_id("CON"), "con-template", "no device name on Windows");
     }
@@ -1278,7 +1289,7 @@ mod tests {
         let header = "---\ndate: {date}\nattendees:\n  - {each participant}\n---\n\n# Meeting Minutes: {title}";
         let table = "| # | Decision | Options Considered | Agreed Option | Rationale | ADR Reference |\n|---|---|---|---|---|---|\nOne row per decision [mm:ss]; ADR-TBD when none.";
         let secs = vec![json!({"heading": "Decisions", "instruction": table}), json!({"heading": "Action Items", "instruction": "- owner — task"})];
-        let id = template_save(None, "Minutes format", &["steering".into()], header, &secs).unwrap();
+        let id = template_save(None, "Minutes format", &["steering".into()], header, &secs, None).unwrap();
         let t = all_templates().into_iter().find(|t| t.name == id).unwrap();
         assert_eq!(t.header, header);
         assert_eq!(t.sections, secs);
@@ -1286,8 +1297,86 @@ mod tests {
         // Saved again unchanged (an edit elsewhere in the window): the same file.
         let f = templates_dir().join(format!("{id}.md"));
         let before = fs::read_to_string(&f).unwrap();
-        template_save(Some(&id), "", &t.keywords, &t.header, &t.sections).unwrap();
+        template_save(Some(&id), "", &t.keywords, &t.header, &t.sections, None).unwrap();
         assert_eq!(fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
+    fn a_template_keeps_every_section_only_with_fixed_true_in_its_frontmatter() {
+        let fixed = |front: &str| parse_template(&format!("---\nname: x\nmatch: []\n{front}---\n## A\nb\n"), "x", "t".into()).unwrap().fixed;
+        assert!(fixed("fixed: true\n") && fixed("fixed:true\n") && fixed("fixed: TRUE  \n") && fixed("fixed: \"true\"\n"));
+        assert!(!fixed("") && !fixed("fixed: false\n") && !fixed("fixed: yes\n"));
+        // Only the frontmatter counts.
+        assert!(!parse_template("---\nname: x\nmatch: []\n---\n## A\nfixed: true\n", "x", "t".into()).unwrap().fixed);
+    }
+
+    #[test]
+    fn the_memo_is_never_fixed_whatever_its_file_says() {
+        let (_env, _root) = crate::paths::testenv::folders("templates-memo-fixed");
+        fs::create_dir_all(templates_dir()).unwrap();
+        fs::write(templates_dir().join("memo.md"), "---\nname: personal\nmatch: []\nfixed: true\n---\n## Per thread\nx\n").unwrap();
+        assert!(!memo_template().unwrap().fixed);
+        assert!(!all_templates().into_iter().find(|t| t.name == "memo").unwrap().fixed);
+        let rows = templates_view()["templates"].as_array().cloned().unwrap();
+        assert_eq!(rows.iter().find(|r| r["id"] == "memo").unwrap()["fixed"], false);
+    }
+
+    #[test]
+    fn saving_writes_fixed_only_when_on_and_keeps_it_when_not_told() {
+        let (_env, _root) = crate::paths::testenv::folders("templates-fixed-save");
+        let secs = vec![json!({"heading": "Summary", "instruction": "short"})];
+        let id = template_save(None, "Steering", &[], "# {title}", &secs, None).unwrap();
+        let file = templates_dir().join(format!("{id}.md"));
+        assert!(!fs::read_to_string(&file).unwrap().contains("fixed:"), "a new template is off");
+        template_save(Some(&id), "", &[], "# {title}", &secs, Some(true)).unwrap();
+        assert!(fs::read_to_string(&file).unwrap().starts_with("---\nname: steering\nmatch: []\nfixed: true\n---\n"));
+        template_save(Some(&id), "", &["weekly".into()], "# {title}", &secs, None).unwrap();
+        assert!(fs::read_to_string(&file).unwrap().contains("\nfixed: true\n"), "not told: kept");
+        template_save(Some(&id), "", &["weekly".into()], "# {title}", &secs, Some(false)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "---\nname: steering\nmatch: [weekly]\n---\n# {title}\n\n## Summary\nshort");
+        template_save(Some("discussion"), "", &[], "", &secs, None).unwrap();
+        assert!(!fs::read_to_string(templates_dir().join("discussion.md")).unwrap().contains("fixed:"), "a built-in's first edit is off");
+        template_save(Some("memo"), "", &[], "", &secs, Some(true)).unwrap();
+        assert!(!fs::read_to_string(templates_dir().join("memo.md")).unwrap().contains("fixed:"), "never for the memo");
+    }
+
+    #[test]
+    fn a_hand_written_default_with_fixed_true_is_edited_and_fixed() {
+        let (_env, _root) = crate::paths::testenv::folders("templates-default-fixed");
+        fs::create_dir_all(templates_dir()).unwrap();
+        fs::write(templates_dir().join("default.md"), "---\nname: default\nmatch: []\nfixed: true\n---\n## Summary\nx\n").unwrap();
+        let rows = templates_view()["templates"].as_array().cloned().unwrap();
+        let row = rows.iter().find(|r| r["id"] == "default").unwrap();
+        assert_eq!((row["kind"].as_str(), row["fixed"].as_bool()), (Some("edited"), Some(true)));
+    }
+
+    #[test]
+    fn context_gives_the_end_and_no_heading_cap_for_a_fixed_template() {
+        let (_env, root) = crate::paths::testenv::folders("context-fixed");
+        let d = root.join("home/calls/2026-11-04_100000-steering");
+        fs::create_dir_all(&d).unwrap();
+        let meta = |end: &str| format!(r#"{{"title":"Steering","started_at":"2026-11-04T10:00:00+02:00"{end}}}"#);
+        fs::write(d.join("meta.json"), meta(r#","ended_at":"2026-11-04T10:43:00+02:00""#)).unwrap();
+        let v = context_value(d.to_str().unwrap()).unwrap();
+        assert_eq!(v["ended_at"], "2026-11-04T10:43:00+02:00");
+        assert!(v["heading_budget"].is_u64() && v["template"]["fixed"] == false);
+        assert!(v["template_values"].as_array().unwrap().iter().any(|x| x["name"] == "end"));
+        let own = paths::state_dir().join("templates");
+        fs::create_dir_all(&own).unwrap();
+        fs::write(own.join("default.md"), "---\nname: default\nmatch: []\nfixed: true\n---\n## Summary\nx\n").unwrap();
+        let v = context_value(d.to_str().unwrap()).unwrap();
+        assert!(v["template"]["fixed"] == true && v["heading_budget"].is_null());
+        fs::write(d.join("meta.json"), meta("")).unwrap();
+        assert!(context_value(d.to_str().unwrap()).unwrap()["ended_at"].is_null());
+        // A memo: its own template, never fixed, so the cap stays.
+        let m = root.join("home/calls/2026-11-04_120000-memo");
+        fs::create_dir_all(&m).unwrap();
+        fs::write(m.join("meta.json"), r#"{"title":"Memo","kind":"memo","started_at":"2026-11-04T12:00:00+02:00","ended_at":"2026-11-04T12:05:00+02:00"}"#).unwrap();
+        fs::write(own.join("memo.md"), "---\nname: personal\nmatch: []\nfixed: true\n---\n## Per thread\nx\n").unwrap();
+        let v = context_value(m.to_str().unwrap()).unwrap();
+        assert!(v["memo"] == true && v["template"]["fixed"] == false && v["heading_budget"].is_u64());
+        assert_eq!(v["ended_at"], "2026-11-04T12:05:00+02:00");
+        assert!(v["template_values"].as_array().unwrap().iter().any(|x| x["name"] == "end"));
     }
 
     #[test]
