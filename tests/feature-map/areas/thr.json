@@ -193,7 +193,7 @@
   },
   {
    "id": "F-THR-20",
-   "feature": "A thread's sync (extract, verify, people) runs on its AI profile after its calls are 15 minutes old, or on Sync now, and reads them into its work",
+   "feature": "A thread's sync (extract, verify, people) runs on its AI profile after its calls are 15 minutes old, after its mail and chat have waited (F-THR-26), or on Sync now, and reads them into its work",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -241,6 +241,15 @@
    "id": "F-THR-25",
    "feature": "A thread's sync keeps what each pass used (tokens: input, output, cache read and write; turns) in its run's log, its state and `ledger/sync-usage.jsonl`; `echoctl project sync-stats [--days N]` sums every thread's per day and pass",
    "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sync"
+   ]
+  },
+  {
+   "id": "F-THR-26",
+   "feature": "Mail and chat wait for a batch: the scheduler (`ledger <id> run --scheduled`) reads them once the first has waited 2 hours since it was first seen waiting, or 5 wait, or with a call; meanwhile the sync says how many wait and when they're read; Sync now reads them at once",
+   "priority": "high",
    "check": "agent",
    "axes": [
     "thread.sync"

@@ -266,8 +266,12 @@ pub enum LedgerCmd {
     },
     /// The whole tree (JSON)
     Tree,
-    /// Sync now: the calls into evidence, then Claude reads them in (extract, then verify, then people)
-    Run,
+    /// Sync now: the calls into evidence, then Claude reads them in (extract, then verify, then people);
+    /// --scheduled: as the app's scheduler does, mail and chat waiting for their batch (2 h, or 5 items, or a call)
+    Run {
+        #[arg(long)]
+        scheduled: bool,
+    },
     /// The last sync's state
     Status,
     /// An edit of yours (JSON: {op: edit|ac_add|ac_set|link|unlink|merge|delete|accept|reject|undo|create, …})
@@ -810,7 +814,7 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::PeopleContext { items } => print_json(&people::context(id, &items)?),
         LedgerCmd::PeopleApply { evidence, file } => print_json(&people::apply_suggestions(id, &evidence, &read(&file)?)?),
         LedgerCmd::Tree => print_json(&ledger::tree(id)?),
-        LedgerCmd::Run => print_json(&projectsync::run(id)?),
+        LedgerCmd::Run { scheduled } => print_json(&if scheduled { projectsync::run_scheduled(id)? } else { projectsync::run(id)? }),
         LedgerCmd::Status => print_json(&projectsync::state(id)),
         LedgerCmd::Edit { json } => {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
