@@ -115,16 +115,22 @@ pub fn run(id: &str) -> Result<Value> {
         let settings = settings_file(&run_id)?;
         let mut log = fs::File::create(run_dir.join("log.txt"))?;
         let _ = writeln!(log, "{}  Echo syncs {} ({}) on {}{}", Local::now().format("%H:%M:%S"), p.name, id, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default());
+        // What each pass used (Claude Code's result event), kept in the state and `ledger/sync-usage.jsonl`.
+        let mut used = serde_json::Map::new();
         let mut extract_report = String::new();
         if !pending.is_empty() {
             let prompt = prompt(&p, "extract", &pending, &run_dir);
-            extract_report = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
+            let (r, u) = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
+            extract_report = r;
+            record_usage(id, &run_id, "extract", &u, &mut log, &mut used);
         }
         // Fresh eyes: the verifier is another process, started after the extraction ended.
         let mut verify_report = String::new();
         if !ledger::verify_prep(id, false)?.is_empty() {
             let prompt = prompt(&p, "verify", &[], &run_dir);
-            verify_report = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
+            let (r, u) = claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log)?;
+            verify_report = r;
+            record_usage(id, &run_id, "verify", &u, &mut log, &mut used);
         }
         // Who's who: proposals about people and organisations from the same calls, with their words;
         // they wait for the user (`people::decide`).
@@ -132,8 +138,9 @@ pub fn run(id: &str) -> Result<Value> {
         if !for_people.is_empty() {
             let prompt = prompt(&p, "people", &for_people, &run_dir);
             people_report = match claude(profile, model.as_deref(), &plugin, &cwd, &settings, &prompt, id, &run_dir, &mut log) {
-                Ok(r) => {
+                Ok((r, u)) => {
                     mark_people_read(id, &for_people);
+                    record_usage(id, &run_id, "people", &u, &mut log, &mut used);
                     r
                 }
                 Err(e) => format!("people pass: {e:#}"),
@@ -142,7 +149,7 @@ pub fn run(id: &str) -> Result<Value> {
         let _ = fs::remove_file(&settings);
         let left = ledger::pending_count(id)?;
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
-                  "processed": before.saturating_sub(left), "left": left, "message": format!("{extract_report}\n{verify_report}\n{people_report}").trim().to_string()}))
+                  "processed": before.saturating_sub(left), "left": left, "usage": used, "message": format!("{extract_report}\n{verify_report}\n{people_report}").trim().to_string()}))
     })();
     let v = match outcome {
         Ok(v) => v,
@@ -206,7 +213,7 @@ fn prompt(p: &projects::Project, mode: &str, ids: &[String], run_dir: &Path) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd: &Path, settings: &Path, prompt: &str, id: &str, run_dir: &Path, log: &mut fs::File) -> Result<String> {
+fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd: &Path, settings: &Path, prompt: &str, id: &str, run_dir: &Path, log: &mut fs::File) -> Result<(String, Value)> {
     let ledger = dunce::canonicalize(ledger_dir(id))?;
     let abs = |p: &Path| format!("/{}", notes::rule_path(p));
     let clis = notes::run_clis(plugin);
@@ -228,17 +235,91 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
         c.env(guard::RUN_SKILL, plugin.join("skills").join("project-sync"));
         Ok(c.spawn()?)
     })?;
-    finish_run(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time")
+    let (text, result) = finish_run_result(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time")?;
+    Ok((text, usage_of(&result)))
+}
+
+/// Each pass's usage, one line a pass, in the thread's ledger folder (`sync_stats` sums them).
+const USAGE: &str = "sync-usage.jsonl";
+
+/// What a run used, from Claude Code's result event: its tokens (cache reads and writes apart), turns, cost.
+pub fn usage_of(r: &Value) -> Value {
+    let u = &r["usage"];
+    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+    json!({"input": n("input_tokens"), "output": n("output_tokens"), "cache_read": n("cache_read_input_tokens"),
+           "cache_write": n("cache_creation_input_tokens"), "turns": r["num_turns"].as_u64().unwrap_or(0), "cost_usd": r["total_cost_usd"].as_f64()})
+}
+
+/// All the tokens of a usage: input, output and the cache's reads and writes.
+fn tokens(u: &Value) -> u64 {
+    ["input", "output", "cache_read", "cache_write"].iter().map(|k| u[k].as_u64().unwrap_or(0)).sum()
+}
+
+fn record_usage(id: &str, run: &str, pass: &str, u: &Value, log: &mut fs::File, used: &mut serde_json::Map<String, Value>) {
+    let _ = writeln!(
+        log,
+        "{}  {pass}: {} tokens (input {}, output {}, cache read {}, cache write {}), {} turns",
+        Local::now().format("%H:%M:%S"),
+        tokens(u),
+        u["input"],
+        u["output"],
+        u["cache_read"],
+        u["cache_write"],
+        u["turns"]
+    );
+    used.insert(pass.into(), u.clone());
+    let line = json!({"at": Local::now().to_rfc3339(), "run": run, "pass": pass, "usage": u});
+    let appended = fs::OpenOptions::new().create(true).append(true).open(ledger_dir(id).join(USAGE)).and_then(|mut f| writeln!(f, "{line}"));
+    if let Err(e) = appended {
+        let _ = writeln!(log, "{}  the usage couldn't be kept: {e}", Local::now().format("%H:%M:%S"));
+    }
+}
+
+/// Every thread's sync usage over the last `days` days (today included), summed per day and pass, newest day first:
+/// `{days: [{day, passes: {extract: {runs, tokens, input, output, cache_read, cache_write, turns, cost_usd}, …}, runs, tokens}], total}`.
+pub fn sync_stats(days: u32) -> Value {
+    let from = (Local::now() - chrono::Duration::days(days.saturating_sub(1).into())).format("%Y-%m-%d").to_string();
+    let mut by_day: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>> = Default::default();
+    let add = |sum: &mut Value, u: &Value| {
+        sum["runs"] = json!(sum["runs"].as_u64().unwrap_or(0) + 1);
+        sum["tokens"] = json!(sum["tokens"].as_u64().unwrap_or(0) + tokens(u));
+        for k in ["input", "output", "cache_read", "cache_write", "turns"] {
+            sum[k] = json!(sum[k].as_u64().unwrap_or(0) + u[k].as_u64().unwrap_or(0));
+        }
+        if let Some(c) = u["cost_usd"].as_f64() {
+            sum["cost_usd"] = json!(sum["cost_usd"].as_f64().unwrap_or(0.0) + c);
+        }
+    };
+    let mut total = json!({});
+    for p in projects::list() {
+        let Ok(text) = fs::read_to_string(ledger_dir(&p.id).join(USAGE)) else { continue };
+        for line in text.lines() {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let (Some(at), Some(pass)) = (v["at"].as_str(), v["pass"].as_str()) else { continue };
+            let Ok(at) = chrono::DateTime::parse_from_rfc3339(at) else { continue };
+            let day = at.with_timezone(&Local).format("%Y-%m-%d").to_string();
+            if day < from {
+                continue;
+            }
+            add(by_day.entry(day).or_default().entry(pass.to_string()).or_insert_with(|| json!({})), &v["usage"]);
+            add(&mut total, &v["usage"]);
+        }
+    }
+    let days: Vec<Value> = by_day
+        .into_iter()
+        .rev()
+        .map(|(day, passes)| {
+            let (runs, tokens): (u64, u64) = passes.values().fold((0, 0), |(r, t), v| (r + v["runs"].as_u64().unwrap_or(0), t + v["tokens"].as_u64().unwrap_or(0)));
+            json!({"day": day, "runs": runs, "tokens": tokens, "passes": passes})
+        })
+        .collect();
+    json!({"days": days, "total": total})
 }
 
 /// Follow a headless Claude Code run started with `--output-format stream-json`: its steps into `log`,
 /// stopped after `timeout` or when it is too old for the guard (`what` it was for), and its final
-/// answer — or why there is none. Shared by the project sync and routines.
-pub fn finish_run(child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<String> {
-    finish_run_result(child, log, timeout, what, quit).map(|(text, _)| text)
-}
-
-/// The same, with Claude Code's result event (its usage, cost, duration, turns).
+/// answer with Claude Code's result event (its usage, cost, turns) — or why there is none. Shared by the project sync
+/// and routines.
 pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
@@ -373,8 +454,61 @@ pub fn start(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)] // every test here runs a Unix shell fake
     use super::*;
+
+    #[test]
+    fn each_passs_usage_is_kept_and_summed_per_day_and_pass_over_every_thread() {
+        let (_env, root) = crate::paths::testenv::folders("sync-usage");
+        let a = projects::create("Acme pilot", None, None).unwrap().id;
+        let b = projects::create("Globex rollout", None, None).unwrap().id;
+        let result = |input: u64, read: u64, turns: u64| {
+            json!({"type": "result", "num_turns": turns, "total_cost_usd": 0.5,
+                   "usage": {"input_tokens": input, "output_tokens": 100, "cache_read_input_tokens": read, "cache_creation_input_tokens": 1000}})
+        };
+        let mut log = fs::File::create(root.join("log.txt")).unwrap();
+        let mut used = serde_json::Map::new();
+        for (id, pass, r) in [(&a, "extract", result(10, 5000, 7)), (&a, "verify", result(20, 3000, 5)), (&b, "extract", result(30, 4000, 6))] {
+            fs::create_dir_all(ledger_dir(id)).unwrap();
+            record_usage(id, "20261116-090000", pass, &usage_of(&r), &mut log, &mut used);
+        }
+        // An older day, outside a one-day report.
+        let old = json!({"at": (Local::now() - chrono::Duration::days(3)).to_rfc3339(), "run": "x", "pass": "people", "usage": usage_of(&result(1, 1, 1))});
+        fs::OpenOptions::new().append(true).open(ledger_dir(&b).join(USAGE)).and_then(|mut f| writeln!(f, "{old}\nnot json")).unwrap();
+
+        assert_eq!(used["extract"]["cache_read"], 4000, "the state keeps each pass's last usage");
+        assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("extract: 6110 tokens (input 10, output 100, cache read 5000, cache write 1000), 7 turns"));
+        let today = sync_stats(1);
+        let days = today["days"].as_array().unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0]["runs"], 3);
+        assert_eq!(days[0]["tokens"], 6110 + 4120 + 5130);
+        let extract = &days[0]["passes"]["extract"];
+        assert_eq!((extract["runs"].as_u64(), extract["cache_read"].as_u64(), extract["turns"].as_u64()), (Some(2), Some(9000), Some(13)));
+        assert_eq!(days[0]["passes"]["verify"]["input"], 20);
+        assert_eq!(today["total"]["cost_usd"], 1.5);
+        let week = sync_stats(7);
+        assert_eq!(week["days"].as_array().unwrap().len(), 2, "the older day too, newest first");
+        assert_eq!(week["days"][1]["passes"]["people"]["runs"], 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_runs_usage_comes_from_claude_codes_result_event() {
+        let (_env, root) = crate::paths::testenv::folders("run-usage");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("u", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let init = json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0"});
+        let result = json!({"type": "result", "result": "done", "is_error": false, "num_turns": 3,
+                            "usage": {"input_tokens": 12, "output_tokens": 34, "cache_read_input_tokens": 5600, "cache_creation_input_tokens": 780}});
+        fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
+        let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+        let mut log = fs::File::create(root.join("log.txt")).unwrap();
+        let (_, r) = finish_run_result(child, &mut log, Duration::from_secs(30), "sync a thread", "quit").unwrap();
+        let u = usage_of(&r);
+        assert_eq!((u["input"].as_u64(), u["output"].as_u64(), u["cache_read"].as_u64(), u["cache_write"].as_u64(), u["turns"].as_u64()), (Some(12), Some(34), Some(5600), Some(780), Some(3)));
+        assert_eq!(tokens(&u), 12 + 34 + 5600 + 780);
+        assert!(u["cost_usd"].is_null(), "no cost given: none made up");
+    }
 
     #[cfg(unix)]
     #[test]

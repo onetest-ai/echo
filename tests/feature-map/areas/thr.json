@@ -236,6 +236,15 @@
    "axes": [
     "thread.stage"
    ]
+  },
+  {
+   "id": "F-THR-25",
+   "feature": "A thread's sync keeps what each pass used (tokens: input, output, cache read and write; turns) in its run's log, its state and `ledger/sync-usage.jsonl`; `echoctl project sync-stats [--days N]` sums every thread's per day and pass",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sync"
+   ]
   }
  ]
 }
