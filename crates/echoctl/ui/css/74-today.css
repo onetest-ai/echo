@@ -319,7 +319,10 @@
 .pc-lg.col { flex-direction: column; gap: 6px; margin-top: 0; min-width: 0; flex: 0 1 260px; }
 .pc-lg.col b { margin-left: auto; padding-left: 12px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pc-rows { display: grid; grid-template-columns: minmax(60px, 32%) minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; font-size: 12px; }
-.pc-rows.funnel { grid-template-columns: minmax(60px, 28%) minmax(0, 1fr) auto auto; }
+.pc-rows.funnel { grid-template-columns: minmax(60px, 28%) minmax(0, 1fr) auto auto; row-gap: 3px; }
+/* A funnel's stage: centred on the axis, a little taller, its shape cut by the widget (clip-path) to the next stage. */
+.pc-bar.fun { justify-content: center; height: 22px; }
+.pc-bar.fun > span { border-radius: 2px; }
 .pc-rl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pc-bar { display: flex; gap: 2px; height: 12px; min-width: 0; }
@@ -359,3 +362,19 @@
 /* A task that looks done (#463): the line and Close / Not yet, under its title. */
 .td-looks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 .td-looks-t { flex: 1 1 100%; }
+/* A plugin table's scorecard cells: a small trend, a heat map's shaded number, a thin 100% bar of parts; a band over
+   grouped heads; the total in bold. */
+.pw-spark { display: inline-flex; align-items: center; gap: 6px; }
+.pw-spark svg { width: 60px; height: 16px; overflow: visible; }
+.pw-spark polyline { stroke: var(--chart-1); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.pw-spark circle { fill: var(--chart-1); }
+.pw-table td.k-heat, .pw-table th.k-heat { text-align: center; padding-right: 2px; }
+.pw-heat { display: inline-block; min-width: 26px; padding: 2px 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.pw-heat.zero { color: var(--text-3); }
+.pw-mix { display: inline-flex; align-items: center; gap: 6px; min-width: 80px; width: 100%; }
+.pw-mixbar { display: flex; flex: 1 1 auto; min-width: 60px; height: 8px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pw-mixbar > i { height: 100%; }
+.pw-table thead tr.pw-band th { font-size: 10px; text-align: center; color: var(--text-3); padding-bottom: 0; box-shadow: none; }
+.pw-table thead tr.pw-band th[scope] { border-bottom: 1px solid var(--line); }
+.pw-table tfoot td { font-weight: 650; border-top: 1px solid var(--line-strong); }
+.pw-lg { margin-top: 6px; }

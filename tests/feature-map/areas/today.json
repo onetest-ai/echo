@@ -159,7 +159,7 @@
   },
   {
    "id": "F-TODAY-22",
-   "feature": "A plugin's widget kinds beyond the first five: chart (line, area, bar, bars, stacked, stacked-bars, pie, donut, funnel; one series or up to 6 in Echo's palette with a legend; a headline — its value, what it is, its change with an arrow, in tone good or bad; every mark titled with its value; dates as Echo writes them; data it can't draw says why), a stats item's trend as a sparkline,, a stat's progress bar, and on any kind a link (echo:// opens in Echo; https opens in the browser on the click, its host in the tooltip) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
+   "feature": "A plugin's widget kinds beyond the first five: chart (line, area, bar, bars, stacked, stacked-bars, pie, donut, funnel; one series or up to 6 in Echo's palette with a legend; a headline — its value, what it is, its change with an arrow, in tone good or bad; every mark titled with its value; dates as Echo writes them; data it can't draw says why), a funnel drawn as one (each stage centred, as wide as its share of the widest, narrowing to the next; at S plain centred bars), a stats item's trend as a sparkline, a stat's progress bar, and on any kind a link (echo:// opens in Echo; https opens in the browser on the click, its host in the tooltip) and up to 3 actions (the plugin's own commands, run on a click, then Today read again)",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -243,6 +243,13 @@
    "id": "F-TODAY-32",
    "feature": "A plugin's widget on Today or a dashboard never scrolls inside the page: the wheel over it always scrolls the page. A table draws 8 rows a row of height (16 at height 2) and a list 3 / 5 / 10 items at S / M / L a row of height, in the plugin's order, then '+N more' — a click shows them all in place, 'Show less' folds back (each page its own, kept while it redraws); a bar chart (bars, stacked-bars) draws its last 4 / 6 / 12 bars at S / M / L a row of height; its provider is told the same (`height` 1 | 2 and `fits: {rows, items, bars}`) and asked again when its height changes; a wide table scrolls only sideways",
    "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-33",
+   "feature": "A plugin's table as a scorecard: column kinds spark (a cell {values: 2–30 numbers, text?}: a small trend, its last point dotted, the text beside it), heat (a number shaded by its share of the column's largest; 0 or none a muted '·'; up to 12 heat columns besides the 10), mix (a cell {parts: [{key?, value, tone?}], text?}: a thin 100% bar of its parts in the column's `series` colours — Echo's palette or a tone — with a legend under the table); a column's `group` drawn as a band over the heads of its run of columns ('New deals by week'); `total: {label?, cells}` a bold row under the rows ('Total' unless its first cell is given), never folded away; wrong data said (a spark's values, a heat below 0, a mix part not a number, series on another kind, a total not {label?, cells}); every text escaped",
+   "priority": "medium",
    "check": "agent",
    "axes": []
   }

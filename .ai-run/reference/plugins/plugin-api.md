@@ -340,8 +340,25 @@ Evidence: `pluginWidgetHtml`, `pluginTableHtml` (window script)
 | `list` | `{items: [{title, sub?, link?}], empty?}` | the first 3 / 5 / 10 items a row of height (`fits.items`), then "+N more" (100 at most) | title 200, sub 200 | `items` not a list |
 | `status` | `{state, title, text?}`, `state` `ok`, `warn` or `bad` | the same | title 80, text 300 | another `state` |
 | `card` | `{title?, text?, link?}` | the same | title 120, text 2000 | neither `title` nor `text` |
-| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill` or `date`; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M; the first 8 rows a row of height (`fits.rows`; in the order drawn, a group's header and count kept whole), then "+N more" | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns; a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
+| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill`, `date`, `spark`, `heat` or `mix` (§ Scorecard tables), `group?` a band over a run of its heads; `total?: {label?, cells}` a bold row under them; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M; the first 8 rows a row of height (`fits.rows`; in the order drawn, a group's header and count kept whole), then "+N more" | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns (and over 12 `heat` columns besides); a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
 | `page` | the plugin's, drawn by its client half (§ Client half) | the draw gets `size` | the plugin's | — |
+
+### Scorecard tables
+
+A `table`'s columns may also be:
+
+- `spark`: a cell `{values: [2–30 numbers], text?}` — a small trend, its last point dotted, `text` (24) beside it.
+- `heat`: a number, shaded by its share of the column's largest (of all its rows, shown or behind "+N more"); 0 or
+  none a muted "·"; below 0 refused. Up to 12
+  `heat` columns besides the 10 (a heat map's weeks); give them one `group` for a band over their heads.
+- `mix`: a cell `{parts: [1–6 {key?, value ≥ 0, tone?}], text?}` — a thin 100% bar of its parts (a zero not drawn),
+  `text` beside it, its parts in its hover; colours from the column's `series: [≤ 6 {key, label, tone?}]` (Echo's
+  palette in order, or the tone; keys `[A-Za-z0-9_-]{1,40}`, unique), named in a legend under the table; a part's own
+  `tone` wins, and with `series` given a part names one of them (or has a `tone`).
+- Numbers in all three: finite, at most 10^15 either way.
+
+`total: {label?, cells}`: one bold row under the rows, never folded away ("Total" in its first column unless that
+cell is given); its `heat` cells plain numbers. Evidence: `pluginTableHtml` (window script)
 
 ### Charts
 
@@ -357,7 +374,7 @@ refused). All series share one y-axis and the `unit`. Evidence: `pluginChartHtml
 | `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
 | `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
 | `pie`, `donut` | slices | all read; up to 6 drawn in the given order, those under 3% and past the 6th folded into one Other after them (all zero: "Nothing to show yet") | one | refused |
-| `funnel` | stages | the first 8 in the given order, each with its share of the one before | one | refused |
+| `funnel` | stages, drawn as a funnel: each centred, as wide as its share of the widest, narrowing to the next (at S plain centred bars) | the first 8 in the given order, each with its share of the one before | one | refused |
 
 | Field | Shape |
 |---|---|

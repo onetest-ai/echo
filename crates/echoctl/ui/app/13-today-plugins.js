@@ -95,22 +95,37 @@ function pluginWidgetHtml(kind, data, size, opened = [], height = 1, all = false
   throw new Error(`Echo doesn't draw the kind ${kind}`)
 }
 
-/** A table widget's body: its columns (text, number, pill, date — "Nov 15", "Jan 5, 2027" in another year; `hide: "M"`
- *  left out below L), its rows under their group's header in the groups' order (the rest last), a row's link on its
+/** A table widget's body: its columns (text, number, pill, date — "Nov 15", "Jan 5, 2027" in another year; spark — a
+ *  small trend; heat — a number shaded by its share of the column's largest; mix — a thin 100% bar of parts; `hide: "M"`
+ *  left out below L; `group` a band over its columns' heads), a `total` row under them, its rows under their group's header in the groups' order (the rest last), a row's link on its
  *  first text cell, its details under it when `opened` names it. Throws with what is wrong. */
 function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, every = false) {
   const TONES = ['good', 'warn', 'bad', 'muted']
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  if (!Array.isArray(d.columns) || !d.columns.length || d.columns.length > 10) throw new Error('a table needs 1–10 columns: [{key, label, kind?}]')
+  const KINDS = ['text', 'number', 'pill', 'date', 'spark', 'heat', 'mix']
+  // Up to 10 columns, and up to 12 heat columns besides (a heat map's weeks).
+  const cs = Array.isArray(d.columns) ? d.columns : []
+  const heats = cs.filter((c) => c && c.kind === 'heat').length
+  if (!cs.length || cs.length - Math.min(heats, 12) > 10 || heats > 12) throw new Error('a table needs 1–10 columns: [{key, label, kind?}] (and up to 12 heat columns besides)')
   const keys = new Set()
-  const all = d.columns.map((c, i) => {
+  const all = cs.map((c, i) => {
     const key = c && typeof c.key === 'string' ? c.key : ''
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(key) || keys.has(key)) throw new Error(`column ${i + 1} needs a plain, unique key`)
     keys.add(key)
     const k = c.kind == null ? 'text' : c.kind
-    if (!['text', 'number', 'pill', 'date'].includes(k)) throw new Error(`column ${key}: kind is text, number, pill or date`)
+    if (!KINDS.includes(k)) throw new Error(`column ${key}: kind is text, number, pill, date, spark, heat or mix`)
     if (c.hide != null && c.hide !== 'M') throw new Error(`column ${key}: hide is "M"`)
-    return { key, label: str(c.label, `column ${key}'s label`, 40), kind: k, hide: c.hide === 'M' }
+    // A mix column's parts: its series (in Echo's palette, or a tone), named in its legend.
+    const series = c.series == null ? [] : c.series
+    if (!Array.isArray(series) || series.length > 6 || (k !== 'mix' && series.length)) throw new Error(`column ${key}: series is a mix column's, 6 at most: [{key, label, tone?}]`)
+    const skeys = new Set()
+    const ser = series.map((x, j) => {
+      if (!x || typeof x.key !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(x.key) || skeys.has(x.key)) throw new Error(`column ${key}: series ${j + 1} needs a plain, unique key`)
+      skeys.add(x.key)
+      if (x.tone != null && !TONES.includes(x.tone)) throw new Error(`column ${key}: series ${x.key}'s tone is good, warn, bad or muted`)
+      return { key: x.key, label: str(x.label, `column ${key}'s series ${x.key}`, 40) || x.key, color: x.tone ? `var(--${{ good: 'me', warn: 'warn', bad: 'danger', muted: 'text-3' }[x.tone]})` : `var(--chart-${j + 1})` }
+    })
+    return { key, label: str(c.label, `column ${key}'s label`, 40), kind: k, hide: c.hide === 'M', group: str(c.group, `column ${key}'s group`, 40), series: ser }
   })
   const cols = all.filter((c) => !(c.hide && size !== 'L'))
   if (!Array.isArray(d.rows)) throw new Error('a table needs rows: [{id, cells}]')
@@ -123,15 +138,52 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
     if (!id || gids.has(id)) throw new Error(`group ${i + 1} needs a unique id`)
     gids.set(id, str(g.label, `group ${id}'s label`, 120))
   })
-  // A cell as drawn: by its column's kind; {text, tone} anywhere.
+  // A heat column's largest value, against which each of its cells is shaded.
+  const val = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v.text : v)
+  const heatMax = Object.fromEntries(all.filter((c) => c.kind === 'heat').map((c) => [c.key, Math.max(0, ...(Array.isArray(d.rows) ? d.rows : []).map((r) => Number(val(r && r.cells && r.cells[c.key])) || 0))]))
+  // A number as a chart takes one: finite, |v| ≤ 10^15 (so sums and spans stay finite).
+  const num = (x, what) => { if (typeof x !== 'number' || !Number.isFinite(x) || Math.abs(x) > 1e15) throw new Error(`${what} isn't a number (up to 10^15)`); return x }
+  // A cell as drawn: by its column's kind; {text, tone} anywhere. `row` is a number (a row) or 'total'.
   const cell = (v, col, row) => {
-    const what = `row ${row}'s cell “${col.key}”`
+    const what = row === 'total' ? `the total's cell “${col.key}”` : `row ${row}'s cell “${col.key}”`
     const obj = v && typeof v === 'object'
     if (obj && !Array.isArray(v) && v.tone != null && !TONES.includes(v.tone)) throw new Error(`${what}: tone is good, warn, bad or muted`)
+    if (col.kind === 'spark' && v != null && v !== '') {
+      if (!obj || !Array.isArray(v.values) || v.values.length < 2 || v.values.length > 30) throw new Error(`${what}: a spark is {values: 2–30 numbers, text?}`)
+      const vs = v.values.map((x, j) => num(x, `${what}'s value ${j + 1}`)), lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1
+      const pts = vs.map((x, j) => [(j / (vs.length - 1)) * 58 + 1, 15 - ((x - lo) / span) * 13])
+      const text = str(v.text, `${what}'s text`, 24)
+      return { html: `<span class="pw-spark"><svg viewBox="0 0 60 16" aria-hidden="true"><polyline points="${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}" fill="none"/><circle cx="${pts[pts.length - 1][0].toFixed(1)}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="1.8"/></svg>${text ? `<span class="mono">${esc(text)}</span>` : ''}</span>`, text: `${vs.join(', ')}${text ? ` (${text})` : ''}`, t: '' }
+    }
+    if (col.kind === 'mix' && v != null && v !== '') {
+      if (!obj || !Array.isArray(v.parts) || !v.parts.length || v.parts.length > 6) throw new Error(`${what}: a mix is {parts: 1–6 [{key?, value, tone?}], text?}`)
+      const parts = v.parts.map((p, j) => {
+        const n = num(p && p.value, `${what}'s part ${j + 1}`)
+        if (n < 0) throw new Error(`${what}'s part ${j + 1} is below 0`)
+        if (p.tone != null && !TONES.includes(p.tone)) throw new Error(`${what}'s part ${j + 1}: tone is good, warn, bad or muted`)
+        const s = col.series.find((x) => x.key === p.key)
+        if (col.series.length && !s && !p.tone) throw new Error(`${what}'s part ${j + 1}: key is one of its column's series`)
+        const color = p.tone ? `var(--${{ good: 'me', warn: 'warn', bad: 'danger', muted: 'text-3' }[p.tone]})` : s ? s.color : `var(--chart-${(j % 6) + 1})`
+        return { n, color, label: s ? s.label : typeof p.key === 'string' ? p.key.slice(0, 40) : `part ${j + 1}` }
+      })
+      const sum = parts.reduce((a, p) => a + p.n, 0) || 1
+      const text = str(v.text, `${what}'s text`, 24)
+      const say = parts.map((p) => `${p.label} ${p.n}`).join(', ')
+      return { html: `<span class="pw-mix"><span class="pw-mixbar" role="img" aria-label="${esc(say)}" title="${esc(say)}">${parts.filter((p) => p.n > 0).map((p) => `<i style="width:${((p.n / sum) * 100).toFixed(1)}%;background:${p.color}"></i>`).join('')}</span>${text ? `<span class="mono">${esc(text)}</span>` : ''}</span>`, text: say, t: '' }
+    }
     const raw = obj && !Array.isArray(v) ? v.text : v
     const t = obj && !Array.isArray(v) && v.tone ? ` tone-${v.tone}` : ''
+    if (col.kind === 'heat' && row === 'total' && raw != null && raw !== '' && num(raw, what) < 0) throw new Error(`${what} is below 0`)
+    if (col.kind === 'heat' && row !== 'total') {
+      // 0 or none: a muted dot; else shaded by its share of the column's largest.
+      if (raw == null || raw === '' || raw === 0) return { html: '<span class="pw-heat zero" aria-label="0">·</span>', text: '0', t }
+      const n = num(raw, what)
+      if (n < 0) throw new Error(`${what} is below 0`)
+      const share = n / (heatMax[col.key] || 1)
+      return { html: `<span class="pw-heat" style="background:color-mix(in srgb, var(--chart-1) ${Math.round(12 + share * 60)}%, transparent)">${esc(String(n))}</span>`, text: String(n), t }
+    }
     if (raw == null || raw === '') return { html: '', text: '', t }
-    if (col.kind === 'number') {
+    if (col.kind === 'number' || col.kind === 'heat') {
       if (!Number.isFinite(typeof raw === 'number' ? raw : Number.NaN)) throw new Error(`${what} isn't a number`)
       return { html: esc(String(raw)), text: String(raw), t }
     }
@@ -191,7 +243,25 @@ function pluginTableHtml(d, size, opened, { str, outLink }, cap = Infinity, ever
   if (restSeen.length && gids.size) body.push(`<tr class="pw-tg"><th colspan="${span}" scope="rowgroup">Other <span class="mono">${rest.length}</span></th></tr>`)
   body.push(...restSeen.map(line))
   const head = `${details ? '<th class="pw-tc" aria-label="Details"></th>' : ''}${cols.map((c) => `<th scope="col" class="k-${c.kind}">${esc(c.label)}</th>`).join('')}`
-  return `<div class="pw-table"><table><thead><tr>${head}</tr></thead><tbody>${body.join('')}</tbody></table></div>${pluginMore(rows.length - shown.size, every && rows.length > cap)}`
+  // A band over the heads of columns that share a `group` (one run each: "Weeks"), when any has one.
+  let band = ''
+  if (cols.some((c) => c.group)) {
+    const runs = []
+    for (const c of cols) { const last = runs[runs.length - 1]; if (last && last.g === c.group) last.n++; else runs.push({ g: c.group, n: 1 }) }
+    band = `<tr class="pw-band">${details ? '<th class="pw-tc"></th>' : ''}${runs.map((r) => `<th colspan="${r.n}"${r.g ? ' scope="colgroup"' : ''}>${esc(r.g)}</th>`).join('')}</tr>`
+  }
+  // The total, bold under the rows (never folded away): its label in the first column unless a cell is given there.
+  let foot = ''
+  if (d.total != null) {
+    if (typeof d.total !== 'object' || Array.isArray(d.total) || (d.total.cells != null && (typeof d.total.cells !== 'object' || Array.isArray(d.total.cells)))) throw new Error('total is {label?, cells: {key: value}}')
+    const tc = d.total.cells || {}
+    const drawn = all.map((c) => [c, cell(tc[c.key], c, 'total')]).filter(([c]) => cols.includes(c)).map(([, x]) => x)
+    const label = str(d.total.label, 'the total\'s label', 40) || 'Total'
+    foot = `<tfoot><tr class="pw-total">${details ? '<td class="pw-tc"></td>' : ''}${drawn.map((x, j) => `<td class="k-${cols[j].kind}${x.t}">${j === 0 && !x.html ? esc(label) : x.html}</td>`).join('')}</tr></tfoot>`
+  }
+  // Each mix column's legend, under the table.
+  const legend = cols.filter((c) => c.kind === 'mix' && c.series.length).map((c) => `<div class="pc-lg pw-lg" aria-label="${esc(c.label)}">${c.series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div>`).join('')
+  return `<div class="pw-table"><table><thead>${band}<tr>${head}</tr></thead><tbody>${body.join('')}</tbody>${foot}</table></div>${legend}${pluginMore(rows.length - shown.size, every && rows.length > cap)}`
 }
 
 /** A widget its plugin never answered and whose ask failed (no data yet, not being asked): why, in its frame — it
@@ -284,10 +354,15 @@ function pluginChartHtml(d, size, { str, num, foot }, fits = pluginFits(size)) {
     const pct = (v) => `${Math.round((v / total) * 100)}%`
     body = `<div class="pc-pie"><div class="pc-disc"><svg viewBox="0 0 120 120" role="img" aria-label="${esc(slices.map((x) => `${x.label} ${pct(x.v)}`).join(', '))}">${arcs}</svg>${center}</div>${size === 'S' || slices.length < 2 ? '' : `<div class="pc-lg col">${slices.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.label)}<em class="pc-share" aria-hidden="true"><span style="width:${((x.v / total) * 100).toFixed(1)}%;background:${x.color}"></span></em><b>${esc(type === 'pie' ? pct(x.v) : fmt(x.v))}</b></span>`).join('')}</div>`}</div>`
   } else if (type === 'funnel') {
+    // A funnel: each stage centred on the axis, as wide as its share of the widest, narrowing (a trapezoid, but at S)
+    // to the next one's width.
     const st = pts, first = Math.max(...st.map((p) => p.vals[0])) || 1
+    const w = st.map((p) => (p.vals[0] / first) * 100)
     body = `<div class="pc-rows funnel" role="img" aria-label="${esc(all)}">${st.map((p, i) => {
       const prev = i ? st[i - 1].vals[0] : null
-      return `<span class="pc-rl">${esc(p.label)}</span><span class="pc-bar"><span style="width:${((p.vals[0] / first) * 100).toFixed(1)}%;background:var(--chart-1)" title="${esc(say(p))}"></span></span><span class="mono pc-rn">${esc(fmt(p.vals[0]))}</span><span class="mono pc-rn dim">${prev ? `${Math.round((p.vals[0] / prev) * 100)}%` : ''}</span>`
+      const cut = size === 'S' || i === st.length - 1 || !w[i] ? 0 : Math.max(0, Math.min(50, ((w[i] - w[i + 1]) / 2 / w[i]) * 100))
+      const shape = cut ? `;clip-path:polygon(0 0,100% 0,${(100 - cut).toFixed(1)}% 100%,${cut.toFixed(1)}% 100%)` : ''
+      return `<span class="pc-rl">${esc(p.label)}</span><span class="pc-bar fun"><span style="width:${w[i].toFixed(1)}%;background:var(--chart-1)${shape}" title="${esc(say(p))}"></span></span><span class="mono pc-rn">${esc(fmt(p.vals[0]))}</span><span class="mono pc-rn dim">${prev ? `${Math.round((p.vals[0] / prev) * 100)}%` : ''}</span>`
     }).join('')}</div>`
   } else if (type === 'bars' || type === 'stacked-bars') {
     const rows = pts.slice(-fits.bars)

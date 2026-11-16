@@ -156,6 +156,55 @@ test('stacked and stacked-bars, percent; pie and donut fold small slices into Ot
   assert.ok(!draw('chart', { type: 'pie', points: slices, center: { value: 1 } }, 'M').includes('pc-center'), 'center only in a donut')
   const fun = draw('chart', { type: 'funnel', points: [{ label: 'Leads', value: 120 }, { label: 'Won', value: 30 }] }, 'M')
   assert.match(fun, /<span class="mono pc-rn dim">25%<\/span>/)
+  // A funnel, not bars: each stage centred, narrowing to the next (a trapezoid), the last one plain; at S, plain.
+  const three = draw('chart', { type: 'funnel', points: [{ label: 'Leads', value: 100 }, { label: 'Calls', value: 60 }, { label: 'Won', value: 20 }] }, 'M')
+  assert.equal((three.match(/class="pc-bar fun"/g) || []).length, 3)
+  assert.match(three, /width:100\.0%;background:var\(--chart-1\);clip-path:polygon\(0 0,100% 0,80\.0% 100%,20\.0% 100%\)/)
+  assert.match(three, /width:60\.0%;background:var\(--chart-1\);clip-path:polygon\(0 0,100% 0,66\.7% 100%,33\.3% 100%\)/)
+  assert.match(three, /width:20\.0%;background:var\(--chart-1\)" title/)
+  assert.ok(!draw('chart', { type: 'funnel', points: [{ label: 'a', value: 100 }, { label: 'b', value: 50 }] }, 'S').includes('clip-path'), 'at S: just the centred bars')
+  assert.ok(!draw('chart', { type: 'funnel', points: [{ label: 'a', value: 50 }, { label: 'b', value: 100 }] }, 'M').includes('clip-path'), 'a stage under a wider one: not cut')
+})
+
+test('a scorecard table: spark trends, heat columns shaded by their largest (12 besides the 10), mix bars with a legend, a band over grouped heads, a bold total', () => {
+  const weeks = Array.from({ length: 12 }, (_, i) => ({ key: `w${i + 1}`, label: `W${i + 1}`, kind: 'heat', group: 'Weeks' }))
+  const columns = [{ key: 'unit', label: 'Unit' }, { key: 'trend', label: 'Trend', kind: 'spark' }, { key: 'stage', label: 'Stage mix', kind: 'mix', series: [{ key: 'q', label: 'Qualified' }, { key: 'p', label: 'Proposal' }, { key: 'lost', label: 'Lost', tone: 'bad' }] }, ...weeks]
+  const rows = [
+    { id: 'a', cells: { unit: 'Data', trend: { values: [1, 3, 2, 5], text: '5' }, stage: { parts: [{ key: 'q', value: 3 }, { key: 'p', value: 1 }, { key: 'lost', value: 0 }] }, w1: 4, w2: 0 } },
+    { id: 'b', cells: { unit: 'Cloud', w1: 2, w2: { text: 1, tone: 'warn' } } },
+  ]
+  const h = draw('table', { columns, rows, total: { cells: { w1: 6, w2: 1 } } }, 'L')
+  assert.equal((h.match(/<th scope="col"/g) || []).length, 15, '3 + 12 heat columns')
+  assert.match(h, /<tr class="pw-band"><th colspan="3"><\/th><th colspan="12" scope="colgroup">Weeks<\/th><\/tr>/)
+  assert.match(h, /<span class="pw-spark"><svg viewBox="0 0 60 16" aria-hidden="true"><polyline points="1\.0,15\.0 [^"]+" fill="none"\/><circle cx="59\.0" cy="2\.0" r="1\.8"\/><\/svg><span class="mono">5<\/span><\/span>/)
+  assert.match(h, /color-mix\(in srgb, var\(--chart-1\) 72%, transparent\)">4</, 'the largest: the deepest')
+  assert.match(h, /color-mix\(in srgb, var\(--chart-1\) 42%, transparent\)">2</, 'half of it: half as deep')
+  assert.match(h, /<span class="pw-heat zero" aria-label="0">·<\/span>/)
+  assert.match(h, /aria-label="Qualified 3, Proposal 1, Lost 0"/)
+  assert.match(h, /<i style="width:75\.0%;background:var\(--chart-1\)"><\/i><i style="width:25\.0%;background:var\(--chart-2\)"><\/i><\/span>/, 'a zero part not drawn')
+  assert.match(h, /<div class="pc-lg pw-lg" aria-label="Stage mix"><span><i style="background:var\(--chart-1\)"><\/i>Qualified<\/span><span><i style="background:var\(--chart-2\)"><\/i>Proposal<\/span><span><i style="background:var\(--danger\)"><\/i>Lost<\/span><\/div>/)
+  assert.match(h, /<tfoot><tr class="pw-total"><td class="k-text">Total<\/td>/)
+  assert.ok(h.includes('<td class="k-heat">6</td>'), 'a total heat cell: a plain bold number')
+  // Wrong data said.
+  refused('table', { columns: [...columns, { key: 'x13', label: 'X', kind: 'heat' }], rows: [] }, '1–10 columns')
+  refused('table', { columns: [{ key: 't', label: 'T', kind: 'spark' }], rows: [{ id: 1, cells: { t: { values: [1] } } }] }, 'a spark is {values: 2–30 numbers')
+  refused('table', { columns: [{ key: 'h', label: 'H', kind: 'heat' }], rows: [{ id: 1, cells: { h: -1 } }] }, 'is below 0')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 'x' }] } } }] }, "part 1 isn't a number")
+  refused('table', { columns: [{ key: 'n', label: 'N', series: [{ key: 'a' }] }], rows: [] }, "series is a mix column's")
+  refused('table', { columns: [{ key: 's', label: 'S', kind: 'spark' }], rows: [{ id: 1, cells: { s: { values: [-1e308, 1e308] } } }] }, 'up to 10^15')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 1e308 }, { value: 1e308 }] } } }] }, 'up to 10^15')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'a', label: 'A' }] }], rows: [{ id: 1, cells: { m: { parts: [{ key: 'zz', value: 1 }] } } }] }, "key is one of its column's series")
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'a' }, { key: 'a' }] }], rows: [] }, 'needs a plain, unique key')
+  refused('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', series: [{ key: 'x'.repeat(41) }] }], rows: [] }, 'needs a plain, unique key')
+  refused('table', { columns: [{ key: 'h', label: 'H', kind: 'heat' }], rows: [{ id: 1, cells: { h: 1 } }], total: { cells: { h: -5 } } }, 'is below 0')
+  // A mix of all zeros: an empty bar, no error; quotes in its text escaped in the attribute.
+  const zero = draw('table', { columns: [{ key: 'm', label: 'M', kind: 'mix' }], rows: [{ id: 1, cells: { m: { parts: [{ value: 0 }], text: '" onmouseover="x' } } }] }, 'M')
+  assert.ok(zero.includes('<span class="pw-mixbar"') && !zero.includes('" onmouseover="x'), zero)
+  refused('table', { columns: [{ key: 'n', label: 'N' }], rows: [{ id: 1 }], total: [1] }, 'total is {label?, cells')
+  // Others' text escaped in the new places.
+  const evil = '<img src=x onerror=alert(1)>'
+  const e = draw('table', { columns: [{ key: 'm', label: 'M', kind: 'mix', group: evil, series: [{ key: 'a', label: evil }] }, { key: 's', label: 'S', kind: 'spark' }], rows: [{ id: 1, cells: { m: { parts: [{ key: 'a', value: 1 }], text: evil }, s: { values: [1, 2], text: evil } } }], total: { label: evil } }, 'M')
+  assert.ok(!e.includes('<img'), e)
 })
 
 test("a chart's headline: the value, what it is, the change (arrow by sign, tone by good); stats' trend as a sparkline", () => {
@@ -293,7 +342,7 @@ test('a table with no rows says its empty text; its text is escaped; wrong data 
   refused('table', { rows: [] }, 'needs 1–10 columns')
   refused('table', { columns: Array.from({ length: 11 }, (_, i) => ({ key: `c${i}`, label: 'x' })), rows: [] }, 'needs 1–10 columns')
   refused('table', { columns: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], rows: [] }, 'column 2 needs a plain, unique key')
-  refused('table', { columns: [{ key: 'a', label: 'A', kind: 'money' }], rows: [] }, 'kind is text, number, pill or date')
+  refused('table', { columns: [{ key: 'a', label: 'A', kind: 'money' }], rows: [] }, 'kind is text, number, pill, date, spark, heat or mix')
   refused('table', { columns: cols, rows: Array.from({ length: 201 }, (_, i) => ({ id: i })) }, '200 rows at most')
   refused('table', { columns: cols, rows: [{ id: 1 }, { id: 1 }] }, 'row 2 needs a unique id')
   refused('table', { columns: cols, rows: [{ id: 1, group: 'nope' }] }, "row 1's group “nope” isn't in groups")

@@ -2,7 +2,7 @@
   "id": "table-demo",
   "name": "Table demo",
   "version": "0.3.0",
-  "summary": "A test plugin: a table widget (groups, pills, dates, numbers, details, links), stats with links, a count and a table for a thread or a client with a link, details and an action (tests/cases/today/TC-042, TC-044).",
+  "summary": "A test plugin: a table widget (groups, pills, dates, numbers, details, links), stats with links, a count and a table for a thread or a client with a link, details and an action and a scorecard (tests/cases/today/TC-042, TC-044, TC-053).",
   "main": "main.js",
   "widgets": [
     {
@@ -80,6 +80,16 @@
           "label": "Client",
           "type": "client"
         }
+      ]
+    },
+    {
+      "id": "scorecard",
+      "label": "Pipeline by unit",
+      "about": "a scorecard: trends, a stage mix, 12 weeks as a heat map and a total",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
       ]
     }
   ]
