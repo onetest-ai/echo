@@ -39,13 +39,18 @@ const MAX_PRESETS: usize = 6;
 const MAX_ITEMS: usize = 24;
 pub const GROUPS: [&str; 3] = ["pursuit", "delivery", "closed"];
 
-/// A preset item's widget as the catalog names it.
+/// A preset item's widget as the catalog names it (one named in full as it is).
 pub fn widget_id(plugin: &str, widget: &str) -> String {
-    if widget.starts_with("plugin:") {
+    if widget.contains(':') {
         widget.to_string()
     } else {
         format!("plugin:{plugin}:{widget}")
     }
+}
+
+/// A widget named in full as a dashboard may hold it: Echo's own (`core:…`) or `plugin:<id>:<widget>`.
+pub fn full_ok(id: &str) -> bool {
+    parts(id).is_some() || (id.starts_with("core:") && id.len() <= 80 && id[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'))
 }
 
 /// The plugin and widget of `plugin:<id>:<widget>`, each a plain id.
@@ -90,8 +95,8 @@ pub(super) fn check(m: &Manifest) -> Result<()> {
     }
     let mut ids = std::collections::HashSet::new();
     for d in &m.dashboards {
-        if !valid_id(&d.id) || !ids.insert((d.kind.clone(), d.id.clone())) {
-            bail!("dashboard “{}” needs a plain id (a–z, 0–9, -), unique for its kind", d.id);
+        if !valid_id(&d.id) || !ids.insert(d.id.clone()) {
+            bail!("dashboard “{}” needs a plain, unique id (a–z, 0–9, -)", d.id);
         }
         if d.kind != "thread" && d.kind != "client" {
             bail!("dashboard “{}”: kind is thread or client", d.id);
@@ -199,6 +204,8 @@ mod tests {
         assert!(bad(one(json!([{"widget": "glance"}, {"widget": "plugin:acme-crm:glance"}]))).contains("twice"));
         assert!(bad(one(json!([{"widget": "plugin:Bad Id:x"}]))).contains("plugin:<id>:<widget>"));
         assert!(bad(one(json!([]))).contains("1–24 widgets"));
+        assert!(manifest(json!([{"id": "x", "kind": "client", "name": "X", "items": [{"widget": "glance"}]}, {"id": "x", "kind": "thread", "name": "Y", "items": [{"widget": "pipe"}]}])).unwrap_err().to_string().contains("unique id"), "one id for a thread's and a client's: refused");
+        assert!(bad(one(json!([{"widget": "core:needs.now"}]))).contains("plugin:<id>:<widget>"), "Echo's own aren't a plugin's to offer");
         assert!(bad(json!({"id": "x", "kind": "page", "name": "X", "items": [{"widget": "glance"}]})).contains("thread or client"));
         assert!(bad(json!({"id": "x", "kind": "client", "name": "X", "for": ["pursuit"], "items": [{"widget": "glance"}]})).contains("“for” is a thread's"));
         assert!(bad(json!({"id": "x", "kind": "thread", "name": "X", "for": ["won"], "items": [{"widget": "pipe"}]})).contains("“for” is a thread's"));

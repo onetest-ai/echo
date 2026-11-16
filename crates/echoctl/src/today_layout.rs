@@ -593,6 +593,11 @@ pub fn board_items(kind: crate::boards::Kind, board: &str) -> Vec<Item> {
     load_on(&board_page(kind, board))
 }
 
+/// A dashboard's layout as saved, before the catalog's say (its sizes and heights as written).
+pub fn board_saved(kind: crate::boards::Kind, board: &str) -> Vec<Item> {
+    std::fs::read(board_page(kind, board).file()).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()).and_then(|f| f.items).unwrap_or_default()
+}
+
 /// A dashboard's whole layout, set (a plugin's preset, an import): what it shows after.
 pub fn set_board(kind: crate::boards::Kind, board: &str, items: Vec<Item>) -> Result<Vec<Item>> {
     change(&board_page(kind, board), |_| Ok(items))

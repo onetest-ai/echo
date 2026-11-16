@@ -378,21 +378,21 @@ offered in the "+" beside a thread's (`kind: "thread"`) or a client's (`"client"
 Echo never adds one itself, and the install sheet only says so ("Offers dashboards: Staffing (clients)"): not a
 permission, an update adding one doesn't ask again.
 
-- `id` a–z 0–9 `-`, unique for its kind; `name` 1–40 chars (the dashboard's, unless the user has one of that name:
-  then it isn't added); `about` ≤ 160 (the row's tooltip).
+- `id` a–z 0–9 `-`, unique across the plugin's dashboards; `name` 1–40 chars (the dashboard's; when the user has one of
+  that name, the next free "<name> 2", "<name> 3"…); `about` ≤ 160 (the row's tooltip).
 - `for` (a thread's only): the stage groups it shows on — `pursuit`, `delivery`, `closed`; none: every thread.
 - `items`: 1–24, each widget once — the plugin's own by its id, or `plugin:<id>:<widget>` of a plugin of its
   marketplace. A widget has a setting of the page's kind (`thread` / `client`), which the page sets: never in `params`.
   `size`, `height` and `params` are ones the widget takes (unset: its first size, 1 row, its defaults); `row`: it starts
   a row. Its own widgets are checked at install; others' by `plugin check` beside them, and on a page a widget of a
   plugin not installed draws nothing.
-- Updated: a dashboard added from a preset the plugin's new version changed says "<plugin> updated this dashboard —
+- Updated: a dashboard added from a preset whose widgets or `for` the plugin's new version changed says "<plugin> updated this dashboard —
   Update / Keep mine" ("— Update replaces your changes" when the user changed it); Update takes the new layout (and
   `for`), Keep mine keeps theirs and that version isn't offered again (`echoctl dashboard preset-update <id> [--keep]`).
 - Its plugin off or removed: the dashboard stays the user's, saying so, with Remove.
 - `echoctl dashboard export <id> --thread|--client` prints a dashboard as such a block (widgets in full, their thread /
   client settings left out) — a preset for a manifest, or a file for `echoctl dashboard import <file>` (the user's own
-  then). Evidence: `plugins::presets::check`, `boards::add_preset`, `boards::status`
+  then; its widgets named in full: `plugin:<id>:<widget>` or Echo's `core:…`). Evidence: `plugins::presets::check`, `boards::add_preset`, `boards::status`
 
 ## Work rows
 

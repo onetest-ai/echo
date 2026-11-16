@@ -33,8 +33,8 @@ const boardsShown = (kind) => {
   const group = p ? ProjectArt.stage(p.stage).gid : ''
   return boardsOf(kind).filter((b) => boardShows(b, group))
 }
-/** The board a tab id names (`b-<id>`), or null. */
-const boardOfTab = (kind, tab) => (typeof tab === 'string' && tab.startsWith('b-') ? boardsOf(kind).find((b) => b.id === tab.slice(2)) || null : null)
+/** The board a tab id names (`b-<id>`) and this page shows, or null. */
+const boardOfTab = (kind, tab) => (typeof tab === 'string' && tab.startsWith('b-') ? boardsShown(kind).find((b) => b.id === tab.slice(2)) || null : null)
 /** The tabs with the boards after the first (the Brief, the Overview). */
 const withBoards = (kind, tabs) => [tabs[0], ...boardsShown(kind).map((b) => [`b-${b.id}`, esc(b.name)]), ...tabs.slice(1)]
 const KIND_WORD = { thread: 'thread', client: 'client' }
@@ -54,7 +54,7 @@ function boardTabRow(kind, tabs, active, attr) {
 
 /** A board's page: its name with ⋯ (rename, move, remove) and ✎, then its widgets. */
 function boardPage(kind, b) {
-  const all = boardsOf(kind), at = all.findIndex((x) => x.id === b.id)
+  const all = boardsShown(kind), at = all.findIndex((x) => x.id === b.id)
   const name = S.boardRename === b.id
     ? `<input id="bd-rename" class="bd-rename" data-board-rename="${esc(b.id)}" value="${esc(b.name)}" aria-label="Dashboard name" maxlength="40">`
     : `<h3>${esc(b.name)}</h3>`
@@ -88,7 +88,8 @@ document.addEventListener('click', (e) => {
   if (pre) {
     const kind = pre.dataset.kind, plugin = pre.dataset.boardPreset, preset = pre.dataset.preset
     S.boardNew = null
-    return boardOp({ op: 'add_preset', kind, plugin, preset }, () => { const n = boardsOf(kind).find((b) => b.from && b.from.plugin === plugin && b.from.preset === preset); if (n) boardGo(kind, n.id) })
+    // Opened here only if this page shows it (a pursuit thread's board added on a delivery thread is on the others).
+    return boardOp({ op: 'add_preset', kind, plugin, preset }, () => { const n = boardsShown(kind).find((b) => b.from && b.from.plugin === plugin && b.from.preset === preset); if (n) boardGo(kind, n.id) })
   }
   const add = e.target.closest('[data-board-add]')
   if (add) { S.boardNew = add.dataset.boardAdd; render(); const i = $('#bd-new'); if (i) i.focus(); return }
@@ -96,12 +97,14 @@ document.addEventListener('click', (e) => {
   const d = e.target.closest('[data-board-do]')
   const here = boardHere()
   if (!d || !here) { if (S.boardMenu && !e.target.closest('.menu')) { S.boardMenu = false; render() } return }
-  const { kind, b } = here, all = boardsOf(kind), at = all.findIndex((x) => x.id === b.id)
+  // Left / right: past the next board this page shows (one for other stages stays where it is between them).
+  const { kind, b } = here, all = boardsOf(kind), shown = boardsShown(kind), at = shown.findIndex((x) => x.id === b.id)
+  const to = (n) => all.findIndex((x) => x.id === (shown[n] || {}).id)
   S.boardMenu = false
   switch (d.dataset.boardDo) {
     case 'rename': S.boardRename = b.id; render(); { const i = $('#bd-rename'); if (i) { i.focus(); i.select() } } return
-    case 'left': return boardOp({ op: 'move', kind, id: b.id, to: Math.max(0, at - 1) })
-    case 'right': return boardOp({ op: 'move', kind, id: b.id, to: at + 1 })
+    case 'left': return at > 0 ? boardOp({ op: 'move', kind, id: b.id, to: to(at - 1) }) : undefined
+    case 'right': return at < shown.length - 1 ? boardOp({ op: 'move', kind, id: b.id, to: to(at + 1) }) : undefined
     case 'remove-ask': S.boardRemove = b.id; return render()
     case 'remove-cancel': S.boardRemove = null; return render()
     case 'remove': S.boardRemove = null; return boardOp({ op: 'remove', kind, id: b.id }, () => boardGo(kind, null))
@@ -115,9 +118,13 @@ window.addEventListener('hashchange', () => { S.boardNew = null; S.boardRename =
 // Clicked away from a name field: it closes (Enter keeps it, Esc drops it).
 document.addEventListener('focusout', (e) => {
   const t = e.target
-  if (!t || !t.dataset || !(t.dataset.boardNew || t.dataset.boardRename)) return
-  setTimeout(() => { if (document.activeElement === t) return; S.boardNew = null; S.boardRename = null; render() }, 150)
+  if (!t || !t.dataset || !(t.dataset.boardNew || t.dataset.boardRename || t.dataset.boardPreset)) return
+  // Into the "+"'s From plugins (Tab to a row): it stays open.
+  if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.bd-new')) return
+  setTimeout(() => { const a = document.activeElement; if (a === t || (a && a.closest && a.closest('.bd-new'))) return; S.boardNew = null; S.boardRename = null; render() }, 150)
 })
+// A press on a From plugins row keeps the name field's focus: a slow click isn't lost to the field closing.
+document.addEventListener('mousedown', (e) => { if (e.target.closest && e.target.closest('[data-board-preset]')) e.preventDefault() })
 
 document.addEventListener('keydown', (e) => {
   const t = e.target

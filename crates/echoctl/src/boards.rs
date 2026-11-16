@@ -34,8 +34,10 @@ pub struct FromPreset {
     pub preset: String,
     /// The plugin's version it came from.
     pub version: String,
-    /// The preset's widgets as taken (a newer one differs: offered as an update) …
+    /// The preset's widgets and stage groups as taken (a newer one differs: offered as an update) …
     pub taken: Vec<PresetItem>,
+    #[serde(default, rename = "taken_for", skip_serializing_if = "Vec::is_empty")]
+    pub taken_stages: Vec<String>,
     /// … and the layout they made (the user's own differs: their changes, said before an update replaces them).
     pub laid: Vec<Item>,
 }
@@ -209,12 +211,13 @@ fn preset(plugin: &str, id: &str) -> Result<(PresetDef, String, String)> {
 /// The dashboards and the plugins' presets as the window reads them: each dashboard with its `status`, and what each
 /// kind's "+" offers.
 pub fn view() -> Value {
+    let ps = Plugins::now();
     let of = |kind: Kind| -> Vec<Value> {
         list(kind)
             .into_iter()
             .map(|b| {
                 let mut v = serde_json::to_value(&b).unwrap_or_default();
-                if let Some(s) = status(kind, &b) {
+                if let Some(s) = status_with(&ps, kind, &b) {
                     v["status"] = s;
                 }
                 v
@@ -244,16 +247,22 @@ pub fn add_preset(plugin: &str, id: &str) -> Result<Board> {
     if list(kind).iter().any(|b| b.from.as_ref().is_some_and(|f| f.plugin == plugin && f.preset == id)) {
         bail!("{name}'s “{}” is added already", d.name.trim());
     }
-    let from = FromPreset { plugin: plugin.into(), preset: id.into(), version, taken: d.items.clone(), laid: vec![] };
-    let b = add_as(kind, &d.name, d.stages.clone(), Some(from))?;
+    let from = FromPreset { plugin: plugin.into(), preset: id.into(), version, taken: d.items.clone(), taken_stages: d.stages.clone(), laid: vec![] };
+    // A name the user has a dashboard of already: the next free "<name> 2", "<name> 3"…
+    let taken: Vec<String> = list(kind).into_iter().map(|b| b.name.to_lowercase()).collect();
+    let base: String = d.name.trim().chars().take(37).collect();
+    let name = std::iter::once(d.name.trim().to_string()).chain((2..=MAX + 1).map(|n| format!("{} {n}", base.trim_end()))).find(|n| !taken.contains(&n.to_lowercase())).unwrap_or_else(|| d.name.clone());
+    let b = add_as(kind, &name, d.stages.clone(), Some(from))?;
     lay(kind, &b.id, layout_of(plugin, &d.items)).inspect_err(|_| {
         let _ = remove(kind, &b.id);
     })
 }
 
-/// A dashboard's layout set whole, kept as what its preset laid.
+/// A dashboard's layout set whole, kept as what its preset laid (as written: compared with what is saved, never with
+/// what the catalog makes of it now).
 fn lay(kind: Kind, id: &str, items: Vec<Item>) -> Result<Board> {
-    let laid = crate::today_layout::set_board(kind, id, items)?;
+    crate::today_layout::set_board(kind, id, items)?;
+    let laid = crate::today_layout::board_saved(kind, id);
     change(|f| {
         let b = f.of(kind).iter_mut().find(|b| b.id == id).ok_or_else(|| anyhow!("no dashboard {id:?}"))?;
         if let Some(from) = &mut b.from {
@@ -263,20 +272,36 @@ fn lay(kind: Kind, id: &str, items: Vec<Item>) -> Result<Board> {
     })
 }
 
-/// Where a preset's dashboard stands: `{state, plugin_name, edited}` — `ok`, `update` (its plugin changed the preset;
-/// `edited`: the user changed the layout, which an update replaces), `dropped` (the plugin offers it no more), `off`
-/// (its plugin is off), `gone` (removed). None for the user's own.
+/// What a status reads once for every dashboard: the installed plugins and the enabled ones' manifests.
+struct Plugins {
+    installed: std::collections::BTreeMap<String, crate::plugins::Installed>,
+    manifests: Vec<(String, crate::plugins::Manifest)>,
+}
+
+impl Plugins {
+    fn now() -> Plugins {
+        Plugins { installed: crate::plugins::Registry::load().map(|r| r.installed).unwrap_or_default(), manifests: crate::plugins::enabled_manifests() }
+    }
+}
+
+/// Where a preset's dashboard stands: `{state, plugin_name, edited}` — `ok`, `update` (its plugin changed the preset's
+/// widgets or `for`; `edited`: the user changed the layout, which an update replaces), `dropped` (the plugin offers it no
+/// more), `off` (its plugin is off), `gone` (removed). None for the user's own.
+#[cfg(test)]
 pub fn status(kind: Kind, b: &Board) -> Option<Value> {
+    status_with(&Plugins::now(), kind, b)
+}
+
+fn status_with(ps: &Plugins, kind: Kind, b: &Board) -> Option<Value> {
     let f = b.from.as_ref()?;
-    let installed = crate::plugins::Registry::load().ok().and_then(|r| r.installed.get(&f.plugin).cloned());
-    let edited = crate::today_layout::board_items(kind, &b.id) != f.laid;
-    let (state, name) = match &installed {
+    let edited = crate::today_layout::board_saved(kind, &b.id) != f.laid;
+    let (state, name) = match ps.installed.get(&f.plugin) {
         None => ("gone", f.plugin.clone()),
         Some(p) if !p.enabled => ("off", p.name.clone()),
-        Some(p) => match preset(&f.plugin, &f.preset) {
-            Err(_) => ("dropped", p.name.clone()),
-            Ok((d, ..)) if d.items != f.taken => ("update", p.name.clone()),
-            Ok(_) => ("ok", p.name.clone()),
+        Some(p) => match ps.manifests.iter().find(|(id, _)| *id == f.plugin).and_then(|(_, m)| m.dashboards.iter().find(|d| d.id == f.preset)) {
+            None => ("dropped", p.name.clone()),
+            Some(d) if d.items != f.taken || d.stages != f.taken_stages => ("update", p.name.clone()),
+            Some(_) => ("ok", p.name.clone()),
         },
     };
     Some(json!({"state": state, "plugin_name": name, "edited": edited}))
@@ -292,6 +317,7 @@ pub fn take_update(kind: Kind, id: &str, keep: bool) -> Result<Board> {
         let x = file.of(kind).iter_mut().find(|x| x.id == id).ok_or_else(|| anyhow!("no dashboard {id:?}"))?;
         let from = x.from.as_mut().expect("from a preset");
         from.taken = d.items.clone();
+        from.taken_stages = d.stages.clone();
         from.version = version;
         if !keep {
             x.stages = d.stages.clone();
@@ -325,8 +351,8 @@ pub fn import(kind: Kind, block: &Value) -> Result<Board> {
     if d.kind != kind.name() {
         bail!("it is a {}'s dashboard, not a {}'s", d.kind, kind.name());
     }
-    if d.items.is_empty() || d.items.len() > 24 || d.items.iter().any(|i| !i.widget.contains(':') || i.widget.len() > 120) {
-        bail!("its widgets: 1–24, each named in full (plugin:<id>:<widget>)");
+    if d.items.is_empty() || d.items.len() > 24 || d.items.iter().any(|i| !crate::plugins::presets::full_ok(&i.widget)) {
+        bail!("its widgets: 1–24, each named in full (plugin:<id>:<widget>, or Echo's core:…)");
     }
     if d.stages.iter().any(|s| !crate::plugins::presets::GROUPS.contains(&s.as_str())) || (!d.stages.is_empty() && kind != Kind::Thread) {
         bail!("“for” is a thread's, of {:?}", crate::plugins::presets::GROUPS);
@@ -457,5 +483,57 @@ mod tests {
         bare["name"] = json!("Bare");
         bare["items"] = json!([{"widget": "glance"}]);
         assert!(import(Kind::Client, &bare).unwrap_err().to_string().contains("named in full"));
+    }
+
+    #[test]
+    fn a_preset_named_like_a_users_dashboard_is_added_numbered_and_its_plugins_changes_are_told_apart_from_the_users() {
+        use crate::plugins;
+        let (_env, root) = paths::testenv::folders("boards-presets-edges");
+        plugin(&root, "0.1.0", json!([{"widget": "glance", "size": "L", "height": 2}]));
+        let m = plugins::market_add(root.join("market").to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&m).unwrap();
+        let r = plugins::review("acme-crm", Some(&m)).unwrap();
+        plugins::install("acme-crm", Some(&m), &r.uses).unwrap();
+        add(Kind::Client, "Staffing").unwrap();
+        let b = add_preset("acme-crm", "staffing").unwrap();
+        assert_eq!((b.id.as_str(), b.name.as_str()), ("staffing-2", "Staffing 2"), "the user's own name kept, the preset's numbered");
+        assert_eq!(presets(Kind::Client)[0]["added"], true);
+        let st = || status(Kind::Client, &find(Kind::Client, "staffing-2").unwrap()).unwrap();
+        // The plugin's widget no longer takes L or 2 rows: the page draws it smaller, but the user changed nothing.
+        let d = root.join("market/plugins/acme-crm/echo-plugin.json");
+        let mut man: Value = serde_json::from_slice(&std::fs::read(&d).unwrap()).unwrap();
+        man["version"] = json!("0.2.0");
+        man["widgets"][0]["sizes"] = json!(["M"]);
+        man["widgets"][0]["heights"] = json!([1]);
+        man["dashboards"][0]["items"] = json!([{"widget": "glance"}]);
+        // Its thread preset now shows on delivery threads too: an update as well.
+        man["dashboards"][1]["for"] = json!(["pursuit", "delivery"]);
+        std::fs::write(&d, man.to_string()).unwrap();
+        plugins::refresh(&m).unwrap();
+        plugins::update("acme-crm", &[]).unwrap();
+        assert_eq!((st()["state"].as_str(), st()["edited"].as_bool()), (Some("update"), Some(false)), "not the user's change");
+        let t = add_preset("acme-crm", "pursuit").unwrap();
+        assert_eq!(t.stages, ["pursuit", "delivery"]);
+        man["dashboards"][1]["for"] = json!(["pursuit"]);
+        man["version"] = json!("0.3.0");
+        std::fs::write(&d, man.to_string()).unwrap();
+        plugins::refresh(&m).unwrap();
+        plugins::update("acme-crm", &[]).unwrap();
+        assert_eq!(status(Kind::Thread, &find(Kind::Thread, &t.id).unwrap()).unwrap()["state"], "update", "only its `for` changed");
+        assert_eq!(take_update(Kind::Thread, &t.id, false).unwrap().stages, ["pursuit"]);
+    }
+
+    #[test]
+    fn an_import_keeps_echos_own_widgets_and_refuses_one_not_named_in_full() {
+        let (_env, _root) = paths::testenv::folders("boards-import-core");
+        let block = json!({"id": "x", "kind": "client", "name": "Mine", "items": [{"widget": "core:needs.now", "size": "M"}, {"widget": "plugin:acme-crm:glance"}]});
+        let b = import(Kind::Client, &block).unwrap();
+        assert_eq!(crate::today_layout::board_saved(Kind::Client, &b.id).iter().map(|i| i.widget.as_str()).collect::<Vec<_>>(), ["core:needs.now", "plugin:acme-crm:glance"]);
+        for w in ["plugin::x", "plugin:Acme:x", "core:<b>", "glance"] {
+            let mut bad = block.clone();
+            bad["name"] = json!("Other");
+            bad["items"] = json!([{"widget": w}]);
+            assert!(import(Kind::Client, &bad).unwrap_err().to_string().contains("named in full"), "{w}");
+        }
     }
 }

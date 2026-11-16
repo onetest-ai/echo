@@ -76,10 +76,10 @@ value only for a thread of that client (else its default). Each place a widget i
 its own. Evidence: `today_layout::params_on`, `today_layout::Page::holds_thread`
 
 A dashboard added from a plugin's preset keeps where it came from in `boards.json` (`from: {plugin, preset, version,
-taken, laid}`: the preset's widgets as taken and the layout they made) and its `for`; `boards::status` compares them
-with the plugin's preset now (`update`) and the layout now (`edited`), and with the registry (`off`, `gone`,
-`dropped`). The window reads them with the presets on offer from `/api/boards` (`boards::view`). Evidence:
-`boards::status`, `boards::take_update`
+taken, taken_for, laid}`: the preset's widgets and `for` as taken, and the layout written) and its `for`; its status
+compares them with the plugin's preset now (`update`) and the layout as saved, before the catalog's sizes (`edited`),
+and with the registry (`off`, `gone`, `dropped`), reading the registry and manifests once for all dashboards. The window reads them with the presets on offer from `/api/boards` (`boards::view`). Evidence:
+`boards::status_with`, `boards::take_update`
 
 ## Where things are
 
