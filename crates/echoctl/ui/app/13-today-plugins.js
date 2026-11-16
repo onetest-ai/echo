@@ -76,9 +76,11 @@ function pluginWidgetHtml(kind, data, size, opened = [], height = 1, all = false
   if (kind === 'list') {
     if (!Array.isArray(d.items)) throw new Error('a list needs items: [{title, sub?, link?}]')
     // The items its height holds, in the plugin's order, then "+N more" (100 at most in all).
-    const every = d.items.slice(0, 100), items = all ? every : every.slice(0, fits.items)
+    // Each item checked, shown or not: "+N more" never turns it into an error.
+    const every = d.items.slice(0, 100).map((x, i) => `<div class="pw-li" role="listitem"><span>${linked(str(x && x.title, `item ${i + 1}'s title`), x && x.link)}</span>${x && x.sub ? `<span class="set-sub">${esc(str(x.sub, `item ${i + 1}'s sub`))}</span>` : ''}</div>`)
+    const items = all ? every : every.slice(0, fits.items)
     if (!items.length) return `<p class="set-sub">${esc(str(d.empty, 'empty') || 'Nothing here.')}</p>${foot()}`
-    return `<div class="pw-list" role="list">${items.map((x, i) => `<div class="pw-li" role="listitem"><span>${linked(str(x && x.title, `item ${i + 1}'s title`), x && x.link)}</span>${x && x.sub ? `<span class="set-sub">${esc(str(x.sub, `item ${i + 1}'s sub`))}</span>` : ''}</div>`).join('')}</div>${pluginMore(every.length - items.length, all && every.length > fits.items)}${foot()}`
+    return `<div class="pw-list" role="list">${items.join('')}</div>${pluginMore(every.length - items.length, all && every.length > fits.items)}${foot()}`
   }
   if (kind === 'status') {
     if (!['ok', 'warn', 'bad'].includes(d.state)) throw new Error('a status needs state: ok, warn or bad')
@@ -384,7 +386,7 @@ function pluginWidgetView(id, w, size, height = 1) {
       if (!draw) throw new Error('its page isn\'t loaded (the plugin\'s window half)')
       const theme = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       Plugins.drawing = true
-      try { body = `<div class="pw-page">${String(draw({ data: w.data, size, theme }) ?? '')}</div>` } finally { Plugins.drawing = false }
+      try { body = `<div class="pw-page">${String(draw({ data: w.data, size, height, fits: pluginFits(size, height), theme }) ?? '')}</div>` } finally { Plugins.drawing = false }
     } else body = pluginWidgetHtml(w.kind, w.data, size, (S.pwRows && S.pwRows[`${tdPageKey()}|${id}`]) || [], height, !!(S.pwAll && S.pwAll[`${tdPageKey()}|${id}`]))
   } catch (e) { body = `<p class="set-sub warn">Couldn't draw this — ${esc(e.message)}</p>` }
   // When its data came: plugins answer on their own schedule, so the time says how fresh it is (a day's other date

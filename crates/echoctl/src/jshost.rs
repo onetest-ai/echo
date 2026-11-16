@@ -1527,7 +1527,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let widgets = json!([
             {"id": "builds", "label": "Builds", "about": "the last builds", "kind": "list", "sizes": ["M", "L"], "heights": [1, 2]},
-            {"id": "health", "label": "CI health", "kind": "status", "params": [{"key": "branch", "label": "Branch", "type": "choice", "options": ["main", "dev"], "default": "main"}]},
+            {"id": "health", "label": "CI health", "kind": "status", "params": [{"key": "branch", "label": "Branch", "type": "choice", "options": ["main", "dev"], "default": "main"}], "heights": [1, 2]},
         ]);
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "ci", "name": "CI", "version": "0.1.0", "main": "main.js", "widgets": widgets}).to_string()).unwrap();
         std::fs::write(
@@ -1560,8 +1560,9 @@ mod tests {
         assert_eq!(green, Some(json!(1)));
         assert_eq!(widget_last("ci", "health").unwrap()["data"]["title"], "All green");
         assert!(call("ci", "stranger", &json!({})).unwrap_err().to_string().contains("isn't a widget this plugin declares"));
-        // A `set` stays: Today doesn't take it for a resize and ask the provider over it.
+        // A `set` stays: Today doesn't take it for a resize and ask the provider over it — two rows high too.
         crate::today_layout::add("plugin:ci:health", Some("M"), None).unwrap();
+        crate::today_layout::set_height("plugin:ci:health", 2).unwrap();
         widget_ask_now("ci", "health");
         call("ci", "green", &json!({})).unwrap();
         crate::widgets::data("plugin:ci:health", &crate::widgets::Inputs { tasks: &json!({}) }).unwrap();

@@ -436,7 +436,7 @@ Evidence: `jshost::work::check_rows`
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
-- `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
+- `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is

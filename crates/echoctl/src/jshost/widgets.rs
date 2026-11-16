@@ -57,10 +57,13 @@ pub(super) fn widget_store(id: &str, widget: &str, page: &crate::today_layout::P
         (d, None) => {
             // A `set` keeps the size and settings its provider was last asked with (else Today would take it for a
             // change of them).
-            let kept = (last.get("size").cloned(), last.get("params").cloned());
+            let kept = (last.get("size").cloned(), last.get("params").cloned(), last.get("height").cloned());
             last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
             if let Some(k) = kept.0 {
                 last["size"] = k;
+            }
+            if let Some(h) = kept.2 {
+                last["height"] = h;
             }
             if let Some(p) = kept.1 {
                 last["params"] = p;

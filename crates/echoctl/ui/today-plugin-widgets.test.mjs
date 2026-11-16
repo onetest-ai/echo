@@ -53,6 +53,7 @@ test('a table or list draws the rows its height holds, then "+N more"; all of th
   assert.ok(draw('list', list, 'M', [], 1).includes('+4 more'))
   assert.equal((draw('list', list, 'M', [], 2).match(/role="listitem"/g) || []).length, 9)
   assert.equal((draw('list', list, 'M', [], 1, true).match(/role="listitem"/g) || []).length, 9)
+  assert.throws(() => draw('list', { items: [...list.items, { title: { not: 'text' } }] }, 'M', [], 1), /item 10's title is not text/, 'an item past the fold is checked too')
   const many = { type: 'bars', points: Array.from({ length: 30 }, (_, i) => ({ label: `B${i}`, value: i + 1 })) }
   for (const [size, h, n] of [['S', 1, 4], ['M', 1, 6], ['M', 2, 12], ['L', 2, 24]]) assert.equal((draw('chart', many, size, [], h).match(/class="pc-rl"/g) || []).length, n, `${size} h${h}`)
 })
