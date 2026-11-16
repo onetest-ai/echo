@@ -191,7 +191,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await setActs(page, false)
   })
 
-  test("3 · Sync now reads the thread's new call into its work under the guard, verifies it in a fresh run, and keeps the fields the user set", covers('work/TC-028', 'F-THR-20', 'F-WORK-16', 'F-CC-04'), async ({ page }) => {
+  test("3 · Sync now reads the thread's new call into its work and who's who in one guarded run given its text, verifies it in a fresh run with no tools, and keeps the fields the user set", covers('work/TC-028', 'F-THR-20', 'F-THR-27', 'F-WORK-16', 'F-CC-04'), async ({ page }) => {
     const { sync: s, virtualModel: vm } = data.set
     const w = data.text.work
     const run = data.text.minutesRun
@@ -230,11 +230,12 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const handedOver = await work.value(data.text.work.handedOverBy).textContent()
     await work.syncNow.click()
 
-    // 4: the sync's status: done, the three scripted reports.
+    // 4: the sync's status: done, the extract's scripted report and Echo's verify line; two passes.
     const status = () => data.ledger(id, 'status')
     await expect.poll(() => { const st = status(); return st && st.run !== last?.run && st.state !== 'running' ? st.state : null }, { timeout: 60_000, intervals: [1_000] }).toBe(s.state)
     const st = status()
     expect(st).toMatchObject({ processed: 1, left: 0, message: s.message })
+    expect(Object.keys(st.usage).sort()).toEqual([...s.passes].sort())
 
     // 5: nothing pending; the run's folder.
     expect(data.ledger(id, 'pending')).toEqual([])
@@ -265,7 +266,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     expect(t3.delegated_by).toBe(before[owner.node].delegated_by)
     expect(t3.history.find((h) => h.by === 'agent' && h.effect === s.reassign.effect)).toMatchObject({ internal_owner: s.reassign.to, verdict: 'supports', applied: false })
 
-    // 8: the run's log: three runs; the guard refused only the other thread's context.
+    // 8: the run's log: two runs; the guard refused both `context` calls (another thread's, and its own: it is in the prompt).
     const log = lines(data.read(runDir, data.text.claude.log))
     expect(log[0]).toContain(s.log.first)
     expect(log.filter((l) => l.includes(s.log.started))).toHaveLength(s.log.runs)
@@ -273,33 +274,37 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const tool = (name) => log.filter((l) => l.includes(fill(c.tool, { tool: name })))
     expect(tool(c.tools.bash).filter((l) => !l.includes(s.log.own))).toEqual([expect.stringContaining(s.log.other)])
     const refused = log.map((l, i) => [l, i]).filter(([l]) => l.includes(run.logRefused))
-    expect(refused).toHaveLength(1)
-    expect(refused[0][0]).toContain(s.log.refusal)
-    expect(log[refused[0][1] - 1]).toContain(s.log.other)
-    expect(log.filter((l) => l.includes(run.logNotAllowed))).toEqual([expect.stringContaining(s.log.notAllowed)])
+    expect(refused).toHaveLength(s.log.refusals.length)
+    for (const [l] of refused) expect(l).toContain(s.log.refusal)
+    s.log.refusals.forEach((cmd, k) => expect(log[refused[0][1] - s.log.refusals.length + k]).toContain(cmd))
+    expect(log.filter((l) => l.includes(run.logNotAllowed))).toEqual(s.log.notAllowed.map((x) => expect.stringContaining(x)))
     for (const l of tool(c.tools.write)) expect(l).toContain(path.join(data.home, 'projects', id, w.runs) + path.sep)
-    for (const l of tool(c.tools.read)) expect(l).toContain(path.join(data.home, 'projects', id, 'ledger') + path.sep)
+    expect(tool(c.tools.read)).toEqual([])
     expect(log.filter((l) => l.includes(run.logOk))).toHaveLength(s.log.runs)
 
-    // 9: what each run was given (its own prompt and the sync's tools only) and told back.
+    // 9: what each run was given (its fixed instructions, then its own message; the extract run Write and Bash only, the
+    // verifier no tools) and told back.
     expect(s.turns.map((_, r) => data.model.turns(r).length)).toEqual(s.turns)
     expect([...new Set(data.model.requests().filter((e) => e.rule != null).map((e) => e.model))]).toEqual([vm.model])
     s.prompts.forEach((has, r) => {
       const [first] = data.model.turns(r).filter((e) => e.step === 0)
-      expect([...new Set(first.tools)].filter((t) => !run.ignoredTools.includes(t)).sort()).toEqual(s.tools)
+      expect([...new Set(first.tools)].filter((t) => !run.ignoredTools.includes(t)).sort()).toEqual(s.tools[r])
       const prompt = textOf(first.messages[0].content)
       for (const words of has) expect(prompt).toContain(words)
+      const system = JSON.stringify(first.system)
+      for (const words of s.systems[r]) expect(system).toContain(words)
+      for (const words of s.systemHasNot) expect(system).not.toContain(words)
     })
     for (const e of data.model.turns(1)) expect(JSON.stringify(e.messages)).not.toContain(s.notToVerifier)
     expect(data.model.toolResults(0).map(Boolean)).toEqual(s.extractResults)
 
-    // 10: the people pass: Priya Nair's role suggested and a fact added; Tom Becker's role, the user's, left alone.
+    // 10: who's who, from the same run: Priya Nair's role suggested and a fact added; Tom Becker's role, the user's, left alone.
     const suggestions = data.json(data.home, 'projects', id, w.suggestions)
     expect(suggestions).toContainEqual(expect.objectContaining({ field: 'role', value: s.person.role, state: 'pending', quote: expect.any(String), target: expect.objectContaining({ name: s.person.name }) }))
     expect(suggestions.filter((x) => x.field === 'role' && x.target?.name === s.userRole)).toEqual([])
     const priya = data.json(data.home, 'projects', w.people).find((p) => p.name === s.person.name)
     expect(priya.facts).toContainEqual(expect.objectContaining({ text: s.person.fact, evidence: evid }))
-    const answer = JSON.stringify(data.model.turns(2).at(-1).messages.at(-1).content)
+    const answer = JSON.stringify(data.model.turns(0).at(-1).messages.at(-1).content)
     for (const words of s.peopleApply) expect(answer).toContain(JSON.stringify(words).slice(1, -1))
 
     // 11: the window: synced, three to review; T008 and T003 still the user's, the agent's proposals "kept yours".

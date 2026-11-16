@@ -1,7 +1,7 @@
 # Extraction — one evidence item at a time
 
-Contents: the tree · how the user works · for each item (steps) · Pass 1 — the tree moves · Pass 2 — new nodes ·
-Schema
+Contents: the tree · how the user works · each item, in order · Pass 1 — the tree moves · Pass 2 — new nodes ·
+Pass 3 — dependencies across the tree · Schema
 
 You keep a project's work tree current from its calls (and the meeting chats and mails the user
 added to it: an item of kind `chat` or `mail` is read the same way — its turns are messages, the
@@ -22,7 +22,7 @@ signal. The tree:
 
 The CLI does every exact thing (quote checks, dates, ids). You do the judgment.
 
-**About me** (`me_profile` in `$L context`, when the user wrote one): who "Me" is — name, role, the
+**About me** (`me_profile` in the tree, `context`, when the user wrote one): who "Me" is — name, role, the
 people around them, their terms — and how they work. Apply its patterns as **defaults**: e.g. "I
 delegate and track" → work Me hands over is the other person's task with `delegated_by: Me`, not
 Me's; "mine only if addressed to me" → mail to a list belongs to the team behind it, Cc is FYI;
@@ -30,29 +30,26 @@ Me's; "mine only if addressed to me" → mail to a list belongs to the team behi
 (`status` `done`, quoting the words that say it happened). The item's words still win when they say
 otherwise, and every proposal still needs its quote. It never makes up work the item doesn't state.
 
-First, once: `$L pending` — each item's `.md` path. Then for each evidence id you were given, in that order:
-1. `$L context` — the live tree (`waits_for` / `holds_up` spell out each dependency's direction),
-   the project's people, the client, the user's notes for Claude, and what was processed. Read it
-   every time; it changes after each item. `unverified_claims` wait for the verifier: don't repeat
-   them. `pinned_by_human` fields were set by the user: never try to change them.
-   In a large project Claude Code saves its answer to a file and tells you to Read it: Read that file
-   (it is your session's own and is allowed). **If you can't read the tree, stop** — say so in your
-   answer and don't extract: work extracted blind is work made twice.
-2. Read the item's `.md` file (its path is in `$L pending`) in full. "Me" is the user.
-   **An item in several threads** (`also_in` in `$L pending`: the other threads by name, `others` counted): take
-   from it only what concerns **this** thread — judged by its `notes`, `brief`, `terms`, people and open work in
-   `$L context` — and leave the rest to the others. A turn about another thread's work is not this thread's work,
-   even when this thread's people say it — except where this thread's work waits on it (a `link` or `waiting`, as
-   the Dependency hunt asks) or a reply `answers:` one of this thread's nodes. When a passage could belong to
-   either, leave it out; when the others are only counted, judge by this thread's own scope. An item with nothing
-   for this thread is done with a note (step 5).
-3. Write `<run folder>/<evidence id>.json` (a JSON array, schema below): **pass 1, then pass 2**.
-4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection: write only the fixed entries to
-   `<run folder>/<id>_fix.json` and `$L apply --evidence <id> --proposals <run folder>/<id>_fix.json`; at most
-   twice, then leave the rest out and say so in the report. Its answer lists what it `created`
-   (ids, titles, parents) and `touched`: the next item refers to those ids — work an earlier item of
-   this run made (a mail asking, then the call the next day) is updated, never made again.
-5. `$L done --evidence <id> --note '<why, when nothing changed>'` — also when it changed nothing.
+## Each item, in order
+Read the items strictly in the order given, one at a time: each reads the tree the previous one left.
+- **The tree** (`context`): the live tree (`waits_for` / `holds_up` spell out each dependency's direction), the
+  project's people, the client, the user's notes for Claude, and what was processed. `unverified_claims` wait for the
+  verifier: don't repeat them. `pinned_by_human` fields were set by the user: never try to change them. **If you don't
+  have the tree, stop** — say so in your answer and don't extract: work extracted blind is work made twice.
+- Read the item in full. "Me" is the user.
+  **An item in several threads** (`also_in`: the other threads by name, `others` counted): take
+  from it only what concerns **this** thread — judged by its `notes`, `brief`, `terms`, people and open work in
+  the tree — and leave the rest to the others. A turn about another thread's work is not this thread's work,
+  even when this thread's people say it — except where this thread's work waits on it (a `link` or `waiting`, as
+  the Dependency hunt asks) or a reply `answers:` one of this thread's nodes. When a passage could belong to
+  either, leave it out; when the others are only counted, judge by this thread's own scope. An item with nothing
+  for this thread is marked done with a note saying why, and nothing applied.
+- Its proposals are one JSON array (schema below), `<id>.json` in the run's folder: **pass 1, then pass 2, then the
+  dependency pass**, applied with `apply`, which marks the item done (`--done '<note>'`).
+- `apply` answers with what it `created` (ids, titles, parents) and `touched`: a later item refers to those ids —
+  work an earlier item of this run made (a mail asking, then the call the next day) is updated, never made again.
+- Fix every rejection: only the fixed entries in `<id>_fix.json`, applied the same way; at most twice, then leave the
+  rest out and say so in the report.
 
 ## Pass 1 — the tree moves (most important)
 Work isn't static: a story is re-scoped, a session gets a date, a chore turns out to be part of
@@ -120,6 +117,21 @@ words differ).
   no invented scope. Leave it out when the title says it all. A description in `pinned_by_human` is
   the user's: never revise it. A question's answer and a risk's response are never a description:
   op `answer`.
+
+## Pass 3 — dependencies across the tree
+Pass 1 looks at the nodes in front of the item, so it misses dependencies **across stories**. Read the item again
+with the whole tree in view and add only two ops:
+
+- `link` — `node` can't finish (or start) until `depends_on` does. Both existing stories or tasks,
+  anywhere in the tree. Typical: a document waits on the sessions that feed it; a workshop waits on
+  findings, interviews or recruiting; access waits on a request being sent; a revised plan waits on
+  leadership alignment.
+- `waiting` — `node` is held up by a person's action or availability that isn't itself a node:
+  replies, calendars, sign-offs, someone being away. Give `who` and `what`.
+
+Not a dependency: a plain to-do, a wish with no work waiting on it, two unrelated things in
+sequence. Don't link a story to its own tasks. Skip anything already in `waits_for` or
+`waiting_for`, or proposed in pass 1. A node created after the item's date can't be linked from it: skip it.
 
 ## Schema (one object per proposal)
 ```json
