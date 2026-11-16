@@ -53,10 +53,10 @@ routing-policy check.
   (`ai::wrapper::proof_settings`): a `SessionStart` hook `echoctl proof hello <value>` and a `PreToolUse` gate
   `echoctl proof gate <value>` (`--deny-all` when Echo set no tools and no MCP server). `<value>`: 32 random hex digits
   per run. The prompt is sent once the hook's answer with that value is seen; the run's `system/init` is checked by
-  `ai::wrapper::Expected` (a Claude Code `guard::new_enough`, the permission mode Echo set — `bypassPermissions` with
+  `ai::wrapper_ready` with `ai::wrapper::Expected` (a Claude Code `guard::new_enough`, the permission mode Echo set — `bypassPermissions` with
   `--dangerously-skip-permissions`, else `--permission-mode`, else `default` — no built-in tool beyond Echo's
   `--tools`, and with `--strict-mcp-config` no MCP server or tool beyond Echo's `--mcp-config`), then marked
-  (`.plugins/.proof/<value>`, removed at the end; a day-old one is swept). The gate holds a tool call up to 8 s for the
+  (`.plugins/.proof/<value>`, removed at the end; a day-old one is swept). The gate (`guard::checked`) holds a tool call up to 8 s for the
   mark, then refuses it. A mismatch, or no answer within 90 s at either step, stops the run: its stderr and a last
   result line `Echo stopped this run: …` name the wrapper.
 - Measured on Claude Code 2.1.325: with stream-json input held back, `SessionStart` hooks run and report

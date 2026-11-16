@@ -262,7 +262,7 @@ pub fn proof_command(args: &[String]) -> i32 {
         }
         (Some("gate"), deny) => {
             let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut vec![]);
-            match gate(value, deny == Some("--deny-all"), Duration::from_secs(HOLD_SECS)) {
+            match crate::guard::checked(value, deny == Some("--deny-all"), Duration::from_secs(HOLD_SECS)) {
                 Ok(()) => 0,
                 Err(why) => {
                     eprintln!("{why}");
@@ -274,23 +274,6 @@ pub fn proof_command(args: &[String]) -> i32 {
             eprintln!("Echo: unknown proof step");
             2
         }
-    }
-}
-
-/// The gate's answer: the run marked within `hold`, or why its tool call is refused.
-fn gate(value: &str, deny_all: bool, hold: Duration) -> Result<(), String> {
-    if deny_all {
-        return Err("Echo: this run has no tools".into());
-    }
-    let t = Instant::now();
-    loop {
-        if marked(value) {
-            return Ok(());
-        }
-        if t.elapsed() >= hold {
-            return Err("Echo hasn't checked this run's start yet: no tool runs before it has".into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -380,6 +363,36 @@ impl Expected {
 fn says_hello(v: &Value, value: &str) -> bool {
     let want = format!("{HELLO}{value}");
     v["type"] == "system" && v["subtype"] == "hook_response" && ["output", "stdout"].iter().any(|k| v[*k].as_str().is_some_and(|o| o.lines().any(|l| l.trim() == want)))
+}
+
+/// What one line of a run through a wrapper means for Echo's proof (`wrapper_ready`).
+#[derive(Debug, PartialEq)]
+pub enum Ready {
+    /// The run's own session-start hook answered with its value: its text may go now.
+    Hello,
+    /// Its start event shows Echo's settings in force: mark it checked (the gate lets tool calls through to the guard).
+    Checked,
+    /// It doesn't hold: stop the run, saying why.
+    Stop(String),
+    /// Nothing for the proof.
+    Pass,
+}
+
+/// One line `v` of a run through a wrapper, given whether its hook answered (`hello`) and it was `checked` (R14).
+pub fn wrapper_ready(v: &Value, value: &str, exp: &Expected, hello: bool, checked: bool) -> Ready {
+    if v["type"] == "system" && v["subtype"] == "init" && !checked {
+        if !hello {
+            return Ready::Stop("Claude Code started its work before Echo's checks answered".into());
+        }
+        return match exp.check(v) {
+            Ok(()) => Ready::Checked,
+            Err(why) => Ready::Stop(why),
+        };
+    }
+    if !hello && says_hello(v, value) {
+        return Ready::Hello;
+    }
+    Ready::Pass
 }
 
 /// How the run's text reaches the wrapper.
@@ -521,23 +534,21 @@ pub fn relay_with(wrapper: &Path, args: Vec<String>, prompt: Option<String>, mut
             Err(_) => break Some(format!("Claude Code started through {} didn't report its start within {start_secs} s", wrapper.display())),
         };
         let v: Value = serde_json::from_str(line.trim()).unwrap_or(Value::Null);
-        let init = v["type"] == "system" && v["subtype"] == "init";
-        if init && !checked {
-            if !hello {
-                break Some("Claude Code started its work before Echo's checks answered".into());
+        let step = super::wrapper_ready(&v, &value, &exp, hello, checked);
+        match &step {
+            Ready::Stop(why) => break Some(format!("{why} (through {})", wrapper.display())),
+            Ready::Checked => {
+                if fs::create_dir_all(proof_dir()).and_then(|()| fs::write(mark(&value), b"")).is_err() {
+                    break Some("the run can't be marked checked".into());
+                }
+                checked = true;
             }
-            if let Err(why) = exp.check(&v) {
-                break Some(format!("{why} (through {})", wrapper.display()));
-            }
-            if fs::create_dir_all(proof_dir()).and_then(|()| fs::write(mark(&value), b"")).is_err() {
-                break Some("the run can't be marked checked".into());
-            }
-            checked = true;
+            Ready::Hello | Ready::Pass => {}
         }
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
             break Some("Echo stopped reading the run".into());
         }
-        if !hello && says_hello(&v, &value) {
+        if step == Ready::Hello {
             hello = true;
             asked = Some(Instant::now());
             match &input {
@@ -685,17 +696,17 @@ mod tests {
         let (_env, _root) = crate::paths::testenv::folders("wrapper-gate");
         let v = new_value().unwrap();
         assert!(valid_value(&v));
-        assert!(gate(&v, false, Duration::from_millis(300)).unwrap_err().contains("hasn't checked"));
-        assert!(gate(&v, true, Duration::from_millis(300)).unwrap_err().contains("no tools"));
+        assert!(crate::guard::checked(&v, false, Duration::from_millis(300)).unwrap_err().contains("hasn't checked"));
+        assert!(crate::guard::checked(&v, true, Duration::from_millis(300)).unwrap_err().contains("no tools"));
         let w = v.clone();
         let marker = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             fs::create_dir_all(proof_dir()).unwrap();
             fs::write(mark(&w), b"").unwrap();
         });
-        assert!(gate(&v, false, Duration::from_secs(5)).is_ok(), "held, then let through to the guard");
+        assert!(crate::guard::checked(&v, false, Duration::from_secs(5)).is_ok(), "held, then let through to the guard");
         marker.join().unwrap();
-        assert!(gate(&v, true, Duration::from_secs(1)).is_err(), "no tools stays no tools");
+        assert!(crate::guard::checked(&v, true, Duration::from_secs(1)).is_err(), "no tools stays no tools");
         assert!(crate::plugins::agent::inside_root(&mark(&v)), "where only Echo writes");
     }
 
@@ -853,5 +864,20 @@ printf '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}
         assert_eq!(proof_command(&args(&["hello", &v, "--mark"])), 0);
         assert!(marked(&v), "its hook's answer is the check");
         assert_eq!(proof_command(&args(&["hello", "../../x", "--mark"])), 2, "a malformed value marks nothing");
+    }
+
+    #[test]
+    fn each_line_of_a_wrapper_run_moves_the_proof_on_only_in_order() {
+        let v = "0123456789abcdef0123456789abcdef";
+        let exp = Expected::of(&args(&["-p", "--tools", "Read", "--strict-mcp-config", "--permission-mode", "dontAsk"]));
+        let hello = json!({"type": "system", "subtype": "hook_response", "output": format!("{HELLO}{v}")});
+        let good = init("2.1.400", "dontAsk", &["Read"], &[]);
+        assert_eq!(wrapper_ready(&hello, v, &exp, false, false), Ready::Hello);
+        assert_eq!(wrapper_ready(&hello, v, &exp, true, false), Ready::Pass, "once");
+        assert!(matches!(wrapper_ready(&good, v, &exp, false, false), Ready::Stop(w) if w.contains("before Echo's checks")));
+        assert_eq!(wrapper_ready(&good, v, &exp, true, false), Ready::Checked);
+        assert_eq!(wrapper_ready(&good, v, &exp, true, true), Ready::Pass, "checked once");
+        assert!(matches!(wrapper_ready(&init("2.1.400", "default", &["Read"], &[]), v, &exp, true, false), Ready::Stop(_)));
+        assert_eq!(wrapper_ready(&json!({"type": "assistant"}), v, &exp, true, true), Ready::Pass);
     }
 }

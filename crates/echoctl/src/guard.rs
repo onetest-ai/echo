@@ -177,6 +177,25 @@ fn hook_command(exe: &Path) -> String {
     }
 }
 
+/// The gate before each tool call of a run through a wrapper (`echoctl proof gate`, claude-code-runs R14): the run
+/// marked checked by Echo within `hold` (then the guard judges the call), or why the call is refused — always, for a
+/// run Echo gave no tools (`deny_all`).
+pub fn checked(value: &str, deny_all: bool, hold: std::time::Duration) -> Result<(), String> {
+    if deny_all {
+        return Err("Echo: this run has no tools".into());
+    }
+    let t = std::time::Instant::now();
+    loop {
+        if crate::ai::wrapper::marked(value) {
+            return Ok(());
+        }
+        if t.elapsed() >= hold {
+            return Err("Echo hasn't checked this run's start yet: no tool runs before it has".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Is `version` (Claude Code's `claude_code_version`, "2.1.310") at least `MIN_CLAUDE`?
 pub fn new_enough(version: &str) -> bool {
     let parts: Vec<u32> = version.split(['.', '-', ' ']).take(3).map_while(|p| p.parse().ok()).collect();

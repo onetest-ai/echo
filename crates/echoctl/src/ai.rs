@@ -36,6 +36,7 @@ mod command;
 mod policy;
 mod signin;
 pub mod wrapper;
+pub use wrapper::wrapper_ready;
 pub use checks::*;
 pub use command::*;
 pub use policy::*;
