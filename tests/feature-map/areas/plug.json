@@ -197,6 +197,56 @@
    ]
   },
   {
+   "id": "F-PLUG-101",
+   "feature": "A plugin adds a box of its own to a call's header, before its My notes and ⋯ buttons (client slot `call.header`: {id, label, render(call) → HTML, after?(box, call)}, call = {name, title, started_at, notes, profile, memo, threads, client} from what the page has): a chip or button with a popup it draws itself, its record of the call its own; each box drawn on its own (one that throws is left out and logged, the header still draws), `after` once per box drawn afresh; switched off or removed, its box leaves every call",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-102",
+   "feature": "A plugin's items in a call's ⋯ menu (`call.menu`) take a label that is text or a function of the call (\"Open in <vault>\"; one that throws or gives nothing leaves the item out), and each plugin's items are a group after a separator, under Echo's own items and above Delete",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-103",
+   "feature": "A plugin adds a line to the box that says a call's minutes are coming (client slot `call.minutes`: {id, label, render(call) → HTML}), drawn only while they are coming (a run queued or going, or Echo writing them by itself) — gone while the user holds them (\"Until I say\") and back when automatic again; not on a call with minutes",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-104",
+   "feature": "A plugin opens a sheet over the window (`ctx.ui.sheet(html, {label, onClose})`): its HTML in Echo's dialog frame, the keyboard moved in and Tab going round inside; one sheet at a time; Esc, a click beside it or `ctx.ui.closeSheet()` close it and call `onClose` once, the keyboard back where it was (a menu's item: its menu button); switched off, updated or removed, its sheet closes without `onClose`. Its `ctx.where()` tells whether Recall is on (`recall`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-105",
+   "feature": "A plugin's activity shows a badge on its icon (`badge()` → a count, 1–99 then \"99+\", or '!' as an attention mark; nothing else) and keeps its box as it is while the user edits in it (`editing()` true: Echo's refreshes and any `ctx.render()` leave it, typed text and focus kept; drawn again once it is false); a badge or editing that throws is logged once and ignored",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
    "id": "F-PLUG-20",
    "feature": "With `uses.work` (sheet: 'Adds its items to Today → My work and to threads' Work') a plugin gives work rows by `ctx.work.provide(({scope, thread}) => rows)` — scope `me` (My work) or `thread` (that thread's Work tab), rows {id, title, kind, where?, url? (https), due? (YYYY-MM-DD), late?, thread?}, 200 at most, a wrong row refusing the answer — and `ctx.work.changed()` has Echo ask again (a change during an ask: asked again after it; a scope asked at most every 10 s, a change said sooner asked in its turn; said from inside the provider: not heard). Echo asks in the background (5 s), draws from the last answer, never waits: a row not answered yet, or asked again after a change, is `pending` and the page reads Today again soon (as for a pending widget), Today open reads itself every minute, a thread's Work tab every 10 s and, while one waits, sooner (as Today), and after a `task.actions` item runs on a row. On My work: late or due by the week's end as Echo's tasks, and also undated (an undated Echo task stays off), among them late first, then by date, the undated last; `late` worked out on the day drawn (its own flag, or `due` past), with the plugin's manifest `icon` (an .svg ≤ 16 KB in its folder, named a–z 0–9 . _ - /, shown only as an image) and 'From <plugin>', no Close or Claude, only `task.actions` items whose `when` accepts {kind: 'plugin', source, row} (each row its own target); a thread's Work tab shows its `thread` rows and the user's rows naming it, once each, in every layout; ⌘K lists them (Open: <title>, the plugin's icon, its host). A title (or its ⌘K entry) opens its https page in the browser on the click (its host in the tooltip); test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) logs it to `open.log` and opens nothing. Never written in a ledger. One that throws or is slow keeps its last rows marked 'not updated' (why on hover) for a day after its last good answer, then none, and a quiet line on its card in Settings → Plugins naming where (My work, or a thread's Work); removed or off: its rows gone; a thread deleted or merged: its rows dropped, a scope not asked for in 30 days dropped. `echoctl work show [--thread <id>]` asks now and prints rows and errors",
    "priority": "medium",

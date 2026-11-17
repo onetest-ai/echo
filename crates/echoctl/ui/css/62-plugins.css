@@ -94,3 +94,13 @@
 
 /* A plugin's chip on a call's row (`call.row`): a small pill in the row's second line. */
 .row .m .plug-chip { padding: 0 6px; border-radius: 999px; background: var(--line); color: var(--text-2); font-size: 11px; line-height: 16px; }
+
+/* A plugin's box on a call's header (`call.header`): its own HTML, in a line with the header's buttons; a popup it draws
+   anchors to it. */
+.doc-actions .plug-head { display: inline-flex; align-items: center; position: relative; }
+/* A plugin's line in the call's minutes box (`call.minutes`). */
+.empty .plug-line { margin-top: 6px; }
+/* A plugin's sheet (`ctx.ui.sheet`): Echo's dialog frame around its HTML, over the window. */
+/* Under the palette and Echo's own dialogs, which open over it; notices over all. */
+.plug-scrim { z-index: 29; }
+.td-dialog.plug-sheet { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; outline: none; }

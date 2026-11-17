@@ -1,0 +1,7 @@
+{
+  "id": "menu-demo",
+  "name": "Menu demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: one fixed item in a call's menu, a group of its own beside Call demo's (tests/cases/plugins/TC-181).",
+  "client": "client.js"
+}

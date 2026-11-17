@@ -169,7 +169,7 @@ function actbar() {
   const btn = (a, i) => {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
-      : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : ''
+      : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : actBadgeHtml(a, (m) => console.warn(`activity badge: ${m}`))
     const key = a.id === 'settings' ? MOD + ',' : MOD + (i + 1)
     return `<button class="act" data-go="${esc(a.id)}"${S.view === a.id ? ' aria-current="page"' : ''} aria-label="${esc(a.label)}" data-hint="${esc(a.label)}" data-key="${esc(key)}">${a.icon}<span class="act-label">${esc(a.label)}</span>${badge}</button>`
   }
@@ -435,7 +435,7 @@ function doc() {
           <div class="facts" role="group" aria-label="About this call">${c.memo ? `<span class="memo-fact">${MIC(12)} Memo</span>` : ''}${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${meetingTypeChip(c)}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
           ${callProjects(c)}
         </div>
-        <div class="doc-actions">${callMenu(c)}</div>
+        <div class="doc-actions">${callHeadBoxes(Plugins.slots['call.header'], slotCallPage(c), (m) => console.warn(`call.header: ${m}`))}${callMenu(c)}</div>
       </div>
       ${callSuggestion(c)}
       <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>`
@@ -461,6 +461,7 @@ function drawCalls() {
       patch(main, '<header class="doc-head" id="r-head"></header><div class="pane" id="pane"></div>')
     }
     patch($('#r-head'), d.head)
+    if (S.call && !S.upSel) callSlotAfter($('#r-head'), Plugins.slots['call.header'], slotCallPage(S.call), (m) => console.warn(`call.header: ${m}`))
     const pane = $('#pane')
     if (d.frame !== undefined) {
       if (pane.dataset.mode !== 'frame') {
