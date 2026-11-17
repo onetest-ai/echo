@@ -348,8 +348,9 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     `PATH` folder inside a folder given to a plugin or inside Echo's own is skipped), git older than 2.31, a repository
     whose history lies outside its folder (a `gitdir:` file, a linked worktree or submodule, a link as or in `.git`),
     one setting `core.worktree`, a bare repository (`HEAD`, `objects` and `refs` not in a `.git` folder) or one
-    another user owns, one that borrows objects (alternates), is a partial clone, or whose settings can't be read
-    whole (over 16 MB, a name that isn't UTF-8); git taking over 20 s is stopped. Nothing is fetched. Nothing a repository's settings, hooks or attributes name
+    another user owns, one that borrows objects (alternates), is a partial clone, whose settings can't be read
+    whole (over 16 MB, a name that isn't UTF-8), or whose settings read or include a file a plugin could change (in a
+    folder given to a plugin, in Echo's own, or in the work tree outside a hidden folder — there or not); git taking over 20 s is stopped. Nothing is fetched. Nothing a repository's settings, hooks or attributes name
     runs (Host § Git).
 - Its window half shows images of a folder it was given (with `uses.folders`) from
   `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and

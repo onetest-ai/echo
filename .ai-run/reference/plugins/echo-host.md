@@ -82,7 +82,7 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   stderr to 64 KB, the rest read and dropped; once it ends its output is waited for 2 s, then whatever it started is
   stopped and the call fails if something still holds it. Evidence: `jshost::git::spawn`
 - The program (`jshost::git::program`): first where the system installs git (`system_candidates`) — macOS
-  `/opt/homebrew/bin/git`, `/usr/local/bin/git`, then `/usr/bin/git` only when `xcode-select -p` names a developer
+  `/opt/homebrew/bin/git`, `/usr/local/bin/git`, then `/usr/bin/git` only when `xcode-select -p` (asked once per process) names a developer
   folder holding `usr/bin/git` (else that stub would open Apple's install dialog); Windows `%ProgramW6432%`,
   `%ProgramFiles%`, `%ProgramFiles(x86)%` `\Git\cmd\git.exe` or `\Git\bin\git.exe` (never a `.cmd`, which runs
   through cmd.exe); other Unix `/usr/bin/git`, `/usr/local/bin/git`. Else the first `git` (Windows `git.exe` only) on
@@ -102,7 +102,16 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - The overrides (`jshost::git::overrides`), read for each call from `git config --list` (every scope, `include` and
   `includeIf` files too), whole: a listing that fails or is over 16 MB, or a key that isn't UTF-8, refuses the
   repository (a setting not read, or read under another name, couldn't be cleared), as does a partial clone
-  (`extensions.partialClone` or any `remote.*.promisor`) and `core.worktree` set anywhere. Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
+  (`extensions.partialClone` or any `remote.*.promisor`) and `core.worktree` set anywhere. No settings file a plugin
+  could change between that reading and git's own: read with `--show-origin`, each `include.path` /
+  `includeIf.*.path` resolved as git does (`~/` from `HOME`, `%(prefix)/` from the folder above git's own, a relative
+  path from the including file's folder; `~user/` refused), there or not (git skips a missing file), by its real path
+  (the deepest existing folder canonical, `jshost::git::physical`); the repository is refused when one lies inside a
+  folder given to any plugin, inside Echo's data or own folder, or in the work tree outside a hidden folder
+  (`jshost::git::changeable`), or names bytes that aren't UTF-8 — and so when the user's `$XDG_CONFIG_HOME/git/config`,
+  `~/.gitconfig` or `~/.config/git/config` lies in such a place, or the repository's `.git/config` or
+  `.git/config.worktree` is a link into one. Evidence:
+  `jshost::git::tests::settings_that_include_a_file_a_plugin_can_write_refuse_the_repository`. Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
   `diff.*.command/textconv`, `merge.*.driver`, `credential.*.helper`, `gpg.*.program`, `*.sshCommand`, `*.askPass`,
   `*.editor`, `*.pager`, `*.proxy`, `remote.*.uploadpack/receivepack/vcs`, `uploadpack.packObjectsHook`, …) set empty,
   `filter.*.required` and every `pager.<command>` false, every `protocol.<name>.allow` never, and each hook set in

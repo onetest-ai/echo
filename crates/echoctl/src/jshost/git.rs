@@ -55,11 +55,14 @@ fn system_candidates() -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let mut list: Vec<PathBuf> = ["/opt/homebrew/bin/git", "/usr/local/bin/git"].map(PathBuf::from).into();
-        let tools = Command::new("/usr/bin/xcode-select").arg("-p").stdin(Stdio::null()).stderr(Stdio::null()).output();
-        if let Some(o) = tools.ok().filter(|o| o.status.success()) {
-            if Path::new(String::from_utf8_lossy(&o.stdout).trim()).join("usr/bin/git").is_file() {
-                list.push("/usr/bin/git".into());
-            }
+        // Asked once a process.
+        static TOOLS: OnceLock<bool> = OnceLock::new();
+        let tools = *TOOLS.get_or_init(|| {
+            let o = Command::new("/usr/bin/xcode-select").arg("-p").stdin(Stdio::null()).stderr(Stdio::null()).output();
+            o.ok().filter(|o| o.status.success()).is_some_and(|o| Path::new(String::from_utf8_lossy(&o.stdout).trim()).join("usr/bin/git").is_file())
+        });
+        if tools {
+            list.push("/usr/bin/git".into());
         }
         list
     }
@@ -73,15 +76,79 @@ fn system_candidates() -> Vec<PathBuf> {
 /// folder, one inside a folder given to any plugin or inside Echo's data or own folder (a plugin could put a git
 /// there), nor macOS's `/usr/bin/git` (in `system_candidates` when it runs); only a file that can be started.
 fn path_candidates(path: &std::ffi::OsStr) -> Vec<PathBuf> {
-    let granted = crate::grants::all_folders();
-    // macOS and Windows file systems ignore case by default: so does this.
-    let fold = |p: &Path| if cfg!(any(target_os = "macos", windows)) { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() };
-    let theirs = |p: &Path| crate::ai::wrapper::outside_echo(p).is_ok() && !granted.iter().any(|g| fold(p).starts_with(fold(g)));
+    let granted = granted();
+    let theirs = |p: &Path| !plugins_reach(p, &granted);
     std::env::split_paths(path)
         .filter(|d| d.is_absolute() && theirs(d))
         .filter_map(|d| dunce::canonicalize(d.join(if cfg!(windows) { "git.exe" } else { "git" })).ok())
         .filter(|f| theirs(f) && !(cfg!(target_os = "macos") && f == Path::new("/usr/bin/git")) && runnable(f))
         .collect()
+}
+
+/// The folders given to any plugin, each by its real path.
+fn granted() -> Vec<PathBuf> {
+    crate::grants::all_folders().into_iter().map(|g| dunce::canonicalize(&g).unwrap_or(g)).collect()
+}
+
+/// Whether a plugin may write at `p`: in a folder given to any plugin, or in Echo's data or own folder (where plugins
+/// keep their stores).
+fn plugins_reach(p: &Path, granted: &[PathBuf]) -> bool {
+    // macOS and Windows file systems ignore case by default: so does this.
+    let fold = |p: &Path| if cfg!(any(target_os = "macos", windows)) { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() };
+    crate::ai::wrapper::outside_echo(p).is_err() || granted.iter().any(|g| fold(p).starts_with(fold(g)))
+}
+
+/// `p` as the file system finds it, there or not: each folder that is there by its real path (links followed, `..`
+/// taken from there), the rest as written.
+fn physical(p: &Path) -> PathBuf {
+    let mut at = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                at.pop();
+            }
+            std::path::Component::Normal(n) => {
+                at.push(n);
+                if let Ok(real) = dunce::canonicalize(&at) {
+                    at = real;
+                }
+            }
+            other => at.push(other),
+        }
+    }
+    at
+}
+
+/// A settings file git would read at `p` that a plugin could change while git runs, by its real path: inside a folder
+/// given to a plugin or Echo's own, or a file of the work tree `top` outside a hidden folder.
+fn changeable(p: &Path, top: &Path, granted: &[PathBuf]) -> Option<PathBuf> {
+    let p = physical(p);
+    let in_tree = p.strip_prefix(top).is_ok_and(|rel| !rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')));
+    (plugins_reach(&p, granted) || in_tree).then_some(p)
+}
+
+/// The user's home, as git expands `~`.
+fn git_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|h| !h.is_empty()).map(PathBuf::from)
+}
+
+/// The file an `include.path` / `includeIf.*.path` names, resolved as git does: `~/` from the home, `%(prefix)/` from
+/// the folder above git's own, a relative path from the folder of the file that includes it. None: one Echo can't place.
+fn include_target(value: &str, origin: &str, git: &Path) -> Option<PathBuf> {
+    if value == "~" || value.starts_with("~/") {
+        return Some(git_home()?.join(value.trim_start_matches('~').trim_start_matches('/')));
+    }
+    if value.starts_with('~') {
+        return None;
+    }
+    if let Some(rest) = value.strip_prefix("%(prefix)/") {
+        return Some(dunce::canonicalize(git).ok()?.parent()?.parent()?.join(rest));
+    }
+    if Path::new(value).is_absolute() {
+        return Some(PathBuf::from(value));
+    }
+    Some(Path::new(origin.strip_prefix("file:")?).parent()?.join(value))
 }
 
 /// A file that can be started (Unix: executable).
@@ -167,7 +234,7 @@ fn checked_version(git: &Path) -> Result<()> {
 /// system's, the user's and the repository's: those of `PROGRAM_KEYS` found in any of them (filters, diff and merge
 /// drivers, credential helpers, signing programs, `includeIf` files' too) cleared, a filter not required, every
 /// command's pager off — then the fixed ones, last so they win.
-fn overrides(git: &Path, dir: &Path, top: &Path, hooks: &Path) -> Result<Vec<(String, String)>> {
+fn overrides(git: &Path, dir: &Path, top: &Path, found: bool, hooks: &Path) -> Result<Vec<(String, String)>> {
     let fixed: Vec<(String, String)> = [
         ("core.hooksPath", hooks.to_string_lossy().as_ref()),
         ("core.fsmonitor", "false"),
@@ -195,15 +262,53 @@ fn overrides(git: &Path, dir: &Path, top: &Path, hooks: &Path) -> Result<Vec<(St
     .collect();
     // Read with the fixed ones in force (a config read runs nothing) — whole, or the repository isn't used: a setting
     // not read (past the cap, a listing that failed, a name that isn't text) couldn't be cleared.
-    let listed = spawn_within(git, dir, Some(top), &["config", "--list", "-z"], &fixed, TIMEOUT)?;
+    // No settings file a plugin could change between this reading and git's own: the user's, the repository's, and
+    // every file they include.
+    let granted = granted();
+    let refuse = |p: &Path| anyhow!("this repository's settings read {}, a file a plugin could change: Echo doesn't use it", p.display());
+    let home = git_home();
+    let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(|x| PathBuf::from(x).join("git/config"));
+    let user: Vec<PathBuf> = xdg.into_iter().chain(home.iter().flat_map(|h| [h.join(".gitconfig"), h.join(".config/git/config")])).collect();
+    if let Some(p) = user.iter().find_map(|f| changeable(f, top, &granted)) {
+        return Err(refuse(&p));
+    }
+    // The repository's own, in its real `.git` (`top_of`) unless a link leads elsewhere.
+    for f in ["config", "config.worktree"].map(|f| top.join(".git").join(f)).iter().filter(|_| found) {
+        if let Some(p) = changeable(f, top, &granted).filter(|p| p != f) {
+            return Err(refuse(&p));
+        }
+    }
+    let listed = spawn_within(git, dir, Some(top), &["config", "--list", "--show-origin", "-z"], &fixed, TIMEOUT)?;
     if !listed.ok || listed.over {
         bail!("this repository's settings couldn't be read whole ({}): Echo doesn't use it", if listed.over { format!("over {} MB", OUT_MAX >> 20) } else { listed.why() });
     }
+    // `<origin>\0<key>\n<value>\0`: a pair a setting.
+    let mut parts: Vec<&[u8]> = listed.stdout.split(|b| *b == 0).collect();
+    if parts.last().is_some_and(|p| p.is_empty()) {
+        parts.pop();
+    }
+    if !parts.len().is_multiple_of(2) {
+        bail!("this repository's settings couldn't be read whole (a listing out of step): Echo doesn't use it");
+    }
     let mut out = vec![];
-    for entry in listed.stdout.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        let key = entry.split(|b| *b == b'\n').next().unwrap_or_default();
+    for pair in parts.chunks(2) {
+        let (origin, entry) = (pair[0], pair[1]);
+        let (key, value) = match entry.iter().position(|b| *b == b'\n') {
+            Some(n) => (&entry[..n], &entry[n + 1..]),
+            None => (entry, &[][..]),
+        };
         let key = std::str::from_utf8(key).map_err(|_| anyhow!("a setting of this repository is named in bytes that aren't text (UTF-8): Echo doesn't use it"))?;
         let (section, last) = (key.split('.').next().unwrap_or("").to_ascii_lowercase(), key.rsplit('.').next().unwrap_or("").to_ascii_lowercase());
+        // A file included, there or not: git skips a missing one, and would read it once a plugin wrote it.
+        if (section == "include" || section == "includeif") && last == "path" && key.contains('.') {
+            let (Ok(value), Ok(origin)) = (std::str::from_utf8(value), std::str::from_utf8(origin)) else {
+                bail!("this repository's settings include a file named in bytes that aren't text (UTF-8): Echo doesn't use it");
+            };
+            let target = include_target(value, origin, git).ok_or_else(|| anyhow!("this repository's settings include “{value}”, a file Echo can't place: Echo doesn't use it"))?;
+            if let Some(p) = changeable(&target, top, &granted) {
+                return Err(refuse(&p));
+            }
+        }
         // Its files kept elsewhere than beside its .git: never used (Echo names the work tree itself).
         if section == "core" && last == "worktree" && key.matches('.').count() == 1 {
             bail!("this repository sets core.worktree (its files kept elsewhere than beside its .git): Echo doesn't use it");
@@ -375,7 +480,7 @@ impl Git {
         checked_version(&git)?;
         let found = top_of(&root)?;
         let top = found.clone().unwrap_or_else(|| root.clone());
-        let config = overrides(&git, &root, &top, &no_hooks()?)?;
+        let config = overrides(&git, &root, &top, found.is_some(), &no_hooks()?)?;
         Ok(Git { git, root, top, found: found.is_some(), config })
     }
 
@@ -1257,6 +1362,13 @@ mod tests {
         put_git(&crate::paths::config_dir().join("bin"));
         let path = std::env::join_paths([PathBuf::from("bin"), granted.join("bin"), crate::paths::home().join("bin"), crate::paths::config_dir().join("bin"), root.join("tools/bin")]).unwrap();
         assert_eq!(path_candidates(&path), [theirs.clone()]);
+        // A PATH folder that is a link into the folder given to a plugin: skipped too.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(granted.join("bin"), root.join("linked-bin")).unwrap();
+            let path = std::env::join_paths([root.join("linked-bin"), root.join("tools/bin")]).unwrap();
+            assert_eq!(path_candidates(&path), [theirs.clone()]);
+        }
         // A git file that can't be started (Unix: not executable) isn't one.
         #[cfg(unix)]
         {
@@ -1573,6 +1685,125 @@ mod tests {
         symlink(other.join(".git/objects").join(&blob[..2]), vault.join(".git/objects").join(&blob[..2])).unwrap();
         assert!(run("linked", "info", json!({})).unwrap_err().contains("outside its folder"), "a folder of objects");
         plugins::remove("linked", true).unwrap();
+        sync();
+    }
+
+    /// A `.git` a plugin could write in — a folder inside it given to a plugin, or `.git` a link to a folder elsewhere:
+    /// refused.
+    #[test]
+    fn a_git_folder_a_plugin_could_write_in_or_a_link_is_refused() {
+        let (_env, root) = paths::testenv::folders("jshost-git-dotgit-reach");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "near", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        one_commit(&vault);
+        crate::grants::grant("other-plugin", &vault.join(".git/info")).unwrap();
+        assert!(run("near", "info", json!({})).unwrap_err().contains("inside this repository's .git is given to a plugin"));
+        crate::grants::forget("other-plugin", &vault.join(".git/info")).unwrap();
+        assert_eq!(run("near", "info", json!({})).unwrap()["repo"], true);
+        #[cfg(unix)]
+        {
+            std::fs::rename(vault.join(".git"), root.join("real-git")).unwrap();
+            std::os::unix::fs::symlink(root.join("real-git"), vault.join(".git")).unwrap();
+            for (cmd, a) in [("info", json!({})), ("log", json!({})), ("commit", json!({"paths": ["a.md"], "message": "x"}))] {
+                assert!(run("near", cmd, a).unwrap_err().contains("outside its folder"), "{cmd}");
+            }
+        }
+        plugins::remove("near", true).unwrap();
+        sync();
+    }
+
+    /// The user's `.git/config` includes `../tools/git.cfg`, a file in the vault a plugin may write: missing when Echo
+    /// reads the settings, then written by the plugin (`ctx.fs.write`) while `commit` runs — a filter the listing never
+    /// saw. Refused whether the file is there or not, and nothing runs.
+    #[cfg(unix)]
+    #[test]
+    fn settings_that_include_a_file_a_plugin_can_write_refuse_the_repository() {
+        let (_env, root) = paths::testenv::folders("jshost-git-include");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "inc", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        one_commit(&vault);
+        let v = dunce::canonicalize(&vault).unwrap().display().to_string();
+        let mark = root.join("filtered");
+        let filter = marker(&root.join("filter.sh"), &mark, true);
+        let config = std::fs::read_to_string(vault.join(".git/config")).unwrap();
+        std::fs::write(vault.join(".git/config"), format!("{config}[include]\n\tpath = ../tools/git.cfg\n")).unwrap();
+        service("inc", "fs.write", &json!([v, "tools/attrs", "*.md filter=evil\n"])).unwrap();
+        let evil = format!("[filter \"evil\"]\n\tclean = {filter}\n[core]\n\tattributesFile = {v}/tools/attrs\n");
+        // While Echo commits, the plugin writes the included file, then takes it away again.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flipper = {
+            let (stop, v, evil) = (stop.clone(), v.clone(), evil.clone());
+            std::thread::spawn(move || {
+                let mut n = 0;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = service("inc", "fs.write", &json!([v, "tools/git.cfg", if n % 2 == 0 { evil.as_str() } else { "" }]));
+                    n += 1;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+        let mut answers = vec![];
+        for i in 0..20 {
+            std::fs::write(vault.join("a.md"), format!("# A {i}\n")).unwrap();
+            answers.push(run("inc", "commit", json!({"paths": ["a.md"], "message": "x"})));
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        flipper.join().unwrap();
+        assert!(!mark.exists(), "a filter the plugin set ran");
+        for a in answers {
+            assert!(a.as_ref().is_err_and(|e| e.contains("a plugin could change")), "{a:?}");
+        }
+        let refused = |why: &str| {
+            for (cmd, a) in [("info", json!({})), ("status", json!({})), ("commit", json!({"paths": ["a.md"], "message": "x"}))] {
+                let r = run("inc", cmd, a);
+                assert!(r.as_ref().is_err_and(|e| e.contains("a plugin could change")), "{why}: {cmd}: {r:?}");
+            }
+        };
+        // Missing, under an includeIf, in the user's own settings: refused all the same.
+        std::fs::remove_file(vault.join("tools/git.cfg")).unwrap();
+        refused("missing");
+        std::fs::write(vault.join(".git/config"), format!("{config}[includeIf \"gitdir:/\"]\n\tpath = {v}/later/git.cfg\n")).unwrap();
+        refused("includeIf, its folder not there yet");
+        std::fs::write(vault.join(".git/config"), &config).unwrap();
+        assert_eq!(run("inc", "info", json!({})).unwrap()["repo"], true, "without it the repository works");
+        let home = root.join("user/.gitconfig");
+        let user = std::fs::read_to_string(&home).unwrap();
+        std::fs::write(&home, format!("{user}[include]\n\tpath = ~/../vault/tools/git.cfg\n")).unwrap();
+        refused("the user's settings include it");
+        // The settings files themselves linked into the vault: the repository's, the user's.
+        std::fs::write(&home, &user).unwrap();
+        std::fs::rename(vault.join(".git/config"), vault.join("tools/config")).unwrap();
+        std::os::unix::fs::symlink(vault.join("tools/config"), vault.join(".git/config")).unwrap();
+        refused("the repository's settings a link into the vault");
+        std::fs::remove_file(vault.join(".git/config")).unwrap();
+        std::fs::rename(vault.join("tools/config"), vault.join(".git/config")).unwrap();
+        std::fs::rename(&home, vault.join("tools/gitconfig")).unwrap();
+        std::os::unix::fs::symlink(vault.join("tools/gitconfig"), &home).unwrap();
+        refused("the user's settings a link into the vault");
+        std::fs::remove_file(&home).unwrap();
+        std::fs::rename(vault.join("tools/gitconfig"), &home).unwrap();
+        // A file of the work tree above the vault, outside a hidden folder: refused; in a hidden one, used.
+        let top = root.join("repo");
+        let inner = top.join("Vault");
+        one_commit(&top);
+        install(&root, "sub", json!({"folders": {"what": "vaults", "write": true}}), &inner);
+        let cfg = std::fs::read_to_string(top.join(".git/config")).unwrap();
+        std::fs::write(top.join(".git/config"), format!("{cfg}[include]\n\tpath = ../shared/git.cfg\n")).unwrap();
+        assert!(run("sub", "info", json!({})).unwrap_err().contains("a plugin could change"));
+        std::fs::write(top.join(".git/config"), format!("{cfg}[include]\n\tpath = ../.shared/git.cfg\n")).unwrap();
+        assert_eq!(run("sub", "info", json!({})).unwrap()["repo"], true);
+        assert!(!mark.exists(), "nothing ran");
+        for id in ["inc", "sub"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 
