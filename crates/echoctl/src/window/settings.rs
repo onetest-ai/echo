@@ -155,7 +155,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
                 Ok(())
             });
         }
-        // A profile's own models for Claude's three names (`ai::set_model_name`; empty: the name as it is).
+        // A profile's own models for Claude's three names (`ai::set_model_names`; empty: the name as it is).
         "profile_models" => {
             let id = value["id"].as_str().unwrap_or("");
             let all: Vec<String> = ["haiku", "sonnet", "opus"].iter().map(|n| format!("{n}={}", value[n].as_str().unwrap_or(""))).collect();
