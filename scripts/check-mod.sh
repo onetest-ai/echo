@@ -20,6 +20,8 @@ node crates/echoctl/ui/workbench.test.mjs
 node crates/echoctl/ui/clicks.test.mjs
 # A plugin's ctx.ui.copy: only with the user's activation, fails closed (copyAllowed).
 node crates/echoctl/ui/copy-guard.test.mjs
+# A plugin's ctx.claude.session: only on the user's click, in a folder it was given, read or edit (pluginSessionAsk).
+node crates/echoctl/ui/plugin-session.test.mjs
 # Echo's menu for the page's selects: rows, arrows, type-ahead, where it opens (select menu block).
 node crates/echoctl/ui/select-menu.test.mjs
 # Echo's suggestions for a text box: the rows for what is typed (suggest block).
@@ -73,6 +75,8 @@ node crates/echoctl/ui/fingerprint.test.mjs
 node crates/echoctl/ui/plugin-work-rows.test.mjs
 # The plugins' rows of a thread's Profile: each drawn on its own, one that throws or repeats left out, after once per box drawn afresh, gone with its plugin (threadSlotRows, threadSlotAfter, #464).
 node crates/echoctl/ui/thread-slot.test.mjs
+# The plugins' chips on a call's row in the calls list (callRowChips).
+node crates/echoctl/ui/call-row-slot.test.mjs
 # A plugin's window half: the stylesheets it may load, and what unloading it takes out.
 node crates/echoctl/ui/plugin-client-ctx.test.mjs
 # Which plugin files dropped on the window go to: the one whose view is shown and listens, else Echo's own (dropTarget).

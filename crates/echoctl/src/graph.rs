@@ -552,13 +552,45 @@ pub fn message(id: &str) -> Result<Value> {
 /// Every message of one conversation (oldest first).
 pub fn conversation(id: &str) -> Result<Vec<Value>> {
     let token = access_token()?;
-    let v = graph_get_text(&token, &format!(
-        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
-        urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
-    ))?;
-    let mut out: Vec<Value> = v["value"].as_array().into_iter().flatten().map(mail_item).collect();
+    let mut out: Vec<Value> = conversation_raw(&token, id, "")?.iter().map(mail_item).collect();
     out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
     Ok(out)
+}
+
+/// The same, each message with its attachments' names (`files`; inline ones left out, the contents never read): one
+/// more request per message that has attachments. A list that can't be read is said (`files_error`), not left out.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn conversation_with_files(id: &str) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let mut out = vec![];
+    for m in conversation_raw(&token, id, ",hasAttachments")? {
+        let mut item = mail_item(&m);
+        item["files"] = json!([]);
+        if let (true, Some(mid)) = (m["hasAttachments"] == true, m["id"].as_str()) {
+            match graph_get(&token, &format!("{GRAPH}/me/messages/{}/attachments?$select=name,isInline", urlencode(mid))) {
+                Ok(a) => item["files"] = json!(attachment_names(&a["value"])),
+                Err(e) => item["files_error"] = json!(format!("{e:#}")),
+            }
+        }
+        out.push(item);
+    }
+    out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
+    Ok(out)
+}
+
+/// A conversation's messages as Graph gives them, `extra` fields selected besides Echo's own.
+fn conversation_raw(token: &str, id: &str, extra: &str) -> Result<Vec<Value>> {
+    let v = graph_get_text(token, &format!(
+        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders{extra}",
+        urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
+    ))?;
+    Ok(v["value"].as_array().cloned().unwrap_or_default())
+}
+
+/// The names of a message's attachments as Graph lists them, inline ones (a signature's picture) left out.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn attachment_names(list: &Value) -> Vec<String> {
+    list.as_array().into_iter().flatten().filter(|a| a["isInline"] != true).filter_map(|a| a["name"].as_str().map(str::to_owned)).collect()
 }
 
 /// How a mail's sender was authenticated, from Exchange's headers: `internal` (sent inside the
@@ -1124,5 +1156,12 @@ mod tests {
         assert_eq!(query_param(q, "code").as_deref(), Some("0.AbC+d-e"));
         assert_eq!(query_param(q, "state").as_deref(), Some("xyz"));
         assert_eq!(query_param(q, "missing"), None);
+    }
+
+    #[test]
+    fn a_mails_attachments_are_named_without_its_inline_pictures() {
+        let list = json!([{"name": "pilot-plan.xlsx", "isInline": false}, {"name": "logo.png", "isInline": true}, {"name": "notes.pdf"}, {"isInline": false}]);
+        assert_eq!(attachment_names(&list), vec!["pilot-plan.xlsx", "notes.pdf"]);
+        assert!(attachment_names(&Value::Null).is_empty());
     }
 }

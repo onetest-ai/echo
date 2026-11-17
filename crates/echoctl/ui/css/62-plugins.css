@@ -91,3 +91,6 @@
 .pl-addrow #pl-mname { width: 160px; }
 .set-main.pl-main { max-width: 1120px; }
 .pl-mlist { overflow: visible; }
+
+/* A plugin's chip on a call's row (`call.row`): a small pill in the row's second line. */
+.row .m .plug-chip { padding: 0 6px; border-radius: 999px; background: var(--line); color: var(--text-2); font-size: 11px; line-height: 16px; }

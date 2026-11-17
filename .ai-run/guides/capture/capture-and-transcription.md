@@ -19,7 +19,7 @@ these rules rely on (`ref: <section>`). It changes with the code; these rules ch
 - R9. An arm for a meeting starts only on that meeting's call when the call window can be read: the window naming the meeting, or a call begun shortly before it, is its call. Evidence: `watch::meetings_call` (ref: Meeting matching)
 - R10. A call begun before that whose window doesn't name the meeting makes the arm wait until the user is on its call; a name alone never does. Evidence: `watch::meetings_call` (ref: Meeting matching)
 - R11. A call window it can't read at all starts the arm on the call going on, and Record on a call already going on arms no meeting. Evidence: `watch::meetings_call`
-- R12. Recording is opt-in per meeting: a call is recorded only when the user chose it (Record, its meeting, or a series the user set to always); a call nobody chose is at most offered. Evidence: `watch::take_arm`, `app::offer_call` (ref: Opt-in)
+- R12. Recording is opt-in per meeting: a call is recorded only when the user chose it (Record, its meeting, or a series the user set to always); a call nobody chose is at most offered. A plugin's microphone is not a recording and never runs beside one. Evidence: `watch::take_arm`, `app::offer_call` (ref: Opt-in)
 
 ### Constraints
 | Do not | Do instead | Evidence |

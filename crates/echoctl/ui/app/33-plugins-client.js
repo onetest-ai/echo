@@ -30,7 +30,31 @@ const Plugins = {
 // `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 // `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
 // `thread` = {id, name, client}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile']
+// `call.row`: a chip on a call's row in the calls list ({id, label, chip(call) → short text or nothing}), `call` =
+// {name, title, started_at, status, memo}.
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'call.row']
+// ── call row slot: the plugins' chips on a call's row (no DOM: `call-row-slot.test.mjs`) — each item's `chip(call)`
+// gives a short text (24 characters, the rest cut) or nothing; one that throws is left out (logged) and the row drawn
+// without it; a second item with the same plugin and id is left out. `chip` runs as a widget's draw does: a
+// `ctx.render()` asked for in it is ignored (no loop).
+function callRowChips(items, call, log) {
+  const out = [], seen = new Set()
+  for (const x of items || []) {
+    const key = `${x.plugin}:${x.id}`
+    if (seen.has(key)) { log(`${x.plugin}: ${x.label || x.id}: a second chip with the id “${x.id}” — left out`); continue }
+    seen.add(key)
+    Plugins.drawing = true
+    try {
+      const t = x.chip(call)
+      const text = t == null ? '' : String(t).trim()
+      if (text) out.push({ key, text: text.length > 24 ? text.slice(0, 23) + '…' : text, title: String(x.label || x.id) })
+    } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) } finally { Plugins.drawing = false }
+  }
+  return out
+}
+/** The call a `call.row` chip is drawn for: the row's own facts. */
+const slotCall = (c) => ({ name: c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
+// end of the call row slot block
 // ── thread slot: the plugins' rows of a thread's Profile, each drawn on its own — one that throws is left out (and
 // logged), the Profile draws without it; a second row with the same plugin and id is left out too (logged).
 // `render` runs as a widget's draw does: a `ctx.render()` asked for in it is ignored (no loop).
@@ -184,6 +208,21 @@ function pluginCtx(id) {
     },
     /** Open one of its panel views (`ctx.panels.add`). */
     showPanel: (view) => { Layout.show(`${id}:${view}`, panelViews()); layoutChanged() },
+    /** Claude Code in a folder the user gave it (`uses.claude` and `uses.folders`): `session({folder, path, mode,
+     *  profile})` opens it in Echo's terminal panel, only on the user's click or key (else it throws) — the user types
+     *  there, the plugin can't, nor read its screen. Open already: shown again (in another folder it throws). */
+    claude: {
+      session: (opts) => {
+        const key = `claude:plugin:${id}`, e = Terms.get(key)
+        const live = !!(e && e.id != null && !e.exited)
+        const a = pluginSessionAsk(id, opts, typeof navigator === 'undefined' ? null : navigator, live ? (S.ptyAbout || {})[key] || {} : null)
+        // Its own tab (each plugin's session has one), shown; started only when it isn't running.
+        if (a.start || !(S.plugSessions || {})[key]) plugSessionNote(id, a.other ? { ...aboutExtra((S.ptyAbout || {})[key]), plugin: id } : a.extra)
+        claudePanel(plugSessionView(id))
+        if (a.other) throw new Error('Claude is open for this plugin in another folder: close it in its panel first')
+        if (a.start) termStart('claude-plugin', key, a.extra)
+      },
+    },
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
@@ -280,6 +319,9 @@ function unloadPlugin(id) {
   for (let i = PANEL_VIEWS.length - 1; i >= 0; i--) if (PANEL_VIEWS[i].plugin === id) PANEL_VIEWS.splice(i, 1)
   // Its work rows' targets (`task.actions#<plugin>:<row>`) go with it.
   slotForget(Plugins.targets, id)
+  // Its Claude session is the user's: it stays while it runs, but its panel goes once it has ended (it can't start again).
+  const sk = `claude:plugin:${id}`
+  if (S.plugSessions && S.plugSessions[sk]) { const e = Terms.get(sk); if (!(e && e.id != null && !e.exited)) delete S.plugSessions[sk] }
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
   delete Plugins.drops[id]
@@ -326,6 +368,25 @@ function pluginDropped(id, files) {
 // the page and can reach the window's IPC itself. Fails closed: an engine that can't tell (no `userActivation`) refuses.
 const copyAllowed = (nav) => !!(nav && nav.userActivation && nav.userActivation.isActive === true)
 // end of the copy guard block
+// ── plugin session: what `ctx.claude.session(opts)` asks Echo for (no DOM: `plugin-session.test.mjs`) — only on the
+// user's click or key (`copyAllowed`), in a folder it was given (`folder`, a subfolder `path`), `read` (the default) or
+// `edit`, on `profile` or the default; Echo checks the rest (its sheet, the grant, the path, the profile). `running`:
+// its session already open (`{folder, path}`) — shown again, never started twice; in another folder, `other`.
+function pluginSessionAsk(id, o, nav, running) {
+  if (!copyAllowed(nav)) throw new Error('Claude opens only on your click')
+  o = o || {}
+  const folder = typeof o.folder === 'string' ? o.folder : ''
+  if (!folder) throw new Error('a Claude session opens in a folder you were given (folder)')
+  const mode = o.mode == null || o.mode === '' ? 'read' : String(o.mode)
+  if (mode !== 'read' && mode !== 'edit') throw new Error(`mode “${mode}”: a session reads (read) or edits (edit) its folder`)
+  const extra = { plugin: id, folder, path: o.path == null ? '' : String(o.path), mode, profile: o.profile == null ? '' : String(o.profile) }
+  const other = !!running && (running.folder !== folder || (running.path || '') !== extra.path)
+  return { key: `claude:plugin:${id}`, extra, start: !running, other }
+}
+/** What starts a plugin's session found running (`api/ptys`' `about`) again: the same request on the profile it runs on,
+ *  so Start resumes the same conversation (Echo checks the profile again). */
+const aboutExtra = (a = {}) => ({ plugin: a.plugin, folder: a.folder, path: a.path || '', mode: a.mode, profile: a.profile || '' })
+// end of the plugin session block
 const slotFor = (slot, target) => (Plugins.slots[slot] || []).filter((x) => { try { return x.when ? x.when(target) : !(target && target.kind === 'plugin') } catch { return false } })
 /** A slot's buttons for `target`: `menu` (menu items) or `buttons`; `key` when the slot is drawn for several targets at
  *  once (each row its own). */

@@ -322,7 +322,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         "plugin_jobs_set" => {
             let id = v["id"].as_str().unwrap_or("");
             let settings: Vec<String> = v["settings"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect();
-            let r = crate::jshost::may_tune_jobs(id).and_then(|()| crate::jobs::set(v["job"].as_str().unwrap_or(""), &settings));
+            let r = crate::jshost::may_tune_jobs(id).and_then(|()| crate::jobs::set_from_plugin(v["job"].as_str().unwrap_or(""), &settings));
             let answer = match r {
                 Ok(list) => json!({"req": v["req"], "value": list}),
                 Err(e) => json!({"req": v["req"], "error": format!("{e:#}")}),

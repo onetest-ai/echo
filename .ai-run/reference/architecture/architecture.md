@@ -105,6 +105,12 @@ reads the data folder's files.
   `<config dir>/jobs.json`, changed only by `jobs::set` (`echoctl jobs set <job> key=value …`, `key=` its default;
   `night from=HH:MM to=HH:MM`) under `.jobs.lock`: all checked, then written at once, never inside a run Echo started.
   `echoctl jobs` lists them all.
+- A plugin's own routines (`plugins::routines`, `plugin-api.md` § Routines) are kept beside Echo's jobs by their id
+  `<plugin>.<routine>`: their settings (`on`, `every`, `night`, `model`) in `jobs.json` (`jobs::routine_fields`), their
+  runs in `jobs-runs/<id>.jsonl` and each run's folder in `jobs-runs/<id>/<run>/` (the newest 20), its lock
+  `jobs-runs/.<id>.lock`. `jobs::routines` lists them after Echo's jobs (`jobs::list` only Echo's); the app runs those
+  due every 30 s (`plugins::routines::start_scheduler`, `jobs::routine_next`); `echoctl jobs run <id>` runs one now and
+  `echoctl jobs outcome <id> [--run <run>]` gives its answer, changes and sends and log.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

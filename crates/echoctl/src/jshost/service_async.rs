@@ -44,6 +44,12 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        // Echo's own box asks the user for an address this plugin may fetch once (`uses.network.ask`).
+        "http.ask_address" => typed::ask(id),
+        // The user's Microsoft 365 through Echo's sign-in, read-only (`uses.m365.read`).
+        "m365.search" => m365::search(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "m365.mail_thread" => m365::mail_thread(id, arg.as_str().unwrap_or("")),
+        "m365.chat" => m365::chat(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "system.pick_folder" => {
             uses(id, "folders")?;
             files::no_picker_in_a_run()?;

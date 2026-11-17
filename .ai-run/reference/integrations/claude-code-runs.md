@@ -10,12 +10,14 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - `local` / `claude` jobs run with `--setting-sources user` (never on `claude auth …`); `ai::policy_conflict` refuses them
   when admin policy could route. A plugin's run in a folder it was given names its own, `--setting-sources user,project`
   as its last arguments (`claudejob::in_folder`; `ai::build_command` then adds none), and is refused when that folder's `.claude/settings.json`
-  could route (`ai::routes`) or isn't JSON.
+  could route (`ai::routes`) or isn't JSON. A plugin's session in Echo's terminal (`terminal::start_plugin`) is built
+  the same way, keeping its conversation (`claudejob::in_folder_session`: no `--no-session-persistence`).
 - Children start in their own session (`ai::detach`); only `echoctl ai login`'s child stays in the terminal's foreground.
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
   their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill
   (`--disable-slash-commands`) (`projectsync::args`).
-- The folder session, a routine, Yolo and a plugin's folder run (on the routines' setting) get their permission flags
+- The folder session, a plugin's session (on the folder session's setting), a routine, Yolo and a plugin's folder run (on the
+  routines' setting) get their permission flags
   from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's
   record): Ask each time none; Skip all permission checks `--dangerously-skip-permissions`; Auto
   `--permission-mode auto` where `folder_args::auto_mode_works` (a `claude` or `system` profile, its model Claude's

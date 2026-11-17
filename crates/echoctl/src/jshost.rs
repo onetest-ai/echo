@@ -24,6 +24,8 @@ use crate::{paths, plugins};
 
 mod test_hosts;
 mod service_async;
+mod typed;
+mod m365;
 pub mod files;
 pub mod folders;
 mod git;
@@ -161,9 +163,12 @@ const PRELUDE: &str = r#"
     settings: { get: (key) => call('settings.get', key), set: (key, value) => call('settings.set', [key, value]) },
     /** HTTPS to the hosts its manifest names (`uses.network.hosts`) and the addresses the user listed: {status, body};
      *  `{file: handle}` sends a file, `{save}` keeps the answer in its store (both up to 512 MB). `stream(url, opts,
-     *  onChunk)` reads an answer as it comes (SSE, chunked): {status, headers, done: Promise<{bytes, cancelled}>, cancel()}. */
+     *  onChunk)` reads an answer as it comes (SSE, chunked): {status, headers, done: Promise<{bytes, cancelled}>, cancel()}.
+     *  `askAddress()` (uses.network.ask): Echo's own box asks the user for a web address — its text, or null; that
+     *  address alone may then be fetched once (a plain GET, no headers or body), within 10 minutes. */
     http: {
       fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]),
+      askAddress: () => later('http.ask_address', null),
       stream: (url, opts, onChunk) => {
         const id = call('http.stream', [String(url), opts || {}])
         let settle
@@ -194,6 +199,9 @@ const PRELUDE: &str = r#"
         }
       }),
     },
+    /** The user's Microsoft 365 through Echo's sign-in, read-only (uses.m365.read: mail, chats): search(query, {kinds, days,
+     *  limit}), mailThread(message) → {subject, picked, messages}, chat(chat, {since, until}) → {id, topic, members, url, messages}. */
+    m365: { search: (q, o) => later('m365.search', [String(q), o || {}]), mailThread: (m) => later('m365.mail_thread', String(m)), chat: (c, o) => later('m365.chat', [String(c), o || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
     markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md) => call('markdown.links', String(md)) }),
     /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
@@ -267,7 +275,8 @@ const PRELUDE: &str = r#"
      *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
     agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
-     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Its events (`ctx.on`, uses.events.on —
+     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>) | 'calls' (opts: q, since, limit) | 'calendar'
+     *  (the meetings Echo last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     echo: {
       read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
@@ -1257,7 +1266,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "dictionary" => crate::share::dictionary()?,
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
                 "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group()})).collect::<Vec<_>>()),
-                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source)"),
+                "calls" => crate::share::calls(&opt)?,
+                "calendar" => crate::share::calendar()?,
+                "me" => crate::share::me()?,
+                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
             }
         }
         "echo.dictionary.add" => {
@@ -2130,7 +2142,8 @@ mod tests {
         sync();
     }
 
-    /// A small http server on this computer: `/clip` answers bytes that aren't UTF-8, `/text` a word, any other path 404.
+    /// A small http server on this computer: `/clip` answers bytes that aren't UTF-8, `/text` a word, `/moved` sends to
+    /// `/text`, any other path 404.
     fn serve_clips() -> u16 {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2144,9 +2157,11 @@ mod tests {
                     "/echo" => ("200 OK", head.split_once("\r\n\r\n").map(|(_, b)| b.as_bytes().to_vec()).unwrap_or_default()),
                     "/clip" => ("200 OK", vec![0xff, 0xfb, 0x90, 0x00, 0x80, 0xfe]),
                     "/text" => ("200 OK", b"hello".to_vec()),
+                    "/moved" => ("302 Found", vec![]),
                     _ => ("404 Not Found", b"nope".to_vec()),
                 };
-                let _ = write!(s, "HTTP/1.1 {code}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+                let to = if code.starts_with("302") { "location: /text\r\n" } else { "" };
+                let _ = write!(s, "HTTP/1.1 {code}\r\n{to}content-length: {}\r\nconnection: close\r\n\r\n", body.len());
                 let _ = s.write_all(&body);
             }
         });
@@ -3422,6 +3437,155 @@ mod tests {
         let _ = (0..50).find_map(|_| call("vaults", "drop", &json!({})).ok());
         assert!(crate::grants::folders("vaults").is_empty() && crate::grants::session_read().is_empty());
         plugins::remove("vaults", false).unwrap();
+        sync();
+    }
+
+    /// Install a made-up plugin `id` from its own local marketplace under `root`, agreeing to its sheet; its sheet lines.
+    fn install_made_up(root: &Path, id: &str, uses: Value, main: &str) -> Vec<String> {
+        let mk = root.join(format!("market-{id}"));
+        let d = mk.join("plugins").join(id);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": format!("Acme {id}"), "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), main).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": format!("m-{id}"), "plugins": [{"id": id, "source": format!("./plugins/{id}")}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some(&format!("m-{id}"))).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review(id, Some(&name)).unwrap().uses;
+        plugins::install(id, Some(&name), &agreed).unwrap();
+        sync();
+        agreed
+    }
+
+    /// A command's answer once the plugin is loaded (its first calls may come before it is).
+    fn call_loaded(id: &str, command: &str, args: &Value) -> Result<Value> {
+        for _ in 0..50 {
+            match call(id, command, args) {
+                Err(e) if e.to_string().contains("isn't loaded") || e.to_string().contains("no command") => std::thread::sleep(Duration::from_millis(50)),
+                r => return r,
+            }
+        }
+        call(id, command, args)
+    }
+
+    #[test]
+    fn a_plugin_reads_calls_the_calendar_and_who_you_are_only_as_its_sheet_said() {
+        let (_env, root) = paths::testenv::folders("jshost-echo-reads");
+        let d = paths::calls_dir().join("2026-10-28_110000-aurora-weekly");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"app": "teams", "platform": "macos", "title": "Aurora weekly", "started_at": "2026-10-28T11:00:00+02:00", "ended_at": "2026-10-28T11:30:00+02:00"}"#).unwrap();
+        std::fs::write(d.join("meeting.json"), r#"{"subject": "Aurora weekly", "organizer": {"name": "Sam Rivera", "email": "sam@initech.example"}, "attendees": [{"name": "Lena Varga", "email": "lena@acme.example"}]}"#).unwrap();
+        std::fs::write(d.join("chat.json"), r#"[{"t": 12, "at": "2026-10-28T11:02:00+02:00", "from": "Lena Varga", "text": "The plan", "files": ["plan.xlsx"]}]"#).unwrap();
+        std::fs::write(d.join("notes.md"), "# Aurora weekly\n- SSO first [12:05]\n").unwrap();
+        let memo = paths::calls_dir().join("2026-10-29_090000-memo");
+        std::fs::create_dir_all(&memo).unwrap();
+        std::fs::write(memo.join("meta.json"), r#"{"app": "memo", "kind": "memo", "title": "Pricing idea", "started_at": "2026-10-29T09:00:00+02:00"}"#).unwrap();
+        let mut cfg = crate::config::Config::load().unwrap_or_default();
+        cfg.me = Some(crate::meeting::Person { name: "Sam Rivera".into(), email: Some("sam@initech.example".into()) });
+        cfg.save().unwrap();
+        crate::watch::write_agenda(&[crate::meeting::MeetingContext { id: Some("ev-1".into()), subject: Some("Acme demo".into()), start: Some("2026-10-28T15:00:00Z".into()), ..Default::default() }]).unwrap();
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('read', (a) => ctx.echo.read(a.kind, a.arg))
+            }
+            "#;
+        let sheet = install_made_up(&root, "reader", json!({"echo": {"read": ["calls", "source", "calendar", "me"]}}), main);
+        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
+        let read = |kind: &str, arg: Value| call_loaded("reader", "read", &json!({"kind": kind, "arg": arg}));
+
+        let list = read("calls", json!({})).unwrap();
+        assert_eq!(list.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect::<Vec<_>>(), ["call:2026-10-29_090000-memo", "call:2026-10-28_110000-aurora-weekly"], "newest first, with or without minutes");
+        assert_eq!((list[0]["memo"].as_bool(), list[0]["minutes"].as_bool()), (Some(true), Some(false)));
+        assert_eq!((list[1]["minutes"].as_bool(), list[1]["chat"].as_bool(), list[1]["transcript"].as_bool()), (Some(true), Some(true), Some(false)));
+        assert_eq!(list[1]["people"], json!(["Sam Rivera", "Lena Varga"]));
+        assert_eq!(read("calls", json!({"q": "lena aurora"})).unwrap().as_array().unwrap().len(), 1, "every word, people too");
+        assert_eq!(read("calls", json!({"since": "2026-10-29"})).unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(read("calls", json!({"limit": 1})).unwrap().as_array().unwrap().len(), 1);
+
+        let s = read("source", json!("call:2026-10-28_110000-aurora-weekly")).unwrap();
+        assert_eq!((s["started_at"].as_str(), s["ended_at"].as_str(), s["app"].as_str(), s["platform"].as_str(), s["memo"].as_bool()), (Some("2026-10-28T11:00:00+02:00"), Some("2026-10-28T11:30:00+02:00"), Some("teams"), Some("macos"), Some(false)));
+        assert_eq!(s["attendees"], json!([{"name": "Sam Rivera", "email": "sam@initech.example"}, {"name": "Lena Varga", "email": "lena@acme.example"}]));
+        assert_eq!(s["chat"], json!([{"at": "2026-10-28T11:02:00+02:00", "from": "Lena Varga", "text": "The plan", "files": ["plan.xlsx"]}]));
+
+        let cal = read("calendar", Value::Null).unwrap();
+        assert_eq!((cal[0]["id"].as_str(), cal[0]["subject"].as_str(), cal[0]["threads"].clone()), (Some("ev-1"), Some("Acme demo"), json!([])));
+        assert_eq!(read("me", Value::Null).unwrap(), json!({"name": "Sam Rivera", "email": "sam@initech.example"}));
+        // What it didn't ask for isn't read.
+        assert!(read("threads", Value::Null).unwrap_err().to_string().contains("didn't ask to read your threads"));
+        plugins::remove("reader", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_reads_microsoft_365_only_as_its_sheet_said_and_only_on_echos_sign_in() {
+        let (_env, root) = paths::testenv::folders("jshost-m365");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('search', (a) => ctx.m365.search(a.q, a.opts))
+              ctx.command('thread', (a) => ctx.m365.mailThread(a.id))
+              ctx.command('chat', (a) => ctx.m365.chat(a.id, a.opts))
+            }
+            "#;
+        let sheet = install_made_up(&root, "mailer", json!({"m365": {"read": ["mail"]}}), main);
+        assert!(sheet.iter().any(|l| l.starts_with("Reads your Microsoft 365 mail through Echo's sign-in") && l.ends_with("it never sends")), "{sheet:?}");
+        let err = |cmd: &str, a: Value| call_loaded("mailer", cmd, &a).unwrap_err().to_string();
+        // Not asked for: chats, or a kind the sheet doesn't grant.
+        assert!(err("chat", json!({"id": "19:x@thread.v2"})).contains("didn't ask to read your Microsoft 365 chats"));
+        assert!(err("search", json!({"q": "pilot", "opts": {"kinds": ["chats"]}})).contains("didn't ask to read your Microsoft 365 chats"));
+        assert!(err("search", json!({"q": "pilot", "opts": {"kinds": ["files"]}})).contains("didn't ask to read your Microsoft 365 files"));
+        // Asked for, but Echo isn't signed in: said, and nothing else is tried (no sign-in of its own).
+        assert!(err("thread", json!({"id": "AAMk1"})).contains("Microsoft 365 isn't connected"));
+        assert!(err("search", json!({"q": "pilot"})).contains("Microsoft 365 isn't connected"));
+        plugins::remove("mailer", false).unwrap();
+        sync();
+    }
+
+    // A release build reads no ECHOCTL_ASK_ADDRESS: there `askAddress` would open the real dialog (testing R11).
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_plugin_fetches_the_address_the_user_typed_once_and_nothing_else() {
+        let (_env, root) = paths::testenv::folders("jshost-typed");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('ask', () => ctx.http.askAddress())
+              ctx.command('get', (a) => ctx.http.fetch(a.url, a.opts || {}))
+            }
+            "#;
+        let sheet = install_made_up(&root, "typer", json!({"network": {"ask": true}}), main);
+        assert!(sheet.iter().any(|l| l == "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time"), "{sheet:?}");
+        install_made_up(&root, "other", json!({"network": {"hosts": ["api.acme.example"]}}), main);
+        let port = serve_clips();
+        let page = format!("http://127.0.0.1:{port}/text");
+        let get = |id: &str, url: &str, opts: Value| call_loaded(id, "get", &json!({"url": url, "opts": opts}));
+        // Nothing typed yet: refused.
+        assert!(get("typer", &page, json!({})).unwrap_err().to_string().contains("may reach only"));
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", &format!(" {page} "));
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        // Only the plugin it was typed for, only that address, only GET.
+        assert!(get("other", &page, json!({})).unwrap_err().to_string().contains("may reach only"), "another plugin");
+        assert!(get("typer", &format!("http://127.0.0.1:{port}/clip"), json!({})).unwrap_err().to_string().contains("may reach only"), "another address");
+        assert!(get("typer", &page, json!({"method": "POST", "body": "x"})).unwrap_err().to_string().contains("may reach only"), "GET only");
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        assert_eq!(get("typer", &page, json!({})).unwrap(), json!({"status": 200, "body": "hello"}));
+        assert!(get("typer", &page, json!({})).unwrap_err().to_string().contains("may reach only"), "once");
+        // Headers or a body: nothing of the plugin's goes along (the address stays the user's to fetch).
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        assert!(get("typer", &page, json!({"headers": {"x-acme": "1"}})).unwrap_err().to_string().contains("may reach only"), "no headers");
+        assert!(get("typer", &page, json!({"body": "call text"})).unwrap_err().to_string().contains("may reach only"), "no body");
+        // A page that moved isn't followed: where it went is no address the user typed.
+        drop(typed);
+        let moved = format!("http://127.0.0.1:{port}/moved");
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", &moved);
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(moved));
+        assert_eq!(get("typer", &moved, json!({})).unwrap()["status"], 302);
+        // What isn't a web address is refused where it is typed; a plugin that didn't ask can't ask.
+        drop(typed);
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", "file:///etc/passwd");
+        assert!(call_loaded("typer", "ask", &json!({})).unwrap_err().to_string().contains("isn't a web address"));
+        assert!(call_loaded("other", "ask", &json!({})).unwrap_err().to_string().contains("didn't ask for “network.ask”"));
+        drop(typed);
+        for id in ["typer", "other"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 }

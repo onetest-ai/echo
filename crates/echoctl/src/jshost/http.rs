@@ -31,6 +31,9 @@ pub(super) fn reach(id: &str, url: &str) -> Result<Reach> {
     }
     let named = url.strip_prefix("https://").map(|r| r.split(['/', '?', '#']).next().unwrap_or(""));
     if !named.is_some_and(|h| !h.contains('@') && !h.contains(':') && hosts.iter().any(|x| x == h)) {
+        if hosts.is_empty() && listed.is_empty() && m.uses.get("network").is_some_and(|n| n["ask"] == true) {
+            bail!("{id} may reach only an address you type in Echo's box when it asks, once");
+        }
         bail!("{id} may reach only the hosts its manifest names ({}) and the addresses you list in its settings ({})", hosts.join(", "), listed.join(", "));
     }
     // Checked on the real host above; a development build may send it to a fake service instead (or refuse it).
@@ -150,13 +153,24 @@ fn failed(id: &str, url: &str, reach: &Reach, code: Option<i32>, stderr: &str) -
 }
 
 /// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, or to an address the user listed in a setting its
-/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, to any listed host), through
+/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, to any listed host), or once to the
+/// address the user just typed in Echo's box (`typed`, `uses.network.ask`: a plain GET, no headers or body), through
 /// curl (its config on stdin, so headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
 /// With `save: <path>` (relative, in the plugin's store) a 2xx answer's bytes go to that file — up to 512 MB in 15
 /// minutes — and the answer is {status, body: "", saved, bytes}: the body is text, so audio and images can't come
 /// through it. With `file: <handle>` that file is the body (up to 512 MB, 15 minutes).
 pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    let reach = reach(id, url)?;
+    let reach = match reach(id, url) {
+        Ok(r) => r,
+        // An address the user just typed in Echo's box: once, a plain GET (`typed`).
+        Err(e) => {
+            let get = opts["method"].as_str().unwrap_or("GET").eq_ignore_ascii_case("GET");
+            if !get || opts.get("body").is_some_and(|b| !b.is_null()) || opts["headers"].as_object().is_some_and(|h| !h.is_empty()) || !super::typed::take(id, url) {
+                return Err(e);
+            }
+            Reach { listed: false, fake: None }
+        }
+    };
     let url = reach.fake.as_deref().unwrap_or(url);
     if url.contains('\0') {
         bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");

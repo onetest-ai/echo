@@ -72,6 +72,15 @@
     {
       "id": "jobs-demo",
       "source": "./plugins/jobs-demo"
+    },
+    {
+      "id": "data-demo",
+      "source": "./plugins/data-demo"
+
+    },
+    {
+      "id": "routine-demo",
+      "source": "./plugins/routine-demo"
     }
   ]
 }
