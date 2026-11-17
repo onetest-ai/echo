@@ -442,11 +442,11 @@ pub(super) fn describe_folders(v: &Value) -> Result<String> {
 pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("clients", "the names of your clients"),
     ("threads", "your threads' names and stages"),
-    ("people", "who the people in your threads are"),
+    ("people", "who the people in your threads are (their names, addresses and organisations)"),
     ("dictionary", "your dictionary"),
     ("sources", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
     ("source", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
-    ("calls", "the list of your calls (titles, times, who was invited, their threads)"),
+    ("calls", "the list of your calls (titles, times, who was invited with their addresses, their threads)"),
     ("calendar", "the meetings Echo has read from your calendar"),
     ("me", "your name and email"),
 ];
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn the_sheet_names_each_of_echos_calls_calendar_and_you_that_a_plugin_reads() {
         let line = describe_echo(&serde_json::json!({"read": ["calls", "source", "calendar", "me"]})).unwrap();
-        assert_eq!(line, "Reads the list of your calls (titles, times, who was invited, their threads), your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels, the meetings Echo has read from your calendar and your name and email in Echo");
+        assert_eq!(line, "Reads the list of your calls (titles, times, who was invited with their addresses, their threads), your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels, the meetings Echo has read from your calendar and your name and email in Echo");
     }
 
     #[test]

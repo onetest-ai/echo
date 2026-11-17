@@ -650,7 +650,7 @@
   },
   {
    "id": "F-PLUG-70",
-   "feature": "A plugin reads Echo's calls as its sheet says (`ctx.echo.read`): `calls` lists them newest first with or without minutes (`{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}`; `q` every word in title, folder, subject or people, `since`, `limit` 50 up to 500) and `source` of a call also gives its `started_at`, `ended_at`, `duration_min`, `app`, `platform`, `memo`, the invite's `attendees`, its `participants` with the person Echo knows each as (`person`: a key the people read lists, by address, by name only when the invite gives no address; null when none), its meeting `chat` and transcript (each left out with `{chat: false}` / `{transcript: false}`), its threads with their client's name and its `client` (`{id, name}` when its threads have one, else null), and its `minutes` by section, by headings in English, Ukrainian or Russian (`summary`, `decisions`, `questions`, `actions` as Echo keeps them `{id, text, owner, due, done}`, `revision`, `body` without the header); the sheet says \"the list of your calls (titles, times, who was invited, their threads)\" and \"your calls' minutes, transcripts, meeting chat and who was invited, …\"; a kind it didn't ask for is refused",
+   "feature": "A plugin reads Echo's calls as its sheet says (`ctx.echo.read`): `calls` lists them newest first with or without minutes (`{id, title, date, started_at, ended_at, duration_min, app, memo, minutes, transcript, chat, people, participants, threads, client, profile}`; `q` every word in title, folder, subject or people, `since` / `until` (both days in), `thread`, `client`, `limit` 50 up to 500) and `source` of a call also gives its `started_at`, `ended_at`, `duration_min`, `app`, `platform`, `memo`, the invite's `attendees`, its `participants` with the person Echo knows each as (`person`: a key the people read lists, by address, by name only when the invite gives no address; null when none), its meeting `chat` and transcript (each left out with `{chat: false}` / `{transcript: false}`), its threads with their client's name and its `client` (`{id, name}` when its threads have one, else null), and its `minutes` by section, by headings in English, Ukrainian or Russian (`summary`, `decisions`, `questions`, `actions` as Echo keeps them `{id, text, owner, due, done}`, `revision`, `body` without the header); the sheet says \"the list of your calls (titles, times, who was invited with their addresses, their threads)\" and \"your calls' minutes, transcripts, meeting chat and who was invited, …\"; a kind it didn't ask for is refused",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -659,7 +659,7 @@
   },
   {
    "id": "F-PLUG-71",
-   "feature": "A plugin reads the meetings Echo last read from the calendar (`ctx.echo.read('calendar')`: `{id, subject, start, end, organizer, attendees, join_url, response, threads}`, no request to Microsoft 365) and who the user is (`'me'`: About me's name and email) as its sheet says (\"the meetings Echo has read from your calendar\", \"your name and email\")",
+   "feature": "A plugin reads the meetings Echo last read from the calendar (`ctx.echo.read('calendar', {from, to})`: `{id, subject, start, end, organizer, attendees, join_url, response, threads, client}` — `client` `{id, name}` when its threads have one, `from` / `to` days by its start's local day, no request to Microsoft 365) and who the user is (`'me'`: About me's name and email) as its sheet says (\"the meetings Echo has read from your calendar\", \"your name and email\")",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -782,6 +782,15 @@
    "id": "F-PLUG-106",
    "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
    "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-107",
+   "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names); the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
+   "priority": "medium",
    "check": "agent",
    "axes": [
     "plugin.uses"

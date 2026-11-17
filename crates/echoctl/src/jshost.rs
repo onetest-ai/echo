@@ -285,9 +285,9 @@ const PRELUDE: &str = r#"
      *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
     agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
-     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves it out)
-     *  | 'calls' (opts: q, since, limit) | 'calendar'
-     *  (the meetings Echo last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
+     *  client, q, since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves
+     *  it out) | 'calls' (opts: q, since, until, thread, client, limit) | 'calendar' (opts: from, to; the meetings Echo
+     *  last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
      *  template, else {text, name, parts: {identity, people, terms, style, patterns}, hash} — only the kinds asked (all
@@ -1308,7 +1308,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
                 "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group()})).collect::<Vec<_>>()),
                 "calls" => crate::share::calls(&opt)?,
-                "calendar" => crate::share::calendar()?,
+                "calendar" => crate::share::calendar(&opt)?,
                 "me" => crate::share::me()?,
                 o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
             }
@@ -3578,7 +3578,7 @@ mod tests {
             }
             "#;
         let sheet = install_made_up(&root, "reader", json!({"echo": {"read": ["calls", "source", "calendar", "me"]}}), main);
-        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
+        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited with their addresses, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
         let read = |kind: &str, arg: Value| call_loaded("reader", "read", &json!({"kind": kind, "arg": arg}));
 
         let list = read("calls", json!({})).unwrap();

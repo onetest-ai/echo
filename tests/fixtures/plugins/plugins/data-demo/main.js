@@ -5,7 +5,9 @@ export function apply(ctx) {
   // It reads sources, so it hears minutes_written whole (tests/cases/plugins/TC-045).
   ctx.command('minutes', () => JSON.parse(ctx.store.read('minutes.json') || '[]'))
   ctx.on('minutes_written', (p) => { const h = JSON.parse(ctx.store.read('minutes.json') || '[]'); h.push(p); ctx.store.write('minutes.json', JSON.stringify(h)) })
-  ctx.command('calendar', () => ctx.echo.read('calendar'))
+  ctx.command('calendar', (a) => ctx.echo.read('calendar', a || {}))
+  ctx.command('sources', (a) => ctx.echo.read('sources', a || {}))
+  ctx.command('people', () => ctx.echo.read('people'))
   ctx.command('me', () => ctx.echo.read('me'))
   ctx.command('threads', () => ctx.echo.read('threads'))
   ctx.command('search', (a) => ctx.m365.search(a.q, a.opts || {}))
