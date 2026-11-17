@@ -30,7 +30,7 @@ tags: [plugins, cli, self-service]
 | 5 | `cd "$S" && $E plugin install . --yes; cd -` | `.` is the folder: copied and installed with the network line |
 | 6 | A second, different folder with the same id: `T="$(dirname "$ECHOCTL_HOME")/src/other"; mkdir -p "$T"; cp "$S/echo-plugin.json" "$S/main.js" "$T/"`; `$E plugin install "$T" --yes` | Refused: My plugins already has a folder `folder-pulse` that isn't this folder's copy (its path named); My plugins' copy and the installed plugin unchanged |
 | 7 | `$E plugin install "$(dirname "$ECHOCTL_HOME")/src/nothing-here"`; `$E plugin install "$S" --from onetest` | Refused: "… isn't a folder" — nothing copied; then "a folder installs from My plugins, not from onetest" |
-| 8 | `ECHOCTL_HEADLESS=1 $E plugin install "$S" --yes` | Refused: "plugins are installed and updated by you, not from inside a run Echo started"; nothing copied |
+| 8 | `ECHOCTL_HEADLESS=1 $E plugin install "$S" --yes` | Refused: "plugins are installed, updated and changed by you, not from inside a run Echo started"; nothing copied |
 | 9 | `$E plugin install folder-pulse --from my-plugins --yes` | An id still installs as before (from My plugins' copy) |
 | 10 | `$E plugin remove folder-pulse` | Removed; the folder `folder-pulse` stays in My plugins (yours to delete), and `$S` untouched |
 

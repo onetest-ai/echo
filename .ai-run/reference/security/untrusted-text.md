@@ -20,7 +20,8 @@ A routine's or Yolo's run has no run guard: it runs as the folder session (One b
 - `notes::run_limited()`: true in every run Echo started but a routine acting on its own. A CLI command that changes
   settings, recording, audio retention or anything outside the run's call checks it, as `memo start` does.
 - `notes::headless()`: true in every run. Checked by the always-on vocabulary and keeping a call's audio
-  (`notes::refused_in_run`) and by Echo plugin installs and updates (`cli::plugin::refuse_in_run`).
+  (`notes::refused_in_run`) and by every `echoctl plugin` command that changes plugins (`cli::plugin::refuse_in_run`):
+  install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`.
 - A mail draft is not refused: `echoctl compose`, `m365 mail draft`.
 
 ## Safe Markdown
