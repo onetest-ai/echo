@@ -330,10 +330,12 @@ function list() {
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       const due = minutesAhead(c)
       const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
+      // Plugins' chips (`call.row`): text only, each through esc.
+      const plugChips = callRowChips(Plugins.slots['call.row'], slotCall(c), (m) => console.warn(`call.row: ${m}`)).map((x) => `<span class="plug-chip" data-plug-chip="${esc(x.key)}" title="${esc(x.title)}">${esc(x.text)}</span>`).join('')
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
         ${c.memo && c.status !== 'recording' ? `<span class="si memo" title="Memo" aria-label="Memo">${MIC(14)}</span>` : statusIcon(c.status)}
         <span class="t">${esc(c.title)}</span>${clockChip}
-        <span class="m">${icons}${meta}</span>${faces}
+        <span class="m">${icons}${meta}${plugChips}</span>${faces}
       </button>`
     }).join('') + (S.callsNext ? `<div class="rows-more" data-calls-more>${S.callsMore ? 'Loading…' : `${calls.length} of ${S.callsTotal}`}</div>` : '')
   }

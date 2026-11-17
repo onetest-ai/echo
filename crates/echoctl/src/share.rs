@@ -20,12 +20,36 @@ fn ref_thread(t: &Value) -> Option<&str> {
     t["id"].as_str().or(t.as_str())
 }
 
+/// A call's threads: `{id, name, client, client_name}` (`client` the client's id, `client_name` its name).
 fn threads_of_call(dir: &Path) -> Vec<Value> {
-    crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| json!({"id": p.id, "name": p.name, "client": p.client})).collect()
+    let clients = crate::projects::clients().unwrap_or_default();
+    crate::projects::of_call(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, _)| {
+            let client_name = p.client.as_deref().and_then(|c| clients.iter().find(|x| x.id == c)).map(|c| c.name.clone());
+            json!({"id": p.id, "name": p.name, "client": p.client, "client_name": client_name})
+        })
+        .collect()
+}
+
+/// Who a call's invite names: its organizer, then its attendees, each once — `{name, email}`.
+fn attendees(meeting: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = vec![];
+    for p in std::iter::once(&meeting["organizer"]).chain(meeting["attendees"].as_array().into_iter().flatten()) {
+        let (name, email) = (p["name"].as_str().unwrap_or(""), p["email"].as_str());
+        if name.is_empty() && email.is_none() || out.iter().any(|x| x["name"] == name && x["email"].as_str() == email) {
+            continue;
+        }
+        out.push(json!({"name": name, "email": email}));
+    }
+    out
 }
 
 /// One source in the shape a plugin's ingest takes: `{id, kind, title, date, text, link, threads, profile,
 /// transcript?}` — `profile` is the AI profile its text may go to (strict routing: a call's own, a mail's threads').
+/// A call's also has its facts: `started_at`, `ended_at`, `app`, `platform`, `memo`, `attendees` (`{name, email}`, the
+/// invite's) and `chat` (its meeting chat: `[{at, from, text, files}]`, `[]` when none).
 pub fn source(id: &str) -> Result<Value> {
     if let Some(name) = id.strip_prefix("call:") {
         anyhow::ensure!(crate::links::Link::parse(&format!("echo://call/{name}")).is_some(), "not a call: {id}");
@@ -33,12 +57,20 @@ pub fn source(id: &str) -> Result<Value> {
         let meta = crate::calls::read_json(&dir.join("meta.json"));
         let text = std::fs::read_to_string(dir.join("notes.md")).map_err(|_| anyhow!("{name}: no minutes yet"))?;
         let (id, link) = call_id(&dir);
+        let chat: Vec<Value> = crate::calls::read_json(&dir.join("chat.json"))
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|m| json!({"at": m["at"], "from": m["from"], "text": m["text"], "files": m["files"].as_array().cloned().unwrap_or_default()}))
+            .collect();
         return Ok(json!({
             "id": id, "kind": if meta["kind"] == "memo" { "memo" } else { "call" },
             "title": meta["title"], "date": meta["started_at"].as_str().and_then(|s| s.get(..10)),
             "text": text, "link": link, "threads": threads_of_call(&dir),
             "profile": crate::ai::call_profile_id(&dir).ok(),
             "transcript": std::fs::read_to_string(dir.join("transcript.md")).ok(),
+            "started_at": meta["started_at"], "ended_at": meta["ended_at"], "app": meta["app"], "platform": meta["platform"],
+            "memo": meta["kind"] == "memo", "attendees": attendees(&crate::calls::read_json(&dir.join("meeting.json"))), "chat": chat,
         }));
     }
     if let Some(src) = id.strip_prefix("mail:") {
@@ -130,6 +162,66 @@ pub fn sources(opts: &Value) -> Result<Value> {
     out.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
     out.truncate(limit);
     Ok(json!(out))
+}
+
+/// The calls, newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes,
+/// transcript, chat, people, threads, profile}` — `minutes`, `transcript`, `chat` say what it has (its text is
+/// `source`'s); `people` the invite's names. `opts`: `q` (every word in its title, folder, subject or people), `since`
+/// (YYYY-MM-DD), `limit` (≤ 500, default 50).
+pub fn calls(opts: &Value) -> Result<Value> {
+    let words: Vec<String> = opts["q"].as_str().unwrap_or("").to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let since = opts["since"].as_str().unwrap_or("");
+    let limit = opts["limit"].as_u64().unwrap_or(50).clamp(1, 500) as usize;
+    let mut out = vec![];
+    for dir in crate::calls::all_calls().into_iter().rev() {
+        if out.len() >= limit {
+            break;
+        }
+        let meta = crate::calls::read_json(&dir.join("meta.json"));
+        let date = meta["started_at"].as_str().and_then(|s| s.get(..10)).unwrap_or("").to_string();
+        if date.as_str() < since {
+            continue;
+        }
+        let meeting = crate::calls::read_json(&dir.join("meeting.json"));
+        let people: Vec<Value> = attendees(&meeting).into_iter().map(|p| p["name"].clone()).filter(|n| n.as_str().is_some_and(|n| !n.is_empty())).collect();
+        let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+        if !words.is_empty() {
+            let hay = format!("{} {} {} {}", meta["title"].as_str().unwrap_or(""), name.replace('-', " "), meeting["subject"].as_str().unwrap_or(""), people.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" ")).to_lowercase();
+            if !words.iter().all(|w| hay.contains(w.as_str())) {
+                continue;
+            }
+        }
+        out.push(json!({
+            "id": call_id(&dir).0, "title": meta["title"], "date": date, "started_at": meta["started_at"], "ended_at": meta["ended_at"],
+            "memo": meta["kind"] == "memo", "minutes": dir.join("notes.md").is_file(), "transcript": dir.join("transcript.md").is_file(),
+            "chat": dir.join("chat.json").is_file(), "people": people, "threads": threads_of_call(&dir), "profile": crate::ai::call_profile_id(&dir).ok(),
+        }));
+    }
+    Ok(json!(out))
+}
+
+/// The meetings Echo last read from the calendar (its agenda — no new request to Microsoft 365), by start: `{id,
+/// subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo
+/// puts it in).
+pub fn calendar() -> Result<Value> {
+    let mut agenda = crate::watch::agenda();
+    agenda.sort_by_key(crate::watch::meeting_start);
+    Ok(json!(agenda
+        .iter()
+        .map(|m| json!({
+            "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "organizer": m.organizer, "attendees": m.attendees,
+            "join_url": m.join_url, "response": m.response,
+            "threads": crate::projects::for_event(m).iter().filter_map(|c| c["id"].as_str().map(str::to_owned)).collect::<Vec<_>>(),
+        }))
+        .collect::<Vec<_>>()))
+}
+
+/// Who the user is to Echo: `{name, email}` — About me's, the email else Microsoft 365's account; null when unknown.
+pub fn me() -> Result<Value> {
+    let me = crate::config::Config::load().ok().and_then(|c| c.me);
+    let name = me.as_ref().map(|m| m.name.clone()).filter(|n| !n.is_empty());
+    let email = me.and_then(|m| m.email).filter(|e| !e.is_empty()).or_else(crate::graph::account);
+    Ok(json!({"name": name, "email": email}))
 }
 
 /// People across the threads: `{key, name, organisation, title, threads, link}` (People's own; roles stay there).

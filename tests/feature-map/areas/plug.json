@@ -498,6 +498,51 @@
    "axes": []
   },
   {
+   "id": "F-PLUG-70",
+   "feature": "A plugin reads Echo's calls as its sheet says (`ctx.echo.read`): `calls` lists them newest first with or without minutes (`{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}`; `q` every word in title, folder, subject or people, `since`, `limit` 50 up to 500) and `source` of a call also gives its `started_at`, `ended_at`, `app`, `platform`, `memo`, the invite's `attendees` and its meeting `chat`, its threads with their client's name; the sheet says \"the list of your calls (titles, times, who was invited, their threads)\" and \"your calls' minutes, transcripts, meeting chat and who was invited, …\"; a kind it didn't ask for is refused",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-71",
+   "feature": "A plugin reads the meetings Echo last read from the calendar (`ctx.echo.read('calendar')`: `{id, subject, start, end, organizer, attendees, join_url, response, threads}`, no request to Microsoft 365) and who the user is (`'me'`: About me's name and email) as its sheet says (\"the meetings Echo has read from your calendar\", \"your name and email\")",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-72",
+   "feature": "A plugin reads the user's Microsoft 365 only through Echo's sign-in and only what `uses.m365.read` names (`mail`, `chats`): `ctx.m365.search`, `ctx.m365.mailThread` (a mail's thread, each message with its attachments' names, never their contents) and `ctx.m365.chat` (a chat's messages on some days); the sheet says what it reads and that it never sends; without Echo's sign-in each says \"Microsoft 365 isn't connected\"; a kind it didn't ask for (`files` among them) is refused",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-73",
+   "feature": "A plugin with `network.ask` fetches a web address the user types in Echo's own box (`ctx.http.askAddress()`: the system's dialog in Echo's words, never the plugin's page): only that address, only by that plugin, once, a plain GET (no headers or body, no redirect followed), within 10 minutes; a cancelled box gives null, text that isn't an http(s) address is refused; the sheet says \"Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time\"; not inside a run Echo started",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-74",
+   "feature": "A plugin puts a chip on a call's row in the calls list (`call.row`: `chip(call)` → a short text, cut at 24 characters, drawn as text with its label as tooltip, in the row's second line); a chip that throws is left out and the list draws; switching the plugin off takes its chips out",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
    "id": "F-PLUG-75",
    "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again — the user's yes keeping it as they had it, a routine the update adds starting off; a routine breaking a rule refuses the install with why",
    "priority": "high",

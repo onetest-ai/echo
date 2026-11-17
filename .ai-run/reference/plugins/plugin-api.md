@@ -36,7 +36,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
 | `deliver_provider.kinds` | the delivery kinds it provides (§ Delivery) |
-| `network.hosts`, `network.hosts_from` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists |
+| `network.hosts`, `network.hosts_from`, `network.ask` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address) |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
@@ -44,6 +44,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
 | `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
+| `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -194,6 +195,17 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
 | a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
 | the request | the host can't be reached, the 60 s or the 10 MB passed |
 
+**A typed address** (`uses.network.ask: true`): `await ctx.http.askAddress()` opens Echo's own box — the system's text
+dialog, not the plugin's page — saying, in Echo's words, "<plugin name> asks for the address of a web page to fetch
+once. Type or paste it:"; it resolves the address typed (trimmed) or `null` (cancelled). Echo takes only `http://` or
+`https://` with a host, no user part (`@`), no spaces, quotes, `<`, `>`, `\`, backticks or control characters, 2,000
+characters at most (anything else rejects: "… isn't a web address Echo fetches"). That plugin may then
+`ctx.http.fetch` exactly that address once, within 10 minutes (a newer one replaces it), as a plain `GET`: no
+`headers`, no `body`, and like every fetch no redirect followed (a page that moved answers its 3xx). Another address,
+another plugin, a second fetch, another method, headers or a body is refused as any host not granted. Refused inside a run Echo started. The sheet: "Fetches a web page from an address you
+type in Echo's own box when it asks — that page only, once each time" (after the `Talks to …` line when it names hosts
+too). A plugin never sets the address: not by its settings, its store or its window half. Evidence: `jshost::typed`
+
 ## Claude runs
 
 - `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})`, only with `claude` in `uses`. It runs
@@ -299,9 +311,36 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source` (`calls` is named on the sheet but not served yet); a `threads` row is `{id, name, client, stage, group}` of
-an open thread (`group`: `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under
-`uses.echo.write: ["dictionary"]`. Evidence: `plugins::ECHO_READS`, `share::dictionary_add`
+`source`, `calls`, `calendar`, `me`; a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
+`pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
+`plugins::ECHO_READS`, `share::dictionary_add`
+
+| Read | Sheet ("Reads … in Echo") | Gives |
+|---|---|---|
+| `source` (`sources` too) | your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels | `ctx.echo.read('source', 'call:<folder>' \| 'mail:<source>')` → `{id, kind, title, date, text, link, threads, profile, transcript?}` (a call needs its minutes); a call's also `started_at`, `ended_at`, `app`, `platform`, `memo`, `attendees` (the invite's `{name, email}`, organizer first) and `chat` (`[{at, from, text, files}]`, `[]` when none); a thread `{id, name, client, client_name}`; `profile` the AI profile its text may go to |
+| `calls` | the list of your calls (titles, times, who was invited, their threads) | `ctx.echo.read('calls', {q, since, limit})` → newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}` (`minutes`, `transcript`, `chat`: whether it has them; `people`: the invite's names); `q` every word in its title, folder, subject or people, `since` `YYYY-MM-DD`, `limit` 50 (500 at most) |
+| `calendar` | the meetings Echo has read from your calendar | `ctx.echo.read('calendar')` → the agenda Echo last read (no request to Microsoft 365), by start: `{id, subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo puts it in) |
+| `me` | your name and email | `ctx.echo.read('me')` → `{name, email}` (About me's; the email else Microsoft 365's account; `null` each when unknown) |
+
+## Microsoft 365
+
+Under `uses.m365.read` (`mail`, `chats`), through Echo's own Microsoft 365 sign-in — no sign-in of the plugin's, no
+send; without Echo's sign-in each rejects "Microsoft 365 isn't connected: sign in to it in Echo's Settings → Calendar &
+chat"; a kind not asked for rejects "… didn't ask to read your Microsoft 365 <kind> when it was installed" (`files` and
+any other kind are named on the sheet as not had yet, never granted). The sheet: "Reads your Microsoft 365 mail and
+Teams chats through Echo's sign-in when it asks: it searches them and reads a mail's thread with its attachments' names
+or a chat's messages over some days — it never sends" (each part only for what it names).
+
+- `await ctx.m365.search(query, {kinds, days, limit})` → `{query, results, errors}` as `echoctl m365 search`: its own
+  kinds by default; `days` 90 (1–365), `limit` 25 a kind (1–50); an empty query gives no results.
+- `await ctx.m365.mailThread(message)` (`mail`) → `{subject, picked, messages}`: the thread of a mail by its Graph id,
+  oldest first, each `{id, from, to, at, text, url, …, files}` — `files` its attachments' names, inline pictures left
+  out, never their contents; a list Graph refused is said in `files_error`.
+- `await ctx.m365.chat(chat, {since, until})` (`chats`) → `{id, topic, members: [{name, email}], url, since, until,
+  messages: [{id, at, from, text, files}]}`: what was written on those local days, both included (`until` today,
+  `since` six days before by default; `YYYY-MM-DD`), oldest first, about 400 messages at most (whole pages of 50).
+
+Evidence: `jshost::m365`, `plugins::describe_m365`, `graph::conversation_with_files`
 
 What `uses.echo.write` may name, and the sheet's line for each (`plugins::ECHO_WRITES`):
 
@@ -711,8 +750,8 @@ Evidence: `jshost::work::check_rows`
   the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
   with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
   `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`
-- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
-  last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
+- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `call.row`, `knowledge.tab` and
+  `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
@@ -721,6 +760,11 @@ Evidence: `jshost::work::check_rows`
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is
   ignored), `after` runs once per box drawn afresh (fetch there, then `ctx.render()`), one row per id, and one that
   throws is left out, the Profile drawn without it. Evidence: `threadSlotRows`, `threadSlotAfter` (window script)
+- `ctx.slots.add('call.row', {id, label, chip(call) → text})`: a chip on each call's row in the calls list, in its
+  second line, `call` `{name, title, started_at, status, memo}`; `chip` is synchronous and gives a short text (24
+  characters, the rest cut with …) or nothing (no chip), drawn as text (Echo escapes it) with `label` as its tooltip;
+  a click on it opens the call as the row does. One per id; one that throws is left out, the row drawn without it; a
+  `ctx.render()` inside it is ignored. Evidence: `callRowChips` (window script)
 - `ctx.slots.add('task.actions', {…, when: (t) => t.kind === 'plugin' && t.source === ctx.id, run(t)})`: `t.row` is
   the work row, each row its own target; an item without `when` stays on Echo's tasks; after `run`, Echo reads the rows
   again. Evidence: `slotFor` (window script)
@@ -736,6 +780,7 @@ Evidence: `jshost::work::check_rows`
   apart are served on different ports. A release build never reads it. Evidence: `jshost::test_hosts::test_host`
 - Made-up `gh` / `git` first on `PATH` (`gh.cmd` / `git.cmd` on Windows) answer `ctx.signin.get` in any build
   (`tests/app_profile.md` → Plugins against fake services).
+- `ECHOCTL_ASK_ADDRESS=<address>` answers `ctx.http.askAddress` in a debug build (no dialog; checked as typed).
 - `ECHOCTL_PICK_FOLDER=<dir>` answers the folder picker in a debug build; `ECHOCTL_PICK_FILES=<path>[:<path>…]` (`;` on
   Windows) the file picker (the files there, as `multiple` and `ext` take them).
 
@@ -755,7 +800,7 @@ Evidence: `jshost::work::check_rows`
 | When you are | Exemplar | Tests |
 |---|---|---|
 | writing a first host half | `jshost::a_host_half_gets_echos_services_and_answers_commands` | exemplar is a test |
-| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test |
+| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test; calls, calendar, me: `jshost::a_plugin_reads_calls_the_calendar_and_who_you_are_only_as_its_sheet_said` |
 | adding Today widgets | `jshost::a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set` | exemplar is a test; a plugin with one widget of each kind: `tests/fixtures/plugins` |
 | giving work rows | `jshost::a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it` | exemplar is a test |
 | keeping values per thread | `jshost::a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes` | exemplar is a test |
