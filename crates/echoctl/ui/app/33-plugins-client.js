@@ -30,7 +30,31 @@ const Plugins = {
 // `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 // `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
 // `thread` = {id, name, client}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile']
+// `call.row`: a chip on a call's row in the calls list ({id, label, chip(call) → short text or nothing}), `call` =
+// {name, title, started_at, status, memo}.
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'call.row']
+// ── call row slot: the plugins' chips on a call's row (no DOM: `call-row-slot.test.mjs`) — each item's `chip(call)`
+// gives a short text (24 characters, the rest cut) or nothing; one that throws is left out (logged) and the row drawn
+// without it; a second item with the same plugin and id is left out. `chip` runs as a widget's draw does: a
+// `ctx.render()` asked for in it is ignored (no loop).
+function callRowChips(items, call, log) {
+  const out = [], seen = new Set()
+  for (const x of items || []) {
+    const key = `${x.plugin}:${x.id}`
+    if (seen.has(key)) { log(`${x.plugin}: ${x.label || x.id}: a second chip with the id “${x.id}” — left out`); continue }
+    seen.add(key)
+    Plugins.drawing = true
+    try {
+      const t = x.chip(call)
+      const text = t == null ? '' : String(t).trim()
+      if (text) out.push({ key, text: text.length > 24 ? text.slice(0, 23) + '…' : text, title: String(x.label || x.id) })
+    } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) } finally { Plugins.drawing = false }
+  }
+  return out
+}
+/** The call a `call.row` chip is drawn for: the row's own facts. */
+const slotCall = (c) => ({ name: c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
+// end of the call row slot block
 // ── thread slot: the plugins' rows of a thread's Profile, each drawn on its own — one that throws is left out (and
 // logged), the Profile draws without it; a second row with the same plugin and id is left out too (logged).
 // `render` runs as a widget's draw does: a `ctx.render()` asked for in it is ignored (no loop).

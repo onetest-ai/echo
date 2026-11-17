@@ -55,6 +55,17 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - The window serves a granted folder's images as `/plugin/<id>/folder/<root>/<path>` (§ Store's media rule, by folder).
   Evidence: `window::plugins::folder_image`
 
+## Typed addresses
+
+What Echo does with an address the user types for a plugin (`ctx.http.askAddress`, API § Network): the box is the
+system's text dialog (`app::ask_text`: AppleScript on macOS, an input box on Windows), never drawn by the plugin's page,
+its words Echo's with the plugin's name; it doesn't open inside a run Echo started. The address is checked and kept in
+the asking process's memory only — one per plugin, a newer one replacing it, gone after its one fetch or 10 minutes,
+and with the process — never in a file a plugin or its store can reach. `jshost::fetch` takes it (`typed::take`) only
+when nothing else grants the URL, only for the exact text and a plain `GET` (no headers, no body); like every fetch it
+follows no redirect. On Windows the box's texts reach PowerShell through the environment, never quoted into its script. A debug build's
+`ECHOCTL_ASK_ADDRESS` answers the box. Evidence: `jshost::typed`
+
 ## Script runs
 
 - Every run goes through `plugins::scripts::run`: the original from the installed package, made runnable by Echo, in
@@ -197,6 +208,7 @@ and with the registry (`off`, `gone`, `dropped`), reading the registry and manif
 | adding a host service | `jshost::service` | `jshost::a_host_half_gets_echos_services_and_answers_commands` |
 | adding to the client-half `ctx` | `pluginCtx` (window script) | no covering test |
 | adding a granted folder's service | `jshost::folders::stat` | `jshost::folders::stat_reports_links_as_links_and_never_an_absolute_path` |
+| letting a plugin fetch what the user typed | `jshost::typed::ask` | `jshost::a_plugin_fetches_the_address_the_user_typed_once_and_nothing_else` |
 | handing a plugin files | `jshost::files::make` | `jshost::files::a_handle_is_its_plugins_alone_and_never_names_the_path` |
 | changing install, update or remove | `plugins::install` | `plugins::install_update_and_remove_from_a_local_marketplace` |
 | letting a plugin run Claude | `claudejob::Spec::from_value` | `claudejob::a_spec_stays_in_the_plugins_store` |
