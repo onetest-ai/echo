@@ -59,48 +59,9 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             Ok(json!(out))
         }
-        "fs.walk" => {
-            uses(id, "folders")?;
-            let root = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), "")?;
-            let o = &arg[1];
-            let base = match o["path"].as_str().filter(|p| !p.is_empty()) {
-                Some(rel) => crate::grants::resolve(id, &root.display().to_string(), rel)?,
-                None => root.clone(),
-            };
-            let hidden = o["hidden"].as_bool().unwrap_or(false);
-            let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(20_000).min(100_000) as usize;
-            let exts: Vec<String> = o["ext"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|e| e.trim_start_matches('.').to_lowercase())).collect()).unwrap_or_default();
-            let mut out = vec![];
-            let mut stack = vec![base];
-            while let Some(dir) = stack.pop() {
-                // A folder swapped for a link since it was listed: not read.
-                if !dunce::canonicalize(&dir).is_ok_and(|real| real.starts_with(&root)) {
-                    continue;
-                }
-                let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-                for e in rd.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let Ok(t) = e.file_type() else { continue };
-                    // Links aren't followed: one could lead out of the folder.
-                    if t.is_symlink() || (!hidden && name.starts_with('.')) {
-                        continue;
-                    }
-                    let p = e.path();
-                    if t.is_dir() {
-                        stack.push(p);
-                    } else if exts.is_empty() || p.extension().is_some_and(|x| exts.contains(&x.to_string_lossy().to_lowercase())) {
-                        let m = e.metadata().ok();
-                        let rel = p.strip_prefix(&root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
-                        let mtime = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-                        out.push(json!({"path": rel, "size": m.map(|m| m.len()).unwrap_or(0), "mtime": mtime}));
-                        if out.len() >= max {
-                            return Ok(json!(out));
-                        }
-                    }
-                }
-            }
-            Ok(json!(out))
-        }
+        "fs.walk" => folders::walk(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "fs.search" => folders::search(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &arg[2]),
+        "fs.snapshot" => folders::snapshot(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "claude.has_plugin" | "claude.install_plugin" => {
             let spec = arg[0].as_str().unwrap_or("");
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {

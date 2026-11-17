@@ -1310,6 +1310,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = fs::remove_file(secrets_file(id));
         let _ = fs::remove_file(addresses_file(id));
         thread_values::forget(id);
+        #[cfg(feature = "js")]
+        crate::jshost::folders::forget(id);
     }
     changed();
     Ok(())

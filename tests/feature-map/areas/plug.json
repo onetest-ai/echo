@@ -123,7 +123,7 @@
   },
   {
    "id": "F-PLUG-13",
-   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old and its own half-written downloads (`.part`) over an hour old; the rest of the store, the plugin's own `.part` files too, is the plugin's to clean; the plugin can ask how much it keeps — `ctx.store.size(dir?)` and `ctx.cache.size()` give {bytes, files} of its own files (not the settings Echo writes for the user)",
+   "feature": "When a plugin's host half starts, Echo removes the files in its store's `cache/` over 7 days old (and the folders of `cache/` they leave empty) and its own half-written downloads (`.part`) over an hour old; the rest of the store, the plugin's own `.part` files too, is the plugin's to clean; the plugin can ask how much it keeps — `ctx.store.size(dir?)` and `ctx.cache.size()` give {bytes, files} of its own files (not the settings Echo writes for the user)",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -418,6 +418,34 @@
    "feature": "macOS: files dropped on the Echo window while a plugin's view that listens is shown (its activity, its Knowledge tab; `ctx.onFileDrop`) go to it as handles (names, never paths), for its `ctx.call(command, args, {files})`; dropped anywhere else they stay Echo's own (a logo tile's)",
    "priority": "medium",
    "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-47",
+   "feature": "With `uses.folders.write` a plugin writes a file only over the one it read (`ctx.fs.write(root, path, text, {ifSha})`: another sha256 or a file gone → \"changed since you read it\", the file untouched) or only where nothing is (`{createNew: true}` or an explicit `{ifSha: null}`: never over a file, also when writers race; `ifSha` on a file over 64 MB refused before hashing), adds a block to a file's end (`ctx.fs.append`, a newline added, 1 MB at most, under the plugin's lock across processes, never into a link or a FIFO) and makes folders (`ctx.fs.mkdir`) — never through a link out, never a hidden name, never while Claude prepares and asks",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-48",
+   "feature": "With `uses.folders` a plugin asks what a path of a folder it was given is (`ctx.fs.stat(root, path, {sha})` → {kind: file | dir | link | other, size, mtime, real, sha?} or null: a link reported as a link, never followed; `real` its place relative to the root, null for a link out; no absolute path), searches its text off the plugin's time slice (`ctx.fs.search(root, query, {path, ext, hidden, max, caseSensitive})` → [{path, line, text}]: as typed, no pattern, 200 by default and 1,000 at most, dot names and links left out) and hashes in Rust (`ctx.crypto.sha256(text)`, `ctx.fs.walk({sha: true})`); reads work while Claude prepares and asks",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-49",
+   "feature": "With `uses.folders` a plugin copies a folder it was given into its store (`ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → {path: `cache/snapshots/<id>`, files, bytes, skipped, why: {large, unreadable}}) to work on: no link followed, never a `.git` folder or `.obsidian/plugins` at any depth, nor the paths `exclude` names (over 100 refused), dot names only with `hidden`; over 20,000 files or min(512 MB, 2 GB less what its snapshots already hold) (or the plugin's lower caps) refused with nothing left, a file over 50 MB (grown past it while copied too) or one it can't read left out and counted; one made at a time, 3 kept and 2 GB in all a plugin, more refused; read with `ctx.store.read`, removed with `ctx.store.remove(path)`, swept with `cache/`",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-50",
+   "feature": "A plugin's store writes take its lock across processes: `ctx.store.write(path, text, {ifSha | createNew})` writes only over what it read or where nothing is, and `ctx.store.update(path, fn)` reads, changes and writes only over what it read — reading again when another process (`echoctl plugin call` beside the app) wrote meanwhile — so neither loses the other's write; Echo's own store files stay refused",
+   "priority": "high",
+   "check": "agent",
    "axes": []
   }
  ]

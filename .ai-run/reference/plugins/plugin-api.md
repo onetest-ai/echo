@@ -97,6 +97,13 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 
 - `ctx.store.read/write/list/remove/path`, by relative path only; a name at the store's top level is plain ASCII
   (letters, digits, `-` `_` `.`). Evidence: `plugins::data_dir`, `jshost::not_echos`
+- Every `ctx.store.write` takes the plugin's lock across processes (the app and `echoctl plugin call`).
+  `ctx.store.write(path, text, {ifSha})` writes only while the file's sha256 is still `ifSha` (else "changed since you
+  read it"), `{createNew: true}` only where no file is ("is there already"). `ctx.store.update(path, fn)` reads,
+  calls `fn(text | null)` and writes its answer only over what it read; when another process wrote meanwhile it reads
+  again and calls `fn` again (so `fn` may run more than once and only computes), up to 50 times. `undefined`, `null` or
+  the same text writes nothing; it returns the text kept. `ctx.crypto.sha256(text)` → the hex sha256 of the text's
+  UTF-8 bytes. Evidence: `jshost::folders::store_write`, `jshost::folders::put`
 - Echo keeps its own files in the store and refuses a plugin's `ctx.store.write` of `settings.json`, `inbox.json`,
   `widgets.json`, `threads.json` or `work.json`, and its `ctx.store.remove` of `settings.json`, `threads.json`,
   `work.json` or the store folder itself: those change through `ctx.settings.set`, `ctx.inbox.set` / `clear`,
@@ -226,6 +233,37 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file, refused while Claude
   prepares and asks); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
+- More of a folder it was given (each needs `uses.folders`; the writes `folders.write`, checked as `ctx.fs.write` and
+  refused while Claude prepares and asks; the reads and `snapshot` are not). Evidence: `jshost::folders`
+  - `ctx.fs.write(root, path, text, {ifSha, createNew})`: `ifSha` writes only while the file's sha256 is still that
+    (a file gone or changed: "“path” changed since you read it: read it again", nothing written; a file over 64 MB
+    refused before it is hashed); `createNew: true` never over a file, also when writers race ("is there already").
+    `ifSha: null` said (not left out) means `createNew`, never an unconditional write; `ifSha` that isn't hex or
+    null, or with `createNew`, is refused. Every `ctx.fs.write` takes the plugin's lock across processes.
+  - `ctx.fs.append(root, path, text)`: `text` added at the end (a newline added when it has none; 1 MB at most), the
+    file made when it isn't there, under the plugin's lock; never through a link, never into a FIFO.
+  - `ctx.fs.mkdir(root, path)`: the folder and those above it.
+  - `ctx.fs.stat(root, path, {sha})` → `{kind: file | dir | link | other, size, mtime, real, sha?}` or `null` when
+    nothing is there. The last name is never followed: a link is `kind: link`; `real` is the canonical place relative to
+    the root (the folders above followed, inside the root only), `null` for a link that leads out; `sha` (asked) for a
+    file of 64 MB at most. No absolute path is ever given: the roots are those `ctx.fs.folders()` names (canonical),
+    so nested or overlapping roots are compared on those.
+  - `await ctx.fs.walk(root, {sha: true})` adds each file's `sha` (64 MB at most).
+  - `await ctx.fs.search(root, query, {path, ext, hidden, max, caseSensitive})` → `[{path, line, text}]`: the lines
+    holding `query` as typed (1–1,000 characters, no pattern; any case unless `caseSensitive`), in Rust off the
+    plugin's time slice; 200 by default, 1,000 at most; 4 MB read of a file, a line's text cut at 300 characters;
+    dot names (unless `hidden`) and links left out, 100,000 files looked at most.
+  - `await ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → `{path, files, bytes, skipped, why:
+    {large, unreadable}}`: the folder's files copied into the store's `cache/snapshots/<id>/` (`path`, a store path) to
+    work on with `ctx.store`; no link followed, never a `.git` folder or `.obsidian/plugins` at any depth (with
+    `hidden` too), nor the paths under the root `exclude` names (more than 100: refused); dot names only with
+    `hidden`. Its bytes are capped at the smallest of 512 MB, `maxBytes` and 2 GB less what the plugin's snapshots
+    already hold; its files at 20,000 or the lower `maxFiles`. Over either cap it is refused and nothing is left. A
+    file over 50 MB, or one grown past it while it was copied (`large`), or one that can't be read — gone since it was
+    listed, not allowed, locked (`unreadable`) — is left out, nothing of it kept, and counted in `skipped`. One
+    snapshot is made at a time per plugin, and it keeps 3 at most: a fourth, or one when its snapshots already hold
+    2 GB, is refused until it removes one.
+    `ctx.store.remove(path)` removes it; Echo sweeps it with `cache/` (Host § Store).
 - Its window half shows images of a folder it was given (with `uses.folders`) from
   `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and
   webp only (no svg), 10 MB at most, inside the folder once links are followed. Evidence: `window::plugins::folder_image`
