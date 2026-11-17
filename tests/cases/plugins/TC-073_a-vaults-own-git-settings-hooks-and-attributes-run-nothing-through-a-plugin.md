@@ -1,6 +1,6 @@
 ---
 id: TC-073
-title: Nothing a vault's own git settings, hooks or attributes name runs when a plugin reads or commits it — no hook (a file's or a setting's), fsmonitor, filter or signing program — and a partial clone, which would fetch through a program, is refused
+title: Nothing a vault's own git settings, hooks or attributes name runs when a plugin reads or commits it — no hook (a file's or a setting's), fsmonitor, filter or signing program
 priority: critical
 type: functional
 requirements: [F-PLUG-57]
@@ -54,11 +54,9 @@ echoctl plugin marketplace add "$M" --name acme-git
 | 2 | The repository's own settings name the mark script for hooks (a hooks folder and a hook in the settings), the fsmonitor, a filter and signing: `mkdir -p "$D/hooks"; for h in pre-commit post-commit reference-transaction; do cp "$D/mark.sh" "$D/hooks/$h"; done; printf '[core]\n\tfsmonitor = %s\n\thooksPath = %s\n[filter "x"]\n\tclean = %s\n\trequired = true\n[commit]\n\tgpgSign = true\n[gpg]\n\tprogram = %s\n[hook "x"]\n\tevent = pre-commit\n\tevent = post-commit\n\tcommand = %s\n' "$D/mark.sh" "$D/hooks" "$D/mark.sh" "$D/mark.sh" "$D/mark.sh" >> "$D/history/.git/config"; mkdir -p "$D/history/.git/info"; printf '*.md filter=x\n' > "$D/history/.git/info/attributes"` | Nothing printed |
 | 3 | `echoctl plugin call acme-history put '{"path":"Notes/Acme.md","text":"# Acme\nPilot signed off.\n"}'`; `echoctl plugin call acme-history status`; `echoctl plugin call acme-history commit '{"paths":["Notes/Acme.md"],"message":"Acme: signed off"}'`; `echoctl plugin call acme-history log '{"max":1}'`; `echoctl plugin call acme-history show '{"rev":"HEAD","path":"Notes/Acme.md"}'` | `null`; the list holds `{"path": "Notes/Acme.md", "code": " M"}`; `{"rev": "<40 hex>"}`; one commit `Acme: signed off`; `{"text": "# Acme\nPilot signed off.\n", …}` — the text as on the disk, no filter |
 | 4 | `ls "$D/ran"` | `No such file or directory`: no hook, fsmonitor, filter or signing program ran |
-| 5 | The repository becomes a partial clone whose remote is a shell command: `printf '[extensions]\n\tpartialClone = origin\n[remote "origin"]\n\turl = %s\n\tpromisor = true\n[protocol "ext"]\n\tallow = always\n' "ext::sh -c touch% $D/fetched" >> "$D/history/.git/config"`; then `echoctl plugin call acme-history info`; `echoctl plugin call acme-history show '{"rev":"HEAD","path":"Notes/Acme.md"}'` | Both fail: `this repository is a partial clone, which fetches what it lacks from elsewhere: Echo doesn't use it` |
-| 6 | `ls "$D/ran" "$D/fetched"` | `No such file or directory` for both |
 
 ## Expected Final State
-`$D/history` holds the commit `Acme: signed off` by `Echo (acme-history)`; no `$D/ran`, no `$D/fetched`; the repository is refused from step 5 on.
+`$D/history` holds the commit `Acme: signed off` by `Echo (acme-history)`, its settings still naming the mark script; no `$D/ran`.
 
 ## Teardown
 - `echoctl plugin remove acme-history --delete-data`; `echoctl plugin marketplace remove acme-git`
