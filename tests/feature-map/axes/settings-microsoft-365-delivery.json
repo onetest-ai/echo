@@ -43,7 +43,7 @@
   },
   {
    "axis": "set.window_claude",
-   "values": "folder_skip_permissions on / off",
+   "values": "folder_permissions ask / auto / skip; routine_permissions, yolo_permissions auto / skip; unset (auto) / the old folder_skip_permissions on / off",
    "where": "`config.json`"
   },
   {

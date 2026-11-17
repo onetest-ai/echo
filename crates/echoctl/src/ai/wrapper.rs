@@ -831,6 +831,10 @@ mod tests {
         let acts = Expected::of(&args(&["-p", "x", "--dangerously-skip-permissions"]));
         assert_eq!((acts.mode.as_deref(), acts.tools.is_none(), acts.mcp.is_none()), (Some("bypassPermissions"), true, true));
         assert!(acts.check(&init("2.1.400", "bypassPermissions", &["Bash", "Write"], &["anything"])).is_ok());
+        // Acting on its own in auto mode (the default): the start event must show auto mode, never skipping permissions.
+        let auto = Expected::of(&args(&["-p", "x", "--permission-mode", "auto"]));
+        assert!(auto.check(&init("2.1.400", "auto", &["Bash", "Write"], &["anything"])).is_ok());
+        assert!(auto.check(&init("2.1.400", "bypassPermissions", &["Bash"], &[])).unwrap_err().contains("bypassPermissions"));
         // Echo set no mode (a routine preparing and asking): the user's own default mode, never one skipping permissions.
         let own = Expected::of(&args(&["-p", "--tools", "Bash"]));
         assert_eq!(own.mode, None);

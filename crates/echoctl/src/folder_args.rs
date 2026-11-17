@@ -2,7 +2,7 @@
 //! a plugin's run (a routine, `ctx.claude.run`) and a Yolo task (`claudejob::run`) alike (#590): the same knowledge
 //! (the core's SessionStart hook, what plugins lay out in `.plugins/`, Echo's own plugin, the user's skills, the
 //! window's view hook) and the same permissions (the plugins' commands and scripts allowed, the folders plugins were
-//! given, the OneDrive and `.plugins` write checks, and the user's choice to skip permission prompts).
+//! given, the OneDrive and `.plugins` write checks, and how the user chose each to handle permission prompts).
 
 // Without the window (`tray`) or plugin code (`js`) nobody starts one.
 #![cfg_attr(not(any(feature = "tray", feature = "js")), allow(dead_code))]
@@ -11,6 +11,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::config::Permissions;
 use crate::paths;
 
 /// Echo commands any of its sessions runs without a prompt (`Bash(<cli> <command>:*)`, each a fixed command and its own
@@ -25,11 +26,22 @@ pub const FREE_COMMANDS: [&str; 16] = [
 ];
 
 /// Who a session is: the folder session (the user there, its plugin commands and scripts as their sheets say), or a
-/// routine's or Yolo's run — acting on its own, or preparing and asking (then only a script marked `readonly`).
+/// routine's or Yolo's run — acting on its own with its permissions (`run_permissions`), or preparing and asking
+/// (`None`: then only a script marked `readonly`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Who {
     Folder,
-    Run { acts: bool },
+    Run { acts: Option<Permissions> },
+}
+
+impl Who {
+    /// How it handles permission prompts: the folder session as the user chose; a run preparing and asking sets none.
+    fn permissions(self) -> Permissions {
+        match self {
+            Who::Folder => folder_permissions(),
+            Who::Run { acts } => acts.unwrap_or(Permissions::Ask),
+        }
+    }
 }
 
 /// The arguments, its settings file first (`--settings <settings>`, written here): `managed` — a profile of its own,
@@ -70,7 +82,7 @@ pub fn build(managed: bool, exe: &Path, settings: &Path, who: Who) -> Result<Vec
         }
     }
     // Their declared scripts, by their launchers' full paths (`uses.scripts`): no prompt for them either.
-    for s in crate::plugins::agent::scripts(who == Who::Run { acts: false }) {
+    for s in crate::plugins::agent::scripts(who == Who::Run { acts: None }) {
         args.extend(["--allowedTools".into(), format!("Bash({s}:*)")]);
     }
     // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
@@ -113,11 +125,6 @@ pub fn build(managed: bool, exe: &Path, settings: &Path, who: Who) -> Result<Vec
     }
     std::fs::write(settings, serde_json::to_vec_pretty(&serde_json::json!({"hooks": hooks}))?)?;
     args.splice(0..0, ["--settings".to_string(), settings.display().to_string()]);
-    // The user's choice (Settings → AI & minutes): no permission prompts. Without it a headless run simply can't do
-    // what would ask.
-    if skip_permissions() {
-        args.push("--dangerously-skip-permissions".into());
-    }
     Ok(args)
 }
 
@@ -131,6 +138,9 @@ pub fn session(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &str,
         args.extend(["--model".into(), m.to_string()]);
     }
     args.extend(build(p.kind.managed(), exe, settings, who)?);
+    // The user's choice (Settings → AI & minutes) as this profile and model can run it. A headless run preparing and
+    // asking sets none: it simply can't do what would ask.
+    args.extend(permission_args(who.permissions(), p, model, true).0);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "tray")]
     if let Some(f) = crate::terminal::brain_mcp_config(exe, &["--profile".into(), p.id.clone(), "--who".into(), usage.into()]) {
@@ -141,9 +151,68 @@ pub fn session(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &str,
     Ok(args)
 }
 
-/// The user's choice to skip permission prompts in Echo's sessions (Settings → AI & minutes).
-pub fn skip_permissions() -> bool {
-    crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions)
+/// How the folder session handles permission prompts (Settings → AI & minutes; unreadable settings: ask).
+pub fn folder_permissions() -> Permissions {
+    crate::config::Config::load().map_or(Permissions::Ask, |c| c.folder_permissions())
+}
+
+/// What Claude Code starts with for permission setting `p` on `profile` running `model` (None: Claude Code's own
+/// default), and its words for a run's record and log: the one mapping the folder session, routines, Yolo and plugins'
+/// folder runs (the routines' setting) all use. Auto is Claude Code's auto mode only where it works
+/// (`auto_mode_works`); elsewhere Claude Code would start in its manual mode, where a headless run does nothing, so
+/// it is `acceptEdits` for a run that may edit (`may_edit`) and `dontAsk` for a read-only one.
+pub fn permission_args(p: Permissions, profile: &crate::ai::Profile, model: Option<&str>, may_edit: bool) -> (Vec<String>, &'static str) {
+    let mode = |m: &str| vec!["--permission-mode".to_string(), m.to_string()];
+    match p {
+        Permissions::Ask => (vec![], "asks each time"),
+        Permissions::Skip => (vec!["--dangerously-skip-permissions".into()], "every permission check skipped"),
+        Permissions::Auto if auto_mode_works(profile, model) => (mode("auto"), "auto mode: Claude Code decides each action"),
+        Permissions::Auto if may_edit => (mode("acceptEdits"), "edits accepted: this profile's model has no auto mode"),
+        Permissions::Auto => (mode("dontAsk"), "read-only, nothing asked: this profile's model has no auto mode"),
+    }
+}
+
+/// Claude Code's auto mode works on `profile` running `model`: a Claude account (`claude`) or the user's own Claude
+/// Code (`system`) — never a model server (`local`) or a wrapper — and no model pinned below what auto mode needs:
+/// Claude's names (`sonnet`, `opus`, `haiku`, `fable`) and Claude Code's default are recent; a full id needs Opus or
+/// Sonnet 4.6, Haiku 5.5 or any Fable — on Bedrock or Vertex (`anthropic.` / `@` in the id) Sonnet 5 or Opus 4.7.
+/// An id it can't read: no.
+pub fn auto_mode_works(profile: &crate::ai::Profile, model: Option<&str>) -> bool {
+    if !matches!(profile.kind, crate::ai::Kind::Claude | crate::ai::Kind::System) {
+        return false;
+    }
+    let Some(m) = model.map(|m| m.trim().to_ascii_lowercase()).filter(|m| !m.is_empty() && m != "default") else { return true };
+    if ["sonnet", "opus", "haiku", "fable"].contains(&m.as_str()) || m.contains("fable") {
+        return true;
+    }
+    let cloud = m.contains("anthropic.") || m.contains('@');
+    let at = |family: &str| m.find(&format!("{family}-")).map(|i| &m[i + family.len() + 1..]);
+    // `claude-sonnet-4-6…`, `claude-opus-4-7@…`: the version's first two numbers.
+    let version = |rest: &str| -> Option<(u32, u32)> {
+        let mut n = rest.split(['-', '@', '.', ':', '[']).map_while(|x| x.parse::<u32>().ok().filter(|v| *v < 100));
+        Some((n.next()?, n.next().unwrap_or(0)))
+    };
+    let need = |family: &str| match (family, cloud) {
+        ("opus", false) | ("sonnet", false) => (4, 6),
+        ("opus", true) => (4, 7),
+        ("sonnet", true) => (5, 0),
+        _ => (5, 5),
+    };
+    ["opus", "sonnet", "haiku"].iter().any(|f| at(f).and_then(version).is_some_and(|v| v >= need(f)))
+}
+
+/// What Auto gets on each of the user's AI profiles, by its name, on the model its runs use (Settings and `echoctl
+/// config` show it).
+pub fn auto_on_profiles() -> Vec<(String, &'static str)> {
+    let all = crate::ai::Settings::load().map(|s| s.all()).unwrap_or_default();
+    all.iter().map(|p| (p.name.clone(), permission_args(Permissions::Auto, p, p.notes_model().map(|m| p.model(&m)).as_deref(), true).1)).collect()
+}
+
+/// A routine's (`yolo` false) or Yolo's run: acting on its own with its own setting's permissions, or `None` —
+/// preparing and asking, when the user has the folder session ask each time (or Echo's settings can't be read).
+pub fn run_permissions(yolo: bool) -> Option<Permissions> {
+    let cfg = crate::config::Config::load().ok()?;
+    (cfg.folder_permissions() != Permissions::Ask).then(|| if yolo { cfg.yolo_permissions() } else { cfg.routine_permissions() })
 }
 
 /// The environment its hooks read: it is one of Echo's sessions, on AI profile `profile`.
@@ -182,7 +251,7 @@ mod tests {
             crate::plugins::install(id, Some(&name), &sheet).unwrap();
             crate::grants::set_session_skills(id, &json!([{"name": "notes", "description": "Notes.", "body": "Read them."}])).unwrap();
         }
-        let args = build(false, Path::new("/Apps/Echo.app/echoctl"), &root.join("s.json"), Who::Run { acts: false }).unwrap();
+        let args = build(false, Path::new("/Apps/Echo.app/echoctl"), &root.join("s.json"), Who::Run { acts: None }).unwrap();
         let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
         let copy = |id: &str| crate::grants::session_dir(id).display().to_string();
         assert_eq!(dirs.iter().filter(|d| ***d == copy("vaults")).count(), 1, "no prefix: its session copy, once: {dirs:?}");
@@ -208,12 +277,84 @@ mod tests {
         crate::plugins::install("kit", Some(&name), &sheet).unwrap();
         let exe = Path::new("/Apps/Echo.app/echoctl");
         let has = |who: Who, script: &str| build(false, exe, &root.join("s.json"), who).unwrap().iter().any(|a| a.starts_with("Bash(") && a.contains(&format!("/scripts/{script}:*)")));
-        for who in [Who::Folder, Who::Run { acts: true }] {
+        for who in [Who::Folder, Who::Run { acts: Some(Permissions::Auto) }] {
             assert!(has(who, "read.sh") && has(who, "write.sh"), "{who:?}");
         }
-        assert!(has(Who::Run { acts: false }, "read.sh") && !has(Who::Run { acts: false }, "write.sh"));
+        assert!(has(Who::Run { acts: None }, "read.sh") && !has(Who::Run { acts: None }, "write.sh"));
         // Echo's own commands, each by its prefix: no wildcard reaches another ledger command.
         let args = build(false, exe, &root.join("s.json"), Who::Folder).unwrap();
         assert!(args.iter().any(|a| a.ends_with(" project work:*)")) && !args.iter().any(|a| a.starts_with("Bash(") && a.contains("ledger")), "{args:?}");
+    }
+
+    #[test]
+    fn each_session_starts_with_its_own_permission_setting_auto_by_default() {
+        let (_env, root) = paths::testenv::folders("folder-args-permissions");
+        let exe = Path::new("/Apps/Echo.app/echoctl");
+        let claude = profile("claude");
+        let mode = |who: Who| {
+            let a = session(&claude, exe, &root.join("s.json"), "test", None, who).unwrap();
+            let skip = a.iter().any(|x| x == "--dangerously-skip-permissions");
+            let m = a.windows(2).find(|w| w[0] == "--permission-mode").map(|w| w[1].clone());
+            (skip, m)
+        };
+        let set = |f: &dyn Fn(&mut crate::config::Config)| {
+            let mut c = crate::config::Config::load().unwrap();
+            f(&mut c);
+            c.save().unwrap();
+        };
+        let auto = (false, Some("auto".to_string()));
+        let skip = (true, None);
+        // Nothing set: the folder session in auto mode; routines and Yolo act on their own, in auto mode too.
+        assert_eq!(mode(Who::Folder), auto);
+        assert_eq!((run_permissions(false), run_permissions(true)), (Some(Permissions::Auto), Some(Permissions::Auto)));
+        assert_eq!(mode(Who::Run { acts: run_permissions(false) }), auto);
+        // Each its own: the routines' skip changes neither Yolo nor the folder session.
+        set(&|c| c.routine_permissions = Some(Permissions::Skip));
+        assert_eq!((run_permissions(false), run_permissions(true)), (Some(Permissions::Skip), Some(Permissions::Auto)));
+        assert_eq!((mode(Who::Run { acts: run_permissions(false) }), mode(Who::Run { acts: run_permissions(true) }), mode(Who::Folder)), (skip.clone(), auto.clone(), auto.clone()));
+        set(&|c| {
+            c.routine_permissions = None;
+            c.yolo_permissions = Some(Permissions::Skip);
+        });
+        assert_eq!((mode(Who::Run { acts: run_permissions(false) }), mode(Who::Run { acts: run_permissions(true) })), (auto.clone(), skip.clone()));
+        set(&|c| c.folder_permissions = Some(Permissions::Skip));
+        assert_eq!(mode(Who::Folder), skip, "the folder session's own choice");
+        // Ask each time: the folder session gets Claude Code's prompts, and routines and Yolo prepare and ask (no mode).
+        set(&|c| c.folder_permissions = Some(Permissions::Ask));
+        assert_eq!(mode(Who::Folder), (false, None));
+        assert_eq!((run_permissions(false), run_permissions(true)), (None, None));
+        assert_eq!(mode(Who::Run { acts: None }), (false, None));
+    }
+
+    fn profile(kind: &str) -> crate::ai::Profile {
+        serde_json::from_value(json!({"id": kind, "name": kind, "kind": kind})).unwrap()
+    }
+
+    #[test]
+    fn auto_is_claude_codes_auto_mode_only_where_the_profiles_model_has_it_else_edits_accepted_or_read_only() {
+        let flags = |kind: &str, model: Option<&str>, may_edit: bool| permission_args(Permissions::Auto, &profile(kind), model, may_edit).0.join(" ");
+        // A Claude account or the user's own Claude Code, on Claude's names or Claude Code's default: auto mode.
+        for kind in ["claude", "system"] {
+            for model in [None, Some("sonnet"), Some("opus"), Some("haiku"), Some("default"), Some("claude-sonnet-4-6"), Some("claude-opus-4-7[1m]"), Some("claude-haiku-5-5"), Some("claude-fable-1")] {
+                assert_eq!(flags(kind, model, true), "--permission-mode auto", "{kind} {model:?}");
+            }
+            // A model pinned below what auto mode needs, or one it can't read.
+            for model in ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5", "claude-3-5-sonnet-20241022", "acme-gw/large", "us.anthropic.claude-sonnet-4-6-v1:0", "claude-opus-4-6@20260101"] {
+                assert_eq!(flags(kind, Some(model), true), "--permission-mode acceptEdits", "{kind} {model}");
+            }
+            assert_eq!(flags(kind, Some("us.anthropic.claude-sonnet-5-0-v1:0"), true), "--permission-mode auto", "Bedrock: Sonnet 5");
+            assert_eq!(flags(kind, Some("claude-opus-4-7@20260101"), true), "--permission-mode auto", "Vertex: Opus 4.7");
+        }
+        // A model server or a wrapper: never auto mode — edits accepted, or nothing asked for a read-only run.
+        for kind in ["local", "wrapper"] {
+            assert_eq!(flags(kind, Some("sonnet"), true), "--permission-mode acceptEdits", "{kind}");
+            assert_eq!(flags(kind, None, false), "--permission-mode dontAsk", "{kind}");
+        }
+        // Skip and Ask are the same on every profile; the words name what it got.
+        for kind in ["claude", "system", "local", "wrapper"] {
+            assert_eq!(permission_args(Permissions::Skip, &profile(kind), None, false), (vec!["--dangerously-skip-permissions".to_string()], "every permission check skipped"));
+            assert_eq!(permission_args(Permissions::Ask, &profile(kind), None, true), (vec![], "asks each time"));
+        }
+        assert_eq!(permission_args(Permissions::Auto, &profile("local"), None, true).1, "edits accepted: this profile's model has no auto mode");
     }
 }

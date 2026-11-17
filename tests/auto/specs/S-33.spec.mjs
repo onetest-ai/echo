@@ -14,11 +14,16 @@ const data = useData(test, { set: 'standard', ai: 'virtual' })
 /** The lines of a run's log. */
 const lines = (text) => text.split('\n').filter(Boolean)
 
-/** "Claude acts on its own" on or off, through the served window's own IPC (the page loaded first). */
+/** Yolo acting on its own with every permission check skipped (on: Claude in the window "Auto", Yolo "Skip all
+ * permission checks" — auto mode would ask the virtual model to judge each action), or as the data has them (off:
+ * "Ask each time", Yolo "Auto"), through the served window's own IPC (the page loaded first). */
 async function setActs(page, on) {
   await page.goto(data.base + '/')
-  await page.evaluate((v) => fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key: 'folder_skip_permissions', value: v }) }), on)
-  await page.waitForLoadState('networkidle')
+  const set = { folder_permissions: on ? 'auto' : 'ask', yolo_permissions: on ? 'skip' : 'auto' }
+  await page.evaluate(async (set) => {
+    for (const [key, value] of Object.entries(set)) await fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key, value }) })
+  }, set)
+  await expect.poll(() => data.json(data.home, data.text.settings.config.file)).toMatchObject(set)
 }
 
 scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", () => {
@@ -187,7 +192,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
       await expect(work.history.nth(k)).toContainText(fill(w.runSet, { field: w.fields.state }))
       await expect(work.history.nth(k).getByRole('button', { name: w.undo, exact: true })).toBeVisible()
     }
-    // The choice back off, as the data had it.
+    // Claude's permissions back as the data had them.
     await setActs(page, false)
   })
 
@@ -325,7 +330,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await expect(work.history.nth(1)).toContainText(fill(w.youSet, { field: w.fields.internal_owner }))
   })
 
-  test('4 · With the choice off, Yolo prepares and asks: its send refused, its mail drafted, its task closed as Echo\'s run', covers('tasks/TC-031', 'F-PLUG-35', 'F-M365-08'), async ({ page }) => {
+  test('4 · With Claude in the window asking each time, Yolo prepares and asks: its send refused, its mail drafted, its task closed as Echo\'s run', covers('tasks/TC-031', 'F-PLUG-35', 'F-M365-08'), async ({ page }) => {
     const a = data.set.yoloAsks
     const c = data.text.claude
     data.model.use(a.script)

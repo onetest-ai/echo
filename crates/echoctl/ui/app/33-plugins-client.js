@@ -595,8 +595,14 @@ const SETTINGS_BODY = {
         setRow('Where Claude Code runs for minutes', st.notes_in ? `<code>${esc(st.notes_in)}</code> — its .claude/settings.json applies.` : 'The data folder.', actBtn('notes_choose', 'Choose…') + (st.notes_in ? actBtn('notes_anywhere', 'Use the data folder') : '')),
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
       ]) +
-      setCard('Claude in the window', [
-        setRow('Claude acts on its own', `In the window, routines and Yolo alike. On: Claude starts with <code>--dangerously-skip-permissions</code>: it runs any command and tool without asking — it can talk to your other sessions, close your tasks in other systems and send — and a routine's or Yolo's outcome lists what it changed and sent. Off: it prepares and asks — in the window it asks you first; a routine or Yolo reads, edits Echo's own work, leaves mail as drafts and says what it couldn't do. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude acts on its own'), '', 'Claude acts on its own'),
+      setCard("Claude's permissions", [
+        setRow('Claude in the window', `Auto: Claude Code's auto mode (<code>--permission-mode auto</code>) decides each action without asking. Skip all permission checks: Claude starts with <code>--dangerously-skip-permissions</code> and runs any command and tool without asking — it can talk to your other sessions, close your tasks in other systems and send. Ask each time: Claude Code asks you first, and routines and Yolo prepare and ask instead of acting on their own — they read, edit Echo's own work, leave mail as drafts and say what they couldn't do. ${st.folder_permissions === 'skip' ? '<span class="warn">Skips every check.</span> ' : ''}Takes effect the next time the session starts.`,
+          seg('folder_permissions', st.folder_permissions, [['ask', 'Ask each time'], ['auto', 'Auto'], ['skip', 'Skip all permission checks']], 'Claude in the window: permissions'), '', 'Claude in the window'),
+        ...[['routine_permissions', 'Routines acting on their own', "A routine's"], ['yolo_permissions', 'Yolo acting on its own', "A Yolo run's"]].map(([key, label, whose]) =>
+          setRow(label, `Auto: Claude Code's auto mode (<code>--permission-mode auto</code>) decides each action. Skip all permission checks: <code>--dangerously-skip-permissions</code>, nothing checked. ${whose} outcome lists what it changed and sent. ${st.folder_permissions === 'ask' ? 'Now they prepare and ask: Claude in the window asks each time. ' : st[key] === 'skip' ? '<span class="warn">Skips every check.</span> ' : ''}`,
+            seg(key, st[key], [['auto', 'Auto'], ['skip', 'Skip all permission checks']], `${label}: permissions`), '', label)),
+        // What Auto gets on each profile: auto mode needs a recent Claude model; elsewhere edits are accepted.
+        `<div class="set-sub" style="padding:10px 14px" data-auto-on>Auto on your profiles: ${(st.auto_on_profiles || []).map(([name, got]) => `${esc(name)} — ${esc(got)}`).join(' · ')}</div>`,
       ])
   },
   calendar(st) {

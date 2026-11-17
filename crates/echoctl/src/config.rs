@@ -24,6 +24,26 @@ impl Default for Config {
     }
 }
 
+/// How a Claude Code session Echo starts in its data folder handles permission prompts (`folder_args`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Permissions {
+    /// Claude Code's own prompts: only the folder session, where the user answers them.
+    Ask,
+    /// Claude Code's auto mode decides each action, no prompt — where the profile's model has it, else edits accepted
+    /// (`folder_args::permission_args`).
+    Auto,
+    /// `--dangerously-skip-permissions`: every permission check skipped.
+    Skip,
+}
+
+impl Permissions {
+    /// As the setting names it: `ask`, `auto` or `skip`.
+    pub fn parse(s: &str) -> Result<Permissions> {
+        serde_json::from_value(serde_json::Value::String(s.trim().to_string())).map_err(|_| anyhow::anyhow!("“{s}”: ask, auto or skip"))
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     /// Active transcription model (a catalog name, e.g. "large-v3-turbo-q5_0")
@@ -66,12 +86,21 @@ pub struct Config {
     /// project's AI profile reads each new call into its tree. Default: on.
     #[serde(default = "yes")]
     pub project_sync: bool,
-    /// The window's Echo folder session (the user's own Claude Code) starts with
-    /// `--dangerously-skip-permissions`: no prompts, so in auto mode it can reach other sessions and
-    /// other systems (closing the user's tasks there). Never the call's session, which reads others'
-    /// words under the guard, nor any run Echo starts. Default: off.
-    #[serde(default)]
+    /// The switch before the three permission settings (on: no prompts): read once into `folder_permissions`
+    /// (`load`), never written again.
+    #[serde(default, skip_serializing)]
     pub folder_skip_permissions: bool,
+    /// How the window's Echo folder session (the user's own Claude Code) handles permission prompts (unset: auto).
+    /// Its "ask" also has routines and Yolo prepare and ask rather than act on their own. Never the call's session,
+    /// which reads others' words under the guard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_permissions: Option<Permissions>,
+    /// How a routine acting on its own handles them: auto or skip (unset: auto).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routine_permissions: Option<Permissions>,
+    /// How Yolo acting on its own handles them: auto or skip (unset: auto).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_permissions: Option<Permissions>,
     /// macOS: no Dock icon while the Echo window is closed — Echo only in the menu bar, as before 0.7.8. Off by
     /// default: a full menu bar hides icons, and Echo then looked gone.
     #[serde(default)]
@@ -198,6 +227,34 @@ impl Config {
         self.unscheduled.as_deref() != Some("manual")
     }
 
+    /// How the folder session handles permission prompts (unset: auto).
+    pub fn folder_permissions(&self) -> Permissions {
+        self.folder_permissions.unwrap_or(Permissions::Auto)
+    }
+
+    /// How a routine acting on its own does: auto or skip (unset: auto; nobody answers a prompt there).
+    pub fn routine_permissions(&self) -> Permissions {
+        self.routine_permissions.filter(|p| *p != Permissions::Ask).unwrap_or(Permissions::Auto)
+    }
+
+    /// How Yolo acting on its own does: auto or skip (unset: auto).
+    pub fn yolo_permissions(&self) -> Permissions {
+        self.yolo_permissions.filter(|p| *p != Permissions::Ask).unwrap_or(Permissions::Auto)
+    }
+
+    /// Set how `who` (`folder`, `routine` or `yolo`) handles permission prompts: a routine or Yolo, auto or skip only
+    /// (nobody is there to answer a prompt).
+    pub fn set_permissions(&mut self, who: &str, p: Permissions) -> Result<()> {
+        anyhow::ensure!(who == "folder" || p != Permissions::Ask, "{who} permissions are auto or skip: nobody is there to answer a prompt");
+        match who {
+            "folder" => self.folder_permissions = Some(p),
+            "routine" => self.routine_permissions = Some(p),
+            "yolo" => self.yolo_permissions = Some(p),
+            o => anyhow::bail!("no permission setting for {o}"),
+        }
+        Ok(())
+    }
+
     /// Offer "record?" before calendar meetings?
     pub fn ask_scheduled(&self) -> bool {
         self.scheduled.as_deref() != Some("manual")
@@ -223,6 +280,10 @@ impl Config {
         match fs::read(path()) {
             Ok(b) => {
                 let mut cfg: Config = serde_json::from_slice(&b)?;
+                // The old switch on: the user chose to skip every prompt, and keeps it; off: auto, the default.
+                if cfg.folder_permissions.is_none() && cfg.folder_skip_permissions {
+                    cfg.folder_permissions = Some(Permissions::Skip);
+                }
                 // Once: the old one-list vocabulary is scoped to the calls it came from.
                 if crate::vocab::migrate(&mut cfg) {
                     cfg.save()?;
@@ -302,6 +363,34 @@ mod tests {
         assert_eq!(Config::default().languages, new.languages);
         let any: Config = serde_json::from_str(r#"{"languages": []}"#).unwrap();
         assert!(any.languages.is_empty());
+    }
+
+    #[test]
+    fn permissions_default_to_auto_and_the_old_switch_on_stays_skip() {
+        let (_env, _root) = crate::paths::testenv::folders("config-permissions");
+        let fresh = Config::load().unwrap();
+        let all = |c: &Config| (c.folder_permissions(), c.routine_permissions(), c.yolo_permissions());
+        assert_eq!(all(&fresh), (Permissions::Auto, Permissions::Auto, Permissions::Auto), "a new folder: auto everywhere");
+        fresh.save().unwrap();
+        for (old, folder) in [(false, Permissions::Auto), (true, Permissions::Skip)] {
+            std::fs::write(path(), format!(r#"{{"folder_skip_permissions": {old}}}"#)).unwrap();
+            let c = Config::load().unwrap();
+            assert_eq!(all(&c), (folder, Permissions::Auto, Permissions::Auto), "the old switch {old}");
+            c.save().unwrap();
+            let saved = std::fs::read_to_string(path()).unwrap();
+            assert!(!saved.contains("folder_skip_permissions"), "never written again: {saved}");
+            assert_eq!(Config::load().unwrap().folder_permissions(), folder, "kept after a save");
+        }
+        let mut c = Config::load().unwrap();
+        c.folder_permissions = Some(Permissions::Ask);
+        c.routine_permissions = Some(Permissions::Ask);
+        assert_eq!((c.folder_permissions(), c.routine_permissions()), (Permissions::Ask, Permissions::Auto), "nobody answers a routine's prompt");
+        assert!(c.set_permissions("yolo", Permissions::Ask).is_err() && c.set_permissions("routine", Permissions::Ask).is_err());
+        c.set_permissions("yolo", Permissions::Skip).unwrap();
+        c.set_permissions("folder", Permissions::Ask).unwrap();
+        assert_eq!((c.yolo_permissions(), c.routine_permissions(), c.folder_permissions()), (Permissions::Skip, Permissions::Auto, Permissions::Ask));
+        assert_eq!(Permissions::parse(" skip ").unwrap(), Permissions::Skip);
+        assert!(Permissions::parse("bypass").is_err());
     }
 
     #[test]

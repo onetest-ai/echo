@@ -1,6 +1,6 @@
 ---
 id: TC-031
-title: With "Claude acts on its own" off, Yolo on the virtual model prepares and asks — its send is refused before it reaches Echo, its mail is drafted, another thread's work refused, its task closed as Echo's run, and its record lists the draft and the change, no send
+title: With Claude in the window on "Ask each time", Yolo on the virtual model prepares and asks — its send is refused before it reaches Echo, its mail is drafted, another thread's work refused, its task closed as Echo's run, and its record lists the draft and the change, no send
 priority: high
 type: functional
 requirements: [F-PLUG-35, F-M365-08, F-TASK-12]
@@ -19,7 +19,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 
 ## Preconditions
 - Standard data set with the virtual model, built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard --ai virtual`; `{{base_url}}/` loaded first (the cookie); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`; Claude Code on `PATH` (only the model is the virtual one)
-- "Claude acts on its own" **off** (Settings → AI & minutes; the data's default — after TC-026 it is switched back off)
+- Claude in the window on **"Ask each time"** (Settings → AI & minutes → Claude's permissions; the data's — after TC-026 it is set back)
 - The script: `cp tests/fixtures/model-scripts/yolo-asks.json <dir>/model/model-script.json` and an empty request log (`: > <dir>/model/model-log.jsonl`). On Yolo's prompt for `echo://task/globex-pilot/T009` the model, by Bash with the CLI's full path from the prompt, in turn: reads its task, sends a mail with `m365 mail send … --yes`, drafts it with `compose … --body …` instead, reads another thread's work with `project work acme-rollout`, closes T009 with `project work globex-pilot '{"op":"edit","node":"T009","set":{"state":"done"}}'`; then answers "Drafted the welcome mail to Kim Park (virtual model); sending it was refused. Left for you: send the draft."
 - An IPC helper for the served window: `curl -s -c "$D/jar" {{base_url}}/ > /dev/null`; `ipc() { curl -s -b "$D/jar" -H "Origin: {{base_url}}" -X POST --data "$1" {{base_url}}/ipc; }` (`D="$(dirname "$ECHOCTL_HOME")"`)
 
@@ -33,7 +33,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | 4 | `target/debug/echoctl project ledger globex-pilot tree` (T009); `tail -1 $ECHOCTL_HOME/projects/globex-pilot/ledger/events.jsonl` | T009 `state` "done"; the last event `"by": "run"`, `"op": "edit"`, `"node": "T009"`, `"set": {"state": "done"}` — Echo's run's, not yours |
 
 ## Expected Final State
-T009 is done, by Echo's run; the welcome mail is a draft; nothing was sent; "Claude acts on its own" is off.
+T009 is done, by Echo's run; the welcome mail is a draft; nothing was sent; Claude in the window is on "Ask each time".
 
 ## Teardown
 - None (S-33 stops the data)

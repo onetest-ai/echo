@@ -984,13 +984,24 @@
     "liveNotes": "Live notes",
     "liveOn": "Live notes on",
     "autoMinutes": "Write minutes automatically",
-    "skipRow": "Claude acts on its own",
+    "permissionsCard": "Claude's permissions",
+    "folderRow": "Claude in the window",
+    "routineRow": "Routines acting on their own",
+    "yoloRow": "Yolo acting on its own",
+    "permissionsOf": "{row}: permissions",
+    "ask": "Ask each time",
+    "auto": "Auto",
+    "skip": "Skip all permission checks",
     "skipFlag": "--dangerously-skip-permissions",
+    "autoFlag": "--permission-mode auto",
     "skipSays": [
       "runs any command and tool without asking",
       "Takes effect the next time the session starts."
     ],
-    "skipOn": "On."
+    "asksNow": "Now they prepare and ask: Claude in the window asks each time.",
+    "autoOnProfiles": "Auto on your profiles:",
+    "autoMode": "auto mode: Claude Code decides each action",
+    "skipOn": "Skips every check."
   },
   "transcription": {
     "route": "#settings/transcription",

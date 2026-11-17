@@ -328,11 +328,37 @@ pub struct ConfigArgs {
     /// by itself), or none
     #[arg(long)]
     pub onedrive: Option<String>,
+    /// Claude in the window (the folder session): ask (Claude Code's prompts; routines and Yolo then prepare and ask),
+    /// auto (Claude Code's auto mode, the default) or skip (every permission check skipped)
+    #[arg(long, value_parser = ["ask", "auto", "skip"])]
+    pub folder_permissions: Option<String>,
+    /// A routine acting on its own: auto (the default) or skip
+    #[arg(long, value_parser = ["auto", "skip"])]
+    pub routine_permissions: Option<String>,
+    /// Yolo acting on its own: auto (the default) or skip
+    #[arg(long, value_parser = ["auto", "skip"])]
+    pub yolo_permissions: Option<String>,
 }
 
 pub fn config(args: ConfigArgs) -> Result<()> {
-    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model, drafts, onedrive } = args;
+    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model, drafts, onedrive, folder_permissions, routine_permissions, yolo_permissions } = args;
     let mut cfg = config::Config::load()?;
+    let permissions = [("folder", folder_permissions), ("routine", routine_permissions), ("yolo", yolo_permissions)];
+    let auto = permissions.iter().any(|(_, p)| p.as_deref() == Some("auto"));
+    for (who, p) in permissions {
+        if let Some(p) = p {
+            // How Claude's sessions and runs handle permissions: never chosen by a run Echo started, one acting on its
+            // own included.
+            anyhow::ensure!(!crate::notes::headless(), "refused inside a run Echo started: how Claude handles permissions is the user's to choose");
+            cfg.set_permissions(who, config::Permissions::parse(&p)?)?;
+        }
+    }
+    // What Auto gets on each profile (on stderr: the settings stay the output).
+    if auto {
+        for (name, got) in crate::folder_args::auto_on_profiles() {
+            eprintln!("Auto on {name}: {got}");
+        }
+    }
     if let Some(d) = drafts {
         // The app named here is run with each draft: never chosen by a run Echo started.
         anyhow::ensure!(!crate::notes::run_limited(), "refused inside a run Echo started: where drafts go is the user's to choose");

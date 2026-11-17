@@ -29,7 +29,6 @@ pub(super) fn settings_snapshot() -> Value {
         "minutes_page": c.is_some_and(|c| c.minutes_page),
         "auto_minutes": c.is_some_and(|c| c.auto_minutes),
         "project_sync": c.is_some_and(|c| c.project_sync),
-        "folder_skip_permissions": c.is_some_and(|c| c.folder_skip_permissions),
         "hide_dock_icon": c.is_some_and(|c| c.hide_dock_icon),
         "own_title_bar": on(c.map(|c| c.own_title_bar)),
         // Where mail drafts go (#135): the choice as stored (null: the default, `drafts_now` says which).
@@ -63,6 +62,11 @@ pub(super) fn settings_snapshot() -> Value {
         "models": crate::models::list_value().ok(),
         "downloading": crate::models::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
+    // How the folder session, and routines and Yolo acting on their own, handle permission prompts.
+    v["folder_permissions"] = json!(c.map(|c| c.folder_permissions()));
+    v["routine_permissions"] = json!(c.map(|c| c.routine_permissions()));
+    v["yolo_permissions"] = json!(c.map(|c| c.yolo_permissions()));
+    v["auto_on_profiles"] = json!(crate::folder_args::auto_on_profiles());
     // Colleagues' photos: [the switch, the sign-in may read them].
     // AI & minutes: the last wrapper check, add or update the page started (`wrapper_job`).
     v["wrapper"] = WRAPPER.lock().map(|s| s.clone()).unwrap_or(Value::Null);
@@ -199,7 +203,10 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "minutes_page" => cfg.minutes_page = b()?,
         "auto_minutes" => cfg.set_auto_minutes(b()?),
         "project_sync" => cfg.project_sync = b()?,
-        "folder_skip_permissions" => cfg.folder_skip_permissions = b()?,
+        "folder_permissions" | "routine_permissions" | "yolo_permissions" => {
+            let p = crate::config::Permissions::parse(value.as_str().unwrap_or(""))?;
+            cfg.set_permissions(&key[..key.len() - "_permissions".len()], p)?;
+        }
         "hide_dock_icon" => cfg.hide_dock_icon = b()?,
         "own_title_bar" => cfg.own_title_bar = Some(b()?),
         "drafts" => cfg.drafts = crate::drafts::setting(value.as_str().unwrap_or(""))?,

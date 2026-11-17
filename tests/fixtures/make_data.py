@@ -703,7 +703,7 @@ def build_settings(d, H):
     # "before", later ones wait their 15 minutes. A midnight, not now − 10 days, so a call 10 days ago is "before"
     # whatever the hour of the build. Never run the real app on this data (it would start them); `window --serve` doesn't.
     cfg.update({"auto_minutes": True, "auto_minutes_since": iso(auto_since(d.now)), "follow_app_mute": False, "capture_ui": True,
-                "capture_chat": True, "echo_cancel": False, "project_sync": True, "folder_skip_permissions": False, "hide_dock_icon": False,
+                "capture_chat": True, "echo_cancel": False, "project_sync": True, "folder_permissions": "ask", "hide_dock_icon": False,
                 # OneDrive off: the computer's own OneDrive (found in the real home) never shows in made-up data; a case
                 # that needs one makes it and sets it (`echoctl config --onedrive`).
                 "onedrive": "none",
@@ -733,7 +733,7 @@ def build_settings(d, H):
                  "set.capture=follow_app_mute off; capture_ui, capture_chat, capture_frames on": "config.json",
                  "set.audio=echo_cancel off; keep_audio off": "config.json",
                  "set.minutes=auto_minutes, project_sync, minutes_page on; notes_in data folder": "config.json",
-                 "set.window_claude=folder_skip_permissions off": "config.json", "set.me=name, email set; profile Markdown": "config.json me, .echo/me.md",
+                 "set.window_claude=folder_permissions ask; routines and Yolo unset (auto)": "config.json", "set.me=name, email set; profile Markdown": "config.json me, .echo/me.md",
                  "set.config=readable": "config.json", "set.recall=off": "no config/brain.json",
                  "set.layout=vocabulary in the bottom panel; panel closed; bar open": "config/window-layout.json",
                  "set.health=stale plugins": "claude-config/plugins/installed_plugins.json (echo 0.0.1)",

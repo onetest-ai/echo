@@ -21,7 +21,8 @@ A routine's or Yolo's run has no run guard: it runs as the folder session (One b
   settings, recording, audio retention or anything outside the run's call checks it, as `memo start` does.
 - `notes::headless()`: true in every run. Checked by the always-on vocabulary and keeping a call's audio
   (`notes::refused_in_run`) and by every `echoctl plugin` command that changes plugins (`cli::plugin::refuse_in_run`):
-  install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`.
+  install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`; and by
+  `echoctl config --folder-permissions / --routine-permissions / --yolo-permissions` (`cli::app::config`).
 - A mail draft is not refused: `echoctl compose`, `m365 mail draft`.
 
 ## Safe Markdown
@@ -130,11 +131,26 @@ variables (`ai::PASS`).
 - `folder_args::session` builds the context and permissions of the folder session (`terminal::start_folder`), a routine
   (`ctx.claude.run`, `claudejob::run`) and a Yolo run. A routine and Yolo add only `-p`, the prompt and the model, and
   start in the data folder.
-- The user's choice "Claude acts on its own": `Config::folder_skip_permissions`; `notes::run_acts` tells a run acting on
-  its own.
+- The user's permission settings (Settings → AI & minutes → Claude's permissions; `echoctl config --folder-permissions
+  ask|auto|skip`, `--routine-permissions auto|skip`, `--yolo-permissions auto|skip`, refused in every run Echo started:
+  `notes::headless`), `config::Permissions`, each Auto when unset:
+  - `Config::folder_permissions` — the folder session: `ask` (Claude Code's prompts, no flag), `auto` or `skip`
+    (`--dangerously-skip-permissions`) (`folder_args::folder_permissions`). Each setting becomes flags only through
+    `folder_args::permission_args`: `auto` is `--permission-mode auto` where the profile's model has auto mode, else
+    `acceptEdits` (`dontAsk` read-only) (claude-code-runs reference, Starting Claude Code).
+  - A routine or Yolo acts on its own unless the folder session is on `ask`; then it prepares and asks.
+    `folder_args::run_permissions(yolo)`: `None` (preparing and asking, no flag), else `Config::routine_permissions` or
+    `Config::yolo_permissions` (`auto` or `skip`; an `ask` written by hand reads as `auto`). `claudejob::Spec::yolo`
+    says which.
+  - Its record (`permissions.json` `used`) and its log's first line name the mode: `acts on its own (auto mode: Claude
+    Code decides each action)`, `acts on its own (edits accepted: this profile's model has no auto mode)`,
+    `acts on its own (every permission check skipped)` or `prepares and asks (…)`.
+  - The switch before (`folder_skip_permissions`) is read once by `Config::load`: on becomes `folder_permissions: skip`,
+    off stays unset (Auto); it is never written again.
+- `notes::run_acts` tells a run acting on its own (`ECHOCTL_RUN_SESSION=acts`), whatever its mode.
 - A run with `tools: "none"` (Won't do, a plugin's analysis of what it read) keeps no tools.
 
-## Preparing and asking (the choice off)
+## Preparing and asking (the folder session on "Ask each time")
 
 - Free without a prompt: `folder_args::FREE_COMMANDS`, each a fixed command and its own arguments — `context`,
   `attention`, `prep`, `previous`, `status`, `calendar events`, `read`, `project list`, `project show`, `project of`,

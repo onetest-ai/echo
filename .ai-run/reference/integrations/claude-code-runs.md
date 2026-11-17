@@ -13,6 +13,17 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
   their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill
   (`--disable-slash-commands`) (`projectsync::args`).
+- The folder session, a routine, Yolo and a plugin's folder run (on the routines' setting) get their permission flags
+  from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's
+  record): Ask each time none; Skip all permission checks `--dangerously-skip-permissions`; Auto
+  `--permission-mode auto` where `folder_args::auto_mode_works` (a `claude` or `system` profile, its model Claude's
+  name, Claude Code's default, or an id of Opus / Sonnet 4.6+, Haiku 5.5+ or Fable — Bedrock / Vertex ids, with
+  `anthropic.` or `@`, Sonnet 5+ or Opus 4.7+; an id it can't read: no), else `--permission-mode acceptEdits` (may
+  edit) or `dontAsk` (read-only). Without auto mode Claude Code starts in its manual mode, where a headless run does
+  nothing and a wrapper's start event (`default`) wouldn't match Echo's `auto`. `folder_args::auto_on_profiles` gives
+  what Auto gets per profile (Settings' card, `echoctl config`). Measured on Claude Code 2.1.326: `-p` with `--permission-mode auto` runs headless, its `system/init` shows
+  `permissionMode: auto`, and a Bash command outside `--allowedTools` ran without a prompt. The fake Claude Code
+  (`ai::fake`, the test data's `bin/claude`) takes any flags.
 
 ## Profiles
 
@@ -83,7 +94,7 @@ routing-policy check.
   `echoctl proof gate <value>` (`--deny-all` when Echo set no tools and no MCP server). `<value>`: 32 random hex digits
   per run. The prompt is sent once the hook's answer with that value is seen; the run's `system/init` is checked by
   `ai::wrapper_ready` with `ai::wrapper::Expected` (a Claude Code `guard::new_enough`, the permission mode Echo set — `bypassPermissions` with
-  `--dangerously-skip-permissions`, else `--permission-mode`; none set: anything but `bypassPermissions`; not checked
+  `--dangerously-skip-permissions`, else `--permission-mode` (`auto` for a session on Auto); none set: anything but `bypassPermissions`; not checked
   when the run has no tool and no MCP server — no built-in tool beyond Echo's
   `--tools`, and with `--strict-mcp-config` no MCP server or tool beyond Echo's `--mcp-config`), then marked
   (`.plugins/.proof/<value>`, removed at the run's end, never by age). The run's files are named by another random id

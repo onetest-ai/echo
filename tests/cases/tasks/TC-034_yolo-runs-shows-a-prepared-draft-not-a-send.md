@@ -1,6 +1,6 @@
 ---
 id: TC-034
-title: On Yolo runs, a run with "Claude acts on its own" off whose send was refused shows its mail as a draft and its task's close as a change — never as a send — and "Prepared and asked"
+title: On Yolo runs, a run with Claude in the window on "Ask each time" whose send was refused shows its mail as a draft and its task's close as a change — never as a send — and "Prepared and asked"
 priority: medium
 type: functional
 requirements: [F-TASK-15, F-TASK-12]
@@ -17,7 +17,7 @@ tags: [tasks, yolo, yolo-runs, permissions, virtual-model]
 **Module:** Tasks | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- TC-031's run `ask-asks-1` on the same data (Yolo on Globex pilot's T009 "Send the welcome mail" with "Claude acts on its own" off: its `m365 mail send` refused by Claude Code, the mail drafted with `compose`, T009 closed); `{{base_url}}/` loaded first (the cookie)
+- TC-031's run `ask-asks-1` on the same data (Yolo on Globex pilot's T009 "Send the welcome mail" with Claude in the window on "Ask each time": its `m365 mail send` refused by Claude Code, the mail drafted with `compose`, T009 closed); `{{base_url}}/` loaded first (the cookie)
 
 ## Steps
 
