@@ -988,10 +988,8 @@ pub fn message(text: &str, buttons: &[&str]) -> Option<String> {
     }
     #[cfg(windows)]
     {
-        // Line breaks survive as PowerShell "`n" between single-quoted pieces.
-        let lines = text.split('\n').map(|l| format!("'{}'", l.replace('\'', "''"))).collect::<Vec<_>>().join(" + \"`n\" + ");
-        let script = format!("$null = (New-Object -ComObject WScript.Shell).Popup(({lines}), 0, 'Echo', 64)");
-        Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).status().ok()?;
+        let (script, env) = message_ps(text);
+        Command::new("powershell").no_window().envs(env).args(["-NoProfile", "-Command", &script]).status().ok()?;
         return buttons.first().map(|b| b.to_string());
     }
     #[allow(unreachable_code)]
@@ -1092,6 +1090,23 @@ fn files_dialog_ps(prompt: &str, multiple: bool, ext: &[String]) -> (String, Vec
     (script, vec![("ECHO_PICK_PROMPT", prompt.to_string()), ("ECHO_PICK_FILTER", filter)])
 }
 
+// Windows' message and text prompt: the text goes in through the environment, never quoted into the script, as in the
+// pickers above — a plugin's name is in `ask_text`'s message (`jshost::typed`).
+
+/// The PowerShell script of Windows' information popup and the environment it reads its text from (line breaks and all).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn message_ps(text: &str) -> (String, Vec<(&'static str, String)>) {
+    let script = "$null = (New-Object -ComObject WScript.Shell).Popup($env:ECHO_MESSAGE, 0, 'Echo', 64)";
+    (script.to_string(), vec![("ECHO_MESSAGE", text.to_string())])
+}
+
+/// The PowerShell script of Windows' text prompt and the environment it reads its message and default answer from.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ask_text_ps(message: &str, default: &str) -> (String, Vec<(&'static str, String)>) {
+    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox($env:ECHO_ASK_MESSAGE, 'echo', $env:ECHO_ASK_DEFAULT)";
+    (script.to_string(), vec![("ECHO_ASK_MESSAGE", message.to_string()), ("ECHO_ASK_DEFAULT", default.to_string())])
+}
+
 /// A one-line text prompt; the text, or None if cancelled / empty.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
@@ -1110,11 +1125,9 @@ pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
     }
     #[cfg(windows)]
     {
-        // The texts go in through the environment, never quoted into the script: a plugin's name is in the message
-        // (`jshost::typed`), and PowerShell ends a '…' string at a curly quote too.
-        let script = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox($env:ECHO_ASK_MESSAGE, 'echo', $env:ECHO_ASK_DEFAULT)";
+        let (script, env) = ask_text_ps(message, default);
         let _ = ok;
-        let out = Command::new("powershell").no_window().env("ECHO_ASK_MESSAGE", message).env("ECHO_ASK_DEFAULT", default).args(["-NoProfile", "-Command", script]).output().ok()?;
+        let out = Command::new("powershell").no_window().envs(env).args(["-NoProfile", "-Command", &script]).output().ok()?;
         let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (!t.is_empty()).then_some(t);
     }
@@ -1392,6 +1405,20 @@ mod tests {
         assert_eq!(env, vec![("ECHO_PICK_PROMPT", evil.to_string()), ("ECHO_PICK_FILTER", "Files|*.md;*.pdf".to_string())]);
         assert!(files.contains("$d.Multiselect = $true") && super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
         assert_eq!(super::files_dialog_ps("p", false, &[]).1[1].1, "", "no filter: every file");
+    }
+
+    #[test]
+    fn windows_message_and_text_prompt_take_their_text_from_the_environment_never_in_the_script() {
+        let evil = "x’; Start-Process calc; ‘ 'y' \"z\" $(calc)\nline two";
+        let (message, menv) = super::message_ps(evil);
+        let (ask, aenv) = super::ask_text_ps(evil, "d’; calc");
+        for script in [&message, &ask] {
+            assert!(!script.contains("calc") && !script.contains('’') && !script.contains('‘') && !script.contains("line two"), "{script}");
+        }
+        assert!(message.contains("$env:ECHO_MESSAGE"));
+        assert!(ask.contains("$env:ECHO_ASK_MESSAGE") && ask.contains("$env:ECHO_ASK_DEFAULT"));
+        assert_eq!(menv, vec![("ECHO_MESSAGE", evil.to_string())], "line breaks stay in the text");
+        assert_eq!(aenv, vec![("ECHO_ASK_MESSAGE", evil.to_string()), ("ECHO_ASK_DEFAULT", "d’; calc".to_string())]);
     }
 
     #[test]
