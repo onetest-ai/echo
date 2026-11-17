@@ -63,15 +63,15 @@ fn call_facts(meta: &Value) -> serde_json::Map<String, Value> {
     v.as_object().cloned().unwrap_or_default()
 }
 
+/// Everyone Echo knows (People's, as `echo.read('people')` lists them): what `participants` finds people in.
+fn known_people() -> Vec<Value> {
+    crate::people::everyone(chrono::Local::now().date_naive()).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default()
+}
+
 /// Who took part as the invite names them (`attendees`), each with the person Echo knows them as: `person` their key in
 /// `echo.read('people')`, by address, else by name; null when Echo doesn't know them. At most `LIST_MAX`.
-fn participants(dir: &Path) -> Vec<Value> {
+fn participants(dir: &Path, people: &[Value]) -> Vec<Value> {
     let invited = attendees(&crate::calls::read_json(&dir.join("meeting.json")));
-    if invited.is_empty() {
-        return vec![];
-    }
-    let everyone = crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_default();
-    let people = everyone["people"].as_array().cloned().unwrap_or_default();
     let same = |x: &Value, e: &str| x.as_str().is_some_and(|x| x.eq_ignore_ascii_case(e));
     let person = |name: &str, email: Option<&str>| -> Value {
         let by_mail = email.and_then(|e| people.iter().find(|p| same(&p["email"], e) || p["also"].as_array().is_some_and(|a| a.iter().any(|x| same(x, e)))));
@@ -169,7 +169,7 @@ pub fn source(id: &str, opts: &Value) -> Result<Value> {
             "date": meta["started_at"].as_str().and_then(|s| s.get(..10)),
             "text": text, "link": link, "client": client_of(&threads), "threads": threads,
             "profile": crate::ai::call_profile_id(&dir).ok(), "platform": meta["platform"],
-            "attendees": attendees(&crate::calls::read_json(&dir.join("meeting.json"))), "participants": participants(&dir),
+            "attendees": attendees(&crate::calls::read_json(&dir.join("meeting.json"))), "participants": participants(&dir, &known_people()),
             "minutes": minutes_parts(&dir, true),
         });
         for (k, v) in call_facts(&meta) {
@@ -265,13 +265,29 @@ fn mail_source(src: &str) -> Result<Value> {
     bail!("{src}: this build has no Recall")
 }
 
-/// The sources, newest first: `{id, kind, title, date, threads}` — calls with minutes, and Recall's mail and channel
-/// posts. `opts`: `kind` (call | mail | channel), `thread`, `since` (YYYY-MM-DD), `limit` (≤ 1000, default 200).
+/// Every word of `q` (lowercase) in `hay`.
+fn has_words(words: &[String], hay: &str) -> bool {
+    let hay = hay.to_lowercase();
+    words.iter().all(|w| hay.contains(w.as_str()))
+}
+
+fn words(opts: &Value) -> Vec<String> {
+    opts["q"].as_str().unwrap_or("").to_lowercase().split_whitespace().map(str::to_owned).collect()
+}
+
+/// The sources, newest first: `{id, kind, title, date, threads, client}` (`threads` their ids, `client` as `source`
+/// says it) — calls with minutes, and Recall's mail and channel posts, those with what Recall decided of each
+/// (`mail_item`: `subject`, `at`, `from`, `people`, `trust`, `profile`, …), never a text. `opts`: `kind` (call | mail |
+/// channel), `thread`, `client`, `q` (every word in its title, a mail's subject or senders), `since` (YYYY-MM-DD),
+/// `limit` (≤ 1000, default 200).
 pub fn sources(opts: &Value) -> Result<Value> {
     let kind = opts["kind"].as_str().unwrap_or("");
     let thread = opts["thread"].as_str().filter(|t| !t.is_empty());
+    let client = opts["client"].as_str().filter(|t| !t.is_empty());
+    let words = words(opts);
     let since = opts["since"].as_str().unwrap_or("");
     let limit = opts["limit"].as_u64().unwrap_or(200).clamp(1, 1000) as usize;
+    let routed = |threads: &[Value], client_v: &Value| thread.is_none_or(|t| threads.iter().any(|x| x["id"] == t)) && client.is_none_or(|c| client_v["id"] == c);
     let mut out: Vec<Value> = vec![];
     if kind.is_empty() || kind == "call" {
         for dir in crate::calls::all_calls() {
@@ -280,32 +296,36 @@ pub fn sources(opts: &Value) -> Result<Value> {
             }
             let meta = crate::calls::read_json(&dir.join("meta.json"));
             let date = meta["started_at"].as_str().and_then(|s| s.get(..10)).unwrap_or("").to_string();
-            if date.as_str() < since {
+            if date.as_str() < since || !has_words(&words, meta["title"].as_str().unwrap_or("")) {
                 continue;
             }
             let threads = threads_of_call(&dir);
-            if thread.is_some_and(|t| !threads.iter().any(|x| x["id"] == t)) {
+            let client_v = client_of(&threads);
+            if !routed(&threads, &client_v) {
                 continue;
             }
-            out.push(json!({"id": call_id(&dir).0, "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>()}));
+            out.push(json!({"id": call_id(&dir).0, "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(), "client": client_v}));
         }
     }
     #[cfg(feature = "brain")]
     if kind.is_empty() || kind == "mail" || kind == "channel" {
         if let Ok(c) = crate::brain::store::open(&crate::brain::store_path()) {
-            let mut st = c.prepare("SELECT source, kind, title, event_date, refs FROM documents WHERE kind IN ('mail', 'channel')")?;
-            let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?)))?;
-            for (src, k, title, date, refs) in rows.flatten() {
-                let date = date.unwrap_or_default();
-                if (!kind.is_empty() && k != kind) || date.as_str() < since {
+            let rows: Vec<[String; 2]> = c
+                .prepare("SELECT source, kind FROM documents WHERE kind IN ('mail', 'channel') ORDER BY event_date DESC")?
+                .query_map([], |r| Ok([r.get(0)?, r.get(1)?]))?
+                .collect::<Result<_, _>>()?;
+            for [src, k] in rows {
+                if !kind.is_empty() && k != kind {
                     continue;
                 }
-                let refs: Value = refs.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
-                let threads: Vec<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(ref_thread).collect();
-                if thread.is_some_and(|t| !threads.contains(&t)) {
+                let Ok(mut it) = mail_item(&c, &src) else { continue };
+                let hay = format!("{} {} {}", it["title"].as_str().unwrap_or(""), it["subject"].as_str().unwrap_or(""), it["from"]);
+                if it["at"].as_str().unwrap_or("") < since || !has_words(&words, &hay) || !routed(it["threads"].as_array().map_or(&[], |v| v), &it["client"]) {
                     continue;
                 }
-                out.push(json!({"id": format!("mail:{src}"), "kind": k, "title": title, "date": date, "threads": threads}));
+                it["date"] = it["at"].clone();
+                it["threads"] = json!(it["threads"].as_array().into_iter().flatten().map(|t| t["id"].clone()).collect::<Vec<_>>());
+                out.push(it);
             }
         }
     }
@@ -314,14 +334,19 @@ pub fn sources(opts: &Value) -> Result<Value> {
     Ok(json!(out))
 }
 
-/// The calls, newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes,
-/// transcript, chat, people, threads, profile}` — `minutes`, `transcript`, `chat` say what it has (its text is
-/// `source`'s); `people` the invite's names. `opts`: `q` (every word in its title, folder, subject or people), `since`
-/// (YYYY-MM-DD), `limit` (≤ 500, default 50).
+/// The calls, newest first, with or without minutes: `{id, title, date, started_at, ended_at, duration_min, app, memo,
+/// minutes, transcript, chat, people, participants, threads, client, profile}` — `minutes`, `transcript`, `chat` say
+/// what it has (its text is `source`'s); `people` the invite's names, `participants` as `source` gives them. `opts`:
+/// `q` (every word in its title, folder, subject or people), `since` / `until` (YYYY-MM-DD, both days in), `thread`,
+/// `client`, `limit` (≤ 500, default 50).
 pub fn calls(opts: &Value) -> Result<Value> {
-    let words: Vec<String> = opts["q"].as_str().unwrap_or("").to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let words = words(opts);
     let since = opts["since"].as_str().unwrap_or("");
+    let until = opts["until"].as_str().filter(|u| !u.is_empty());
+    let thread = opts["thread"].as_str().filter(|t| !t.is_empty());
+    let client = opts["client"].as_str().filter(|t| !t.is_empty());
     let limit = opts["limit"].as_u64().unwrap_or(50).clamp(1, 500) as usize;
+    let known = known_people();
     let mut out = vec![];
     for dir in crate::calls::all_calls().into_iter().rev() {
         if out.len() >= limit {
@@ -329,40 +354,58 @@ pub fn calls(opts: &Value) -> Result<Value> {
         }
         let meta = crate::calls::read_json(&dir.join("meta.json"));
         let date = meta["started_at"].as_str().and_then(|s| s.get(..10)).unwrap_or("").to_string();
-        if date.as_str() < since {
+        if date.as_str() < since || until.is_some_and(|u| date.as_str() > u) {
             continue;
         }
         let meeting = crate::calls::read_json(&dir.join("meeting.json"));
         let people: Vec<Value> = attendees(&meeting).into_iter().map(|p| p["name"].clone()).filter(|n| n.as_str().is_some_and(|n| !n.is_empty())).collect();
         let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
-        if !words.is_empty() {
-            let hay = format!("{} {} {} {}", meta["title"].as_str().unwrap_or(""), name.replace('-', " "), meeting["subject"].as_str().unwrap_or(""), people.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" ")).to_lowercase();
-            if !words.iter().all(|w| hay.contains(w.as_str())) {
-                continue;
-            }
+        let hay = format!("{} {} {} {}", meta["title"].as_str().unwrap_or(""), name.replace('-', " "), meeting["subject"].as_str().unwrap_or(""), people.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" "));
+        if !has_words(&words, &hay) {
+            continue;
         }
-        out.push(json!({
-            "id": call_id(&dir).0, "title": meta["title"], "date": date, "started_at": meta["started_at"], "ended_at": meta["ended_at"],
-            "memo": meta["kind"] == "memo", "minutes": dir.join("notes.md").is_file(), "transcript": dir.join("transcript.md").is_file(),
-            "chat": dir.join("chat.json").is_file(), "people": people, "threads": threads_of_call(&dir), "profile": crate::ai::call_profile_id(&dir).ok(),
-        }));
+        let threads = threads_of_call(&dir);
+        let client_v = client_of(&threads);
+        if thread.is_some_and(|t| !threads.iter().any(|x| x["id"] == t)) || client.is_some_and(|c| client_v["id"] != c) {
+            continue;
+        }
+        let mut row = json!({
+            "id": call_id(&dir).0, "date": date, "minutes": dir.join("notes.md").is_file(), "transcript": dir.join("transcript.md").is_file(),
+            "chat": dir.join("chat.json").is_file(), "people": people, "participants": participants(&dir, &known), "client": client_v, "threads": threads,
+            "profile": crate::ai::call_profile_id(&dir).ok(),
+        });
+        for (k, v) in call_facts(&meta) {
+            row[k] = v;
+        }
+        out.push(row);
     }
     Ok(json!(out))
 }
 
 /// The meetings Echo last read from the calendar (its agenda — no new request to Microsoft 365), by start: `{id,
-/// subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo
-/// puts it in).
-pub fn calendar() -> Result<Value> {
+/// subject, start, end, organizer, attendees, join_url, response, threads, client}` (`threads`: the ids of the threads
+/// Echo puts it in; `client` `{id, name}` when they have one between them). `opts`: `from` / `to` (YYYY-MM-DD, both days
+/// in, by its start).
+pub fn calendar(opts: &Value) -> Result<Value> {
+    let (from, to) = (opts["from"].as_str().unwrap_or(""), opts["to"].as_str().filter(|t| !t.is_empty()));
     let mut agenda = crate::watch::agenda();
     agenda.sort_by_key(crate::watch::meeting_start);
+    let clients = crate::projects::clients().unwrap_or_default();
+    let all = crate::projects::list();
     Ok(json!(agenda
         .iter()
-        .map(|m| json!({
-            "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "organizer": m.organizer, "attendees": m.attendees,
-            "join_url": m.join_url, "response": m.response,
-            "threads": crate::projects::for_event(m).iter().filter_map(|c| c["id"].as_str().map(str::to_owned)).collect::<Vec<_>>(),
-        }))
+        .filter(|m| {
+            let day = m.start.as_deref().and_then(|s| s.get(..10)).unwrap_or("");
+            day >= from && to.is_none_or(|t| day <= t)
+        })
+        .map(|m| {
+            let threads: Vec<Value> = crate::projects::for_event(m).iter().filter_map(|c| all.iter().find(|p| c["id"] == p.id.as_str())).map(|p| thread_ref(p, &clients)).collect();
+            json!({
+                "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "organizer": m.organizer, "attendees": m.attendees,
+                "join_url": m.join_url, "response": m.response, "client": client_of(&threads),
+                "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(),
+            })
+        })
         .collect::<Vec<_>>()))
 }
 
@@ -403,9 +446,12 @@ pub fn about_me(opts: &Value) -> Result<Value> {
     Ok(json!({"text": text, "name": name.flatten(), "parts": parts, "hash": crate::calls::me_hash(Some(&text))}))
 }
 
-/// People across the threads: `{key, name, organisation, title, threads, link}` (People's own; roles stay there).
+/// People across the threads: `{key, name, aliases, email, also, organisation, client, title, threads, link}` (People's
+/// own; roles stay there) — `aliases` the other names the user's directory knows them by, `also` their other addresses,
+/// `client` their organisation's id.
 pub fn people() -> Result<Value> {
     let v = crate::people::everyone(chrono::Local::now().date_naive())?;
+    let directory = crate::people::directory().unwrap_or_default();
     Ok(json!(v["people"]
         .as_array()
         .into_iter()
@@ -413,7 +459,9 @@ pub fn people() -> Result<Value> {
         .filter(|x| x["archived"] != true)
         .map(|x| {
             let key = x["key"].as_str().unwrap_or("");
-            json!({"key": key, "name": x["name"], "organisation": x["org"]["name"], "title": x["title"], "threads": x["threads"],
+            let entry = directory.iter().find(|p| p.id == key || x["email"].as_str().is_some_and(|e| p.emails.iter().any(|m| m == e)));
+            json!({"key": key, "name": x["name"], "aliases": entry.map(|p| p.aliases.clone()).unwrap_or_default(), "email": x["email"], "also": x["also"],
+                   "organisation": x["org"]["name"], "client": x["org"]["id"], "title": x["title"], "threads": x["threads"],
                    "link": format!("echo://person/{}", key.replace('%', "%25").replace(' ', "%20"))})
         })
         .collect::<Vec<_>>()))
@@ -479,7 +527,7 @@ pub(crate) fn minutes_payload(dir: &Path) -> Value {
     let mut out = json!({
         "id": id, "link": link, "call": call, "revision": revision, "rewritten": rewritten,
         "client": client_of(&threads), "threads": threads, "profile": crate::ai::call_profile_id(dir).ok(),
-        "participants": participants(dir), "minutes": minutes,
+        "participants": participants(dir, &known_people()), "minutes": minutes,
     });
     for (k, v) in call_facts(&meta) {
         out[k] = v;
@@ -584,6 +632,49 @@ mod tests {
     }
 
     #[test]
+    fn the_lists_carry_echos_routing_and_filter_by_it() {
+        let (_env, _root) = crate::paths::testenv::folders("share-lists");
+        let pilot = acme_pilot();
+        crate::people::merge("n:j doe", "J. Doe", &[], "jane@acme.example", "Jane Doe", Some("jane@acme.example")).unwrap();
+        for (folder, subject) in [("2026-11-10_100000-acme-pilot", "Acme pilot sync"), ("2026-11-12_100000-lunch", "Lunch")] {
+            let d = crate::paths::calls_dir().join(folder);
+            std::fs::create_dir_all(&d).unwrap();
+            let day = &folder[..10];
+            std::fs::write(d.join("meta.json"), json!({"title": subject, "started_at": format!("{day}T10:00:00+01:00"), "ended_at": format!("{day}T10:30:00+01:00"), "app": "teams"}).to_string()).unwrap();
+            std::fs::write(d.join("meeting.json"), json!({"subject": subject, "attendees": [{"name": "Jane Doe", "email": "jane@acme.example"}]}).to_string()).unwrap();
+            std::fs::write(d.join("notes.md"), format!("# {subject}\n")).unwrap();
+        }
+        // Calls: a thread's or a client's, within days; each with its facts, client and participants.
+        let ids = |v: Value| v.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(calls(&json!({"thread": pilot})).unwrap()), ["call:2026-11-10_100000-acme-pilot"]);
+        assert_eq!(ids(calls(&json!({"client": "acme"})).unwrap()), ["call:2026-11-10_100000-acme-pilot"]);
+        assert_eq!(ids(calls(&json!({"until": "2026-11-11"})).unwrap()), ["call:2026-11-10_100000-acme-pilot"]);
+        assert_eq!(ids(calls(&json!({"since": "2026-11-11", "until": "2026-11-12"})).unwrap()), ["call:2026-11-12_100000-lunch"]);
+        let c = &calls(&json!({"thread": pilot})).unwrap()[0];
+        assert_eq!((c["duration_min"].as_i64(), c["app"].as_str(), c["client"].clone()), (Some(30), Some("teams"), json!({"id": "acme", "name": "Acme"})));
+        assert_eq!(c["participants"], json!([{"name": "Jane Doe", "email": "jane@acme.example", "person": "jane@acme.example"}]));
+        // Sources: by client and words, with the client.
+        assert_eq!(ids(sources(&json!({"client": "acme"})).unwrap()), ["call:2026-11-10_100000-acme-pilot"]);
+        assert_eq!(ids(sources(&json!({"q": "lunch"})).unwrap()), ["call:2026-11-12_100000-lunch"]);
+        assert_eq!(sources(&json!({"q": "lunch"})).unwrap()[0]["client"], Value::Null);
+        // The calendar: by days, with the client its threads have.
+        std::fs::create_dir_all(crate::paths::state_dir()).unwrap();
+        std::fs::write(
+            crate::paths::state_dir().join("agenda.json"),
+            r#"[{"id": "m1", "subject": "Acme pilot weekly", "start": "2026-11-20T10:00:00Z"}, {"id": "m2", "subject": "Lunch", "start": "2026-11-25T12:00:00Z"}]"#,
+        )
+        .unwrap();
+        let cal = calendar(&json!({"from": "2026-11-20", "to": "2026-11-21"})).unwrap();
+        assert_eq!(ids(cal.clone()), ["m1"]);
+        assert_eq!((cal[0]["threads"].clone(), cal[0]["client"].clone()), (json!([pilot]), json!({"id": "acme", "name": "Acme"})));
+        assert_eq!(ids(calendar(&json!({})).unwrap()), ["m1", "m2"]);
+        // People: their addresses, other names and client.
+        let ppl = people().unwrap();
+        let jane = ppl.as_array().unwrap().iter().find(|p| p["key"] == "jane@acme.example").unwrap();
+        assert_eq!((jane["email"].as_str(), jane["client"].as_str(), jane["aliases"].clone()), (Some("jane@acme.example"), Some("acme"), json!(["J. Doe"])), "{jane}");
+    }
+
+    #[test]
     fn a_plugin_that_doesnt_read_sources_hears_no_routing_people_minutes_or_mail() {
         let u = |v: Value| v.as_object().cloned().unwrap();
         let readers = u(json!({"echo": {"read": ["source"]}}));
@@ -637,6 +728,14 @@ mod tests {
         assert!(s["messages"][0]["text"].as_str().unwrap().contains("The pilot moves to 24 Nov"), "{s}");
         assert_eq!(s["messages"][1]["from"], "Kim Ito");
         assert!(s["text"].as_str().unwrap().contains("Kim confirms the room"));
+        // The list: the same decisions, its threads by id, no text; found by a sender's name and by client.
+        let rows = sources(&json!({"kind": "mail", "q": "kim", "client": "acme"})).unwrap();
+        let row = &rows[0];
+        assert_eq!((row["id"].as_str(), row["date"].as_str(), row["threads"].clone(), row["trust"].as_str()), (Some("mail:mail/abc"), Some("2026-11-11"), json!([pilot]), Some("trusted")));
+        assert_eq!((row["from"].clone(), row["client"].clone()), (it["from"].clone(), it["client"].clone()));
+        assert!(row.get("text").is_none() && row.get("messages").is_none());
+        assert!(sources(&json!({"kind": "mail", "q": "nobody"})).unwrap().as_array().unwrap().is_empty());
+        assert!(sources(&json!({"kind": "mail", "client": "globex"})).unwrap().as_array().unwrap().is_empty());
     }
 
     #[test]

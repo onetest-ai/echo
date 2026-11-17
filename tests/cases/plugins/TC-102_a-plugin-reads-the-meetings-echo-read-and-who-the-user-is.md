@@ -1,9 +1,9 @@
 ---
 id: TC-102
-title: A plugin reads the meetings Echo last read from the calendar, by start with their threads, and the user's name and email
+title: A plugin reads the meetings Echo last read from the calendar, by start and by days with their threads and client, the user's name and email, and the people of the threads
 priority: medium
 type: functional
-requirements: [F-PLUG-71]
+requirements: [F-PLUG-71, F-PLUG-107]
 module: plugins
 run: agent
 platform: any
@@ -27,7 +27,10 @@ tags: [plugins, host-half, echo-read, calendar]
 |---|--------|----------------|
 | 1 | `echoctl plugin call data-demo calendar` | Today's meetings, each `{id, subject, start, end, organizer, attendees, join_url, response, threads}`, in the order of their `start`; "Acme weekly sync" with `"threads": ["acme-rollout"]` and its attendees by name and email; "Globex steering" with `"threads": ["globex-pilot"]` |
 | 2 | Read `$ECHOCTL_HOME/.echo/agenda.json` (Echo's agenda) | The same meetings, by the same ids: the plugin got what Echo had read, nothing more |
+| 1a | The same answer | Each meeting also has `client`: "Acme weekly sync" `{"id": "acme", "name": "Acme"}`, "Globex steering" `{"id": "globex", "name": "Globex"}`, a meeting in no thread `null` |
+| 1b | `echoctl plugin call data-demo calendar '{"from":"<today>","to":"<today>"}'`; `echoctl plugin call data-demo calendar '{"from":"<tomorrow>"}'` | The same meetings as step 1; `[]` (none starts after today) |
 | 3 | `echoctl plugin call data-demo me` | `{"name": "Sam Rivera", "email": "sam@initech.example"}` |
+| 4 | `echoctl plugin call data-demo people` | The people of the open threads, each `{key, name, aliases, email, also, organisation, client, title, threads, link}`; Kim Park: `"key": "kim@globex.example"`, `"email": "kim@globex.example"`, `"organisation": "Globex"`, `"client": "globex"`, `"threads": ["globex-pilot"]`, `"aliases": []` — her `key` is what a call's `participants[].person` names (TC-100, TC-101) |
 
 ## Expected Final State
 Nothing changed.

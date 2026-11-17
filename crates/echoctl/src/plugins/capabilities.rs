@@ -442,7 +442,7 @@ pub(super) fn describe_folders(v: &Value) -> Result<String> {
 pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("clients", "the names of your clients"),
     ("threads", "your threads' names and stages"),
-    ("people", "who the people in your threads are"),
+    ("people", "who the people in your threads are (their names, addresses and organisations)"),
     ("dictionary", "your dictionary"),
     ("sources", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
     ("source", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
