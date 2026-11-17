@@ -92,12 +92,16 @@ reads the data folder's files.
   session keeps the model it started with until the next call.
 - A job's runs are kept as a routine's: `jobs::begin` … `Run::done` / `failed` on the job's thread, its model calls
   counted by `jobs::add_usage` (from `claude_session::complete_claude_with` and `livenotes::complete_local_body`), or
-  `jobs::record` for a run elsewhere (the thread sync's passes, the fetch, a live notes session, a minutes run). A pass
-  that did nothing and called no model leaves no run. One line a run in `<config dir>/jobs-runs/<job>.jsonl`
-  (`started`, `ended`, `duration_ms`, `ok`, `summary` or `error`, `model`, `calls`, tokens, `cost_usd`), those of the
-  last 31 days and at most 5000 kept. `jobs::list` gives each job `to` (where it shows), `last`, `next_run` (a time) or
+  `jobs::record` for a run elsewhere (the thread sync's passes, a failed sync, the fetch, a live notes session); a
+  minutes run is `begin` at Claude Code's start … `Run::minutes`. A look that found nothing and called no model leaves
+  no run (`Run::done_if_used`). One line a run, appended, in `<config dir>/jobs-runs/<job>.jsonl` (`started`, `ended`,
+  `duration_ms`, `ok`, `summary` or `error`, `model`, `calls`, tokens, `cost_usd`), rewritten once its first run is
+  older than 31 days or it grows long, keeping the last 31 days and at most 5000. A run's words are Echo's own and its
+  counts: no call, thread or person named, no model text (plugins read them). `jobs::list` gives each job `to` (where it shows), `last`, `next_run` (a time) or
   `next` (in words, for a job that runs on events), `month` (`runs`, `failed`, `cost`, `daily` × 30) and today's
-  counts, plus the night and `night_default`; `echoctl jobs runs <job>` its runs. The settings are
+  counts, plus the night and `night_default`; `echoctl jobs runs <job>` its runs. `jobs::routines` /
+  `jobs::routine_runs` give the same as routines, the one shape the Scheduler draws every routine from
+  (`plugin-api.md` § Routines; `echoctl jobs routines`). The settings are
   `<config dir>/jobs.json`, changed only by `jobs::set` (`echoctl jobs set <job> key=value …`, `key=` its default;
   `night from=HH:MM to=HH:MM`) under `.jobs.lock`: all checked, then written at once, never inside a run Echo started.
   `echoctl jobs` lists them all.

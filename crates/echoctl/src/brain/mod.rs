@@ -332,7 +332,7 @@ pub fn start_scheduler() {
                 }
                 Err(e) => {
                     eprintln!("brain: {e:#}");
-                    run.failed(&format!("{e:#}"));
+                    run.failed("Recall couldn't read its sources (Echo's log says why)");
                     failed_at = Some(std::time::Instant::now());
                     last = Some(fp);
                 }

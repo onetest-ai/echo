@@ -2,7 +2,9 @@
 //! model), and when each last ran. The settings are `<config dir>/jobs.json`, changed only through `set` (its lock,
 //! re-read inside it), never inside a run Echo started; a job reads its own on every tick, so a change applies at
 //! the next one. What a job did is kept as a routine's runs are: one line a run in `<config dir>/jobs-runs/<job>.jsonl`
-//! (when, how it ended, its model, tokens and cost — `begin` … `Run::done`, or `record`), the newest 500 kept. Every job
+//! (when, how it ended, its model, tokens and cost — `begin` … `Run::done`, or `record`), 31 days of them. A run's
+//! record says what happened in Echo's own words and counts: never a call's, thread's or person's name, nor a model's
+//! text (a plugin with `uses.echo.jobs` reads them: echo-plugins R25). Every job
 //! runs on its defaults when the file is missing or a value in it can't be read.
 
 use crate::paths;
@@ -209,10 +211,21 @@ pub struct Run {
     ended: bool,
 }
 
+/// The jobs running now in this process (the app's, whose window lists them): a job's name, how many of its runs.
+static RUNNING: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+
 /// Start a run of `job` on this thread.
 pub fn begin(job: &'static str) -> Run {
     CURRENT.with(|c| *c.borrow_mut() = Some(Used::default()));
+    RUNNING.lock().unwrap_or_else(|e| e.into_inner()).push(job);
     Run { job, started: Local::now(), ended: false }
+}
+
+fn not_running(job: &str) {
+    let mut r = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = r.iter().position(|j| *j == job) {
+        r.remove(i);
+    }
 }
 
 impl Run {
@@ -220,28 +233,37 @@ impl Run {
     /// do leaves no run (a job looks every few minutes).
     pub fn done(mut self, summary: Option<String>) {
         self.ended = true;
+        not_running(self.job);
         let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
         if summary.is_some() || used.calls > 0 {
             write_run(self.job, self.started, Ok(summary.unwrap_or_default()), used.value());
         }
     }
 
-    /// A minutes run of `dir` concluded (`notes`): its Claude Code result's usage, and done or why not.
-    pub fn minutes(self, dir: &std::path::Path, result: Option<&Value>, model: Option<&str>, state: &str, message: Option<&str>) {
+    /// A minutes run concluded (`notes`): its Claude Code result's usage, and how it ended — in Echo's words only,
+    /// never the call's name or the model's (a run's record names no call, thread or person: echo-plugins R25).
+    pub fn minutes(self, result: Option<&Value>, model: Option<&str>, state: &str) {
         if let Some(v) = result {
             add_usage(model.unwrap_or(""), v);
         }
-        let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-        if state == "done" {
-            self.done(Some(format!("minutes of {call}")));
-        } else {
-            self.failed(&format!("{call}: {}", message.unwrap_or(state)));
+        match state {
+            "done" => self.done(Some("minutes written".into())),
+            "skipped" => self.done(Some("nothing to write: skipped".into())),
+            "needs_login" => self.failed("the profile isn't signed in"),
+            _ => self.failed("the minutes run failed (the call's log says why)"),
         }
+    }
+
+    /// It ended well, recorded only when it called a model (a look that found nothing new leaves no run).
+    pub fn done_if_used(self, summary: String) {
+        let used = CURRENT.with(|c| c.borrow().as_ref().map_or(0, |u| u.calls));
+        self.done((used > 0).then_some(summary));
     }
 
     /// It failed: always recorded, with why.
     pub fn failed(mut self, error: &str) {
         self.ended = true;
+        not_running(self.job);
         let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
         write_run(self.job, self.started, Err(error.to_string()), used.value());
     }
@@ -250,6 +272,7 @@ impl Run {
 impl Drop for Run {
     fn drop(&mut self) {
         if !self.ended {
+            not_running(self.job);
             let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
             write_run(self.job, self.started, Err("it stopped before it ended".into()), used.value());
         }
@@ -337,26 +360,35 @@ fn write_run(job: &str, started: DateTime<Local>, result: Result<String, String>
     if let Some(c) = line["cost_usd"].as_f64() {
         line["cost_usd"] = json!((c * 1e6).round() / 1e6);
     }
-    let Ok(_lock) = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs-runs.lock"), "Echo's jobs", std::time::Duration::from_secs(5)) else { return };
     let f = runs_file(job);
     let _ = std::fs::create_dir_all(f.parent().expect("a folder"));
-    let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(str::to_owned).collect();
-    lines.push(line.to_string());
-    let oldest = (Local::now() - chrono::Duration::days(KEEP_DAYS)).to_rfc3339();
-    let old = lines.first().and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v["started"].as_str().map(str::to_owned)).is_some_and(|t| t < oldest);
-    if lines.len() > KEEP * 2 || old {
-        lines.retain(|l| serde_json::from_str::<Value>(l).ok().and_then(|v| v["started"].as_str().map(str::to_owned)).is_some_and(|t| t >= oldest));
+    let Ok(_lock) = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs-runs.lock"), "Echo's jobs", std::time::Duration::from_secs(5)) else { return };
+    // One line appended (readers take whole lines only); the file rewritten, trimmed, once its first run is older
+    // than `KEEP_DAYS` or it passes `KEEP * 2` lines.
+    let first = std::fs::File::open(&f).ok().and_then(|h| std::io::BufRead::lines(std::io::BufReader::new(h)).next()).and_then(Result::ok);
+    let old = first.and_then(|l| serde_json::from_str::<Value>(&l).ok()).and_then(|v| started_at(&v)).is_some_and(|t| t < Local::now() - chrono::Duration::days(KEEP_DAYS));
+    let long = std::fs::metadata(&f).is_ok_and(|m| m.len() > 600 * (KEEP as u64) * 2);
+    if old || long {
+        let oldest = Local::now() - chrono::Duration::days(KEEP_DAYS);
+        let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().filter(|l| serde_json::from_str::<Value>(l).ok().and_then(|v| started_at(&v)).is_some_and(|t| t >= oldest)).map(str::to_owned).collect();
+        lines.push(line.to_string());
         if lines.len() > KEEP {
             lines.drain(..lines.len() - KEEP);
         }
+        let _ = paths::write_atomic(&f, (lines.join("\n") + "\n").as_bytes());
+    } else if let Ok(mut h) = std::fs::OpenOptions::new().create(true).append(true).open(&f) {
+        let _ = std::io::Write::write_all(&mut h, format!("{line}\n").as_bytes());
     }
-    let _ = paths::write_atomic(&f, (lines.join("\n") + "\n").as_bytes());
 }
 
 /// A job's runs, newest first, at most `limit`.
 pub fn runs(job: &str, limit: usize) -> Result<Vec<Value>> {
     self::job(job)?;
     Ok(read_runs(job).into_iter().rev().take(limit).collect())
+}
+
+fn started_at(v: &Value) -> Option<DateTime<Local>> {
+    v["started"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Local))
 }
 
 fn read_runs(job: &str) -> Vec<Value> {
@@ -416,6 +448,80 @@ pub fn list() -> Value {
         })
         .collect();
     json!({"jobs": jobs, "night": {"from": from.format("%H:%M").to_string(), "to": to.format("%H:%M").to_string()}, "night_default": {"from": NIGHT.0, "to": NIGHT.1}})
+}
+
+// ── as routines ──────────────────────────────────────────────────────────────────────────────
+
+/// Where a job's output goes, as a routine's `to`.
+fn sends(id: &str) -> &'static [&'static str] {
+    match id {
+        "needs" => &["today"],
+        "thread_sync" => &["thread_work"],
+        "fetch" => &["thread_sources"],
+        "minutes" => &["minutes"],
+        "prep" => &["prep"],
+        "brain_reader" => &["recall"],
+        "live_notes" => &["live_notes"],
+        _ => &[],
+    }
+}
+
+/// When a job runs, in words, and whether on a timer or on events.
+fn schedule(id: &str) -> Value {
+    let (text, kind) = match id {
+        "needs" | "prep" => (format!("Every {} min", number(id, "every")), "timer"),
+        "brain_reader" => (format!("Every {} min · {} a pass", number(id, "every"), number(id, "per_pass")), "timer"),
+        "fetch" => (format!("Every {} min a source", number(id, "every")), "timer"),
+        "minutes" => (format!("{} min after a call", number(id, "delay")), "event"),
+        "live_notes" => (format!("Every {} s during a call", number(id, "every_s")), "event"),
+        _ => (next_words(id).map(|w| w[..1].to_uppercase() + &w[1..]).unwrap_or_default(), "event"),
+    };
+    json!({"text": text, "kind": kind})
+}
+
+/// A run as a routine's run (the one shape for every routine's runs, `plugin-api.md` § Routines): the run's own
+/// fields, plus `state` ("done" | "failed"; a user routine's also "empty", "running"), `sent` (where its result went)
+/// and `trial` (a user routine's "Try it").
+fn as_routine_run(r: &Value) -> Value {
+    let mut x = r.clone();
+    x["state"] = json!(if r["ok"] == false { "failed" } else { "done" });
+    x["sent"] = json!([]);
+    x["trial"] = json!(false);
+    x
+}
+
+/// Echo's jobs as routines, the Scheduler's one shape for every routine (source "system"):
+/// `{routines: [...], night: {from, to, default}}`.
+pub fn routines() -> Value {
+    let l = list();
+    let now = Local::now();
+    let running = RUNNING.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let routines: Vec<Value> = l["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|j| {
+            let id = j["id"].as_str().unwrap_or("");
+            let model = j["fields"].as_array().into_iter().flatten().find(|f| f["kind"] == "model").map_or(Value::Null, |f| json!({"value": f["value"], "default": f["default"]}));
+            let last = if j["last"].is_null() { Value::Null } else { as_routine_run(&j["last"]) };
+            let all = read_runs(id);
+            let since = (now - chrono::Duration::days(30)).to_rfc3339();
+            let month_runs: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t >= since.as_str())).collect();
+            let tokens: u64 = month_runs.iter().map(|r| ["input", "output", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
+            let cached: u64 = month_runs.iter().filter_map(|r| r["cache_read"].as_u64()).sum();
+            json!({"id": id, "source": "system", "name": j["name"], "what": j["what"], "enabled": true, "to": sends(id), "schedule": schedule(id),
+                   "next_run": j["next_run"], "next": j["next"], "paused_until": if paused(id, now.time()) { json!(after_night(now).to_rfc3339()) } else { Value::Null },
+                   "running": running.contains(&id), "last": last, "model": model,
+                   "month": {"runs": j["month"]["runs"], "failed": j["month"]["failed"], "tokens": tokens, "cached": cached, "cost": j["month"]["cost"], "daily": j["month"]["daily"]},
+                   "settings": j["fields"]})
+        })
+        .collect();
+    json!({"routines": routines, "night": {"from": l["night"]["from"], "to": l["night"]["to"], "default": l["night_default"]}})
+}
+
+/// A job's runs as routine runs, newest first.
+pub fn routine_runs(job: &str, limit: usize) -> Result<Vec<Value>> {
+    Ok(runs(job, limit)?.iter().map(as_routine_run).collect())
 }
 
 /// `echoctl jobs set <job> key=value …` (`key=` back to the default), and `night from=HH:MM to=HH:MM`. All checked,
@@ -601,8 +707,9 @@ mod tests {
         let f = runs_file("fetch");
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(&f, format!("{}\n", json!({"started": old.to_rfc3339(), "ok": true, "summary": "old"}))).unwrap();
-        record("fetch", Local::now() - chrono::Duration::days(1), Ok("yesterday".into()), json!({"cost_usd": 0.25}));
-        record("fetch", Local::now(), Err("today".into()), json!({"cost_usd": 0.5}));
+        let noon = |days: u64| (Local::now().date_naive() - chrono::Days::new(days)).and_hms_opt(12, 0, 0).unwrap().and_local_timezone(Local).earliest().unwrap();
+        record("fetch", noon(1), Ok("yesterday".into()), json!({"cost_usd": 0.25}));
+        record("fetch", noon(0), Err("today".into()), json!({"cost_usd": 0.5}));
         let got = runs("fetch", usize::MAX).unwrap();
         assert_eq!(got.iter().map(|r| r["summary"].as_str().or(r["error"].as_str()).unwrap()).collect::<Vec<_>>(), ["today", "yesterday"], "the run of 40 days ago is gone");
         let l = list();
@@ -614,6 +721,33 @@ mod tests {
         assert!(fetch["last"]["duration_ms"].is_number());
         assert_eq!((fetch["next_run"].clone(), fetch["next"].clone()), (Value::Null, json!("each followed source every 30 min")));
         assert_eq!(l["night_default"], json!({"from": "22:30", "to": "07:00"}));
+    }
+
+    #[test]
+    fn echos_jobs_read_as_routines_in_the_schedulers_one_shape() {
+        let (_env, _) = paths::testenv::folders("jobs-routines");
+        record("thread_sync", Local::now(), Ok("Acme: 1 item read".into()), json!({"calls": 7, "input": 100, "output": 10, "cache_read": 50, "cost_usd": 0.3, "model": "sonnet"}));
+        record("fetch", Local::now(), Err("mail: unreachable".into()), json!({}));
+        let r = routines();
+        let get = |id: &str| r["routines"].as_array().unwrap().iter().find(|x| x["id"] == id).unwrap().clone();
+        let ts = get("thread_sync");
+        assert_eq!((ts["source"].clone(), ts["enabled"].clone(), ts["schedule"]["kind"].clone(), ts["to"].clone(), ts["running"].clone()), (json!("system"), json!(true), json!("event"), json!(["thread_work"]), json!(false)));
+        assert_eq!((ts["last"]["state"].clone(), ts["last"]["summary"].clone(), ts["last"]["cost_usd"].clone(), ts["last"]["sent"].clone(), ts["last"]["trial"].clone()), (json!("done"), json!("Acme: 1 item read"), json!(0.3), json!([]), json!(false)));
+        assert!(ts["next_run"].is_null() && ts["next"].is_string());
+        assert_eq!((ts["month"]["runs"].clone(), ts["month"]["tokens"].clone(), ts["month"]["cached"].clone(), ts["month"]["cost"].clone()), (json!(1), json!(110), json!(50), json!(0.3)));
+        assert_eq!(ts["month"]["daily"].as_array().unwrap().len(), 30);
+        assert_eq!(get("needs")["schedule"], json!({"text": "Every 5 min", "kind": "timer"}));
+        assert!(get("fetch")["model"].is_null(), "no model to choose");
+        assert_eq!(get("needs")["model"]["value"], "");
+        let runs = routine_runs("fetch", 5).unwrap();
+        assert_eq!((runs[0]["state"].clone(), runs[0]["error"].clone(), runs[0]["ok"].clone(), runs[0]["cost_usd"].clone()), (json!("failed"), json!("mail: unreachable"), json!(false), Value::Null));
+        let runs = routine_runs("thread_sync", 5).unwrap();
+        assert_eq!((runs[0]["input"].clone(), runs[0]["cache_read"].clone(), runs[0]["model"].clone(), runs[0]["state"].clone()), (json!(100), json!(50), json!("sonnet"), json!("done")));
+        assert_eq!(r["night"]["default"], json!({"from": "22:30", "to": "07:00"}));
+        let held = begin("prep");
+        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "prep").unwrap()["running"], true);
+        held.done(None);
+        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "prep").unwrap()["running"], false);
     }
 
     #[test]

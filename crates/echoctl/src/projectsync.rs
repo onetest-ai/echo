@@ -70,7 +70,16 @@ pub fn run(id: &str) -> Result<Value> {
 /// As the app's scheduler syncs (`echoctl project ledger <id> run --scheduled`): mail and chat wait for their batch.
 pub fn run_scheduled(id: &str) -> Result<Value> {
     let started = Local::now();
-    let v = run_with(id, true)?;
+    let v = match run_with(id, true) {
+        Ok(v) => v,
+        Err(e) => {
+            // A sync that failed: a run of the thread sync job too (said in Echo's words; the thread says why).
+            if !format!("{e:#}").contains("being synced already") {
+                crate::jobs::record("thread_sync", started, Err("a thread's sync failed (the thread says why)".into()), json!({}));
+            }
+            return Err(e);
+        }
+    };
     // A sync that went to the model (one held for its batch, or with nothing new, didn't): a run of the thread sync
     // job, its passes' usage summed.
     if v.get("run").is_some() {
@@ -82,9 +91,8 @@ pub fn run_scheduled(id: &str) -> Result<Value> {
             used["calls"] = json!(used["calls"].as_u64().unwrap_or(0) + u["turns"].as_u64().unwrap_or(0));
             used["cost_usd"] = json!(used["cost_usd"].as_f64().unwrap_or(0.0) + u["cost_usd"].as_f64().unwrap_or(0.0));
         }
-        let name = projects::load(id).map(|p| p.name).unwrap_or_else(|_| id.to_string());
-        let first = v["message"].as_str().unwrap_or("").lines().next().unwrap_or("").to_string();
-        let outcome = if v["state"] == "done" { Ok(format!("{name}: {first}")) } else { Err(format!("{name}: {first}")) };
+        let n = v["read"].as_u64().unwrap_or(0);
+        let outcome = if v["state"] == "done" { Ok(format!("{n} item{} read into a thread", if n == 1 { "" } else { "s" })) } else { Err("a thread's sync failed (the thread says why)".into()) };
         used["model"] = v["model"].clone();
         crate::jobs::record("thread_sync", started, outcome, used);
     }
@@ -215,8 +223,11 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         // A run of the fetch job when a source was due: what it brought, or why it couldn't.
         if fetching {
             let n = written.len() - fetch_from;
-            let outcome = if fetch_errors.is_empty() { Ok(format!("{}: {n} new item{}", p.name, if n == 1 { "" } else { "s" })) } else { Err(format!("{}: {}", p.name, fetch_errors.join("; "))) };
-            crate::jobs::record("fetch", fetch_at, outcome, json!({}));
+            // Recorded when it brought something or failed (a look that found nothing leaves no run).
+            if n > 0 || !fetch_errors.is_empty() {
+                let outcome = if fetch_errors.is_empty() { Ok(format!("{n} new item{}", if n == 1 { "" } else { "s" })) } else { Err("mail or a meeting chat couldn't be read (the thread says why)".into()) };
+                crate::jobs::record("fetch", fetch_at, outcome, json!({}));
+            }
         }
     }
     let backlog = ledger::pending(id)?;
@@ -317,7 +328,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         }
         let _ = fs::remove_file(&settings);
         let left = ledger::pending_count(id)?;
-        Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id, "model": model,
+        Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id, "model": model, "read": reading,
                   "processed": before.saturating_sub(left), "left": left, "usage": used,
                   "message": format!("{extract_report}\n{verify_report}\n{}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at, started)).unwrap_or_default()).trim().to_string()}))
     })();

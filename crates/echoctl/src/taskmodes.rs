@@ -87,7 +87,7 @@ pub fn classify_in_background() {
             Ok(n) => run.done((n > 0).then(|| format!("{n} task{} sorted by who can do {}", if n == 1 { "" } else { "s" }, if n == 1 { "it" } else { "them" }))),
             Err(e) => {
                 eprintln!("task modes: {e:#}");
-                run.failed(&format!("task modes: {e:#}"));
+                run.failed("tasks couldn't be sorted (Echo's log says why)");
             }
         }
         RUNNING.store(false, Ordering::SeqCst);

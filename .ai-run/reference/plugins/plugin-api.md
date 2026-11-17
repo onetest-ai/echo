@@ -132,6 +132,26 @@ plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence
   default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec; an
   install in a routine's or Yolo's run preparing and asking is refused. Evidence: `capabilities::describe_channel`
 
+## Routines
+
+The one shape for every routine, whoever's it is: the user's (the Scheduler's own, mapped by it), Echo's jobs
+(`source: "system"`) and later a plugin's (`"plugin:<id>"`). A plugin that shows routines draws them all from it.
+
+- **Routine:** `{id, source, name, what, enabled, to: ["today" | "thread_work" | "thread_sources" | "minutes" | "prep" |
+  "recall" | "live_notes" | "mail" | "teams" | …], schedule: {text, kind: "time" | "timer" | "event"}, next_run (ISO,
+  or null), next (in words, for one that runs on events, or null), paused_until (ISO while paused at night, or null),
+  running, last (a run, or null), model ({value, default}, or null when it has none to choose), month: {runs, failed,
+  tokens, cached, cost, daily: [{day: "YYYY-MM-DD", runs, failed, cost}] × 30, oldest first, ending today}, settings
+  (what it lets the user change: `{key, label, kind: "number" | "night" | "model", value, default, range, set}`)}`.
+- **Run:** `{started, ended, duration_ms, state: "done" | "empty" | "failed" | "running", ok, summary?, error?, model?,
+  calls?, input?, output?, cache_read?, cache_write?, cost_usd?, sent: [...], trial}` — `summary` or `error` one line;
+  `sent` where its result went; `trial` a "Try it" run. A run with no model has no tokens or cost. An Echo job's
+  `summary` / `error` is Echo's own words and counts, never a call's, thread's or person's name nor a model's text.
+- Echo's jobs: `ctx.echo.routines.list()` → `{routines, night: {from, to, default: {from, to}}}` and
+  `ctx.echo.routines.runs(id, {limit})` (newest first, 20 by default, 500 at most), for a plugin with `uses.echo.jobs`;
+  changes through `ctx.echo.jobs.set` (§ Client half). Echo keeps a job's runs 31 days; a pass that did nothing leaves
+  none. `echoctl jobs routines [--runs <job>]` prints the same. Evidence: `jobs::routines`, `jobs::routine_runs`
+
 ## Delivery
 
 `ctx.deliver.provide(kind, {label, send(msg)})` for a kind in `uses.deliver_provider.kinds` (never `teams` or `mail`);
@@ -451,6 +471,7 @@ Evidence: `jshost::work::check_rows`
   `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`,
   `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`). Echo takes out what a plugin
   added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
+- `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, where
   it shows, its fields with value, default and range, its last run, next run or what it waits for, the last 30 days by
   day with cost, today's counts, and the night with Echo's default); `runs(job, {limit})` — its runs, newest first, as

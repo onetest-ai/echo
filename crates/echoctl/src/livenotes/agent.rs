@@ -302,7 +302,7 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
                     let n = |k: &str| x[k].as_u64().unwrap_or(0);
                     let used = serde_json::json!({"calls": v["num_turns"].as_u64().unwrap_or(1), "input": n("input_tokens"), "output": n("output_tokens"),
                         "cache_read": n("cache_read_input_tokens"), "cache_write": n("cache_creation_input_tokens"), "cost_usd": v["total_cost_usd"].as_f64()});
-                    let outcome = if v["is_error"] == true { Err(v["result"].as_str().unwrap_or("it failed").to_string()) } else { Ok("live notes of a call".to_string()) };
+                    let outcome = if v["is_error"] == true { Err("the live notes session failed".to_string()) } else { Ok("live notes of a call".to_string()) };
                     crate::jobs::record("live_notes", session_started, outcome, used);
                     result = Some(v);
                     break;

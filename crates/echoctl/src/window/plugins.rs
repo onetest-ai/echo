@@ -148,6 +148,21 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     Err(e) => json!({"error": format!("{e:#}")}),
                 }));
             }
+            // Echo's jobs as routines and their runs (`ctx.echo.routines`), read only.
+            if let Some(id) = rest.strip_suffix("/routines").filter(|id| crate::plugins::valid_id(id)) {
+                return Some(json_reply(match crate::jshost::may_tune_jobs(id) {
+                    Ok(()) => json!({"value": crate::jobs::routines()}),
+                    Err(e) => json!({"error": format!("{e:#}")}),
+                }));
+            }
+            if let Some(id) = rest.strip_suffix("/routines/runs").filter(|id| crate::plugins::valid_id(id)) {
+                let q = req.uri().query().unwrap_or("");
+                let limit = query_param(q, "limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(20).min(500);
+                return Some(json_reply(match crate::jshost::may_tune_jobs(id).and_then(|()| crate::jobs::routine_runs(&query_param(q, "id").unwrap_or_default(), limit)) {
+                    Ok(v) => json!({"value": v}),
+                    Err(e) => json!({"error": format!("{e:#}")}),
+                }));
+            }
             // A job's runs (`ctx.echo.jobs.runs`), read only.
             if let Some(id) = rest.strip_suffix("/jobs/runs").filter(|id| crate::plugins::valid_id(id)) {
                 let q = req.uri().query().unwrap_or("");

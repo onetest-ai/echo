@@ -119,6 +119,11 @@ enum JobsCmd {
     List,
     /// Tune a job (`echoctl jobs` lists their keys): key=value …, key= for its default; `night from=HH:MM to=HH:MM`
     Set { job: String, settings: Vec<String> },
+    /// Echo's jobs as routines (JSON), the Scheduler's one shape for every routine; `--runs <job>`: its runs as such
+    Routines {
+        #[arg(long)]
+        runs: Option<String>,
+    },
     /// A job's runs, newest first (JSON): when, how it ended, its model, tokens and cost
     Runs {
         job: String,
@@ -855,6 +860,8 @@ fn main() -> Result<()> {
                 None | Some(JobsCmd::List) => jobs::list(),
                 Some(JobsCmd::Set { job, settings }) => jobs::set(&job, &settings)?,
                 Some(JobsCmd::Runs { job, limit }) => serde_json::json!(jobs::runs(&job, limit)?),
+                Some(JobsCmd::Routines { runs: None }) => jobs::routines(),
+                Some(JobsCmd::Routines { runs: Some(job) }) => serde_json::json!(jobs::routine_runs(&job, 20)?),
             };
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())

@@ -476,11 +476,11 @@ pub fn start_scheduler() {
                 match refresh() {
                     Ok(()) => {
                         let n = view()["items"].as_array().map_or(0, Vec::len);
-                        run.done(Some(format!("{n} item{} in Needs you now", if n == 1 { "" } else { "s" })));
+                        run.done_if_used(format!("{n} item{} in Needs you now", if n == 1 { "" } else { "s" }));
                     }
                     Err(e) => {
                         eprintln!("needs you now: {e:#}");
-                        run.failed(&format!("{e:#}"));
+                        run.failed("Teams or mail couldn't be read");
                     }
                 }
             }
