@@ -1496,7 +1496,8 @@ mod tests {
         assert_eq!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").unwrap(), "skip");
         let line = describe_claude(&json!({})).unwrap();
         assert!(line.contains("acting on its own as you set routines in Settings") && !line.contains("you mark so"), "{line}");
-        assert!(describe_claude(&json!({"skip": true})).unwrap().ends_with("; a run you mark so may skip every permission check"));
+        assert!(describe_claude(&json!({"skip": true})).unwrap().contains("permission check); a run you mark so may skip every permission check. In a folder"));
+        assert!(line.contains(". In a folder you gave it, Claude works with that folder's own Claude Code setup") && line.ends_with("for you to review — as you set routines"), "{line}");
         // Sends: the ways its sheet named, or its own way.
         let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
         assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());

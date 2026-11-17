@@ -273,7 +273,7 @@ pub(super) fn read_policy_json(f: &Path) -> Result<Value, String> {
 
 /// A policy document that can decide the route: a routing variable in its `env`, or a helper.
 /// Server-managed settings may wrap the settings in a `settings` object.
-pub(super) fn routes(v: &Value) -> bool {
+pub(crate) fn routes(v: &Value) -> bool {
     let doc = |v: &Value| {
         v["env"].as_object().is_some_and(|env| env.keys().any(|k| routing_var(k)))
             || v.get("apiKeyHelper").is_some()

@@ -31,7 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)"; with `{"skip": true}` it adds "; a run you mark so may skip every permission check" — only then is a run's own `tools: "skip"` honoured |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines" |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -199,6 +199,33 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
 
   What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`).
   Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
+- In a folder it was given (needs `uses.folders`): `await ctx.claude.run({folder, path, mode, prompt, title, profile,
+  model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
+  Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load
+  (`--setting-sources user,project` on a profile of Echo's own, as the run's last arguments; the user's own Claude
+  Code setup and a wrapper load them anyway), none of Echo's session (no Echo CLI, Brain, plugins' skills or Echo's
+  hooks), no MCP server (`--strict-mcp-config`), never Bash or the web. With `path`, Claude Code starts in that
+  subfolder: the project is the subfolder's — its `.claude` (skills, settings, hooks), and the `CLAUDE.md` files of
+  the subfolder and of the folders above it. `mode`:
+  - `read` (the default): `--tools Read,Grep,Glob,Skill`;
+  - `edit` (needs `folders.write`): `--tools Read,Grep,Glob,Skill,Edit,Write` — Claude Code keeps its edits inside the
+    folder;
+  - `copy`: the `edit` run on a snapshot of the folder in its store (`ctx.fs.snapshot` with dot names, so `.claude`
+    comes along; never `.git` or `.obsidian/plugins`, its caps and its 3-snapshot limit), the folder itself untouched;
+    the result's `snapshot` is the snapshot's answer (`{path, files, bytes, skipped, why}`), for the plugin to compare
+    with the folder and apply what the user accepts (`ctx.fs.write`); nothing is applied by Echo. A `path` the
+    snapshot left out is refused before the run, and a run that fails removes its snapshot.
+
+  Its permissions are the user's setting for routines (Settings → AI & minutes → Claude's permissions), by
+  `folder_args::permission_args`: Auto — `--permission-mode auto` where the profile's model has auto mode, else
+  `acceptEdits` for `edit` and `copy` and `dontAsk` for `read`; Skip all permission checks —
+  `--dangerously-skip-permissions` in every mode. A plugin can't choose a permission mode or tools of its own (`tools`
+  is ignored there). Its record (`permissions.json`) and log name the mode it asked (`read`, `edit` or `copy`) and the
+  permissions it runs with; a start in another permission mode than asked is said there too. On a profile of Echo's
+  own, a folder whose `.claude/settings.json` could route the run elsewhere (a routing variable in its `env`, a key or
+  policy helper; or not JSON) is refused. A call's text reaches the run only as the plugin puts it in the prompt: Echo
+  can't see it there, so a plugin that does passes the call's `profile` (`ctx.echo.read('source', …)`). Evidence:
+  `claudejob::in_folder`, `jshost::folders::claude_folder`
 - `ctx.claude.installPlugin(spec)` installs the channel plugin the manifest names (`uses.channel.plugin`) into the
   default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec.
   Evidence: `capabilities::describe_channel`

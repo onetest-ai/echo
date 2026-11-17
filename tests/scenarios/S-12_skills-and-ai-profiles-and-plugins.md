@@ -58,6 +58,7 @@ cases:
   - tests/cases/plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md
   - tests/cases/plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md
   - tests/cases/plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md
+  - tests/cases/plugins/TC-090_a-plugin-runs-claude-in-its-folder-as-that-folders-own-project.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -145,6 +146,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 52 | `plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |
 | 53 | `plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Last of the git stages on `$D/history` (step 2 leaves the repository refused); its teardown removes Acme history and `acme-git` |
 | 54 | `plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md` | — | Stage 53 removed Acme history and `acme-git`: run its precondition lines as written (its own vault, `$D/layout`) |
+| 55 | `plugins/TC-090_a-plugin-runs-claude-in-its-folder-as-that-folders-own-project.md` | — | Its own marketplace `acme-tidy`, folder `$D/tidy` and profile `acme-work`: run its precondition lines as written; step 5 uses the scenario's `{{base_url}}` |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

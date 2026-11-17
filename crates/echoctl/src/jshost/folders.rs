@@ -489,6 +489,49 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
     Ok(json!({"path": at, "files": files, "bytes": bytes, "skipped": large + unreadable, "why": {"large": large, "unreadable": unreadable}}))
 }
 
+/// `ctx.claude.run({folder, path, mode})`: the run goes into a folder given to the plugin (`uses.folders`; `edit` also
+/// `folders.write`), at `path` inside it — or, for `copy`, into a snapshot of it (`snapshot`, dot names too, so the
+/// folder's `.claude` comes along), whose answer is the run's `snapshot` for the plugin to compare and apply. No
+/// `folder`: the run as before (`mode` and `path` then refused).
+pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
+    use crate::claudejob::{FolderMode, InFolder};
+    let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
+    if root.is_empty() {
+        if !arg["mode"].is_null() || !path.is_empty() {
+            bail!("a run's mode and path go with a folder it was given (folder)");
+        }
+        return Ok(None);
+    }
+    uses(id, "folders")?;
+    let mode = FolderMode::parse(arg["mode"].as_str().unwrap_or(""))?;
+    if mode == FolderMode::Edit {
+        uses_flag(id, "folders", "write")?;
+    }
+    let cwd = crate::grants::resolve(id, root, path)?;
+    if !cwd.is_dir() {
+        bail!("“{path}” isn't a folder in {root}");
+    }
+    let (cwd, snap) = match mode {
+        // The path in the snapshot: a subfolder it left out (`.git`, a cap) refuses the run, and the snapshot goes.
+        FolderMode::Copy => {
+            let s = snapshot(id, root, &json!({"hidden": true}))?;
+            let at = store_path(id, s["path"].as_str().unwrap_or(""))?;
+            let inner = dunce::canonicalize(&at).map_err(anyhow::Error::from).and_then(|a| crate::grants::inside(&a, path)).and_then(|c| Ok(dunce::canonicalize(c)?));
+            match inner {
+                Ok(c) if c.is_dir() => (c, Some(s)),
+                _ => {
+                    let _ = std::fs::remove_dir_all(&at);
+                    bail!("“{path}” isn't in the copy of {root} (a copy leaves out .git and what is over its caps)");
+                }
+            }
+        }
+        _ => (dunce::canonicalize(&cwd)?, None),
+    };
+    spec.folder = Some(InFolder { cwd, mode });
+    spec.session = false;
+    Ok(snap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,6 +905,92 @@ mod tests {
         assert!(lock_file("counter").exists(), "written under the plugin's lock");
         plugins::remove("counter", false).unwrap();
         assert!(!lock_file("counter").exists(), "its lock goes with its data");
+        sync();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_claude_run_goes_into_a_folder_given_to_the_plugin_edits_only_with_write_and_copy_answers_its_snapshot() {
+        let (_env, root) = paths::testenv::folders("jshost-folders-claude");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        crate::ai::set_default("work").unwrap();
+        let cwd = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.cwd")).unwrap_or_default().trim().to_string();
+        let started = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).is_ok();
+        let forget = || {
+            let _ = std::fs::remove_file(crate::ai::fake::file(&p, "p.args"));
+        };
+        let vault = root.join("acme-vault");
+        std::fs::create_dir_all(vault.join(".claude/skills/tidy")).unwrap();
+        std::fs::create_dir_all(vault.join("Notes")).unwrap();
+        std::fs::write(vault.join("CLAUDE.md"), "# Acme vault\n").unwrap();
+        std::fs::write(vault.join(".claude/skills/tidy/SKILL.md"), "---\nname: tidy\ndescription: Tidy.\n---\n").unwrap();
+        std::fs::write(vault.join("Notes/Acme.md"), "# Acme\n").unwrap();
+        std::fs::create_dir_all(vault.join(".git")).unwrap();
+        let other = root.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        install(&root, "reader", json!({"claude": {}, "folders": {"what": "vaults"}}));
+        install(&root, "writer", json!({"claude": {}, "folders": {"what": "vaults", "write": true}}));
+        install(&root, "asker", json!({"claude": {}}));
+        for id in ["reader", "writer"] {
+            crate::grants::grant(id, &vault).unwrap();
+        }
+        sync();
+        let vault = dunce::canonicalize(&vault).unwrap();
+        let v = vault.display().to_string();
+        let claude = |id: &str, mut a: Value| {
+            a["prompt"] = json!("Tidy the notes");
+            a["dir"] = json!("runs/x");
+            service_async(id, "claude.run", &a)
+        };
+        // Read: in the folder, or a subfolder of it.
+        let _ = claude("reader", json!({"folder": v, "mode": "read"}));
+        assert_eq!(cwd(), v);
+        let _ = claude("reader", json!({"folder": v, "path": "Notes"}));
+        assert_eq!(cwd(), vault.join("Notes").display().to_string(), "read is the default mode");
+        // Refused before anything starts: no folders on its sheet, a folder not given, a path out of it, a mode Echo
+        // doesn't know, a path or mode with no folder, and editing without folders.write.
+        forget();
+        let refused = [
+            claude("asker", json!({"folder": v})),
+            claude("reader", json!({"folder": other.display().to_string()})),
+            claude("reader", json!({"folder": v, "path": "../other"})),
+            claude("reader", json!({"folder": v, "path": "Notes/Acme.md"})),
+            claude("reader", json!({"folder": v, "mode": "bypassPermissions"})),
+            claude("reader", json!({"mode": "edit"})),
+            claude("reader", json!({"folder": v, "mode": "edit"})),
+        ];
+        let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
+        assert!(why[0].contains("“folders”") && why[1].contains("isn't one of the folders you gave") && why[3].contains("isn't a folder"), "{why:?}");
+        assert!(why[4].contains("read, edit or copy") && why[5].contains("go with a folder") && why[6].contains("“folders.write”"), "{why:?}");
+        assert!(!started(), "nothing started");
+        // Edit, with folders.write: in the folder itself.
+        let _ = claude("writer", json!({"folder": v, "mode": "edit"}));
+        assert_eq!(cwd(), v);
+        // Copy (no write needed): in a snapshot of it in the store, its `.claude` too, the folder left as it was; the
+        // answer names the snapshot.
+        std::fs::write(crate::ai::fake::file(&p, "p.result"), json!({"type": "result", "subtype": "success", "result": "Tidied", "usage": {}}).to_string() + "\n").unwrap();
+        let out = claude("reader", json!({"folder": v, "mode": "copy"})).unwrap();
+        assert_eq!(out["answer"], "Tidied");
+        let at = out["snapshot"]["path"].as_str().unwrap().to_string();
+        assert!(at.starts_with("cache/snapshots/"), "{out}");
+        let snap = dunce::canonicalize(plugins::data_dir("reader").join(&at)).unwrap();
+        assert_eq!(cwd(), snap.display().to_string());
+        assert!(snap.join("CLAUDE.md").is_file() && snap.join(".claude/skills/tidy/SKILL.md").is_file() && snap.join("Notes/Acme.md").is_file());
+        // A copy run that fails leaves no snapshot behind (the plugin never got its name).
+        std::fs::remove_file(crate::ai::fake::file(&p, "p.result")).unwrap();
+        assert!(claude("reader", json!({"folder": v, "mode": "copy"})).is_err());
+        let kept: Vec<_> = std::fs::read_dir(plugins::data_dir("reader").join("cache/snapshots")).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(kept.len(), 1, "only the answered one: {kept:?}");
+        // A copy run into what a copy leaves out (`.git`): refused before Claude Code starts, its snapshot gone too.
+        forget();
+        let e = claude("reader", json!({"folder": v, "path": ".git", "mode": "copy"})).unwrap_err();
+        assert!(e.to_string().contains("isn't in the copy of") && !started(), "{e}");
+        let kept: Vec<_> = std::fs::read_dir(plugins::data_dir("reader").join("cache/snapshots")).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(kept.len(), 1, "no snapshot left by the refused run: {kept:?}");
+        for id in ["reader", "writer", "asker"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 }
