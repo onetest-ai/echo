@@ -257,8 +257,7 @@ const PRELUDE: &str = r#"
        *  most), never over a file unless `createNew: false`: {path, size}. */
       copyIn: (file, root, path, opts) => later('fs.copy_in', [file, String(root), String(path), opts || {}]),
     },
-    /** Git in a folder it was given, off its time slice: info, status, log, show; init and commit with folders.write. */
-    git: Object.fromEntries(['info', 'status', 'log', 'show', 'init', 'commit'].map((v) => [v, (root, ...a) => later(`git.${v}`, [String(root), ...a])])),
+    git: Object.fromEntries(['info', 'status', 'log', 'show', 'init', 'commit'].map((v) => [v, (root, ...a) => later(`git.${v}`, [String(root), ...a])])), /** Git in a folder it was given, off its time slice: info, status, log, show; init and commit with folders.write. */
     /** Files the user handed it — picked, dropped on its view, passed to a command — as handles {file, name, size}
      *  (an hour): `read(file, {max})` → text (1 MB by default, 4 MB at most). */
     files: { read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]) },
