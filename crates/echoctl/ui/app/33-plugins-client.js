@@ -70,14 +70,16 @@ const JobsAsked = {}
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], windowListeners: [], styles: [], cleanups: [] }
+  // Unloaded since (a timer it didn't clear): what it adds now would never be taken out.
+  const gone = () => Plugins.owned[id] !== owned
   return {
     id,
     /** A document listener that goes when the plugin is switched off, updated or removed. */
     listen: (type, fn, opts) => { document.addEventListener(type, fn, opts); owned.listeners.push([type, fn, opts]) },
     /** The same for a window listener (resize, focus, message). */
-    listenWindow: (type, fn, opts) => { window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
+    listenWindow: (type, fn, opts) => { if (gone()) return; window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
     /** Its own cleanup (timers, observers), run when it is switched off, updated or removed. */
-    onUnload: (fn) => { owned.cleanups.push(fn) },
+    onUnload: (fn) => { if (!gone()) owned.cleanups.push(fn) },
     call: async (command, args = {}) => {
       const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
       if (r && r.error) throw new Error(r.error)
@@ -165,10 +167,12 @@ function pluginCtx(id) {
     /** Echo's own pieces, so a plugin looks like Echo. */
     ui: {
       esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
-      /** Replace a box's HTML only when it changed (Echo's own `patch`): redrawn the same, its focus, typed text and scroll stay. */
+      /** Echo's own `patch`: replaces a box's HTML unless it is what `patch` last wrote there (the first call on a fresh box
+       *  writes it), so redrawn the same, its focus, typed text and scroll stay. */
       patch,
       /** A stylesheet of its installed package (`styles/view.css`), resolved when loaded; taken out when it unloads. */
       stylesheet: (path) => new Promise((resolve, reject) => {
+        if (gone()) { reject(new Error('the plugin is no longer loaded')); return }
         let href
         try { href = pluginStylesheetHref(id, path, Plugins.loaded[id]) } catch (e) { reject(e); return }
         const el = document.createElement('link')
@@ -257,7 +261,7 @@ function unloadPlugin(id) {
 // `plugin-client-ctx.test.mjs`). Only a plain relative `.css` path inside the package; versioned so an update reloads it.
 function pluginStylesheetHref(id, path, version) {
   const p = String(path)
-  if (!/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_.-]+)*\.css$/.test(p) || p.split('/').some((x) => x === '..' || x === '.')) throw new Error(`Not a stylesheet of the plugin: ${p}`)
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*(\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*\.css$/.test(p)) throw new Error(`Not a stylesheet of the plugin: ${p}`)
   return `plugin/${encodeURIComponent(id)}/${p}?v=${encodeURIComponent(version || '')}`
 }
 // end of the plugin stylesheet block

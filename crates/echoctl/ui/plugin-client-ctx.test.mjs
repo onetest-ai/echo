@@ -11,8 +11,9 @@ assert.ok(a >= 0 && b > a, 'the plugin stylesheet block not found in app.js')
 const href = new Function(`${src.slice(a, b)}\nreturn pluginStylesheetHref`)()
 
 assert.equal(href('acme-greeter', 'view.css', '0.2.0'), 'plugin/acme-greeter/view.css?v=0.2.0')
+assert.equal(href('acme-greeter', 'view.min.css', '1'), 'plugin/acme-greeter/view.min.css?v=1', 'a dot in a root file name')
 assert.equal(href('acme-greeter', 'styles/dark.v2.css', '0.2.0:abc'), 'plugin/acme-greeter/styles/dark.v2.css?v=0.2.0%3Aabc', 'versioned: an update loads it afresh')
-for (const bad of ['../x.css', 'styles/../../x.css', './x.css', 'a/./x.css', '/etc/x.css', 'a\\x.css', 'https://cdn.example/x.css', 'x.js', 'x.css?y', '.css', ''])
+for (const bad of ['../x.css', 'styles/../../x.css', './x.css', 'a/./x.css', '.hidden.css', 'styles/.x.css', 'a//x.css', '/etc/x.css', 'a\\x.css', 'https://cdn.example/x.css', 'x.js', 'x.css?y', '.css', ''])
   assert.throws(() => href('acme-greeter', bad, '1'), /Not a stylesheet of the plugin/, bad)
 
 // unloadPlugin, with the helper it calls (slotForget) and fakes for the page's document and window.

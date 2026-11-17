@@ -473,9 +473,11 @@ Evidence: `jshost::work::check_rows`
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `patch(el, html)`
-  (replaces a box's HTML only when it changed: redrawn the same, its focus, typed text and scroll stay), `setRow`, `setCard`, `sw`, `ICON`,
+  (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
+  stay), `setRow`, `setCard`, `sw`, `ICON`,
   `relDay`, `ago`, `notice`, `copy`, `style(css)`, `stylesheet(path)` (a `.css` file of its package by a plain relative
-  path, resolved once loaded; anything else is refused), `graph`, `newGraph`). Echo takes out what a plugin added when
+  path whose parts don't start with a dot, resolved once loaded; anything else is refused; what a plugin adds after it was
+  unloaded is refused), `graph`, `newGraph`). Echo takes out what a plugin added when
   it unloads, and runs its `onUnload` cleanups first (one that throws is logged, the rest still run). Evidence:
   `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).

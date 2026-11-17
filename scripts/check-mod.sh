@@ -71,6 +71,7 @@ node crates/echoctl/ui/fingerprint.test.mjs
 node crates/echoctl/ui/plugin-work-rows.test.mjs
 # The plugins' rows of a thread's Profile: each drawn on its own, one that throws or repeats left out, after once per box drawn afresh, gone with its plugin (threadSlotRows, threadSlotAfter, #464).
 node crates/echoctl/ui/thread-slot.test.mjs
+# A plugin's window half: the stylesheets it may load, and what unloading it takes out.
 node crates/echoctl/ui/plugin-client-ctx.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs
