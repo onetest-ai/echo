@@ -43,6 +43,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `files.read` | other apps' files, each named in full, read with `ctx.system.readFile(entry)` |
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
 | `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
+| `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -450,6 +451,12 @@ Evidence: `jshost::work::check_rows`
   `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`,
   `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`). Echo takes out what a plugin
   added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
+- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, its
+  fields with value, default and range, last run, runs today, and the night); `set(job, ["key=value", …])` — only on the
+  user's click or key (`copyAllowed`, else it throws before anything is sent), checked as `echoctl jobs set` (`key=`
+  back to its default, `night` with `from` / `to`), resolving to the list after. Echo's routes:
+  `/api/plugin/<id>/jobs` and `/api/plugin/<id>/jobs/set?job=…&settings=[…]` (`window::plugins`). Echo's jobs run on
+  their own settings with or without the plugin. Evidence: `jshost::may_tune_jobs`, `jobs::set`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or

@@ -873,6 +873,15 @@ fn read_only_here(what: &str) -> Result<()> {
     Ok(())
 }
 
+/// A plugin's client half showing or tuning Echo's background jobs (echo-plugins R25): it is on, and its install sheet
+/// named `uses.echo.jobs`.
+pub fn may_tune_jobs(id: &str) -> Result<()> {
+    if !plugins::enabled().iter().any(|p| p.id == id) {
+        bail!("{id} isn't on");
+    }
+    uses_flag(id, "echo", "jobs")
+}
+
 /// …and, within it, `flag` set (the install sheet named that part).
 fn uses_flag(id: &str, cap: &str, flag: &str) -> Result<()> {
     if uses(id, cap)?[flag].as_bool() != Some(true) {

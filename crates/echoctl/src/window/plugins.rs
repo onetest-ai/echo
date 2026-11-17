@@ -140,6 +140,23 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         #[cfg(feature = "js")]
         p if p.starts_with("/api/plugin/") => {
             let rest = &p["/api/plugin/".len()..];
+            // Echo's background jobs, for a client half that asked for them (`ctx.echo.jobs`, echo-plugins R25): the
+            // list, and a change the page sends only on the user's own click or key (`jobs::set` checks it as the CLI).
+            if let Some((id, op)) = rest.split_once("/jobs").filter(|(id, _)| crate::plugins::valid_id(id)) {
+                let q = req.uri().query().unwrap_or("");
+                let r = crate::jshost::may_tune_jobs(id).and_then(|()| match op {
+                    "" => Ok(crate::jobs::list()),
+                    "/set" => {
+                        let settings: Vec<String> = query_param(q, "settings").and_then(|a| serde_json::from_str(&a).ok()).unwrap_or_default();
+                        crate::jobs::set(&query_param(q, "job").unwrap_or_default(), &settings)
+                    }
+                    _ => Err(anyhow::anyhow!("no such jobs request")),
+                });
+                return Some(json_reply(match r {
+                    Ok(v) => json!({"value": v}),
+                    Err(e) => json!({"error": format!("{e:#}")}),
+                }));
+            }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
                     let q = req.uri().query().unwrap_or("");

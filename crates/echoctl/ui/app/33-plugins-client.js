@@ -76,6 +76,24 @@ function pluginCtx(id) {
       if (r && r.error) throw new Error(r.error)
       return r ? r.value : null
     },
+    /** Echo's background jobs, when its manifest asks for `uses.echo.jobs` (echo-plugins R25): `list()` — every job, its
+     *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
+     *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */
+    echo: {
+      jobs: {
+        list: async () => {
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+        set: async (job, settings) => {
+          if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error("Echo's jobs change only on your click or key")
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs/set?job=${encodeURIComponent(String(job))}&settings=${encodeURIComponent(JSON.stringify((settings || []).map(String)))}`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+      },
+    },
     slots: {
       list: () => SLOTS.slice(),
       add: (slot, item) => { if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`); add(Plugins.slots[slot] = Plugins.slots[slot] || [], item) },
