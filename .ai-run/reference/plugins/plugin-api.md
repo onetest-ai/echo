@@ -134,7 +134,8 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 - Echo keeps its own files in the store and refuses a plugin's `ctx.store.write` of `settings.json`, `inbox.json`,
   `widgets.json`, `threads.json` or `work.json`, and its `ctx.store.remove` of `settings.json`, `threads.json`,
   `work.json` or the store folder itself: those change through `ctx.settings.set`, `ctx.inbox.set` / `clear`,
-  `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered.
+  `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered. The same for
+  `client-values.json` (write and remove), changed through `ctx.clients.set`.
   Evidence: `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file`
 - `ctx.http.fetch(url, {save: "<store path>"})` saves audio or a picture, shown from `/plugin/<id>/store/<path>` (media
   kinds only). Echo removes what lies in `cache/` over 7 days; the rest is the plugin's to remove with `ctx.store.remove`.
@@ -535,6 +536,15 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   threads gone left out). No grant needed. A `threads.json` that isn't JSON makes `get` and `list` fail and is moved
   aside as `threads.json.bad-<time>` at the next change; a thread id used again inherits nothing. A thread's changes
   arrive as `threads_changed` (§ Events). Evidence: `plugins::thread_values::changed`
+- `ctx.clients.set(client, key, value)` — the per-client twin of `ctx.threads` values, by a client's id (as
+  `ctx.echo.read('clients')` and the `client.profile` slot give it): the same limits (`key` 1–80 chars, `value` JSON of
+  16 KB at most, 64 keys a client, 4 MB a plugin in all); `null` removes it; refused for a client that isn't there (an
+  organisation that isn't a client included). `ctx.clients.get(client, key)` (null when none), `ctx.clients.list(key)`
+  (`[{client, value}]`, clients gone left out). No grant needed. Only the plugin's own keys: a key with a dot is
+  refused (no shared values per client), and Echo's own client fields (name, domains, …) are never reached through it.
+  Kept when the client is renamed (its id stays); dropped when it is removed, so a client later under the same id
+  inherits none; no event is told. The window half doesn't read them itself: it asks its host half (`ctx.call`).
+  Evidence: `plugins::client_values`
 - A key with a dot, `<ns>.<name>`, is shared with the other plugins of the marketplace: `ns` is the marketplace's
   declared `name` (`echo-marketplace.json`) in lower case, letters, digits and `-` (`Acme` → `acme.project_codes`) —
   per thread with `ctx.threads.get/set/list` (one value for every plugin; it follows the thread the same way; a
@@ -834,7 +844,7 @@ Evidence: `jshost::work::check_rows`
   `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
   permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
   (window script), `window::plugins::mic_open`
-- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `call.row`, `knowledge.tab` and
+- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `knowledge.tab` and
   `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
@@ -844,6 +854,8 @@ Evidence: `jshost::work::check_rows`
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is
   ignored), `after` runs once per box drawn afresh (fetch there, then `ctx.render()`), one row per id, and one that
   throws is left out, the Profile drawn without it. Evidence: `threadSlotRows`, `threadSlotAfter` (window script)
+- `ctx.slots.add('client.profile', {id, label, render(client) → HTML, after?(box, client)})`: as `thread.profile`, on a
+  client's Profile under its Threads; `client` is `{id, name}`. Evidence: `threadSlotRows`, `slotClient` (window script)
 - `ctx.slots.add('call.row', {id, label, chip(call) → text})`: a chip on each call's row in the calls list, in its
   second line, `call` `{name, title, started_at, status, memo}`; `chip` is synchronous and gives a short text (24
   characters, the rest cut with …) or nothing (no chip), drawn as text (Echo escapes it) with `label` as its tooltip;

@@ -23,16 +23,16 @@ pub const FILE: &str = "threads.json";
 /// The file's shape (`"v"`): anything else is #465's.
 const FORMAT: u64 = 2;
 /// One value, as JSON, at most this long.
-const MAX_VALUE: usize = 16 * 1024;
+pub(super) const MAX_VALUE: usize = 16 * 1024;
 /// Keys a thread may have, per plugin.
-const MAX_KEYS: usize = 64;
+pub(super) const MAX_KEYS: usize = 64;
 /// The whole file, at most this long.
-const MAX_FILE: usize = 4 * 1024 * 1024;
+pub(super) const MAX_FILE: usize = 4 * 1024 * 1024;
 /// Events for the app waiting in a file (a terminal's change), at most this long.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 const MAX_QUEUE: u64 = 4 * 1024 * 1024;
 /// How long a change waits for a plugin's lock: less than the projects' lock (10 s), held around it by a delete.
-const LOCK_WAIT: Duration = Duration::from_secs(5);
+pub(super) const LOCK_WAIT: Duration = Duration::from_secs(5);
 
 fn stores() -> PathBuf {
     paths::state_dir().join("plugins")

@@ -49,6 +49,7 @@ pub mod presets;
 pub mod routines;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
+pub mod client_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod markdown;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -1328,6 +1329,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = (fs::remove_file(secrets_file(id)), fs::remove_file(addresses_file(id)));
         pins::remove_plugin(id);
         thread_values::forget(id);
+        client_values::forget(id);
         #[cfg(feature = "js")]
         crate::jshost::folders::forget(id);
     }
@@ -1477,25 +1479,6 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
         // Installed, updated or removed: the Inbox (its update items) is read again, not from its cache.
         crate::attention::stale();
     });
-}
-
-// ── CLI ──
-
-pub fn print_review(r: &Review) {
-    println!("{} {} — from {} ({})", r.name, r.version, r.market, &r.commit[..r.commit.len().min(12)]);
-    if r.uses.is_empty() {
-        println!("  uses nothing of Echo's yet");
-    }
-    if let Some(b) = &r.blocked {
-        println!("  ⚠ {b}");
-    }
-    for u in &r.uses {
-        let new = if r.new_uses.contains(u) { " (new)" } else { "" };
-        println!("  • {u}{new}");
-    }
-    if let Some(o) = &r.offers {
-        println!("  {o}");
-    }
 }
 
 #[cfg(test)]

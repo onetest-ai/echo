@@ -14,6 +14,10 @@
       "source": "./plugins/thread-demo"
     },
     {
+      "id": "client-demo",
+      "source": "./plugins/client-demo"
+    },
+    {
       "id": "work-demo",
       "source": "./plugins/work-demo"
     },

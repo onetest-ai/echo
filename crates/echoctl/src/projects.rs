@@ -919,6 +919,8 @@ pub fn remove_client(id: &str) -> Result<()> {
     }
     write_logo(&client_logo_stem(id)?, None)?;
     write_json(&dir().join(CLIENTS), &all)?;
+    // Gone now: the plugins' values for it go with it (a client later under its id inherits none).
+    crate::plugins::client_values::removed(id);
     crate::today_layout::forget(&crate::today_layout::Page::Client(id.to_string()));
     // Nothing points at it any more: threads' counterparts, other organisations' parent and relations.
     for p in list().into_iter().filter(|p| p.orgs.iter().any(|o| o.client == id)) {

@@ -32,7 +32,7 @@ assert.deepEqual(rows(undefined, thread, () => {}), [], 'no plugin rows: none')
 
 // after: once per box drawn afresh. A fake page whose boxes are made again when its HTML changes (as patch does).
 const page = { html: '', boxes: [], querySelectorAll: () => page.boxes }
-const draw = (html) => { if (page.html === html) return; page.html = html; page.boxes = ['gh:repos', 'jira:project'].map((k) => ({ dataset: { threadSlot: k } })) }
+const draw = (html) => { if (page.html === html) return; page.html = html; page.boxes = ['gh:repos', 'jira:project'].map((k) => ({ dataset: { profileSlot: k } })) }
 let calls = 0, cached = null
 const slot = [{ plugin: 'gh', id: 'repos', render: () => cached || 'loading', after: () => { calls++; cached = 'repos: 2'; redraw() } }]
 // Echo's render(): the page drawn from each row's render, then their after — as drawProjects does.
