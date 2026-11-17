@@ -607,6 +607,15 @@
    ]
   },
   {
+   "id": "F-PLUG-100",
+   "feature": "A plugin reads the user's About me (Settings → About me) read-only, only with `uses.me: {}` on its sheet (\"Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work\"; anything but `{}` is refused at check): `ctx.me({kinds})` in its host half gives `null` when About me is missing, empty or still the template, else `{text, name, parts, hash}` — only the parts asked (`identity`, `people`, `terms`, `style`, `patterns`; none named: all but `patterns`), `name` its `Name:` line else Echo's name for the user (with `identity` only), `hash` 8 hex characters that change when what it gets changes; an unknown part throws naming the parts; without `me` on its sheet it is refused (\"didn't ask for “me”\"); an update that adds it asks again. `ctx.echo.read('me')` stays the user's name and email",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
    "id": "F-PLUG-72",
    "feature": "A plugin reads the user's Microsoft 365 only through Echo's sign-in and only what `uses.m365.read` names (`mail`, `chats`): `ctx.m365.search`, `ctx.m365.mailThread` (a mail's thread, each message with its attachments' names, never their contents) and `ctx.m365.chat` (a chat's messages on some days); the sheet says what it reads and that it never sends; without Echo's sign-in each says \"Microsoft 365 isn't connected\"; a kind it didn't ask for (`files` among them) is refused",
    "priority": "high",
