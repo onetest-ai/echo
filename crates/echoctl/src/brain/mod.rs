@@ -300,7 +300,7 @@ pub fn start_scheduler() {
         loop {
             // As often as Recall's job settings say (5 minutes by default; a minute after start), never in
             // the night they pause it in.
-            std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::number("brain_reader", "every") * 60 }));
+            std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::after_pass("brain_reader", crate::jobs::number("brain_reader", "every")) }));
             if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) {
                 continue;
             }
@@ -309,9 +309,11 @@ pub fn start_scheduler() {
             if last == Some(fp) && !retry {
                 continue;
             }
+            let run = crate::jobs::begin("brain_reader");
             match sync() {
                 Ok(r) => {
-                    crate::jobs::ran("brain_reader");
+                    // A run when it indexed something or read mail into facts (its model calls).
+                    run.done((r.chunks > 0).then(|| format!("{} new section{} indexed", r.chunks, if r.chunks == 1 { "" } else { "s" })));
                     // New sections get their topics once a taxonomy exists (Claude, on the default profile).
                     if EXTRAS && r.chunks > 0 && taxonomy::current().is_some() {
                         if let Err(e) = taxonomy::classify(None, false, &|_| {}) {
@@ -330,6 +332,7 @@ pub fn start_scheduler() {
                 }
                 Err(e) => {
                     eprintln!("brain: {e:#}");
+                    run.failed("Recall couldn't read its sources (Echo's log says why)");
                     failed_at = Some(std::time::Instant::now());
                     last = Some(fp);
                 }

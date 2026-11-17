@@ -190,6 +190,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
         "dashboard" if matches!(second, "list" | "presets" | "export") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
+        "jobs" if second == "runs" || second == "routines" => None,
         _ => Some("change"),
     }
 }
@@ -929,7 +930,6 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     };
     let profile = ready.profile();
     let model = crate::jobs::model_for("minutes", profile).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
-    crate::jobs::ran("minutes");
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.
     let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
@@ -1025,7 +1025,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          guard:  every tool call is checked: this call's folder{}, and Echo's minutes commands on this call only", if previous.is_some() { " and the previous minutes" } else { "" });
     let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
-    let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
+    let (intent, job_run) = (if r.auto { Intent::Auto } else { Intent::Explicit }, crate::jobs::begin("minutes"));
     let mut child = match crate::ai::without_policy(&let_go, || crate::ai::guard_ready(profile, &cwd, "write minutes").and_then(|()| admit_child(|| {
         let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
@@ -1040,6 +1040,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             let msg = format!("couldn't start Claude Code: {e:#}");
             let _ = writeln!(log, "{}  {msg}", stamp());
             offer(&mut r, &msg);
+            job_run.failed("Claude Code couldn't start");
             return fail(&mut r, msg);
         }
     };
@@ -1143,6 +1144,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         let _ = writeln!(log, "{}  Echo quit before the minutes were written: it starts them again next time.", stamp());
         crate::kept_minutes::settle(dir, true, &mut None, &run_id, &mut log);
         withdraw(dir);
+        job_run.done(None);
         return Ok(dir.to_path_buf());
     }
     let applied = if stopped.is_none() && !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
@@ -1162,6 +1164,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         stopped: stopped.as_deref(),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
+    job_run.minutes(result.as_ref(), model.as_deref(), &r.state);
     crate::kept_minutes::settle(dir, r.state == "done", &mut r.message, &run_id, &mut log);
     if r.state == "done" {
         let sha256 = crate::models::sha256_file(&dir.join("notes.md")).unwrap_or_default();

@@ -154,6 +154,8 @@ pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, conten
     if status.trim().parse::<u16>().is_ok_and(|s| s >= 400) {
         bail!("{} answered HTTP {}: {}", p.name, status.trim(), clip(body, 200));
     }
+    // Counted towards the background job running on this thread, if any (its runs: `jobs`; no cost on a local server).
+    crate::jobs::add_usage(&p.model(model), &v);
     if whole && v["stop_reason"] == "max_tokens" {
         bail!("{}'s reply was cut off at the token limit", p.name);
     }

@@ -470,13 +470,21 @@ pub fn start_scheduler() {
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(45));
         loop {
-            if !crate::notes::quitting() && !crate::jobs::paused("needs", chrono::Local::now().time()) {
+            // Signed in to Microsoft 365 (else there is nothing to read: no run).
+            if !crate::notes::quitting() && graph::account().is_some() && !crate::jobs::paused("needs", chrono::Local::now().time()) {
+                let run = crate::jobs::begin("needs");
                 match refresh() {
-                    Ok(()) => crate::jobs::ran("needs"),
-                    Err(e) => eprintln!("needs you now: {e:#}"),
+                    Ok(()) => {
+                        let n = view()["items"].as_array().map_or(0, Vec::len);
+                        run.done_if_used(format!("{n} item{} in Needs you now", if n == 1 { "" } else { "s" }));
+                    }
+                    Err(e) => {
+                        eprintln!("needs you now: {e:#}");
+                        run.failed("Teams or mail couldn't be read");
+                    }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::number("needs", "every") * 60));
+            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::after_pass("needs", crate::jobs::number("needs", "every"))));
         }
     });
 }
