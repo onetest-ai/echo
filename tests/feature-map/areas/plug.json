@@ -422,7 +422,7 @@
   },
   {
    "id": "F-PLUG-47",
-   "feature": "With `uses.folders.write` a plugin writes a file only over the one it read (`ctx.fs.write(root, path, text, {ifSha})`: another sha256 or a file gone → \"changed since you read it\", the file untouched) or only where nothing is (`{createNew: true}`: never over a file, also when writers race), adds a block to a file's end (`ctx.fs.append`, a newline added, 1 MB at most, under the plugin's lock across processes, never into a link or a FIFO) and makes folders (`ctx.fs.mkdir`) — never through a link out, never a hidden name, never while Claude prepares and asks",
+   "feature": "With `uses.folders.write` a plugin writes a file only over the one it read (`ctx.fs.write(root, path, text, {ifSha})`: another sha256 or a file gone → \"changed since you read it\", the file untouched) or only where nothing is (`{createNew: true}` or an explicit `{ifSha: null}`: never over a file, also when writers race; `ifSha` on a file over 64 MB refused before hashing), adds a block to a file's end (`ctx.fs.append`, a newline added, 1 MB at most, under the plugin's lock across processes, never into a link or a FIFO) and makes folders (`ctx.fs.mkdir`) — never through a link out, never a hidden name, never while Claude prepares and asks",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -436,7 +436,7 @@
   },
   {
    "id": "F-PLUG-49",
-   "feature": "With `uses.folders` a plugin copies a folder it was given into its store (`ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → {path: `cache/snapshots/<id>`, files, bytes, skipped}) to work on: no link followed, never `.git` or `.obsidian/plugins`, nor the paths `exclude` names, dot names only with `hidden`; over 20,000 files or 512 MB (or the plugin's lower caps) refused with nothing left, a file over 50 MB left out and counted; read with `ctx.store.read`, removed with `ctx.store.remove(path)`, swept with `cache/`",
+   "feature": "With `uses.folders` a plugin copies a folder it was given into its store (`ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → {path: `cache/snapshots/<id>`, files, bytes, skipped, why: {large, unreadable}}) to work on: no link followed, never a `.git` folder or `.obsidian/plugins` at any depth, nor the paths `exclude` names (over 100 refused), dot names only with `hidden`; over 20,000 files or 512 MB (or the plugin's lower caps) refused with nothing left, a file over 50 MB or one it can't read left out and counted; one made at a time, 3 kept and 2 GB in all a plugin, more refused; read with `ctx.store.read`, removed with `ctx.store.remove(path)`, swept with `cache/`",
    "priority": "high",
    "check": "agent",
    "axes": []

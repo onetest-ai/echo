@@ -18,8 +18,9 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   `jshost::folders::put`
 - `ctx.fs.snapshot` copies into `cache/snapshots/<16 hex>/` of the store, each file opened without following a link
   (`O_NOFOLLOW`; Windows: the reparse point opened as itself and refused) and refused unless regular, folders checked
-  inside the root as they are entered; on a cap or a failed copy the folder made is removed. Evidence:
-  `jshost::folders::snapshot`
+  inside the root as they are entered; a file that can't be opened or read is left out (its part removed), and on a
+  cap or a copy that can't be written the folder made is removed. One snapshot of a plugin is made at a time, under
+  `.locks/<id>.snapshot.lock` (taken without waiting; removed with its data). Evidence: `jshost::folders::snapshot`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json` and `work.json` there;
   `threads.json` and `work.json` each change under its own lock across processes (`.locks/<id>.threads.lock`,
   `.locks/<id>.work.lock`); a `threads.json` that isn't JSON is moved aside as `threads.json.bad-<time>`. The plugin

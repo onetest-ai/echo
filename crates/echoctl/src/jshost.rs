@@ -239,12 +239,13 @@ const PRELUDE: &str = r#"
       /** Lines holding `query` as typed (no pattern), off its time slice: [{path, line, text}] — `path`, `ext`,
        *  `hidden`, `max` (200, at most 1,000), `caseSensitive`. */
       search: (root, query, opts) => later('fs.search', [String(root), String(query), opts || {}]),
-      /** A copy of the folder in its store's cache/snapshots/<id>/ to work on: {path, files, bytes, skipped} — no link
-       *  followed, never .git or .obsidian/plugins, `exclude` paths, dot names with `hidden`; 20,000 files and 512 MB
-       *  at most (`maxFiles`, `maxBytes` less), a file over 50 MB left out. ctx.store.remove(path) removes it. */
+      /** A copy of the folder in its store's cache/snapshots/<id>/ to work on: {path, files, bytes, skipped, why} — no
+       *  link followed, never a .git folder or .obsidian/plugins at any depth, `exclude` paths (100 at most), dot names
+       *  with `hidden`; 20,000 files and 512 MB at most (`maxFiles`, `maxBytes` less), a file over 50 MB or unreadable
+       *  left out; one at a time, 3 kept and 2 GB in all. ctx.store.remove(path) removes it. */
       snapshot: (root, opts) => later('fs.snapshot', [String(root), opts || {}]),
-      /** With `uses.folders.write`: write a file (atomically; {ifSha} only over the file it read, {createNew} never over
-       *  one), add to one's end (append, under its lock), make folders (mkdir), move one (never over another), delete
+      /** With `uses.folders.write`: write a file (atomically; {ifSha} only over the file it read, up to 64 MB;
+       *  {createNew} or {ifSha: null} never over one), add to one's end (append, under its lock), make folders (mkdir), move one (never over another), delete
        *  one or an empty folder — inside the folders the user gave it, never through a link. */
       write: (root, path, text, opts) => call('fs.write', [String(root), String(path), String(text), opts || {}]),
       append: (root, path, text) => call('fs.append', [String(root), String(path), String(text)]),

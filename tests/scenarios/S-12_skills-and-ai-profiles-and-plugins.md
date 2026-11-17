@@ -43,7 +43,10 @@ cases:
   - tests/cases/plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md
   - tests/cases/plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md
   - tests/cases/plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md
-  - tests/cases/plugins/TC-064_a-plugin-keeps-a-vault-with-guarded-writes-stat-search-snapshots-and-store-updates.md
+  - tests/cases/plugins/TC-064_a-plugin-writes-a-vault-only-over-what-it-read-appends-and-makes-folders.md
+  - tests/cases/plugins/TC-065_a-plugin-asks-what-a-path-is-searches-its-text-and-hashes-it.md
+  - tests/cases/plugins/TC-066_a-plugin-copies-its-vault-into-its-store-without-links-or-tool-folders-and-within-its-caps.md
+  - tests/cases/plugins/TC-067_a-plugins-store-updates-from-two-processes-both-count.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -64,6 +67,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | The made-up marketplace folder `$M` | the prelude | 22–31 |
 | Settings → Plugins open | stage 19 (step 1) | 19–31 |
 | The marketplace `acme-local`, added in the window | stage 22 (step 1) | 22–31 (removed by stage 31) |
+| Acme vault, installed with its made-up vault | stage 40 (its preconditions, step 1) | 40–43 (removed by stage 43's teardown) |
 | The plugin Acme notes, installed through the sheet | stage 26 (step 2) | 26–30 (removed by stage 30) |
 
 ## Prelude
@@ -114,7 +118,10 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 37 | `plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md` | — | — |
 | 38 | `plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md` | — | — |
 | 39 | `plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md` | — | — |
-| 40 | `plugins/TC-064_a-plugin-keeps-a-vault-with-guarded-writes-stat-search-snapshots-and-store-updates.md` | — | — |
+| 40 | `plugins/TC-064_a-plugin-writes-a-vault-only-over-what-it-read-appends-and-makes-folders.md` | — | Skip its teardown: keep Acme vault for stages 41–43 |
+| 41 | `plugins/TC-065_a-plugin-asks-what-a-path-is-searches-its-text-and-hashes-it.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Skip its teardown |
+| 42 | `plugins/TC-066_a-plugin-copies-its-vault-into-its-store-without-links-or-tool-folders-and-within-its-caps.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Skip its teardown |
+| 43 | `plugins/TC-067_a-plugins-store-updates-from-two-processes-both-count.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Its teardown removes Acme vault and `acme-local` |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

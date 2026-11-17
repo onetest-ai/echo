@@ -21,8 +21,11 @@ const LINE_CHARS: usize = 300;
 /// Snapshot: files and bytes at most (a plugin may ask for less); a bigger file is left out and counted.
 const SNAP_FILES: u64 = 20_000;
 const SNAP_BYTES: u64 = 512 << 20;
-/// Tool folders never copied: other programs' code, history and tokens.
-const NEVER_COPIED: [&str; 2] = [".git", ".obsidian/plugins"];
+/// Snapshots a plugin keeps at once, and their bytes in all.
+const SNAP_KEPT: usize = 3;
+const SNAP_ALL: u64 = 2 << 30;
+/// Paths `exclude` names at most.
+const EXCLUDE_MAX: usize = 100;
 
 fn lock_file(id: &str) -> PathBuf {
     paths::state_dir().join("plugins").join(".locks").join(format!("{id}.files.lock"))
@@ -35,12 +38,17 @@ fn lock(id: &str) -> Result<crate::app::FileLock> {
     plugins::wait_lock_for(&p, &format!("{id}'s files"), Duration::from_secs(5))
 }
 
-/// A plugin removed with its data: its lock goes too, when nobody holds it.
+fn snapshot_lock_file(id: &str) -> PathBuf {
+    lock_file(id).with_file_name(format!("{id}.snapshot.lock"))
+}
+
+/// A plugin removed with its data: its locks go too, when nobody holds them.
 pub fn forget(id: &str) {
-    let p = lock_file(id);
-    if let Ok(Some(l)) = crate::app::FileLock::try_take(&p) {
-        drop(l);
-        let _ = std::fs::remove_file(&p);
+    for p in [lock_file(id), snapshot_lock_file(id)] {
+        if let Ok(Some(l)) = crate::app::FileLock::try_take(&p) {
+            drop(l);
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }
 
@@ -100,11 +108,22 @@ fn sha_file(p: &Path) -> Result<Option<String>> {
 /// - `createNew`: never over a file — a hidden part beside it linked into place, which never replaces one;
 /// - neither: atomically, over whatever is there.
 pub(super) fn put(f: &Path, name: &str, text: &str, opts: &Value) -> Result<()> {
-    if let Some(want) = opts["ifSha"].as_str() {
+    // `ifSha: null` (said, not left out) is "nothing there": never an unconditional write.
+    let if_sha = opts.get("ifSha");
+    let create_new = opts["createNew"] == true || if_sha.is_some_and(Value::is_null);
+    if let Some(want) = if_sha.filter(|v| !v.is_null()) {
+        let Some(want) = want.as_str() else { bail!("ifSha is a sha256 in hex, or null for a file that isn't there yet") };
+        if create_new {
+            bail!("ifSha and createNew: one or the other");
+        }
+        // Never a big file hashed while the lock is held, on the plugin's own time.
+        if std::fs::symlink_metadata(f).is_ok_and(|m| m.len() > SHA_MAX) {
+            bail!("“{name}” is over 64 MB: ifSha compares files up to 64 MB");
+        }
         if sha_file(f)?.as_deref() != Some(want.to_ascii_lowercase().as_str()) {
             bail!("“{name}” changed since you read it: read it again");
         }
-    } else if opts["createNew"] == true {
+    } else if create_new {
         static N: AtomicU64 = AtomicU64::new(0);
         let file = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let tmp = f.with_file_name(format!(".{file}.{}.{}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
@@ -340,52 +359,109 @@ pub(super) fn search(id: &str, root: &str, query: &str, o: &Value) -> Result<Val
     Ok(json!(out))
 }
 
+/// Other programs' code, history and tokens, never copied, by name at any depth: a `.git` folder, `.obsidian/plugins`.
+fn tool_folder(rel: &str) -> bool {
+    let names: Vec<String> = rel.split('/').map(str::to_lowercase).collect();
+    names.iter().any(|n| n == ".git") || names.windows(2).any(|w| w[0] == ".obsidian" && w[1] == "plugins")
+}
+
+/// Room for one more snapshot of plugin `id`: none being made (its lock, held while it is), fewer than 3 kept, and
+/// what they hold under 2 GB → the lock and the bytes left.
+fn snapshot_room(id: &str) -> Result<(crate::app::FileLock, u64)> {
+    let p = snapshot_lock_file(id);
+    std::fs::create_dir_all(p.parent().unwrap_or(&p))?;
+    let Some(l) = crate::app::FileLock::try_take(&p)? else { bail!("a snapshot of this plugin is being made already: wait for it") };
+    let kept: Vec<PathBuf> = std::fs::read_dir(plugins::data_dir(id).join("cache/snapshots")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    if kept.len() >= SNAP_KEPT {
+        bail!("this plugin keeps {SNAP_KEPT} snapshots already: remove one (ctx.store.remove) first");
+    }
+    let mut used = 0u64;
+    for k in &kept {
+        let k = dunce::canonicalize(k)?;
+        walk_files(&k, &k, true, &|_| false, &mut |_, _, m| {
+            used += m.len();
+            true
+        });
+    }
+    if used >= SNAP_ALL {
+        bail!("this plugin's snapshots hold 2 GB already: remove one (ctx.store.remove) first");
+    }
+    Ok((l, SNAP_ALL - used))
+}
+
+/// One file copied whole into `to` (made new): Ok(None) when it can't be read (gone since it was listed, not allowed,
+/// locked) — the part written removed; an error when the copy can't be written.
+fn copy_file(from: &Path, to: &Path) -> Result<Option<u64>> {
+    let Ok(src) = open_no_link(from) else { return Ok(None) };
+    std::fs::create_dir_all(to.parent().unwrap_or(to))?;
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    let (mut src, mut buf, mut n) = (src.take(files::MAX_COPY), vec![0u8; 64 << 10], 0u64);
+    loop {
+        match src.read(&mut buf) {
+            Ok(0) => return Ok(Some(n)),
+            Ok(k) => {
+                out.write_all(&buf[..k])?;
+                n += k as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => {
+                drop(out);
+                let _ = std::fs::remove_file(to);
+                return Ok(None);
+            }
+        }
+    }
+}
+
 /// `ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})`: the folder's files copied into the plugin's store,
-/// `cache/snapshots/<id>/` (Echo sweeps `cache/`), for it to work on: never through a link, never `.git` or
-/// `.obsidian/plugins`, nor what `exclude` names (paths under the root); dot names only with `hidden`. 20,000 files and
-/// 512 MB at most — more is refused and nothing is left; a file over 50 MB is left out and counted.
-/// → {path (in the store), files, bytes, skipped}. `ctx.store.remove(path)` removes it.
+/// `cache/snapshots/<id>/` (Echo sweeps `cache/`), for it to work on: never through a link, never a `.git` folder or
+/// `.obsidian/plugins` at any depth, nor what `exclude` names (up to 100 paths under the root); dot names only with
+/// `hidden`. 20,000 files and 512 MB at most — more is refused and nothing is left; a file over 50 MB, or one that
+/// can't be read, is left out and counted. One made at a time, 3 kept and 2 GB in all a plugin.
+/// → {path (in the store), files, bytes, skipped, why: {large, unreadable}}. `ctx.store.remove(path)` removes it.
 pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
     let (root, base) = walk_base(id, root, &json!({}))?;
-    let mut exclude: Vec<String> = NEVER_COPIED.iter().map(|e| e.to_string()).collect();
-    for e in o["exclude"].as_array().into_iter().flatten().take(100) {
-        let e = e.as_str().ok_or_else(|| anyhow!("exclude is a list of paths in the folder"))?;
-        exclude.push(crate::grants::plain(&root, e.trim_end_matches('/'))?.to_string_lossy().replace('\\', "/"));
+    let asked = o["exclude"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if asked.len() > EXCLUDE_MAX {
+        bail!("exclude names {EXCLUDE_MAX} paths at most");
     }
-    // Compared in lower case: `.GIT` is `.git` on a disk that folds case.
-    let exclude: Vec<String> = exclude.into_iter().map(|e| e.to_lowercase()).collect();
+    let mut exclude = vec![];
+    for e in asked {
+        let e = e.as_str().ok_or_else(|| anyhow!("exclude is a list of paths in the folder"))?;
+        // Compared in lower case: `.GIT` is `.git` on a disk that folds case.
+        exclude.push(crate::grants::plain(&root, e.trim_end_matches('/'))?.to_string_lossy().replace('\\', "/").to_lowercase());
+    }
     let skip = |rel: &str| {
         let rel = rel.to_lowercase();
-        exclude.iter().any(|e| rel == *e || rel.strip_prefix(e.as_str()).is_some_and(|r| r.starts_with('/')))
+        tool_folder(&rel) || exclude.iter().any(|e| rel == *e || rel.strip_prefix(e.as_str()).is_some_and(|r| r.starts_with('/')))
     };
+    let (_making, room) = snapshot_room(id)?;
     let most_files = o["maxFiles"].as_u64().filter(|m| *m > 0).unwrap_or(SNAP_FILES).min(SNAP_FILES);
-    let most_bytes = o["maxBytes"].as_u64().filter(|m| *m > 0).unwrap_or(SNAP_BYTES).min(SNAP_BYTES);
+    let most_bytes = o["maxBytes"].as_u64().filter(|m| *m > 0).unwrap_or(SNAP_BYTES).min(SNAP_BYTES).min(room);
     let mut b = [0u8; 8];
     getrandom::fill(&mut b).map_err(|e| anyhow!("{e}"))?;
     let at = format!("cache/snapshots/{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>());
     let dest = writable_store_path(id, &at)?;
     std::fs::create_dir_all(&dest)?;
-    let (mut files, mut bytes, mut skipped) = (0u64, 0u64, 0u64);
+    let (mut files, mut bytes, mut large, mut unreadable) = (0u64, 0u64, 0u64, 0u64);
     let mut failed: Option<anyhow::Error> = None;
     walk_files(&root, &base, o["hidden"] == true, &skip, &mut |rel, p, m| {
         if m.len() > files::MAX_COPY {
-            skipped += 1;
+            large += 1;
             return true;
         }
         if files + 1 > most_files || bytes + m.len() > most_bytes {
             failed = Some(anyhow!("the folder holds more than {most_files} files or {} MB: a snapshot takes up to that", most_bytes >> 20));
             return false;
         }
-        let copy = || -> Result<u64> {
-            let to = dest.join(rel);
-            std::fs::create_dir_all(to.parent().unwrap_or(&dest))?;
-            let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&to)?;
-            Ok(std::io::copy(&mut open_no_link(p)?.take(files::MAX_COPY), &mut out)?)
-        };
-        match copy() {
-            Ok(n) => {
+        match copy_file(p, &dest.join(rel)) {
+            Ok(Some(n)) => {
                 files += 1;
                 bytes += n;
+                true
+            }
+            Ok(None) => {
+                unreadable += 1;
                 true
             }
             Err(e) => {
@@ -398,7 +474,7 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
         let _ = std::fs::remove_dir_all(&dest);
         return Err(e);
     }
-    Ok(json!({"path": at, "files": files, "bytes": bytes, "skipped": skipped}))
+    Ok(json!({"path": at, "files": files, "bytes": bytes, "skipped": large + unreadable, "why": {"large": large, "unreadable": unreadable}}))
 }
 
 #[cfg(test)]
@@ -476,6 +552,16 @@ mod tests {
         // Never over a file; a new one made, its folder too.
         assert!(run("keeper", "write", json!({"path": "Notes/Acme.md", "text": "x", "opts": {"createNew": true}})).unwrap_err().contains("is there already"));
         run("keeper", "write", json!({"path": "Inbox/2026/New.md", "text": "new", "opts": {"createNew": true}})).unwrap();
+        // ifSha: null (said) is "nothing there yet", never an unconditional write; a sha not in hex, or both asked: refused.
+        assert!(run("keeper", "write", json!({"path": "Notes/Acme.md", "text": "x", "opts": {"ifSha": null}})).unwrap_err().contains("is there already"));
+        run("keeper", "write", json!({"path": "Notes/Null.md", "text": "first", "opts": {"ifSha": null}})).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join("Notes/Null.md")).unwrap(), "first");
+        assert!(run("keeper", "write", json!({"path": "Notes/Null.md", "text": "x", "opts": {"ifSha": 12}})).unwrap_err().contains("sha256 in hex"));
+        assert!(run("keeper", "write", json!({"path": "Notes/Null.md", "text": "x", "opts": {"ifSha": sha_hex(b"first"), "createNew": true}})).unwrap_err().contains("one or the other"));
+        // Over 64 MB: refused before it is hashed.
+        std::fs::File::create(vault.join("Notes/Huge.bin")).unwrap().set_len(SHA_MAX + 1).unwrap();
+        assert!(run("keeper", "write", json!({"path": "Notes/Huge.bin", "text": "x", "opts": {"ifSha": read}})).unwrap_err().contains("over 64 MB"));
+        assert_eq!(std::fs::metadata(vault.join("Notes/Huge.bin")).unwrap().len(), SHA_MAX + 1);
         assert_eq!(std::fs::read_to_string(vault.join("Inbox/2026/New.md")).unwrap(), "new");
         // Racing writers asking for a new file: exactly one makes it, the others are told it is there; no part left.
         let won: Vec<bool> = (0..8)
@@ -615,7 +701,7 @@ mod tests {
     fn a_snapshot_copies_the_folder_into_the_cache_never_a_link_or_a_tool_folder() {
         let (_env, root) = paths::testenv::folders("jshost-folders-snapshot");
         let (vault, outside) = vault(&root, "copier");
-        for (p, t) in [("Notes/A.md", "# A"), ("Notes/sub/B.md", "# B"), (".git/config", "token"), (".obsidian/plugins/x/data.json", "token"), (".obsidian/app.json", "{}"), ("Archive/old.md", "old"), (".env", "secret")] {
+        for (p, t) in [("Notes/A.md", "# A"), ("Notes/sub/B.md", "# B"), (".git/config", "token"), (".obsidian/plugins/x/data.json", "token"), (".obsidian/app.json", "{}"), ("Archive/old.md", "old"), (".env", "secret"), ("Notes/sub/.git/config", "token"), ("Archive/.obsidian/plugins/y/data.json", "token")] {
             std::fs::create_dir_all(vault.join(p).parent().unwrap()).unwrap();
             std::fs::write(vault.join(p), t).unwrap();
         }
@@ -642,7 +728,19 @@ mod tests {
         walk_files(&hc, &hc, true, &|_| false, &mut |rel, _, _| { got.push(rel.to_string()); true });
         got.sort();
         assert_eq!(got, [".env", ".obsidian/app.json", "Notes/A.md"]);
+        let nested = run("copier", "snapshot", json!({"hidden": true})).unwrap();
+        let nc = dunce::canonicalize(plugins::data_dir("copier").join(nested["path"].as_str().unwrap())).unwrap();
+        let mut got: Vec<String> = vec![];
+        walk_files(&nc, &nc, true, &|_| false, &mut |rel, _, _| { got.push(rel.to_string()); true });
+        assert!(!got.iter().any(|g| g.contains(".git") || g.contains("plugins")) && got.contains(&"Notes/sub/B.md".to_string()), "tool folders by name at any depth: {got:?}");
+        run("copier", "storeRemove", json!({"path": nested["path"]})).unwrap();
         assert!(run("copier", "snapshot", json!({"exclude": ["../x"]})).unwrap_err().contains("isn't a path inside"));
+        let many: Vec<String> = (0..=EXCLUDE_MAX).map(|i| format!("x{i}")).collect();
+        assert!(run("copier", "snapshot", json!({"exclude": many})).unwrap_err().contains("100 paths at most"), "never dropped silently");
+        // One made at a time.
+        let making = crate::app::FileLock::try_take(&snapshot_lock_file("copier")).unwrap().unwrap();
+        assert!(run("copier", "snapshot", json!({})).unwrap_err().contains("being made already"));
+        drop(making);
         // Over its caps: refused, nothing left.
         let before = std::fs::read_dir(plugins::data_dir("copier").join("cache/snapshots")).unwrap().count();
         assert!(run("copier", "snapshot", json!({"maxFiles": 2})).unwrap_err().contains("more than 2 files"));
@@ -650,8 +748,18 @@ mod tests {
         assert_eq!(std::fs::read_dir(plugins::data_dir("copier").join("cache/snapshots")).unwrap().count(), before);
         // A file over 50 MB: left out and counted.
         std::fs::File::create(vault.join("Notes/video.mp4")).unwrap().set_len(files::MAX_COPY + 1).unwrap();
+        // A file it can't read: left out and counted, the rest copied.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(vault.join("Notes/locked.md"), "x").unwrap();
+            std::fs::set_permissions(vault.join("Notes/locked.md"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
         let big = run("copier", "snapshot", json!({})).unwrap();
-        assert_eq!((big["files"].as_u64(), big["skipped"].as_u64()), (Some(3), Some(1)));
+        #[cfg(unix)]
+        assert_eq!((big["files"].as_u64(), big["skipped"].as_u64(), &big["why"]), (Some(3), Some(2), &json!({"large": 1, "unreadable": 1})));
+        // Three kept: a fourth refused until one is removed.
+        assert!(run("copier", "snapshot", json!({})).unwrap_err().contains("keeps 3 snapshots already"));
         // Removed with ctx.store.remove.
         run("copier", "storeRemove", json!({"path": at})).unwrap();
         assert!(!copy.exists());
