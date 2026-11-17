@@ -525,7 +525,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   - `await ctx.git.log(root, {path, max})` → `[{rev, author, email, date, subject, echo, path?}]`, newest first: the
     commits touching the folder, or the file at `path` through its renames (each with its `path` then); 50 by default,
     1,000 at most; `date` ISO 8601; `echo` the id of the plugin that committed it through Echo, else null.
-  - `await ctx.git.show(root, rev, path, {max})` → `{text, size, truncated}` or null when the file wasn't there: its
+  - `await ctx.git.show(root, rev, path, {max, strict})` → `{text, size, truncated}` (bytes that aren't UTF-8 replaced, or with `strict: true` refused as "not UTF-8", as `ctx.fs.read`) or null when the file wasn't there: its
     text at that version as the repository holds it (no filter), cut at `max` (1 MB by default, 4 MB at most); `rev`
     `HEAD`, `HEAD~N` or a commit's id (4–64 hex), nothing else (the id of a file or a folder is refused); never a file
     of the repository outside the folder.
