@@ -24,9 +24,14 @@ use crate::{paths, plugins};
 
 mod test_hosts;
 mod service_async;
+mod typed;
+mod m365;
 pub mod files;
 pub mod folders;
 mod git;
+mod http;
+pub mod net;
+mod tls;
 mod widgets;
 pub mod work;
 
@@ -37,6 +42,9 @@ use widgets::widget_ask_now_on;
 pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
 use widgets::widget_store;
 
+use http::fetch;
+#[cfg(test)]
+use http::curl_head;
 use service_async::service_async;
 use test_hosts::test_host;
 #[cfg(test)]
@@ -81,6 +89,25 @@ const PRELUDE: &str = r#"
       Promise.resolve().then(t.fn).catch((e) => call('log', ['error', `timer: ${(e && e.message) || e}`]))
     }
   }
+  // A WebSocket's events waiting for their handler (set after the await), every connection's together: at most 1,000
+  // and 8 MB of their data (the heap is every plugin's). Past that the connection is closed, an error waiting after
+  // what came; once it closed, what still waits no longer counts.
+  let waiting = 0, waitingBytes = 0
+  const hold = (id, q, ev) => {
+    if (ev.kind === 'close') return q.push(ev)
+    if (q.over) return
+    const size = String(ev.data || ev.message || '').length
+    if (waiting >= 1000 || waitingBytes + size > (8 << 20)) {
+      q.over = true
+      try { call('net.close', [id, 1000, '']) } catch (e) {}
+      return q.push({ kind: 'error', message: 'more than 8 MB or 1,000 messages waited for this WebSocket\'s handlers, so it is closed: set onMessage, onClose and onError right after the await' })
+    }
+    ev.size = size; waiting++; waitingBytes += size; q.push(ev)
+  }
+  const letGo = (ev) => { if (ev.size !== undefined) { waiting--; waitingBytes -= ev.size; ev.size = undefined } return ev }
+  // A connection's events (`net.rs`): each to its own handler, by id; a handler's error is logged.
+  const conns = {}, fire = (fn, ...a) => Promise.resolve().then(() => fn && fn(...a)).catch((e) => call('log', ['error', `net: ${(e && e.message) || e}`]))
+  globalThis.__net = (id, json) => { const c = conns[id]; if (c) c(JSON.parse(json)) }
   globalThis.__event = (name, payload) => {
     for (const fn of handlers[name] || []) Promise.resolve().then(() => fn(JSON.parse(payload))).catch((e) => call('log', ['error', `${name}: ${(e && e.message) || e}`]))
   }
@@ -134,8 +161,47 @@ const PRELUDE: &str = r#"
     /** Its `cache/` (Echo removes what is there over 7 days): `size()` {bytes, files}. */
     cache: { size: () => call('store.size', 'cache') },
     settings: { get: (key) => call('settings.get', key), set: (key, value) => call('settings.set', [key, value]) },
-    /** HTTPS to the hosts its manifest names (`uses.network.hosts`): {status, body}. */
-    http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
+    /** HTTPS to the hosts its manifest names (`uses.network.hosts`) and the addresses the user listed: {status, body};
+     *  `{file: handle}` sends a file, `{save}` keeps the answer in its store (both up to 512 MB). `stream(url, opts,
+     *  onChunk)` reads an answer as it comes (SSE, chunked): {status, headers, done: Promise<{bytes, cancelled}>, cancel()}.
+     *  `askAddress()` (uses.network.ask): Echo's own box asks the user for a web address — its text, or null; that
+     *  address alone may then be fetched once (a plain GET, no headers or body), within 10 minutes. */
+    http: {
+      fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]),
+      askAddress: () => later('http.ask_address', null),
+      stream: (url, opts, onChunk) => {
+        const id = call('http.stream', [String(url), opts || {}])
+        let settle
+        const s = { status: 0, headers: {}, done: new Promise((y, n) => { settle = [y, n] }), cancel: () => call('http.cancel', id) }
+        conns[id] = (ev) => {
+          if (ev.kind === 'head') Object.assign(s, { status: ev.status, headers: ev.headers })
+          else if (ev.kind === 'chunk') fire(onChunk, ev.text, s)
+          else { delete conns[id]; ev.kind === 'end' ? settle[0]({ status: s.status, bytes: ev.bytes, cancelled: ev.cancelled }) : settle[1](new Error(ev.message)) }
+        }
+        return s
+      },
+    },
+    /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
+     *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),
+     *  onError({message})}; events wait for their handler. */
+    net: {
+      websocket: (url, opts) => new Promise((resolve, reject) => {
+        const id = call('net.websocket', [String(url), opts || {}]), h = {}, q = []
+        const ws = { protocol: '', send: (d, o) => call('net.send', [id, d, o || {}]), close: (code, reason) => call('net.close', [id, code || 1000, String(reason || '')]) }
+        const run = (ev) => { const fn = h[{ message: 'onMessage', close: 'onClose', error: 'onError' }[ev.kind]]; if (fn) fire(fn, ...(ev.kind === 'message' ? [ev.data, { binary: !!ev.binary }] : [ev])); return !!fn }
+        for (const k of ['onMessage', 'onClose', 'onError']) Object.defineProperty(ws, k, { get: () => h[k], set: (fn) => { h[k] = fn; while (q.length && run(q[0])) letGo(q.shift()) } })
+        let open = false
+        conns[id] = (ev) => {
+          if (ev.kind === 'close') { delete conns[id]; q.forEach(letGo) }
+          if (ev.kind === 'open') { open = true; ws.protocol = ev.protocol; return resolve(ws) }
+          if (!open) return ev.kind === 'error' && reject(new Error(ev.message))
+          if (q.length || !run(ev)) hold(id, q, ev)
+        }
+      }),
+    },
+    /** The user's Microsoft 365 through Echo's sign-in, read-only (uses.m365.read: mail, chats): search(query, {kinds, days,
+     *  limit}), mailThread(message) → {subject, picked, messages}, chat(chat, {since, until}) → {id, topic, members, url, messages}. */
+    m365: { search: (q, o) => later('m365.search', [String(q), o || {}]), mailThread: (m) => later('m365.mail_thread', String(m)), chat: (c, o) => later('m365.chat', [String(c), o || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
     markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md) => call('markdown.links', String(md)) }),
     /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
@@ -209,7 +275,8 @@ const PRELUDE: &str = r#"
      *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
     agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
-     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Its events (`ctx.on`, uses.events.on —
+     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>) | 'calls' (opts: q, since, limit) | 'calendar'
+     *  (the meetings Echo last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     echo: {
       read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
@@ -306,6 +373,8 @@ enum Msg {
     /// An event whose payload differs per plugin: each one's fields set on the shared part.
     EventEach(String, Value, serde_json::Map<String, Value>),
     Settle(String, u64, String),
+    /// An event of one of a plugin's connections (`net.rs`): plugin, connection, JSON.
+    Net(String, u64, String),
 }
 
 struct Host {
@@ -375,94 +444,6 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
     let p = provider(kind)?;
     let msg = json!({"title": m.title, "markdown": m.markdown, "about": m.about, "ai": m.ai.map(crate::deliver::ai_notice)});
     call_within(&p.plugin, "__deliver", &json!({"kind": kind, "msg": msg}), Duration::from_secs(90)).map(|_| ())
-}
-
-/// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, or to an address the user listed in a setting its
-/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, to any listed host), through
-/// curl (its config on stdin, so headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
-/// With `save: <path>` (relative, in the plugin's store) a 2xx answer's bytes go to that file and the answer is {status,
-/// body: "", saved, bytes}: the body is text, so audio and images can't come through it.
-fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    use std::io::Write as _;
-    use crate::app::NoWindow;
-    let m = plugins::read_manifest(&package_dir(id)?)?;
-    let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
-    // What the user listed, each checked again as when it was saved (the file may have been edited since).
-    let listed: Vec<String> = plugins::address_settings(&m.uses).iter().filter_map(|k| plugins::listed_addresses(id, k)).collect();
-    let granted: Vec<plugins::addresses::Address> = listed.iter().filter_map(|v| plugins::addresses::parse_list(v).ok()).flatten().collect();
-    let refuse = || anyhow!("{id} may reach only the hosts its manifest names ({}) and the addresses you list in its settings ({})", hosts.join(", "), listed.join(", "));
-    let rest = url.split_once("://").map_or("", |(_, r)| r);
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if !granted.iter().any(|a| a.matches(url)) {
-        let named = url.strip_prefix("https://").map(|r| r.split(['/', '?', '#']).next().unwrap_or(""));
-        if !named.is_some_and(|h| !h.contains('@') && !h.contains(':') && hosts.iter().any(|x| x == h)) {
-            return Err(refuse());
-        }
-    }
-    // Checked on the real host above; a development build may send it to a fake service instead (or refuse it).
-    let fake = test_host(url, &hosts)?;
-    let url = fake.as_deref().unwrap_or(url);
-    /// The half-written download: its own name per fetch, gone however the fetch ends unless renamed into place.
-    struct Part(PathBuf);
-    impl Drop for Part {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-    let save = match opts["save"].as_str().filter(|s| !s.is_empty()) {
-        Some(rel) => {
-            let to = writable_store_path(id, rel)?;
-            std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
-            let mut part = to.clone().into_os_string();
-            part.push(format!(".{}-{}.part", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-            Some((rel, to, Part(PathBuf::from(part))))
-        }
-        None => None,
-    };
-    let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
-    if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
-        bail!("method {method}");
-    }
-    // A NUL would end curl's config line early; a header name is a plain token (curl reads `@file` as a file).
-    let headers = opts["headers"].as_object().cloned().unwrap_or_default();
-    let body = opts.get("body").filter(|b| !b.is_null()).map(|b| b.as_str().map(str::to_owned).unwrap_or_else(|| b.to_string()));
-    if url.contains('\0') || body.as_deref().is_some_and(|b| b.contains('\0')) || headers.iter().any(|(k, v)| k.is_empty() || !k.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c)) || v.as_str().unwrap_or("").contains(['\0', '\n', '\r'])) {
-        bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
-    }
-    let mut cfg = curl_head(url, &method, fake.is_some());
-    if let Some((_, _, part)) = &save {
-        cfg.push_str(&format!("output = {}\n", curl_quote(&part.0.to_string_lossy())));
-    }
-    for (k, v) in headers {
-        cfg.push_str(&format!("header = {}\n", curl_quote(&format!("{k}: {}", v.as_str().unwrap_or("")))));
-    }
-    // `data-raw`: sent as written; `data-binary` would read a body starting with `@` as a file.
-    if let Some(body) = body {
-        cfg.push_str(&format!("data-raw = {}\n", curl_quote(&body)));
-    }
-    // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
-    let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
-    let status = code.trim().parse::<u16>().unwrap_or(0);
-    let Some((rel, to, part)) = save else { return Ok(json!({"status": status, "body": body})) };
-    if (200..300).contains(&status) {
-        // An empty answer may leave curl's file unmade.
-        if !part.0.exists() {
-            std::fs::write(&part.0, b"")?;
-        }
-        let bytes = std::fs::metadata(&part.0).map(|m| m.len()).unwrap_or(0);
-        std::fs::rename(&part.0, &to)?;
-        return Ok(json!({"status": status, "body": "", "saved": rel, "bytes": bytes}));
-    }
-    // Not a success: what the server said (text, cut), not a file.
-    let said = std::fs::read(&part.0).map(|b| String::from_utf8_lossy(&b[..b.len().min(4096)]).into_owned()).unwrap_or_default();
-    Ok(json!({"status": status, "body": said}))
 }
 
 /// Async operations and command calls in flight, numbered.
@@ -669,6 +650,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         match msg {
             Ok(Msg::Load(id, dir)) => {
                 plugins.remove(&id);
+                net::stop_plugin(&id);
                 // A new version registers what it adds again; an old version's additions don't linger.
                 crate::grants::drop_plugin(&id);
                 let outcome = load(&rt, &id, &dir, &current, &tx, &mut slice);
@@ -685,6 +667,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
                 plugins::scripts::stop_plugin(&id);
+                net::stop_plugin(&id);
                 files::forget(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
@@ -752,6 +735,15 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     set_current(&current, &id);
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__settle").and_then(|f| f.call::<_, ()>((token, out.clone()))))));
+                }
+            }
+            Ok(Msg::Net(id, n, ev)) => {
+                net::delivered(n, ev.len());
+                if let Some(p) = plugins.get(&id) {
+                    set_current(&current, &id);
+                    current.lock().unwrap().unattended = true;
+                    let ctx = p.ctx.clone();
+                    slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__net").and_then(|f| f.call::<_, ()>((n, ev.clone()))))));
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -889,23 +881,6 @@ fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: b
     token
 }
 
-/// A value in curl's config: quoted, its backslashes, quotes and line breaks escaped.
-fn curl_quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
-}
-
-/// The first lines of curl's config for `ctx.http.fetch`. Only http(s), never a redirect elsewhere: what the plugin may
-/// reach is checked on this URL alone. A request sent to a fake service never goes through a proxy (`http_proxy`,
-/// `all_proxy`): it stays on this computer, its headers with it.
-fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
-    let mut cfg = format!("url = {}\nrequest = \"{method}\"\nproto = \"=http,https\"\ngloboff\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", curl_quote(url));
-    if to_fake {
-        cfg.push_str("noproxy = \"*\"\n");
-    }
-    cfg
-}
-
-
 /// Where the plugin is installed.
 fn package_dir(id: &str) -> Result<PathBuf> {
     plugins::enabled().into_iter().find(|p| p.id == id).map(|p| plugins::plugin_dir(&p)).ok_or_else(|| anyhow!("{id} isn't installed and on"))
@@ -1037,6 +1012,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
     Ok(match op {
         "id" => json!(id),
         "terminal" => json!(!TIMERS.load(Ordering::Relaxed)),
+        "net.websocket" | "net.send" | "net.close" | "http.stream" | "http.cancel" => net::service(id, op, arg)?,
         "log" => {
             eprintln!("plugin {id}: [{}] {}", s(&arg[0]), s(&arg[1]));
             Value::Null
@@ -1290,7 +1266,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "dictionary" => crate::share::dictionary()?,
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
                 "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group()})).collect::<Vec<_>>()),
-                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source)"),
+                "calls" => crate::share::calls(&opt)?,
+                "calendar" => crate::share::calendar()?,
+                "me" => crate::share::me()?,
+                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
             }
         }
         "echo.dictionary.add" => {
@@ -2163,7 +2142,8 @@ mod tests {
         sync();
     }
 
-    /// A small http server on this computer: `/clip` answers bytes that aren't UTF-8, `/text` a word, any other path 404.
+    /// A small http server on this computer: `/clip` answers bytes that aren't UTF-8, `/text` a word, `/moved` sends to
+    /// `/text`, any other path 404.
     fn serve_clips() -> u16 {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2177,9 +2157,11 @@ mod tests {
                     "/echo" => ("200 OK", head.split_once("\r\n\r\n").map(|(_, b)| b.as_bytes().to_vec()).unwrap_or_default()),
                     "/clip" => ("200 OK", vec![0xff, 0xfb, 0x90, 0x00, 0x80, 0xfe]),
                     "/text" => ("200 OK", b"hello".to_vec()),
+                    "/moved" => ("302 Found", vec![]),
                     _ => ("404 Not Found", b"nope".to_vec()),
                 };
-                let _ = write!(s, "HTTP/1.1 {code}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+                let to = if code.starts_with("302") { "location: /text\r\n" } else { "" };
+                let _ = write!(s, "HTTP/1.1 {code}\r\n{to}content-length: {}\r\nconnection: close\r\n\r\n", body.len());
                 let _ = s.write_all(&body);
             }
         });
@@ -3455,6 +3437,155 @@ mod tests {
         let _ = (0..50).find_map(|_| call("vaults", "drop", &json!({})).ok());
         assert!(crate::grants::folders("vaults").is_empty() && crate::grants::session_read().is_empty());
         plugins::remove("vaults", false).unwrap();
+        sync();
+    }
+
+    /// Install a made-up plugin `id` from its own local marketplace under `root`, agreeing to its sheet; its sheet lines.
+    fn install_made_up(root: &Path, id: &str, uses: Value, main: &str) -> Vec<String> {
+        let mk = root.join(format!("market-{id}"));
+        let d = mk.join("plugins").join(id);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": format!("Acme {id}"), "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), main).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": format!("m-{id}"), "plugins": [{"id": id, "source": format!("./plugins/{id}")}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some(&format!("m-{id}"))).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review(id, Some(&name)).unwrap().uses;
+        plugins::install(id, Some(&name), &agreed).unwrap();
+        sync();
+        agreed
+    }
+
+    /// A command's answer once the plugin is loaded (its first calls may come before it is).
+    fn call_loaded(id: &str, command: &str, args: &Value) -> Result<Value> {
+        for _ in 0..50 {
+            match call(id, command, args) {
+                Err(e) if e.to_string().contains("isn't loaded") || e.to_string().contains("no command") => std::thread::sleep(Duration::from_millis(50)),
+                r => return r,
+            }
+        }
+        call(id, command, args)
+    }
+
+    #[test]
+    fn a_plugin_reads_calls_the_calendar_and_who_you_are_only_as_its_sheet_said() {
+        let (_env, root) = paths::testenv::folders("jshost-echo-reads");
+        let d = paths::calls_dir().join("2026-10-28_110000-aurora-weekly");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"app": "teams", "platform": "macos", "title": "Aurora weekly", "started_at": "2026-10-28T11:00:00+02:00", "ended_at": "2026-10-28T11:30:00+02:00"}"#).unwrap();
+        std::fs::write(d.join("meeting.json"), r#"{"subject": "Aurora weekly", "organizer": {"name": "Sam Rivera", "email": "sam@initech.example"}, "attendees": [{"name": "Lena Varga", "email": "lena@acme.example"}]}"#).unwrap();
+        std::fs::write(d.join("chat.json"), r#"[{"t": 12, "at": "2026-10-28T11:02:00+02:00", "from": "Lena Varga", "text": "The plan", "files": ["plan.xlsx"]}]"#).unwrap();
+        std::fs::write(d.join("notes.md"), "# Aurora weekly\n- SSO first [12:05]\n").unwrap();
+        let memo = paths::calls_dir().join("2026-10-29_090000-memo");
+        std::fs::create_dir_all(&memo).unwrap();
+        std::fs::write(memo.join("meta.json"), r#"{"app": "memo", "kind": "memo", "title": "Pricing idea", "started_at": "2026-10-29T09:00:00+02:00"}"#).unwrap();
+        let mut cfg = crate::config::Config::load().unwrap_or_default();
+        cfg.me = Some(crate::meeting::Person { name: "Sam Rivera".into(), email: Some("sam@initech.example".into()) });
+        cfg.save().unwrap();
+        crate::watch::write_agenda(&[crate::meeting::MeetingContext { id: Some("ev-1".into()), subject: Some("Acme demo".into()), start: Some("2026-10-28T15:00:00Z".into()), ..Default::default() }]).unwrap();
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('read', (a) => ctx.echo.read(a.kind, a.arg))
+            }
+            "#;
+        let sheet = install_made_up(&root, "reader", json!({"echo": {"read": ["calls", "source", "calendar", "me"]}}), main);
+        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
+        let read = |kind: &str, arg: Value| call_loaded("reader", "read", &json!({"kind": kind, "arg": arg}));
+
+        let list = read("calls", json!({})).unwrap();
+        assert_eq!(list.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect::<Vec<_>>(), ["call:2026-10-29_090000-memo", "call:2026-10-28_110000-aurora-weekly"], "newest first, with or without minutes");
+        assert_eq!((list[0]["memo"].as_bool(), list[0]["minutes"].as_bool()), (Some(true), Some(false)));
+        assert_eq!((list[1]["minutes"].as_bool(), list[1]["chat"].as_bool(), list[1]["transcript"].as_bool()), (Some(true), Some(true), Some(false)));
+        assert_eq!(list[1]["people"], json!(["Sam Rivera", "Lena Varga"]));
+        assert_eq!(read("calls", json!({"q": "lena aurora"})).unwrap().as_array().unwrap().len(), 1, "every word, people too");
+        assert_eq!(read("calls", json!({"since": "2026-10-29"})).unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(read("calls", json!({"limit": 1})).unwrap().as_array().unwrap().len(), 1);
+
+        let s = read("source", json!("call:2026-10-28_110000-aurora-weekly")).unwrap();
+        assert_eq!((s["started_at"].as_str(), s["ended_at"].as_str(), s["app"].as_str(), s["platform"].as_str(), s["memo"].as_bool()), (Some("2026-10-28T11:00:00+02:00"), Some("2026-10-28T11:30:00+02:00"), Some("teams"), Some("macos"), Some(false)));
+        assert_eq!(s["attendees"], json!([{"name": "Sam Rivera", "email": "sam@initech.example"}, {"name": "Lena Varga", "email": "lena@acme.example"}]));
+        assert_eq!(s["chat"], json!([{"at": "2026-10-28T11:02:00+02:00", "from": "Lena Varga", "text": "The plan", "files": ["plan.xlsx"]}]));
+
+        let cal = read("calendar", Value::Null).unwrap();
+        assert_eq!((cal[0]["id"].as_str(), cal[0]["subject"].as_str(), cal[0]["threads"].clone()), (Some("ev-1"), Some("Acme demo"), json!([])));
+        assert_eq!(read("me", Value::Null).unwrap(), json!({"name": "Sam Rivera", "email": "sam@initech.example"}));
+        // What it didn't ask for isn't read.
+        assert!(read("threads", Value::Null).unwrap_err().to_string().contains("didn't ask to read your threads"));
+        plugins::remove("reader", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_reads_microsoft_365_only_as_its_sheet_said_and_only_on_echos_sign_in() {
+        let (_env, root) = paths::testenv::folders("jshost-m365");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('search', (a) => ctx.m365.search(a.q, a.opts))
+              ctx.command('thread', (a) => ctx.m365.mailThread(a.id))
+              ctx.command('chat', (a) => ctx.m365.chat(a.id, a.opts))
+            }
+            "#;
+        let sheet = install_made_up(&root, "mailer", json!({"m365": {"read": ["mail"]}}), main);
+        assert!(sheet.iter().any(|l| l.starts_with("Reads your Microsoft 365 mail through Echo's sign-in") && l.ends_with("it never sends")), "{sheet:?}");
+        let err = |cmd: &str, a: Value| call_loaded("mailer", cmd, &a).unwrap_err().to_string();
+        // Not asked for: chats, or a kind the sheet doesn't grant.
+        assert!(err("chat", json!({"id": "19:x@thread.v2"})).contains("didn't ask to read your Microsoft 365 chats"));
+        assert!(err("search", json!({"q": "pilot", "opts": {"kinds": ["chats"]}})).contains("didn't ask to read your Microsoft 365 chats"));
+        assert!(err("search", json!({"q": "pilot", "opts": {"kinds": ["files"]}})).contains("didn't ask to read your Microsoft 365 files"));
+        // Asked for, but Echo isn't signed in: said, and nothing else is tried (no sign-in of its own).
+        assert!(err("thread", json!({"id": "AAMk1"})).contains("Microsoft 365 isn't connected"));
+        assert!(err("search", json!({"q": "pilot"})).contains("Microsoft 365 isn't connected"));
+        plugins::remove("mailer", false).unwrap();
+        sync();
+    }
+
+    // A release build reads no ECHOCTL_ASK_ADDRESS: there `askAddress` would open the real dialog (testing R11).
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_plugin_fetches_the_address_the_user_typed_once_and_nothing_else() {
+        let (_env, root) = paths::testenv::folders("jshost-typed");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('ask', () => ctx.http.askAddress())
+              ctx.command('get', (a) => ctx.http.fetch(a.url, a.opts || {}))
+            }
+            "#;
+        let sheet = install_made_up(&root, "typer", json!({"network": {"ask": true}}), main);
+        assert!(sheet.iter().any(|l| l == "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time"), "{sheet:?}");
+        install_made_up(&root, "other", json!({"network": {"hosts": ["api.acme.example"]}}), main);
+        let port = serve_clips();
+        let page = format!("http://127.0.0.1:{port}/text");
+        let get = |id: &str, url: &str, opts: Value| call_loaded(id, "get", &json!({"url": url, "opts": opts}));
+        // Nothing typed yet: refused.
+        assert!(get("typer", &page, json!({})).unwrap_err().to_string().contains("may reach only"));
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", &format!(" {page} "));
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        // Only the plugin it was typed for, only that address, only GET.
+        assert!(get("other", &page, json!({})).unwrap_err().to_string().contains("may reach only"), "another plugin");
+        assert!(get("typer", &format!("http://127.0.0.1:{port}/clip"), json!({})).unwrap_err().to_string().contains("may reach only"), "another address");
+        assert!(get("typer", &page, json!({"method": "POST", "body": "x"})).unwrap_err().to_string().contains("may reach only"), "GET only");
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        assert_eq!(get("typer", &page, json!({})).unwrap(), json!({"status": 200, "body": "hello"}));
+        assert!(get("typer", &page, json!({})).unwrap_err().to_string().contains("may reach only"), "once");
+        // Headers or a body: nothing of the plugin's goes along (the address stays the user's to fetch).
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(page));
+        assert!(get("typer", &page, json!({"headers": {"x-acme": "1"}})).unwrap_err().to_string().contains("may reach only"), "no headers");
+        assert!(get("typer", &page, json!({"body": "call text"})).unwrap_err().to_string().contains("may reach only"), "no body");
+        // A page that moved isn't followed: where it went is no address the user typed.
+        drop(typed);
+        let moved = format!("http://127.0.0.1:{port}/moved");
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", &moved);
+        assert_eq!(call_loaded("typer", "ask", &json!({})).unwrap(), json!(moved));
+        assert_eq!(get("typer", &moved, json!({})).unwrap()["status"], 302);
+        // What isn't a web address is refused where it is typed; a plugin that didn't ask can't ask.
+        drop(typed);
+        let typed = EnvVar::set("ECHOCTL_ASK_ADDRESS", "file:///etc/passwd");
+        assert!(call_loaded("typer", "ask", &json!({})).unwrap_err().to_string().contains("isn't a web address"));
+        assert!(call_loaded("other", "ask", &json!({})).unwrap_err().to_string().contains("didn't ask for “network.ask”"));
+        drop(typed);
+        for id in ["typer", "other"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 }

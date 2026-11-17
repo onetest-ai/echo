@@ -32,6 +32,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
     Capability { id: "ai", ready: true, describe: describe_ai },
     Capability { id: "microphone", ready: true, describe: describe_microphone },
+    Capability { id: "m365", ready: true, describe: describe_m365 },
 ];
 
 /// The sheet's line for `uses.microphone` (`window::plugins` opens it only as it says).
@@ -130,7 +131,8 @@ pub(super) fn join_words(w: &[&str]) -> String {
 
 /// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
 /// before that choice) is still taken and changes nothing. In a folder you gave it, a run works there on that folder's
-/// own setup, its permissions as you set routines too.
+/// own setup, its permissions as you set routines too; a session the user opens there from its screens, as they set
+/// Claude in the window.
 pub(super) fn describe_claude(v: &Value) -> Result<String> {
     let mut line = "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)".to_string();
     if v["skip"] == true {
@@ -138,7 +140,7 @@ pub(super) fn describe_claude(v: &Value) -> Result<String> {
     }
     line.push_str(
         ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, \
-         edits files there or in a copy for you to review — as you set routines",
+         edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window",
     );
     Ok(line)
 }
@@ -204,8 +206,18 @@ pub(super) fn describe_deliver_provider(v: &Value) -> Result<String> {
 pub(super) fn describe_network(v: &Value) -> Result<String> {
     let hosts = strings(v, "hosts")?;
     let from = strings(v, "hosts_from")?;
-    if (hosts.is_empty() && from.is_empty()) || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
-        bail!("“network” names hosts (e.g. api.example.com) or settings that hold an address (hosts_from)");
+    // `ask`: it may ask the user, in Echo's own box, for an address to fetch once (`ctx.http.askAddress`).
+    let ask = match v.get("ask") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => bail!("“network.ask” is true or false"),
+    };
+    if (hosts.is_empty() && from.is_empty() && !ask) || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
+        bail!("“network” names hosts (e.g. api.example.com), settings that hold an address (hosts_from) or asks you for one (ask)");
+    }
+    let asks = "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time";
+    if hosts.is_empty() && from.is_empty() {
+        return Ok(asks.into());
     }
     let mut parts = vec![];
     if !hosts.is_empty() {
@@ -216,7 +228,31 @@ pub(super) fn describe_network(v: &Value) -> Result<String> {
         let s = if from.len() == 1 { "setting" } else { "settings" };
         parts.push(format!("the addresses you list in its {s} {} (wildcards allowed, plain http too; its window part also over WebSocket)", join_words(&quoted.iter().map(String::as_str).collect::<Vec<_>>())));
     }
-    Ok(format!("Talks to {}", parts.join(" and to ")))
+    let talks = format!("Talks to {}", parts.join(" and to "));
+    Ok(if ask { format!("{talks}. {asks}") } else { talks })
+}
+
+/// What `uses.m365.read` may name, with the sheet's words for each: what it is, and what of it is read.
+const M365_READS: &[(&str, &str, &str)] = &[("mail", "mail", "a mail's thread with its attachments' names"), ("chats", "Teams chats", "a chat's messages over some days")];
+
+/// `uses.m365.read`: the user's Microsoft 365, read-only through Echo's own sign-in (`ctx.m365`); nothing sent.
+pub(super) fn describe_m365(v: &Value) -> Result<String> {
+    let read = strings(v, "read")?;
+    let asked: Vec<&(&str, &str, &str)> = M365_READS.iter().filter(|(k, _, _)| read.iter().any(|r| r == k)).collect();
+    let unknown: Vec<&str> = read.iter().map(String::as_str).filter(|r| !M365_READS.iter().any(|(k, _, _)| k == r)).collect();
+    if asked.is_empty() && unknown.is_empty() {
+        bail!("“m365” reads nothing (read: {})", M365_READS.iter().map(|(k, _, _)| *k).collect::<Vec<_>>().join(", "));
+    }
+    let mut lines = vec![];
+    if !asked.is_empty() {
+        let what = join_words(&asked.iter().map(|(_, w, _)| *w).collect::<Vec<_>>());
+        let reads = asked.iter().map(|(_, _, r)| *r).collect::<Vec<_>>().join(" or ");
+        lines.push(format!("Reads your Microsoft 365 {what} through Echo's sign-in when it asks: it searches them and reads {reads} — it never sends"));
+    }
+    if !unknown.is_empty() {
+        lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
+    }
+    Ok(lines.join(". "))
 }
 
 pub(super) fn describe_channel(v: &Value) -> Result<String> {
@@ -373,9 +409,11 @@ pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("threads", "your threads' names and stages"),
     ("people", "who the people in your threads are"),
     ("dictionary", "your dictionary"),
-    ("sources", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
-    ("source", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
-    ("calls", "your calls' minutes and transcripts"),
+    ("sources", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
+    ("source", "your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels"),
+    ("calls", "the list of your calls (titles, times, who was invited, their threads)"),
+    ("calendar", "the meetings Echo has read from your calendar"),
+    ("me", "your name and email"),
 ];
 
 /// `uses.echo.jobs` on the sheet (echo-plugins R25).
@@ -467,6 +505,34 @@ mod tests {
         let only = describe_echo(&serde_json::json!({"write": ["tasks"]})).unwrap();
         assert_eq!(only, "Adds and updates tasks in your threads", "a sheet that adds one asks again: its line differs");
         assert!(describe_echo(&serde_json::json!({"write": ["calendar"]})).unwrap().contains("Asks for things this Echo doesn't have yet: calendar"));
+    }
+
+    #[test]
+    fn the_sheet_names_each_of_echos_calls_calendar_and_you_that_a_plugin_reads() {
+        let line = describe_echo(&serde_json::json!({"read": ["calls", "source", "calendar", "me"]})).unwrap();
+        assert_eq!(line, "Reads the list of your calls (titles, times, who was invited, their threads), your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels, the meetings Echo has read from your calendar and your name and email in Echo");
+    }
+
+    #[test]
+    fn a_plugin_reads_microsoft_365_only_as_its_sheet_says_and_never_sends() {
+        assert_eq!(describe_m365(&serde_json::json!({"read": ["mail"]})).unwrap(), "Reads your Microsoft 365 mail through Echo's sign-in when it asks: it searches them and reads a mail's thread with its attachments' names — it never sends");
+        assert_eq!(
+            describe_m365(&serde_json::json!({"read": ["mail", "chats"]})).unwrap(),
+            "Reads your Microsoft 365 mail and Teams chats through Echo's sign-in when it asks: it searches them and reads a mail's thread with its attachments' names or a chat's messages over some days — it never sends"
+        );
+        assert!(describe_m365(&serde_json::json!({"read": ["files"]})).unwrap().contains("Asks for things this Echo doesn't have yet: files"), "named, never granted");
+        assert!(describe_m365(&serde_json::json!({"read": []})).is_err());
+        assert!(describe_m365(&serde_json::json!({"send": ["mail"]})).is_err(), "no sends");
+    }
+
+    #[test]
+    fn a_plugin_that_asks_for_a_typed_address_says_so_on_its_sheet() {
+        let ask = "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time";
+        assert_eq!(describe_network(&serde_json::json!({"ask": true})).unwrap(), ask);
+        assert_eq!(describe_network(&serde_json::json!({"hosts": ["api.acme.example"], "ask": true})).unwrap(), format!("Talks to api.acme.example over HTTPS. {ask}"));
+        assert!(!describe_network(&serde_json::json!({"hosts": ["api.acme.example"]})).unwrap().contains("type"));
+        assert!(describe_network(&serde_json::json!({"ask": false})).is_err(), "asks for nothing");
+        assert!(describe_network(&serde_json::json!({"ask": "yes"})).is_err());
     }
 
     #[test]

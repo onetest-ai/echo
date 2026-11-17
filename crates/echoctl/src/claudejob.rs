@@ -126,6 +126,17 @@ pub struct InFolder {
 /// `ai::build_command` looks for them. Refused on a profile of Echo's own when the folder's project settings could send
 /// the run elsewhere than that profile.
 pub fn in_folder(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions) -> Result<Vec<String>> {
+    folder_project(p, model, f, perm, false)
+}
+
+/// `in_folder` for a plugin's session in Echo's terminal (`terminal::start_plugin`): the same, but Claude Code keeps the
+/// conversation, for the user to resume.
+#[cfg(feature = "tray")]
+pub fn in_folder_session(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions) -> Result<Vec<String>> {
+    folder_project(p, model, f, perm, true)
+}
+
+fn folder_project(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions, kept: bool) -> Result<Vec<String>> {
     let managed = p.kind.managed();
     if managed {
         let s = f.cwd.join(".claude").join("settings.json");
@@ -139,7 +150,10 @@ pub fn in_folder(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm
     if let Some(m) = model {
         a.extend(["--model".into(), m.to_string()]);
     }
-    a.extend(["--tools".into(), f.mode.tools().into(), "--strict-mcp-config".into(), "--no-session-persistence".into()]);
+    a.extend(["--tools".into(), f.mode.tools().into(), "--strict-mcp-config".into()]);
+    if !kept {
+        a.push("--no-session-persistence".into());
+    }
     a.extend(crate::folder_args::permission_args(perm, p, model, f.mode != FolderMode::Read).0);
     if managed {
         a.extend(["--setting-sources".into(), "user,project".into()]);
@@ -730,5 +744,35 @@ mod tests {
         let e = run(&spec(FolderMode::Read, "routed")).unwrap_err();
         assert!(e.to_string().contains("could send the run elsewhere than"), "{e}");
         assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
+    }
+
+    #[test]
+    #[cfg(feature = "tray")]
+    fn a_plugins_folder_session_is_that_folders_own_project_kept_for_resuming_with_the_permissions_it_is_given() {
+        let vault = std::path::PathBuf::from("/data/acme-vault");
+        let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
+        let profile = |kind| crate::ai::Profile { id: "work".into(), name: "Work".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
+        let inf = |mode| InFolder { cwd: vault.clone(), mode };
+        // As a folder run (the mode's tools, no MCP server, its project last), but the conversation kept.
+        let claude = profile(crate::ai::Kind::Claude);
+        for (mode, tools) in [(FolderMode::Read, "Read,Grep,Glob,Skill"), (FolderMode::Edit, "Read,Grep,Glob,Skill,Edit,Write")] {
+            let a = in_folder_session(&claude, None, &inf(mode), Permissions::Ask).unwrap();
+            assert_eq!(after(&a, "--tools").as_deref(), Some(tools));
+            assert!(a.contains(&"--strict-mcp-config".to_string()) && !a.contains(&"--no-session-persistence".to_string()), "{a:?}");
+            assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
+        }
+        // The setting it is given, each way: Ask each time — Claude Code's own prompts; Auto; Skip all permission checks.
+        let ask = in_folder_session(&claude, None, &inf(FolderMode::Edit), Permissions::Ask).unwrap();
+        assert!(!ask.contains(&"--permission-mode".to_string()) && !ask.contains(&"--dangerously-skip-permissions".to_string()), "{ask:?}");
+        assert_eq!(after(&in_folder_session(&claude, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some("auto"));
+        let skip = in_folder_session(&claude, None, &inf(FolderMode::Read), Permissions::Skip).unwrap();
+        assert!(skip.contains(&"--dangerously-skip-permissions".to_string()) && !skip.contains(&"--permission-mode".to_string()), "{skip:?}");
+        // A model server has no auto mode: edits accepted, or a read asking nothing; its model named.
+        let local = profile(crate::ai::Kind::Local);
+        let a = in_folder_session(&local, Some("qwen3"), &inf(FolderMode::Read), Permissions::Auto).unwrap();
+        assert_eq!((after(&a, "--model").as_deref(), after(&a, "--permission-mode").as_deref()), (Some("qwen3"), Some("dontAsk")));
+        assert_eq!(after(&in_folder_session(&local, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some("acceptEdits"));
+        // The user's own Claude Code loads the folder's project anyway: no sources named.
+        assert!(!in_folder_session(&profile(crate::ai::Kind::System), None, &inf(FolderMode::Read), Permissions::Ask).unwrap().contains(&"--setting-sources".to_string()));
     }
 }

@@ -37,7 +37,14 @@ document.addEventListener('change', (e) => {
 document.addEventListener('focusout', (e) => {
   if (e.target.matches && e.target.matches('input[data-pl-set]') && S.renderOnBlur) { S.renderOnBlur = false; setTimeout(render) }
 })
+// A plugin's routine switched on or off: only here, by the user (a plugin never switches one); saved as shown.
 document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('button[data-pl-routine]')
+  if (b) pluginOp('routine', { id: b.dataset.plRoutine, routine: b.dataset.routine, on: b.dataset.val === 'true' })
+})
+document.addEventListener('click', (e) => {
+  const c = e.target.closest && e.target.closest('button[data-pl-cert-trust], button[data-pl-cert-forget]')
+  if (c) return c.dataset.plCertTrust ? pluginOp('cert_trust', { id: c.dataset.plCertTrust, address: c.dataset.address, key: c.dataset.key }) : pluginOp('cert_forget', { id: c.dataset.plCertForget, address: c.dataset.address })
   const b = e.target.closest && e.target.closest('button[data-pl-set]')
   if (!b) return
   if ('forget' in b.dataset) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: '' })
@@ -93,6 +100,16 @@ function plDetail(p, x) {
   // An address list's notes under it (plain http outside the user's network, what its window part can't reach).
   const notes = (d) => (d.notes || []).map((n) => `<span class="set-sub warn" role="note">${esc(n)}</span>`).join('')
   const fields = (x.settings || []).map((d) => `<div class="pl-field"><b>${esc(d.label)}</b>${d.help ? `<span class="set-sub">${esc(d.help)}</span>` : ''}<div class="pl-field-ctl">${plField(x.id, d)}</div>${notes(d)}</div>`)
+  // Certificates of its https / wss addresses: what the user trusts, and what Echo met there and refused (Trust asks
+  // again in a dialog of the system's).
+  const cert = (c) => `<div class="pl-field" role="group" aria-label="Certificate of ${esc(c.address)}"><b>${esc(c.address)}</b>`
+    + (c.pinned ? `<span class="set-sub">Trusted: <code>${esc(c.pinned)}</code></span>` : '')
+    + (c.seen ? `<span class="set-sub warn" role="note">${c.pinned ? 'Its certificate changed — refused until you trust the new one' : "Its certificate isn't one this computer trusts"}: <code>${esc(c.seen)}</code></span>` : '')
+    + `<div class="pl-field-ctl">${c.seen ? `<button class="btn" data-pl-cert-trust="${esc(x.id)}" data-address="${esc(c.address)}" data-key="${esc(c.seen)}">Trust</button>` : ''}`
+    + `<button class="btn ghost" data-pl-cert-forget="${esc(x.id)}" data-address="${esc(c.address)}">${c.pinned ? 'Forget' : 'Dismiss'}</button></div></div>`
+  const certs = (x.certs || []).length ? `<div class="pl-h4">Certificates</div><div class="pl-fields">${x.certs.map(cert).join('')}</div>` : ''
+  // Its routines (its manifest's): each off until the user switches it on here; when it runs and its last run, Echo's words.
+  const routines = (x.routines || []).map((r) => `<div class="pl-field"><b>${esc(r.name)}</b><span class="set-sub">${esc(r.what)}</span><span class="set-sub">${esc(r.when)}${r.last ? ` · ${esc(r.last)}` : ''}</span><div class="pl-field-ctl"><button class="sw${r.on ? ' on' : ''}" role="switch" aria-checked="${!!r.on}" aria-label="${esc(r.name)} on" data-pl-routine="${esc(x.id)}" data-routine="${esc(r.routine)}" data-val="${!r.on}"></button></div></div>`)
   let own = ''
   const card = Plugins.settings[x.id]
   if (card && x.enabled && !sec) { try { own = card.render() } catch (e) { own = `<p class="error">${esc(String(e))}</p>` } }
@@ -105,7 +122,8 @@ function plDetail(p, x) {
     ${x.summary ? `<p class="pl-sum">${esc(x.summary)}</p>` : ''}
     <div class="pl-acts">${open}${upd}<span class="grow"></span><button class="btn ghost danger" data-pl-ask-remove="${esc(x.id)}">Remove…</button></div>
     ${rm}${plErr(p, `plugin:${x.id}`)}${broke}
-    ${fields.length ? `<div class="pl-h4">Its settings</div><div class="pl-fields">${fields.join('')}</div>` : ''}${own}
+    ${fields.length ? `<div class="pl-h4">Its settings</div><div class="pl-fields">${fields.join('')}</div>` : ''}${certs}${own}
+    ${routines.length ? `<div class="pl-h4">Its routines</div><div class="pl-fields">${routines.join('')}</div>` : ''}
     <div class="pl-h4">What it can do</div>${plUses(x.uses)}
     <p class="set-sub">You agreed to these when you installed it. An update that asks for more asks you again.</p>
   </section>`

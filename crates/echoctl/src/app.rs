@@ -115,6 +115,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
         // This process is the app: the plugins hear Echo's events here, and what other processes queued for them.
         crate::jshost::as_app();
         crate::jshost::sync();
+        // Plugins' own routines the user switched on, each every so many minutes (`plugins::routines`).
+        #[cfg(feature = "tray")]
+        crate::plugins::routines::start_scheduler();
     }
     #[cfg(feature = "brain")]
     crate::brain::start_scheduler();
@@ -1107,13 +1110,11 @@ pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
     }
     #[cfg(windows)]
     {
-        let script = format!(
-            "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox('{}', 'echo', '{}')",
-            message.replace('\'', "''"),
-            default.replace('\'', "''")
-        );
+        // The texts go in through the environment, never quoted into the script: a plugin's name is in the message
+        // (`jshost::typed`), and PowerShell ends a '…' string at a curly quote too.
+        let script = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox($env:ECHO_ASK_MESSAGE, 'echo', $env:ECHO_ASK_DEFAULT)";
         let _ = ok;
-        let out = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).output().ok()?;
+        let out = Command::new("powershell").no_window().env("ECHO_ASK_MESSAGE", message).env("ECHO_ASK_DEFAULT", default).args(["-NoProfile", "-Command", script]).output().ok()?;
         let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (!t.is_empty()).then_some(t);
     }

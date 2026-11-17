@@ -33,6 +33,18 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   Evidence: `window::plugins::store_file`
 - The addresses a plugin may reach by `network.hosts_from` are entered only by the user, in the window or the CLI, and
   kept outside the plugin's store. Evidence: `plugins::listed_addresses`
+- So are the certificate keys the user trusts for those addresses, and the keys Echo met there and refused (20 at most
+  a plugin): `<config dir>/plugins/pins/<id>.json`, `{pins: {"host:port": {key, at}}, seen: {…}}`, written under
+  `plugins.lock` (a met key marked `several` once another key was met at that address); Echo writes a met key only on
+  a connection to a listed https address that failed, a pin only on the user's yes (the window's dialog, `echoctl
+  plugin trust`). The file is named only by a plugin id (`plugins::valid_id`), whoever asks. Removed with the plugin's
+  data. Evidence: `plugins::pins`
+- A host half's open connections (WebSockets, streams) are the app's process's, each on a thread of its own, closed
+  with the host half (switched off, updated, removed, loaded again). Evidence: `jshost::net::stop_plugin`
+- A file sent as a request's body (`fetch` / `stream` with `file`) goes to curl's stdin from the file Echo opened
+  (`upload-file = "-"`, its `Content-Length` Echo's: no chunks, and never the file's name added to the URL's path); that
+  request's curl config is then a file of its own in the system's temporary folder (0600, its headers), removed when
+  curl ends. Evidence: `jshost::http::curl`
 
 ## Files handed to a plugin
 
@@ -67,6 +79,17 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   request on macOS. Evidence: `window::plugins::mic_grant`, `EchoWindow::follow_mic`
 - The window serves a granted folder's images as `/plugin/<id>/folder/<root>/<path>` (§ Store's media rule, by folder).
   Evidence: `window::plugins::folder_image`
+
+## Typed addresses
+
+What Echo does with an address the user types for a plugin (`ctx.http.askAddress`, API § Network): the box is the
+system's text dialog (`app::ask_text`: AppleScript on macOS, an input box on Windows), never drawn by the plugin's page,
+its words Echo's with the plugin's name; it doesn't open inside a run Echo started. The address is checked and kept in
+the asking process's memory only — one per plugin, a newer one replacing it, gone after its one fetch or 10 minutes,
+and with the process — never in a file a plugin or its store can reach. `jshost::fetch` takes it (`typed::take`) only
+when nothing else grants the URL, only for the exact text and a plain `GET` (no headers, no body); like every fetch it
+follows no redirect. On Windows the box's texts reach PowerShell through the environment, never quoted into its script. A debug build's
+`ECHOCTL_ASK_ADDRESS` answers the box. Evidence: `jshost::typed`
 
 ## Script runs
 
@@ -210,6 +233,7 @@ and with the registry (`off`, `gone`, `dropped`), reading the registry and manif
 | adding a host service | `jshost::service` | `jshost::a_host_half_gets_echos_services_and_answers_commands` |
 | adding to the client-half `ctx` | `pluginCtx` (window script) | no covering test |
 | adding a granted folder's service | `jshost::folders::stat` | `jshost::folders::stat_reports_links_as_links_and_never_an_absolute_path` |
+| letting a plugin fetch what the user typed | `jshost::typed::ask` | `jshost::a_plugin_fetches_the_address_the_user_typed_once_and_nothing_else` |
 | handing a plugin files | `jshost::files::make` | `jshost::files::a_handle_is_its_plugins_alone_and_never_names_the_path` |
 | changing install, update or remove | `plugins::install` | `plugins::install_update_and_remove_from_a_local_marketplace` |
 | letting a plugin run Claude | `claudejob::Spec::from_value` | `claudejob::a_spec_stays_in_the_plugins_store` |

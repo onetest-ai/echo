@@ -9,7 +9,7 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 
 - A plugin is one folder with `echo-plugin.json` at its root: required `id` (1–40 chars, a–z 0–9 `-`, no leading `-`),
   `name` (≤ 60) and `version` (`X.Y.Z[-pre]`); optional `echo` (`>=X.Y.Z`, the Echo it needs), `summary` (≤ 240),
-  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
+  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `routines` (§ Routines), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
   with a–z 0–9 `.` `_` `-` `/` only, ≤ 16 KB, shown only as an image beside its work rows and ⌘K entries).
   Evidence: `plugins::read_manifest`, `plugins::valid_id`
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
@@ -31,12 +31,12 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines" |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
 | `deliver_provider.kinds` | the delivery kinds it provides (§ Delivery) |
-| `network.hosts`, `network.hosts_from` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists |
+| `network.hosts`, `network.hosts_from`, `network.ask` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address) |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
@@ -44,11 +44,21 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
 | `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
+| `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
 | `microphone` | `{}` (nothing else): its window half hears the microphone through `ctx.microphone` (§ Client half). The sheet: "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach". Nothing in its host half. Evidence: `capabilities::describe_microphone`, `window::plugins::mic_open` |
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
+
+The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in Settings →
+Plugins: then every <every> min Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
+own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
+prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
+or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
+asks again, naming the changed routine; the user's yes to the update keeps the routine as they had it (on stays on).
+A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
+id left. Evidence: `plugins::routines::sheet_lines`, `plugins::routines::switch_off_new`
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s; an update that adds a script or changes any
@@ -132,13 +142,15 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 
 ## Network
 
-`ctx.http.fetch(url, {method, headers, body, save?})` resolves `{status, body}` for any HTTP answer, a redirect too
-(never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. Plain http is allowed only to
+`ctx.http.fetch(url, {method, headers, body, save?, file?})` resolves `{status, body}` for any HTTP answer, a redirect
+too (never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. With `save` (a path in its
+store) or `file` (a handle the user handed it, `ctx.files`, sent as the body as it is with `POST`, `PUT` or `PATCH` —
+never with `body` too) the limits are 512 MB each way and 15 minutes. Evidence: `jshost::http::fetch` Plain http is allowed only to
 an address the user listed, any host; one outside the user's own network (private IPv4 ranges, `localhost`, `*.local`)
 gets a note on the setting's row and from `echoctl plugin set` ("plain http: anyone on the way can read it"). Only the
 user enters those addresses (window or CLI), never the plugin (`ctx.settings.set`, its `settings.json`, a manifest
 `default`). The sheet's line: "Talks to the addresses you list in its setting “<key>” (wildcards allowed, plain http
-too; its window part also over WebSocket)". Evidence: `jshost::fetch`, `jshost::curl_head`, `plugins::addresses`,
+too; its window part also over WebSocket)". Evidence: `jshost::http::fetch`, `jshost::http::curl_head`, `plugins::addresses`,
 `plugins::listed_addresses`, `plugins::addresses::notes`
 
 The list is `scheme://host[:port]` patterns (http or https; no port: the scheme's own; `:*` any), comma- or
@@ -172,19 +184,71 @@ holds an address the window may reach. Evidence: `plugins::SHARED_WINDOW`
 - `fetch` and `EventSource` still go through CORS: the server must allow Echo's origin (`echo://localhost` on macOS,
   `http://echo.localhost` on Windows; `Access-Control-Allow-Origin: *` covers both). WebSocket has no CORS: the
   server sees the page's `Origin` and decides.
-- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview (no pinning yet); use plain
-  `ws://` / `http://` inside the user's own network, or a certificate the system trusts.
-- The host half has no WebSocket or streaming (`ctx.http.fetch` only), and no microphone.
+- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview: the keys the user trusts are the
+  host half's alone (below). Reach such a server from the host half, use plain `ws://` / `http://` inside the user's own
+  network, or a certificate the system trusts.
+- The host half has no microphone.
 
 Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::Address::csp_sources`, `netReload`
 (window script)
 
+**The host half's connections** (it runs without the window, so it has none of the page's Web APIs):
+
+- `ctx.http.stream(url, {method, headers, body, file}, onChunk)` → `{status, headers, done, cancel()}` at once, the same
+  checks as `fetch`: `onChunk(text, s)` for each piece as it comes (SSE, chunked; UTF-8 never cut inside a character),
+  `status` and `headers` (lower-case names) set once the answer's head arrived, `done` resolving `{status, bytes,
+  cancelled}` at its end (rejecting with why it failed), `cancel()` ending it. No time limit (an event stream stays
+  open), 512 MB at most. Evidence: `jshost::http::stream`
+- `await ctx.net.websocket(url, {headers, protocols})` → `{protocol, send, close, onMessage, onClose, onError}` once
+  open (rejects with why not): `ws://` and `wss://` only to an address the user listed — its `http://` / `https://`
+  address and port (never a `network.hosts` host). `send(text)`, `send(base64, {binary: true})`, `send(handle)` (a file
+  the user handed it, as one binary message); `onMessage(data, {binary})` (binary as base64), `onClose({code,
+  reason})`, `onError({message})`; `close(code, reason)` (1000 or 3000–4999). Events wait for their handler, set after
+  the `await` — up to 1,000 of them and 8 MB of their data, all the plugin's WebSockets together; past that the
+  connection is closed and `onError` says why. Headers can't be the WebSocket's own (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-*`); `protocols`
+  are plain words. Evidence: `jshost::net::websocket`
+- Each runs on a thread of its own; its events reach the plugin's JavaScript like Echo's other events, one slice each.
+  A plugin keeps 8 connections (WebSockets and streams) open at once. A WebSocket message is 16 MB at most out and 4 MB
+  in (binary in arrives as base64, in the 64 MB every plugin's host half shares): a bigger one in closes the connection
+  (code 1009) with an error saying so. While the plugin is 256 events behind on a connection, or its connections' events
+  waiting for it pass 16 MB together, Echo reads no more from them. Switching the plugin off, updating or removing it closes every one (no event follows). Evidence:
+  `jshost::net::MOST`, `jshost::net::stop_plugin`
+
+**Certificates the system doesn't trust** (a server of the user's own, self-signed or from an internal CA): https and
+wss to an address the user listed fail the first time with the key of the certificate met there — "the certificate at
+`<host:port>` isn't one this computer trusts (its key: `sha256//…`): if it is your own server's, trust it in Settings →
+Plugins → `<name>`, or with `echoctl plugin trust <id> <host:port>`" — and Echo keeps that key as met. The user trusts
+it in the plugin's detail under Certificates ("Trust": a dialog of the system's asks again) or with `echoctl plugin
+trust <id> <host:port> [--key sha256//…]`; `echoctl plugin certs <id>` lists them, `echoctl plugin untrust <id>
+<host:port>` (or "Forget") drops one. Without `--key` `trust` takes the key `certs` shows as met, and is refused (give
+`--key`) once Echo met more than one key there since the user last trusted or forgot one. From then on that address is reached with that key alone — not the system's
+trust, its name or dates — and another key is refused ("… changed since you trusted it (its key is now …; you trusted
+…): refused until you …") until the user trusts it. A key is the SHA-256 of the certificate's public key, as curl's
+`--pinnedpubkey` writes it (`openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst
+-sha256 -binary | base64`): a certificate renewed with the same key goes through. Echo keeps them outside the plugin's
+store (`<config dir>/plugins/pins/<id>.json`), only for https addresses the user listed; no plugin sets one, and none
+is changed from inside a run Echo started. A plugin removed with its data loses them. Evidence: `plugins::pins`,
+`jshost::tls::connect`
+
 | Rejected | When |
 |---|---|
-| the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`) |
+| the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`); a WebSocket: not an address the user listed |
+| the certificate | https / wss to a listed address the system doesn't trust and no key trusted, or not the key the user trusted |
+| too many | a 9th connection open at once, a WebSocket message over 16 MB out or 4 MB in, a file sent over 512 MB |
 | the method | other than `GET`, `POST`, `PUT`, `PATCH` or `DELETE` |
-| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
-| the request | the host can't be reached, the 60 s or the 10 MB passed |
+| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too); `Content-Length` or `Transfer-Encoding` with `file` (Echo sets them) |
+| the request | the host can't be reached, the 60 s or the 10 MB passed (15 minutes, 512 MB with `save` or `file`) |
+
+**A typed address** (`uses.network.ask: true`): `await ctx.http.askAddress()` opens Echo's own box — the system's text
+dialog, not the plugin's page — saying, in Echo's words, "<plugin name> asks for the address of a web page to fetch
+once. Type or paste it:"; it resolves the address typed (trimmed) or `null` (cancelled). Echo takes only `http://` or
+`https://` with a host, no user part (`@`), no spaces, quotes, `<`, `>`, `\`, backticks or control characters, 2,000
+characters at most (anything else rejects: "… isn't a web address Echo fetches"). That plugin may then
+`ctx.http.fetch` exactly that address once, within 10 minutes (a newer one replaces it), as a plain `GET`: no
+`headers`, no `body`, and like every fetch no redirect followed (a page that moved answers its 3xx). Another address,
+another plugin, a second fetch, another method, headers or a body is refused as any host not granted. Refused inside a run Echo started. The sheet: "Fetches a web page from an address you
+type in Echo's own box when it asks — that page only, once each time" (after the `Talks to …` line when it names hosts
+too). A plugin never sets the address: not by its settings, its store or its window half. Evidence: `jshost::typed`
 
 ## Claude runs
 
@@ -227,6 +291,28 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
   policy helper; or not JSON) is refused. A call's text reaches the run only as the plugin puts it in the prompt: Echo
   can't see it there, so a plugin that does passes the call's `profile` (`ctx.echo.read('source', …)`). Evidence:
   `claudejob::in_folder`, `jshost::folders::claude_folder`
+- A session the user asks in, from the client half (needs `uses.claude` and `uses.folders`):
+  `ctx.claude.session({folder, path, mode, profile})` opens Claude Code in Echo's terminal, in its own bottom-panel tab
+  "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's
+  own project — as a folder run: the folder's setup (`--setting-sources user,project` on a profile of Echo's own, last),
+  `mode` `read` (the default, `--tools Read,Grep,Glob,Skill`) or `edit` (needs `folders.write`, also `Edit,Write`; no
+  `copy`), no MCP server, never Bash or the web, refused on a folder whose `.claude/settings.json` could route it — but
+  interactive, its conversation kept (`--session-id`, then `--resume` for that plugin and folder on that profile), and
+  its permissions the user's setting for Claude in the window (Settings → AI & minutes → Claude's permissions: Ask each
+  time — Claude Code's own prompts, no flag; Auto — `--permission-mode auto`, or `acceptEdits` / `dontAsk` where the
+  model has no auto mode; Skip all permission checks — `--dangerously-skip-permissions`), never the plugin's. `profile`:
+  one of the user's AI profiles (a wrapper only when it is the default), else the default. It opens only on the user's
+  click or key in the plugin's screens (`copyAllowed`, else it throws before anything is sent); asked again while it
+  runs, it is shown (in another folder it throws: one session per plugin). Each plugin's session has its own tab, so
+  sessions of several plugins run side by side; one found running when the window opens gets its tab back, and its
+  Resume keeps the profile it ran on (Echo checks it again). ⌘K has "Restart" and "New conversation" for each, as for
+  the Claude · Echo folder session. The panel names the plugin, the folder, the mode, the permissions and the profile.
+  Its `ctx` has no way to type into or read the session, and Echo types nothing in — only the user's keys. Switched off
+  or removed, its session runs on as the user's (its tab goes once it has ended) and doesn't start again. Refused
+  before Claude Code starts: no `claude` or `folders` on
+  its sheet, a folder not given, a path outside it or not a folder, `edit` without `folders.write`, another mode, a
+  wrapper profile that isn't the default, the plugin off. Evidence: `terminal::start_plugin`,
+  `jshost::folders::session_folder`, `claudejob::in_folder_session`, `pluginSessionAsk` (window script)
 - `ctx.claude.installPlugin(spec)` installs the channel plugin the manifest names (`uses.channel.plugin`) into the
   default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec.
   Evidence: `capabilities::describe_channel`
@@ -234,7 +320,7 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
 ## Routines
 
 The one shape for every routine, whoever's it is: the user's (the Scheduler's own, mapped by it), Echo's jobs
-(`source: "system"`) and later a plugin's (`"plugin:<id>"`). A plugin that shows routines draws them all from it.
+(`source: "system"`) and a plugin's own (`"plugin:<id>"`, below). A plugin that shows routines draws them all from it.
 
 - **Routine:** `{id, source, name, what, enabled, to: ["today" | "thread_work" | "thread_sources" | "minutes" | "prep" |
   "recall" | "live_notes" | "mail" | "teams" | …], schedule: {text, kind: "time" | "timer" | "event"}, next_run (ISO,
@@ -253,6 +339,35 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
   `ctx.echo.routines.runs(id, {limit})` (newest first, 20 by default, 500 at most), for a plugin with `uses.echo.jobs`;
   changes through `ctx.echo.jobs.set` (§ Client half). Echo keeps a job's runs 31 days; a pass that did nothing leaves
   none. `echoctl jobs routines [--runs <job>]` prints the same. Evidence: `jobs::routines`, `jobs::routine_runs`
+- **A plugin's own routines:** `"routines": [{id, name, what, prompt, every, night?, tools?, timeout?}]` in its
+  manifest, at most 4, with `uses.claude`: `id` a–z 0–9 `-` (≤ 40, once), `name` one line ≤ 60, `what` one line ≤ 200,
+  `prompt` a `.md` file of its package (UTF-8, not empty, ≤ 16 KB), `every` minutes 15–1440 (the default the user may
+  change), `night` paused at night by default (`true` when not said), `tools` `auto` / `skip` / `none` or left out (as
+  `ctx.claude.run`'s: § Claude runs), `timeout` minutes 1–60 (20). Each is a line of its sheet (§ `uses` and the
+  permission sheet). Its id among the routines is `<plugin>.<routine>`, `source` `"plugin:<id>"`, with `plugin` its
+  plugin's name, `to` `[]`, `schedule` `{text: "Every N min", kind: "timer"}`, `enabled` true only while the user
+  switched it on and its plugin is on, `next_run` then (else null), and `settings`: `on` (kind `"switch"`, false by
+  default), `every`, `night`, `model` (default "the profile's minutes model"). It is off until the user switches it on —
+  its row in Settings → Plugins, or `echoctl jobs set <plugin>.<routine> on=on` — and tuned as Echo's jobs are
+  (`echoctl jobs set … every=30 night=off model=sonnet`, never inside a run Echo started); a plugin with
+  `uses.echo.jobs` tunes `every`, `night` and `model` on the user's click (`ctx.echo.jobs.set`, which then resolves to
+  the routine) but never `on`: "a plugin can't switch a routine on or off: you do, in Settings → Plugins or with
+  echoctl jobs set". The plugin's own code neither switches nor starts it. Evidence: `plugins::routines`, `jobs::set_from_plugin`
+- It runs while Echo runs, one run at a time across processes, `every` minutes after its last run began (at once when
+  it never ran), not in a night it pauses in, while it is on and its plugin is on; `echoctl jobs run <plugin>.<routine>`
+  runs it now, on or off (its plugin on; refused inside a run Echo started). A run is `ctx.claude.run`'s (§ Claude
+  runs) on the user's default AI profile, its `model` setting as that profile maps it, with the prompt file read from
+  the installed package after Echo's lines: "This is the routine “<name>” of the plugin “<plugin>”, run by Echo for the
+  user (every N min while it is on). Its last run started <time>. | It hasn't run before. Its answer is kept for the
+  user with its run; nobody is sent it." It sends nothing itself; a send its run makes through Echo is noted.
+- Its runs are kept as Echo's jobs' (§ Routines' run, `jobs-runs/<plugin>.<routine>.jsonl`): `summary` "done" or "done:
+  N changes and M sends through Echo", `error` "the run failed: its log says why", with `run` (its folder),
+  `changes`, `sends`, tokens and cost — never the model's text. The run's folder (`<config dir>/jobs-runs/<id>/<run>/`:
+  `prompt.md`, `log.txt`, `answer.md`, `actions.jsonl`, `drafts.jsonl`, `permissions.json`; the newest 20 kept) is the
+  user's: `echoctl jobs outcome <id> [--run <run>]` → `{id, run, record, answer, actions, drafts, permissions, log}`. A
+  run that fails before Claude Code starts (its prompt gone, no profile) is recorded too, its log saying why. Removing the
+  plugin switches its routines off (an install again never switches one on); with its data, their settings and runs
+  go too. Evidence: `plugins::routines::run`, `plugins::routines::outcome`, `jobs::forget_routines`
 
 ## Delivery
 
@@ -262,9 +377,36 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source` (`calls` is named on the sheet but not served yet); a `threads` row is `{id, name, client, stage, group}` of
-an open thread (`group`: `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under
-`uses.echo.write: ["dictionary"]`. Evidence: `plugins::ECHO_READS`, `share::dictionary_add`
+`source`, `calls`, `calendar`, `me`; a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
+`pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
+`plugins::ECHO_READS`, `share::dictionary_add`
+
+| Read | Sheet ("Reads … in Echo") | Gives |
+|---|---|---|
+| `source` (`sources` too) | your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels | `ctx.echo.read('source', 'call:<folder>' \| 'mail:<source>')` → `{id, kind, title, date, text, link, threads, profile, transcript?}` (a call needs its minutes); a call's also `started_at`, `ended_at`, `app`, `platform`, `memo`, `attendees` (the invite's `{name, email}`, organizer first) and `chat` (`[{at, from, text, files}]`, `[]` when none); a thread `{id, name, client, client_name}`; `profile` the AI profile its text may go to |
+| `calls` | the list of your calls (titles, times, who was invited, their threads) | `ctx.echo.read('calls', {q, since, limit})` → newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}` (`minutes`, `transcript`, `chat`: whether it has them; `people`: the invite's names); `q` every word in its title, folder, subject or people, `since` `YYYY-MM-DD`, `limit` 50 (500 at most) |
+| `calendar` | the meetings Echo has read from your calendar | `ctx.echo.read('calendar')` → the agenda Echo last read (no request to Microsoft 365), by start: `{id, subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo puts it in) |
+| `me` | your name and email | `ctx.echo.read('me')` → `{name, email}` (About me's; the email else Microsoft 365's account; `null` each when unknown) |
+
+## Microsoft 365
+
+Under `uses.m365.read` (`mail`, `chats`), through Echo's own Microsoft 365 sign-in — no sign-in of the plugin's, no
+send; without Echo's sign-in each rejects "Microsoft 365 isn't connected: sign in to it in Echo's Settings → Calendar &
+chat"; a kind not asked for rejects "… didn't ask to read your Microsoft 365 <kind> when it was installed" (`files` and
+any other kind are named on the sheet as not had yet, never granted). The sheet: "Reads your Microsoft 365 mail and
+Teams chats through Echo's sign-in when it asks: it searches them and reads a mail's thread with its attachments' names
+or a chat's messages over some days — it never sends" (each part only for what it names).
+
+- `await ctx.m365.search(query, {kinds, days, limit})` → `{query, results, errors}` as `echoctl m365 search`: its own
+  kinds by default; `days` 90 (1–365), `limit` 25 a kind (1–50); an empty query gives no results.
+- `await ctx.m365.mailThread(message)` (`mail`) → `{subject, picked, messages}`: the thread of a mail by its Graph id,
+  oldest first, each `{id, from, to, at, text, url, …, files}` — `files` its attachments' names, inline pictures left
+  out, never their contents; a list Graph refused is said in `files_error`.
+- `await ctx.m365.chat(chat, {since, until})` (`chats`) → `{id, topic, members: [{name, email}], url, since, until,
+  messages: [{id, at, from, text, files}]}`: what was written on those local days, both included (`until` today,
+  `since` six days before by default; `YYYY-MM-DD`), oldest first, about 400 messages at most (whole pages of 50).
+
+Evidence: `jshost::m365`, `plugins::describe_m365`, `graph::conversation_with_files`
 
 What `uses.echo.write` may name, and the sheet's line for each (`plugins::ECHO_WRITES`):
 
@@ -651,6 +793,7 @@ Evidence: `jshost::work::check_rows`
   shown, or on Windows, the drop is Echo's own), `listen`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
+  `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
   `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
@@ -669,7 +812,8 @@ Evidence: `jshost::work::check_rows`
   `echoctl jobs runs` (20 by default, 500 at most); `set(job, ["key=value", …])` — only on the
   user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
   `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
-  its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check
+  its default, `night` with `from` / `to`; a plugin's routine's `on` refused), resolving to the list after (a plugin's
+  routine: that routine in the routines' shape). The list is `/api/plugin/<id>/jobs`. Both check
   the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
   with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
   `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`
@@ -689,8 +833,8 @@ Evidence: `jshost::work::check_rows`
   `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
   permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
   (window script), `window::plugins::mic_open`
-- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
-  last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
+- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `call.row`, `knowledge.tab` and
+  `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
@@ -699,6 +843,11 @@ Evidence: `jshost::work::check_rows`
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is
   ignored), `after` runs once per box drawn afresh (fetch there, then `ctx.render()`), one row per id, and one that
   throws is left out, the Profile drawn without it. Evidence: `threadSlotRows`, `threadSlotAfter` (window script)
+- `ctx.slots.add('call.row', {id, label, chip(call) → text})`: a chip on each call's row in the calls list, in its
+  second line, `call` `{name, title, started_at, status, memo}`; `chip` is synchronous and gives a short text (24
+  characters, the rest cut with …) or nothing (no chip), drawn as text (Echo escapes it) with `label` as its tooltip;
+  a click on it opens the call as the row does. One per id; one that throws is left out, the row drawn without it; a
+  `ctx.render()` inside it is ignored. Evidence: `callRowChips` (window script)
 - `ctx.slots.add('task.actions', {…, when: (t) => t.kind === 'plugin' && t.source === ctx.id, run(t)})`: `t.row` is
   the work row, each row its own target; an item without `when` stays on Echo's tasks; after `run`, Echo reads the rows
   again. Evidence: `slotFor` (window script)
@@ -714,6 +863,7 @@ Evidence: `jshost::work::check_rows`
   apart are served on different ports. A release build never reads it. Evidence: `jshost::test_hosts::test_host`
 - Made-up `gh` / `git` first on `PATH` (`gh.cmd` / `git.cmd` on Windows) answer `ctx.signin.get` in any build
   (`tests/app_profile.md` → Plugins against fake services).
+- `ECHOCTL_ASK_ADDRESS=<address>` answers `ctx.http.askAddress` in a debug build (no dialog; checked as typed).
 - `ECHOCTL_PICK_FOLDER=<dir>` answers the folder picker in a debug build; `ECHOCTL_PICK_FILES=<path>[:<path>…]` (`;` on
   Windows) the file picker (the files there, as `multiple` and `ext` take them).
 
@@ -733,7 +883,7 @@ Evidence: `jshost::work::check_rows`
 | When you are | Exemplar | Tests |
 |---|---|---|
 | writing a first host half | `jshost::a_host_half_gets_echos_services_and_answers_commands` | exemplar is a test |
-| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test |
+| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test; calls, calendar, me: `jshost::a_plugin_reads_calls_the_calendar_and_who_you_are_only_as_its_sheet_said` |
 | adding Today widgets | `jshost::a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set` | exemplar is a test; a plugin with one widget of each kind: `tests/fixtures/plugins` |
 | giving work rows | `jshost::a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it` | exemplar is a test |
 | keeping values per thread | `jshost::a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes` | exemplar is a test |

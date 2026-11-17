@@ -44,7 +44,9 @@ use sources::*;
 mod snapshot;
 pub use snapshot::snapshot;
 pub mod mine;
+pub mod pins;
 pub mod presets;
+pub mod routines;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -109,6 +111,9 @@ pub struct Manifest {
     /// Dashboards it offers ready-made (`presets`): the user adds one, or not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dashboards: Vec<presets::PresetDef>,
+    /// Its own routines (`routines.rs`): a prompt it ships, run by Echo as a routine once the user switches it on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routines: Vec<routines::RoutineDef>,
     /// Its package skills: folders in its package (`skills/<name>`, Agent Skills format: `SKILL.md`, `scripts/`,
     /// `references/`) Echo copies into its Claude Code plugin for Echo's sessions (`grants::copy_package_skills`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -431,6 +436,9 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
         put(man, check_widget(w, &m, &mut ids));
     }
     put(man, presets::check(&m));
+    for e in routines::check(dir, &mut m) {
+        put(man, Err(e));
+    }
     // Its icon goes into the page as a path (`plugin/<id>/<icon>`): lowercase letters, digits, `.`, `_`, `-` and `/`
     // only, ending `.svg` — what the window serves as an image.
     if let Some(i) = &m.icon {
@@ -608,6 +616,8 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
         lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
     }
+    // Its routines: each named, with what its run may do and the hash of its definition and prompt.
+    lines.extend(routines::sheet_lines(m));
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
     match m.widgets.len() {
         0 => {}
@@ -1161,6 +1171,10 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
             return Err(e);
         }
     }
+    // A version replaced: the routines this one adds start off, before its files are in place.
+    if let Some(e) = before.as_ref().and_then(|b| routines::switch_off_new(b, &new).err()) {
+        return Err(e).inspect_err(|_| { let _ = fs::remove_dir_all(&tmp); });
+    }
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
     // The files handed to the version replaced aren't the new one's.
@@ -1297,6 +1311,8 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
     shared::bind_all();
+    // Its routines off first (an install again never switches one on); with its data, their settings and runs go.
+    Registry::load()?.installed.get(id).ok_or_else(|| anyhow!("“{id}” isn't installed")).and_then(|_| crate::jobs::forget_routines(id, !keep_data))?;
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     #[cfg(feature = "js")]
@@ -1309,8 +1325,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     signin::forget_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
-        let _ = fs::remove_file(secrets_file(id));
-        let _ = fs::remove_file(addresses_file(id));
+        let _ = (fs::remove_file(secrets_file(id)), fs::remove_file(addresses_file(id)));
+        pins::remove_plugin(id);
         thread_values::forget(id);
         #[cfg(feature = "js")]
         crate::jshost::folders::forget(id);
@@ -1354,6 +1370,8 @@ pub fn page_op(v: &Value) -> Result<()> {
     match s("op").as_str() {
         "enable" => set_enabled(&s("id"), v["on"].as_bool().unwrap_or(true)).inspect(|_| reload()),
         "remove" => remove(&s("id"), v["keep_data"].as_bool().unwrap_or(true)).inspect(|_| reload()),
+        // The user's switch of one of its routines (its row in Settings → Plugins).
+        "routine" => routines::switch(&s("id"), &s("routine"), v["on"].as_bool().unwrap_or(false)),
         "set" => {
             let (id, key, value) = (s("id"), s("key"), v["value"].clone());
             match addresses_to_allow(&id, &key, &value)? {
@@ -1374,6 +1392,7 @@ pub fn page_op(v: &Value) -> Result<()> {
                 None => set_setting(&id, &key, &value),
             }
         }
+        "cert_trust" | "cert_forget" => pins::page_op(v),
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
         "market_remove" => market_remove(&s("name"), v["keep_data"].as_bool().unwrap_or(true)).map(|_| ()),
         "market_add" => {
@@ -1497,7 +1516,7 @@ mod tests {
         let line = describe_claude(&json!({})).unwrap();
         assert!(line.contains("acting on its own as you set routines in Settings") && !line.contains("you mark so"), "{line}");
         assert!(describe_claude(&json!({"skip": true})).unwrap().contains("permission check); a run you mark so may skip every permission check. In a folder"));
-        assert!(line.contains(". In a folder you gave it, Claude works with that folder's own Claude Code setup") && line.ends_with("for you to review — as you set routines"), "{line}");
+        assert!(line.contains(". In a folder you gave it, Claude works with that folder's own Claude Code setup") && line.contains("for you to review — as you set routines; ") && line.ends_with("on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window"), "{line}");
         // Sends: the ways its sheet named, or its own way.
         let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
         assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());
@@ -1560,7 +1579,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], dashboards: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], dashboards: vec![], routines: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
