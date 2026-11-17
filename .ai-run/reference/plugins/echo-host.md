@@ -128,7 +128,8 @@ follows no redirect. On Windows the box's texts reach PowerShell through the env
   own folder (`ai::wrapper::outside_echo`), macOS's `/usr/bin/git`, and a file that can't be started. None: "git isn't
   installed on this computer". Evidence: `jshost::git::path_candidates`
 - Its environment: only `PATH`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`,
-  `XDG_CONFIG_HOME` of the user's (no `GIT_*`, `ECHOCTL*`, `CLAUDE*`, `ANTHROPIC*`), then `LC_ALL=C`,
+  `XDG_CONFIG_HOME` and `GIT_CONFIG_GLOBAL` of the user's — those Echo's own process was started with (no other `GIT_*`,
+  no `ECHOCTL*`, `CLAUDE*`, `ANTHROPIC*`), then `LC_ALL=C`,
   `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1`, `GIT_EDITOR=:`, an empty `GIT_PAGER`,
   `GIT_NO_LAZY_FETCH=1` (a missing object is never fetched from a promisor remote) and an empty `GIT_ALLOW_PROTOCOL`
   (no transport at all, whatever `protocol.*.allow` says), and the overrides as `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (git 2.31+, which is why older git
@@ -143,10 +144,13 @@ follows no redirect. On Windows the box's texts reach PowerShell through the env
   path from the including file's folder; `~user/` and a drive with no root, `C:tools\git.cfg`, refused), there or not (git skips a missing file), by its real path
   (the deepest existing folder canonical, `jshost::git::physical`); the repository is refused when one lies inside a
   folder given to any plugin, inside Echo's data or own folder, or in the work tree outside a hidden folder
-  (`jshost::git::changeable`), or names bytes that aren't UTF-8 — and so when the user's `$XDG_CONFIG_HOME/git/config`,
-  `~/.gitconfig` or `~/.config/git/config` lies in such a place, or the repository's `.git/config` or
+  (`jshost::git::changeable`), or names bytes that aren't UTF-8 — and so when the user's settings file lies in such a
+  place (`jshost::git::user_files`: `$XDG_CONFIG_HOME/git/config`, `~/.gitconfig` and `~/.config/git/config`, and
+  also the file `GIT_CONFIG_GLOBAL` names when set — git 2.32 and later read that one instead, 2.31 ignores it; one
+  that isn't a full path is refused), or the repository's `.git/config` or
   `.git/config.worktree` is a link into one. Evidence:
-  `jshost::git::tests::settings_that_include_a_file_a_plugin_can_write_refuse_the_repository`. Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
+  `jshost::git::tests::settings_that_include_a_file_a_plugin_can_write_refuse_the_repository`,
+  `jshost::git::tests::a_test_environments_git_settings_a_plugin_could_change_refuse_the_repository_as_the_users_would`. Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
   `diff.*.command/textconv`, `merge.*.driver`, `credential.*.helper`, `gpg.*.program`, `*.sshCommand`, `*.askPass`,
   `*.editor`, `*.pager`, `*.proxy`, `remote.*.uploadpack/receivepack/vcs`, `uploadpack.packObjectsHook`, …) set empty,
   `filter.*.required` and every `pager.<command>` false, every `protocol.<name>.allow` never, and each hook set in

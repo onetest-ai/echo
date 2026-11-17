@@ -1,7 +1,7 @@
 //! `ctx.git.*`: a granted folder's git history, changes and commits, for a plugin that may not start programs itself
 //! (echo-plugins R17). Git runs here only with the verbs of `VERBS`, never through a shell, each path literal after
 //! `--` (`GIT_LITERAL_PATHSPECS`), within `TIMEOUT` and the output caps, in an environment of a few named variables
-//! (none of Echo's secrets, no `CLAUDE*` / `ANTHROPIC*`, no `GIT_*` of the user's), and with every setting that names a
+//! (none of Echo's secrets, no `CLAUDE*` / `ANTHROPIC*`, no `GIT_*` of the user's but `GIT_CONFIG_GLOBAL`), and with every setting that names a
 //! program switched off on its command line (`overrides`): a vault's own `.git/config` runs nothing. No network verb.
 //! Only a repository whose git dir no plugin can write (`top_of`), named to git outright (`GIT_DIR`, `GIT_WORK_TREE`):
 //! its settings stay as `overrides` read them while git runs.
@@ -205,8 +205,22 @@ impl Out {
     }
 }
 
-/// The variables git gets from the user's environment; nothing else of it (no `GIT_*`, none of Echo's or Claude's).
-const ENV_KEPT: &[&str] = &["PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "XDG_CONFIG_HOME"];
+/// The variables git gets from the user's environment; nothing else of it (no other `GIT_*`, none of Echo's or
+/// Claude's). `GIT_CONFIG_GLOBAL` is checked as the user's settings are (`user_files`).
+const ENV_KEPT: &[&str] = &["PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"];
+
+/// The user's settings files git may read: `$XDG_CONFIG_HOME/git/config`, `~/.gitconfig` and `~/.config/git/config`,
+/// and the one `GIT_CONFIG_GLOBAL` names when Echo's environment sets it (git 2.32 and later read that instead of
+/// them; 2.31 ignores it). A `GIT_CONFIG_GLOBAL` that isn't a full path is refused: git would read it from the folder
+/// it runs in.
+fn user_files() -> Result<Vec<PathBuf>> {
+    let global = std::env::var_os("GIT_CONFIG_GLOBAL").filter(|g| !g.is_empty()).map(PathBuf::from);
+    if let Some(g) = global.as_ref().filter(|g| !g.is_absolute()) {
+        bail!("GIT_CONFIG_GLOBAL names {}, not a full path: Echo doesn't run git with it", g.display());
+    }
+    let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(|x| PathBuf::from(x).join("git/config"));
+    Ok(global.into_iter().chain(xdg).chain(git_home().iter().flat_map(|h| [h.join(".gitconfig"), h.join(".config/git/config")])).collect())
+}
 
 /// An empty folder git is told holds the hooks: none ever runs.
 fn no_hooks() -> Result<PathBuf> {
@@ -271,10 +285,7 @@ fn overrides(git: &Path, dir: &Path, top: &Path, found: bool, hooks: &Path) -> R
     // every file they include.
     let granted = granted();
     let refuse = |p: &Path| anyhow!("this repository's settings read {}, a file a plugin could change: Echo doesn't use it", p.display());
-    let home = git_home();
-    let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(|x| PathBuf::from(x).join("git/config"));
-    let user: Vec<PathBuf> = xdg.into_iter().chain(home.iter().flat_map(|h| [h.join(".gitconfig"), h.join(".config/git/config")])).collect();
-    if let Some(p) = user.iter().find_map(|f| changeable(f, top, &granted)) {
+    if let Some(p) = user_files()?.iter().find_map(|f| changeable(f, top, &granted)) {
         return Err(refuse(&p));
     }
     // The repository's own, in its real `.git` (`top_of`) unless a link leads elsewhere.
@@ -1120,7 +1131,6 @@ mod tests {
         drop(terminal_end);
     }
 
-    #[cfg(unix)]
     /// Whether the git on this computer is at least `major.minor` (`git version 2.54.0 (Apple Git-157)`).
     fn git_at_least(major: u32, minor: u32) -> bool {
         let out = std::process::Command::new("git").arg("--version").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
@@ -1810,6 +1820,109 @@ mod tests {
         assert_eq!(run("sub", "info", json!({})).unwrap()["repo"], true);
         assert!(!mark.exists(), "nothing ran");
         for id in ["inc", "sub"] {
+            plugins::remove(id, true).unwrap();
+        }
+        sync();
+    }
+
+    /// A made-up git identity at `at`: a test environment's own settings file.
+    fn test_identity(at: &Path) {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, "[user]\n\tname = Sam Rivera\n\temail = sam@initech.example\n").unwrap();
+    }
+
+    #[test]
+    fn a_commit_under_a_test_environments_own_git_settings_is_by_its_made_up_user() {
+        let (_env, root) = paths::testenv::folders("jshost-git-global");
+        // Git reads `GIT_CONFIG_GLOBAL` from 2.32 on.
+        if program().is_err() || !git_at_least(2, 32) {
+            return;
+        }
+        // The home's settings: another made-up person, standing for the user's own, which the environment's replace.
+        std::fs::write(root.join("user/.gitconfig"), "[user]\n\tname = Pat Doe\n\temail = pat@globex.example\n").unwrap();
+        let global = root.join("test-data/gitconfig");
+        test_identity(&global);
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global);
+        let vault = root.join("vault");
+        install(&root, "tester", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        run("tester", "init", json!({})).unwrap();
+        std::fs::write(vault.join("Acme.md"), "# Acme\n").unwrap();
+        run("tester", "commit", json!({"paths": ["Acme.md"], "message": "Acme: notes"})).unwrap();
+        let log = run("tester", "log", json!({})).unwrap();
+        assert_eq!((log[0]["author"].clone(), log[0]["email"].clone(), log[0]["echo"].clone()), (json!("Sam Rivera"), json!("sam@initech.example"), json!("tester")));
+        assert_eq!(user_git(&vault, &["log", "-1", "--format=%an <%ae> / %cn <%ce>"]).trim(), "Sam Rivera <sam@initech.example> / Echo (tester) <tester@plugins.echo.invalid>");
+        // Empty: no user settings at all (git reads none), so Echo is the author too — never the home's.
+        std::env::set_var("GIT_CONFIG_GLOBAL", "");
+        std::fs::write(vault.join("Acme.md"), "# Acme\nv2\n").unwrap();
+        run("tester", "commit", json!({"paths": ["Acme.md"], "message": "Acme: v2"})).unwrap();
+        assert_eq!(run("tester", "log", json!({"max": 1})).unwrap()[0]["author"], "Echo (tester)");
+        plugins::remove("tester", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_test_environments_git_settings_a_plugin_could_change_refuse_the_repository_as_the_users_would() {
+        let (_env, root) = paths::testenv::folders("jshost-git-global-reach");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "reach", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        one_commit(&vault);
+        let top = root.join("repo");
+        one_commit(&top);
+        install(&root, "sub", json!({"folders": {"what": "vaults", "write": true}}), &top.join("Vault"));
+        let refused = |id: &str, at: &str, why: &str, want: &str| {
+            std::env::set_var("GIT_CONFIG_GLOBAL", at);
+            for (cmd, a) in [("info", json!({})), ("status", json!({})), ("commit", json!({"paths": ["a.md"], "message": "x"}))] {
+                let r = run(id, cmd, a);
+                assert!(r.as_ref().is_err_and(|e| e.contains(want)), "{why}: {cmd}: {r:?}");
+            }
+        };
+        let s = |p: PathBuf| p.display().to_string();
+        // Inside the folder given to a plugin — a hidden folder of it too, there or not.
+        let hidden = vault.join(".tools/gitconfig");
+        test_identity(&hidden);
+        refused("reach", &s(hidden), "in a grant's hidden folder", "a plugin could change");
+        refused("reach", &s(vault.join(".later/gitconfig")), "in a grant, not there yet", "a plugin could change");
+        // In the work tree outside a hidden folder, though outside the grant.
+        let shared = top.join("shared/gitconfig");
+        test_identity(&shared);
+        refused("sub", &s(shared), "in the work tree", "a plugin could change");
+        // Inside Echo's data or own folder.
+        for (at, why) in [(root.join("home/gitconfig"), "Echo's data folder"), (root.join("config/gitconfig"), "Echo's own folder")] {
+            test_identity(&at);
+            refused("reach", &s(at), why, "a plugin could change");
+        }
+        // A file elsewhere that includes one a plugin can write.
+        let outside = root.join("test-data/gitconfig");
+        test_identity(&outside);
+        std::fs::write(&outside, format!("[user]\n\tname = Sam Rivera\n[include]\n\tpath = {}\n", s(vault.join(".tools/gitconfig")))).unwrap();
+        refused("reach", &s(outside.clone()), "includes a file in a grant", "a plugin could change");
+        // The home's settings a link into the grant, the environment's file elsewhere: refused all the same (a git
+        // older than 2.32 reads the home's).
+        test_identity(&outside);
+        let home = root.join("user/.gitconfig");
+        std::fs::rename(&home, vault.join(".tools/home.gitconfig")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(vault.join(".tools/home.gitconfig"), &home).unwrap();
+            refused("reach", &s(outside.clone()), "the home's settings in a grant", "a plugin could change");
+            std::fs::remove_file(&home).unwrap();
+        }
+        std::fs::rename(vault.join(".tools/home.gitconfig"), &home).unwrap();
+        // Not a full path: git would read it from the folder it runs in.
+        refused("reach", "gitconfig", "relative", "not a full path");
+        // Elsewhere, and in the work tree's hidden folder: used.
+        test_identity(&outside);
+        std::env::set_var("GIT_CONFIG_GLOBAL", &outside);
+        assert_eq!(run("reach", "info", json!({})).unwrap()["repo"], true);
+        let tucked = top.join(".shared/gitconfig");
+        test_identity(&tucked);
+        std::env::set_var("GIT_CONFIG_GLOBAL", &tucked);
+        assert_eq!(run("sub", "info", json!({})).unwrap()["repo"], true);
+        for id in ["reach", "sub"] {
             plugins::remove(id, true).unwrap();
         }
         sync();
