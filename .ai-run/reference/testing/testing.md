@@ -34,7 +34,7 @@ and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for t
 ## Opening nothing in tests
 
 With `ECHOCTL_TEST_OPEN_LOG_ONLY` set (the test data's `<dir>/env` sets it), Echo, in any build and on any OS, appends
-what the window's `open_url`, a sign-in, `echoctl join` or a Settings pane would open to `ECHOCTL_TEST_OPEN_LOG`
+what the window's `open_url`, a sign-in, `echoctl join`, a Settings pane or a plugin's `ctx.system.reveal` (`reveal <path>`) would open to `ECHOCTL_TEST_OPEN_LOG`
 (`<dir>/open.log`) and opens nothing (`app::open_log_only`).
 
 ## Served test data

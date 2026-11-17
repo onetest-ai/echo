@@ -795,6 +795,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-115",
+   "feature": "A plugin's window half shows a file or folder of a folder the user gave it selected in Finder / Explorer (`ctx.system.reveal(root, path)`, `uses.folders`): only on the user's click or key (else refused with \"Finder or Explorer opens only on your click\", nothing sent); never outside the folder (`..`, an absolute path, a link out of it), a missing file, a folder it wasn't given, a plugin that didn't ask for folders or is off; never from the host half; on test data only written to the open log (`reveal <path>`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }
