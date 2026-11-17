@@ -25,7 +25,7 @@ tags: [plugins, calls, client-half, slots]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Open the call Acme weekly sync (`[data-call$="-acme-weekly-sync"]`, the first), click "Call actions" | The menu lists, in order: Echo's own items down to "Ask Claude about this call", a separator, "Open in Acme notes", "About Call demo", a separator, "Say hello to the call", a separator, "Delete…" |
+| 1 | Reload `{{base_url}}/` (plugins load in their install order, so the groups' order doesn't depend on an earlier stage switching one off and on); open the call Acme weekly sync (`[data-call$="-acme-weekly-sync"]`, the first), click "Call actions" | The menu lists, in order: Echo's own items down to "Ask Claude about this call", a separator, "Open in Acme notes", "About Call demo", a separator, "Say hello to the call", a separator, "Delete…" |
 | 2 | Click "About Call demo" | A notice reads "Call demo files your calls in your notes." |
 | 3 | Open the call Globex standup (`[data-call$="-globex-standup"]`), click "Call actions" | Call demo's first item reads "Open in Inbox notes" |
 | 4 | Click "Say hello to the call" | A notice reads "Hello, Globex standup" (a fixed label runs on its call) |

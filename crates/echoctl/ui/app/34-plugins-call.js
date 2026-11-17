@@ -40,12 +40,13 @@ function minutesComing(c) {
   if (c.notes) return false
   if (run && ['failed', 'needs_login', 'skipped'].includes(run.state)) return false
   if (!run && (c.status === 'failed' || c.status === 'audio')) return false
-  return ['now', 'at', 'before', 'not_ready'].includes(auto.due) || (auto.due === 'tried' && !!auto.held_by)
+  // `before`: the call ended before automatic minutes were on — Echo won't write them by itself.
+  return ['now', 'at', 'not_ready'].includes(auto.due) || (auto.due === 'tried' && !!auto.held_by)
 }
 /** The plugins' lines in the minutes' box, only while they are coming; a line with nothing to say isn't drawn. */
 const callMinutesLines = (items, c, log) => !minutesComing(c) ? '' : threadSlotRows(items, slotCallPage(c), log)
   .filter((r) => r.html.trim())
-  .map((r) => `<p class="alt plug-line" data-call-minutes="${esc(r.key)}">${r.html}</p>`).join('')
+  .map((r) => `<div class="alt plug-line" data-call-minutes="${esc(r.key)}">${r.html}</div>`).join('')
 // end of the call page slots block
 
 // ── plugin sheet: the one plugin sheet open, and where Tab goes in it (no DOM: `call-slots.test.mjs`).
@@ -110,7 +111,9 @@ function sheetShut(plugin, quiet) {
 }
 // Esc closes it (the palette over it keeps its own Escape); Tab goes round inside it.
 document.addEventListener('keydown', (e) => {
-  if (!Sheet.now || !Sheet.now.el || PAL.open) return
+  // The palette or one of Echo's own dialogs over it keeps its own keys.
+  const dlg = document.getElementById('r-dlg')
+  if (!Sheet.now || !Sheet.now.el || PAL.open || (dlg && dlg.firstElementChild)) return
   if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); sheetShut(null); return }
   if (e.key !== 'Tab') return
   const box = Sheet.now.el.firstElementChild, list = sheetFocusables(box)
@@ -118,6 +121,8 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault()
   ;(to < 0 ? box : list[to]).focus()
 }, true)
+// Another place opened under it (a shortcut, the tray, `ctx.go`): it closes, its onClose called.
+window.addEventListener('hashchange', () => { if (Sheet.now) sheetShut(null) })
 // A click beside it (on its backdrop) closes it.
 document.addEventListener('click', (e) => { if (Sheet.now && Sheet.now.el && e.target === Sheet.now.el) sheetShut(null) })
 

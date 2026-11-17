@@ -64,9 +64,9 @@ assert.equal(afters.length, 3, 'a box drawn afresh: after again')
 const coming = (o) => page.minutesComing({ name: 'k', ...o })
 assert.equal(coming({ notes_run: { state: 'queued' } }), true)
 assert.equal(coming({ notes_run: { state: 'running' } }), true)
-for (const due of ['now', 'at', 'before', 'not_ready']) assert.equal(coming({ auto: { due } }), true, due)
+for (const due of ['now', 'at', 'not_ready']) assert.equal(coming({ auto: { due } }), true, due)
 assert.equal(coming({ auto: { due: 'tried', held_by: { pid: 4 } } }), true, 'a Claude Code session writing them')
-for (const due of ['off', 'held', 'gate', 'missing', 'error', 'tried']) assert.equal(coming({ auto: { due } }), false, due)
+for (const due of ['off', 'held', 'gate', 'missing', 'error', 'tried', 'before']) assert.equal(coming({ auto: { due } }), false, due)
 for (const state of ['failed', 'needs_login', 'skipped']) assert.equal(coming({ notes_run: { state }, auto: { due: 'at' } }), false, state)
 assert.equal(coming({ status: 'failed', auto: { due: 'not_ready' } }), false, 'no transcript')
 assert.equal(coming({ notes: 'x', notes_run: { state: 'done' }, auto: { due: 'at' } }), false, 'written already')
@@ -77,7 +77,7 @@ const lines = [
   { plugin: 'boom', id: 'x', render: () => { throw new Error('nope') } },
 ]
 const pending = { ...c, notes: null, notes_run: null, auto: { due: 'at', at: '2026-11-06T11:00:00Z' } }
-assert.equal(page.callMinutesLines(lines, pending, () => {}), '<p class="alt plug-line" data-call-minutes="vault:line">Goes to the vault once written: <b>Acme weekly sync</b></p>', 'one line; the empty one and the one that throws left out')
+assert.equal(page.callMinutesLines(lines, pending, () => {}), '<div class="alt plug-line" data-call-minutes="vault:line">Goes to the vault once written: <b>Acme weekly sync</b></div>', 'one line; the empty one and the one that throws left out')
 assert.equal(page.callMinutesLines(lines, { ...pending, auto: { due: 'held' } }, () => {}), '', 'held: not coming by themselves, no line')
 assert.equal(page.callMinutesLines(lines, { ...pending, auto: { due: 'off' } }, () => {}), '', 'automatic minutes off: no line')
 assert.ok(src.includes("callMinutesLines(Plugins.slots['call.minutes'], c,"), 'the minutes box draws the lines')
