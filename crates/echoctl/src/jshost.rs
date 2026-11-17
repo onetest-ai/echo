@@ -385,9 +385,6 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
 fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     use std::io::Write as _;
     use crate::app::NoWindow;
-    if opts["save"].as_str().is_some_and(|s| !s.is_empty()) || opts["method"].as_str().is_some_and(|m| !m.eq_ignore_ascii_case("GET")) {
-        read_only_here("a request other than GET")?;
-    }
     let m = plugins::read_manifest(&package_dir(id)?)?;
     let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
     // What the user listed, each checked again as when it was saved (the file may have been edited since).
@@ -934,16 +931,6 @@ fn may_touch_claude_plugin(id: &str, spec: &str) -> Result<()> {
     Ok(())
 }
 
-/// A plugin command run while Claude prepares and asks — a read-only routine's, or a routine's or Yolo's run with the
-/// user's choice "Claude acts on its own" off (`echoctl plugin call`, its environment inherited): it reads, it changes
-/// nothing outside the plugin's store — no folder writes, no Claude run, no message, no request but a GET.
-fn read_only_here(what: &str) -> Result<()> {
-    if std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine") {
-        bail!("{what} isn't allowed while Claude prepares and asks");
-    }
-    Ok(())
-}
-
 /// A plugin's client half showing or tuning Echo's background jobs (echo-plugins R25): it is on, and its install sheet
 /// named `uses.echo.jobs`.
 pub fn may_tune_jobs(id: &str) -> Result<()> {
@@ -1170,7 +1157,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
         }
         "threads.set" => {
-            read_only_here("changing files or settings")?;
             let key = s(&arg[1]);
             let store = match plugins::shared::store_of(&key)? {
                 Some(st) => {
@@ -1198,7 +1184,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "shared.get" => plugins::shared::get(&s(arg))?,
         "shared.set" => {
-            read_only_here("changing files or settings")?;
             let key = s(&arg[0]);
             let before = plugins::shared::get(&key).ok();
             plugins::shared::set(id, &key, &arg[1])?;
@@ -1238,7 +1223,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "settings.set" => {
-            read_only_here("changing files or settings")?;
             let m = plugins::read_manifest(&package_dir(id)?)?;
             if plugins::address_settings(&m.uses).contains(&s(&arg[0])) {
                 bail!("only you set the addresses {id} may reach (its setting “{}”)", s(&arg[0]));
@@ -1280,7 +1264,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "agent.set" => {
-            read_only_here("changing files or settings")?;
             plugins::agent::set_runtime(id, arg)?;
             Value::Null
         }
@@ -1311,14 +1294,12 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
         }
         "echo.dictionary.add" => {
-            read_only_here("changing files or settings")?;
             if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == "dictionary")) {
                 bail!("{id} didn't ask to add to your dictionary when it was installed");
             }
             crate::share::dictionary_add(id, arg)?
         }
         "threads.set_stage" | "tasks.upsert" | "tasks.close" => {
-            read_only_here("changing your threads")?;
             let what = if op == "threads.set_stage" { "thread_stage" } else { "tasks" };
             if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == what)) {
                 bail!("{id} didn't ask to change your threads' {} when it was installed", if what == "tasks" { "tasks" } else { "stage" });
@@ -1384,7 +1365,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "fs.stat" => folders::stat(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?,
         "fs.move" => {
-            read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;
             let from = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
             let to = crate::grants::writable(id, &s(&arg[0]), &s(&arg[2]))?;
@@ -1401,7 +1381,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "fs.remove" => {
-            read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;
             let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
             if f.is_dir() {
@@ -1449,12 +1428,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 bail!("it didn't ask Echo to keep a sign-in it makes when it was installed (uses.signin.keep)");
             }
             if op == "signin.keep" {
-                read_only_here("keeping a sign-in")?;
                 let token = arg[1].as_str().ok_or_else(|| anyhow!("a sign-in is one line of text, 8 KB at most"))?;
                 plugins::signin::keep(id, &host, token)?;
                 Value::Bool(true)
             } else {
-                read_only_here("forgetting a sign-in")?;
                 json!(plugins::signin::forget_kept(id, &host)?)
             }
         }
@@ -1992,7 +1969,7 @@ mod tests {
 
     /// The gates on every system; the answers (and `{fresh: true}`) where made-up programs are shell scripts.
     #[test]
-    fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine() {
+    fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named() {
         let (_env, root) = paths::testenv::folders("jshost-signin");
         // Made-up `gh` and `git` (Echo's tests never look for the computer's own: `signin::FAKE_PROGRAMS`), each
         // logging that it was asked; on Windows none (no program is asked there).
@@ -2050,24 +2027,6 @@ mod tests {
             }
         }
         assert!(!asked("gh") && !asked("git"));
-        // A read-only routine never reads one (refused before any program is asked).
-        struct RunMode;
-        impl Drop for RunMode {
-            fn drop(&mut self) {
-                std::env::remove_var(crate::guard::RUN_MODE);
-            }
-        }
-        {
-            let _routine = RunMode;
-            std::env::set_var(crate::guard::RUN_MODE, "routine");
-            for command in ["get", "fresh"] {
-                match call("gh-ish", command, &json!({"host": "signin-jshost.example"})) {
-                    Err(e) => assert!(e.to_string().contains("isn't allowed while Claude prepares and asks"), "{e}"),
-                    Ok(_) => panic!("a read-only routine was handed a sign-in"),
-                }
-            }
-        }
-        assert!(!asked("gh") && !asked("git"));
         // The host it named: the made-up CLI's token.
         #[cfg(unix)]
         {
@@ -2087,7 +2046,7 @@ mod tests {
     }
 
     /// `uses.signin.keep`: Echo keeps a sign-in the plugin made (whatever service, however made), outside its store, and
-    /// hands it back first to that plugin only; refused without `keep`, for a host it didn't name, in a read-only routine.
+    /// hands it back first to that plugin only; refused without `keep` and for a host it didn't name.
     #[test]
     fn echo_keeps_a_sign_in_a_plugin_made_and_hands_it_back_only_to_a_plugin_that_said_keep() {
         let (_env, root) = paths::testenv::folders("jshost-signin-keep");
@@ -2164,21 +2123,6 @@ mod tests {
         // A host whose file would be a Windows device (con.example.json): refused.
         let e = call("keeper", "keep", &json!({"host": "con.example", "token": "x"})).unwrap_err().to_string();
         assert!(e.contains("can't be a file's name on Windows"), "{e}");
-        // A read-only routine keeps and forgets nothing.
-        {
-            struct RunMode;
-            impl Drop for RunMode {
-                fn drop(&mut self) {
-                    std::env::remove_var(crate::guard::RUN_MODE);
-                }
-            }
-            let _routine = RunMode;
-            std::env::set_var(crate::guard::RUN_MODE, "routine");
-            for command in ["keep", "forget"] {
-                let e = call("keeper", command, &token).unwrap_err().to_string();
-                assert!(e.contains("isn't allowed while Claude prepares and asks"), "{command}: {e}");
-            }
-        }
         // Installed again from its marketplace: its sign-in stays. A version that no longer says `keep`, or the same id
         // from another marketplace: it starts without one.
         let reinstall = |market: &str| {
@@ -2571,16 +2515,12 @@ mod tests {
         assert!(err.contains("may ask about or install only the Claude Code plugin its install sheet named"), "{err}");
         assert!(may_touch_claude_plugin("chan", "telegram@claude-plugins-official").is_ok(), "the named one passes the gate");
         assert!(call("chan", "has", &json!({"spec": "evil@somewhere"})).unwrap_err().to_string().contains("may ask about or install only"), "nor asked about another");
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let refused = call("chan", "install", &json!({"spec": "telegram@claude-plugins-official"}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
         plugins::remove("chan", true).unwrap();
         sync();
     }
 
     #[test]
-    fn a_plugin_gives_claude_guides_at_run_time_and_never_from_a_read_only_routine() {
+    fn a_plugin_gives_claude_guides_at_run_time() {
         let (_env, root) = paths::testenv::folders("jshost-agent-set");
         let mk = root.join("market");
         let d = mk.join("plugins/vaults");
@@ -2637,20 +2577,13 @@ mod tests {
             assert!(e.contains(why), "{why}: {e}");
         }
         assert!(dir.join("work/CLAUDE.md").is_file());
-        // A read-only routine sets nothing.
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let refused = call("vaults", "set", &json!({"entries": []}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        let refused = refused.map(|v| v["error"].as_str().unwrap_or("").to_string()).unwrap_or_else(|e| e.to_string());
-        assert!(refused.contains("while Claude prepares and asks"), "{refused}");
-        assert!(dir.join("work/CLAUDE.md").is_file());
         plugins::remove("vaults", true).unwrap();
         sync();
         assert!(!dir.exists());
     }
 
     #[test]
-    fn a_routine_preparing_and_asking_runs_no_plugin_command_that_sends_and_one_acting_on_its_own_does() {
+    fn a_plugin_command_that_sends_goes_on_as_its_sheet_named() {
         let (_env, root) = paths::testenv::folders("jshost-run-sends");
         let mk = root.join("market");
         let d = mk.join("plugins/notifier");
@@ -2674,14 +2607,9 @@ mod tests {
                 })
                 .unwrap()
         };
-        // Preparing and asking (Echo set the read-only marker for its run): refused before anything is sent.
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let refused = send();
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.contains("isn't allowed while Claude prepares and asks"), "{refused}");
-        // Acting on its own (no marker): the send goes on — here it stops only for want of a Teams sign-in.
+        // The send goes on — here it stops only for want of a Teams sign-in.
         let tried = send();
-        assert!(!tried.contains("while Claude prepares and asks"), "{tried}");
+        assert!(tried.contains("Teams") || tried.contains("sign"), "{tried}");
         plugins::remove("notifier", true).unwrap();
         sync();
     }
@@ -2734,13 +2662,6 @@ mod tests {
             assert!(err.contains("not the folder itself"), "{path:?}: {err}");
         }
         assert!(plugins::data_dir("repos").join("threads.json").is_file(), "the store and Echo's files in it kept");
-        // A read-only routine reads them, never sets them.
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let refused = call("repos", "map", &json!({"thread": beta, "repos": ["acme-test/web"]}));
-        let read = call("repos", "get", &json!({"thread": alpha}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(refused.unwrap_err().to_string().contains("while Claude prepares and asks"));
-        assert_eq!(read.unwrap(), json!(["acme-test/api"]));
         // A host that isn't the app's (this one, until it is marked): it hears nothing and takes nothing queued.
         let born = |id: &str| json!(crate::projects::load(id).unwrap().stages[0].at);
         let (alpha_born, beta_born) = (born(&alpha), born(&beta));
@@ -3225,7 +3146,7 @@ mod tests {
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         let agreed = plugins::review("kit", Some(&name)).unwrap().uses;
-        let line = agreed.iter().find(|l| l.starts_with("Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh” (read-only routines may run it; Echo can't check it only reads)")).unwrap_or_else(|| panic!("{agreed:?}")).clone();
+        let line = agreed.iter().find(|l| l.starts_with("Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh”, “staffing/scripts/slow.sh”")).unwrap_or_else(|| panic!("{agreed:?}")).clone();
         assert!(line.contains("“staffing/scripts/write.sh”") && !line.contains("other.sh") && line.contains("(their files: "), "{line}");
         plugins::install("kit", Some(&name), &agreed).unwrap();
         // In Echo's sessions each declared script's path holds Echo's launcher of it; the original stays in the package.
@@ -3233,9 +3154,8 @@ mod tests {
         let wrapper = std::fs::read_to_string(sp[0].join("skills/staffing/scripts/read.sh")).unwrap();
         assert!(wrapper.starts_with("#!/bin/sh\n") && wrapper.contains("plugin script 'kit' 'staffing' 'scripts/read.sh' -- \"$@\""), "{wrapper}");
         assert_eq!(std::fs::read_to_string(sp[0].join("skills/staffing/scripts/other.sh")).unwrap(), "#!/bin/sh\necho other\n", "an undeclared file is copied as it is");
-        let ro = crate::grants::session_scripts(true);
-        assert!(ro.iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/read.sh")) && !ro.iter().any(|p| p.ends_with("write.sh") || p.ends_with("other.sh")), "{ro:?}");
-        assert!(crate::grants::session_scripts(false).iter().any(|p| p.ends_with("/kit/skills/staffing/scripts/write.sh")));
+        let all = crate::grants::session_scripts();
+        assert!(["read.sh", "write.sh"].iter().all(|f| all.iter().any(|p| p.ends_with(&format!("/kit/skills/staffing/scripts/{f}")))) && !all.iter().any(|p| p.ends_with("other.sh")), "{all:?}");
         sync();
         let leak = EnvVar::set("CLAUDE_TEST_LEAK", "secret");
         let run = |script: &str, args: Value, opts: Value| {
@@ -3274,19 +3194,18 @@ mod tests {
         let ran = v.as_array().unwrap().iter().filter(|r| r["timed_out"] == true).count();
         assert_eq!((busy, ran), (1, 1), "{v}");
         // Whichever process runs it, a script's run holds its lock: Echo stops it from anywhere (a removal, an update).
-        let runner = std::thread::spawn(|| plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false));
+        let runner = std::thread::spawn(|| plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None));
         let held = (0..100).any(|_| {
             std::thread::sleep(Duration::from_millis(50));
-            plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None, false).is_err_and(|e| e.to_string().contains("already running"))
+            plugins::scripts::run("kit", "staffing", "scripts/slow.sh", &[], None).is_err_and(|e| e.to_string().contains("already running"))
         });
         assert!(held, "the running script holds its lock");
         let t = std::time::Instant::now();
         plugins::scripts::stop_plugin("kit");
         let v = runner.join().unwrap().unwrap();
         assert!(v["status"].is_null() && v["timed_out"].is_null() && t.elapsed() < Duration::from_secs(5), "{v}");
-        // A read-only routine runs only a script marked readonly.
-        assert!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, true).unwrap_err().to_string().contains("isn't marked readonly"));
-        assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None, false).unwrap()["stdout"], "wrote\n");
+        // A script once marked readonly or not: each runs as declared.
+        assert_eq!(plugins::scripts::run("kit", "staffing", "scripts/write.sh", &[], None).unwrap()["stdout"], "wrote\n");
         // A version changing a file of that skill folder asks again.
         std::fs::write(sk.join("scripts/big.sh"), "#!/bin/sh\necho small\n").unwrap();
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "kit", "name": "Kit", "version": "0.2.0", "main": "main.js", "skills": ["skills/staffing"], "agent": {"prefix": "kit"}, "uses": {"scripts": scripts}}).to_string()).unwrap();
@@ -3294,7 +3213,7 @@ mod tests {
         assert!(plugins::update("kit", &[]).unwrap_err().to_string().contains("asks for more: Runs programs from its package"));
         plugins::remove("kit", false).unwrap();
         sync();
-        assert!(crate::grants::session_plugins().is_empty() && crate::grants::session_scripts(false).is_empty());
+        assert!(crate::grants::session_plugins().is_empty() && crate::grants::session_scripts().is_empty());
     }
 
     #[test]
@@ -3379,7 +3298,7 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    fn a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says_and_never_while_claude_prepares() {
+    fn a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says() {
         let (_env, root) = paths::testenv::folders("jshost-thread-writes");
         let mk = root.join("market");
         for (id, write) in [("tracker", json!(["thread_stage", "tasks"])), ("reader", json!([]))] {
@@ -3438,12 +3357,6 @@ mod tests {
         // Not asked for on its sheet: refused, named.
         assert!(run("reader", "stage", json!({"thread": t, "stage": "negotiation"})).unwrap_err().contains("didn't ask to change your threads' stage"));
         assert!(run("reader", "task", json!({"thread": t, "task": {"key": "k", "title": "x"}})).unwrap_err().contains("didn't ask to change your threads' tasks"));
-        // While Claude prepares and asks: nothing changes.
-        {
-            let _m = EnvVar::set(crate::guard::RUN_MODE, "routine");
-            assert!(run("tracker", "stage", json!({"thread": t, "stage": "negotiation"})).unwrap_err().contains("while Claude prepares and asks"));
-            assert!(run("tracker", "task", json!({"thread": t, "task": {"key": "P-8", "title": "x"}})).unwrap_err().contains("while Claude prepares and asks"));
-        }
         // A Yolo run on one thread: never another thread.
         {
             let _t = EnvVar::set(crate::guard::RUN_THREAD, &t);

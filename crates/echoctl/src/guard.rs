@@ -41,19 +41,6 @@ pub const RUN_DIR: &str = "ECHOCTL_RUN_DIR";
 pub const RUN_PROJECT: &str = "ECHOCTL_RUN_PROJECT";
 /// The evidence items a sync run may mark done (`done`, `apply --done`), one id a line: those Echo gave it for the work.
 pub const RUN_ITEMS: &str = "ECHOCTL_RUN_ITEMS";
-/// `RUN_MODE=routine`: a routine the user wrote, run on a schedule with "read" permissions
-/// (`routines.rs`) — the data folder it may read.
-pub const RUN_HOME: &str = "ECHOCTL_RUN_HOME";
-/// The skills a read-only routine may load (one per line): those of the plugins Echo gave the run.
-pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
-/// More folders a read-only routine may read (one per line): the ones plugins gave Echo's sessions (an
-/// Obsidian vault the user picked).
-pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
-/// A read-only routine may run these plugin commands (`echoctl plugin call <id> <command> …`), one `<id> <command>`
-/// per line: those the enabled plugins name in `uses.sessions.commands` (the user agreed on their sheets).
-pub const RUN_PLUGIN_COMMANDS: &str = "ECHOCTL_RUN_PLUGIN_COMMANDS";
-/// A routine's plugin scripts marked readonly, by their launchers' full paths, one a line (`grants::session_scripts`).
-pub const RUN_PLUGIN_SCRIPTS: &str = "ECHOCTL_RUN_PLUGIN_SCRIPTS";
 /// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
 pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
 /// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
@@ -68,11 +55,6 @@ pub fn run_thread() -> Option<String> {
     let t = std::env::var(RUN_THREAD).ok().filter(|t| !t.is_empty());
     t.or_else(|| std::env::var(RUN_TASK).ok().and_then(|t| t.split_once('/').map(|(p, _)| p.to_string())).filter(|t| !t.is_empty()))
 }
-/// The Echo commands a read-only routine may run (`*` = any one word: an id).
-pub const ROUTINE_COMMANDS: [&str; 13] = [
-    "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
-    "project tasks", "project ledger * tree", "client list", "org list",
-];
 /// The Brain's MCP tools, as Claude Code names them (`mcp__<server>__<tool>`; all read-only).
 pub const BRAIN_TOOLS: &str = "mcp__echo__";
 
@@ -92,16 +74,6 @@ pub struct Scope {
     ask: bool,
     /// A project's sync run (`RUN_MODE=project`): `call` is then its ledger folder.
     project: Option<ProjectScope>,
-    /// A read-only routine (`RUN_MODE=routine`): `call` is then the data folder; `ask` holds too.
-    routine: bool,
-    /// A routine may read these too: folders the user gave plugins for Echo's sessions (`RUN_READ`).
-    extra: Vec<PathBuf>,
-    /// …and load these skills (`RUN_SKILLS`).
-    skills: Vec<String>,
-    /// …and run these plugin commands, `(plugin, command)` (`RUN_PLUGIN_COMMANDS`).
-    plugin_commands: Vec<(String, String)>,
-    /// …and these plugin scripts, by full path (`RUN_PLUGIN_SCRIPTS`).
-    plugin_scripts: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -130,7 +102,6 @@ pub fn command() -> i32 {
             let who = match std::env::var(RUN_MODE).as_deref() {
                 Ok("ask") => "Echo (this call's Claude session reads only)",
                 Ok("project") => "Echo's project sync",
-                Ok("routine") => "Echo (this routine reads only)",
                 _ => "Echo's minutes run",
             };
             let _ = writeln!(std::io::stderr(), "{who}: {why}");
@@ -233,23 +204,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let items = clis_of(var(RUN_ITEMS));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, items }), routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] });
-        }
-        if var(RUN_MODE).is_some_and(|m| m == "routine") {
-            let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
-            let home = dunce::canonicalize(&home).map_err(|e| format!("the data folder can't be found: {e}"))?;
-            if !home.join(".echo").is_dir() {
-                return Err(format!("{} isn't Echo's data folder", home.display()));
-            }
-            let clis = clis_of(var(RUN_CLIS));
-            if clis.is_empty() {
-                return Err("the run names no Echo CLI".into());
-            }
-            let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
-            let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-            let plugin_commands = var(RUN_PLUGIN_COMMANDS).map(|v| v.to_string_lossy().lines().filter_map(|l| l.split_once(' ').map(|(p, c)| (p.to_string(), c.to_string()))).collect()).unwrap_or_default();
-            let plugin_scripts = var(RUN_PLUGIN_SCRIPTS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, plugin_commands, plugin_scripts });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, items }) });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -262,7 +217,7 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] })
+        Ok(Scope { call, previous, clis, ask, project: None })
     }
 
     /// Allowed, or why not.
@@ -281,9 +236,6 @@ impl Scope {
         if let Some(ps) = &self.project {
             return self.judge_project(ps, tool, input);
         }
-        if self.routine {
-            return self.judge_routine(call, tool, input);
-        }
         // A command's answer too long to show goes to the session's own tool results, for the model to Read there.
         let theirs = |p: &Path| own_results(call).is_some_and(|r| p.starts_with(&r));
         match tool {
@@ -296,7 +248,6 @@ impl Scope {
                     Err(format!("only {} can be read, not {}", self.place(), p.display()))
                 }
             }
-            "Edit" | "Write" if self.routine => Err("a read-only routine changes no file".into()),
             "Edit" | "Write" if self.ask => Err("this session reads the call; it changes no file".into()),
             "Edit" | "Write" => {
                 let raw = input["file_path"].as_str();
@@ -379,56 +330,8 @@ impl Scope {
         }
     }
 
-    /// A read-only routine: read the data folder — and the session's own saved tool output, where Claude
-    /// Code puts a command's answer too long to show (`<transcript>/tool-results/`, from the hook's own
-    /// input, not the model's) —, run `ROUTINE_COMMANDS`, ask the Brain; change nothing.
-    fn judge_routine(&self, call: &Value, tool: &str, input: &Value) -> Result<(), String> {
-        let results = own_results(call);
-        let readable = |p: &Path| self.inside(p) || self.extra.iter().any(|d| p.starts_with(d)) || results.as_ref().is_some_and(|r| p.starts_with(r));
-        match tool {
-            "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
-            "Read" => {
-                let p = resolve(input["file_path"].as_str())?;
-                if readable(&p) {
-                    Ok(())
-                } else {
-                    Err(format!("only the data folder can be read, not {}", p.display()))
-                }
-            }
-            "Glob" | "Grep" => {
-                // No path: the working folder, which is the data folder.
-                let p = match input["path"].as_str().filter(|p| !p.is_empty()) {
-                    Some(raw) => resolve(Some(raw))?,
-                    None => self.call.clone(),
-                };
-                if !readable(&p) {
-                    return Err(format!("{tool} works only in the data folder, not {}", p.display()));
-                }
-                let pattern = if tool == "Glob" { input["pattern"].as_str() } else { input["glob"].as_str() };
-                match pattern {
-                    Some(g) if escapes(g) => Err(format!("the pattern {g} reaches outside the data folder")),
-                    _ => Ok(()),
-                }
-            }
-            t if t.starts_with(BRAIN_TOOLS) => Ok(()),
-            // Only the skills of the plugins Echo gave the run (`--plugin-dir`), by their full name (`plugin:skill`):
-            // a skill of the same name from anywhere else isn't one of them.
-            "Skill" => {
-                let name = input["skill"].as_str().unwrap_or("");
-                if self.skills.iter().any(|k| name == k) {
-                    Ok(())
-                } else {
-                    Err(format!("the skill {name} isn't one Echo gave this routine"))
-                }
-            }
-            "Edit" | "Write" | "NotebookEdit" => Err("a read-only routine changes no file".into()),
-            "" => Err("no tool named".into()),
-            other => Err(format!("{other} isn't available in a read-only routine")),
-        }
-    }
-
     fn place(&self) -> &'static str {
-        if self.routine { "the data folder" } else { "this call's folder" }
+        "this call's folder"
     }
 
     fn inside(&self, p: &Path) -> bool {
@@ -439,22 +342,18 @@ impl Scope {
     fn bash(&self, line: &str) -> Result<(), String> {
         let words = shell_words(line)?;
         let (cli, rest) = words.split_first().ok_or("an empty command")?;
-        // A plugin script marked readonly, by its full path, with plain words: never through an interpreter.
-        if self.routine && self.plugin_scripts.iter().any(|s| s == cli) {
-            return Ok(());
-        }
         if !self.clis.iter().any(|c| c == cli) {
             return Err(format!("only the Echo CLI runs here, not {cli}"));
         }
-        let commands: &[&str] = if self.routine { &ROUTINE_COMMANDS } else if self.ask { &ASK_COMMANDS } else { &crate::notes::RUN_COMMANDS };
+        let commands: &[&str] = if self.ask { &ASK_COMMANDS } else { &crate::notes::RUN_COMMANDS };
         let allowed = commands.iter().any(|c| {
             let c: Vec<&str> = c.split(' ').collect();
             rest.len() >= c.len() && rest.iter().zip(&c).all(|(w, c)| *c == "*" || w.as_str() == *c)
-        }) || (self.routine && matches!(rest, [p, c, id, cmd, ..] if p == "plugin" && c == "call" && self.plugin_commands.iter().any(|(i, k)| i == id && k == cmd)));
+        });
         if allowed {
             Ok(())
         } else {
-            let who = if self.routine { "a read-only routine" } else if self.ask { "this session" } else { "a minutes run" };
+            let who = if self.ask { "this session" } else { "a minutes run" };
             Err(format!("echoctl {} isn't one of the commands {who} uses", rest.first().map(String::as_str).unwrap_or("")))
         }
     }
@@ -589,11 +488,6 @@ mod tests {
             clis: vec!["echoctl".into(), "/Apps/Echo.app/plugin/scripts/echoctl".into()],
             ask: false,
             project: None,
-            routine: false,
-            extra: vec![],
-            skills: vec![],
-            plugin_commands: vec![],
-            plugin_scripts: vec![],
         }
     }
 
@@ -784,92 +678,6 @@ mod tests {
     }
 
     #[test]
-    fn a_read_only_routine_reads_the_data_folder_and_changes_nothing() {
-        let root = fixture("routine");
-        let home = dunce::canonicalize(&root).unwrap();
-        let vars = |k: &str| match k {
-            RUN_HOME => Some(home.clone().into_os_string()),
-            RUN_CLIS => Some("echoctl".into()),
-            RUN_MODE => Some("routine".into()),
-            _ => None,
-        };
-        let vault = root.join("vault");
-        fs::create_dir_all(&vault).unwrap();
-        fs::write(vault.join("Dana.md"), "x").unwrap();
-        let vault = dunce::canonicalize(&vault).unwrap();
-        let (v2, h2) = (vault.clone(), home.clone());
-        let vars = move |k: &str| match k {
-            RUN_READ => Some(v2.clone().into_os_string()),
-            RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
-            RUN_PLUGIN_COMMANDS => Some("obsidian search\nobsidian backlinks".into()),
-            RUN_PLUGIN_SCRIPTS => Some("/cfg/plugins/session/kit/skills/staffing/scripts/read.sh".into()),
-            o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
-        };
-        let s = Scope::from_vars(vars).unwrap();
-        assert!(s.routine && s.ask);
-        assert!(s.judge(&tool("Read", json!({"file_path": vault.join("Dana.md").display().to_string()}))).is_ok(), "a folder given to Echo's sessions");
-        assert!(s.judge(&tool("Skill", json!({"skill": "echo-obsidian:obsidian-vaults"}))).is_ok(), "a skill Echo gave the run");
-        for other in ["obsidian-vaults", "evil:obsidian-vaults", "echo:process-call"] {
-            assert!(s.judge(&tool("Skill", json!({"skill": other}))).is_err(), "{other}");
-        }
-        let path = |p: &Path| p.display().to_string();
-        let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
-        ok("Read", json!({"file_path": path(&home.join("calls/2026-10-24_100000-other/transcript.md"))})).unwrap();
-        ok("Grep", json!({"pattern": "budget", "path": path(&home.join("calls"))})).unwrap();
-        ok("Bash", json!({"command": "echoctl project tasks"})).unwrap();
-        ok("Bash", json!({"command": "echoctl project ledger acme tree"})).unwrap();
-        // The commands a plugin named for Echo's sessions (its sheet said so), and only those.
-        ok("Bash", json!({"command": r#"echoctl plugin call obsidian search '{"q":"Dana"}'"#})).unwrap();
-        ok("Bash", json!({"command": "echoctl plugin call obsidian backlinks"})).unwrap();
-        for no in ["echoctl plugin call obsidian rename_plan", "echoctl plugin call other search", "echoctl plugin call obsidian", "echoctl plugin install obsidian"] {
-            assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
-        }
-        // A plugin's script marked readonly, by its full path with plain words; never another, an interpreter or more.
-        ok("Bash", json!({"command": "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh --project 'ACME 1'"})).unwrap();
-        for no in [
-            "/cfg/plugins/session/kit/skills/staffing/scripts/write.sh",
-            "node /cfg/plugins/session/kit/skills/staffing/scripts/read.sh",
-            "sh /cfg/plugins/session/kit/skills/staffing/scripts/read.sh",
-            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh | sh",
-            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh > /tmp/x",
-            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh $(id)",
-            "/cfg/plugins/session/kit/skills/staffing/scripts/read.sh; rm -rf ~",
-            "echoctl plugin script kit staffing scripts/write.sh",
-        ] {
-            assert!(ok("Bash", json!({"command": no})).is_err(), "{no}");
-        }
-        ok("mcp__echo__search_sources", json!({"query": "budget"})).unwrap();
-        ok("Glob", json!({"pattern": "projects/*/ledger/*.jsonl"})).unwrap();
-        // The session's own saved output (a long command answer), named by Claude Code's hook input.
-        let claude = std::env::temp_dir().join(format!("echo-guard-claude-{}", std::process::id()));
-        let results = claude.join("s1/tool-results");
-        fs::create_dir_all(&results).unwrap();
-        fs::write(results.join("out.txt"), "x").unwrap();
-        let read = |session: &str| json!({"tool_name": "Read", "tool_input": {"file_path": path(&results.join("out.txt"))},
-                                          "session_id": session, "transcript_path": path(&claude.join("s1.jsonl"))});
-        assert!(s.judge(&read("s1")).is_ok(), "its own tool results");
-        assert!(s.judge(&read("s2")).is_err(), "not another session's");
-        assert!(s.judge(&json!({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": path(&results)}, "session_id": "s1", "transcript_path": path(&claude.join("s1.jsonl"))})).is_ok());
-        let _ = fs::remove_dir_all(&claude);
-        let outside = json!({"tool_name": "Read", "tool_input": {"file_path": "/etc/hosts"}, "session_id": "hosts", "transcript_path": "/etc/hosts.jsonl"});
-        assert!(s.judge(&outside).is_err(), "only a tool-results folder");
-        for (t, input) in [
-            ("Write", json!({"file_path": path(&home.join("x.md")), "content": "x"})),
-            ("Edit", json!({"file_path": path(&home.join(".echo/config.json"))})),
-            ("Read", json!({"file_path": "/etc/passwd"})),
-            ("Bash", json!({"command": "echoctl project ledger acme apply x.json"})),
-            ("Bash", json!({"command": "echoctl delete 2026-10-24_100000-other"})),
-            ("Bash", json!({"command": "echoctl project tasks; rm -rf ~"})),
-            ("Skill", json!({"skill": "echo:process-call"})),
-            ("WebFetch", json!({"url": "https://example.com"})),
-            ("mcp__other__send_mail", json!({})),
-        ] {
-            assert!(s.judge(&tool(t, input.clone())).is_err(), "{t} {input}");
-        }
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn a_neighbour_named_like_the_call_is_another_call() {
         let root = fixture("neighbour");
         // A second call in the same second gets `-2`; an untitled call is its bare stamp: both
@@ -879,7 +687,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),
@@ -948,27 +756,13 @@ mod tests {
     }
 
     #[test]
-    fn a_read_only_routine_reads_what_plugins_tell_claude_and_loads_their_laid_out_skills() {
-        let (_env, root) = crate::paths::testenv::folders("guard-routine-plugins");
-        let home = dunce::canonicalize(root.join("home")).unwrap();
-        fs::create_dir_all(home.join(".plugins/kit/.claude/skills/kit-staffing")).unwrap();
-        fs::write(home.join(".plugins/kit/CLAUDE.md"), "# Kit").unwrap();
-        let s = Scope { call: home.clone(), previous: None, clis: vec!["echoctl".into()], ask: true, project: None, routine: true, extra: vec![], skills: vec!["kit-staffing".into()], plugin_commands: vec![], plugin_scripts: vec![] };
-        s.judge(&tool("Read", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string()}))).unwrap();
-        s.judge(&tool("Glob", json!({"path": home.join(".plugins").display().to_string(), "pattern": "**/CLAUDE.md"}))).unwrap();
-        s.judge(&tool("Skill", json!({"skill": "kit-staffing"}))).unwrap();
-        assert!(s.judge(&tool("Skill", json!({"skill": "kit-other"}))).is_err());
-        assert!(s.judge(&tool("Write", json!({"file_path": home.join(".plugins/kit/CLAUDE.md").display().to_string(), "content": "x"}))).is_err());
-    }
-
-    #[test]
     fn what_plugins_tell_claude_is_never_written_by_a_run() {
         let (_env, root) = crate::paths::testenv::folders("guard-plugins");
         let kit = dunce::canonicalize(root.join("home")).unwrap().join(".plugins/kit");
         fs::create_dir_all(kit.join(".claude/skills/x")).unwrap();
         fs::write(kit.join("CLAUDE.md"), "# Kit").unwrap();
         // Even a run whose own folder it were: a write there is Echo's alone.
-        let s = Scope { call: kit.clone(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], plugin_commands: vec![], plugin_scripts: vec![] };
+        let s = Scope { call: kit.clone(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None };
         for (t, f) in [("Write", "notes.md"), ("Edit", "CLAUDE.md"), ("Write", ".claude/skills/x/SKILL.md"), ("MultiEdit", "notes.md")] {
             let e = s.judge(&tool(t, json!({"file_path": kit.join(f).display().to_string(), "content": "x"}))).unwrap_err();
             assert!(e.contains("only Echo writes there"), "{t} {f}: {e}");

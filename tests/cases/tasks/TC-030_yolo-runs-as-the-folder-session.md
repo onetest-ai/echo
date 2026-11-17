@@ -1,9 +1,9 @@
 ---
 id: TC-030
-title: Yolo on a task runs Claude Code as the folder session does — in the data folder, with its settings and hooks (the core among them), skipping permission prompts only when the user chose so — and keeps what it asked for in its record
+title: Yolo on a task runs Claude Code as the folder session does — in the data folder, with its settings and hooks (the core among them), always acting on its own, in Yolo's own permission mode (Auto by default, or Skip all permission checks), whatever Claude in the window's — and keeps what it asked for in its record
 priority: high
 type: functional
-requirements: [F-TASK-12, F-PLUG-35]
+requirements: [F-TASK-12, F-PLUG-35, F-SET-24]
 module: tasks
 run: agent
 platform: macos
@@ -28,14 +28,14 @@ tags: [tasks, yolo, claude-code, permissions]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `ipc '{"cmd":"task_yolo","ask":"ask-1","project":"globex-pilot","node":"T005","skill":"","text":""}'`; wait until `$ECHOCTL_HOME/.echo/task-asks.json`'s entry `ask-1` is no longer `working` (every 2 s, up to 30 s) | Its `state` is `failed` (the data's fake refuses the run): it started |
-| 2 | `cat "$D/run-cwd"`; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `python3 -c "import json,sys; h=json.load(open(sys.argv[1]))['hooks']; print([x['command'].split()[-2:] for e in h['SessionStart'] for x in e['hooks']])" "$D/run-settings.json"`; `cat "$ECHOCTL_CONFIG_DIR/yolo/ask-1/permissions.json"`; `head -1 "$ECHOCTL_CONFIG_DIR/yolo/ask-1/log.txt"` | `$ECHOCTL_HOME`; `0` (the user didn't choose to skip prompts); `view-hook` and `core --hook`; `{"asked": "skip", "used": "the folder session's: prepares and asks (reads and Echo's own edits; nothing sent; what would ask is refused)"}`; the log line ends `(asked: skip permissions; runs with the folder session's: prepares and asks (reads and Echo's own edits; nothing sent; what would ask is refused))` |
-| 3 | `ipc '{"cmd":"settings_set","key":"folder_skip_permissions","value":true}'`; `ipc '{"cmd":"task_yolo","ask":"ask-2","project":"globex-pilot","node":"T005","skill":"","text":""}'`; wait for `ask-2` as in step 1; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `grep '^ECHOCTL_RUN_SESSION=' "$D/run-env"` | `1` and `ECHOCTL_RUN_SESSION=acts`: with the user's choice, Yolo acts on its own (its own task's and thread's limits stay) |
+| 2 | `cat "$D/run-cwd"`; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `grep -A1 '^--permission-mode$' "$D/run-args"`; `grep '^ECHOCTL_RUN_SESSION=' "$D/run-env"`; `python3 -c "import json,sys; h=json.load(open(sys.argv[1]))['hooks']; print([x['command'].split()[-2:] for e in h['SessionStart'] for x in e['hooks']])" "$D/run-settings.json"`; `cat "$ECHOCTL_CONFIG_DIR/yolo/ask-1/permissions.json"`; `head -1 "$ECHOCTL_CONFIG_DIR/yolo/ask-1/log.txt"` | `$ECHOCTL_HOME`; `0`; `--permission-mode` then `auto`; `ECHOCTL_RUN_SESSION=acts` — with Claude in the window on "Ask each time" (the data's) Yolo still acts on its own, in Claude Code's auto mode, its default (the thread's profile, Claude · work, runs a Claude model; its own task's and thread's limits stay); `view-hook` and `core --hook`; `{"asked": "setting", "used": "the folder session's: acts on its own (auto mode: Claude Code decides each action)"}`; the log line ends `(asked: setting; runs with the folder session's: acts on its own (auto mode: Claude Code decides each action))` |
+| 3 | `ipc '{"cmd":"settings_set","key":"yolo_permissions","value":"skip"}'`; `ipc '{"cmd":"task_yolo","ask":"ask-2","project":"globex-pilot","node":"T005","skill":"","text":""}'`; wait for `ask-2` as in step 1; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `grep -c '^--permission-mode$' "$D/run-args"`; `head -1 "$ECHOCTL_CONFIG_DIR/yolo/ask-2/log.txt"` | `1`; `0`; the log line ends `runs with the folder session's: acts on its own (every permission check skipped))` — Yolo's own setting |
 
 ## Expected Final State
-Two Yolo runs started (refused by the fake) as the folder session; the setting is on.
+Two Yolo runs started (refused by the fake) as the folder session; Yolo on Skip all permission checks.
 
 ## Teardown
-- `ipc '{"cmd":"settings_set","key":"folder_skip_permissions","value":false}'`; `mv "$D/bin/claude.fake" "$D/bin/claude"`; `tests/fixtures/serve.sh down <dir>`
+- `ipc '{"cmd":"settings_set","key":"yolo_permissions","value":"auto"}'`; `mv "$D/bin/claude.fake" "$D/bin/claude"`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
 - Besides `echoctl`, this case runs `cat`, `grep`, `head`, `python3 -c` and `curl` (the served window's own IPC, as the page sends it).

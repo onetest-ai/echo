@@ -18,12 +18,16 @@ cases:
   - tests/cases/settings/TC-028_general-and-health-say-what-is-this-computers.md
   - tests/cases/window/TC-026_notes-that-cannot-be-saved-show-retry-and-a-close-with-unsaved-notes-asks-try-again-or-close-without-saving.md
   - tests/cases/settings/TC-029_where-drafts-go.md
+  - tests/cases/settings/TC-036_claudes-permissions-are-saved-as-shown-from-the-window-and-the-cli.md
+  - tests/cases/settings/TC-037_claudes-permissions-are-never-changed-from-a-run-and-routines-and-yolo-cant-be-set-to-ask.md
+  - tests/cases/settings/TC-038_the-old-switch-on-becomes-skip-all-permission-checks-off-becomes-auto-and-its-key-goes.md
+  - tests/cases/settings/TC-039_auto-on-a-local-model-accepts-edits-and-the-window-and-cli-say-what-auto-gets-on-each-profile.md
 auto: [tests/auto/specs/S-29.spec.mjs]
 ---
 
 # S-29: Notes, transcripts, settings and Today off the happy path
 
-**Story:** Sam goes back over a busy day. He opens a meeting made from its Teams transcript and two calls whose transcripts aren't there, ticks and edits his notes on the Acme sync, comments on what was said and on a line of the minutes, starts a note and jumps to another call before adding it, then presses Write minutes with a note still in the box. A notes file that can't be read, and one another editor changed while he typed, tell him what happened. A broken settings file says so instead of the settings. On Today a routine's morning brief waits until he says Got it, and ⌘K acts on the day's preps and tasks. Last, Settings tells him which of what it shows is this computer's, with no home path on Health.
+**Story:** Sam goes back over a busy day. He opens a meeting made from its Teams transcript and two calls whose transcripts aren't there, ticks and edits his notes on the Acme sync, comments on what was said and on a line of the minutes, starts a note and jumps to another call before adding it, then presses Write minutes with a note still in the box. A notes file that can't be read, and one another editor changed while he typed, tell him what happened. A broken settings file says so instead of the settings. On Today a routine's morning brief waits until he says Got it, and ⌘K acts on the day's preps and tasks. Last, Settings tells him which of what it shows is this computer's, with no home path on Health. Then he sets how Claude handles permissions, from the window and the terminal, sees a run refused when it tries to change them, how his old switch carried over, and what Auto gets on his local model.
 
 **Data:** `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`). Fresh data per run, built right before it and before 21:00 local (stage 10 needs meetings still to come).
 
@@ -64,9 +68,13 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 12 | `settings/TC-028_general-and-health-say-what-is-this-computers.md` | — | — |
 | 13 | `window/TC-026_notes-that-cannot-be-saved-show-retry-and-a-close-with-unsaved-notes-asks-try-again-or-close-without-saving.md` | — | — |
 | 14 | `settings/TC-029_where-drafts-go.md` | — | — |
+| 15 | `settings/TC-036_claudes-permissions-are-saved-as-shown-from-the-window-and-the-cli.md` | — | — |
+| 16 | `settings/TC-037_claudes-permissions-are-never-changed-from-a-run-and-routines-and-yolo-cant-be-set-to-ask.md` | — | Step 1's lines are what stage 15 left (its teardown put the window back on Ask each time; routines and Yolo stay on Skip) |
+| 17 | `settings/TC-038_the-old-switch-on-becomes-skip-all-permission-checks-off-becomes-auto-and-its-key-goes.md` | — | On stage 15's view (`#settings/ai`): its steps reload the page themselves |
+| 18 | `settings/TC-039_auto-on-a-local-model-accepts-edits-and-the-window-and-cli-say-what-auto-gets-on-each-profile.md` | — | On stage 17's view (`#settings/ai`): in step 1 skip the navigation, read the card's last line |
 
 ## Notes
-- Stages 3–7 change the notes of their calls (each on its own calls; stage 5 adds a note to today's Acme weekly sync after stage 4 edited it, and expects only its own line). Stage 8 breaks `config.json` and restores it: its teardown must run.
+- Stages 3–7 change the notes of their calls (each on its own calls; stage 5 adds a note to today's Acme weekly sync after stage 4 edited it, and expects only its own line). Stage 8 breaks `config.json` and restores it: its teardown must run. Stages 15–18 change Claude's permissions in `config.json`; each later one reads only what it sets itself.
 - My notes is opened once (stage 3) and stays open while stages 3–7 change calls; a stage that finds it closed opens it (`[data-panel-flip="notes"]`) before its first step and says so in its notes.
 - The call folders are dated by the build: the prelude lists them once; TC-018 names its calls by slug and TC-019 finds its folder with `ls` (the oldest Acme weekly sync), so both read the prelude's folders.
 - Not covered here: the window closing with a note typed (native window), "Listening…" while a call records (the test call), the Teams transcript import itself (Microsoft 365), the quiet day (`today/TC-006`, in S-10 on the `small` set).

@@ -1,8 +1,7 @@
 //! A granted folder's further services — writes only over what the plugin read (`ifSha`) or never over a file
 //! (`createNew`), appends, new folders, what a path is (`stat`), text search, scratch copies (`snapshot`) — and the
 //! store's guarded writes and hashing. Every folder service checks the manifest (`uses.folders`, writes
-//! `folders.write`) and goes through `grants::resolve` (reads) or `grants::writable` (writes); a write is refused
-//! while Claude prepares and asks. The plugin's writes to a file — its store's and its folders' — take one lock of its
+//! `folders.write`) and goes through `grants::resolve` (reads) or `grants::writable` (writes). The plugin's writes to a file — its store's and its folders' — take one lock of its
 //! own across processes (`.locks/<id>.files.lock`), so the app and `echoctl plugin call` never lose each other's.
 
 use super::*;
@@ -144,7 +143,6 @@ pub(super) fn put(f: &Path, name: &str, text: &str, opts: &Value) -> Result<()> 
 
 /// `ctx.fs.write(root, rel, text, {ifSha, createNew})`, with `folders.write`.
 pub(super) fn write(id: &str, root: &str, rel: &str, text: &str, opts: &Value) -> Result<()> {
-    read_only_here("changing files or settings")?;
     uses_flag(id, "folders", "write")?;
     let f = crate::grants::writable(id, root, rel)?;
     if f.is_dir() {
@@ -166,7 +164,6 @@ pub(super) fn store_write(id: &str, rel: &str, text: &str, opts: &Value) -> Resu
 /// `ctx.fs.append(root, rel, text)`: `text` added at the end of the file (made when it isn't there; a newline added
 /// when it doesn't end with one), in one write under the plugin's lock — never through a link, never into a FIFO.
 pub(super) fn append(id: &str, root: &str, rel: &str, text: &str) -> Result<()> {
-    read_only_here("changing files or settings")?;
     uses_flag(id, "folders", "write")?;
     if text.len() > APPEND_MAX {
         bail!("ctx.fs.append adds 1 MB at most at once");
@@ -200,7 +197,6 @@ pub(super) fn append(id: &str, root: &str, rel: &str, text: &str) -> Result<()> 
 
 /// `ctx.fs.mkdir(root, rel)`: the folder and those above it, inside a folder it may change.
 pub(super) fn mkdir(id: &str, root: &str, rel: &str) -> Result<()> {
-    read_only_here("changing files or settings")?;
     uses_flag(id, "folders", "write")?;
     let d = crate::grants::writable(id, root, rel)?;
     if std::fs::symlink_metadata(&d).is_ok_and(|m| !m.is_dir()) {
@@ -824,25 +820,7 @@ mod tests {
         for (cmd, a) in [("stat", json!({"path": "A.md"})), ("search", json!({"q": "acme"})), ("snapshot", json!({})), ("walk", json!({}))] {
             assert!(run("none", cmd, a).unwrap_err().contains("“folders”"), "{cmd}");
         }
-        // While Claude prepares and asks: reads and its own store, never the folder.
-        let w = root.join("wvault");
-        std::fs::create_dir_all(&w).unwrap();
-        std::fs::write(w.join("A.md"), "acme").unwrap();
-        install(&root, "writer", json!({"folders": {"what": "vaults", "write": true}}));
-        crate::grants::grant("writer", &w).unwrap();
-        sync();
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let asked: Vec<String> = [("write", json!({"path": "B.md", "text": "x"})), ("append", json!({"path": "log.md", "text": "x"})), ("mkdir", json!({"path": "X"}))]
-            .into_iter()
-            .map(|(cmd, a)| run("writer", cmd, a).unwrap_err())
-            .collect();
-        let read = run("writer", "stat", json!({"path": "A.md"}));
-        let stored = run("writer", "storeWrite", json!({"path": "x.txt", "text": "x"}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(asked.iter().all(|e| e.contains("prepares and asks")), "{asked:?}");
-        assert!(read.is_ok() && stored.is_ok());
-        assert!(!w.join("B.md").exists() && !w.join("X").exists());
-        for id in ["reader", "none", "writer"] {
+        for id in ["reader", "none"] {
             plugins::remove(id, true).unwrap();
         }
         sync();

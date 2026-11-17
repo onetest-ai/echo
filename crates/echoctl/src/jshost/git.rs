@@ -553,9 +553,8 @@ fn read_root(id: &str, root: &str) -> Result<PathBuf> {
     crate::grants::resolve(id, root, "")
 }
 
-/// …and one it may change (`folders.write`), not while Claude prepares and asks.
+/// …and one it may change (`folders.write`).
 fn write_root(id: &str, root: &str) -> Result<PathBuf> {
-    read_only_here("changing files or settings")?;
     uses_flag(id, "folders", "write")?;
     read_root(id, root)
 }
@@ -1227,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn git_is_reached_only_as_the_sheet_said_and_not_written_while_claude_prepares_and_asks() {
+    fn git_is_reached_only_as_the_sheet_said() {
         let (_env, root) = paths::testenv::folders("jshost-git-uses");
         if program().is_err() {
             return;
@@ -1251,13 +1250,6 @@ mod tests {
         for cmd in ["info", "status", "log"] {
             assert!(run("none", cmd, json!({})).unwrap_err().contains("“folders”"), "{cmd}");
         }
-        // While Claude prepares and asks: reads only.
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let asked = run("writer", "commit", json!({"paths": ["A.md"], "message": "x"}));
-        let read = run("writer", "status", json!({}));
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(asked.unwrap_err().contains("prepares and asks"));
-        assert_eq!(rel(&read.unwrap(), "path"), ["A.md"]);
         // No git on this computer: said so.
         std::env::set_var("ECHOCTL_TEST_NO_GIT", "1");
         let none = run("writer", "info", json!({}));

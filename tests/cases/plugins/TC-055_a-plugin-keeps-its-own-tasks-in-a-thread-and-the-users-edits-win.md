@@ -39,4 +39,4 @@ tags: [plugins, threads, work, to-review, host-half]
 - `$E plugin remove tracker-demo --delete-data`; `$E plugin marketplace remove test-plugins`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- A task the user closed, deleted or merged; another plugin's key; withdrawing a proposal by closing it: the Rust tests in `ledger::plugin::tests`; the refusals: `jshost::tests::a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says_and_never_while_claude_prepares`; the To review rows and History lines: `work-status.test.mjs`.
+- A task the user closed, deleted or merged; another plugin's key; withdrawing a proposal by closing it: the Rust tests in `ledger::plugin::tests`; the refusals: `jshost::tests::a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says`; the To review rows and History lines: `work-status.test.mjs`.

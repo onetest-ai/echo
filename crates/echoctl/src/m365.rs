@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_sends_only_when_the_user_lets_it_act_and_else_is_told_to_draft() {
+    fn a_routine_or_yolo_acting_on_its_own_sends_and_any_other_run_is_told_to_draft() {
         let (_env, _root) = crate::paths::testenv::folders("m365-run-acts");
         struct Unset;
         impl Drop for Unset {
@@ -610,12 +610,10 @@ mod tests {
         }
         let _unset = Unset;
         std::env::set_var("ECHOCTL_HEADLESS", "1");
-        std::env::set_var(crate::notes::RUN_SESSION, "asks");
-        assert!(not_in_run().unwrap_err().to_string().contains("leave a mail as a draft with `echoctl compose`"));
         std::env::set_var(crate::notes::RUN_SESSION, "acts");
         not_in_run().unwrap();
         std::env::remove_var(crate::notes::RUN_SESSION);
-        assert!(not_in_run().is_err(), "a minutes or sync run never sends");
+        assert!(not_in_run().unwrap_err().to_string().contains("leave a mail as a draft with `echoctl compose`"), "a minutes or sync run never sends");
     }
 
     #[test]

@@ -21,7 +21,8 @@ A routine's or Yolo's run has no run guard: it runs as the folder session (One b
   settings, recording, audio retention or anything outside the run's call checks it, as `memo start` does.
 - `notes::headless()`: true in every run. Checked by the always-on vocabulary and keeping a call's audio
   (`notes::refused_in_run`) and by every `echoctl plugin` command that changes plugins (`cli::plugin::refuse_in_run`):
-  install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`.
+  install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`; and by
+  `echoctl config --folder-permissions / --routine-permissions / --yolo-permissions` (`cli::app::config`).
 - A mail draft is not refused: `echoctl compose`, `m365 mail draft`.
 
 ## Safe Markdown
@@ -130,20 +131,38 @@ variables (`ai::PASS`).
 - `folder_args::session` builds the context and permissions of the folder session (`terminal::start_folder`), a routine
   (`ctx.claude.run`, `claudejob::run`) and a Yolo run. A routine and Yolo add only `-p`, the prompt and the model, and
   start in the data folder.
-- The user's choice "Claude acts on its own": `Config::folder_skip_permissions`; `notes::run_acts` tells a run acting on
-  its own.
+- The user's permission settings (Settings → AI & minutes → Claude's permissions; `echoctl config --folder-permissions
+  ask|auto|skip`, `--routine-permissions auto|skip`, `--yolo-permissions auto|skip`, refused in every run Echo started:
+  `notes::headless`), `config::Permissions`, each Auto when unset:
+  - `Config::folder_permissions` — the folder session: `ask` (Claude Code's prompts, no flag), `auto` or `skip`
+    (`--dangerously-skip-permissions`) (`folder_args::folder_permissions`). Each setting becomes flags only through
+    `folder_args::permission_args`: `auto` is `--permission-mode auto` where the profile's model has auto mode, else
+    `acceptEdits` (`dontAsk` read-only) (claude-code-runs reference, Starting Claude Code).
+  - A routine and Yolo always act on their own, whatever the folder session's setting. A routine's own choice
+    (`claudejob::Tools`, `ctx.claude.run`'s `tools`: `auto`, or `skip` when its plugin's sheet has `claude.skip`
+    (`plugins::may_run_claude`); `read` and `folder` of before are `auto`) comes first; else
+    `folder_args::run_permissions(yolo)`: `Config::routine_permissions` (routines, plugins' runs, Echo's own jobs as
+    routines) or `Config::yolo_permissions` (`auto` or `skip`; an `ask` written by hand reads as `auto`).
+    `claudejob::Spec::yolo` says which.
+  - Its record (`permissions.json`: `asked` — `auto`, `skip`, `setting` or `none`; `used`) and its log's first line name
+    the mode: `acts on its own (auto mode: Claude Code decides each action)`, `acts on its own (edits accepted: this
+    profile's model has no auto mode)` or `acts on its own (every permission check skipped)`; `mode`, when Claude Code started in another permission mode
+    than asked, says which. A record of before may
+    say `prepares and asks (…)` (Yolo runs shows it as "Prepared and asked").
+  - The switch before (`folder_skip_permissions`) is read once by `Config::load`: on becomes `folder_permissions: skip`,
+    off stays unset (Auto); it is never written again.
+- `notes::run_acts` tells a routine's or Yolo's run (`ECHOCTL_RUN_SESSION=acts`), whatever its mode.
 - A run with `tools: "none"` (Won't do, a plugin's analysis of what it read) keeps no tools.
 
-## Preparing and asking (the choice off)
+## Allowed by name
 
-- Free without a prompt: `folder_args::FREE_COMMANDS`, each a fixed command and its own arguments — `context`,
-  `attention`, `prep`, `previous`, `status`, `calendar events`, `read`, `project list`, `project show`, `project of`,
-  `project tasks`, `project people`, `client list`, `org list`, `project work`, `compose`.
-- A Microsoft 365 send is refused, pointing to a draft (`compose --body`) (`m365::not_in_run`).
-- A plugin command's host half is read-only and only `readonly` scripts run (`guard::RUN_MODE=routine`:
-  `jshost::read_only_here`, `plugins::scripts::run`).
-- A thread's work refuses `delete`, `merge`, `xref`, `unxref`, `undo`, `accept`, `reject`, `state: cancelled` and a
-  task's `mode`, `prompt` or `skill` (`cli::project::refused_when_asking`).
+- Every session in the data folder gets Echo's reads and its own data's edits allowed by name (`--allowedTools`):
+  `folder_args::FREE_COMMANDS`, each a fixed command and its own arguments — `context`, `attention`, `prep`,
+  `previous`, `status`, `calendar events`, `read`, `project list`, `project show`, `project of`, `project tasks`,
+  `project people`, `client list`, `org list`, `project work`, `compose` — and every plugin's declared scripts and
+  session commands. What else a run does is its permission mode's to decide.
+- Preparing and asking (a run with the user's one switch off, a read-only routine) is gone: no run sets
+  `RUN_MODE=routine` or `ECHOCTL_RUN_SESSION=asks`, and the guard, the CLI and the plugin host have no limits for it.
 
 ## Run actions and markers
 

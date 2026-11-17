@@ -29,8 +29,6 @@ pub struct Script {
     pub skill: String,
     /// Its path inside that skill's folder (`scripts/read.sh`).
     pub script: String,
-    /// Changes nothing (the plugin says so; Echo can't check it): a read-only routine may run it.
-    pub readonly: bool,
     /// Seconds it may take.
     pub timeout: u64,
 }
@@ -67,16 +65,15 @@ pub fn declared(uses: &serde_json::Map<String, Value>) -> Result<Vec<Script>> {
         if !super::valid_skill_name(skill) || !plain_path(script) {
             bail!("a script names one of its skills and a plain path inside its folder (“{skill}” “{script}”)");
         }
-        let readonly = match o.get("readonly") {
-            None => false,
-            Some(Value::Bool(b)) => *b,
-            Some(_) => bail!("script {skill}/{script}: readonly is true or false"),
-        };
+        // `readonly`, from before every routine acted on its own: still taken, true or false, and changing nothing.
+        if o.get("readonly").is_some_and(|r| !r.is_boolean()) {
+            bail!("script {skill}/{script}: readonly is true or false");
+        }
         let timeout = match o.get("timeout") {
             None => DEFAULT_TIMEOUT,
             Some(t) => t.as_u64().filter(|t| (1..=MAX_TIMEOUT).contains(t)).ok_or_else(|| anyhow!("script {skill}/{script}: timeout is 1–{MAX_TIMEOUT} seconds"))?,
         };
-        let s = Script { skill: skill.into(), script: script.into(), readonly, timeout };
+        let s = Script { skill: skill.into(), script: script.into(), timeout };
         if out.iter().any(|o| o.name() == s.name()) {
             bail!("script {} is named twice", s.name());
         }
@@ -93,9 +90,6 @@ pub(super) fn describe_scripts(v: &Value) -> Result<String> {
         .iter()
         .map(|s| {
             let mut notes = vec![];
-            if s.readonly {
-                notes.push("read-only routines may run it; Echo can't check it only reads".to_string());
-            }
             if s.timeout > DEFAULT_TIMEOUT {
                 notes.push(format!("up to {}", minutes(s.timeout)));
             }
@@ -216,16 +210,13 @@ fn stop_where(which: impl Fn(&str) -> bool) {
 
 /// Run plugin `id`'s declared script `skill`/`script` with `args` (plain words, no shell), within `timeout` seconds (at
 /// most what it declared, which is the default): `{status, stdout, stderr, truncated?, timed_out?}` — `status` null
-/// when it was stopped. `read_only`: a read-only routine asks, which runs only a script marked `readonly`.
-pub fn run(id: &str, skill: &str, script: &str, args: &[String], timeout: Option<u64>, read_only: bool) -> Result<Value> {
+/// when it was stopped.
+pub fn run(id: &str, skill: &str, script: &str, args: &[String], timeout: Option<u64>) -> Result<Value> {
     let p = super::enabled().into_iter().find(|p| p.id == id).ok_or_else(|| anyhow!("{id} isn't installed and on"))?;
     let dir = super::plugin_dir(&p);
     let m = super::read_manifest(&dir)?;
     let script = script.trim_start_matches("./");
     let s = declared(&m.uses)?.into_iter().find(|s| s.skill == skill && s.script == script).ok_or_else(|| anyhow!("{id} didn't declare the script “{skill}/{script}” when it was installed"))?;
-    if read_only && !s.readonly {
-        bail!("{} isn't marked readonly: it doesn't run while Claude prepares and asks", s.name());
-    }
     let limit = match timeout {
         None => s.timeout,
         Some(t) if (1..=s.timeout).contains(&t) => t,
@@ -440,11 +431,11 @@ mod tests {
     fn a_script_is_declared_by_its_skill_and_a_plain_path_with_its_time() {
         let uses = |v: Value| json!({"scripts": v}).as_object().cloned().unwrap();
         let got = declared(&uses(json!([{"skill": "staffing", "script": "scripts/read.sh", "readonly": true}, {"skill": "staffing", "script": "./scripts/sync.mjs", "timeout": 1800}]))).unwrap();
-        assert_eq!(got[0], Script { skill: "staffing".into(), script: "scripts/read.sh".into(), readonly: true, timeout: 300 });
-        assert_eq!((got[1].script.as_str(), got[1].readonly, got[1].timeout), ("scripts/sync.mjs", false, 1800));
+        assert_eq!(got[0], Script { skill: "staffing".into(), script: "scripts/read.sh".into(), timeout: 300 });
+        assert_eq!((got[1].script.as_str(), got[1].timeout), ("scripts/sync.mjs", 1800));
         assert_eq!(
             describe_scripts(&json!([{"skill": "staffing", "script": "scripts/read.sh", "readonly": true}, {"skill": "staffing", "script": "scripts/sync.mjs", "timeout": 1800}])).unwrap(),
-            "Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh” (read-only routines may run it; Echo can't check it only reads), “staffing/scripts/sync.mjs” (up to 30 min)"
+            "Runs programs from its package on this computer with your rights — they can reach the network and anything you can: “staffing/scripts/read.sh”, “staffing/scripts/sync.mjs” (up to 30 min)"
         );
         for bad in [
             json!([]),

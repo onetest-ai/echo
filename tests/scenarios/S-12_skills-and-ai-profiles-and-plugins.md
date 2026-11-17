@@ -52,7 +52,7 @@ cases:
   - tests/cases/plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md
   - tests/cases/plugins/TC-071_a-plugin-starts-a-repository-in-its-vault-and-commits-only-the-notes-it-names.md
   - tests/cases/plugins/TC-072_a-plugin-reads-its-vaults-git-history-and-a-notes-old-version.md
-  - tests/cases/plugins/TC-074_a-plugins-git-commit-is-refused-while-claude-prepares-and-asks.md
+  - tests/cases/plugins/TC-074_a-plugins-git-commit-goes-through-under-the-read-only-marker-of-before.md
   - tests/cases/plugins/TC-073_a-vaults-own-git-settings-hooks-and-attributes-run-nothing-through-a-plugin.md
   - tests/cases/plugins/TC-089_a-repository-whose-settings-include-a-file-in-the-vault-is-refused.md
   - tests/cases/plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md
@@ -139,7 +139,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 46 | `plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md` | — | — |
 | 47 | `plugins/TC-071_a-plugin-starts-a-repository-in-its-vault-and-commits-only-the-notes-it-names.md` | — | Its marketplace is its own `acme-git`: run its precondition lines as written. Skip its teardown: keep Acme history and its repository for stages 48–53 |
 | 48 | `plugins/TC-072_a-plugin-reads-its-vaults-git-history-and-a-notes-old-version.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1 (HEAD~1 is then stage 47's `a star`, which holds the same `Notes/Acme.md`). Skip its teardown |
-| 49 | `plugins/TC-074_a-plugins-git-commit-is-refused-while-claude-prepares-and-asks.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |
+| 49 | `plugins/TC-074_a-plugins-git-commit-goes-through-under-the-read-only-marker-of-before.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |
 | 50 | `plugins/TC-073_a-vaults-own-git-settings-hooks-and-attributes-run-nothing-through-a-plugin.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1, but run its mark-script line (`printf … > "$D/mark.sh"; chmod 755 …`). Skip its teardown |
 | 51 | `plugins/TC-089_a-repository-whose-settings-include-a-file-in-the-vault-is-refused.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1, but run its mark-script line. Skip its teardown |
 | 52 | `plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |

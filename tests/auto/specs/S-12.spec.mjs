@@ -303,17 +303,25 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await expect(settings.switch(a.autoMinutes)).toHaveAttribute('aria-checked', 'false')
   })
 
-  test('13 · AI & minutes: Claude in the window without permission prompts shows its warning and is off', covers('settings/TC-014', 'F-SET-12'), async ({ page }) => {
+  test("13 · AI & minutes: Claude's permissions shows its three settings side by side, each on Auto by default", covers('settings/TC-014', 'F-SET-24'), async ({ page }) => {
     const a = data.text.ai
     const settings = new SettingsPage(page, data)
     await settings.open(a.route)
-    const row = settings.settingRow(a.skipRow)
-    await expect(row).toBeVisible()
-    await expect(settings.rowSays(row, a.skipFlag)).toBeVisible()
-    for (const words of a.skipSays) await expect(row).toContainText(words)
-    await expect(settings.switch(a.skipRow)).toHaveAttribute('aria-checked', 'false')
-    await expect(settings.rowSays(row, a.skipOn)).toHaveCount(0)
-    expect(config().folder_skip_permissions).toBe(false)
+    await expect(settings.cardHeading(a.permissionsCard)).toBeVisible()
+    const of = (row) => fill(a.permissionsOf, { row })
+    const folder = settings.settingRow(a.folderRow)
+    await expect(settings.rowSays(folder, a.skipFlag)).toBeVisible()
+    await expect(settings.rowSays(folder, a.autoFlag)).toBeVisible()
+    for (const words of a.skipSays) await expect(folder).toContainText(words)
+    for (const [name, pressed] of [[a.ask, 'false'], [a.auto, 'true'], [a.skip, 'false']]) await expect(settings.choice(of(a.folderRow), name)).toHaveAttribute('aria-pressed', pressed)
+    await expect(folder).not.toContainText(a.skipOn)
+    for (const r of [a.routineRow, a.yoloRow]) {
+      await expect(settings.choice(of(r), a.ask)).toHaveCount(0)
+      for (const [name, pressed] of [[a.auto, 'true'], [a.skip, 'false']]) await expect(settings.choice(of(r), name)).toHaveAttribute('aria-pressed', pressed)
+    }
+    const autoOn = settings.main.getByText(a.autoOnProfiles)
+    await expect(autoOn).toContainText(a.autoMode)
+    for (const k of ['folder_permissions', 'routine_permissions', 'yolo_permissions', 'folder_skip_permissions']) expect(config()).not.toHaveProperty(k)
   })
 
   test('14 · Transcription lists the speech models with their download size and starts none', covers('settings/TC-010', 'F-SET-09'), async ({ page }) => {

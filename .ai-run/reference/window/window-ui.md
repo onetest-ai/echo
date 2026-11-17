@@ -46,7 +46,9 @@ rules are in `.ai-run/guides/window/window-ui.md`.
 
 ## Settings
 
-- `window::settings::settings_set` saves a setting as the value shown.
+- `window::settings::settings_set` saves a setting as the value shown. A choice of several (the `seg` buttons, each its
+  value: `folder_permissions` `ask` / `auto` / `skip`, `routine_permissions` and `yolo_permissions` `auto` / `skip`) sends
+  the button's own value.
 - `window::settings_action` runs the tray's `Action` by name for a flow that needs a dialog, sign-in or download.
 
 ## Rendering

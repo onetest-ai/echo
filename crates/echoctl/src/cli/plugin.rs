@@ -53,7 +53,7 @@ pub enum PluginCmd {
         /// JSON arguments (default {})
         args: Option<String>,
         /// A file handed to the command, as a handle it reads or copies (repeatable). Refused inside a run Echo started —
-        /// a minutes run, a thread's sync, Yolo, a routine preparing and asking — but not a routine acting on its own
+        /// a minutes run, a thread's sync, Yolo — but not a routine
         #[arg(long = "file")]
         files: Vec<std::path::PathBuf>,
     },
@@ -222,10 +222,8 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         #[cfg(not(feature = "js"))]
         PluginCmd::Call { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
         PluginCmd::Script { id, skill, script, args } => {
-            // In a read-only routine only a script marked readonly runs.
-            let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
             let argv: Vec<String> = std::env::args().skip(1).collect();
-            let v = match crate::plugins::scripts::run(&id, &skill, &script, &args, None, read_only) {
+            let v = match crate::plugins::scripts::run(&id, &skill, &script, &args, None) {
                 Ok(v) => v,
                 Err(e) => {
                     crate::notes::note_action(&argv, Some(&format!("failed: {e:#}")));

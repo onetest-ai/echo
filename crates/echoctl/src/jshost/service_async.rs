@@ -5,18 +5,19 @@ use super::*;
 
 pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
-        // A script it declared (`uses.scripts`): a read-only routine's host runs only one marked readonly.
+        // A script it declared (`uses.scripts`).
         "scripts.run" => {
             let args: Vec<String> = arg[2].as_array().into_iter().flatten().map(|a| a.as_str().map(str::to_owned).ok_or_else(|| anyhow!("a script's arguments are strings"))).collect::<Result<_>>()?;
-            let read_only = std::env::var(crate::guard::RUN_MODE).is_ok_and(|m| m == "routine");
-            plugins::scripts::run(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &args, arg[3]["timeout"].as_u64(), read_only)
+            plugins::scripts::run(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &args, arg[3]["timeout"].as_u64())
         }
         // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
         "claude.run" => {
-            read_only_here("a Claude run")?;
-            // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
-            plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
-            let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
+            // Only what its install sheet said: running Claude Code at all, and a run's own `skip` (else the user's
+            // setting for routines).
+            let uses = plugins::read_manifest(&package_dir(id)?)?.uses;
+            let mut arg = arg.clone();
+            arg["tools"] = plugins::may_run_claude(&uses, arg["tools"].as_str().unwrap_or(""))?.to_string().into();
+            let spec = crate::claudejob::Spec::from_value(&arg, &plugins::data_dir(id))?;
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             // What it changed and sent with Echo's CLI, for the plugin to show (a routine's outcome).
             let actions = crate::notes::run_actions(&spec.run_dir.join("actions.jsonl"));
@@ -26,7 +27,6 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "signin.get" => {
             let host = arg[0].as_str().unwrap_or("");
             plugins::may_use_signin(&plugins::read_manifest(&package_dir(id)?)?.uses, host)?;
-            read_only_here("reading your sign-in")?;
             let own = plugins::may_keep_signin(&plugins::read_manifest(&package_dir(id)?)?.uses).then_some(id);
             Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
         }
@@ -73,11 +73,10 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
                 bail!("“{spec}” isn't a Claude Code plugin (name@marketplace)");
             }
-            // Only the channel plugin its install sheet named; installing (it changes the user's Claude Code) never from
-            // a read-only routine, and only into the default profile's.
+            // Only the channel plugin its install sheet named; installing (it changes the user's Claude Code) only into
+            // the default profile's.
             may_touch_claude_plugin(id, spec)?;
             let profile = if op == "claude.install_plugin" {
-                read_only_here("installing")?;
                 crate::ai::default_id()
             } else {
                 Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id)
@@ -103,7 +102,6 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(Value::Null)
         }
         "deliver.send" => {
-            read_only_here("sending")?;
             let kind = arg[0].as_str().unwrap_or("");
             // Only the ways its install sheet named, or its own.
             plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;

@@ -882,16 +882,15 @@ pub fn clis() -> Vec<String> {
     out
 }
 
-/// Enabled plugins' declared scripts as Echo's sessions run them (`read_only`: only those marked `readonly`): the launcher at each one's path in
+/// Enabled plugins' declared scripts as Echo's sessions run them: the launcher at each one's path in
 /// `.plugins/<id>/.claude/skills/<prefix>-<skill>/`, by its full path (both slash forms on Windows).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn scripts(read_only: bool) -> Vec<String> {
+pub fn scripts() -> Vec<String> {
     let mut out = vec![];
     for (p, d) in laid_out() {
         let Ok(m) = super::read_manifest(&super::plugin_dir(&p)) else { continue };
         let prefix = prefix_of(&m).unwrap_or_default();
-        // `read_only`: only those marked `readonly` (a routine or Yolo preparing and asking).
-        for s in super::scripts::declared(&m.uses).unwrap_or_default().into_iter().filter(|s| s.readonly || !read_only) {
+        for s in super::scripts::declared(&m.uses).unwrap_or_default() {
             let f = d.join(".claude").join("skills").join(skill_name(&prefix, &s.skill)).join(&s.script);
             if f.is_file() {
                 for form in [f.display().to_string(), fwd(&f)] {
@@ -1232,14 +1231,14 @@ mod tests {
         let script = dir.join(".claude/skills/kit-staffing/scripts/read.sh");
         let wrapper = fs::read_to_string(&script).unwrap();
         assert!(wrapper.contains(&format!("'{here}/scripts/echoctl' plugin script 'kit' 'staffing' 'scripts/read.sh'")), "{wrapper}");
-        assert!(scripts(false).contains(&script.display().to_string()), "{:?}", scripts(false));
+        assert!(scripts().contains(&script.display().to_string()), "{:?}", scripts());
         assert!(clis().contains(&format!("{here}/scripts/echoctl")));
         let row = Row { plugin: "Kit".into(), what: "Staffing of Acme projects".into(), skills: vec!["kit-old".into(), "kit-staffing".into()], read: ".plugins/kit/CLAUDE.md".into() };
         assert_eq!(rows(), vec![row]);
         assert!(core().contains("| Kit | Staffing of Acme projects | `kit-old`, `kit-staffing` | `.plugins/kit/CLAUDE.md` |"), "{}", core());
         // Switched off: its folder and its row go; on again: back.
         super::super::set_enabled("kit", false).unwrap();
-        assert!(!dir.exists() && rows().is_empty() && scripts(false).is_empty());
+        assert!(!dir.exists() && rows().is_empty() && scripts().is_empty());
         super::super::set_enabled("kit", true).unwrap();
         assert!(dir.join("CLAUDE.md").is_file() && rows().len() == 1);
         // At start: a folder that is no plugin switched on goes — not a stray file, nor a folder laid out after the list

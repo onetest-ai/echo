@@ -118,18 +118,21 @@ pub(super) fn join_words(w: &[&str]) -> String {
 
 /// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
 /// before that choice) is still taken and changes nothing.
-pub(super) fn describe_claude(_: &Value) -> Result<String> {
-    Ok("Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings".into())
+pub(super) fn describe_claude(v: &Value) -> Result<String> {
+    let mut line = "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)".to_string();
+    if v["skip"] == true {
+        line.push_str("; a run you mark so may skip every permission check");
+    }
+    Ok(line)
 }
 
 /// May a plugin with these `uses` start a Claude Code run (`claudejob::Spec`)? Only with `claude` on its install sheet.
-/// What it may do there is the user's one choice, whatever `tools` it asks (`claudejob`).
+/// The `tools` it may ask (`claudejob::Tools`): `skip` only when its sheet said so (`claude.skip`), else the user's
+/// setting for routines (`""`); anything else as it asked.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
-pub fn may_run_claude(uses: &serde_json::Map<String, Value>, _tools: &str) -> Result<()> {
-    if uses.get("claude").is_none() {
-        bail!("it didn't ask to run Claude Code when it was installed");
-    }
-    Ok(())
+pub fn may_run_claude<'a>(uses: &serde_json::Map<String, Value>, tools: &'a str) -> Result<&'a str> {
+    let Some(claude) = uses.get("claude") else { bail!("it didn't ask to run Claude Code when it was installed") };
+    Ok(if tools.trim() == "skip" && claude["skip"] != true { "" } else { tools })
 }
 
 /// May a plugin with these `uses` send by `kind`? Only a way its install sheet named (`deliver.to`), or its own (the
