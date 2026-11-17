@@ -190,6 +190,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
         "dashboard" if matches!(second, "list" | "presets" | "export") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
+        "jobs" if second == "runs" => None,
         _ => Some("change"),
     }
 }
@@ -929,7 +930,8 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     };
     let profile = ready.profile();
     let model = crate::jobs::model_for("minutes", profile).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
-    crate::jobs::ran("minutes");
+    // A run of the minutes job: its Claude Code run's usage, how it ended (after `conclude`).
+    let job_run = crate::jobs::begin("minutes");
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.
     let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
@@ -1162,6 +1164,15 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         stopped: stopped.as_deref(),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
+    if let Some(v) = &result {
+        crate::jobs::add_usage(model.as_deref().unwrap_or(""), v);
+    }
+    let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    if r.state == "done" {
+        job_run.done(Some(format!("minutes of {call}")));
+    } else {
+        job_run.failed(&format!("{call}: {}", r.message.as_deref().unwrap_or(&r.state)));
+    }
     crate::kept_minutes::settle(dir, r.state == "done", &mut r.message, &run_id, &mut log);
     if r.state == "done" {
         let sha256 = crate::models::sha256_file(&dir.join("notes.md")).unwrap_or_default();

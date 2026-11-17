@@ -69,10 +69,24 @@ pub fn run(id: &str) -> Result<Value> {
 
 /// As the app's scheduler syncs (`echoctl project ledger <id> run --scheduled`): mail and chat wait for their batch.
 pub fn run_scheduled(id: &str) -> Result<Value> {
+    let started = Local::now();
     let v = run_with(id, true)?;
-    // A sync that went to the model (one held for its batch, or with nothing new, didn't): the thread sync job ran.
+    // A sync that went to the model (one held for its batch, or with nothing new, didn't): a run of the thread sync
+    // job, its passes' usage summed.
     if v.get("run").is_some() {
-        crate::jobs::ran("thread_sync");
+        let mut used = json!({"calls": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost_usd": 0.0});
+        for u in v["usage"].as_object().into_iter().flat_map(|m| m.values()) {
+            for k in ["input", "output", "cache_read", "cache_write"] {
+                used[k] = json!(used[k].as_u64().unwrap_or(0) + u[k].as_u64().unwrap_or(0));
+            }
+            used["calls"] = json!(used["calls"].as_u64().unwrap_or(0) + u["turns"].as_u64().unwrap_or(0));
+            used["cost_usd"] = json!(used["cost_usd"].as_f64().unwrap_or(0.0) + u["cost_usd"].as_f64().unwrap_or(0.0));
+        }
+        let name = projects::load(id).map(|p| p.name).unwrap_or_else(|_| id.to_string());
+        let first = v["message"].as_str().unwrap_or("").lines().next().unwrap_or("").to_string();
+        let outcome = if v["state"] == "done" { Ok(format!("{name}: {first}")) } else { Err(format!("{name}: {first}")) };
+        used["model"] = v["model"].clone();
+        crate::jobs::record("thread_sync", started, outcome, used);
     }
     Ok(v)
 }
@@ -180,18 +194,29 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     // Mail and chat are fetched unless a scheduled sync falls in the night the fetch job pauses in (Sync now always).
     if !(batch && crate::jobs::paused("fetch", started.time())) {
         let fetching = ledger::chat_due(&p) || ledger::mail_due(&p);
+        let (fetch_from, fetch_at) = (written.len(), Local::now());
+        let mut fetch_errors: Vec<String> = vec![];
         // Its meeting chats between calls (a chat that can't be read keeps its error; the calls go on).
         match ledger::chat_sync(id) {
             Ok(w) => written.extend(w),
-            Err(e) => eprintln!("project sync {id}: the meeting chat: {e:#}"),
+            Err(e) => {
+                eprintln!("project sync {id}: the meeting chat: {e:#}");
+                fetch_errors.push(format!("the meeting chat: {e:#}"));
+            }
         }
         // Its ✉ Mail sources, trusted senders only (a source that can't be read keeps its error).
         match ledger::mail_sync(id) {
             Ok(w) => written.extend(w),
-            Err(e) => eprintln!("project sync {id}: mail: {e:#}"),
+            Err(e) => {
+                eprintln!("project sync {id}: mail: {e:#}");
+                fetch_errors.push(format!("mail: {e:#}"));
+            }
         }
+        // A run of the fetch job when a source was due: what it brought, or why it couldn't.
         if fetching {
-            crate::jobs::ran("fetch");
+            let n = written.len() - fetch_from;
+            let outcome = if fetch_errors.is_empty() { Ok(format!("{}: {n} new item{}", p.name, if n == 1 { "" } else { "s" })) } else { Err(format!("{}: {}", p.name, fetch_errors.join("; "))) };
+            crate::jobs::record("fetch", fetch_at, outcome, json!({}));
         }
     }
     let backlog = ledger::pending(id)?;
@@ -292,7 +317,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         }
         let _ = fs::remove_file(&settings);
         let left = ledger::pending_count(id)?;
-        Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
+        Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id, "model": model,
                   "processed": before.saturating_sub(left), "left": left, "usage": used,
                   "message": format!("{extract_report}\n{verify_report}\n{}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at, started)).unwrap_or_default()).trim().to_string()}))
     })();

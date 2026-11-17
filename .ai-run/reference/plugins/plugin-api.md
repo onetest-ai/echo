@@ -451,8 +451,10 @@ Evidence: `jshost::work::check_rows`
   `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`,
   `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`). Echo takes out what a plugin
   added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
-- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, its
-  fields with value, default and range, last run, runs today, and the night); `set(job, ["key=value", …])` — only on the
+- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, where
+  it shows, its fields with value, default and range, its last run, next run or what it waits for, the last 30 days by
+  day with cost, today's counts, and the night with Echo's default); `runs(job, {limit})` — its runs, newest first, as
+  `echoctl jobs runs` (20 by default, 500 at most); `set(job, ["key=value", …])` — only on the
   user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
   `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
   its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check

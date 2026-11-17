@@ -148,6 +148,15 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     Err(e) => json!({"error": format!("{e:#}")}),
                 }));
             }
+            // A job's runs (`ctx.echo.jobs.runs`), read only.
+            if let Some(id) = rest.strip_suffix("/jobs/runs").filter(|id| crate::plugins::valid_id(id)) {
+                let q = req.uri().query().unwrap_or("");
+                let limit = query_param(q, "limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(20).min(500);
+                return Some(json_reply(match crate::jshost::may_tune_jobs(id).and_then(|()| crate::jobs::runs(&query_param(q, "job").unwrap_or_default(), limit)) {
+                    Ok(v) => json!({"value": v}),
+                    Err(e) => json!({"error": format!("{e:#}")}),
+                }));
+            }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
                     let q = req.uri().query().unwrap_or("");

@@ -119,6 +119,12 @@ enum JobsCmd {
     List,
     /// Tune a job (`echoctl jobs` lists their keys): key=value …, key= for its default; `night from=HH:MM to=HH:MM`
     Set { job: String, settings: Vec<String> },
+    /// A job's runs, newest first (JSON): when, how it ended, its model, tokens and cost
+    Runs {
+        job: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -848,6 +854,7 @@ fn main() -> Result<()> {
             let v = match cmd {
                 None | Some(JobsCmd::List) => jobs::list(),
                 Some(JobsCmd::Set { job, settings }) => jobs::set(&job, &settings)?,
+                Some(JobsCmd::Runs { job, limit }) => serde_json::json!(jobs::runs(&job, limit)?),
             };
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())

@@ -968,9 +968,10 @@ fn worker() {
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &job {
             Job::Ask { stamp, generation, ask } => run_ask(stamp, *generation, ask.clone()),
             Job::Summary { stamp, generation } => {
-                // Outside the live notes' lock: the run is recorded in a file of its own (`jobs::ran`).
-                crate::jobs::ran("live_notes");
-                run_summary(stamp, *generation)
+                // A run of the live notes job (outside the live notes' lock): its model call, a panic as its failure.
+                let run = crate::jobs::begin("live_notes");
+                run_summary(stamp, *generation);
+                run.done(None)
             }
         }));
         if ran.is_err() {

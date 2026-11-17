@@ -87,11 +87,20 @@ reads the data folder's files.
   empty: the job's own default). A job reads its settings on every tick (`jobs::number`, `jobs::paused`;
   `jobs::model_for` for its model — never on a local profile that maps no model to that name — through
   `livenotes::job_model` for prep, Recall, meeting types and task modes, `needs::needs_model`,
-  `livenotes::live_model_of`; minutes and the thread sync after the thread's own model) and records a run with
-  `jobs::ran`. A live notes session keeps the model it started with until the next call. The settings are
+  `livenotes::live_model_of`; minutes and the thread sync after the thread's own model) and a timed one (Needs
+  you now, prep, Recall) says when it looks next (`jobs::after_pass`, `<config dir>/jobs-next.json`). A live notes
+  session keeps the model it started with until the next call.
+- A job's runs are kept as a routine's: `jobs::begin` … `Run::done` / `failed` on the job's thread, its model calls
+  counted by `jobs::add_usage` (from `claude_session::complete_claude_with` and `livenotes::complete_local_body`), or
+  `jobs::record` for a run elsewhere (the thread sync's passes, the fetch, a live notes session, a minutes run). A pass
+  that did nothing and called no model leaves no run. One line a run in `<config dir>/jobs-runs/<job>.jsonl`
+  (`started`, `ended`, `duration_ms`, `ok`, `summary` or `error`, `model`, `calls`, tokens, `cost_usd`), those of the
+  last 31 days and at most 5000 kept. `jobs::list` gives each job `to` (where it shows), `last`, `next_run` (a time) or
+  `next` (in words, for a job that runs on events), `month` (`runs`, `failed`, `cost`, `daily` × 30) and today's
+  counts, plus the night and `night_default`; `echoctl jobs runs <job>` its runs. The settings are
   `<config dir>/jobs.json`, changed only by `jobs::set` (`echoctl jobs set <job> key=value …`, `key=` its default;
   `night from=HH:MM to=HH:MM`) under `.jobs.lock`: all checked, then written at once, never inside a run Echo started.
-  Runs are `<config dir>/jobs-state.json` (last run, runs today). `echoctl jobs` lists them all.
+  `echoctl jobs` lists them all.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

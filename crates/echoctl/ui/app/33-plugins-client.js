@@ -89,6 +89,12 @@ function pluginCtx(id) {
           if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
           return r.value
         },
+        /** A job's runs, newest first (at most `limit`, 20 by default, 500 at most): what `echoctl jobs runs` prints. */
+        runs: async (job, opts = {}) => {
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs/runs?job=${encodeURIComponent(String(job))}&limit=${encodeURIComponent(String(opts.limit || 20))}`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
         set: (job, settings) => {
           if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) return Promise.reject(new Error("Echo's jobs change only on your click or key"))
           // Through the page's IPC (never a GET); Echo answers this request by `window.echo.jobsSet`.

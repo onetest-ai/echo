@@ -1,8 +1,9 @@
 //! Echo's background jobs (#669): what each one is, the settings the user may tune (how often, the night pause, the
 //! model), and when each last ran. The settings are `<config dir>/jobs.json`, changed only through `set` (its lock,
 //! re-read inside it), never inside a run Echo started; a job reads its own on every tick, so a change applies at
-//! the next one. What a job did is `<config dir>/jobs-state.json` (`ran`). Every job runs on its defaults when the
-//! file is missing or a value in it can't be read.
+//! the next one. What a job did is kept as a routine's runs are: one line a run in `<config dir>/jobs-runs/<job>.jsonl`
+//! (when, how it ended, its model, tokens and cost — `begin` … `Run::done`, or `record`), the newest 500 kept. Every job
+//! runs on its defaults when the file is missing or a value in it can't be read.
 
 use crate::paths;
 use anyhow::{anyhow, bail, Result};
@@ -10,7 +11,12 @@ use chrono::{DateTime, Local, NaiveTime};
 use serde_json::{json, Map, Value};
 
 const FILE: &str = "jobs.json";
-const STATE: &str = "jobs-state.json";
+const RUNS: &str = "jobs-runs";
+const NEXT: &str = "jobs-next.json";
+/// Runs kept a job: those of the last `KEEP_DAYS` days, at most the newest `KEEP` (trimmed once a file passes
+/// `KEEP * 2` lines or holds an older one).
+const KEEP: usize = 5000;
+const KEEP_DAYS: i64 = 31;
 
 /// A setting a job has: its key, what it means, its unit and default.
 pub struct Field {
@@ -33,6 +39,8 @@ pub struct Job {
     pub id: &'static str,
     pub name: &'static str,
     pub what: &'static str,
+    /// Where what it does shows.
+    pub to: &'static str,
     pub fields: &'static [Field],
 }
 
@@ -54,42 +62,49 @@ pub const JOBS: &[Job] = &[
         id: "needs",
         name: "Needs you now",
         what: "Reads your Teams and mail of the last day for what waits on you, and chats that are burning",
+        to: "Needs you now",
         fields: &[num("every", "Every (minutes)", 1, 240, 5), night(true), model_field("the profile's live model")],
     },
     Job {
         id: "thread_sync",
         name: "Thread sync",
         what: "Reads new calls, mail and chat into each thread's work and people",
+        to: "Threads' work and people",
         fields: &[num("batch_wait", "Mail and chat wait at most (minutes)", 5, 1440, 120), num("batch_items", "…or until this many wait", 1, 50, 5), night(true), model_field("the thread's, else the profile's minutes model")],
     },
     Job {
         id: "fetch",
         name: "Threads' mail and meeting chats",
         what: "Fetches the mail and meeting chats threads follow (no model: what the thread sync reads)",
+        to: "Threads' sources",
         fields: &[num("every", "Every (minutes)", 5, 1440, 30), night(true)],
     },
     Job {
         id: "minutes",
         name: "Minutes",
         what: "Writes a call's minutes: by itself after the call when automatic minutes are on, or when you ask",
+        to: "The call's minutes",
         fields: &[num("delay", "Automatic: after the call (minutes)", 1, 240, 15), model_field("the profile's minutes model")],
     },
     Job {
         id: "prep",
         name: "Meeting prep",
         what: "Prepares today's meetings of threads, types meetings by their invites, and sorts your tasks by who can do them",
+        to: "Meeting prep, meeting types, task modes",
         fields: &[num("every", "Every (minutes)", 1, 240, 5), night(false), model_field("the profile's minutes model")],
     },
     Job {
         id: "brain_reader",
         name: "Recall",
         what: "Indexes new calls, mail, channel posts and folders for Recall, reading mail and posts into plain facts",
+        to: "Recall",
         fields: &[num("every", "Every (minutes)", 1, 1440, 5), num("per_pass", "Documents a pass", 1, 200, 30), night(false), model_field("the profile's minutes model")],
     },
     Job {
         id: "live_notes",
         name: "Live notes",
         what: "Keeps a running summary during a call",
+        to: "The call's live notes",
         fields: &[num("every_s", "Summary every (seconds)", 30, 900, 90), model_field("the profile's live model")],
     },
 ];
@@ -162,23 +177,183 @@ pub fn model_for(id: &str, p: &crate::ai::Profile) -> Option<String> {
     model(id).filter(|m| p.kind != crate::ai::Kind::Local || p.model(m) != *m)
 }
 
-/// Record that `id` did its work now (the list's last run and runs today).
-pub fn ran(id: &str) {
-    let path = paths::config_dir().join(STATE);
-    let Ok(_lock) = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs-state.lock"), "Echo's jobs", std::time::Duration::from_secs(5)) else { return };
-    let mut st = load_from(STATE);
+// ── runs ─────────────────────────────────────────────────────────────────────────────────────
+
+thread_local! {
+    /// What the job running on this thread used so far (`begin` … `Run::done`): its model calls' tokens and cost.
+    static CURRENT: std::cell::RefCell<Option<Used>> = const { std::cell::RefCell::new(None) };
+}
+
+#[derive(Default, Clone)]
+struct Used {
+    calls: u64,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+    cost_usd: f64,
+    models: Vec<String>,
+}
+
+impl Used {
+    fn value(&self) -> Value {
+        json!({"calls": self.calls, "input": self.input, "output": self.output, "cache_read": self.cache_read, "cache_write": self.cache_write,
+               "cost_usd": (self.cost_usd * 1e6).round() / 1e6, "model": self.models.join(", ")})
+    }
+}
+
+/// A job's run on this thread: its model calls count towards it (`add_usage`) until it is `done` or `failed`.
+pub struct Run {
+    job: &'static str,
+    started: DateTime<Local>,
+    ended: bool,
+}
+
+/// Start a run of `job` on this thread.
+pub fn begin(job: &'static str) -> Run {
+    CURRENT.with(|c| *c.borrow_mut() = Some(Used::default()));
+    Run { job, started: Local::now(), ended: false }
+}
+
+impl Run {
+    /// It ended well. Recorded when it said what it did (`summary`) or called a model; a pass that found nothing to
+    /// do leaves no run (a job looks every few minutes).
+    pub fn done(mut self, summary: Option<String>) {
+        self.ended = true;
+        let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
+        if summary.is_some() || used.calls > 0 {
+            write_run(self.job, self.started, Ok(summary.unwrap_or_default()), used.value());
+        }
+    }
+
+    /// It failed: always recorded, with why.
+    pub fn failed(mut self, error: &str) {
+        self.ended = true;
+        let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
+        write_run(self.job, self.started, Err(error.to_string()), used.value());
+    }
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        if !self.ended {
+            let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
+            write_run(self.job, self.started, Err("it stopped before it ended".into()), used.value());
+        }
+    }
+}
+
+/// A model call on this thread used this (a Claude Code result event's `usage` and `total_cost_usd`, or a Messages API
+/// answer's `usage`): counted towards the job running here, if any.
+pub fn add_usage(model: &str, v: &Value) {
+    CURRENT.with(|c| {
+        if let Some(u) = c.borrow_mut().as_mut() {
+            let x = &v["usage"];
+            let n = |k: &str| x[k].as_u64().unwrap_or(0);
+            u.calls += 1;
+            u.input += n("input_tokens");
+            u.output += n("output_tokens");
+            u.cache_read += n("cache_read_input_tokens");
+            u.cache_write += n("cache_creation_input_tokens");
+            u.cost_usd += v["total_cost_usd"].as_f64().unwrap_or(0.0);
+            if !model.is_empty() && !u.models.iter().any(|m| m == model) {
+                u.models.push(model.to_string());
+            }
+        }
+    });
+}
+
+/// A run that happened elsewhere (its own process or session): `used` as `{calls, input, output, cache_read,
+/// cache_write, cost_usd, model}`, any of them absent.
+pub fn record(job: &'static str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
+    write_run(job, started, result, used);
+}
+
+/// When a timed job looks next (its loop, after a pass or a paused tick): kept for the list, any process.
+pub fn next_at(job: &str, at: DateTime<Local>) {
+    let Ok(_lock) = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs-next.lock"), "Echo's jobs", std::time::Duration::from_secs(5)) else { return };
+    let mut m = load_from(NEXT);
+    m.insert(job.to_string(), json!(at.to_rfc3339()));
+    let _ = std::fs::create_dir_all(paths::config_dir());
+    let _ = paths::write_atomic(&paths::config_dir().join(NEXT), serde_json::to_string_pretty(&Value::Object(m)).unwrap_or_default().as_bytes());
+}
+
+/// After a timed job's pass: it looks again in `minutes` (its `every`), or at the night's end when that falls in a
+/// night it pauses in. The seconds to sleep.
+pub fn after_pass(job: &str, minutes: u64) -> u64 {
     let now = Local::now();
-    let today = now.format("%Y-%m-%d").to_string();
-    let e = st.entry(id.to_string()).or_insert_with(|| json!({}));
-    let runs = if e["day"].as_str() == Some(today.as_str()) { e["runs_today"].as_u64().unwrap_or(0) + 1 } else { 1 };
-    *e = json!({"last_run": now.to_rfc3339(), "day": today, "runs_today": runs});
-    let _ = paths::write_atomic(&path, serde_json::to_string_pretty(&Value::Object(st)).unwrap_or_default().as_bytes());
+    let mut at = now + chrono::Duration::minutes(minutes as i64);
+    if paused(job, at.time()) {
+        at = after_night(at);
+    }
+    next_at(job, at);
+    minutes * 60
+}
+
+/// What a job's next run waits for, in words, when it isn't a time (a job that runs on events).
+fn next_words(id: &str) -> Option<String> {
+    Some(match id {
+        "thread_sync" => {
+            let n = number(id, "batch_items");
+            format!("after a call, or when mail and chat wait {} min or {n} item{}", number(id, "batch_wait"), if n == 1 { "" } else { "s" })
+        }
+        "fetch" => format!("each followed source every {} min", number(id, "every")),
+        "minutes" => format!("{} min after a call", number(id, "delay")),
+        "live_notes" => format!("during a call, every {} s", number(id, "every_s")),
+        _ => return None,
+    })
+}
+
+fn runs_file(job: &str) -> std::path::PathBuf {
+    paths::config_dir().join(RUNS).join(format!("{job}.jsonl"))
+}
+
+fn write_run(job: &str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
+    let ended = Local::now();
+    let mut line = json!({"started": started.to_rfc3339(), "ended": ended.to_rfc3339(), "duration_ms": (ended - started).num_milliseconds().max(0), "ok": result.is_ok()});
+    match result {
+        Ok(s) if !s.is_empty() => line["summary"] = json!(s.chars().take(300).collect::<String>()),
+        Ok(_) => {}
+        Err(e) => line["error"] = json!(e.chars().take(500).collect::<String>()),
+    }
+    for k in ["calls", "input", "output", "cache_read", "cache_write", "cost_usd", "model"] {
+        if !used[k].is_null() && used[k] != json!("") {
+            line[k] = used[k].clone();
+        }
+    }
+    if let Some(c) = line["cost_usd"].as_f64() {
+        line["cost_usd"] = json!((c * 1e6).round() / 1e6);
+    }
+    let Ok(_lock) = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs-runs.lock"), "Echo's jobs", std::time::Duration::from_secs(5)) else { return };
+    let f = runs_file(job);
+    let _ = std::fs::create_dir_all(f.parent().expect("a folder"));
+    let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(str::to_owned).collect();
+    lines.push(line.to_string());
+    let oldest = (Local::now() - chrono::Duration::days(KEEP_DAYS)).to_rfc3339();
+    let old = lines.first().and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v["started"].as_str().map(str::to_owned)).is_some_and(|t| t < oldest);
+    if lines.len() > KEEP * 2 || old {
+        lines.retain(|l| serde_json::from_str::<Value>(l).ok().and_then(|v| v["started"].as_str().map(str::to_owned)).is_some_and(|t| t >= oldest));
+        if lines.len() > KEEP {
+            lines.drain(..lines.len() - KEEP);
+        }
+    }
+    let _ = paths::write_atomic(&f, (lines.join("\n") + "\n").as_bytes());
+}
+
+/// A job's runs, newest first, at most `limit`.
+pub fn runs(job: &str, limit: usize) -> Result<Vec<Value>> {
+    self::job(job)?;
+    Ok(read_runs(job).into_iter().rev().take(limit).collect())
+}
+
+fn read_runs(job: &str) -> Vec<Value> {
+    std::fs::read_to_string(runs_file(job)).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
 /// `echoctl jobs`: every job with its settings (each with its value and default), last run and runs today, and the night.
 pub fn list() -> Value {
     let s = settings();
-    let st = Value::Object(load_from(STATE));
+    let next_runs = Value::Object(load_from(NEXT));
     let today = Local::now().format("%Y-%m-%d").to_string();
     let (from, to) = night_window();
     let jobs: Vec<Value> = JOBS
@@ -201,12 +376,33 @@ pub fn list() -> Value {
                     json!({"key": f.key, "label": f.label, "kind": kind, "value": value, "default": default, "range": unit, "set": s[j.id].get(f.key).is_some()})
                 })
                 .collect();
-            let e = &st[j.id];
-            let runs_today = if e["day"].as_str() == Some(today.as_str()) { e["runs_today"].as_u64().unwrap_or(0) } else { 0 };
-            json!({"id": j.id, "name": j.name, "what": j.what, "fields": fields, "last_run": e["last_run"], "runs_today": runs_today})
+            let all = read_runs(j.id);
+            let last = all.last().cloned().unwrap_or(Value::Null);
+            let todays: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(&today))).collect();
+            let cost_today: f64 = todays.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
+            let tokens_today: u64 = todays.iter().map(|r| ["input", "output", "cache_read", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
+            // The last 30 days, a day each (oldest first), as a routine's month.
+            let days: Vec<String> = (0..30).rev().map(|d| (Local::now().date_naive() - chrono::Days::new(d)).format("%Y-%m-%d").to_string()).collect();
+            let daily: Vec<Value> = days
+                .iter()
+                .map(|d| {
+                    let of: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(d.as_str()))).collect();
+                    let cost: f64 = of.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
+                    json!({"day": d, "runs": of.len(), "failed": of.iter().filter(|r| r["ok"] == false).count(), "cost": (cost * 1e6).round() / 1e6})
+                })
+                .collect();
+            let month = json!({"runs": daily.iter().map(|d| d["runs"].as_u64().unwrap_or(0)).sum::<u64>(),
+                               "failed": daily.iter().map(|d| d["failed"].as_u64().unwrap_or(0)).sum::<u64>(),
+                               "cost": (daily.iter().map(|d| d["cost"].as_f64().unwrap_or(0.0)).sum::<f64>() * 1e6).round() / 1e6, "daily": daily});
+            let next = next_words(j.id);
+            let next_run = if next.is_some() { Value::Null } else { next_runs[j.id].clone() };
+            json!({"id": j.id, "name": j.name, "what": j.what, "to": j.to, "fields": fields, "last_run": last["started"], "last": last,
+                   "next_run": next_run, "next": next, "month": month,
+                   "runs_today": todays.len(), "failed_today": todays.iter().filter(|r| r["ok"] == false).count(),
+                   "cost_today": (cost_today * 1e6).round() / 1e6, "tokens_today": tokens_today})
         })
         .collect();
-    json!({"jobs": jobs, "night": {"from": from.format("%H:%M").to_string(), "to": to.format("%H:%M").to_string()}})
+    json!({"jobs": jobs, "night": {"from": from.format("%H:%M").to_string(), "to": to.format("%H:%M").to_string()}, "night_default": {"from": NIGHT.0, "to": NIGHT.1}})
 }
 
 /// `echoctl jobs set <job> key=value …` (`key=` back to the default), and `night from=HH:MM to=HH:MM`. All checked,
@@ -359,13 +555,63 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_counted_for_today() {
-        let (_env, _) = paths::testenv::folders("jobs-ran");
-        ran("needs");
-        ran("needs");
+    fn a_run_is_kept_with_its_model_calls_and_one_with_nothing_done_is_not() {
+        let (_env, _) = paths::testenv::folders("jobs-runs");
+        let r = begin("needs");
+        add_usage("haiku", &json!({"usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 5}, "total_cost_usd": 0.0012}));
+        add_usage("haiku", &json!({"usage": {"input_tokens": 50, "output_tokens": 10}, "total_cost_usd": 0.0008}));
+        r.done(Some("3 waiting on you".into()));
+        begin("needs").done(None);
+        begin("needs").failed("Teams: unreachable");
+        // Outside a run, a model call counts towards nothing.
+        add_usage("sonnet", &json!({"usage": {"input_tokens": 9}}));
+        let got = runs("needs", 10).unwrap();
+        assert_eq!(got.len(), 2, "the pass with nothing done left no run: {got:?}");
+        assert_eq!((got[0]["ok"].clone(), got[0]["error"].clone()), (json!(false), json!("Teams: unreachable")));
+        assert_eq!((got[1]["summary"].clone(), got[1]["calls"].clone(), got[1]["input"].clone(), got[1]["cost_usd"].clone(), got[1]["model"].clone()), (json!("3 waiting on you"), json!(2), json!(150), json!(0.002), json!("haiku")));
+        {
+            let _dropped = begin("prep");
+        }
+        assert_eq!(runs("prep", 1).unwrap()[0]["error"], "it stopped before it ended");
+        record("thread_sync", Local::now(), Ok("1 item read".into()), json!({"calls": 3, "input": 10, "cost_usd": 0.5, "model": "sonnet"}));
         let l = list();
-        let needs = l["jobs"].as_array().unwrap().iter().find(|j| j["id"] == "needs").unwrap();
-        assert_eq!(needs["runs_today"], 2);
-        assert!(needs["last_run"].is_string());
+        let job = |id: &str| l["jobs"].as_array().unwrap().iter().find(|j| j["id"] == id).unwrap().clone();
+        assert_eq!((job("needs")["runs_today"].clone(), job("needs")["failed_today"].clone(), job("needs")["cost_today"].clone(), job("needs")["tokens_today"].clone()), (json!(2), json!(1), json!(0.002), json!(185)));
+        assert_eq!((job("thread_sync")["last"]["summary"].clone(), job("thread_sync")["cost_today"].clone()), (json!("1 item read"), json!(0.5)));
+        assert!(runs("nope", 1).is_err());
+    }
+
+    #[test]
+    fn a_jobs_runs_older_than_a_month_go_and_the_month_is_counted_by_day() {
+        let (_env, _) = paths::testenv::folders("jobs-runs-trim");
+        let old = Local::now() - chrono::Duration::days(40);
+        let f = runs_file("fetch");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, format!("{}\n", json!({"started": old.to_rfc3339(), "ok": true, "summary": "old"}))).unwrap();
+        record("fetch", Local::now() - chrono::Duration::days(1), Ok("yesterday".into()), json!({"cost_usd": 0.25}));
+        record("fetch", Local::now(), Err("today".into()), json!({"cost_usd": 0.5}));
+        let got = runs("fetch", usize::MAX).unwrap();
+        assert_eq!(got.iter().map(|r| r["summary"].as_str().or(r["error"].as_str()).unwrap()).collect::<Vec<_>>(), ["today", "yesterday"], "the run of 40 days ago is gone");
+        let l = list();
+        let fetch = l["jobs"].as_array().unwrap().iter().find(|j| j["id"] == "fetch").unwrap().clone();
+        let daily = fetch["month"]["daily"].as_array().unwrap();
+        assert_eq!(daily.len(), 30);
+        assert_eq!((daily[29]["runs"].clone(), daily[29]["failed"].clone(), daily[28]["cost"].clone()), (json!(1), json!(1), json!(0.25)));
+        assert_eq!((fetch["month"]["runs"].clone(), fetch["month"]["cost"].clone()), (json!(2), json!(0.75)));
+        assert!(fetch["last"]["duration_ms"].is_number());
+        assert_eq!((fetch["next_run"].clone(), fetch["next"].clone()), (Value::Null, json!("each followed source every 30 min")));
+        assert_eq!(l["night_default"], json!({"from": "22:30", "to": "07:00"}));
+    }
+
+    #[test]
+    fn a_timed_job_says_when_it_looks_next_after_a_pass_or_the_nights_end() {
+        let (_env, _) = paths::testenv::folders("jobs-next");
+        assert_eq!(after_pass("needs", 5), 300);
+        let l = list();
+        let needs = l["jobs"].as_array().unwrap().iter().find(|j| j["id"] == "needs").unwrap().clone();
+        let at = chrono::DateTime::parse_from_rfc3339(needs["next_run"].as_str().unwrap()).unwrap();
+        let want = if paused("needs", (Local::now() + chrono::Duration::minutes(5)).time()) { after_night(Local::now() + chrono::Duration::minutes(5)) } else { Local::now() + chrono::Duration::minutes(5) };
+        assert!((at.timestamp() - want.timestamp()).abs() < 5, "{at} vs {want}");
+        assert!(needs["next"].is_null() && needs["to"] == "Needs you now");
     }
 }
