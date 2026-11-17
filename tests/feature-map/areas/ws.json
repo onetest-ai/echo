@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-WS-01",
-   "feature": "The activity bar shows Today, Calls, Calendar, Threads, Tasks (Knowledge only with Recall on or a plugin tab) and Settings; icons only until \"Expand the sidebar\" (⌘\\), remembered",
+   "feature": "The activity bar shows Today, Calls, Calendar, Threads, Tasks (Recall only with Recall on or a plugin tab) and Settings; icons only until \"Expand the sidebar\" (⌘\\), remembered",
    "priority": "medium",
    "check": "agent",
    "axes": [

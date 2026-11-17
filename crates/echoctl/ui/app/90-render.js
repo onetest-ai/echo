@@ -73,7 +73,7 @@ function viewState() {
   }
   if (S.view === 'tasks') { const k = tkPicks(); v.filter = `Tasks across threads${k.project ? ` · only ${(projById(k.project) || {}).name || k.project}` : k.client ? ` · only ${(((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === k.client) || {}).name || k.client}'s` : ''}` }
   if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
-  if (S.view === 'brain') v.filter = `Knowledge · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
+  if (S.view === 'brain') v.filter = `Recall · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
   if (S.view === 'calendar') {
     v.filter = `Calendar · ${S.cal.mode}`
     const e = S.cal.selected && S.cal.data && (S.cal.data.events || []).find((x) => x.id === S.cal.selected)

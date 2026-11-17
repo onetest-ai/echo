@@ -342,7 +342,7 @@
     ],
     "notActivities": [
       "Inbox",
-      "Knowledge"
+      "Recall"
     ],
     "yourDay": "Your day",
     "threads": "Threads",
@@ -436,7 +436,7 @@
       "AI & minutes",
       "Templates",
       "Calendar & chat",
-      "Knowledge",
+      "Recall",
       "About me",
       "Sends to you",
       "Plugins",
@@ -444,7 +444,7 @@
       "Health"
     ],
     "headings": {
-      "Knowledge": [
+      "Recall": [
         "Recall",
         3
       ]
@@ -1235,7 +1235,7 @@
       "ai": "AI"
     },
     "noSeries": "No meeting series yet. A meeting that recurs in this thread shows here.",
-    "brainOff": "Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Knowledge. Meeting chats, and mail already added here, are read into the work either way.",
+    "brainOff": "Recall is off, so channels, mail and folders aren't read into it — turn it on in Settings → Recall. Meeting chats, and mail already added here, are read into the work either way.",
     "footStart": "Saved as you change it",
     "foot": "Saved as you change it · projects/{id}/ · Delete in ⋯",
     "orgHint": "Who this thread is with besides its client: ",

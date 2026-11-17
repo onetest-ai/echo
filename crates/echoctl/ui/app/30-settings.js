@@ -3,7 +3,7 @@
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'], ['templates', 'Templates'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Knowledge'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Recall'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 // ── settings search: which sections a search keeps, by their names and by their settings' own labels (#103) —
 // the rows' titles (`<b>` of setRow) and the cards' heads (`<h3>`) of a section as drawn; not descriptions or badges.
