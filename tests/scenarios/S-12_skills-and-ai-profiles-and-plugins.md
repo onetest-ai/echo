@@ -61,6 +61,8 @@ cases:
   - tests/cases/plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md
   - tests/cases/plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md
   - tests/cases/plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md
+  - tests/cases/plugins/TC-140_a-plugins-claude-session-opens-in-its-folder-as-that-folders-own-project-with-the-windows-permission-setting.md
+  - tests/cases/plugins/TC-141_a-plugins-claude-session-opens-only-on-the-users-click-and-is-refused-before-it-starts-when-its-request-doesnt-fit.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -151,6 +153,8 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 55 | `plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md` | — | Its own marketplace `acme-tidy`, folder `$D/tidy` and profile `acme-work`: run its precondition lines as written. Skip its teardown: Acme tidy, `$D/tidy` and the fake `claude` stay for stages 56–57 |
 | 56 | `plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md` | 55 | Acme tidy is installed with `$D/tidy` given to it and the fake `claude` in place: skip the precondition lines of TC-090 and its step 1; set `D`, `E` and `S` as its prelude does. Skip its teardown |
 | 57 | `plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md` | 55 | As for stage 56. Its teardown ends with TC-090's: Acme tidy, `acme-tidy`, `acme-work` and `$D/tidy` go, the data's fake `claude` back |
+| 58 | `plugins/TC-140_a-plugins-claude-session-opens-in-its-folder-as-that-folders-own-project-with-the-windows-permission-setting.md` | — | Its own marketplace `acme-ask`, folder `$D/vault`, profile `acme-work` and session-keeping fake `claude` (stage 57 put the data's fake back): run its precondition lines as written. Skip its teardown: Acme ask, `$D/vault`, `acme-work` and the fake `claude` stay for stage 59 |
+| 59 | `plugins/TC-141_a-plugins-claude-session-opens-only-on-the-users-click-and-is-refused-before-it-starts-when-its-request-doesnt-fit.md` | 58 | Acme ask is installed with `$D/vault` given to it and the fake `claude` in place: skip TC-140's precondition lines and its step 1; set `D`, `E`, `B` and the helpers as its prelude does. Its teardown ends with TC-140's |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

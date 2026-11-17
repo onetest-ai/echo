@@ -118,7 +118,8 @@ pub(super) fn join_words(w: &[&str]) -> String {
 
 /// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
 /// before that choice) is still taken and changes nothing. In a folder you gave it, a run works there on that folder's
-/// own setup, its permissions as you set routines too.
+/// own setup, its permissions as you set routines too; a session the user opens there from its screens, as they set
+/// Claude in the window.
 pub(super) fn describe_claude(v: &Value) -> Result<String> {
     let mut line = "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)".to_string();
     if v["skip"] == true {
@@ -126,7 +127,7 @@ pub(super) fn describe_claude(v: &Value) -> Result<String> {
     }
     line.push_str(
         ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, \
-         edits files there or in a copy for you to review — as you set routines",
+         edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window",
     );
     Ok(line)
 }

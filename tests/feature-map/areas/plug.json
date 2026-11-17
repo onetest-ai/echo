@@ -354,6 +354,42 @@
    ]
   },
   {
+   "id": "F-PLUG-90",
+   "feature": "A plugin's window half opens an interactive Claude Code session in a folder the user gave it (`ctx.claude.session({folder, path, mode, profile})`, `uses.claude` + `uses.folders`): in Echo's terminal, its own bottom-panel tab 'Claude · <plugin name>', in that folder (or its subfolder `path`) as that folder's own project — `--setting-sources user,project` last on a profile of Echo's own, `read` (the default) only Read, Grep, Glob and Skill, `edit` (only with `folders.write`) also Edit and Write, no MCP server, never Bash — its conversation kept and resumed for that plugin and folder; the panel names the plugin, the folder, the mode, the permissions and the profile; on the default profile or one the plugin names (a wrapper only when it is the default)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-91",
+   "feature": "A plugin's Claude session takes the user's permission setting for Claude in the window, never the plugin's: Ask each time — Claude Code's own prompts (no flag); Auto — `--permission-mode auto` (edits accepted, or a read asking nothing, where the model has no auto mode); Skip all permission checks — `--dangerously-skip-permissions`; the sheet's Claude line says a session opens on the user's click as they set Claude in the window",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-92",
+   "feature": "A plugin's Claude session opens only on the user's click or key in the plugin's screens (without the page's user activation `ctx.claude.session` throws and nothing is sent); the plugin's ctx can't type into it or read it, and Echo types nothing in; asked again while it runs it is shown, in another folder it throws (one session per plugin)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-93",
+   "feature": "A plugin's Claude session is refused before Claude Code starts, the reason in its panel: no `claude` or `folders` on its sheet, a folder not given to it, a path outside it or not a folder, `edit` without `folders.write`, `copy` or another mode, a wrapper profile that isn't the default, the plugin off, and on a profile of Echo's own a folder whose `.claude/settings.json` could route it; a session open when its plugin is switched off runs on as the user's but doesn't start again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
    "id": "F-PLUG-36",
    "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered; in a debug build `echoctl plugin emit <event> <json>` queues one as Echo would tell it, for the running app (or a served window) to deliver — refused in a release build, for an event Echo hasn't, and for a payload that isn't a JSON object",
    "priority": "high",

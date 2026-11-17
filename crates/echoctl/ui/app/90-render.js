@@ -342,6 +342,8 @@ CLICKS.push(
     return termRestart(t.dataset.termKind, key, extra, v)
   } },
   { sel: '[data-term-start]', area: 'terminals', when: (t) => t.dataset.termStart, run: (t) => {
+    // A plugin's session: again as it was asked (`S.plugSession`).
+    if (t.dataset.termStart === 'claude-plugin') return S.plugSession && termStart('claude-plugin', S.plugSession.key, S.plugSession.extra)
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
     if (sel) S.folderProfile = sel.value
     return termStart(t.dataset.termStart, t.dataset.termKey, { call: t.dataset.termCall, profile: sel ? sel.value : undefined })

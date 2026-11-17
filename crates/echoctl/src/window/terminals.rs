@@ -120,6 +120,9 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             let (cols, rows) = (v["cols"].as_u64().unwrap_or(100) as u16, v["rows"].as_u64().unwrap_or(30) as u16);
             let kind = v["kind"].as_str().unwrap_or("");
             let key = v["key"].as_str().unwrap_or(kind).to_string();
+            // A plugin's session: what it is, for the panel to name.
+            #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+            let mut about = Value::Null;
             let opened = match kind {
                 // The self-test's shell only (`window --selftest`): never in a normal window.
                 "shell" if shell_allowed(SELFTEST.load(std::sync::atomic::Ordering::SeqCst)) => {
@@ -132,10 +135,21 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                     Some(dir) => crate::terminal::start_call(&key, &dir, v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
                     None => Err(anyhow::anyhow!("that call can't be found")),
                 },
+                // A plugin's Claude in a folder the user gave it (`ctx.claude.session`, on the user's click): its own
+                // key per plugin, so another plugin's request never reaches it.
+                #[cfg(feature = "js")]
+                "claude-plugin" => {
+                    let plugin = v["plugin"].as_str().unwrap_or("");
+                    let key = format!("claude:plugin:{plugin}");
+                    crate::terminal::start_plugin(&key, plugin, v, v["profile"].as_str().filter(|p| !p.is_empty()), cols, rows).map(|(id, a)| {
+                        about = a;
+                        (id, key)
+                    })
+                }
                 other => Err(anyhow::anyhow!("no terminal of kind {other:?}")),
             };
             let answer = match opened {
-                Ok((id, key)) => json!({ "ok": true, "id": id, "key": key }),
+                Ok((id, key)) => json!({ "ok": true, "id": id, "key": key, "about": about }),
                 Err(e) => {
                     // A profile that needs a sign-in (or is being signed in): the page offers Sign in… for it.
                     let signin = e.downcast_ref::<crate::ai::SignInNeeded>().map(|s| s.profile.clone())

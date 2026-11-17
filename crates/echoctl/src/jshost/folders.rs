@@ -502,15 +502,8 @@ pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::
         }
         return Ok(None);
     }
-    uses(id, "folders")?;
     let mode = FolderMode::parse(arg["mode"].as_str().unwrap_or(""))?;
-    if mode == FolderMode::Edit {
-        uses_flag(id, "folders", "write")?;
-    }
-    let cwd = crate::grants::resolve(id, root, path)?;
-    if !cwd.is_dir() {
-        bail!("“{path}” isn't a folder in {root}");
-    }
+    let cwd = granted_cwd(id, root, path, mode)?;
     let (cwd, snap) = match mode {
         // The path in the snapshot: a subfolder it left out (`.git`, a cap) refuses the run, and the snapshot goes.
         FolderMode::Copy => {
@@ -530,6 +523,39 @@ pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::
     spec.folder = Some(InFolder { cwd, mode });
     spec.session = false;
     Ok(snap)
+}
+
+/// Where Claude Code goes in a folder given to plugin `id` (`uses.folders`; `edit` also `folders.write`): `path` inside
+/// `root`, a folder.
+fn granted_cwd(id: &str, root: &str, path: &str, mode: crate::claudejob::FolderMode) -> Result<std::path::PathBuf> {
+    uses(id, "folders")?;
+    if mode == crate::claudejob::FolderMode::Edit {
+        uses_flag(id, "folders", "write")?;
+    }
+    let cwd = crate::grants::resolve(id, root, path)?;
+    if !cwd.is_dir() {
+        bail!("“{path}” isn't a folder in {root}");
+    }
+    Ok(cwd)
+}
+
+/// `ctx.claude.session({folder, path, mode})` (the client half, on the user's click): the folder a plugin's Claude
+/// session in Echo's terminal opens in — the plugin installed and on, with `claude` and `folders` on its sheet; `read`
+/// (the default) or `edit` (`folders.write`), never `copy` (a session has no snapshot to hand back).
+#[cfg(feature = "tray")]
+pub fn session_folder(id: &str, arg: &Value) -> Result<crate::claudejob::InFolder> {
+    use crate::claudejob::{FolderMode, InFolder};
+    uses(id, "claude")?;
+    let root = arg["folder"].as_str().unwrap_or("");
+    if root.is_empty() {
+        bail!("a Claude session opens in a folder you gave the plugin (folder)");
+    }
+    let mode = match FolderMode::parse(arg["mode"].as_str().unwrap_or(""))? {
+        FolderMode::Copy => bail!("mode “copy”: a session reads (read) or edits (edit) its folder"),
+        m => m,
+    };
+    let cwd = granted_cwd(id, root, arg["path"].as_str().unwrap_or(""), mode)?;
+    Ok(InFolder { cwd: dunce::canonicalize(&cwd)?, mode })
 }
 
 #[cfg(test)]

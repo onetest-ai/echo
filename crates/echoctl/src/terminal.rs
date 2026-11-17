@@ -154,7 +154,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         child: Mutex::new(child),
         out: Mutex::new(Ring::default()),
         changed: Condvar::new(),
-        loaded: if key.starts_with("claude:") { loaded_now(profile.as_deref(), key.starts_with("claude:folder")).into_iter().map(|(w, f, _)| (w, f)).collect() } else { vec![] },
+        loaded: if tracks_start(key) { loaded_now(profile.as_deref(), key.starts_with("claude:folder")).into_iter().map(|(w, f, _)| (w, f)).collect() } else { vec![] },
         stopped: std::sync::atomic::AtomicBool::new(false),
         profile,
         _hold: Mutex::new(hold),
@@ -278,9 +278,15 @@ pub fn close_all() {
     ids.into_iter().for_each(close);
 }
 
-/// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale}` —
-/// `stale` = `{at, what}`, the first of what Claude Code reads only at start that is different now (#44) — and the
-/// keys still being stopped (`{key, stopping: true}`).
+/// Does a terminal's session load at start what Echo watches for changes (#44): Echo's folder and call sessions, not a
+/// plugin's (its folder's own setup).
+fn tracks_start(key: &str) -> bool {
+    key.starts_with("claude:") && !key.starts_with("claude:plugin:")
+}
+
+/// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale, about}` —
+/// `stale` = `{at, what}`, the first of what Claude Code reads only at start that is different now (#44); `about` = a
+/// plugin's session's (`start_plugin`) — and the keys still being stopped (`{key, stopping: true}`).
 pub fn list_value() -> serde_json::Value {
     type Row = (u64, String, bool, Option<String>, Vec<(String, String)>);
     let terms: Vec<Row> = TERMS
@@ -290,11 +296,12 @@ pub fn list_value() -> serde_json::Value {
         .map(|(id, t)| (*id, t.key.clone(), t.out.lock().unwrap_or_else(|e| e.into_inner()).exited, t.profile.clone(), t.loaded.clone()))
         .collect();
     let mut out: Vec<serde_json::Value> = terms.into_iter().map(|(id, key, exited, profile, loaded)| {
-        let stale = (!exited && key.starts_with("claude:")).then(|| {
+        let stale = (!exited && tracks_start(&key)).then(|| {
             let now = loaded_now(profile.as_deref(), key.starts_with("claude:folder"));
             now.into_iter().find(|(what, f, _)| loaded.iter().find(|(w, _)| w == what).is_none_or(|(_, g)| g != f))
         }).flatten();
-        serde_json::json!({"id": id, "key": key, "exited": exited, "stale": stale.map(|(what, _, at)| serde_json::json!({"at": at.map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339()), "what": what}))})
+        let about = ABOUT.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+        serde_json::json!({"id": id, "key": key, "exited": exited, "stale": stale.map(|(what, _, at)| serde_json::json!({"at": at.map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339()), "what": what})), "about": about})
     }).collect();
     for key in STOPPING.lock().unwrap_or_else(|e| e.into_inner()).keys() {
         out.push(serde_json::json!({"key": key, "stopping": true}));
@@ -567,6 +574,65 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     let id = open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(unmark_on_exit(forget, proof.clone())))?;
     note_proof(id, proof);
     Ok(id)
+}
+
+/// What each plugin's session is (`start_plugin`), by its terminal's key: the panel names the plugin, the folder and
+/// how it asks, and starts it again with the same request (Resume) — also after the window was closed.
+static ABOUT: Mutex<BTreeMap<String, serde_json::Value>> = Mutex::new(BTreeMap::new());
+
+/// The store key of a plugin's session in folder `cwd` on `profile`: one conversation per plugin and folder.
+#[cfg(feature = "js")]
+fn plugin_store_key(profile: &str, plugin: &str, cwd: &Path) -> String {
+    use sha2::Digest as _;
+    let tag: String = sha2::Sha256::digest(cwd.display().to_string().as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect();
+    format!("{profile}:plugin:{plugin}:{tag}")
+}
+
+/// A plugin's session (`ctx.claude.session`, opened only on the user's click in its view): Claude Code in a folder the
+/// user gave plugin `plugin` (`req`: `{folder, path, mode}`), as that folder's own project — its setup, the mode's tools,
+/// no MCP server (`claudejob::in_folder_session`) — with the folder session's permission setting (Ask each time, Auto,
+/// Skip), on `profile` (a wrapper only when it is the default) or the default. Nothing is typed into it but the user's
+/// keys; the plugin gets no handle on it. With the plugin switched off it keeps running, the user's, but doesn't start
+/// again.
+#[cfg(feature = "js")]
+pub fn start_plugin(key: &str, plugin: &str, req: &serde_json::Value, profile: Option<&str>, cols: u16, rows: u16) -> Result<(u64, serde_json::Value)> {
+    running_already(key)?;
+    if stopping(key) {
+        bail!("the previous session is still stopping — try again in a moment");
+    }
+    let (cmd, ready, forget, proof, about) = plugin_command(plugin, req, profile)?;
+    let p = ready.profile().id.clone();
+    let id = open_with(key, cmd, cols, rows, Some((p, Box::new(ready))), Some(unmark_on_exit(forget, proof.clone())))?;
+    note_proof(id, proof);
+    ABOUT.lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_string(), about.clone());
+    Ok((id, about))
+}
+
+/// `start_plugin`'s command, profile lease, exit handler, wrapper mark and what the panel shows.
+#[cfg(feature = "js")]
+fn plugin_command(plugin: &str, req: &serde_json::Value, profile: Option<&str>) -> Result<(CommandBuilder, ai::Ready, OnExit, Option<String>, serde_json::Value)> {
+    let f = crate::jshost::folders::session_folder(plugin, req)?;
+    if let Some(id) = profile {
+        ai::plugin_may_name(&ai::Settings::load()?, id, None)?;
+    }
+    let id = profile.map(str::to_owned).unwrap_or_else(ai::default_id);
+    let ready = ai::ready(&id)?;
+    let p = ready.profile().clone();
+    let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten().map(|m| p.model(&m));
+    let (mut args, _, forget) = session_args(&plugin_store_key(&p.id, plugin, &f.cwd));
+    let perm = crate::folder_args::folder_permissions();
+    args.extend(crate::claudejob::in_folder_session(&p, model.as_deref(), &f, perm)?);
+    // Through a wrapper, its own settings file's session-start hook answering is the check (claude-code-runs R14).
+    let proof = if p.kind == ai::Kind::Wrapper { Some(ai::wrapper::terminal_proof(&mut args)?) } else { None };
+    let cmd = ai::terminal_command(&p, &args, &f.cwd, &[], false)?;
+    let name = crate::plugins::enabled().into_iter().find(|x| x.id == plugin).and_then(|x| crate::plugins::read_manifest(&crate::plugins::plugin_dir(&x)).ok()).map_or_else(|| plugin.to_string(), |m| m.name);
+    let about = serde_json::json!({
+        "plugin": plugin, "name": name, "cwd": f.cwd.display().to_string(),
+        "folder": req["folder"].as_str().unwrap_or(""), "path": req["path"].as_str().unwrap_or(""), "mode": f.mode.name(),
+        "profile": p.id, "profile_name": p.name,
+        "permissions": crate::folder_args::permission_args(perm, &p, model.as_deref(), f.mode != crate::claudejob::FolderMode::Read).1,
+    });
+    Ok((cmd, ready, forget, proof, about))
 }
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
@@ -956,5 +1022,99 @@ mod tests {
         note_proof(id, Some(v.clone()));
         close(id);
         assert!(!ai::wrapper::marked(&v), "closed by Echo: no exit callback, the mark goes anyway");
+    }
+
+    #[test]
+    #[cfg(all(unix, feature = "js"))]
+    fn a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions() {
+        use crate::config::Permissions;
+        use serde_json::json;
+        let (_env, root) = paths::testenv::folders("terminal-plugin-session");
+        let _fake = ai::fake::install(&root);
+        let _p = ai::fake::profile("work", None, &ai::fake::signed_in("pat@example.com"));
+        ai::set_default("work").unwrap();
+        let vault = root.join("acme-vault");
+        std::fs::create_dir_all(vault.join("Notes")).unwrap();
+        std::fs::create_dir_all(vault.join(".claude")).unwrap();
+        std::fs::write(vault.join("Notes/Acme.md"), "# Acme\n").unwrap();
+        let install = |id: &str, uses: serde_json::Value| {
+            let d = root.join("market").join(id).join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": format!("Acme {id}"), "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+            std::fs::write(d.join("main.js"), "export function apply(ctx) {}\n").unwrap();
+            let mk = root.join("market").join(id);
+            std::fs::write(mk.join("echo-marketplace.json"), json!({"name": format!("m-{id}"), "plugins": [{"id": id, "source": format!("./plugins/{id}")}]}).to_string()).unwrap();
+            let name = crate::plugins::market_add(mk.to_str().unwrap(), Some(&format!("m-{id}"))).unwrap();
+            crate::plugins::refresh(&name).unwrap();
+            let agreed = crate::plugins::review(id, Some(&name)).unwrap().uses;
+            crate::plugins::install(id, Some(&name), &agreed).unwrap();
+        };
+        install("vault", json!({"claude": {}, "folders": {"what": "vaults"}}));
+        install("writer", json!({"claude": {}, "folders": {"what": "vaults", "write": true}}));
+        install("noclaude", json!({"folders": {"what": "vaults"}}));
+        for id in ["vault", "writer", "noclaude"] {
+            crate::grants::grant(id, &vault).unwrap();
+        }
+        let vault = dunce::canonicalize(&vault).unwrap();
+        let v = vault.display().to_string();
+        let set = |p: Permissions| {
+            let mut c = crate::config::Config::load().unwrap_or_default();
+            c.folder_permissions = Some(p);
+            c.save().unwrap();
+        };
+        let argv = |c: &CommandBuilder| c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
+        let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
+        let start = |id: &str, req: serde_json::Value, profile: Option<&str>| plugin_command(id, &req, profile).map(|(c, _ready, _, _, about)| (argv(&c), c.get_cwd().map(|d| d.to_string_lossy().into_owned()), about));
+        // In the folder (or a subfolder), its own project last, the mode's tools, no MCP server, a conversation of its
+        // own; the folder session's setting — Ask each time: Claude Code's own prompts, no mode of Echo's.
+        set(Permissions::Ask);
+        let (a, cwd, about) = start("vault", json!({"folder": v}), None).unwrap();
+        assert_eq!(cwd.as_deref(), Some(v.as_str()));
+        assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
+        assert_eq!(after(&a, "--tools").as_deref(), Some("Read,Grep,Glob,Skill"));
+        assert!(a.contains(&"--strict-mcp-config".to_string()) && after(&a, "--session-id").is_some(), "{a:?}");
+        for no in ["--permission-mode", "--dangerously-skip-permissions", "--no-session-persistence", "--settings", "--plugin-dir", "--mcp-config", "--add-dir", "--allowedTools", "-p"] {
+            assert!(!a.contains(&no.to_string()), "{no}: {a:?}");
+        }
+        assert_eq!((about["name"].as_str(), about["mode"].as_str(), about["permissions"].as_str(), about["profile"].as_str()), (Some("Acme vault"), Some("read"), Some("asks each time"), Some("work")));
+        // Started again: the same conversation, resumed.
+        let id = after(&a, "--session-id").unwrap();
+        let (b, ..) = start("vault", json!({"folder": v}), None).unwrap();
+        assert_eq!(after(&b, "--resume"), Some(id.clone()));
+        // A subfolder is a conversation of its own; edit (with folders.write) adds Edit and Write; Auto and Skip.
+        set(Permissions::Auto);
+        let (a, cwd, _) = start("writer", json!({"folder": v, "path": "Notes", "mode": "edit"}), None).unwrap();
+        assert_eq!(cwd, Some(vault.join("Notes").display().to_string()));
+        assert_eq!((after(&a, "--tools").as_deref(), after(&a, "--permission-mode").as_deref()), (Some("Read,Grep,Glob,Skill,Edit,Write"), Some("auto")));
+        assert!(after(&a, "--session-id").is_some_and(|x| x != id), "{a:?}");
+        set(Permissions::Skip);
+        let (a, ..) = start("vault", json!({"folder": v}), None).unwrap();
+        assert!(a.contains(&"--dangerously-skip-permissions".to_string()) && !a.contains(&"--permission-mode".to_string()), "{a:?}");
+        set(Permissions::Ask);
+        // Refused before anything starts: no Claude on its sheet; edit without folders.write; a copy; no folder; a
+        // folder not given; a path out of it or to a file; a wrapper profile that isn't the default.
+        let other = root.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        ai::Settings::update(|s| {
+            s.profiles.push(ai::Profile { id: "wrap".into(), name: "Wrap".into(), kind: ai::Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None });
+            Ok(())
+        })
+        .unwrap();
+        let why = |id: &str, req: serde_json::Value, profile: Option<&str>| start(id, req, profile).map(|_| ()).unwrap_err().to_string();
+        assert!(why("noclaude", json!({"folder": v}), None).contains("“claude”"));
+        assert!(why("vault", json!({"folder": v, "mode": "edit"}), None).contains("“folders.write”"));
+        assert!(why("writer", json!({"folder": v, "mode": "copy"}), None).contains("reads (read) or edits (edit)"));
+        assert!(why("vault", json!({"path": "Notes"}), None).contains("in a folder you gave the plugin"));
+        assert!(why("vault", json!({"folder": other.display().to_string()}), None).contains("isn't one of the folders you gave"));
+        assert!(why("vault", json!({"folder": v, "path": "../other"}), None).contains("isn't a path inside"));
+        assert!(why("vault", json!({"folder": v, "path": "Notes/Acme.md"}), None).contains("isn't a folder"));
+        assert!(why("vault", json!({"folder": v}), Some("wrap")).contains("only when it is your default"));
+        assert!(why("gone", json!({"folder": v}), None).contains("isn't installed and on"));
+        // A folder whose project settings could route the session elsewhere than Echo's profile.
+        std::fs::write(vault.join(".claude/settings.json"), r#"{"apiKeyHelper": "/bin/echo"}"#).unwrap();
+        assert!(why("vault", json!({"folder": v}), None).contains("could send the run elsewhere than"));
+        for id in ["vault", "writer", "noclaude"] {
+            crate::plugins::remove(id, true).unwrap();
+        }
     }
 }
