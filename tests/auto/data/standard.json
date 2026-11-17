@@ -4405,10 +4405,10 @@
         "err": "Error: no thread \"no-such-thread\""
       },
       "retitled": {
-        "link": "echo://call/2025-11-20_100000-an-old-title",
-        "head": "# Call: Acme rollout kickoff — 2025-11-20 10:00",
-        "gone": "echo://call/2025-11-20_100001-an-old-title",
-        "err": "Error: no call \"2025-11-20_100001-an-old-title\""
+        "call": "acme-rollout-kickoff",
+        "old": "an-old-title",
+        "head": "# Call: Acme rollout kickoff — {day} {time}",
+        "err": "Error: no call \"{c}\""
       },
       "foreign": [
         [

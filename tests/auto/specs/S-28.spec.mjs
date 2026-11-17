@@ -217,10 +217,13 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
     const missing = read(r.missing.link)
     expect([missing.code, err(missing)]).toEqual([1, r.missing.err])
     // A link saved before its call was retitled: the call by its stamp; a stamp no call has is nothing.
-    const retitled = read(r.retitled.link)
-    expect([retitled.code, retitled.out.split('\n')[0]]).toEqual([0, r.retitled.head])
-    const gone = read(r.retitled.gone)
-    expect([gone.code, err(gone)]).toEqual([1, r.retitled.err])
+    const K = lastCall(r.retitled.call)
+    const retitled = read(fill(k.call, { c: `${K.slice(0, 17)}-${r.retitled.old}` }))
+    expect([retitled.code, retitled.out.split('\n')[0]]).toEqual([0, fill(r.retitled.head, { day: ymd(startOf(K)), time: hhmm(startOf(K)) })])
+    // The same name a second later: no call has that stamp.
+    const none = `${K.slice(0, 16)}${(Number(K[16]) + 1) % 10}-${r.retitled.old}`
+    const gone = read(fill(k.call, { c: none }))
+    expect([gone.code, err(gone)]).toEqual([1, fill(r.retitled.err, { c: none })])
     for (const [link, e] of r.foreign) {
       const x = read(link)
       expect([x.code, err(x)]).toEqual([1, e])
