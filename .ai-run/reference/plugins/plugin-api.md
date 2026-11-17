@@ -54,7 +54,8 @@ Plugins: then every <every> min Echo runs Claude Code on your default AI profile
 own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
 prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
 or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
-asks again. Evidence: `plugins::routines::sheet_lines`
+asks again, and once taken switches that routine off until the user switches it on again (one the update left as it
+was keeps the user's switch; a new one starts off). Evidence: `plugins::routines::sheet_lines`, `jobs::switch_off_routines`
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s; an update that adds a script or changes any
@@ -283,8 +284,9 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 - Its runs are kept as Echo's jobs' (§ Routines' run, `jobs-runs/<plugin>.<routine>.jsonl`): `summary` "done" or "done:
   N changes and M sends through Echo", `error` "the run failed: its log says why", with `run` (its folder),
   `changes`, `sends`, tokens and cost — never the model's text. The run's folder (`<config dir>/jobs-runs/<id>/<run>/`:
-  `prompt.md`, `log.txt`, `answer.md`, `actions.jsonl`, `permissions.json`; the newest 20 kept) is the user's:
-  `echoctl jobs outcome <id> [--run <run>]` → `{id, run, record, answer, actions, permissions, log}`. Removing the
+  `prompt.md`, `log.txt`, `answer.md`, `actions.jsonl`, `drafts.jsonl`, `permissions.json`; the newest 20 kept) is the
+  user's: `echoctl jobs outcome <id> [--run <run>]` → `{id, run, record, answer, actions, drafts, permissions, log}`. A
+  run that fails before Claude Code starts (its prompt gone, no profile) is recorded too, its log saying why. Removing the
   plugin switches its routines off (an install again never switches one on); with its data, their settings and runs
   go too. Evidence: `plugins::routines::run`, `plugins::routines::outcome`, `jobs::forget_routines`
 

@@ -1268,7 +1268,9 @@ pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
     if let Some(u) = rv.new_uses.iter().find(|u| !ok.contains(u)) {
         bail!("{} {} asks for more: {u}", rv.name, rv.version);
     }
-    install(id, Some(&p.market), &ok).map(Some)
+    let before = routines::digests(&p);
+    let done = install(id, Some(&p.market), &ok)?;
+    routines::after_update(&done, &before).map(|()| Some(done))
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
@@ -1306,6 +1308,8 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
     shared::bind_all();
+    // Its routines off first (an install again never switches one on); with its data, their settings and runs go.
+    crate::jobs::forget_routines(id, !keep_data)?;
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     #[cfg(feature = "js")]
@@ -1316,8 +1320,6 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     agent::remove(id);
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
     signin::forget_plugin(id);
-    // Its routines switched off (an install again never switches one on); with its data, their settings and runs go.
-    let _ = crate::jobs::forget_routines(id, !keep_data);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));

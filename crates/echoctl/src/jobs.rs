@@ -540,8 +540,8 @@ fn as_routine_run(r: &Value) -> Value {
     x
 }
 
-/// Echo's jobs as routines, the Scheduler's one shape for every routine (source "system"):
-/// `{routines: [...], night: {from, to, default}}`.
+/// Echo's jobs as routines (source "system"), then plugins' own (source "plugin:<id>"), the Scheduler's one shape for
+/// every routine: `{routines: [...], night: {from, to, default}}`.
 pub fn routines() -> Value {
     let l = list();
     let now = Local::now();
@@ -695,6 +695,7 @@ fn set_in(id: &str, assignments: &[String], in_run: bool) -> Result<Value> {
     Ok(routines()["routines"].as_array().into_iter().flatten().find(|r| r["id"] == id).cloned().unwrap_or(Value::Null))
 }
 
+#[cfg_attr(not(all(feature = "js", feature = "tray")), allow(dead_code))]
 /// A plugin's change (`ctx.echo.jobs.set`, on the user's click in its screens): as `set`, but it never switches a
 /// plugin's routine on or off — the user does (Settings → Plugins, `echoctl jobs set`).
 pub fn set_from_plugin(id: &str, assignments: &[String]) -> Result<Value> {
@@ -702,6 +703,30 @@ pub fn set_from_plugin(id: &str, assignments: &[String]) -> Result<Value> {
         bail!("a plugin can't switch a routine on or off: you do, in Settings → Plugins or with echoctl jobs set");
     }
     set(id, assignments)
+}
+
+/// A plugin updated: those of its routines that are new or changed (`routines`) switched off — the user switches them on
+/// again, knowing what they now do.
+pub fn switch_off_routines(plugin: &str, routines: &[String]) -> Result<()> {
+    if routines.is_empty() {
+        return Ok(());
+    }
+    let _lock = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs.lock"), "Echo's jobs", std::time::Duration::from_secs(10))?;
+    let mut s = load_from(FILE);
+    let before = s.clone();
+    for r in routines {
+        let id = format!("{plugin}.{r}");
+        if let Some(o) = s.get_mut(&id).and_then(Value::as_object_mut) {
+            o.remove("on");
+            if o.is_empty() {
+                s.remove(&id);
+            }
+        }
+    }
+    if s != before {
+        paths::write_atomic(&paths::config_dir().join(FILE), serde_json::to_string_pretty(&Value::Object(s))?.as_bytes())?;
+    }
+    Ok(())
 }
 
 /// A plugin removed: its routines switched off (`on` cleared), and with its data (`all`) their settings and runs gone too.

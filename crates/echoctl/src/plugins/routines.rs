@@ -3,7 +3,7 @@
 //! routine itself says (`tools`, `skip` only with `claude.skip` on its sheet), else as the user set routines.
 //!
 //! Each is a line of the plugin's sheet, with the hash of its definition and prompt (an update that changes either
-//! asks again). It is off until the user switches it on — Settings → Plugins, `echoctl jobs set <plugin>.<routine>
+//! asks again, and switches it off: `jobs::switch_off_routines`). It is off until the user switches it on — Settings → Plugins, `echoctl jobs set <plugin>.<routine>
 //! on=on` — never by a plugin or a run. Its settings (`on`, `every`, `night`, `model`) are kept with Echo's jobs'
 //! (`jobs.json`) and its runs as theirs (`jobs-runs/<id>.jsonl`, in Echo's words and counts), each run's folder —
 //! prompt, log, answer, the changes and sends it made — in `jobs-runs/<id>/<run>/`, the newest 20 kept. The app runs
@@ -134,6 +134,18 @@ pub(super) fn sheet_lines(m: &Manifest) -> Vec<String> {
         .collect()
 }
 
+/// Its routines' hashes as installed, before an update (`after_update`).
+pub(super) fn digests(p: &Installed) -> Vec<(String, Option<String>)> {
+    read_manifest(&plugin_dir(p)).map(|m| m.routines.into_iter().map(|r| (r.id, r.digest)).collect()).unwrap_or_default()
+}
+
+/// An update taken: each routine it added or changed is switched off (its line said "off until you switch it on"); one
+/// it left as it was keeps the user's switch.
+pub(super) fn after_update(p: &Installed, before: &[(String, Option<String>)]) -> Result<()> {
+    let changed: Vec<String> = read_manifest(&plugin_dir(p)).map(|m| m.routines.into_iter().filter(|r| !before.iter().any(|(i, d)| *i == r.id && *d == r.digest)).map(|r| r.id).collect()).unwrap_or_default();
+    crate::jobs::switch_off_routines(&p.id, &changed)
+}
+
 /// A routine's id among Echo's jobs and routines: `<plugin>.<routine>` (Echo's jobs have no dot).
 pub fn id_of(plugin: &str, routine: &str) -> String {
     format!("{plugin}.{routine}")
@@ -201,6 +213,7 @@ pub fn switch(plugin: &str, routine: &str, on: bool) -> Result<()> {
 }
 
 /// A run's words in its record: Echo's own and counts, never the model's text.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 fn summary(actions: &[Value]) -> String {
     let sends = actions.iter().filter(|a| a["kind"] == "send").count();
     let changes = actions.len() - sends;
@@ -224,9 +237,6 @@ pub fn run(id: &str) -> Result<Value> {
     if !p.enabled {
         bail!("{} is off: its routines don't run", p.name);
     }
-    // Only what its sheet said: Claude Code at all, and its own `skip` only with `claude.skip` (else the user's setting).
-    let tools = crate::claudejob::Tools::parse(may_run_claude(&m.uses, &r.tools)?)?;
-    let prompt = prompt_text(&plugin_dir(&p), &r)?;
     fs::create_dir_all(runs_dir())?;
     // A look at whether it runs (`running`) holds the lock a moment: tried a few times before it counts as running.
     let mut lock = None;
@@ -244,6 +254,26 @@ pub fn run(id: &str) -> Result<Value> {
     let folder = runs_dir().join(id);
     let stamp = (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") }).find(|s| !folder.join(s).exists()).unwrap_or(base);
     let run_dir = folder.join(&stamp);
+    // A run that fails before Claude Code starts (its sheet, its prompt, the profile) is recorded too, its log saying why:
+    // the schedule then waits its `every` before it tries again.
+    let failed = |e: anyhow::Error| -> Result<Value> {
+        let _ = fs::create_dir_all(&run_dir);
+        let log = run_dir.join("log.txt");
+        let before = fs::read_to_string(&log).unwrap_or_default();
+        let _ = fs::write(&log, format!("{before}{}  {e:#}\n", chrono::Local::now().format("%H:%M:%S")));
+        crate::jobs::record(id, started, Err("the run failed: its log says why".into()), json!({"run": stamp}));
+        prune(&folder);
+        Err(e)
+    };
+    // Only what its sheet said: Claude Code at all, and its own `skip` only with `claude.skip` (else the user's setting).
+    let tools = match may_run_claude(&m.uses, &r.tools).and_then(crate::claudejob::Tools::parse) {
+        Ok(t) => t,
+        Err(e) => return failed(e),
+    };
+    let prompt = match prompt_text(&plugin_dir(&p), &r) {
+        Ok(t) => t,
+        Err(e) => return failed(e),
+    };
     let text = format!(
         "This is the routine “{}” of the plugin “{}”, run by Echo for the user (every {} min while it is on). {}\nIts answer is kept for the user with its run; nobody is sent it.\n\n{}",
         r.name,
@@ -268,6 +298,14 @@ pub fn run(id: &str) -> Result<Value> {
         yolo: false,
     };
     let out = crate::claudejob::run(&spec);
+    if let Err(e) = &out {
+        // `claudejob::run` logs what Claude Code did; an error before it started (no profile, not signed in) is said here.
+        let log = run_dir.join("log.txt");
+        let before = fs::read_to_string(&log).unwrap_or_default();
+        if !before.contains(&format!("{e:#}")) {
+            let _ = fs::write(&log, format!("{before}{}  {e:#}\n", chrono::Local::now().format("%H:%M:%S")));
+        }
+    }
     let actions = crate::notes::run_actions(&run_dir.join("actions.jsonl"));
     let sends = actions.iter().filter(|a| a["kind"] == "send").count();
     let mut used = json!({"run": stamp, "changes": actions.len() - sends, "sends": sends});
@@ -311,10 +349,15 @@ pub fn outcome(id: &str, run: Option<&str>) -> Result<Value> {
         bail!("{id} has no run “{stamp}”");
     }
     let dir = runs_dir().join(id).join(&stamp);
+    if !dir.is_dir() {
+        bail!("{id}'s run “{stamp}” is no longer kept (Echo keeps the newest {KEEP_RUNS})");
+    }
     let read = |n: &str| fs::read_to_string(dir.join(n)).unwrap_or_default();
     Ok(json!({
         "id": id, "run": stamp, "record": record, "answer": read("answer.md"),
         "actions": crate::notes::run_actions(&dir.join("actions.jsonl")),
+        // The mail drafts it wrote (`echoctl compose`), as Yolo's outcome gives them.
+        "drafts": crate::notes::run_actions(&dir.join("drafts.jsonl")),
         "permissions": serde_json::from_str::<Value>(&read("permissions.json")).unwrap_or(Value::Null),
         "log": read("log.txt"),
     }))
@@ -459,7 +502,19 @@ mod tests {
         let rv = review("acme-routine", Some(&name)).unwrap();
         assert_eq!(rv.new_uses.len(), 1, "{:?}", rv.new_uses);
         assert!(rv.new_uses[0].starts_with("Has a routine “Mail → notes”"));
+        crate::jobs::set("acme-routine.mail-notes", &["on=on".into(), "every=30".into()]).unwrap();
         assert!(update("acme-routine", &[]).is_err(), "it waits for the user's yes");
+        assert!(crate::jobs::on("acme-routine.mail-notes"));
+        // Taken: the changed routine is off again (its line said so), its tuning kept; a version that leaves it as it was
+        // keeps the user's switch.
+        update("acme-routine", &rv.new_uses).unwrap().unwrap();
+        assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::number("acme-routine.mail-notes", "every")), (false, 30));
+        crate::jobs::set("acme-routine.mail-notes", &["on=on".into()]).unwrap();
+        m["version"] = json!("0.3.0");
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        update("acme-routine", &[]).unwrap().unwrap();
+        assert!(crate::jobs::on("acme-routine.mail-notes"), "the same routine: still on");
     }
 
     #[test]
@@ -579,6 +634,17 @@ mod tests {
         assert!(run(id).is_err());
         assert_eq!(fs::read_dir(&folder).unwrap().count(), KEEP_RUNS);
         assert!(!folder.join("20000101-000000").exists());
+        // Failed before Claude Code started (its prompt gone from the installed copy): recorded, its log saying why.
+        let installed = plugin_dir(&Registry::load().unwrap().installed["acme-routine"]);
+        let prompt_file = installed.join("routines/mail-notes.md");
+        let kept = fs::read(&prompt_file).unwrap();
+        fs::remove_file(&prompt_file).unwrap();
+        assert!(run(id).is_err());
+        let o = outcome(id, None).unwrap();
+        assert_eq!(o["record"]["error"], "the run failed: its log says why");
+        assert!(o["log"].as_str().unwrap().contains("routines/mail-notes.md isn't in the plugin"), "{}", o["log"]);
+        fs::write(&prompt_file, kept).unwrap();
+        assert!(outcome(id, Some("20000101-000000")).is_err(), "a run no longer kept");
         // Its plugin off: refused, nothing run.
         set_enabled("acme-routine", false).unwrap();
         assert!(run(id).unwrap_err().to_string().contains("Acme routine is off: its routines don't run"));

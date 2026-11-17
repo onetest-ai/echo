@@ -499,7 +499,7 @@
   },
   {
    "id": "F-PLUG-75",
-   "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again; a routine breaking a rule refuses the install with why",
+   "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again and, taken, switches it off until the user switches it on again; a routine breaking a rule refuses the install with why",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -522,7 +522,7 @@
   },
   {
    "id": "F-PLUG-78",
-   "feature": "A plugin's routine's runs are recorded as Echo's jobs' are, in Echo's words and counts (\"done\", the changes and sends it made through Echo, tokens, cost; a failure \"the run failed: its log says why\"), never the model's text; `echoctl jobs outcome <id> [--run <run>]` gives the user its answer, the changes and sends it made and its log; Echo keeps its last 20 runs' folders",
+   "feature": "A plugin's routine's runs are recorded as Echo's jobs' are, in Echo's words and counts (\"done\", the changes and sends it made through Echo, tokens, cost; a failure \"the run failed: its log says why\"), never the model's text; `echoctl jobs outcome <id> [--run <run>]` gives the user its answer, the changes and sends it made, its mail drafts and its log (a run that failed before Claude Code started too); Echo keeps its last 20 runs' folders",
    "priority": "high",
    "check": "agent",
    "axes": []
