@@ -298,7 +298,7 @@ pub fn start_scheduler() {
         let mut last: Option<u64> = None;
         let mut failed_at: Option<std::time::Instant> = None;
         loop {
-            // As often as the Recall reader's job settings say (5 minutes by default; a minute after start), never in
+            // As often as Recall's job settings say (5 minutes by default; a minute after start), never in
             // the night they pause it in.
             std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::number("brain_reader", "every") * 60 }));
             if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) {

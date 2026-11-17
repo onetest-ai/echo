@@ -555,7 +555,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     // now waits, and its sources aren't read further until it is.
     let default = crate::ai::default_id();
     let profiles = super::access::thread_profiles(&default);
-    // Documents the reader reads at most a sync (the Recall reader's `per_pass`, 30 by default; the rest wait: their
+    // Documents the reader reads at most a sync (Recall's `per_pass`, 30 by default; the rest wait: their
     // sources aren't read further).
     let mut budget = crate::jobs::number("brain_reader", "per_pass") as usize;
     let mut errors: BTreeSet<String> = BTreeSet::new();
