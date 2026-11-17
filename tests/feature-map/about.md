@@ -22,4 +22,4 @@ without merge conflicts.
 **Keeping it current:** a change in behaviour adds, changes or removes its features in its area's file **in the same
 PR**, with its cases; `tests/tools/feature-map.py check` must pass. IDs are never reused: a removed feature goes, its
 ID stays retired. Features marked "needs review" were inferred rather than seen in the code. Areas being reworked
-(Today, Knowledge) list only their top-level features, with no axes or combinations, until the rework settles.
+(Today, Recall) list only their top-level features, with no axes or combinations, until the rework settles.

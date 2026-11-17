@@ -748,7 +748,7 @@ def build_settings(d, H):
                  "vocab.scope=learned with meetings / people / only invites; > 6 learned": "config.json learned"}.items():
         d.axis(k, v)
     d.skip("set.config=unreadable", "one config.json for the whole set; unreadable breaks every view (a case corrupts it on purpose)")
-    d.skip("set.recall=on", "Knowledge is being reworked: left off")
+    d.skip("set.recall=on", "Recall is being reworked: left off")
     d.skip("set.models", "speech models are large downloads and machine state")
     d.skip("set.server", "a transcription server needs another computer on the network")
     d.skip("set.general=autostart on / CLI installed / update available", "read from the real machine (LaunchAgents, PATH, GitHub releases)")

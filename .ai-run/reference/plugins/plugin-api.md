@@ -45,6 +45,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
+| `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -388,6 +389,16 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 | `calls` | the list of your calls (titles, times, who was invited, their threads) | `ctx.echo.read('calls', {q, since, limit})` → newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}` (`minutes`, `transcript`, `chat`: whether it has them; `people`: the invite's names); `q` every word in its title, folder, subject or people, `since` `YYYY-MM-DD`, `limit` 50 (500 at most) |
 | `calendar` | the meetings Echo has read from your calendar | `ctx.echo.read('calendar')` → the agenda Echo last read (no request to Microsoft 365), by start: `{id, subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo puts it in) |
 | `me` | your name and email | `ctx.echo.read('me')` → `{name, email}` (About me's; the email else Microsoft 365's account; `null` each when unknown) |
+
+**About me** (`uses.me`, the host half only): `await ctx.me({kinds})` → `null` when About me (Settings → About me) is
+missing, empty or still the template; else `{text, name, parts, hash}`. `kinds` are About me's parts: `identity` (name,
+role, company, what the user works on), `people`, `terms`, `style` (how they like notes and follow-ups written),
+`patterns` (how they work); none named: all but `patterns`, as Echo's own readers. A part is a block under a heading or
+a `Label:` line, by its words; an unknown kind throws. `text` is the asked blocks in About me's order (20,000 characters
+at most), `parts` each asked kind's blocks (a kind About me hasn't is left out), `name` its `Name:` line (else Echo's
+name for the user, as `echo.read('me')`) when `identity` is asked, else `null`, and `hash` 8 hex characters of `text`:
+another hash, an edit to read again. No event: read it when it is needed. `echo.read('me')` stays the way to name and
+mail the user; `ctx.me` is the one to read what they wrote about themselves. Evidence: `share::about_me`
 
 ## Microsoft 365
 

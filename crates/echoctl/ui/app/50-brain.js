@@ -57,7 +57,7 @@ function brainView() {
     let html = ''
     try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
     const recallTabs = brainOn() ? BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="false">${l}</button>`).join('') : ''
-    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
+    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
   }
   const d = S.br.data
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
@@ -70,7 +70,7 @@ function brainView() {
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Knowledge">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
   const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }

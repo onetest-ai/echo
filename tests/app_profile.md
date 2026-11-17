@@ -113,10 +113,10 @@ Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be ope
 | `#projects` · `#projects/<id>` · `#project/<id>/<tab>` | Threads (UI name; `projects` in the CLI). The app itself writes `#project/<id>/<tab>` (singular), tabs `brief`, `work`, `calls`, `people`, `profile`; the plural form is also accepted. `#projects` (Threads button) opens the last thread on its `work` tab |
 | `#client/<id>` · `#client/<id>/<tab>` | A client, tabs `overview`, `calls`, `tasks`, `people`, `profile` (opened from a thread's "Thread actions" → "Open Acme") |
 | `#tasks` | Tasks: piles I owe, owed to me, waiting, nobody, plus a folded "Others" pile |
-| `#settings` · `#settings/<section>` · `#settings/plugins/<id>` | Settings; `#settings` lands on `general`. Sections: `general`, `recording`, `transcription`, `ai`, `templates`, `calendar`, `brain` (labelled "Knowledge"), `me`, `deliver` ("Sends to you"), `plugins`, `layout`, `health`. `plugins/<id>` needs an installed plugin (none on test data) |
+| `#settings` · `#settings/<section>` · `#settings/plugins/<id>` | Settings; `#settings` lands on `general`. Sections: `general`, `recording`, `transcription`, `ai`, `templates`, `calendar`, `brain` (labelled "Recall"), `me`, `deliver` ("Sends to you"), `plugins`, `layout`, `health`. `plugins/<id>` needs an installed plugin (none on test data) |
 
 Not routes: the Details drawer, My notes, Vocabulary, Asks and Inbox are panels on the right (or bottom); the
-actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Knowledge" activity (`#brain`) exists only while
+actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Recall" activity (`#brain`) exists only while
 Recall is on; it is off on test data.
 
 Live notes are in **My notes** (`[data-panel-flip="notes"]`; the right panel `aside#r-right`, outside `main`), not in the
@@ -152,7 +152,7 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
 - Microsoft 365 (mail, Teams, calendar sync) is not signed in on test data: those views show their sign-in state.
 - The data folder's `.echo/` holds the app's state files; a case reads them only when its steps say so.
 - **First paint is empty.** Right after `browser_navigate` the snapshot can show `main` empty and an extra
-  "Knowledge" activity button (it vanishes once the state is loaded). Wait for text first
+  "Recall" activity button (it vanishes once the state is loaded). Wait for text first
   (`browser_wait_for` "Your day" / the view's heading), then snapshot. Same after clicking a view button: re-snapshot.
 - **The minutes are in an iframe**: `iframe#minutes-frame` (`sandbox="allow-scripts"`, cross-origin, so
   `evaluate` cannot read it and `browser_wait_for text` does not see its text — it times out). The accessibility
@@ -215,7 +215,7 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
 | Inbox | right panel tab | "Open" / "Done" + "this week"; empty: "Nothing needs you" (Open), "Nothing decided this week yet." (Done) | user |
 | Right panel | any view | Tabs Inbox, Vocabulary (names and terms, "Add a term", learned from calls), Details (a task), Asks, My notes (on a call); buttons "Move to the bottom panel", "Close the panel" | user |
 | Details drawer | right panel, tab Details | A task: id, kind, "Send to Claude", Edit, title, thread › story, description Add, Status (a button: click it to get the select "Status"), Owner, Handed over by, Due, Who does it (Claude can / By hand), Link "Copy link" (`echo://task/<thread>/<id>`), link to another thread, History with "undo" | user |
-| Settings | `#settings/<section>` | Left list + "Search settings" (section names and settings' own labels; picked-out rows are `.set-row.hit`; "Nothing matches “…”." when nothing does). General: data folder, Appearance System/Light/Dark, Start at login, Hide from the Dock, Command line, Claude Code plugin, version "Echo <x.y.z>" (the workspace `Cargo.toml`'s version, as `echoctl --version` prints it), Check for updates. Recording: when to record (Ask/Manual), languages, new recordings language, during a call switches. Transcription: speech models (Download), server, audio. AI & minutes: profiles, minutes switches. Templates: Minutes 4 · Meeting types 6 · Skills 1. Calendar & chat: Microsoft 365 "Sign in…". Knowledge: Use Recall. About me. Sends to you. Plugins. Layout. Health | user |
+| Settings | `#settings/<section>` | Left list + "Search settings" (section names and settings' own labels; picked-out rows are `.set-row.hit`; "Nothing matches “…”." when nothing does). General: data folder, Appearance System/Light/Dark, Start at login, Hide from the Dock, Command line, Claude Code plugin, version "Echo <x.y.z>" (the workspace `Cargo.toml`'s version, as `echoctl --version` prints it), Check for updates. Recording: when to record (Ask/Manual), languages, new recordings language, during a call switches. Transcription: speech models (Download), server, audio. AI & minutes: profiles, minutes switches. Templates: Minutes 4 · Meeting types 6 · Skills 1. Calendar & chat: Microsoft 365 "Sign in…". Recall: Use Recall. About me. Sends to you. Plugins. Layout. Health | user |
 | Plugins | `#settings/plugins` | Tabs Installed ("No plugins yet — Discover lists what your marketplaces offer."), Discover (category chips All/Automation/Chat/Knowledge, "Search plugins", Featured: Obsidian vaults 0.7.1, Scheduler 0.3.0, Telegram 0.3.1, each with "Install"), Marketplaces 1 (onetest built in; "Read again"; "Add a marketplace" owner/repo + Name + Add) | user |
 | Actions palette | dialog, `Actions ⌘K` | Input `[aria-label="Action"]`, groups TODAY, MY WORK, ECHO, CLAUDE, GO TO (every view and "Settings: <section>"), THREADS, and calls and people while typing; Enter runs, Esc closes | user |
 
