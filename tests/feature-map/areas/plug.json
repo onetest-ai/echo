@@ -450,7 +450,7 @@
   },
   {
    "id": "F-PLUG-51",
-   "feature": "A plugin's window half reaches the addresses the user listed for it (`network.hosts_from`, the plugin on) with the page's own Web APIs — WebSocket, fetch (CORS still applies), EventSource, audio and video — and nothing else outside: the window's policy names each listed address with its port for its scheme and the matching WebSocket one (http → ws, https → wss; `*.local`, `:*` as listed); an IPv4 address with a `*` number isn't added (its setting's row says the window part can't reach it); when the list changes (an address added or removed, such a plugin switched on, off or removed) the page loads again by itself on the same route, not while the user types, and never when nothing changed",
+   "feature": "A plugin's window half reaches the addresses the user listed for it (`network.hosts_from`, the plugin on) with the page's own Web APIs — WebSocket, fetch (CORS still applies), EventSource, audio and video — and nothing else outside: the window's policy names each listed address with its port for its scheme and the matching WebSocket one (http → ws, https → wss; `*.local`, `:*` as listed); an IPv4 address with a `*` number isn't added (its setting's row says the window part can't reach it); the policy is the page's, so while such a plugin is on any enabled plugin's window part reaches its addresses, and the setting's row (and `echoctl plugin set`) says so; when the list changes (an address added or removed, such a plugin switched on, off or removed) the page loads again by itself on the same route, not while the user types, and never when nothing changed",
    "priority": "high",
    "check": "agent",
    "axes": [

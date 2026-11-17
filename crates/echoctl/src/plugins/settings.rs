@@ -28,6 +28,7 @@ pub(super) fn addresses_file(id: &str) -> PathBuf {
 }
 
 /// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
+#[cfg_attr(not(any(feature = "js", feature = "tray")), allow(dead_code))]
 pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
     read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
 }
@@ -40,6 +41,9 @@ pub(super) fn installed_manifest(id: &str) -> Result<Manifest> {
     let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
     read_manifest(&plugin_dir(&p))
 }
+
+/// Said under an address list the window may reach: its policy is the page's, not one plugin's.
+pub const SHARED_WINDOW: &str = "Echo's window is one page: while this plugin is on, the window part of any plugin you have on can reach these addresses too";
 
 /// The settings as the page shows them: each definition with its value (a secret only as set / not).
 pub fn settings_view(id: &str) -> Result<Vec<Value>> {
@@ -59,9 +63,14 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
                 v["value"] = vals.get(&s.key).cloned().or_else(|| s.default.clone()).unwrap_or(Value::Null);
             }
             // An address list: what the user should know about it (plain http outside their network, what the
-            // window part can't reach).
+            // window part can't reach), and, once the window may reach any of it, that the window is one page.
             if listed.contains(&s.key) {
-                v["notes"] = addresses::notes(v["value"].as_str().unwrap_or("")).into();
+                let value = v["value"].as_str().unwrap_or("");
+                let mut notes = addresses::notes(value);
+                if addresses::parse_list(value).is_ok_and(|l| l.iter().any(|a| a.csp_sources().is_some())) {
+                    notes.push(SHARED_WINDOW.to_string());
+                }
+                v["notes"] = notes.into();
             }
             v
         })
@@ -70,6 +79,7 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
 
 /// The CSP sources the window's page may reach (`window::window_csp`): every address the user listed for a plugin
 /// that is on, as `Address::csp_sources` writes it, sorted and once each. A list that no longer parses gives nothing.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn window_sources() -> Vec<String> {
     let mut out: Vec<String> = enabled()
         .iter()

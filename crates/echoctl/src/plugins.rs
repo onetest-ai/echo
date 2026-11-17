@@ -1672,9 +1672,15 @@ mod tests {
         // The settings row says what the user should know about the list.
         set_setting("voice", "tts", &json!("http://*.local:*, http://tts.acme.example, http://192.168.1.*:*")).unwrap();
         let notes = settings_view("voice").unwrap()[0]["notes"].clone();
-        assert_eq!(notes.as_array().unwrap().len(), 2, "{notes}");
+        assert_eq!(notes.as_array().unwrap().len(), 3, "{notes}");
         assert!(notes[0].as_str().unwrap().starts_with("http://tts.acme.example — plain http: anyone on the way can read it"));
         assert!(notes[1].as_str().unwrap().starts_with("http://192.168.1.*:* — its window part can't reach it"));
+        assert_eq!(notes[2], SHARED_WINDOW, "the window is one page: any plugin's window part reaches what it may");
+        // Only what the window can't reach (an IPv4 wildcard), or nothing: no word about the shared window.
+        set_setting("voice", "tts", &json!("http://192.168.1.*:*")).unwrap();
+        assert_eq!(settings_view("voice").unwrap()[0]["notes"].as_array().unwrap().len(), 1);
+        set_setting("voice", "tts", &json!("")).unwrap();
+        assert!(settings_view("voice").unwrap()[0]["notes"].as_array().unwrap().is_empty());
         assert!(settings_view("plain").unwrap()[0].get("notes").is_none(), "not an address list: no notes");
     }
 

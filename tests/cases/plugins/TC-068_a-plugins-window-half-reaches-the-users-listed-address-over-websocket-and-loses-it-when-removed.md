@@ -1,9 +1,9 @@
 ---
 id: TC-068
-title: A plugin's window half reaches an address the user listed over WebSocket and fetch only once it is listed — the page loads again by itself, on the same route, when the list changes, and not otherwise — and a plain-http address outside the user's network is allowed with a warning on its row
+title: A plugin's window half reaches an address the user listed over WebSocket and fetch only once it is listed — the page loads again by itself, on the same route, when the list changes, not while the user types, and not otherwise
 priority: high
 type: functional
-requirements: [F-PLUG-11, F-PLUG-51]
+requirements: [F-PLUG-51]
 module: plugins
 run: agent
 platform: any
@@ -63,11 +63,10 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 1 | `echoctl plugin install acme-voice --yes` | Among its lines `• Talks to the addresses you list in its setting “voice” (wildcards allowed, plain http too; its window part also over WebSocket) (new)`; then `Installed Acme voice 0.1.0` |
 | 2 | Navigate to `{{base_url}}/#settings/plugins` and reload it; wait 3 s; read `document.body.dataset.acmeWs`, `document.body.dataset.acmeFetch` and `document.querySelector('meta[name="echo-net"]').content`; then `cat "$D/ws.log"` | `blocked` and `blocked`: nothing listed, so the page's policy refuses both (the console says `Connecting to 'ws://127.0.0.1:P/rpc' violates the following Content Security Policy directive: "connect-src 'self' echo: http://echo.localhost"`, and the same for `/ping`); the meta holds a short key; the server's log is empty (or missing): no connection reached it |
 | 3 | Set a mark that only a reload clears: `window.__acmeMark = 'kept'`; wait 6 s (three of the window's 2 s reads of its state); read `window.__acmeMark` | `kept`: nothing listed changed, so the page did not load again |
-| 4 | `echoctl plugin set acme-voice voice "http://127.0.0.1:$P"`; then `curl -s -D - -o /dev/null {{base_url}}/ \| grep -i '^content-security-policy'` | It saves with no `Note:` line (127.0.0.1 is the user's own computer); the header holds `connect-src 'self' echo: http://echo.localhost http://127.0.0.1:P ws://127.0.0.1:P` and `media-src` the same, and `img-src`, `style-src`, `script-src` name no outside address |
+| 4 | `echoctl plugin set acme-voice voice "http://127.0.0.1:$P"`; then `curl -s -D - -o /dev/null {{base_url}}/ \| grep -i '^content-security-policy'` | It saves and prints one note, `Note: Echo's window is one page: while this plugin is on, the window part of any plugin you have on can reach these addresses too` (no plain-http warning: 127.0.0.1 is the user's own computer); the header holds `connect-src 'self' echo: http://echo.localhost http://127.0.0.1:P ws://127.0.0.1:P` and `media-src` the same, and `img-src`, `style-src`, `script-src` name no outside address |
 | 5 | Within 6 s, without touching the page, read `window.__acmeMark`, `location.hash`, `document.body.dataset.acmeWs` and `document.body.dataset.acmeFetch` (wait for `acmeWs` to stop being `trying`); then `cat "$D/ws.log"` | `undefined` (the page loaded again by itself); the hash is still `#settings/plugins`; `answer 7 speak hello` and `ok true`; the log has `ws /rpc`, `rpc speak` and `get /ping` |
-| 6 | Set the mark again (`window.__acmeMark = 'kept'`); `echoctl plugin set acme-voice voice "http://127.0.0.1:$P, http://tts.acme.example:8808"` | It saves and prints `Note: http://tts.acme.example:8808 — plain http: anyone on the way can read it` (plain http to a name outside the user's network is allowed, not refused) |
-| 7 | Within 6 s read `window.__acmeMark`; then on Settings → Plugins → Installed open the detail of "Acme voice" and look at its setting "Voice server" | `undefined` (the list changed: reloaded). Under the field "Voice server", holding both addresses, a warning line reads `http://tts.acme.example:8808 — plain http: anyone on the way can read it`; no warning for `http://127.0.0.1:P` |
-| 8 | `wc -l < "$D/ws.log"` (N: step 7's reload connected again); `echoctl plugin set acme-voice voice ""`; within 6 s read `location.hash`, `document.body.dataset.acmeWs` and `document.body.dataset.acmeFetch`; then `wc -l < "$D/ws.log"` | The page loaded again (still `#settings/plugins`); `blocked` and `blocked` again; the log still has N lines: nothing new reached the server |
+| 6 | `wc -l < "$D/ws.log"` (N: what step 5's reload connected). Set the mark again (`window.__acmeMark = 'kept'`); on the tab "Installed" click "Acme voice", click into its field "Voice server" and type `x` at the end, without leaving the field; `echoctl plugin set acme-voice voice ""`; wait 6 s; read `window.__acmeMark` | `kept`: the user is typing, so the page waits for them |
+| 7 | Empty the field (select all, Backspace) and press Tab; within 6 s read `window.__acmeMark`, `location.hash`, `document.body.dataset.acmeWs` and `document.body.dataset.acmeFetch`; look at the right of the tab "Installed"; then `wc -l < "$D/ws.log"` | `undefined`: once the field is left (the empty list saved, as the CLI set it), the page loaded again; still `#settings/plugins` with the detail of "Acme voice" open; `blocked` and `blocked` again; the log still has N lines: nothing new reached the server |
 
 ## Expected Final State
 Acme voice is installed with no address listed; its window half can't reach the voice server; the page's policy names no outside address.
@@ -79,5 +78,6 @@ Acme voice is installed with no address listed; its window half can't reach the 
 
 ## Notes
 - Written from the feature's text (F-PLUG-51), not from the code.
+- The warning for plain http to a name outside the user's network (F-PLUG-11) is `plugins/TC-018`'s.
 - The served window sends the page's policy in its `Content-Security-Policy` header as the native window does, so the browser enforces it the same; the native window's own origin (`echo://localhost` on macOS, `http://echo.localhost` on Windows) is checked by the Rust tests only.
 - A `*` number of an IPv4 address (`http://127.0.0.*:P`) isn't added to the page's policy (CSP can't say it): its row says the window part can't reach it. The Rust tests in `plugins::addresses` hold the full mapping (`*.local`, ports, https → wss).
