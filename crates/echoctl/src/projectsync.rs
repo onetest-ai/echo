@@ -128,9 +128,32 @@ fn waiting(id: &str, now: chrono::DateTime<Local>) -> Vec<(String, chrono::DateT
     v
 }
 
-/// "N mail or chat items wait: read at HH:MM or once 5 wait".
-fn waits(n: usize, at: chrono::DateTime<Local>) -> String {
-    format!("{n} mail or chat item{} wait{}: read at {} or once {BATCH_ITEMS} wait", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }, at.format("%H:%M"))
+/// The night: the scheduler starts no sync from 22:30 to 07:00 (Sync now still does).
+const QUIET_FROM: (u32, u32) = (22, 30);
+const QUIET_TO: (u32, u32) = (7, 0);
+
+fn quiet(t: chrono::NaiveTime) -> bool {
+    let hm = |(h, m): (u32, u32)| chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap_or_default();
+    t >= hm(QUIET_FROM) || t < hm(QUIET_TO)
+}
+
+/// When the scheduler can read at `at`: `at`, or the night's end when it falls in the night.
+fn after_quiet(at: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
+    if !quiet(at.time()) {
+        return at;
+    }
+    let day = if at.time() < chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap_or_default() { at.date_naive() } else { at.date_naive() + chrono::Days::new(1) };
+    day.and_hms_opt(QUIET_TO.0, QUIET_TO.1, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(at)
+}
+
+/// "N mail or chat items wait: read at HH:MM or once 5 wait" (at night, when 5 waiting don't start a read: "read at
+/// HH:MM", 07:00 or later).
+fn waits(n: usize, at: chrono::DateTime<Local>, now: chrono::DateTime<Local>) -> String {
+    let (s, verb) = if n == 1 { ("", "s") } else { ("s", "") };
+    if quiet(now.time()) {
+        return format!("{n} mail or chat item{s} wait{verb}: read at {}", after_quiet(at).format("%H:%M"));
+    }
+    format!("{n} mail or chat item{s} wait{verb}: read at {} or once {BATCH_ITEMS} wait", after_quiet(at).format("%H:%M"))
 }
 
 /// Mail and chat are due a read: the first has waited `BATCH_WAIT`, or `BATCH_ITEMS` wait.
@@ -202,7 +225,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     }
     mark_people_read(id, &taken.unreadable.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>());
     if items.is_empty() && claims == 0 {
-        let message = held.map(|(n, at)| waits(n, at)).into_iter().chain(said).collect::<Vec<_>>().join("\n");
+        let message = held.map(|(n, at)| waits(n, at, started)).into_iter().chain(said).collect::<Vec<_>>().join("\n");
         let message = if message.is_empty() { "nothing new".to_string() } else { message };
         let v = json!({"state": "done", "at": started.to_rfc3339(), "message": message, "written": written.len(), "processed": 0});
         save_state(id, &v);
@@ -256,7 +279,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         let left = ledger::pending_count(id)?;
         Ok(json!({"state": "done", "at": started.to_rfc3339(), "finished_at": Local::now().to_rfc3339(), "run": run_id,
                   "processed": before.saturating_sub(left), "left": left, "usage": used,
-                  "message": format!("{extract_report}\n{verify_report}\n{}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at)).unwrap_or_default()).trim().to_string()}))
+                  "message": format!("{extract_report}\n{verify_report}\n{}\n{}", said.join("\n"), held.map(|(n, at)| waits(n, at, started)).unwrap_or_default()).trim().to_string()}))
     })();
     let v = match outcome {
         Ok(v) => v,
@@ -953,11 +976,11 @@ fn due() -> Vec<String> {
         .collect()
 }
 
-/// The app's scheduler: every 5 minutes, sync the projects that are due, one at a time.
+/// The app's scheduler: every 5 minutes but at night (`quiet`), sync the projects that are due, one at a time.
 pub fn start_scheduler() {
     std::thread::spawn(|| loop {
         std::thread::sleep(Duration::from_secs(300));
-        if notes::quitting() || !crate::config::Config::load().is_ok_and(|c| c.project_sync) {
+        if notes::quitting() || quiet(Local::now().time()) || !crate::config::Config::load().is_ok_and(|c| c.project_sync) {
             continue;
         }
         for id in due() {
@@ -988,6 +1011,22 @@ pub fn start(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_night_holds_the_scheduler_and_says_when_it_reads() {
+        let at = |h, m| Local::now().date_naive().and_hms_opt(h, m, 0).unwrap().and_local_timezone(Local).earliest().unwrap();
+        for (h, m, q) in [(22, 29, false), (22, 30, true), (23, 59, true), (0, 0, true), (6, 59, true), (7, 0, false), (12, 0, false)] {
+            assert_eq!(quiet(at(h, m).time()), q, "{h}:{m}");
+        }
+        assert_eq!(after_quiet(at(23, 10)).format("%H:%M").to_string(), "07:00");
+        assert_eq!(after_quiet(at(23, 10)).date_naive(), at(23, 10).date_naive() + chrono::Days::new(1), "the next morning");
+        assert_eq!(after_quiet(at(3, 0)), at(7, 0), "this morning");
+        assert_eq!(after_quiet(at(15, 0)), at(15, 0));
+        assert_eq!(waits(2, at(23, 0), at(21, 30)), "2 mail or chat items wait: read at 07:00 or once 5 wait", "due in the night: the morning");
+        assert_eq!(waits(1, at(14, 0), at(14, 5)), "1 mail or chat item waits: read at 14:00 or once 5 wait");
+        assert_eq!(waits(3, at(23, 0), at(23, 5)), "3 mail or chat items wait: read at 07:00");
+        assert_eq!(waits(1, at(8, 30), at(6, 30)), "1 mail or chat item waits: read at 08:30", "first seen at 06:30: two hours on");
+    }
     use super::*;
 
     /// A usage line at `at`, as `record_usage` writes one.

@@ -21,6 +21,7 @@ tags: [threads, sync, mail, batch, virtual-model]
 - Claude Code on `PATH`; the sync's script: `cp tests/fixtures/model-scripts/thread-sync.json <dir>/model/model-script.json`
 - `$L` stands for `target/debug/echoctl project ledger acme-rollout` (write it out in full); `$E` for `$ECHOCTL_HOME/projects/acme-rollout/ledger/evidence`
 - **A made-up mail item**, written as the mail sync writes one (no mailbox is used): `mail(){ python3 -c "import json,sys,datetime as d; t=(d.datetime.now().astimezone()-d.timedelta(days=1)).isoformat(); json.dump({'id':sys.argv[1],'at':t,'date':t[:10],'title':'Acme rollout status'},open(sys.argv[2]+'/'+sys.argv[1]+'.json','w'))" "$1" "$E"; echo 'Test mail, nothing real.' > "$E/$1.md"; }`
+- Run before 22:30: from then a held sync says "read at 07:00" alone (no "or once 5 wait")
 - Besides `echoctl`, this case may run `python3 -c`, `cat` and `echo` in `<dir>`
 
 ## Steps
@@ -28,7 +29,7 @@ tags: [threads, sync, mail, batch, virtual-model]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Run `$L pending`; `$L done --evidence <id>` for each item listed; then `$L run` (Sync now: the verifier and who's who catch up on what the data holds) | `$L pending` prints `[]`; the sync ends `state` "done" |
-| 2 | `mail mail-acme-1`; run `$L run --scheduled` | `state` "done", `processed` 0, `message` "1 mail or chat item waits: read at HH:MM or once 5 wait" (HH:MM two hours from now); no run folder made (`run` absent); `$L pending` still lists `mail-acme-1` |
+| 2 | `mail mail-acme-1`; run `$L run --scheduled` | `state` "done", `processed` 0, `message` "1 mail or chat item waits: read at HH:MM or once 5 wait" (HH:MM two hours from now; 07:00 when that falls between 22:30 and 07:00, the night the scheduler starts no sync); no run folder made (`run` absent); `$L pending` still lists `mail-acme-1` |
 | 3 | Run `cat $ECHOCTL_HOME/projects/acme-rollout/ledger/waiting.json` | `{"mail-acme-1": "<now>"}`: when it was first seen waiting, not the mail's own time a day ago |
 | 4 | Run `$L run --scheduled` again | The same message with the same HH:MM: it still waits from step 2 |
 | 5 | `mail mail-acme-2`, `mail mail-acme-3`, `mail mail-acme-4`; run `$L run --scheduled` | "4 mail or chat items wait: read at HH:MM or once 5 wait", the HH:MM of step 2 |

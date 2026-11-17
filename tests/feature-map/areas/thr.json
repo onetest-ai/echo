@@ -248,7 +248,7 @@
   },
   {
    "id": "F-THR-26",
-   "feature": "Mail and chat wait for a batch: the scheduler (`ledger <id> run --scheduled`) reads them once the first has waited 2 hours since it was first seen waiting, or 5 wait, or with a call; meanwhile the sync says how many wait and when they're read; Sync now reads them at once",
+   "feature": "Mail and chat wait for a batch: the scheduler (`ledger <id> run --scheduled`) reads them once the first has waited 2 hours since it was first seen waiting, or 5 wait, or with a call; meanwhile the sync says how many wait and when they're read; the app's scheduler starts no sync from 22:30 to 07:00 (a read due then waits for the morning); Sync now reads them at once",
    "priority": "high",
    "check": "agent",
    "axes": [
