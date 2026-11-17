@@ -2,7 +2,7 @@
   "id": "me-demo",
   "name": "Me demo",
   "version": "0.1.0",
-  "summary": "A test plugin: reads About me once its 0.2.0 asks for it (tests/cases/plugins/TC-160, TC-161).",
+  "summary": "A test plugin: reads About me once its 0.2.0 asks for it (tests/cases/plugins/TC-162, TC-163).",
   "main": "main.js",
   "uses": {}
 }
