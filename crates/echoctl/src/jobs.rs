@@ -369,7 +369,8 @@ fn write_run(job: &str, started: DateTime<Local>, result: Result<String, String>
     let old = first.and_then(|l| serde_json::from_str::<Value>(&l).ok()).and_then(|v| started_at(&v)).is_some_and(|t| t < Local::now() - chrono::Duration::days(KEEP_DAYS));
     let long = std::fs::metadata(&f).is_ok_and(|m| m.len() > 600 * (KEEP as u64) * 2);
     if old || long {
-        let oldest = Local::now() - chrono::Duration::days(KEEP_DAYS);
+        // Trimmed to a day less than the trigger: the next trim a day away, not at the next run.
+        let oldest = Local::now() - chrono::Duration::days(KEEP_DAYS - 1);
         let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().filter(|l| serde_json::from_str::<Value>(l).ok().and_then(|v| started_at(&v)).is_some_and(|t| t >= oldest)).map(str::to_owned).collect();
         lines.push(line.to_string());
         if lines.len() > KEEP {
@@ -452,6 +453,22 @@ pub fn list() -> Value {
 
 // ── as routines ──────────────────────────────────────────────────────────────────────────────
 
+/// Is a job on: the switches that turn it off elsewhere in Echo (Recall, live notes, automatic minutes, threads kept
+/// current); the others always run.
+fn enabled(id: &str) -> bool {
+    let cfg = crate::config::Config::load().unwrap_or_default();
+    match id {
+        "thread_sync" | "fetch" => cfg.project_sync,
+        "minutes" => cfg.auto_minutes,
+        "live_notes" => crate::ai::Settings::load().is_ok_and(|s| s.live_notes),
+        #[cfg(feature = "brain")]
+        "brain_reader" => crate::brain::enabled() && crate::brain::settings().auto(),
+        #[cfg(not(feature = "brain"))]
+        "brain_reader" => false,
+        _ => true,
+    }
+}
+
 /// Where a job's output goes, as a routine's `to`.
 fn sends(id: &str) -> &'static [&'static str] {
     match id {
@@ -505,11 +522,11 @@ pub fn routines() -> Value {
             let model = j["fields"].as_array().into_iter().flatten().find(|f| f["kind"] == "model").map_or(Value::Null, |f| json!({"value": f["value"], "default": f["default"]}));
             let last = if j["last"].is_null() { Value::Null } else { as_routine_run(&j["last"]) };
             let all = read_runs(id);
-            let since = (now - chrono::Duration::days(30)).to_rfc3339();
-            let month_runs: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t >= since.as_str())).collect();
+            let since = (now.date_naive() - chrono::Days::new(29)).and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(now);
+            let month_runs: Vec<&Value> = all.iter().filter(|r| started_at(r).is_some_and(|t| t >= since)).collect();
             let tokens: u64 = month_runs.iter().map(|r| ["input", "output", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
             let cached: u64 = month_runs.iter().filter_map(|r| r["cache_read"].as_u64()).sum();
-            json!({"id": id, "source": "system", "name": j["name"], "what": j["what"], "enabled": true, "to": sends(id), "schedule": schedule(id),
+            json!({"id": id, "source": "system", "name": j["name"], "what": j["what"], "enabled": enabled(id), "to": sends(id), "schedule": schedule(id),
                    "next_run": j["next_run"], "next": j["next"], "paused_until": if paused(id, now.time()) { json!(after_night(now).to_rfc3339()) } else { Value::Null },
                    "running": running.contains(&id), "last": last, "model": model,
                    "month": {"runs": j["month"]["runs"], "failed": j["month"]["failed"], "tokens": tokens, "cached": cached, "cost": j["month"]["cost"], "daily": j["month"]["daily"]},
@@ -731,7 +748,7 @@ mod tests {
         let r = routines();
         let get = |id: &str| r["routines"].as_array().unwrap().iter().find(|x| x["id"] == id).unwrap().clone();
         let ts = get("thread_sync");
-        assert_eq!((ts["source"].clone(), ts["enabled"].clone(), ts["schedule"]["kind"].clone(), ts["to"].clone(), ts["running"].clone()), (json!("system"), json!(true), json!("event"), json!(["thread_work"]), json!(false)));
+        assert_eq!((ts["source"].clone(), ts["enabled"].clone() == json!(crate::config::Config::load().unwrap_or_default().project_sync), ts["schedule"]["kind"].clone(), ts["to"].clone(), ts["running"].clone()), (json!("system"), true, json!("event"), json!(["thread_work"]), json!(false)));
         assert_eq!((ts["last"]["state"].clone(), ts["last"]["summary"].clone(), ts["last"]["cost_usd"].clone(), ts["last"]["sent"].clone(), ts["last"]["trial"].clone()), (json!("done"), json!("Acme: 1 item read"), json!(0.3), json!([]), json!(false)));
         assert!(ts["next_run"].is_null() && ts["next"].is_string());
         assert_eq!((ts["month"]["runs"].clone(), ts["month"]["tokens"].clone(), ts["month"]["cached"].clone(), ts["month"]["cost"].clone()), (json!(1), json!(110), json!(50), json!(0.3)));
@@ -744,10 +761,11 @@ mod tests {
         let runs = routine_runs("thread_sync", 5).unwrap();
         assert_eq!((runs[0]["input"].clone(), runs[0]["cache_read"].clone(), runs[0]["model"].clone(), runs[0]["state"].clone()), (json!(100), json!(50), json!("sonnet"), json!("done")));
         assert_eq!(r["night"]["default"], json!({"from": "22:30", "to": "07:00"}));
-        let held = begin("prep");
-        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "prep").unwrap()["running"], true);
+        // A job no other test runs (tests run side by side, in one process).
+        let held = begin("brain_reader");
+        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "brain_reader").unwrap()["running"], true);
         held.done(None);
-        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "prep").unwrap()["running"], false);
+        assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "brain_reader").unwrap()["running"], false);
     }
 
     #[test]
