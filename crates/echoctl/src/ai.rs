@@ -115,6 +115,36 @@ pub struct Profile {
     /// wrapper: the command Echo starts in place of `claude`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper: Option<wrapper::Wrapper>,
+    /// The models its provider offers for Claude's three names (a gateway's, a wrapper's, a local server's own)
+    #[serde(default, skip_serializing_if = "Models::is_empty")]
+    pub models: Models,
+}
+
+/// What a profile runs for `haiku`, `sonnet` and `opus`; one not set is passed as it is.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Models {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub haiku: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sonnet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus: Option<String>,
+}
+
+impl Models {
+    pub fn is_empty(&self) -> bool {
+        self.haiku.is_none() && self.sonnet.is_none() && self.opus.is_none()
+    }
+
+    /// The slot for one of Claude's three names (any case), or None for any other model name.
+    pub fn slot(&mut self, name: &str) -> Option<&mut Option<String>> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "haiku" => Some(&mut self.haiku),
+            "sonnet" => Some(&mut self.sonnet),
+            "opus" => Some(&mut self.opus),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -244,6 +274,7 @@ fn system_profile() -> Profile {
         account: None,
         email: None,
         sso: false,
+        models: Default::default(),
         wrapper: None,
     }
 }
@@ -260,7 +291,20 @@ pub fn system_folder() -> Result<PathBuf> {
     }
 }
 
+/// A model name a profile may run for one of Claude's names: one word of at most 200 characters, not starting with
+/// "-", and not itself one of Claude's names (mapped once, never again).
+pub fn model_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 200 && !s.starts_with('-') && !s.chars().any(|c| c.is_control() || c.is_whitespace()) && Models::default().slot(s).is_none()
+}
+
 impl Profile {
+    /// The model Echo asks this profile's provider for when it wants `name`: the profile's own for `haiku`, `sonnet`
+    /// and `opus` when set, else `name` as it is.
+    pub fn model(&self, name: &str) -> String {
+        let mut m = self.models.clone();
+        m.slot(name).and_then(|s| s.clone()).filter(|v| !v.trim().is_empty()).unwrap_or_else(|| name.to_string())
+    }
+
     /// The model for live notes and questions.
     pub fn live_model(&self) -> String {
         self.live_model.clone().or_else(|| self.notes_model.clone()).unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into())
@@ -448,8 +492,10 @@ pub fn routing_env(p: &Profile) -> Vec<(&'static str, String)> {
         v.push(("ANTHROPIC_BASE_URL", p.base_url.clone().unwrap_or_default()));
         v.push(("ANTHROPIC_AUTH_TOKEN", p.token.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| "ollama".into())));
         // Whatever alias Claude Code asks for (its small background model too) is the local one.
-        for k in ["ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"] {
-            v.push((k, model.clone()));
+        // (each of Claude's three names the profile's own model for it, when it has one).
+        for (k, name) in [("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"), ("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"), ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku"), ("ANTHROPIC_SMALL_FAST_MODEL", "haiku")] {
+            let own = p.model(name);
+            v.push((k, if own == name { model.clone() } else { own }));
         }
         v.push(("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1".into()));
         // "This computer" stays on this computer, whatever proxy the environment names.
@@ -997,6 +1043,7 @@ esac
             account: account.map(str::to_owned),
             email: None,
             sso: false,
+            models: Default::default(),
             wrapper: None,
         };
         Settings::update(|s| {
@@ -1025,6 +1072,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_local_profile_runs_its_own_model_for_each_of_claudes_names() {
+        let mut p = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("small-m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None };
+        let env = |p: &Profile| routing_env(p).into_iter().filter(|(k, _)| k.starts_with("ANTHROPIC_DEFAULT") || *k == "ANTHROPIC_SMALL_FAST_MODEL").map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>();
+        assert!(env(&p).iter().all(|e| e.ends_with("=m")), "unmapped: every name its model, as before: {:?}", env(&p));
+        p.models.haiku = Some("small-m".into());
+        p.models.opus = Some("big-m".into());
+        assert_eq!(env(&p), ["ANTHROPIC_DEFAULT_OPUS_MODEL=big-m", "ANTHROPIC_DEFAULT_SONNET_MODEL=m", "ANTHROPIC_DEFAULT_HAIKU_MODEL=small-m", "ANTHROPIC_SMALL_FAST_MODEL=small-m"]);
+        assert_eq!(p.model("opus"), "big-m");
+        assert_eq!(p.model("big-m"), "big-m", "a model's own name passes as it is");
+    }
+
+    #[test]
     fn auth_status_is_read_strictly() {
         let a = parse_status(&fake::signed_in("Pat@Example.com"), "").unwrap().unwrap();
         assert_eq!(a.key(), "pat@example.com · example corp");
@@ -1036,7 +1095,7 @@ mod tests {
 
     #[test]
     fn the_sign_in_page_is_pre_filled() {
-        let mut p = Profile { id: "w".into(), name: "W".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let mut p = Profile { id: "w".into(), name: "W".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         assert_eq!(login_args(&p), ["auth", "login", "--claudeai"], "a claude.ai account always");
         p.account = Some("pat@example.com · example corp".into());
         assert_eq!(login_args(&p)[3..], ["--email", "pat@example.com"], "the recorded account's email");
@@ -1051,7 +1110,7 @@ mod tests {
     fn settling_judges_against_the_settings_as_they_are_now() {
         let (_env, _root) = crate::paths::testenv::folders("ai-settle");
         let a = Account { email: "pat@example.com".into(), org: "Example Corp".into(), subscription: "max".into() };
-        let snapshot = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let snapshot = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         Settings { default: None, live_notes: true, profiles: vec![snapshot.clone()] }.save().unwrap();
         // First use: recorded.
         assert_eq!(settle(&snapshot, Some(&a)).unwrap(), a.key());
@@ -1281,7 +1340,7 @@ mod tests {
         let _unset = Unset;
         USERS.iter().for_each(|k| std::env::set_var(k, "the user's own"));
         std::env::set_var("ANTHROPIC_BASE_URL", "https://gateway.example");
-        let local = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, wrapper: None };
+        let local = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let c = build_command(&local, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         assert_eq!(envs.get("ANTHROPIC_BASE_URL"), Some(&Some("http://localhost:11434".into())), "the profile's, not the shell's");
@@ -1292,7 +1351,7 @@ mod tests {
         }
         let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["-p", "--setting-sources", "user"]);
-        let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let c = build_command(&claude, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         for k in USERS {
@@ -1314,7 +1373,7 @@ mod tests {
         let (_env, root) = crate::paths::testenv::folders("ai-nested-run");
         std::env::set_var(crate::notes::RUN_SESSION, "acts");
         std::env::set_var(crate::notes::RUN_ACTIONS, root.join("actions.jsonl"));
-        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let c = build_command(&p, Path::new("/bin/echo"), &["-p".into()], &root, false, false);
         std::env::remove_var(crate::notes::RUN_SESSION);
         std::env::remove_var(crate::notes::RUN_ACTIONS);
@@ -1334,7 +1393,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let mut c = build_command(&p, &stand_in, &["-p".into()], &root, false, true);
         // The user's login shell (no start-up files of theirs here) and their own routing.
         c.env("HOME", &root).env_remove("ZDOTDIR").env("ANTHROPIC_API_KEY", "the user's own").env("CLAUDE_CODE_USE_BEDROCK", "1");
@@ -1358,7 +1417,7 @@ mod tests {
                 for i in 0..20 {
                     Settings::update(|s| {
                         s.profiles.retain(|p| p.id != id);
-                        s.profiles.push(Profile { id: id.into(), name: format!("{id} {i}"), kind: Kind::Local, base_url: Some("http://localhost:1".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, wrapper: None });
+                        s.profiles.push(Profile { id: id.into(), name: format!("{id} {i}"), kind: Kind::Local, base_url: Some("http://localhost:1".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None });
                         Ok(())
                     })
                     .unwrap();
@@ -1381,7 +1440,7 @@ mod tests {
 
     #[test]
     fn the_account_is_who_not_which_plan() {
-        let p = |account: Option<&str>| Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: account.map(str::to_owned), email: None, sso: false, wrapper: None };
+        let p = |account: Option<&str>| Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: account.map(str::to_owned), email: None, sso: false, models: Default::default(), wrapper: None };
         let a = |sub: &str| Account { email: "Pat@Example.com".into(), org: "Example Corp".into(), subscription: sub.into() };
         assert!(format!("{:#}", judge(&p(None), None).unwrap_err()).contains("isn't signed in"));
         assert_eq!(judge(&p(None), Some(&a("pro"))).unwrap(), ("pat@example.com · example corp".into(), true), "first use: recorded");
@@ -1427,7 +1486,7 @@ mod tests {
             eprintln!("skipped: this machine has a real Claude Code policy, and the result would be about it");
             return;
         }
-        let p = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let p = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         fs::create_dir_all(p.config_folder()).unwrap();
         let f = p.config_folder().join("remote-settings.json");
         fs::write(&f, r#"{"permissions":{"deny":["WebFetch"]}}"#).unwrap();
@@ -1557,7 +1616,7 @@ mod tests {
     fn the_minutes_model_is_one_answer_and_set_per_profile() {
         let (_env, _root) = crate::paths::testenv::folders("ai-notes-model");
         // A local profile with only a live model: that one writes the minutes (as the run routes it).
-        let mut q = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("qwen".into()), notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let mut q = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("qwen".into()), notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         assert_eq!(q.notes_model().as_deref(), Some("qwen"));
         q.notes_model = Some("big".into());
         assert_eq!(q.notes_model_label(), "big");
@@ -1630,7 +1689,7 @@ mod tests {
         let _fake = fake::install(&root);
         let cmd = root.join("acme-claude");
         fs::write(&cmd, "").unwrap();
-        let p = Profile { id: "acme".into(), name: "Acme".into(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: Some(wrapper::Wrapper { command: cmd.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None }) };
+        let p = Profile { id: "acme".into(), name: "Acme".into(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: Some(wrapper::Wrapper { command: cmd.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None }) };
         let run = prepare_claude(&p, &["-p".into(), "the call “Acme”".into(), "--output-format".into(), "stream-json".into()], &root, false).unwrap();
         assert_eq!(run.get_program(), std::env::current_exe().unwrap().as_os_str(), "Echo's own relay starts it");
         let a: Vec<String> = run.get_args().map(|a| a.to_string_lossy().into_owned()).collect();

@@ -930,7 +930,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         }
     };
     let profile = ready.profile();
-    let model = profile.notes_model();
+    let model = profile.notes_model().map(|m| profile.model(&m));
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.
     let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
@@ -1858,7 +1858,7 @@ mod tests {
     fn a_run_is_judged_by_how_it_ended() {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
-        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, answered: false, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
@@ -1895,7 +1895,7 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-answered");
         let warn = "[claude-code:unrecognized_model] {\"model\":\"test-model:8b\"}";
-        let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let judge = |answered, result_text| {
             let e = Ended { wrote_notes: false, wrote_actions: false, is_error: true, answered, result_text, err_text: warn, seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
             let mut r = Run::default();
@@ -2275,7 +2275,7 @@ mod tests {
             stopped: Some("Claude Code 2.1.200 is too old for minutes runs"),
         };
         let mut r = Run::default();
-        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, wrapper: None };
+        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         conclude(&mut r, &p, &e, "C · sonnet", "sonnet");
         assert_eq!(r.state, "failed");
         assert!(r.message.unwrap().contains("too old"));

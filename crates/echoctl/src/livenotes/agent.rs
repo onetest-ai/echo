@@ -221,7 +221,7 @@ fn args(p: &Profile, config: &Path) -> Result<Vec<String>> {
         "--allowedTools".into(), format!("{},{}", tool("wait_for_new_lines"), tool("update_live_notes")),
         "--permission-mode".into(), "dontAsk".into(),
         "--no-session-persistence".into(),
-        "--model".into(), p.live_model(),
+        "--model".into(), p.model(&p.live_model()),
         "--settings".into(), crate::claude_session::lean_settings()?.display().to_string(),
     ])
 }
@@ -233,7 +233,7 @@ fn config(stamp: &str, dir: &Path, p: &Profile) -> Result<PathBuf> {
     let folder = paths::config_dir().join("minutes-run");
     fs::create_dir_all(&folder)?;
     let f = folder.join(format!("live-{stamp}.json"));
-    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.live_model(), "--app", std::process::id().to_string()]});
+    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.model(&p.live_model()), "--app", std::process::id().to_string()]});
     paths::write_atomic(&f, &serde_json::to_vec_pretty(&json!({"mcpServers": {SERVER: server}}))?)?;
     Ok(f)
 }
