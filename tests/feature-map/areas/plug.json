@@ -345,6 +345,15 @@
    ]
   },
   {
+   "id": "F-PLUG-63",
+   "feature": "A plugin runs Claude Code in a folder the user gave it (`ctx.claude.run({folder, path, mode})`, `uses.folders`): there (or in its subfolder `path`) as that folder's own Claude Code project — its CLAUDE.md, skills, settings and hooks (`--setting-sources user,project`, the run's last arguments, on a profile of Echo's own) — with none of Echo's session (no Echo CLI, Brain, plugin skills or Echo's hooks) and no MCP server; `read` (the default) only Read, Grep, Glob and Skill; `edit` (only with `folders.write`) also Edit and Write; `copy` the edit run on a snapshot of the folder in the plugin's store (its `.claude` too), the folder untouched, the answer naming the snapshot for the plugin to compare and apply (a failed run leaves none); never Bash. Its permissions are the user's setting for routines, never the plugin's (its `tools` ignored): Auto — Claude Code's auto mode where the profile's model has it, else edits accepted (`edit`, `copy`) or a read asking nothing; Skip all permission checks — every mode skips them; its record and log name the mode it asked and the permissions it runs with, and a start in another permission mode than asked. The sheet's Claude line says so. Refused before anything starts: a mode Echo doesn't know, no `uses.folders`, a folder not given to it, a path outside it or not a folder, a path or mode without a folder, a copy's `path` the snapshot left out (that snapshot removed), and on a profile of Echo's own a folder whose `.claude/settings.json` could route the run elsewhere",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
    "id": "F-PLUG-36",
    "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered; in a debug build `echoctl plugin emit <event> <json>` queues one as Echo would tell it, for the running app (or a served window) to deliver — refused in a release build, for an event Echo hasn't, and for a payload that isn't a JSON object",
    "priority": "high",

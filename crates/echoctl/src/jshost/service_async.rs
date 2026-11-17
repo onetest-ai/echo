@@ -17,11 +17,24 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let uses = plugins::read_manifest(&package_dir(id)?)?.uses;
             let mut arg = arg.clone();
             arg["tools"] = plugins::may_run_claude(&uses, arg["tools"].as_str().unwrap_or(""))?.to_string().into();
-            let spec = crate::claudejob::Spec::from_value(&arg, &plugins::data_dir(id))?;
-            let (answer, model, usage) = crate::claudejob::run(&spec)?;
+            let mut spec = crate::claudejob::Spec::from_value(&arg, &plugins::data_dir(id))?;
+            // In a folder it was given (`folder`, `path`, `mode`): there, or in a snapshot of it (`copy`).
+            let snapshot = folders::claude_folder(id, &arg, &mut spec)?;
+            let ran = crate::claudejob::run(&spec);
+            // A failed run's snapshot goes: the plugin never got its name.
+            if let (Err(_), Some(s)) = (&ran, &snapshot) {
+                if let Ok(d) = store_path(id, s["path"].as_str().unwrap_or("")) {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+            }
+            let (answer, model, usage) = ran?;
             // What it changed and sent with Echo's CLI, for the plugin to show (a routine's outcome).
             let actions = crate::notes::run_actions(&spec.run_dir.join("actions.jsonl"));
-            Ok(json!({"answer": answer, "model": model, "usage": usage, "actions": actions}))
+            let mut out = json!({"answer": answer, "model": model, "usage": usage, "actions": actions});
+            if let Some(s) = snapshot {
+                out["snapshot"] = s;
+            }
+            Ok(out)
         }
         // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
         "signin.get" => {

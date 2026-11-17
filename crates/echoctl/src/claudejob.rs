@@ -12,6 +12,9 @@
 //! (`finish`); `none` (a plugin's analysis of what it read, Won't
 //! do) keeps no tools at all.
 //!
+//! A plugin's run in a folder the user gave it (`folder`, `InFolder`) runs there instead, as that folder's own Claude Code
+//! project: none of Echo's session, only the tools of its mode, permissions as the user set routines (`in_folder`).
+//!
 //! The plugin writes the prompt; Echo adds what only it knows — the time, and how to reach its data in the
 //! chosen mode. Each run leaves `prompt.md`, `log.txt` and `answer.md` in a folder of the plugin's store.
 
@@ -70,6 +73,80 @@ impl Tools {
     }
 }
 
+/// What a plugin's run may do in a folder it was given (`ctx.claude.run({folder, mode})`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FolderMode {
+    /// Reads it, changes nothing.
+    Read,
+    /// Changes files in it (the plugin may change that folder: `folders.write`).
+    Edit,
+    /// `Edit` on a snapshot of it in the plugin's store, for the plugin to compare and apply after the user's review.
+    Copy,
+}
+
+impl FolderMode {
+    pub fn parse(s: &str) -> Result<FolderMode> {
+        match s.trim() {
+            "" | "read" => Ok(FolderMode::Read),
+            "edit" => Ok(FolderMode::Edit),
+            "copy" => Ok(FolderMode::Copy),
+            o => bail!("mode “{o}”: read, edit or copy"),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            FolderMode::Read => "read",
+            FolderMode::Edit => "edit",
+            FolderMode::Copy => "copy",
+        }
+    }
+
+    /// Claude Code's built-in tools for it: reading the folder and using its skills; `edit` and `copy` change its files
+    /// too. Never Bash, never the web.
+    fn tools(self) -> &'static str {
+        match self {
+            FolderMode::Read => "Read,Grep,Glob,Skill",
+            FolderMode::Edit | FolderMode::Copy => "Read,Grep,Glob,Skill,Edit,Write",
+        }
+    }
+}
+
+/// A run in a folder: where (the folder given to the plugin, a subfolder of it, or its snapshot's), and in what mode.
+#[derive(Debug, Clone)]
+pub struct InFolder {
+    pub cwd: PathBuf,
+    pub mode: FolderMode,
+}
+
+/// A folder run's arguments after `-p` and its prompt: the folder's own Claude Code project loads (on a profile of
+/// Echo's own `--setting-sources user,project`; the user's own setup loads it anyway), only its mode's tools and no MCP
+/// server, the permissions `perm` gives (the user's setting for routines, never the plugin's asking;
+/// `folder_args::permission_args`, `read` as a run that may change nothing). Its sources come last, where
+/// `ai::build_command` looks for them. Refused on a profile of Echo's own when the folder's project settings could send
+/// the run elsewhere than that profile.
+pub fn in_folder(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions) -> Result<Vec<String>> {
+    let managed = p.kind.managed();
+    if managed {
+        let s = f.cwd.join(".claude").join("settings.json");
+        if let Ok(b) = fs::read(&s) {
+            if serde_json::from_slice::<Value>(&b).map_or(true, |v| crate::ai::routes(&v)) {
+                bail!("this folder's Claude Code settings (.claude/settings.json) could send the run elsewhere than {} — run it on Claude Code (as configured), or take that out of the folder's settings", p.name);
+            }
+        }
+    }
+    let mut a: Vec<String> = vec![];
+    if let Some(m) = model {
+        a.extend(["--model".into(), m.to_string()]);
+    }
+    a.extend(["--tools".into(), f.mode.tools().into(), "--strict-mcp-config".into(), "--no-session-persistence".into()]);
+    a.extend(crate::folder_args::permission_args(perm, p, model, f.mode != FolderMode::Read).0);
+    if managed {
+        a.extend(["--setting-sources".into(), "user,project".into()]);
+    }
+    Ok(a)
+}
+
 /// What to run.
 #[derive(Debug, Clone)]
 pub struct Spec {
@@ -94,6 +171,8 @@ pub struct Spec {
     pub thread: Option<String>,
     /// Yolo's run (else a routine's): acting on its own, it takes Yolo's permission setting.
     pub yolo: bool,
+    /// A plugin's run in a folder it was given (`jshost::folders::claude_folder`): there, not as the folder session.
+    pub folder: Option<InFolder>,
 }
 
 impl Spec {
@@ -130,6 +209,7 @@ impl Spec {
             task: None,
             thread: None,
             yolo: false,
+            folder: None,
         })
     }
 }
@@ -148,6 +228,19 @@ fn preamble(tools: bool, cli: &str) -> String {
     format!(
         "Started by Echo; nobody is watching: don't ask anything, do the work and answer. Now: {}. The working folder is Echo's data \
          folder. {reach}",
+        Local::now().format("%A %Y-%m-%d %H:%M (UTC%:z, the user's local time)")
+    )
+}
+
+/// What Echo tells a folder run around the plugin's prompt.
+fn folder_preamble(mode: FolderMode) -> String {
+    let what = match mode {
+        FolderMode::Read => "a folder the user gave a plugin of Echo's. Read it; change nothing",
+        FolderMode::Edit => "a folder the user gave a plugin of Echo's. You may change files in it, nothing outside it",
+        FolderMode::Copy => "a copy of a folder the user gave a plugin of Echo's; the user reviews what you change before it is applied. You may change files in it, nothing outside it",
+    };
+    format!(
+        "Started by Echo; nobody is watching: don't ask anything, do the work and answer. Now: {}. The working folder is {what}; its own CLAUDE.md, skills and settings apply.",
         Local::now().format("%A %Y-%m-%d %H:%M (UTC%:z, the user's local time)")
     )
 }
@@ -176,14 +269,21 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let model = Some(spec.model.clone()).filter(|m| !m.is_empty()).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
     let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
     let home = dunce::canonicalize(paths::home())?;
-    // A session-like run starts in the data folder, as the folder session does: `.plugins/<id>/` loads from there.
-    let cwd = if spec.session || profile.kind.managed() { home.clone() } else { crate::ai::system_folder()? };
+    // A session-like run starts in the data folder, as the folder session does: `.plugins/<id>/` loads from there; a
+    // folder run in its folder.
+    let cwd = match &spec.folder {
+        Some(f) => f.cwd.clone(),
+        None if spec.session || profile.kind.managed() => home.clone(),
+        None => crate::ai::system_folder()?,
+    };
     let clis = notes::run_clis(&plugin);
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.
     let launcher = clis.iter().find(|c| c.contains('/') && c.contains("scripts")).cloned().unwrap_or_else(|| "echoctl".into());
     // A routine or Yolo acts on its own: as the routine asked, else as the user set routines or Yolo.
     let acts = spec.session.then(|| spec.tools.permissions().unwrap_or_else(|| crate::folder_args::run_permissions(spec.yolo)));
+    // A plugin's run in a folder: as the user set routines, never as the plugin asked; `read` may change nothing.
+    let in_dir = spec.folder.as_ref().map(|f| (f, crate::folder_args::run_permissions(false), f.mode != FolderMode::Read));
     // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
     #[cfg(feature = "brain")]
     // Only where the run gets the echo server (the window's builds; a run with tools).
@@ -192,25 +292,40 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let brain_text: Option<String> = None;
     let prompt = format!(
         "{}{}\n\n{}",
-        preamble(acts.is_some(), &format!("`{launcher}` (its full path, exactly so)")),
+        match &spec.folder {
+            Some(f) => folder_preamble(f.mode),
+            None => preamble(acts.is_some(), &format!("`{launcher}` (its full path, exactly so)")),
+        },
         brain_text.map(|b| format!("\n\n<echo_recall>\n{b}\n</echo_recall>")).unwrap_or_default(),
         spec.prompt
     );
     let _ = fs::write(spec.run_dir.join("prompt.md"), &prompt);
-    // What it asked for, and what it runs with (a routine or Yolo: the folder session's arguments, its own permissions).
-    let used = match acts {
-        None => "no tools".to_string(),
-        Some(m) => format!("the folder session's: acts on its own ({})", crate::folder_args::permission_args(m, profile, model.as_deref(), true).1),
+    // What it asked for, and what it runs with (a routine or Yolo: the folder session's arguments, its own permissions;
+    // a folder run: its folder's own setup, the routines' permissions).
+    let used = match (in_dir, acts) {
+        (Some((f, m, edit)), _) => format!(
+            "its folder's own Claude Code setup, {} ({})",
+            if f.mode == FolderMode::Read { "reads only" } else { "edits in the folder" },
+            crate::folder_args::permission_args(m, profile, model.as_deref(), edit).1
+        ),
+        (None, None) => "no tools".to_string(),
+        (None, Some(m)) => format!("the folder session's: acts on its own ({})", crate::folder_args::permission_args(m, profile, model.as_deref(), true).1),
     };
+    let asked_for = spec.folder.as_ref().map_or(spec.tools.name(), |f| f.mode.name());
     let actions = spec.run_dir.join("actions.jsonl");
     let _ = fs::remove_file(&actions);
-    let _ = fs::write(spec.run_dir.join("permissions.json"), serde_json::json!({"asked": spec.tools.name(), "used": used}).to_string());
-    let _ = writeln!(log, "{}  Echo runs “{}” on {}{} (asked: {}; runs with {used})", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default(), spec.tools.name());
+    let _ = fs::write(spec.run_dir.join("permissions.json"), serde_json::json!({"asked": asked_for, "used": used}).to_string());
+    let _ = writeln!(log, "{}  Echo runs “{}” on {}{} (asked: {asked_for}; runs with {used})", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default());
     let exe = std::env::current_exe().context("Echo's own program can't be found")?;
     let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
-    let (settings_file, env) = match acts {
+    let (settings_file, env) = match (in_dir, acts) {
+        // A folder run: the folder's own project, nothing of Echo's session.
+        (Some((f, m, _)), _) => {
+            a.extend(in_folder(profile, model.as_deref(), f, m)?);
+            (None, vec![])
+        }
         // A routine or Yolo: the folder session's arguments, but for `-p` and its prompt.
-        Some(acts) => {
+        (None, Some(acts)) => {
             let f = crate::folder_args::run_settings();
             a.extend(crate::folder_args::session(profile, &exe, &f, "routine", model.as_deref(), crate::folder_args::Who::Run(acts))?);
             let mut env = crate::folder_args::env(&profile.id);
@@ -219,7 +334,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             (Some(f), env)
         }
         // No tools at all: what it reads is in its prompt.
-        None => {
+        (None, None) => {
             if let Some(m) = &model {
                 a.extend(["--model".into(), m.clone()]);
             }
@@ -228,7 +343,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         }
     };
     // The permission mode it asks Claude Code for: checked against the one it starts in.
-    let asked = acts.map(|_| asked_mode(&a));
+    let asked = (acts.is_some() || spec.folder.is_some()).then(|| asked_mode(&a));
     let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
@@ -406,7 +521,7 @@ mod tests {
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
         set_permissions(Permissions::Skip, Some(Permissions::Skip), Some(Permissions::Skip));
-        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false };
+        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false, folder: None };
         let _ = run(&wont);
         let args: Vec<String> = fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
@@ -441,7 +556,7 @@ mod tests {
         let routine = || routine_asking("");
         let yolo = || {
             n.set(n.get() + 1);
-            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true };
+            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true, folder: None };
             let _ = run(&s);
             started(&s.run_dir)
         };
@@ -523,5 +638,97 @@ mod tests {
         assert!(e.to_string().contains("can't choose the wrapper profile"), "{e}");
         std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"default":"acme","profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
         assert!(Spec::from_value(&serde_json::json!({"prompt": "x", "profile": "acme"}), &root.join("store")).is_ok(), "the user's default");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_plugins_folder_run_is_that_folders_own_project_with_its_modes_tools_and_the_routines_permissions() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-folder");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let file = |n: &str| fs::read_to_string(crate::ai::fake::file(&p, n)).unwrap_or_default();
+        let args = || file("p.args").split('\0').filter(|a| !a.is_empty()).map(str::to_owned).collect::<Vec<String>>();
+        let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
+        let vault = root.join("acme-vault");
+        fs::create_dir_all(vault.join(".claude")).unwrap();
+        fs::write(vault.join("CLAUDE.md"), "# Acme vault\n").unwrap();
+        let vault = dunce::canonicalize(&vault).unwrap();
+        // The plugin asks to skip every check: never honoured in a folder.
+        let spec = |mode: FolderMode, dir: &str| Spec {
+            title: "Acme tidy".into(),
+            prompt: "Tidy the notes".into(),
+            profile: "work".into(),
+            model: String::new(),
+            tools: Tools::Skip,
+            run_dir: root.join("store/runs").join(dir),
+            timeout: Duration::from_secs(60),
+            session: false,
+            task: None,
+            thread: None,
+            yolo: false,
+            folder: Some(InFolder { cwd: vault.clone(), mode }),
+        };
+        let record = |dir: &str| serde_json::from_str::<Value>(&fs::read_to_string(root.join("store/runs").join(dir).join("permissions.json")).unwrap()).unwrap();
+        // Routines on Auto (the default), whatever the folder session's setting: every mode in the folder, its own
+        // project loaded once (not Echo's `user` alone) and last, the mode's tools, no MCP server, auto mode; nothing of
+        // Echo's session.
+        set_permissions(Permissions::Skip, None, Some(Permissions::Skip));
+        for (mode, tools) in [(FolderMode::Read, "Read,Grep,Glob,Skill"), (FolderMode::Edit, "Read,Grep,Glob,Skill,Edit,Write"), (FolderMode::Copy, "Read,Grep,Glob,Skill,Edit,Write")] {
+            let _ = run(&spec(mode, mode.name()));
+            let a = args();
+            assert_eq!(file("p.cwd").trim(), vault.display().to_string(), "{mode:?}");
+            assert_eq!(a.iter().filter(|x| *x == "--setting-sources").count(), 1, "{a:?}");
+            assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
+            assert_eq!(after(&a, "--tools").as_deref(), Some(tools));
+            assert_eq!(after(&a, "--permission-mode").as_deref(), Some("auto"));
+            assert!(a.contains(&"--strict-mcp-config".to_string()), "{a:?}");
+            for no in ["--dangerously-skip-permissions", "--settings", "--plugin-dir", "--mcp-config", "--add-dir", "--allowedTools"] {
+                assert!(!a.contains(&no.to_string()), "{no}: {a:?}");
+            }
+            assert!(!file("p.env").contains("ECHOCTL_RUN_SESSION="), "no routine's marks");
+            let r = record(mode.name());
+            let used = r["used"].as_str().unwrap();
+            assert_eq!(r["asked"], mode.name());
+            assert!(used.ends_with("(auto mode: Claude Code decides each action)"), "{r}");
+            let log = fs::read_to_string(root.join("store/runs").join(mode.name()).join("log.txt")).unwrap();
+            assert!(log.lines().next().unwrap().ends_with(&format!("(asked: {}; runs with {used})", mode.name())), "{log}");
+            let prompt = fs::read_to_string(root.join("store/runs").join(mode.name()).join("prompt.md")).unwrap();
+            assert!(prompt.contains("its own CLAUDE.md, skills and settings apply") && prompt.ends_with("Tidy the notes") && !prompt.contains("Echo's CLI"), "{prompt}");
+        }
+        // Routines on Skip all permission checks: every mode skips them.
+        set_permissions(Permissions::Auto, Some(Permissions::Skip), None);
+        for mode in [FolderMode::Read, FolderMode::Edit, FolderMode::Copy] {
+            let _ = run(&spec(mode, &format!("{}-skip", mode.name())));
+            let a = args();
+            assert!(a.contains(&"--dangerously-skip-permissions".to_string()) && !a.contains(&"--permission-mode".to_string()), "{a:?}");
+        }
+        set_permissions(Permissions::Auto, None, None);
+        // Claude Code started in its manual mode though auto was asked: the log and the record say so.
+        let init = serde_json::json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0", "permissionMode": "default"});
+        let result = serde_json::json!({"type": "result", "subtype": "success", "result": "Tidied", "usage": {}});
+        fs::write(crate::ai::fake::file(&p, "p.result"), format!("{init}\n{result}\n")).unwrap();
+        assert_eq!(run(&spec(FolderMode::Edit, "manual")).unwrap().0, "Tidied");
+        assert!(record("manual")["mode"].as_str().unwrap().starts_with("Claude Code ran in manual mode, not auto"), "{}", record("manual"));
+        fs::remove_file(crate::ai::fake::file(&p, "p.result")).unwrap();
+        // Where the profile's model has no auto mode (a model server, a wrapper): edits accepted, or a read asking nothing.
+        let inf = |mode| InFolder { cwd: vault.clone(), mode };
+        for kind in [crate::ai::Kind::Local, crate::ai::Kind::Wrapper] {
+            let mut q = p.clone();
+            q.kind = kind;
+            for (mode, want) in [(FolderMode::Read, "dontAsk"), (FolderMode::Edit, "acceptEdits"), (FolderMode::Copy, "acceptEdits")] {
+                assert_eq!(after(&in_folder(&q, None, &inf(mode), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some(want), "{kind:?} {mode:?}");
+            }
+        }
+        // On the user's own Claude Code (`system`) its project loads anyway: Echo names no sources.
+        let mut own = p.clone();
+        own.kind = crate::ai::Kind::System;
+        let a = in_folder(&own, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap();
+        assert!(!a.contains(&"--setting-sources".to_string()) && after(&a, "--permission-mode").as_deref() == Some("auto"), "{a:?}");
+        // A folder whose project settings could route the run elsewhere: refused before Claude Code starts.
+        fs::write(vault.join(".claude/settings.json"), r#"{"env": {"ANTHROPIC_BASE_URL": "https://gw.acme.example"}}"#).unwrap();
+        let _ = fs::remove_file(crate::ai::fake::file(&p, "p.args"));
+        let e = run(&spec(FolderMode::Read, "routed")).unwrap_err();
+        assert!(e.to_string().contains("could send the run elsewhere than"), "{e}");
+        assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
     }
 }

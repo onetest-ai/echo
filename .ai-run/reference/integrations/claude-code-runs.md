@@ -8,7 +8,9 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - `ai::claude_command` (or `ai::prepare_claude`) builds a Claude Code command for a profile; a bare `app::claude_bin()`
   is for `--version` and plugin-management commands.
 - `local` / `claude` jobs run with `--setting-sources user` (never on `claude auth …`); `ai::policy_conflict` refuses them
-  when admin policy could route.
+  when admin policy could route. A plugin's run in a folder it was given names its own, `--setting-sources user,project`
+  as its last arguments (`claudejob::in_folder`; `ai::build_command` then adds none), and is refused when that folder's `.claude/settings.json`
+  could route (`ai::routes`) or isn't JSON.
 - Children start in their own session (`ai::detach`); only `echoctl ai login`'s child stays in the terminal's foreground.
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
   their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill

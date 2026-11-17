@@ -569,8 +569,11 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
     let managed = p.kind.managed();
     let env = managed.then(|| routing_env(p));
     let mut args = args.to_vec();
-    // Model runs load only the profile's own settings; `claude auth …` and `--version` take no such option.
-    if managed && args.first().is_none_or(|a| a != "auth" && a != "--version") {
+    // Model runs load only the profile's own settings, unless the run names its sources, `user,project`, as its last two
+    // arguments (a plugin's run in a folder adds that folder's project, `claudejob::in_folder`) — by position, so a value
+    // elsewhere (a model, a prompt) never counts; `claude auth …` and `--version` take no such option.
+    let own_sources = args.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]);
+    if managed && args.first().is_none_or(|a| a != "auth" && a != "--version") && !own_sources {
         args.extend(["--setting-sources".into(), "user".into()]);
     }
     let mut c = if use_shell {
@@ -914,7 +917,7 @@ impl Ready {
 /// TERM — stopping it then takes the 3 s until KILL); `auth login` records its
 /// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
-/// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends). Installing it forgets this process's observations and cached checks.
+/// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends; Unix: a stream-json run then prints `p.result` when it is there). Installing it forgets this process's observations and cached checks.
 /// Unix: a shell script. Windows: the same in PowerShell, started by a `.cmd` (`stubborn` is Unix's: Windows stops
 /// the tree with `taskkill /T /F`; its `login.pid` is PowerShell's, a grandchild under `cmd.exe`, not the started child);
 /// most tests that use it are still Unix-only (#423).
@@ -1007,7 +1010,7 @@ case "$1 $2" in
 "--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
 "-p "*) printf '%s\0' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
-  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
+  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done; if [ -f "$d/p.result" ]; then cat "$d/p.result"; fi;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;
@@ -1351,6 +1354,14 @@ mod tests {
         }
         let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["-p", "--setting-sources", "user"]);
+        // A run naming its own sources last (a plugin's folder run) keeps them; the words elsewhere (a plugin's model or
+        // prompt) are no sources: the profile's own only, still.
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        let built = |a: &[&str]| build_command(&local, Path::new("/bin/claude"), &argv(a), &root, false, false).get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
+        assert_eq!(built(&["-p", "x", "--setting-sources", "user,project"]), argv(&["-p", "x", "--setting-sources", "user,project"]));
+        for a in [&["-p", "x", "--model", "--setting-sources", "--tools", ""][..], &["-p", "--setting-sources", "--model", "user,project", "--verbose"], &["-p", "x", "--model", "--setting-sources", "user,project", "--verbose"]] {
+            assert!(built(a).ends_with(&argv(&["--setting-sources", "user"])), "{a:?}");
+        }
         let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let c = build_command(&claude, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
