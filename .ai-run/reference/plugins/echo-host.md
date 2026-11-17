@@ -76,16 +76,22 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - `ctx.git.*` runs git only through `jshost::git::spawn`: the verbs of `VERBS` (`version`, `config`, `rev-parse`,
   `symbolic-ref`, `status`, `log`, `cat-file`, `ls-files`, `init`, `add`, `commit`, `rm` — no network verb), never
   through a shell, no stdin, `--no-pager`, in the granted folder, each path after `--` and literal
-  (`GIT_LITERAL_PATHSPECS=1`). Started with all it starts as one (`plugins::signin::Tree`: Unix its own session, TERM
+  (`GIT_LITERAL_PATHSPECS=1`); in a repository with `GIT_DIR=<top>/.git`, `GIT_WORK_TREE=<top>` and
+  `GIT_CEILING_DIRECTORIES` the top's parent (`jshost::git::top_of`), so git never looks for one itself. Started with all it starts as one (`plugins::signin::Tree`: Unix its own session, TERM
   then KILL to the whole group; Windows a job object killing them all) and stopped at 20 s; stdout kept to 16 MB,
   stderr to 64 KB, the rest read and dropped; once it ends its output is waited for 2 s, then whatever it started is
   stopped and the call fails if something still holds it. Evidence: `jshost::git::spawn`
-- The program (`jshost::git::candidates`): only where the system installs git, never `PATH` or the user's own folders
-  — macOS `/opt/homebrew/bin/git`, `/usr/local/bin/git`, then `/usr/bin/git` only when `xcode-select -p` names a
-  developer folder holding `usr/bin/git` (else that stub would open Apple's install dialog); Windows
-  `%ProgramW6432%`, `%ProgramFiles%`, `%ProgramFiles(x86)%` `\Git\cmd\git.exe` or `\Git\bin\git.exe` (never a
-  `.cmd`, which runs through cmd.exe); other Unix `/usr/bin/git`, `/usr/local/bin/git`. None: "git isn't installed
-  on this computer". Evidence: `jshost::git::candidates`
+- The program (`jshost::git::program`): first where the system installs git (`system_candidates`) — macOS
+  `/opt/homebrew/bin/git`, `/usr/local/bin/git`, then `/usr/bin/git` only when `xcode-select -p` names a developer
+  folder holding `usr/bin/git` (else that stub would open Apple's install dialog); Windows `%ProgramW6432%`,
+  `%ProgramFiles%`, `%ProgramFiles(x86)%` `\Git\cmd\git.exe` or `\Git\bin\git.exe` (never a `.cmd`, which runs
+  through cmd.exe); other Unix `/usr/bin/git`, `/usr/local/bin/git`. Else the first `git` (Windows `git.exe` only) on
+  the user's `PATH` (`path_candidates`): on macOS and other Unix the login shell's, asked once per process as a terminal
+  starts it (`ai::wrapper::login_path`; the app started from the Finder has a minimal `PATH`), this process's own where
+  runs start without the login shell (`ECHOCTL_NOTES_NO_SHELL`) and on Windows. Each by its real path, skipping a
+  relative entry, one inside a folder given to any plugin (`grants::all_folders`, on or off) or inside Echo's data or
+  own folder (`ai::wrapper::outside_echo`), macOS's `/usr/bin/git`, and a file that can't be started. None: "git isn't
+  installed on this computer". Evidence: `jshost::git::path_candidates`
 - Its environment: only `PATH`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`,
   `XDG_CONFIG_HOME` of the user's (no `GIT_*`, `ECHOCTL*`, `CLAUDE*`, `ANTHROPIC*`), then `LC_ALL=C`,
   `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1`, `GIT_EDITOR=:`, an empty `GIT_PAGER`,
@@ -96,7 +102,7 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - The overrides (`jshost::git::overrides`), read for each call from `git config --list` (every scope, `include` and
   `includeIf` files too), whole: a listing that fails or is over 16 MB, or a key that isn't UTF-8, refuses the
   repository (a setting not read, or read under another name, couldn't be cleared), as does a partial clone
-  (`extensions.partialClone` or any `remote.*.promisor`). Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
+  (`extensions.partialClone` or any `remote.*.promisor`) and `core.worktree` set anywhere. Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
   `diff.*.command/textconv`, `merge.*.driver`, `credential.*.helper`, `gpg.*.program`, `*.sshCommand`, `*.askPass`,
   `*.editor`, `*.pager`, `*.proxy`, `remote.*.uploadpack/receivepack/vcs`, `uploadpack.packObjectsHook`, …) set empty,
   `filter.*.required` and every `pager.<command>` false, every `protocol.<name>.allow` never, and each hook set in
@@ -109,10 +115,17 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   `init` `--template=`; `show` reads with `cat-file blob` (no filter or textconv) only at a commit (`cat-file -t` of
   `rev` is `commit`); `log` takes no diff.
   Evidence: `jshost::git::tests::a_repositorys_own_settings_run_nothing`
-- The repository (`jshost::git::Git::repo`): `rev-parse` gives the top, the git folder and the common one; each must be
-  inside the top and the granted folder inside the top, and so must be, followed through links, the common folder's
-  `objects`, `refs`, `packed-refs`, `info`, `logs`, the git folder's `HEAD` and `index`, and each entry of `objects`,
-  `objects/pack` and `objects/info`; `objects/info/alternates` absent; else refused. A folder
+- The repository (`jshost::git::top_of`, then `Git::repo`): looked for upwards from the granted folder, each folder
+  first for its `.git`, then as a bare repository. Only a `.git` that is a real folder (not a link, not a `gitdir:`
+  file), owned by the user running Echo (Unix), with no plugin given a folder inside it, makes the folder holding it
+  the top; a folder holding `HEAD`, `objects` and `refs` itself (a bare repository, or inside a `.git`) is refused. The
+  git folder is then nothing a plugin can write — `grants::writable` refuses every hidden name, and above the granted
+  folder it is outside the grant — so its settings stay as `overrides` read them while git runs, with no lock: only
+  another program of the user's (a sync tool) could change them meanwhile. Any `core.worktree` refuses the
+  repository (`overrides`). `rev-parse` must then give that top, `<top>/.git` as the git folder and the same as the
+  common one; and, followed through links, the common folder's `objects`, `refs`, `packed-refs`, `info`, `logs`, the
+  git folder's `HEAD` and `index`, and each entry of `objects`, `objects/pack` and `objects/info` must be inside the
+  top; `objects/info/alternates` absent; else refused. A folder
   inside a larger repository works within the folder: `status` and `log` limited to `.` (or the paths asked), `show`
   as `<rev>:./<path>`, `commit` only paths `grants::writable` passes. Evidence: `jshost::git::Git::repo`
 - `commit`: refused while a merge, rebase, cherry-pick, revert or bisect is under way (`info`'s `busy`), and when a

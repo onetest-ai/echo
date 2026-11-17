@@ -3,6 +3,8 @@
 //! `--` (`GIT_LITERAL_PATHSPECS`), within `TIMEOUT` and the output caps, in an environment of a few named variables
 //! (none of Echo's secrets, no `CLAUDE*` / `ANTHROPIC*`, no `GIT_*` of the user's), and with every setting that names a
 //! program switched off on its command line (`overrides`): a vault's own `.git/config` runs nothing. No network verb.
+//! Only a repository whose git dir no plugin can write (`top_of`), named to git outright (`GIT_DIR`, `GIT_WORK_TREE`):
+//! its settings stay as `overrides` read them while git runs.
 
 use super::*;
 use crate::app::NoWindow as _;
@@ -38,10 +40,10 @@ const PROGRAM_KEYS: &[&str] = &[
     "fsmonitor", "virtualfilesystem", "defaultkeycommand", "proxy", "gitproxy", "uploadpack", "receivepack", "vcs", "external", "alternaterefscommand", "packobjectshook",
 ];
 
-/// Where git is looked for: only where the system or its package manager installs it, never the user's own folders
-/// or `PATH` (Windows: `git.exe` of Git for Windows, never a `.cmd`, which runs through cmd.exe). macOS: `/usr/bin/git`
-/// only while developer tools are installed — without them it opens Apple's install dialog instead of running.
-fn candidates() -> Vec<PathBuf> {
+/// Where git is looked for first: where the system or its package manager installs it (Windows: `git.exe` of Git for
+/// Windows, never a `.cmd`, which runs through cmd.exe). macOS: `/usr/bin/git` only while developer tools are
+/// installed — without them it opens Apple's install dialog instead of running.
+fn system_candidates() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
@@ -67,13 +69,46 @@ fn candidates() -> Vec<PathBuf> {
     }
 }
 
-/// The git program, from `candidates`.
+/// Then `git` (Windows: `git.exe`) in the folders of a `PATH`, in its order, each by its real path: never a relative
+/// folder, one inside a folder given to any plugin or inside Echo's data or own folder (a plugin could put a git
+/// there), nor macOS's `/usr/bin/git` (in `system_candidates` when it runs); only a file that can be started.
+fn path_candidates(path: &std::ffi::OsStr) -> Vec<PathBuf> {
+    let granted = crate::grants::all_folders();
+    // macOS and Windows file systems ignore case by default: so does this.
+    let fold = |p: &Path| if cfg!(any(target_os = "macos", windows)) { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() };
+    let theirs = |p: &Path| crate::ai::wrapper::outside_echo(p).is_ok() && !granted.iter().any(|g| fold(p).starts_with(fold(g)));
+    std::env::split_paths(path)
+        .filter(|d| d.is_absolute() && theirs(d))
+        .filter_map(|d| dunce::canonicalize(d.join(if cfg!(windows) { "git.exe" } else { "git" })).ok())
+        .filter(|f| theirs(f) && !(cfg!(target_os = "macos") && f == Path::new("/usr/bin/git")) && runnable(f))
+        .collect()
+}
+
+/// A file that can be started (Unix: executable).
+fn runnable(f: &Path) -> bool {
+    let Ok(m) = std::fs::metadata(f) else { return false };
+    #[cfg(unix)]
+    let can = {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o111 != 0
+    };
+    #[cfg(not(unix))]
+    let can = true;
+    m.is_file() && can
+}
+
+/// The git program: the system's (`system_candidates`), else the first on the user's `PATH` — a terminal's, the login
+/// shell's (`path_candidates`).
 fn program() -> Result<PathBuf> {
     #[cfg(test)]
     if std::env::var_os("ECHOCTL_TEST_NO_GIT").is_some() {
         bail!("git isn't installed on this computer");
     }
-    candidates().into_iter().find(|p| p.is_file()).ok_or_else(|| anyhow!("git isn't installed on this computer"))
+    system_candidates()
+        .into_iter()
+        .find(|p| p.is_file())
+        .or_else(|| path_candidates(&crate::ai::wrapper::login_path().unwrap_or_default()).into_iter().next())
+        .ok_or_else(|| anyhow!("git isn't installed on this computer"))
 }
 
 /// Git's answer: whether it succeeded, its output (cut at `OUT_MAX`, `over` when there was more) and its errors.
@@ -132,7 +167,7 @@ fn checked_version(git: &Path) -> Result<()> {
 /// system's, the user's and the repository's: those of `PROGRAM_KEYS` found in any of them (filters, diff and merge
 /// drivers, credential helpers, signing programs, `includeIf` files' too) cleared, a filter not required, every
 /// command's pager off — then the fixed ones, last so they win.
-fn overrides(git: &Path, dir: &Path, hooks: &Path) -> Result<Vec<(String, String)>> {
+fn overrides(git: &Path, dir: &Path, top: &Path, hooks: &Path) -> Result<Vec<(String, String)>> {
     let fixed: Vec<(String, String)> = [
         ("core.hooksPath", hooks.to_string_lossy().as_ref()),
         ("core.fsmonitor", "false"),
@@ -160,7 +195,7 @@ fn overrides(git: &Path, dir: &Path, hooks: &Path) -> Result<Vec<(String, String
     .collect();
     // Read with the fixed ones in force (a config read runs nothing) — whole, or the repository isn't used: a setting
     // not read (past the cap, a listing that failed, a name that isn't text) couldn't be cleared.
-    let listed = spawn(git, dir, &["config", "--list", "-z"], &fixed)?;
+    let listed = spawn_within(git, dir, Some(top), &["config", "--list", "-z"], &fixed, TIMEOUT)?;
     if !listed.ok || listed.over {
         bail!("this repository's settings couldn't be read whole ({}): Echo doesn't use it", if listed.over { format!("over {} MB", OUT_MAX >> 20) } else { listed.why() });
     }
@@ -169,6 +204,10 @@ fn overrides(git: &Path, dir: &Path, hooks: &Path) -> Result<Vec<(String, String
         let key = entry.split(|b| *b == b'\n').next().unwrap_or_default();
         let key = std::str::from_utf8(key).map_err(|_| anyhow!("a setting of this repository is named in bytes that aren't text (UTF-8): Echo doesn't use it"))?;
         let (section, last) = (key.split('.').next().unwrap_or("").to_ascii_lowercase(), key.rsplit('.').next().unwrap_or("").to_ascii_lowercase());
+        // Its files kept elsewhere than beside its .git: never used (Echo names the work tree itself).
+        if section == "core" && last == "worktree" && key.matches('.').count() == 1 {
+            bail!("this repository sets core.worktree (its files kept elsewhere than beside its .git): Echo doesn't use it");
+        }
         // A partial clone fetches what it lacks from its promisor remote, by any read: never used.
         if (section == "extensions" && last == "partialclone") || (section == "remote" && last == "promisor") {
             bail!("this repository is a partial clone, which fetches what it lacks from elsewhere: Echo doesn't use it");
@@ -194,10 +233,11 @@ fn overrides(git: &Path, dir: &Path, hooks: &Path) -> Result<Vec<(String, String
 /// `git <args>` in `dir` with only `config` set on its command line: no shell, no stdin, its own process group, killed
 /// at `TIMEOUT`, both streams read as they come (a full pipe would stall it) and capped.
 fn spawn(git: &Path, dir: &Path, args: &[&str], config: &[(String, String)]) -> Result<Out> {
-    spawn_within(git, dir, args, config, TIMEOUT)
+    spawn_within(git, dir, None, args, config, TIMEOUT)
 }
 
-fn spawn_within(git: &Path, dir: &Path, args: &[&str], config: &[(String, String)], timeout: Duration) -> Result<Out> {
+/// …in the repository whose top folder is `top` when given: its git dir `<top>/.git` named outright, never looked for.
+fn spawn_within(git: &Path, dir: &Path, top: Option<&Path>, args: &[&str], config: &[(String, String)], timeout: Duration) -> Result<Out> {
     if !args.first().is_some_and(|v| VERBS.contains(v)) {
         bail!("Echo doesn't run “git {}”", args.first().unwrap_or(&""));
     }
@@ -218,6 +258,12 @@ fn spawn_within(git: &Path, dir: &Path, args: &[&str], config: &[(String, String
         .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_ALLOW_PROTOCOL", "")
         .env("GIT_CONFIG_COUNT", config.len().to_string());
+    if let Some(top) = top {
+        c.env("GIT_DIR", top.join(".git")).env("GIT_WORK_TREE", top);
+        if let Some(up) = top.parent() {
+            c.env("GIT_CEILING_DIRECTORIES", up);
+        }
+    }
     for (n, (k, v)) in config.iter().enumerate() {
         c.env(format!("GIT_CONFIG_KEY_{n}"), k).env(format!("GIT_CONFIG_VALUE_{n}"), v);
     }
@@ -270,11 +316,50 @@ fn spawn_within(git: &Path, dir: &Path, args: &[&str], config: &[(String, String
     Ok(Out { ok: status.success(), stdout, over, stderr })
 }
 
-/// Git, ready to run in one granted folder: the program, the folder (canonical) and the overrides for it.
+/// Git, ready to run in one granted folder: the program, the folder (canonical), the top folder of its repository
+/// (`found`; the folder itself when there is none, where `init` makes one) and the overrides for it.
 struct Git {
     git: PathBuf,
     root: PathBuf,
+    top: PathBuf,
+    found: bool,
     config: Vec<(String, String)>,
+}
+
+const ELSEWHERE: &str = "this repository keeps its history outside its folder (a linked worktree, a submodule or a link in .git): Echo doesn't use it";
+
+/// The top folder of the repository `root` is in, or None — looked for as git does, upwards from it, but only one
+/// shape taken: a real folder `.git` (not a link, not a `gitdir:` file), the user's own, in the root or a folder above
+/// it. Its git dir is then nothing a plugin writes: `grants::writable` refuses hidden names, above the root it is
+/// outside the grant, and no plugin is given a folder in it. A bare repository (a folder holding `HEAD`, `objects`
+/// and `refs` itself — a plugin can lay those out) is refused, as is being inside a `.git`.
+fn top_of(root: &Path) -> Result<Option<PathBuf>> {
+    for dir in root.ancestors() {
+        let dot = dir.join(".git");
+        match std::fs::symlink_metadata(&dot) {
+            Ok(m) if m.is_dir() => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    // SAFETY: geteuid only reads this process's user id.
+                    if m.uid() != unsafe { libc::geteuid() } {
+                        bail!("this repository belongs to another user of this computer: Echo doesn't use it");
+                    }
+                }
+                if crate::grants::all_folders().iter().any(|g| g.starts_with(&dot)) {
+                    bail!("a folder inside this repository's .git is given to a plugin: Echo doesn't use it");
+                }
+                return Ok(Some(dir.to_path_buf()));
+            }
+            Ok(_) => bail!("{ELSEWHERE}"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => bail!("{}: {e}", dot.display()),
+        }
+        if dir.join("HEAD").is_file() && dir.join("objects").is_dir() && dir.join("refs").is_dir() {
+            bail!("this folder is in a bare repository (its HEAD, objects and refs not in a .git): Echo doesn't use it");
+        }
+    }
+    Ok(None)
 }
 
 /// Where the root sits in its repository.
@@ -288,12 +373,18 @@ impl Git {
     fn new(root: PathBuf) -> Result<Git> {
         let git = program()?;
         checked_version(&git)?;
-        let config = overrides(&git, &root, &no_hooks()?)?;
-        Ok(Git { git, root, config })
+        let found = top_of(&root)?;
+        let top = found.clone().unwrap_or_else(|| root.clone());
+        let config = overrides(&git, &root, &top, &no_hooks()?)?;
+        Ok(Git { git, root, top, found: found.is_some(), config })
     }
 
     fn run(&self, args: &[&str]) -> Result<Out> {
-        spawn(&self.git, &self.root, args, &self.config)
+        self.run_with(args, &self.config)
+    }
+
+    fn run_with(&self, args: &[&str], config: &[(String, String)]) -> Result<Out> {
+        spawn_within(&self.git, &self.root, Some(&self.top), args, config, TIMEOUT)
     }
 
     /// `args` that must succeed: their output.
@@ -308,23 +399,22 @@ impl Git {
         Ok(o)
     }
 
-    /// The repository the root is in, or None. Only one whose files are all in it: its `.git` (and the common one)
-    /// inside its own top folder, the root inside that, no objects borrowed from elsewhere — a `gitdir:` file, a
-    /// `core.worktree` or alternates would let a vault's settings show another repository's files.
+    /// The repository the root is in (`top_of`), or None. Only one whose files are all in it: git agrees its top is
+    /// that folder and its git dir that `.git` (the common one too), no objects borrowed from elsewhere — a
+    /// `commondir`, links in `.git` or alternates would let a vault's settings show another repository's files.
     fn repo(&self) -> Result<Option<Repo>> {
-        let o = self.run(&["rev-parse", "--show-prefix", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"])?;
-        if !o.ok {
-            let why = o.why();
-            if why.contains("not a git repository") {
-                return Ok(None);
-            }
-            bail!("{why}");
+        if !self.found {
+            return Ok(None);
         }
+        let o = self.ok(&["rev-parse", "--show-prefix", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"])?;
         let text = o.text();
         let lines: Vec<&str> = text.lines().collect();
         let [prefix, top, git_dir, common] = lines[..] else { bail!("this folder isn't in a repository's files (a bare repository or inside .git)") };
         let real = |p: &str| dunce::canonicalize(p).map_err(|e| anyhow!("{p}: {e}"));
         let (top, git_dir, common) = (real(top)?, real(git_dir)?, real(common)?);
+        if top != self.top || git_dir != self.top.join(".git") || common != git_dir {
+            bail!("{ELSEWHERE}");
+        }
         // Its history's parts too, each where it really is: a link to another repository's objects or refs (or a
         // folder of objects, a pack linked in) would show that one's files.
         let mut parts: Vec<PathBuf> = ["objects", "refs", "packed-refs", "info", "logs"].iter().map(|p| common.join(p)).chain(["HEAD", "index"].map(|p| git_dir.join(p))).collect();
@@ -632,7 +722,7 @@ pub(super) fn commit(id: &str, root: &str, o: &Value) -> Result<Value> {
     args.extend(paths.iter().map(String::as_str));
     let mut config = g.config.clone();
     config.extend(identity(&g, id));
-    match spawn(&g.git, &g.root, &args, &config) {
+    match g.run_with(&args, &config) {
         Ok(o) if o.ok => Ok(json!({"rev": g.head()?})),
         other => {
             back();
@@ -1116,20 +1206,20 @@ mod tests {
         std::fs::write(&fake, format!("#!/bin/sh\n(sleep 1; touch \"{}\") &\nsleep 30\n", child.display())).unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let t = Instant::now();
-        let e = spawn_within(&fake, &root, &["status"], &[], Duration::from_millis(300)).err().unwrap();
+        let e = spawn_within(&fake, &root, None, &["status"], &[], Duration::from_millis(300)).err().unwrap();
         assert!(e.to_string().contains("took longer"), "{e}");
         assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
         std::thread::sleep(Duration::from_millis(1500));
         assert!(!child.exists(), "its whole group was stopped");
         // More than the cap: read to its end, kept up to the cap.
         std::fs::write(&fake, format!("#!/bin/sh\nhead -c {} /dev/zero\nhead -c 200000 /dev/zero >&2\n", OUT_MAX + 1000)).unwrap();
-        let o = spawn_within(&fake, &root, &["log"], &[], Duration::from_secs(20)).unwrap();
+        let o = spawn_within(&fake, &root, None, &["log"], &[], Duration::from_secs(20)).unwrap();
         assert_eq!((o.stdout.len(), o.over, o.stderr.len()), (OUT_MAX, true, ERR_MAX));
         // It ends, but leaves something of its own (outside its group) holding its output: the call doesn't wait for it.
         let held = root.join("held-pid");
         std::fs::write(&fake, format!("#!/bin/sh\nset -m\nsleep 30 &\necho $! > \"{}\"\necho partial\n", held.display())).unwrap();
         let t = Instant::now();
-        let e = spawn_within(&fake, &root, &["log"], &[], Duration::from_secs(20)).err().unwrap();
+        let e = spawn_within(&fake, &root, None, &["log"], &[], Duration::from_secs(20)).err().unwrap();
         assert!(e.to_string().contains("didn't end"), "{e}");
         assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
         if let Some(pid) = std::fs::read_to_string(&held).ok().and_then(|p| p.trim().parse::<i32>().ok()) {
@@ -1140,20 +1230,173 @@ mod tests {
         }
     }
 
+    /// A git at `dir/git` (Windows: `git.exe`, and a `git.cmd` beside it that is never taken) that can be started.
+    fn put_git(dir: &Path) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let f = dir.join(if cfg!(windows) { "git.exe" } else { "git" });
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::write(dir.join("git.cmd"), "").unwrap();
+        dunce::canonicalize(f).unwrap()
+    }
+
     #[test]
-    fn git_is_looked_for_only_where_the_system_installs_it() {
+    fn git_is_found_where_the_system_installs_it_then_on_the_users_path_never_in_a_plugins_folder_or_echos() {
         let (_env, root) = paths::testenv::folders("jshost-git-where");
-        // A git in the user's own folders (the test's home) is never taken, whatever PATH says.
-        for d in [".local/bin", ".npm-global/bin"] {
-            std::fs::create_dir_all(root.join("user").join(d)).unwrap();
-            std::fs::write(root.join("user").join(d).join(if cfg!(windows) { "git.exe" } else { "git" }), "").unwrap();
+        // The user's own tools folder on PATH: its git found. A folder given to a plugin, Echo's data folder, Echo's
+        // own folder and a relative entry: skipped, even before it.
+        let theirs = put_git(&root.join("tools/bin"));
+        let granted = root.join("vault");
+        put_git(&granted.join("bin"));
+        crate::grants::grant("some-plugin", &granted).unwrap();
+        put_git(&crate::paths::home().join("bin"));
+        put_git(&crate::paths::config_dir().join("bin"));
+        let path = std::env::join_paths([PathBuf::from("bin"), granted.join("bin"), crate::paths::home().join("bin"), crate::paths::config_dir().join("bin"), root.join("tools/bin")]).unwrap();
+        assert_eq!(path_candidates(&path), [theirs.clone()]);
+        // A git file that can't be started (Unix: not executable) isn't one.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(path_candidates(&path).is_empty());
+            std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let list = candidates();
-        assert!(list.iter().all(|c| c.is_absolute() && !c.starts_with(&root) && !c.starts_with(crate::paths::user_home())), "{list:?}");
-        assert!(list.iter().all(|c| c.file_name().is_some_and(|n| n == if cfg!(windows) { "git.exe" } else { "git" })), "{list:?}");
+        // The system's places, looked in first: none of the user's.
+        let list = system_candidates();
+        assert!(list.iter().all(|c| c.is_absolute() && !c.starts_with(&root)), "{list:?}");
         if let Ok(git) = program() {
-            assert!(list.contains(&git), "{git:?}");
+            assert!(git.is_absolute() && !git.starts_with(&root), "{git:?}");
         }
+    }
+
+    /// A plugin with `folders.write` can lay out a bare repository's files in its own folder (`HEAD`, `config`,
+    /// `objects/`, `refs/`, `info/attributes` aren't hidden) and change its `config` while git runs: such a folder is no
+    /// repository Echo runs git in — only a real `.git` folder is, which no plugin can write.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_a_plugin_laid_out_in_its_own_folder_is_never_used() {
+        let (_env, root) = paths::testenv::folders("jshost-git-bare");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "bare", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        let v = dunce::canonicalize(&vault).unwrap().display().to_string();
+        let mark = root.join("filtered");
+        let filter = marker(&root.join("filter.sh"), &mark, true);
+        let write = |rel: &str, text: &str| service("bare", "fs.write", &json!([v, rel, text])).unwrap();
+        let benign = format!("[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = {v}\n");
+        let evil = format!("{benign}[filter \"evil\"]\n\tclean = {filter}\n");
+        write("HEAD", "ref: refs/heads/main\n");
+        write("config", &benign);
+        write("info/attributes", "*.md filter=evil\n");
+        write("a.md", "# A\n");
+        for d in ["objects", "refs/heads"] {
+            service("bare", "fs.mkdir", &json!([v, d])).unwrap();
+        }
+        // While git runs, the plugin flips its settings between harmless and a filter.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flipper = {
+            let (stop, v, benign, evil) = (stop.clone(), v.clone(), benign.clone(), evil.clone());
+            std::thread::spawn(move || {
+                let mut n = 0;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = service("bare", "fs.write", &json!([v, "config", if n % 2 == 0 { &evil } else { &benign }]));
+                    n += 1;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+        let mut answers = vec![];
+        for i in 0..20 {
+            std::fs::write(vault.join("a.md"), format!("# A {i}\n")).unwrap();
+            answers.push(run("bare", "commit", json!({"paths": ["a.md"], "message": "x"})));
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        flipper.join().unwrap();
+        write("config", &benign);
+        assert!(!mark.exists(), "a filter the plugin set ran");
+        for a in answers {
+            assert!(a.as_ref().is_err_and(|e| e.contains("a bare repository")), "{a:?}");
+        }
+        assert!(run("bare", "info", json!({})).unwrap_err().contains("a bare repository"));
+        assert!(run("bare", "init", json!({})).unwrap_err().contains("a bare repository"));
+        plugins::remove("bare", true).unwrap();
+        sync();
+    }
+
+    /// The plugin writes nothing into a `.git` of its folder: by `ctx.fs.write`, `append`, `mkdir`, `move` or `copyIn`.
+    #[test]
+    fn a_plugin_writes_nothing_into_its_folders_git() {
+        let (_env, root) = paths::testenv::folders("jshost-git-dotgit");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "inner", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        one_commit(&vault);
+        let v = dunce::canonicalize(&vault).unwrap().display().to_string();
+        let config = std::fs::read(vault.join(".git/config")).unwrap();
+        std::fs::write(root.join("evil.txt"), "[core]\n\tfsmonitor = /bin/sh\n").unwrap();
+        let handle = super::super::files::make("inner", &root.join("evil.txt")).unwrap();
+        for (what, r) in [
+            ("write", service("inner", "fs.write", &json!([v, ".git/config", "x"]))),
+            ("write a hook", service("inner", "fs.write", &json!([v, ".git/hooks/pre-commit", "x"]))),
+            ("append", service("inner", "fs.append", &json!([v, ".git/config", "x"]))),
+            ("mkdir", service("inner", "fs.mkdir", &json!([v, ".git/info"]))),
+            ("move", service("inner", "fs.move", &json!([v, "a.md", ".git/info/attributes"]))),
+            ("copyIn", super::super::files::copy_in("inner", &handle, &v, ".git/config", false)),
+            ("copyIn, a case away", super::super::files::copy_in("inner", &handle, &v, ".GIT/config", false)),
+        ] {
+            assert!(r.as_ref().is_err_and(|e| e.to_string().contains("hidden")), "{what}: {r:?}");
+        }
+        assert_eq!(std::fs::read(vault.join(".git/config")).unwrap(), config);
+        assert!(!vault.join(".git/hooks/pre-commit").exists() && vault.join("a.md").exists());
+        plugins::remove("inner", true).unwrap();
+        sync();
+    }
+
+    /// `core.worktree` at an ancestor and `.git/objects` and `refs` linked into another repository: every path is
+    /// inside that "top", and a commit would land in the other repository. Refused; so is any `core.worktree`.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_whose_worktree_is_set_elsewhere_is_refused() {
+        use std::os::unix::fs::symlink;
+        let (_env, root) = paths::testenv::folders("jshost-git-worktree");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let other = root.join("private");
+        one_commit(&other);
+        let head = user_git(&other, &["rev-parse", "HEAD"]);
+        let vault = root.join("vault");
+        install(&root, "wide", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        user_git(&vault, &["init", "-q", "-b", "main"]);
+        std::fs::write(vault.join("n.md"), "# N\n").unwrap();
+        for d in ["objects", "refs"] {
+            std::fs::remove_dir_all(vault.join(".git").join(d)).unwrap();
+            symlink(other.join(".git").join(d), vault.join(".git").join(d)).unwrap();
+        }
+        for top in ["/", root.to_str().unwrap()] {
+            user_git(&vault, &["config", "core.worktree", top]);
+            for (cmd, a) in [("info", json!({})), ("status", json!({})), ("log", json!({})), ("commit", json!({"paths": ["n.md"], "message": "x"}))] {
+                let r = run("wide", cmd, a);
+                assert!(r.as_ref().is_err_and(|e| e.contains("core.worktree")), "{top} {cmd}: {r:?}");
+            }
+            assert_eq!(user_git(&other, &["rev-parse", "HEAD"]), head, "nothing committed into the other repository");
+        }
+        // Set to the vault itself: still refused (Echo sets the work tree; the repository never does).
+        user_git(&vault, &["config", "core.worktree", vault.to_str().unwrap()]);
+        assert!(run("wide", "info", json!({})).unwrap_err().contains("core.worktree"));
+        plugins::remove("wide", true).unwrap();
+        sync();
     }
 
     /// A script at `at` that leaves `mark` when it runs; `reads`: then passes its input on (a filter, a pager).

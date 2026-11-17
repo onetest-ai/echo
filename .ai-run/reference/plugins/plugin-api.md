@@ -344,9 +344,11 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     characters. Committed by `Echo (<plugin id>) <<plugin id>@plugins.echo.invalid>`; its author the user's git name
     and address when git knows both, else that too. No hook runs, nothing is signed. Refused while a merge, rebase,
     cherry-pick, revert or bisect is under way, and for a file the repository ignores.
-  - Refused: no git where the system installs it ("git isn't installed on this computer"), git older than 2.31, a
-    repository whose history lies outside its folder (a `gitdir:` file, `core.worktree`, a linked worktree or
-    submodule, a link in `.git`), that borrows objects (alternates), is a partial clone, or whose settings can't be read
+  - Refused: no git where the system installs it or on the user's `PATH` ("git isn't installed on this computer"; a
+    `PATH` folder inside a folder given to a plugin or inside Echo's own is skipped), git older than 2.31, a repository
+    whose history lies outside its folder (a `gitdir:` file, a linked worktree or submodule, a link as or in `.git`),
+    one setting `core.worktree`, a bare repository (`HEAD`, `objects` and `refs` not in a `.git` folder) or one
+    another user owns, one that borrows objects (alternates), is a partial clone, or whose settings can't be read
     whole (over 16 MB, a name that isn't UTF-8); git taking over 20 s is stopped. Nothing is fetched. Nothing a repository's settings, hooks or attributes name
     runs (Host § Git).
 - Its window half shows images of a folder it was given (with `uses.folders`) from

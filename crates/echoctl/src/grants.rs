@@ -51,6 +51,17 @@ pub fn folders(id: &str) -> Vec<PathBuf> {
     v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(PathBuf::from).filter(|p| p.is_dir()).collect()
 }
 
+/// The folders given to any plugin, switched on or off.
+pub fn all_folders() -> Vec<PathBuf> {
+    std::fs::read_dir(paths::config_dir().join("plugins").join("grants"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".json").map(str::to_owned))
+        .flat_map(|id| folders(&id))
+        .collect()
+}
+
 fn save_folders(id: &str, list: &[PathBuf]) -> Result<()> {
     let f = grants_file(id);
     std::fs::create_dir_all(f.parent().expect("a parent"))?;
