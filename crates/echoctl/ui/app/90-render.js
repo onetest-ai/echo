@@ -178,7 +178,7 @@ function renderNow() {
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite" aria-label="Notices">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
-  const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout
+  const layout = activityOf(S.view).layout
   if (primary.dataset.layout !== layout || primary.dataset.view !== S.view) {
     primary.innerHTML = layout === 'list-detail' ? '<div class="list-detail" id="r-ld"><div class="region" id="r-list"></div><main class="main" id="r-main"></main></div>' : ''
     primary._html = undefined
