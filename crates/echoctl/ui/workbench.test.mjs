@@ -8,7 +8,7 @@ const src = appSource()
 const start = src.indexOf('// ── workbench: what the window is made of')
 const end = src.indexOf('// end of the workbench block', start)
 assert.ok(start >= 0 && end > start, 'the workbench block not found in app.js')
-const { ACTIVITIES, callTabs, eventAction, meetingApp, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, callTabs, eventAction, meetingApp, Layout }`)()
+const { ACTIVITIES, activityOf, callTabs, eventAction, meetingApp, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, activityOf, callTabs, eventAction, meetingApp, Layout }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -21,6 +21,17 @@ test('Today comes first, then Calls (list beside the call) and Calendar (one col
 
 test('each of Echo\'s own views draws itself, but Calls: the list beside the call, drawn when no activity draws', () => {
   assert.deepEqual(ACTIVITIES.filter((a) => a.draw).map((a) => a.id), ['today', 'calendar', 'projects', 'tasks', 'brain', 'settings'])
+})
+
+test('a view is drawn in its activity\'s layout; one no activity has (a plugin just switched off) in Calls\', the list beside the call it draws (#731)', () => {
+  assert.equal(activityOf('settings').layout, 'single')
+  assert.equal(activityOf('calls').layout, 'list-detail')
+  for (const gone of ['acme-page:main', undefined, '']) {
+    assert.equal(activityOf(gone).id, 'calls', String(gone))
+    assert.ok(!activityOf(gone).draw, 'drawn by drawCalls, which needs the list-detail layout')
+  }
+  ACTIVITIES.push({ id: 'acme-page:main', label: 'Acme page', layout: 'single', plugin: 'acme-page' })
+  try { assert.equal(activityOf('acme-page:main').plugin, 'acme-page', 'while its plugin is on: its own') } finally { ACTIVITIES.pop() }
 })
 
 test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {

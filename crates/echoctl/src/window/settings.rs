@@ -387,17 +387,17 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 Ok(d) => {
                     crate::app::open_path(&d.join("SKILL.md"));
                     let id = d.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-                    Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, true, 'sk')", json!(id))) }
+                    Handled::answer(false, "templateSaved", json!([id, true, "sk"]))
                 }
                 Err(e) => notice(&format!("{e:#}")),
             }
         }
         "skill_remove" => match crate::skills::remove(v["id"].as_str().unwrap_or("")) {
-            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'sk')".into()) },
+            Ok(()) => Handled::answer(false, "templateSaved", json!([null, false, "sk"])),
             Err(e) => notice(&format!("{e:#}")),
         },
         "skill_on" => match crate::skills::set_on(v["id"].as_str().unwrap_or(""), v["on"] == true) {
-            Ok(()) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, false, 'sk')", json!(v["id"]))) },
+            Ok(()) => Handled::answer(false, "templateSaved", json!([v["id"], false, "sk"])),
             Err(e) => notice(&format!("{e:#}")),
         },
         "skill_open" => {
@@ -410,11 +410,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         }
         // Settings → Templates → Meeting types: save one (a built-in keeps its id), take the user's away.
         "meeting_type_save" => match crate::calls::meeting_type_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["about"].as_str().unwrap_or("")) {
-            Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'mt')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
+            Ok(id) => Handled::answer(false, "templateSaved", json!([id, v["id"].as_str().is_none_or(str::is_empty), "mt"])),
             Err(e) => notice(&format!("{e:#}")),
         },
         "meeting_type_remove" => match crate::calls::meeting_type_remove(v["id"].as_str().unwrap_or("")) {
-            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'mt')".into()) },
+            Ok(()) => Handled::answer(false, "templateSaved", json!([null, false, "mt"])),
             Err(e) => notice(&format!("{e:#}")),
         },
         // Settings → Templates: save one (a built-in keeps its id: edited), take the user's file away (Reset / Delete).
@@ -424,12 +424,12 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             match crate::calls::template_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), &words, v["header"].as_str().unwrap_or(""), &sections, v["fixed"].as_bool()) {
                 // `true`: a new one (the window selects it).
                 // The number of the switch change this save sent (null: none), so the editor knows that change is saved.
-                Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, null, {})", json!(id), v["id"].as_str().is_none_or(str::is_empty), json!(v["fixedGen"].as_u64()))) },
+                Ok(id) => Handled::answer(false, "templateSaved", json!([id, v["id"].as_str().is_none_or(str::is_empty), null, v["fixedGen"].as_u64()])),
                 Err(e) => notice(&format!("{e:#}")),
             }
         }
         "template_remove" => match crate::calls::template_remove(v["id"].as_str().unwrap_or("")) {
-            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null)".into()) },
+            Ok(()) => Handled::answer(false, "templateSaved", json!([null])),
             Err(e) => notice(&format!("{e:#}")),
         },
         "view_state" => {

@@ -465,8 +465,8 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
         // Projects and clients: every change the page makes (`project_op`); a new one is opened.
         "project" => match project_op(v) {
-            Ok(Some(id)) if v["op"] == "create" || v["op"] == "found_accept" => Handled { refresh: true, reply: Some(format!("window.echo && window.echo.projectCreated({})", json!(id))) },
-            Ok(Some(id)) if v["op"] == "client_add" => Handled { refresh: true, reply: Some(format!("window.echo && window.echo.clientCreated({})", json!(id))) },
+            Ok(Some(id)) if v["op"] == "create" || v["op"] == "found_accept" => Handled::answer(true, "projectCreated", json!([id])),
+            Ok(Some(id)) if v["op"] == "client_add" => Handled::answer(true, "clientCreated", json!([id])),
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },

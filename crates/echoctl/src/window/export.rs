@@ -20,9 +20,9 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 crate::app::reveal_file(&path);
             }
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.notice({})", json!(format!("Saved to Downloads: {name}")))) }
+            Handled::answer(false, "notice", json!([format!("Saved to Downloads: {name}")]))
         }
-        Err(e) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.notice({})", json!(format!("Couldn't save the export: {e:#}")))) },
+        Err(e) => Handled::answer(false, "notice", json!([format!("Couldn't save the export: {e:#}")])),
     })
 }
 
