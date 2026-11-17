@@ -44,6 +44,7 @@ use sources::*;
 mod snapshot;
 pub use snapshot::snapshot;
 pub mod mine;
+pub mod pins;
 pub mod presets;
 pub mod routines;
 pub(crate) use sources::copy_tree;
@@ -1324,8 +1325,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     signin::forget_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
-        let _ = fs::remove_file(secrets_file(id));
-        let _ = fs::remove_file(addresses_file(id));
+        let _ = (fs::remove_file(secrets_file(id)), fs::remove_file(addresses_file(id)));
+        pins::remove_plugin(id);
         thread_values::forget(id);
         #[cfg(feature = "js")]
         crate::jshost::folders::forget(id);
@@ -1391,6 +1392,7 @@ pub fn page_op(v: &Value) -> Result<()> {
                 None => set_setting(&id, &key, &value),
             }
         }
+        "cert_trust" | "cert_forget" => pins::page_op(v),
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
         "market_remove" => market_remove(&s("name"), v["keep_data"].as_bool().unwrap_or(true)).map(|_| ()),
         "market_add" => {

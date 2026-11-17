@@ -141,13 +141,15 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 
 ## Network
 
-`ctx.http.fetch(url, {method, headers, body, save?})` resolves `{status, body}` for any HTTP answer, a redirect too
-(never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. Plain http is allowed only to
+`ctx.http.fetch(url, {method, headers, body, save?, file?})` resolves `{status, body}` for any HTTP answer, a redirect
+too (never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. With `save` (a path in its
+store) or `file` (a handle the user handed it, `ctx.files`, sent as the body as it is with `POST`, `PUT` or `PATCH` —
+never with `body` too) the limits are 512 MB each way and 15 minutes. Evidence: `jshost::http::fetch` Plain http is allowed only to
 an address the user listed, any host; one outside the user's own network (private IPv4 ranges, `localhost`, `*.local`)
 gets a note on the setting's row and from `echoctl plugin set` ("plain http: anyone on the way can read it"). Only the
 user enters those addresses (window or CLI), never the plugin (`ctx.settings.set`, its `settings.json`, a manifest
 `default`). The sheet's line: "Talks to the addresses you list in its setting “<key>” (wildcards allowed, plain http
-too; its window part also over WebSocket)". Evidence: `jshost::fetch`, `jshost::curl_head`, `plugins::addresses`,
+too; its window part also over WebSocket)". Evidence: `jshost::http::fetch`, `jshost::http::curl_head`, `plugins::addresses`,
 `plugins::listed_addresses`, `plugins::addresses::notes`
 
 The list is `scheme://host[:port]` patterns (http or https; no port: the scheme's own; `:*` any), comma- or
@@ -181,19 +183,60 @@ holds an address the window may reach. Evidence: `plugins::SHARED_WINDOW`
 - `fetch` and `EventSource` still go through CORS: the server must allow Echo's origin (`echo://localhost` on macOS,
   `http://echo.localhost` on Windows; `Access-Control-Allow-Origin: *` covers both). WebSocket has no CORS: the
   server sees the page's `Origin` and decides.
-- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview (no pinning yet); use plain
-  `ws://` / `http://` inside the user's own network, or a certificate the system trusts.
-- The host half has no WebSocket or streaming (`ctx.http.fetch` only), and no microphone.
+- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview: the keys the user trusts are the
+  host half's alone (below). Reach such a server from the host half, use plain `ws://` / `http://` inside the user's own
+  network, or a certificate the system trusts.
+- The host half has no microphone.
 
 Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::Address::csp_sources`, `netReload`
 (window script)
 
+**The host half's connections** (it runs without the window, so it has none of the page's Web APIs):
+
+- `ctx.http.stream(url, {method, headers, body, file}, onChunk)` → `{status, headers, done, cancel()}` at once, the same
+  checks as `fetch`: `onChunk(text, s)` for each piece as it comes (SSE, chunked; UTF-8 never cut inside a character),
+  `status` and `headers` (lower-case names) set once the answer's head arrived, `done` resolving `{status, bytes,
+  cancelled}` at its end (rejecting with why it failed), `cancel()` ending it. No time limit (an event stream stays
+  open), 512 MB at most. Evidence: `jshost::http::stream`
+- `await ctx.net.websocket(url, {headers, protocols})` → `{protocol, send, close, onMessage, onClose, onError}` once
+  open (rejects with why not): `ws://` and `wss://` only to an address the user listed — its `http://` / `https://`
+  address and port (never a `network.hosts` host). `send(text)`, `send(base64, {binary: true})`, `send(handle)` (a file
+  the user handed it, as one binary message); `onMessage(data, {binary})` (binary as base64), `onClose({code,
+  reason})`, `onError({message})`; `close(code, reason)` (1000 or 3000–4999). Events wait for their handler, set after
+  the `await` — up to 1,000 of them and 8 MB of their data, all the plugin's WebSockets together; past that the
+  connection is closed and `onError` says why. Headers can't be the WebSocket's own (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-*`); `protocols`
+  are plain words. Evidence: `jshost::net::websocket`
+- Each runs on a thread of its own; its events reach the plugin's JavaScript like Echo's other events, one slice each.
+  A plugin keeps 8 connections (WebSockets and streams) open at once. A WebSocket message is 16 MB at most out and 4 MB
+  in (binary in arrives as base64, in the 64 MB every plugin's host half shares): a bigger one in closes the connection
+  (code 1009) with an error saying so. While the plugin is 256 events behind on a connection, or its connections' events
+  waiting for it pass 16 MB together, Echo reads no more from them. Switching the plugin off, updating or removing it closes every one (no event follows). Evidence:
+  `jshost::net::MOST`, `jshost::net::stop_plugin`
+
+**Certificates the system doesn't trust** (a server of the user's own, self-signed or from an internal CA): https and
+wss to an address the user listed fail the first time with the key of the certificate met there — "the certificate at
+`<host:port>` isn't one this computer trusts (its key: `sha256//…`): if it is your own server's, trust it in Settings →
+Plugins → `<name>`, or with `echoctl plugin trust <id> <host:port>`" — and Echo keeps that key as met. The user trusts
+it in the plugin's detail under Certificates ("Trust": a dialog of the system's asks again) or with `echoctl plugin
+trust <id> <host:port> [--key sha256//…]`; `echoctl plugin certs <id>` lists them, `echoctl plugin untrust <id>
+<host:port>` (or "Forget") drops one. Without `--key` `trust` takes the key `certs` shows as met, and is refused (give
+`--key`) once Echo met more than one key there since the user last trusted or forgot one. From then on that address is reached with that key alone — not the system's
+trust, its name or dates — and another key is refused ("… changed since you trusted it (its key is now …; you trusted
+…): refused until you …") until the user trusts it. A key is the SHA-256 of the certificate's public key, as curl's
+`--pinnedpubkey` writes it (`openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst
+-sha256 -binary | base64`): a certificate renewed with the same key goes through. Echo keeps them outside the plugin's
+store (`<config dir>/plugins/pins/<id>.json`), only for https addresses the user listed; no plugin sets one, and none
+is changed from inside a run Echo started. A plugin removed with its data loses them. Evidence: `plugins::pins`,
+`jshost::tls::connect`
+
 | Rejected | When |
 |---|---|
-| the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`) |
+| the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`); a WebSocket: not an address the user listed |
+| the certificate | https / wss to a listed address the system doesn't trust and no key trusted, or not the key the user trusted |
+| too many | a 9th connection open at once, a WebSocket message over 16 MB out or 4 MB in, a file sent over 512 MB |
 | the method | other than `GET`, `POST`, `PUT`, `PATCH` or `DELETE` |
-| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
-| the request | the host can't be reached, the 60 s or the 10 MB passed |
+| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too); `Content-Length` or `Transfer-Encoding` with `file` (Echo sets them) |
+| the request | the host can't be reached, the 60 s or the 10 MB passed (15 minutes, 512 MB with `save` or `file`) |
 
 **A typed address** (`uses.network.ask: true`): `await ctx.http.askAddress()` opens Echo's own box — the system's text
 dialog, not the plugin's page — saying, in Echo's words, "<plugin name> asks for the address of a web page to fetch
