@@ -231,7 +231,8 @@ document.addEventListener('keydown', (e) => {
 
 window.addEventListener('resize', () => render())
 
-window.addEventListener('hashchange', async () => {
+/** The window follows the address: routed, drawn, and its view's data loaded (on a hashchange, and after `go(hash, {replace: true})`). */
+const hashChanged = async () => {
   route()
   render()
   if (S.view === 'calendar' && !S.cal.data) { await loadCalendar(); render() }
@@ -241,5 +242,6 @@ window.addEventListener('hashchange', async () => {
   if (S.view === 'today') { await loadToday(); render() }
   if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
-})
+}
+window.addEventListener('hashchange', hashChanged)
 

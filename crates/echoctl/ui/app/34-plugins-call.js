@@ -9,7 +9,7 @@
 function slotCallPage(c) {
   const ps = c.projects || []
   return {
-    name: c.name, title: c.title, started_at: c.started_at || null, notes: !!c.notes,
+    name: c.name, stamp: callStamp(c.name), title: c.title, started_at: c.started_at || null, notes: !!c.notes,
     profile: (c.live && c.live.profile) || null, memo: !!c.memo,
     threads: ps.map((p) => p.id), client: (ps.find((p) => p.client) || {}).client || null,
   }

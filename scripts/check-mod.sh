@@ -82,6 +82,7 @@ node crates/echoctl/ui/thread-slot.test.mjs
 node crates/echoctl/ui/client-slot.test.mjs
 # The plugins' chips on a call's row in the calls list (callRowChips).
 node crates/echoctl/ui/call-row-slot.test.mjs
+node crates/echoctl/ui/go-replace.test.mjs
 # Plugins on a call's page: header boxes, the ⋯ menu's labels and groups, minutes lines while coming, the one sheet;
 # a plugin activity's badge and its box kept while the user edits in it.
 node crates/echoctl/ui/call-slots.test.mjs

@@ -40,7 +40,7 @@ function callMenu(c) {
     c.notes ? item('write-notes', 'Write minutes again') : '',
     c.notes && c.template && c.template.why !== 'memo' ? writeAgainWith(c) : '',
     item('ask-claude', 'Ask Claude about this call'),
-    slotItems('call.menu', { kind: 'call', call: c }, 'menu'),
+    slotItems('call.menu', { kind: 'call', call: { ...c, stamp: callStamp(c.name) } }, 'menu'),
     '<div class="menu-sep" role="separator"></div>',
     item('ask-delete', 'Delete…', ' danger'),
   ].join('')
