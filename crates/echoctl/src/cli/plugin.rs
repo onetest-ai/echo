@@ -101,6 +101,10 @@ pub enum PluginCmd {
         event: String,
         /// JSON object (default {})
         payload: Option<String>,
+        /// Build the payload as Echo does instead: from a call's folder (`minutes_written`) or a Recall source
+        /// (`sources_changed`: `mail/…`, `channel/…`)
+        #[arg(long, conflicts_with = "payload")]
+        from: Option<String>,
     },
     /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
     Marketplace {
@@ -315,8 +319,11 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
-        PluginCmd::Emit { event, payload } => {
-            let payload: serde_json::Value = serde_json::from_str(payload.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the payload isn't JSON: {e}"))?;
+        PluginCmd::Emit { event, payload, from } => {
+            let payload: serde_json::Value = match from {
+                Some(from) => emit_from(&event, &from)?,
+                None => serde_json::from_str(payload.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the payload isn't JSON: {e}"))?,
+            };
             plugins::thread_values::emit(&event, &payload, cfg!(debug_assertions))?;
             println!("Queued {event}: the running app takes it within a second, or at its next start");
         }
@@ -364,6 +371,22 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         },
     }
     Ok(())
+}
+
+/// `plugin emit --from`: the payload as Echo builds it — `minutes_written` of a call's folder, `sources_changed` of
+/// one Recall source.
+#[cfg(feature = "js")]
+fn emit_from(event: &str, from: &str) -> Result<serde_json::Value> {
+    match event {
+        "minutes_written" => Ok(crate::share::minutes_payload(&crate::calls::resolve_call(from)?)),
+        "sources_changed" => crate::share::sources_payload(&[from.to_string()], &[]).ok_or_else(|| anyhow::anyhow!("not a mail or post: {from} (mail/… | channel/…)")),
+        e => anyhow::bail!("--from builds minutes_written or sources_changed, not {e}"),
+    }
+}
+
+#[cfg(not(feature = "js"))]
+fn emit_from(_event: &str, _from: &str) -> Result<serde_json::Value> {
+    anyhow::bail!("this build has no plugins")
 }
 
 /// `plugin call --file`: a handle of plugin `id` for each file. Handing a plugin a file is the user's own act: refused

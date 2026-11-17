@@ -461,7 +461,7 @@
   },
   {
    "id": "F-PLUG-36",
-   "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered; in a debug build `echoctl plugin emit <event> <json>` queues one as Echo would tell it, for the running app (or a served window) to deliver — refused in a release build, for an event Echo hasn't, and for a payload that isn't a JSON object",
+   "feature": "A plugin hears what happens in Echo that its manifest asks for (`uses.events.on`, `ctx.on`; the sheet: 'Knows when …'): meeting_soon (its id, subject, start and its threads' ids, [] when none known), call_started, call_ended, recording_started, recording_stopped, transcribed, minutes_written, thread_synced, sources_changed, threads_changed, shared_changed (only the namespace's other plugins); an event this Echo doesn't have is named on the sheet and never delivered; in a debug build `echoctl plugin emit <event> <json>` queues one as Echo would tell it, for the running app (or a served window) to deliver (`--from <call folder | Recall source>` builds a `minutes_written` / `sources_changed` payload as Echo does) — refused in a release build, for an event Echo hasn't, and for a payload that isn't a JSON object",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -650,7 +650,7 @@
   },
   {
    "id": "F-PLUG-70",
-   "feature": "A plugin reads Echo's calls as its sheet says (`ctx.echo.read`): `calls` lists them newest first with or without minutes (`{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}`; `q` every word in title, folder, subject or people, `since`, `limit` 50 up to 500) and `source` of a call also gives its `started_at`, `ended_at`, `app`, `platform`, `memo`, the invite's `attendees` and its meeting `chat`, its threads with their client's name; the sheet says \"the list of your calls (titles, times, who was invited, their threads)\" and \"your calls' minutes, transcripts, meeting chat and who was invited, …\"; a kind it didn't ask for is refused",
+   "feature": "A plugin reads Echo's calls as its sheet says (`ctx.echo.read`): `calls` lists them newest first with or without minutes (`{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}`; `q` every word in title, folder, subject or people, `since`, `limit` 50 up to 500) and `source` of a call also gives its `started_at`, `ended_at`, `duration_min`, `app`, `platform`, `memo`, the invite's `attendees`, its `participants` with the person Echo knows each as (`person`, null when none), its meeting `chat` and transcript (each left out with `{chat: false}` / `{transcript: false}`), its threads with their client's name and its `client` (`{id, name}` when its threads have one, else null), and its `minutes` by section (`summary`, `decisions`, `questions`, `actions` as Echo keeps them `{id, text, owner, due, done}`, `revision`, `body` without the header); the sheet says \"the list of your calls (titles, times, who was invited, their threads)\" and \"your calls' minutes, transcripts, meeting chat and who was invited, …\"; a kind it didn't ask for is refused",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -777,6 +777,15 @@
    "priority": "medium",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-106",
+   "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

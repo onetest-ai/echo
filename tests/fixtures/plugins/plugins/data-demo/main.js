@@ -1,7 +1,10 @@
 // The test plugin's host half (tests/cases/plugins/TC-100 to TC-105): each command reads one thing and answers it.
 export function apply(ctx) {
   ctx.command('calls', (a) => ctx.echo.read('calls', a || {}))
-  ctx.command('source', (a) => ctx.echo.read('source', a.id))
+  ctx.command('source', (a) => ctx.echo.read('source', a.id, a.opts))
+  // It reads sources, so it hears minutes_written whole (tests/cases/plugins/TC-045).
+  ctx.command('minutes', () => JSON.parse(ctx.store.read('minutes.json') || '[]'))
+  ctx.on('minutes_written', (p) => { const h = JSON.parse(ctx.store.read('minutes.json') || '[]'); h.push(p); ctx.store.write('minutes.json', JSON.stringify(h)) })
   ctx.command('calendar', () => ctx.echo.read('calendar'))
   ctx.command('me', () => ctx.echo.read('me'))
   ctx.command('threads', () => ctx.echo.read('threads'))

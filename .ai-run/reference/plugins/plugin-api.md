@@ -109,9 +109,21 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
 `call_started`, `call_ended`, `recording_started`, `recording_stopped`, `transcribed`, `minutes_written`,
 `thread_synced`, `sources_changed`, `threads_changed`, `shared_changed`.
 
+A call is named by its folder (`call`, as `call:<folder>` is its source id), never its path. A plugin that reads
+sources (`uses.echo.read` names `source` or `sources`) hears `minutes_written` and `sources_changed` whole; any other
+plugin that hears them gets them without the keys marked *readers* below (`plugins::as_heard`).
+
 | Event | Payload |
 |---|---|
 | `meeting_soon` | `{id, subject, start, threads}` (`threads`: the ids of the threads Echo puts the meeting in, `[]` when none) |
+| `call_started` | `{app}`: `teams` or `meet` |
+| `call_ended` | `{app, recording, next_call}`: `recording` whether Echo was recording it, `next_call` true when Teams went straight on to another call (its `call_started` follows) |
+| `recording_started` | `{call, title, memo}`: `title` the arm's, else the meeting's subject (a memo's `Memo`) |
+| `recording_stopped` | `{call, duration_s, reason}`: `reason` `call_ended`, `user`, `next_call`, `computer_slept` or `watch_stopped` |
+| `transcribed` | `{call, ok}`: `ok` false when the transcription failed |
+| `minutes_written` | `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}`; *readers* also `threads`, `client`, `profile`, `participants`, `minutes` — as `echo.read('source')` gives them for the call (§ Echo's data), `minutes` without `body`. `revision`: 16 hex characters of the minutes, another one when they change; `rewritten`: Echo told this call's minutes before (they were written again). No transcript or chat |
+| `thread_synced` | `{thread, processed, left}`: a thread's work read again from its calls and mail — how many calls were read, how many wait for the next sync |
+| `sources_changed` | `{changed, removed}`: the ids (`mail:<source>`) of Recall's mail conversations and channel posts new or changed, and gone, after a sync; *readers* also `items` — for each changed one (100 at most) what Recall decided when it indexed it: `{id, kind, title, subject, at, threads, client, profile, from, people, trust, link, url}` (§ Echo's data, `source` of a mail or post), never its text. Nothing for a removed one but its id |
 | `threads_changed` | `{thread, born, change: 'renamed', name, from}`, `{thread, born, change: 'merged', into, dropped}` (each key `into` lacks is moved to it; `dropped`: yours that didn't fit in its 64) or `{thread, born, change: 'deleted', values}` (your own values, removed); `born` tells this thread from a later one with its id |
 | `shared_changed` | `{namespace, key, thread?, by}`: a shared value changed (not the same value again), told to the namespace's other plugins, never to the one that set it; it carries no value |
 
@@ -119,7 +131,8 @@ A call's words are not in a payload: read them with `ctx.echo.read('source', id)
 `threads_changed` and `shared_changed` from another process (`echoctl project delete`, a terminal's `plugin call`),
 which wait for the running app (heard within about a second, or at its next start), at least once; a queued `renamed`
 or `deleted` of an id that by then belongs to a new thread is dropped.
-Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::shared::tell_changed`
+Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `share::sources_payload`,
+`plugins::thread_values::take_queued`, `plugins::shared::tell_changed`
 
 ## Store
 
@@ -385,7 +398,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 
 | Read | Sheet ("Reads … in Echo") | Gives |
 |---|---|---|
-| `source` (`sources` too) | your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels | `ctx.echo.read('source', 'call:<folder>' \| 'mail:<source>')` → `{id, kind, title, date, text, link, threads, profile, transcript?}` (a call needs its minutes); a call's also `started_at`, `ended_at`, `app`, `platform`, `memo`, `attendees` (the invite's `{name, email}`, organizer first) and `chat` (`[{at, from, text, files}]`, `[]` when none); a thread `{id, name, client, client_name}`; `profile` the AI profile its text may go to |
+| `source` (`sources` too) | your calls' minutes, transcripts, meeting chat and who was invited, and the facts of your threads' mail and channels | `ctx.echo.read('source', 'call:<folder>' \| 'mail:<source>', opts?)` → `{id, kind, title, date, text, link, threads, client, profile}` (a call needs its minutes): `threads` where Echo put it, each `{id, name, client, client_name}`; `client` `{id, name}` when its threads have one client between them, else `null`; `profile` the AI profile its text may go to (a call's own; a mail's threads' when they share one, else `null`). **A call's** also `started_at`, `ended_at`, `duration_min`, `app`, `platform`, `memo`, `attendees` (the invite's `{name, email}`, organizer first), `participants` (the same with `person`: their key in `echo.read('people')`, by address, else by name; `null` when Echo doesn't know them; 50 at most), `minutes`, `transcript` (as Echo writes it) and `chat` (`[{at, from, text, files}]`, `[]` when none) — `opts` `{transcript: false}` / `{chat: false}` leave those two out. `minutes`: `{summary, decisions, actions, questions, revision, body}` — `summary` the text under the heading with "summary" in it, `decisions` / `questions` the bullets under headings with "decision" / "question" (50 at most, 500 characters each), `actions` the call's action items as Echo keeps them `{id, text, owner, due, done}`, `revision` as `minutes_written`'s, `body` the minutes' Markdown from their first `## ` heading (without the title, date and who lines). **A mail conversation's or channel post's** (`kind` `mail` / `channel`): what Recall decided when it indexed it — `subject`, `at` (its last message's day, = `date`), `from` (who wrote the messages it holds), `people` (a mail's addresses but yours), `trust` `"trusted"` (Recall indexes only trusted senders' messages; one waiting for your decision, ignored or unauthenticated stays out), `url` (Outlook / Teams) — with `text` and `messages` (`[{from, at, text, link}]`, each message's section): the facts Recall's reader kept, never a message's own words (read those with `ctx.m365`, § Microsoft 365) |
 | `calls` | the list of your calls (titles, times, who was invited, their threads) | `ctx.echo.read('calls', {q, since, limit})` → newest first, with or without minutes: `{id, title, date, started_at, ended_at, memo, minutes, transcript, chat, people, threads, profile}` (`minutes`, `transcript`, `chat`: whether it has them; `people`: the invite's names); `q` every word in its title, folder, subject or people, `since` `YYYY-MM-DD`, `limit` 50 (500 at most) |
 | `calendar` | the meetings Echo has read from your calendar | `ctx.echo.read('calendar')` → the agenda Echo last read (no request to Microsoft 365), by start: `{id, subject, start, end, organizer, attendees, join_url, response, threads}` (`threads`: the ids of the threads Echo puts it in) |
 | `me` | your name and email | `ctx.echo.read('me')` → `{name, email}` (About me's; the email else Microsoft 365's account; `null` each when unknown) |

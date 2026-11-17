@@ -284,7 +284,8 @@ const PRELUDE: &str = r#"
      *  entry's guide (Markdown) a file Claude reads before working with it, a row of the core's table; replaces all. */
     agent: { set: (part) => call('agent.set', part || {}) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
-     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>) | 'calls' (opts: q, since, limit) | 'calendar'
+     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves it out)
+     *  | 'calls' (opts: q, since, limit) | 'calendar'
      *  (the meetings Echo last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
@@ -292,7 +293,7 @@ const PRELUDE: &str = r#"
      *  but patterns when none are named); `hash` changes when what it gets changes. Name and email alone: echo.read('me'). */
     me: (opts) => call('me', opts || {}),
     echo: {
-      read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
+      read: (kind, arg, opts) => call('echo.read', arg === undefined ? kind : opts === undefined ? [kind, arg] : [kind, arg, opts]),
       /** Names for one thing into the user's dictionary (uses.echo.write: dictionary): {name, synonyms, spellings, kind, client}. */
       dictionary: { add: (term) => call('echo.dictionary.add', term) },
     },
@@ -683,6 +684,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 net::stop_plugin(&id);
                 files::forget(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                readers().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
                     l.remove(&id);
@@ -718,9 +720,14 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     p.calls.remove(&n);
                 }
             }
-            Ok(Msg::Event(name, payload)) => {
+            Ok(Msg::Event(name, full)) => {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let full: Value = serde_json::from_str(&full).unwrap_or_default();
                 for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
+                    // Without what only a plugin that reads sources hears, unless this one does.
+                    let mut payload = full.clone();
+                    plugins::as_heard(&name, &mut payload, readers().lock().unwrap_or_else(|e| e.into_inner()).get(id) == Some(&true));
+                    let payload = payload.to_string();
                     set_current(&current, id);
                     current.lock().unwrap().unattended = true;
                     let ctx = p.ctx.clone();
@@ -736,6 +743,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     for (k, v) in each.get(id).and_then(Value::as_object).into_iter().flatten() {
                         payload[k] = v.clone();
                     }
+                    plugins::as_heard(&name, &mut payload, readers().lock().unwrap_or_else(|e| e.into_inner()).get(id) == Some(&true));
                     let payload = payload.to_string();
                     set_current(&current, id);
                     current.lock().unwrap().unattended = true;
@@ -807,9 +815,17 @@ fn hears() -> &'static Mutex<HashMap<String, Vec<String>>> {
     HEARS.get_or_init(Default::default)
 }
 
+/// The loaded plugins that may read Echo's sources (`plugins::reads_sources`): they hear an event whole
+/// (`plugins::as_heard`). Set with `hears`, from the same manifest.
+fn readers() -> &'static Mutex<HashMap<String, bool>> {
+    static READERS: std::sync::OnceLock<Mutex<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    READERS.get_or_init(Default::default)
+}
+
 fn load(rt: &Runtime, id: &str, dir: &Path, current: &Arc<Mutex<Current>>, tx: &Sender<Msg>, slice: &mut dyn FnMut(&mut dyn FnMut())) -> Result<Context> {
     let m = plugins::read_manifest(dir)?;
     hears().lock().unwrap_or_else(|e| e.into_inner()).insert(id.into(), plugins::heard_events(&m.uses));
+    readers().lock().unwrap_or_else(|e| e.into_inner()).insert(id.into(), plugins::reads_sources(&m.uses));
     let main = m.main.ok_or_else(|| anyhow!("no host half"))?;
     sweep_store(id);
     let file = plugins::inside_plugin(dir, &main)?;
@@ -1269,9 +1285,9 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "echo.read" => {
-            let (kind, opt) = match arg {
-                Value::Array(a) => (a.first().and_then(|k| k.as_str()).unwrap_or("").to_string(), a.get(1).cloned().unwrap_or(Value::Null)),
-                _ => (s(arg), Value::Null),
+            let (kind, opt, more) = match arg {
+                Value::Array(a) => (a.first().and_then(|k| k.as_str()).unwrap_or("").to_string(), a.get(1).cloned().unwrap_or(Value::Null), a.get(2).cloned().unwrap_or(Value::Null)),
+                _ => (s(arg), Value::Null, Value::Null),
             };
             // `source` is read under `sources`'s grant too, and the other way round: both are the same data.
             let asked = |k: &str| uses(id, "echo").is_ok_and(|u| u["read"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(k))));
@@ -1280,7 +1296,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 bail!("{id} didn't ask to read your {kind} when it was installed");
             }
             match kind.as_str() {
-                "source" => crate::share::source(opt.as_str().unwrap_or(""))?,
+                "source" => crate::share::source(opt.as_str().unwrap_or(""), &more)?,
                 "sources" => crate::share::sources(&opt)?,
                 "people" => crate::share::people()?,
                 "dictionary" => crate::share::dictionary()?,
@@ -2333,12 +2349,13 @@ mod tests {
             export function apply(ctx) {
               const heard = []
               let refused = ''
-              ctx.on('minutes_written', (p) => { heard.push(p.call) }).catch((e) => { refused = String(e.message || e) })
+              ctx.on('minutes_written', (p) => { heard.push(p) }).catch((e) => { refused = String(e.message || e) })
               ctx.command('heard', () => ({ heard, refused }))
             }
         "#;
         let mut entries = vec![];
-        for (id, uses) in [("hears", json!({"events": {"on": ["minutes_written"]}})), ("deaf", json!({}))] {
+        let reads = json!({"echo": {"read": ["source"]}});
+        for (id, uses) in [("hears", json!({"events": {"on": ["minutes_written"]}})), ("deaf", json!({})), ("reader", reads)] {
             let d = mk.join("plugins").join(id);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
@@ -2348,24 +2365,28 @@ mod tests {
         std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": entries}).to_string()).unwrap();
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
-        for id in ["hears", "deaf"] {
+        for id in ["hears", "deaf", "reader"] {
             let agreed = plugins::review(id, Some(&name)).unwrap().uses;
             plugins::install(id, Some(&name), &agreed).unwrap();
         }
         sync();
         let ready = |id: &str| (0..50).any(|_| call(id, "heard", &json!({})).is_ok() || { std::thread::sleep(Duration::from_millis(50)); false });
-        assert!(ready("hears") && ready("deaf"), "{:?} {:?}", call("hears", "heard", &json!({})), call("deaf", "heard", &json!({})));
-        event("minutes_written", &json!({"id": "call:2026-11-06_100000-acme", "call": "2026-11-06_100000-acme", "title": "Acme"}));
-        let got = (0..50).find_map(|_| {
-            let v = call("hears", "heard", &json!({})).unwrap();
+        assert!(ready("hears") && ready("deaf") && ready("reader"), "{:?} {:?}", call("hears", "heard", &json!({})), call("deaf", "heard", &json!({})));
+        let full = json!({"id": "call:2026-11-06_100000-acme", "call": "2026-11-06_100000-acme", "title": "Acme", "threads": [{"id": "acme-pilot"}],
+                          "client": {"id": "acme", "name": "Acme"}, "profile": "work", "participants": [{"name": "Jane Doe"}], "minutes": {"decisions": ["SSO first"]}});
+        event("minutes_written", &full);
+        let got = |id: &str| (0..50).find_map(|_| {
+            let v = call(id, "heard", &json!({})).unwrap();
             if v["heard"].as_array().is_some_and(|a| !a.is_empty()) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
         });
-        assert_eq!(got.unwrap()["heard"], json!(["2026-11-06_100000-acme"]));
+        // Only a plugin that reads sources hears the call's routing, people and minutes.
+        assert_eq!(got("hears").unwrap()["heard"], json!([{"id": "call:2026-11-06_100000-acme", "call": "2026-11-06_100000-acme", "title": "Acme"}]));
+        assert_eq!(got("reader").unwrap()["heard"], json!([full]));
         let deaf = call("deaf", "heard", &json!({})).unwrap();
         assert_eq!(deaf["heard"], json!([]), "not asked: not delivered");
         assert!(deaf["refused"].as_str().unwrap().contains("didn't ask to hear"), "{deaf}");
         assert!(plugins::review("hears", Some(&name)).unwrap().uses.iter().any(|l| l.contains("Knows when a call's minutes are written")), "the sheet says it");
-        for id in ["hears", "deaf"] {
+        for id in ["hears", "deaf", "reader"] {
             plugins::remove(id, false).unwrap();
         }
         sync();

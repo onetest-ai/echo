@@ -108,7 +108,7 @@ pub(super) fn describe_events(v: &Value) -> Result<String> {
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn heard_events(uses: &serde_json::Map<String, Value>) -> Vec<String> {
     let mut out: Vec<String> = uses.get("events").map(|e| strings(e, "on").unwrap_or_default()).unwrap_or_default().into_iter().filter(|o| EVENTS.iter().any(|(k, _)| k == o)).collect();
-    if uses.get("echo").is_some_and(|e| e["read"].as_array().is_some_and(|r| r.iter().any(|k| k == "source" || k == "sources"))) {
+    if reads_sources(uses) {
         for k in ["minutes_written", "sources_changed"] {
             if !out.iter().any(|o| o == k) {
                 out.push(k.into());
@@ -116,6 +116,29 @@ pub fn heard_events(uses: &serde_json::Map<String, Value>) -> Vec<String> {
         }
     }
     out
+}
+
+/// The plugin may read Echo's sources (`uses.echo.read` names `source` or `sources`: the same data).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn reads_sources(uses: &serde_json::Map<String, Value>) -> bool {
+    uses.get("echo").is_some_and(|e| e["read"].as_array().is_some_and(|r| r.iter().any(|k| k == "source" || k == "sources")))
+}
+
+/// What of an event only a plugin that reads Echo's sources hears (`reads_sources`): a call's routing, people and
+/// minutes; a mail's or post's subject, senders and routing. Another plugin hearing the event gets it without them.
+const FOR_READERS: &[(&str, &[&str])] = &[("minutes_written", &["threads", "client", "profile", "participants", "minutes"]), ("sources_changed", &["items"])];
+
+/// An event's payload as this plugin hears it: without what only readers of sources hear (`FOR_READERS`) unless `reads`.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn as_heard(event: &str, payload: &mut Value, reads: bool) {
+    if reads {
+        return;
+    }
+    if let (Some((_, keys)), Some(o)) = (FOR_READERS.iter().find(|(e, _)| *e == event), payload.as_object_mut()) {
+        for k in *keys {
+            o.remove(*k);
+        }
+    }
 }
 
 pub(super) fn strings(v: &Value, key: &str) -> Result<Vec<String>> {

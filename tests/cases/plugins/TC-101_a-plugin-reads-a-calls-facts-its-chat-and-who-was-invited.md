@@ -1,6 +1,6 @@
 ---
 id: TC-101
-title: A plugin reads a call's minutes with its facts — its times, app, who was invited, its meeting chat and its threads' client
+title: "A plugin reads a call's minutes with its facts — its times, app, who was invited and who they are in Echo, its meeting chat, its threads' client and its minutes by section"
 priority: high
 type: functional
 requirements: [F-PLUG-70]
@@ -28,6 +28,8 @@ tags: [plugins, host-half, echo-read, calls, chat]
 | 1 | `echoctl plugin call data-demo calls '{"q":"globex pilot kickoff"}'`; note its `id` | `call:<yesterday>_140000-globex-pilot-kickoff` |
 | 2 | `echoctl plugin call data-demo source '{"id":"<that id>"}'` | `"kind": "call"`, `"title": "Globex pilot kickoff"`, `"text"` starts with "# Globex pilot kickoff" (its minutes), `"transcript"` starts with "# Globex pilot kickoff", `"started_at"` yesterday 14:00, `"ended_at"` yesterday 14:45, `"app": "teams"`, `"platform": "macos"`, `"memo": false`, `"profile": "work"` |
 | 3 | The same answer | `"attendees": [{"name": "Sam Rivera", "email": "sam@initech.example"}, {"name": "Kim Park", "email": "kim@globex.example"}, {"name": "Ben Okafor", "email": "ben@globex-labs.example"}]` (the organizer first); `"chat": [{"at": <yesterday 14:00>, "from": "Kim Park", "text": "Plan template?", "files": ["pilot-plan.xlsx"]}]`; `"threads": [{"id": "globex-pilot", "name": "Globex pilot", "client": "globex", "client_name": "Globex"}]` |
+| 3a | The same answer | What Echo decided of it: `"duration_min": 45`; `"client": {"id": "globex", "name": "Globex"}`; `participants` the three attendees with `person` each — Kim Park's `kim@globex.example`, Ben Okafor's `ben@globex-labs.example`, Sam Rivera's (the user) `null`; `minutes`: `"summary": "- Globex wants a pilot plan in two weeks [00:05]"`, `"decisions": []`, `"questions": []`, `"actions": [{"id": "glob0001", "text": "Draft the Globex pilot plan", "owner": "Me", "due": null, "done": false}]`, `revision` 16 hex characters, and `body` starting "## Summary" (no "# Globex pilot kickoff" title line) |
+| 3b | `echoctl plugin call data-demo source '{"id":"<that id>","opts":{"transcript":false,"chat":false}}'` | The same answer without the keys `transcript` and `chat` |
 | 4 | `echoctl plugin call data-demo calls '{"q":"quick check-in","limit":1}'`; then `source` of its `id` | The row says `"minutes": false`; `source` fails: "…: no minutes yet" |
 | 5 | `echoctl plugin call data-demo source '{"id":"call:../x"}'` | It fails: "not a call: call:../x" |
 
