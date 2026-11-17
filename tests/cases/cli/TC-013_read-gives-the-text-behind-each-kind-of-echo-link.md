@@ -19,6 +19,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
 - `A=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-weekly-sync$' | tail -1)` (today's Acme weekly sync)
+- `K=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-rollout-kickoff$' | cut -c1-17)` (the Acme rollout kickoff's stamp)
 
 ## Test Data
 
@@ -30,6 +31,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | `echo://person/dana@acme.example` | Dana Lee's card |
 | `echo://task/acme-rollout/T001` | Send the SSO checklist (done) |
 | `echo://prep/e11de173ab857a8b` | the prep of Globex sponsor update |
+| `echo://call/$K-an-old-title` | Acme rollout kickoff (folder `$K-acme-rollout-kickoff`, Nov 20 of last year), linked by a title it no longer has |
 
 ## Steps
 
@@ -44,6 +46,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | 7 | Run `target/debug/echoctl read echo://prep/e11de173ab857a8b` | Starts "# Prep"; "In short: Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late."; "Meeting: Globex sponsor update (…)" |
 | 8 | Run `target/debug/echoctl read echo://thread/no-such-thread` | Exit code 1; "Error: no thread \"no-such-thread\"" |
 | 9 | Run `target/debug/echoctl read https://acme.example` and `target/debug/echoctl read "echo://call/../../etc"` | Exit code 1 each; "Error: not an echo:// link Echo knows: https://acme.example" and "Error: not an echo:// link Echo knows: echo://call/../../etc" |
+| 10 | Run `target/debug/echoctl read "echo://call/$K-an-old-title"` (the kickoff's stamp, a title it no longer has: a link saved before the call was retitled), then the same with the stamp's last second one more (`${K%?}<last digit + 1>-an-old-title`) | The first: exit code 0, first line "# Call: Acme rollout kickoff — <last year>-11-20 10:00". The second: exit code 1; "Error: no call \"…-an-old-title\"" (no call has that stamp) |
 
 ## Expected Final State
 Read only: nothing in the data folder changed.

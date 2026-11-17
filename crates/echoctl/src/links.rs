@@ -5,7 +5,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -110,7 +110,10 @@ fn clock(s: u64) -> String {
 /// may read, and a refusal says why (not that the call doesn't exist, #136): Yolo (`guard::run_thread`) a call of its
 /// thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
-    let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
+    let dir = crate::calls::find_call(name)
+        // A link saved before the call was retitled names its old folder; the stamp stays the same.
+        .or_else(|e| crate::calls::by_stamp(&crate::calls::stamp_of(Path::new(name))).ok_or(e))
+        .map_err(|_| anyhow!("no call {name:?}"))?;
     if !crate::notes::run_limited() {
         return Ok(dir);
     }
@@ -457,6 +460,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn renamed_call_link_still_opens() {
+        let (_env, _root) = crate::paths::testenv::folders("links-renamed");
+        let d = crate::paths::calls_dir().join("2026-11-05_090012-weekly-sync");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"title": "Weekly sync"}"#).unwrap();
+        // A note saved before the call was retitled links its old folder name.
+        std::fs::rename(&d, crate::paths::calls_dir().join("2026-11-05_090012-northwind-weekly-sync")).unwrap();
+        assert_eq!(target("echo://call/2026-11-05_090012-weekly-sync").unwrap()["hash"], "call/2026-11-05_090012-northwind-weekly-sync/minutes");
+        assert!(target("echo://call/2026-11-05_093000-never-was").is_err());
+    }
+
+    #[test]
     fn a_series_is_its_calls_with_minutes_by_the_invites_subject() {
         let (_env, _) = crate::paths::testenv::folders("links-series");
         let mk = |name: &str, title: &str, notes: bool| {
@@ -584,7 +599,8 @@ mod tests {
         let t = read("echo://call/2026-10-28_110000-aurora?t=720").unwrap();
         assert!(t.contains("Aurora weekly") && t.contains("[12:05] Lena Varga: Then SSO has to land first.") && !t.contains("Later talk"), "{t}");
         assert!(t.contains("SSO lands first"), "the minutes too: {t}");
-        assert!(read("echo://call/2026-10-28_110000-nope").is_err());
+        // A name with this call's stamp is this call, retitled (`calls::stamp_of`); a stamp no call has is nothing.
+        assert!(read("echo://call/2026-10-28_120000-nope").is_err());
     }
 
     #[test]

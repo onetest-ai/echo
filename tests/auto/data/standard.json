@@ -4404,6 +4404,12 @@
         "link": "echo://thread/no-such-thread",
         "err": "Error: no thread \"no-such-thread\""
       },
+      "retitled": {
+        "call": "acme-rollout-kickoff",
+        "old": "an-old-title",
+        "head": "# Call: Acme rollout kickoff — {day} {time}",
+        "err": "Error: no call \"{c}\""
+      },
       "foreign": [
         [
           "https://acme.example",
