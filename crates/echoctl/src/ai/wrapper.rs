@@ -161,14 +161,36 @@ fn find_in_login_shell(name: &str) -> Result<PathBuf> {
             .and_then(|path| on_path(name, &path))
             .ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"));
     }
-    let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
     // The name goes in as `$0`, never into the script's text.
+    let out = in_login_shell("command -v -- \"$0\"", name).context("asking your login shell where it is")?;
+    out.lines().rev().map(str::trim).find(|l| l.starts_with('/')).map(PathBuf::from).ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"))
+}
+
+/// What `script` prints run by the user's login shell as a terminal starts it, `arg` its `$0`, within 20 s.
+#[cfg(unix)]
+fn in_login_shell(script: &str, arg: &str) -> Result<String> {
+    let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
     let mut c = Command::new(shell);
-    c.args(["-l", "-i", "-c", "command -v -- \"$0\""]).arg(name).current_dir(paths::home()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    c.args(["-l", "-i", "-c", script]).arg(arg).current_dir(paths::home()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     detach(&mut c);
     let mut child = c.spawn()?;
-    let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).context("asking your login shell where it is")?;
-    out.lines().rev().map(str::trim).find(|l| l.starts_with('/')).map(PathBuf::from).ok_or_else(|| anyhow!("“{name}” isn't on your PATH — install it, or give its full path"))
+    Ok(wait_output(&mut child, Duration::from_secs(20), &|| false)?.0)
+}
+
+/// The PATH a terminal has: the login shell's, asked once a process (the app started from the Finder has a minimal
+/// one) — or this process's own where runs start without the login shell (the test data's environment), and on Windows.
+pub(crate) fn login_path() -> Option<std::ffi::OsString> {
+    #[cfg(unix)]
+    if super::use_shell() {
+        static SEEN: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+        return SEEN
+            .get_or_init(|| {
+                let out = in_login_shell("printf '<<echo:path>>%s<</echo:path>>' \"$PATH\"", "echo").ok()?;
+                Some(out.rsplit_once("<<echo:path>>")?.1.split_once("<</echo:path>>")?.0.into())
+            })
+            .clone();
+    }
+    std::env::var_os("PATH")
 }
 
 /// The first `name` a program can be started from in the absolute folders of a `PATH` value.

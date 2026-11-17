@@ -50,6 +50,14 @@ cases:
   - tests/cases/plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md
   - tests/cases/plugins/TC-070_a-plugins-vault-page-renders-safe-html-with-the-links-it-resolved.md
   - tests/cases/plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md
+  - tests/cases/plugins/TC-071_a-plugin-starts-a-repository-in-its-vault-and-commits-only-the-notes-it-names.md
+  - tests/cases/plugins/TC-072_a-plugin-reads-its-vaults-git-history-and-a-notes-old-version.md
+  - tests/cases/plugins/TC-074_a-plugins-git-commit-is-refused-while-claude-prepares-and-asks.md
+  - tests/cases/plugins/TC-073_a-vaults-own-git-settings-hooks-and-attributes-run-nothing-through-a-plugin.md
+  - tests/cases/plugins/TC-089_a-repository-whose-settings-include-a-file-in-the-vault-is-refused.md
+  - tests/cases/plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md
+  - tests/cases/plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md
+  - tests/cases/plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -72,11 +80,12 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | The marketplace `acme-local`, added in the window | stage 22 (step 1) | 22–31 (removed by stage 31) |
 | Acme vault, installed with its made-up vault | stage 40 (its preconditions, step 1) | 40–43 (removed by stage 43's teardown) |
 | The plugin Acme notes, installed through the sheet | stage 26 (step 2) | 26–30 (removed by stage 30) |
+| Acme history, installed with `$D/history` and a repository in it | stage 47 (its preconditions, steps 1–4) | 47–53 (removed by stage 53's teardown) |
 
 ## Prelude
 
 1. Load `{{base_url}}/`.
-2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). Stages 22–31 use this folder as written; the later plugin stages (32–46), after stage 31 removed `acme-local`, each write their own `echo-marketplace.json` and plugin into it again (their preconditions) and remove their marketplace in their teardown — stage 40 writes it for Acme vault, which stages 41–43 use.
+2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). Stages 22–31 use this folder as written; the later plugin stages (32–54), after stage 31 removed `acme-local`, each write their own `echo-marketplace.json` and plugin into it again (their preconditions) and remove their marketplace in their teardown — stage 40 writes it for Acme vault, which stages 41–43 use.
 
 ## Stages
 
@@ -128,6 +137,14 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 44 | `plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md` | — | Its marketplace is its own `acme-local` (stage 31 removed the shared one): run its precondition lines as written |
 | 45 | `plugins/TC-070_a-plugins-vault-page-renders-safe-html-with-the-links-it-resolved.md` | — | — |
 | 46 | `plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md` | — | — |
+| 47 | `plugins/TC-071_a-plugin-starts-a-repository-in-its-vault-and-commits-only-the-notes-it-names.md` | — | Its marketplace is its own `acme-git`: run its precondition lines as written. Skip its teardown: keep Acme history and its repository for stages 48–53 |
+| 48 | `plugins/TC-072_a-plugin-reads-its-vaults-git-history-and-a-notes-old-version.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1 (HEAD~1 is then stage 47's `a star`, which holds the same `Notes/Acme.md`). Skip its teardown |
+| 49 | `plugins/TC-074_a-plugins-git-commit-is-refused-while-claude-prepares-and-asks.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |
+| 50 | `plugins/TC-073_a-vaults-own-git-settings-hooks-and-attributes-run-nothing-through-a-plugin.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1, but run its mark-script line (`printf … > "$D/mark.sh"; chmod 755 …`). Skip its teardown |
+| 51 | `plugins/TC-089_a-repository-whose-settings-include-a-file-in-the-vault-is-refused.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1, but run its mark-script line. Skip its teardown |
+| 52 | `plugins/TC-088_a-plugin-gets-no-git-in-a-repository-whose-settings-put-its-files-elsewhere.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Skip its teardown |
+| 53 | `plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Last of the git stages on `$D/history` (step 2 leaves the repository refused); its teardown removes Acme history and `acme-git` |
+| 54 | `plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md` | — | Stage 53 removed Acme history and `acme-git`: run its precondition lines as written (its own vault, `$D/layout`) |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

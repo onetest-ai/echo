@@ -62,6 +62,12 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "fs.walk" => folders::walk(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "fs.search" => folders::search(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &arg[2]),
         "fs.snapshot" => folders::snapshot(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "git.info" => git::info(id, arg[0].as_str().unwrap_or("")),
+        "git.status" => git::status(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "git.log" => git::log(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "git.show" => git::show(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), arg[2].as_str().unwrap_or(""), &arg[3]),
+        "git.init" => git::init(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "git.commit" => git::commit(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "claude.has_plugin" | "claude.install_plugin" => {
             let spec = arg[0].as_str().unwrap_or("");
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {

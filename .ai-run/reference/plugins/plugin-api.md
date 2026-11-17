@@ -321,6 +321,37 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     snapshot is made at a time per plugin, and it keeps 3 at most: a fourth, or one when its snapshots already hold
     2 GB, is refused until it removes one.
     `ctx.store.remove(path)` removes it; Echo sweeps it with `cache/` (Host § Store).
+- Git in a folder it was given (each needs `uses.folders`; `init` and `commit` also `folders.write` and are refused while
+  Claude prepares and asks; all async, off its time slice). No line on the sheet beyond the folder's. Evidence: `jshost::git`
+  - `await ctx.git.info(root)` → `{repo: false}` or `{repo: true, branch, head, detached, busy, subfolder}`: `branch`
+    null when detached; `head` the commit's id, null before the first commit; `busy` `merge`, `rebase`,
+    `cherry-pick`, `revert`, `bisect` or null; `subfolder` true when the folder sits inside a larger repository.
+  - `await ctx.git.status(root, {paths})` → `[{path, code, from?}]`: the folder's changed and untracked files (or those
+    of `paths`, 1–1,000), relative to the root; `code` git's two letters (porcelain v1: `" M"`, `"A "`, `"??"`, …), `from`
+    a rename's old path. Ignored files left out.
+  - `await ctx.git.log(root, {path, max})` → `[{rev, author, email, date, subject, echo, path?}]`, newest first: the
+    commits touching the folder, or the file at `path` through its renames (each with its `path` then); 50 by default,
+    1,000 at most; `date` ISO 8601; `echo` the id of the plugin that committed it through Echo, else null.
+  - `await ctx.git.show(root, rev, path, {max})` → `{text, size, truncated}` or null when the file wasn't there: its
+    text at that version as the repository holds it (no filter), cut at `max` (1 MB by default, 4 MB at most); `rev`
+    `HEAD`, `HEAD~N` or a commit's id (4–64 hex), nothing else (the id of a file or a folder is refused); never a file
+    of the repository outside the folder.
+  - `await ctx.git.init(root, {branch})` → its `info`: a new repository in the folder, on `main` unless `branch`
+    (letters, digits, `.` `_` `-` `/`), with no template; refused inside a repository.
+  - `await ctx.git.commit(root, {paths, message})` → `{rev}`, or `{rev: null}` when they hold no change: one commit of
+    exactly `paths` (1–1,000 files, each checked as `ctx.fs.write` checks it) as they are on the disk, a file gone
+    committed as removed, the user's other staged and unstaged work left as it is; `message` plain text, 1–5,000
+    characters. Committed by `Echo (<plugin id>) <<plugin id>@plugins.echo.invalid>`; its author the user's git name
+    and address when git knows both, else that too. No hook runs, nothing is signed. Refused while a merge, rebase,
+    cherry-pick, revert or bisect is under way, and for a file the repository ignores.
+  - Refused: no git where the system installs it or on the user's `PATH` ("git isn't installed on this computer"; a
+    `PATH` folder inside a folder given to a plugin or inside Echo's own is skipped), git older than 2.31, a repository
+    whose history lies outside its folder (a `gitdir:` file, a linked worktree or submodule, a link as or in `.git`),
+    one setting `core.worktree`, a bare repository (`HEAD`, `objects` and `refs` not in a `.git` folder) or one
+    another user owns, one that borrows objects (alternates), is a partial clone, whose settings can't be read
+    whole (over 16 MB, a name that isn't UTF-8), or whose settings read or include a file a plugin could change (in a
+    folder given to a plugin, in Echo's own, or in the work tree outside a hidden folder — there or not); git taking over 20 s is stopped. Nothing is fetched. Nothing a repository's settings, hooks or attributes name
+    runs (Host § Git).
 - Its window half shows images of a folder it was given (with `uses.folders`) from
   `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and
   webp only (no svg), 10 MB at most, inside the folder once links are followed. Evidence: `window::plugins::folder_image`
