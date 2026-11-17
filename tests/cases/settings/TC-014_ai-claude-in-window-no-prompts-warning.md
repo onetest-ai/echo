@@ -26,7 +26,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/ai`; find the card "Claude's permissions" | Three rows, in this order: "Claude in the window", "Routines acting on their own", "Yolo acting on its own" |
 | 2 | Read the row "Claude in the window" | It names `--permission-mode auto` and `--dangerously-skip-permissions`, says Claude "runs any command and tool without asking" and "Takes effect the next time the session starts."; its buttons "Ask each time", "Auto" (pressed: the default) and "Skip all permission checks"; no "Skips every check." |
-| 3 | Read the rows "Routines acting on their own" and "Yolo acting on its own" | Each names `--permission-mode auto` and `--dangerously-skip-permissions`; its buttons "Auto" (pressed: the default) and "Skip all permission checks", no "Ask each time"; neither says "Now they prepare and ask" (Claude in the window doesn't ask each time) |
+| 3 | Read the rows "Routines acting on their own" and "Yolo acting on its own" | Each names `--permission-mode auto` and `--dangerously-skip-permissions`; its buttons "Auto" (pressed: the default) and "Skip all permission checks", no "Ask each time": a routine and Yolo always act on their own |
 | 4 | Read the card's last line | "Auto on your profiles:" with each of the data's profiles and what Auto gets there — on a Claude account or Claude Code "auto mode: Claude Code decides each action" |
 | 5 | Run `. <dir>/env && grep -c -E '"(folder_skip|folder|routine|yolo)_permissions"' "$ECHOCTL_HOME/.echo/config.json"` | `0`: none written, each on its default |
 

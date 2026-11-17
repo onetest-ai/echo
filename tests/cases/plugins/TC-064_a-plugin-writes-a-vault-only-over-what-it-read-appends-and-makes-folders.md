@@ -1,6 +1,6 @@
 ---
 id: TC-064
-title: A plugin writes a vault's file only over what it read or where nothing is (an explicit null sha too), adds lines to a log and makes folders — never through a link out, nothing while Claude prepares and asks
+title: A plugin writes a vault's file only over what it read or where nothing is (an explicit null sha too), adds lines to a log and makes folders — never through a link out; the read-only marker of before limits nothing
 priority: high
 type: functional
 requirements: [F-PLUG-47]
@@ -62,10 +62,10 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 4 | `echoctl plugin call acme-vault put '{"path":"Notes/Acme.md","text":"lost","ifSha":null}'`; `echoctl plugin call acme-vault put '{"path":"Notes/Globex.md","text":"# Globex\n","ifSha":null}'` | The first fails: `“Notes/Acme.md” is there already` (an explicit null is "nothing there", never a write over it); the second `null` — `Notes/Globex.md` is made |
 | 5 | `echoctl plugin call acme-vault log '{"path":"log.md","text":"- added · Notes/Acme.md"}'` twice; `cat "$D/vault/log.md"`; `echoctl plugin call acme-vault mkdir '{"path":"Projects/Acme/2026"}'`; `ls "$D/vault/Projects/Acme"` | `null` twice; `log.md` holds the line twice, each on its own line; `null`; `2026` |
 | 6 | `echoctl plugin call acme-vault log '{"path":"Out/x.md","text":"x"}'`; `echoctl plugin call acme-vault mkdir '{"path":"Out/new"}'`; `ls "$D/outside"` | Both fail: `“Out/…” leads outside …`; `$D/outside` holds `leak.md` alone |
-| 7 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault log '{"path":"log.md","text":"x"}'`; `wc -l < "$D/vault/log.md"` | It fails: `changing files or settings isn't allowed while Claude prepares and asks`; `2` |
+| 7 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault log '{"path":"log.md","text":"x"}'`; `wc -l < "$D/vault/log.md"` | `null`; `3` — the read-only marker of before (`ECHOCTL_RUN_MODE=routine`) limits nothing: no run prepares and asks any more |
 
 ## Expected Final State
-`$D/vault/` holds `Wiki.md`, `Notes/Acme.md` (two lines), `Notes/Globex.md`, `log.md` (two lines), `Projects/Acme/2026/`, the two `.git` folders and the link `Out`; `$D/outside` holds `leak.md` alone.
+`$D/vault/` holds `Wiki.md`, `Notes/Acme.md` (two lines), `Notes/Globex.md`, `log.md` (three lines), `Projects/Acme/2026/`, the two `.git` folders and the link `Out`; `$D/outside` holds `leak.md` alone.
 
 ## Teardown
 - `echoctl plugin remove acme-vault --delete-data`; `echoctl plugin marketplace remove acme-local`

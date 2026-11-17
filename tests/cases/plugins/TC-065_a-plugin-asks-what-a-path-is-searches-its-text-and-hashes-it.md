@@ -1,6 +1,6 @@
 ---
 id: TC-065
-title: A plugin asks what a path of its vault is — a link reported as a link, its place relative to the vault, never a path outside — hashes in Rust and searches the vault's text, not hidden files or through a link; reads work while Claude prepares and asks
+title: A plugin asks what a path of its vault is — a link reported as a link, its place relative to the vault, never a path outside — hashes in Rust and searches the vault's text, not hidden files or through a link; the read-only marker of before changes nothing
 priority: high
 type: functional
 requirements: [F-PLUG-48]
@@ -61,7 +61,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 3 | `echoctl plugin call acme-vault stat '{"path":"Research"}'`; `echoctl plugin call acme-vault stat '{"path":"Research/None.md"}'` | `{"kind": "dir", "real": "Research", …}` (no `sha`); `null` |
 | 4 | `echoctl plugin call acme-vault stat '{"path":"Out"}'`; `echoctl plugin call acme-vault stat '{"path":"Out/leak.md"}'` | `{"kind": "link", "real": null, …}` — no `sha`, no path of `$D/outside` anywhere in it; the second fails: `“Out” leads outside …` (the folder it is in is a link out) |
 | 5 | `echoctl plugin call acme-vault find '{"q":"PILOT BUDGET"}'` | Exactly `[{"path": "Research/Globex.md", "line": 2, "text": "Pilot budget agreed."}]` — any case, not `.git/config` or `Archive/.git/HEAD` (hidden), not `Out/leak.md` (through a link) |
-| 6 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault find '{"q":"pilot budget"}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault stat '{"path":"Research/Globex.md"}'` | The same one line; the same stat: reads work while Claude prepares and asks |
+| 6 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault find '{"q":"pilot budget"}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault stat '{"path":"Research/Globex.md"}'` | The same one line; the same stat: the read-only marker of before (`ECHOCTL_RUN_MODE=routine`) limits nothing: no run prepares and asks any more |
 
 ## Expected Final State
 `$D/vault/Research/Globex.md` is there; nothing else changed.

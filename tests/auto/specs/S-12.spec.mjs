@@ -318,7 +318,6 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     for (const r of [a.routineRow, a.yoloRow]) {
       await expect(settings.choice(of(r), a.ask)).toHaveCount(0)
       for (const [name, pressed] of [[a.auto, 'true'], [a.skip, 'false']]) await expect(settings.choice(of(r), name)).toHaveAttribute('aria-pressed', pressed)
-      await expect(settings.settingRow(r)).not.toContainText(a.asksNow)
     }
     const autoOn = settings.main.getByText(a.autoOnProfiles)
     await expect(autoOn).toContainText(a.autoMode)

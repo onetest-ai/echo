@@ -91,8 +91,7 @@ pub struct Config {
     #[serde(default, skip_serializing)]
     pub folder_skip_permissions: bool,
     /// How the window's Echo folder session (the user's own Claude Code) handles permission prompts (unset: auto).
-    /// Its "ask" also has routines and Yolo prepare and ask rather than act on their own. Never the call's session,
-    /// which reads others' words under the guard.
+    /// Never the call's session, which reads others' words under the guard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_permissions: Option<Permissions>,
     /// How a routine acting on its own handles them: auto or skip (unset: auto).

@@ -25,21 +25,20 @@ pub const FREE_COMMANDS: [&str; 16] = [
     "project work", "compose",
 ];
 
-/// Who a session is: the folder session (the user there, its plugin commands and scripts as their sheets say), or a
-/// routine's or Yolo's run — acting on its own with its permissions (`run_permissions`), or preparing and asking
-/// (`None`: then only a script marked `readonly`).
+/// Who a session is: the folder session (the user there), or a routine's or Yolo's run, acting on its own with these
+/// permissions (`claudejob`: the routine's own choice, else `run_permissions`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Who {
     Folder,
-    Run { acts: Option<Permissions> },
+    Run(Permissions),
 }
 
 impl Who {
-    /// How it handles permission prompts: the folder session as the user chose; a run preparing and asking sets none.
+    /// How it handles permission prompts.
     fn permissions(self) -> Permissions {
         match self {
             Who::Folder => folder_permissions(),
-            Who::Run { acts } => acts.unwrap_or(Permissions::Ask),
+            Who::Run(p) => p,
         }
     }
 }
@@ -82,7 +81,7 @@ pub fn build(managed: bool, exe: &Path, settings: &Path, who: Who) -> Result<Vec
         }
     }
     // Their declared scripts, by their launchers' full paths (`uses.scripts`): no prompt for them either.
-    for s in crate::plugins::agent::scripts(who == Who::Run { acts: None }) {
+    for s in crate::plugins::agent::scripts() {
         args.extend(["--allowedTools".into(), format!("Bash({s}:*)")]);
     }
     // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
@@ -208,11 +207,10 @@ pub fn auto_on_profiles() -> Vec<(String, &'static str)> {
     all.iter().map(|p| (p.name.clone(), permission_args(Permissions::Auto, p, p.notes_model().map(|m| p.model(&m)).as_deref(), true).1)).collect()
 }
 
-/// A routine's (`yolo` false) or Yolo's run: acting on its own with its own setting's permissions, or `None` —
-/// preparing and asking, when the user has the folder session ask each time (or Echo's settings can't be read).
-pub fn run_permissions(yolo: bool) -> Option<Permissions> {
-    let cfg = crate::config::Config::load().ok()?;
-    (cfg.folder_permissions() != Permissions::Ask).then(|| if yolo { cfg.yolo_permissions() } else { cfg.routine_permissions() })
+/// The user's setting for a routine's (`yolo` false: also a plugin's folder run, Echo's own jobs as routines) or
+/// Yolo's run that doesn't say itself: auto or skip (unreadable settings: auto).
+pub fn run_permissions(yolo: bool) -> Permissions {
+    crate::config::Config::load().map_or(Permissions::Auto, |c| if yolo { c.yolo_permissions() } else { c.routine_permissions() })
 }
 
 /// The environment its hooks read: it is one of Echo's sessions, on AI profile `profile`.
@@ -251,7 +249,7 @@ mod tests {
             crate::plugins::install(id, Some(&name), &sheet).unwrap();
             crate::grants::set_session_skills(id, &json!([{"name": "notes", "description": "Notes.", "body": "Read them."}])).unwrap();
         }
-        let args = build(false, Path::new("/Apps/Echo.app/echoctl"), &root.join("s.json"), Who::Run { acts: None }).unwrap();
+        let args = build(false, Path::new("/Apps/Echo.app/echoctl"), &root.join("s.json"), Who::Run(Permissions::Auto)).unwrap();
         let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
         let copy = |id: &str| crate::grants::session_dir(id).display().to_string();
         assert_eq!(dirs.iter().filter(|d| ***d == copy("vaults")).count(), 1, "no prefix: its session copy, once: {dirs:?}");
@@ -260,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn a_run_preparing_and_asking_gets_only_readonly_scripts_and_echos_commands_by_their_own_shape() {
+    fn every_session_gets_the_plugins_scripts_and_echos_commands_by_their_own_shape() {
         let (_env, root) = paths::testenv::folders("folder-args-scripts");
         let d = root.join("market/plugins/kit");
         std::fs::create_dir_all(d.join("skills/staffing/scripts")).unwrap();
@@ -277,10 +275,10 @@ mod tests {
         crate::plugins::install("kit", Some(&name), &sheet).unwrap();
         let exe = Path::new("/Apps/Echo.app/echoctl");
         let has = |who: Who, script: &str| build(false, exe, &root.join("s.json"), who).unwrap().iter().any(|a| a.starts_with("Bash(") && a.contains(&format!("/scripts/{script}:*)")));
-        for who in [Who::Folder, Who::Run { acts: Some(Permissions::Auto) }] {
+        // A script once marked `readonly` is a script like any other.
+        for who in [Who::Folder, Who::Run(Permissions::Auto), Who::Run(Permissions::Skip)] {
             assert!(has(who, "read.sh") && has(who, "write.sh"), "{who:?}");
         }
-        assert!(has(Who::Run { acts: None }, "read.sh") && !has(Who::Run { acts: None }, "write.sh"));
         // Echo's own commands, each by its prefix: no wildcard reaches another ledger command.
         let args = build(false, exe, &root.join("s.json"), Who::Folder).unwrap();
         assert!(args.iter().any(|a| a.ends_with(" project work:*)")) && !args.iter().any(|a| a.starts_with("Bash(") && a.contains("ledger")), "{args:?}");
@@ -306,24 +304,23 @@ mod tests {
         let skip = (true, None);
         // Nothing set: the folder session in auto mode; routines and Yolo act on their own, in auto mode too.
         assert_eq!(mode(Who::Folder), auto);
-        assert_eq!((run_permissions(false), run_permissions(true)), (Some(Permissions::Auto), Some(Permissions::Auto)));
-        assert_eq!(mode(Who::Run { acts: run_permissions(false) }), auto);
+        assert_eq!((run_permissions(false), run_permissions(true)), (Permissions::Auto, Permissions::Auto));
+        assert_eq!(mode(Who::Run(run_permissions(false))), auto);
         // Each its own: the routines' skip changes neither Yolo nor the folder session.
         set(&|c| c.routine_permissions = Some(Permissions::Skip));
-        assert_eq!((run_permissions(false), run_permissions(true)), (Some(Permissions::Skip), Some(Permissions::Auto)));
-        assert_eq!((mode(Who::Run { acts: run_permissions(false) }), mode(Who::Run { acts: run_permissions(true) }), mode(Who::Folder)), (skip.clone(), auto.clone(), auto.clone()));
+        assert_eq!((run_permissions(false), run_permissions(true)), (Permissions::Skip, Permissions::Auto));
+        assert_eq!((mode(Who::Run(run_permissions(false))), mode(Who::Run(run_permissions(true))), mode(Who::Folder)), (skip.clone(), auto.clone(), auto.clone()));
         set(&|c| {
             c.routine_permissions = None;
             c.yolo_permissions = Some(Permissions::Skip);
         });
-        assert_eq!((mode(Who::Run { acts: run_permissions(false) }), mode(Who::Run { acts: run_permissions(true) })), (auto.clone(), skip.clone()));
+        assert_eq!((mode(Who::Run(run_permissions(false))), mode(Who::Run(run_permissions(true)))), (auto.clone(), skip.clone()));
         set(&|c| c.folder_permissions = Some(Permissions::Skip));
         assert_eq!(mode(Who::Folder), skip, "the folder session's own choice");
-        // Ask each time: the folder session gets Claude Code's prompts, and routines and Yolo prepare and ask (no mode).
+        // Ask each time: only the folder session gets Claude Code's prompts; routines and Yolo keep their own.
         set(&|c| c.folder_permissions = Some(Permissions::Ask));
         assert_eq!(mode(Who::Folder), (false, None));
-        assert_eq!((run_permissions(false), run_permissions(true)), (None, None));
-        assert_eq!(mode(Who::Run { acts: None }), (false, None));
+        assert_eq!((run_permissions(false), run_permissions(true)), (Permissions::Auto, Permissions::Skip));
     }
 
     fn profile(kind: &str) -> crate::ai::Profile {

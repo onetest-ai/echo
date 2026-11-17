@@ -31,7 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, as Claude in Echo works for you — acting on its own or preparing and asking, as you set it in Settings"; `{"skip": true}` is accepted and changes nothing |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)"; with `{"skip": true}` it adds "; a run you mark so may skip every permission check" — only then is a run's own `tools: "skip"` honoured |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -50,7 +50,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
-time when over 300 s, and that Echo can't check a `readonly` one only reads; an update that adds a script or changes any
+time when over 300 s; an update that adds a script or changes any
 file of a skill folder that has one asks again. Evidence: `plugins::scripts::describe_scripts`, `plugins::scripts::check`
 
 ## Host half
@@ -183,20 +183,25 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
 | the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`) |
 | the method | other than `GET`, `POST`, `PUT`, `PATCH` or `DELETE` |
 | a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
-| a write | a method other than `GET`, or `save`, in a routine's or Yolo's run preparing and asking |
 | the request | the host can't be reached, the 60 s or the 10 MB passed |
 
 ## Claude runs
 
-- `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})`, only with `claude` in `uses`; refused
-  in a routine's or Yolo's run preparing and asking. It runs as the folder session, by the user's one choice (acting on
-  its own or preparing and asking, `untrusted-text.md` R20–R22); only `tools: "none"` changes that (no tools: what it
-  needs goes in the prompt); any other value is accepted, kept in the run's record and changes nothing, as
-  `"claude": {"skip": true}` does. Its result lists the changes and sends it made (`actions`).
+- `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})`, only with `claude` in `uses`. It runs
+  as the folder session and acts on its own (`untrusted-text.md` R20, R21), its permissions by `tools`, a routine's own
+  choice:
+  - `"auto"`: Claude Code's auto mode where the profile's model has it, else edits accepted;
+  - `"skip"`: every permission check skipped — only when the sheet has `"claude": {"skip": true}`, else as not given;
+  - not given (`""`): the user's setting for routines (Settings → AI & minutes → Claude's permissions: Auto by default,
+    or Skip all permission checks);
+  - `"none"`: no tools at all (what it needs goes in the prompt);
+  - from before, `"read"` and `"folder"` are taken as `"auto"`; any other value is refused.
+
+  What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`).
   Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
 - `ctx.claude.installPlugin(spec)` installs the channel plugin the manifest names (`uses.channel.plugin`) into the
-  default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec; an
-  install in a routine's or Yolo's run preparing and asking is refused. Evidence: `capabilities::describe_channel`
+  default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec.
+  Evidence: `capabilities::describe_channel`
 
 ## Routines
 
@@ -241,7 +246,7 @@ What `uses.echo.write` may name, and the sheet's line for each (`plugins::ECHO_W
 | `thread_stage` | Changes your threads' stage | `ctx.threads.setStage` |
 | `tasks` | Adds and updates tasks in your threads | `ctx.tasks.upsert`, `ctx.tasks.close` |
 
-Each is refused while Claude prepares and asks, and in a Yolo run on another thread than its own.
+Each is refused in a Yolo run on another thread than its own.
 
 - `ctx.threads.setStage(thread, stage, reason)` → `{applied, why?}`. `stage` one of `lead`, `proposal`, `negotiation`,
   `kickoff`, `active`, `on_hold`, `wrap_up`, `done`, `lost`, `cancelled`; the stage history keeps the plugin's id,
@@ -281,17 +286,15 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - From: `await ctx.system.pickFiles(prompt, {multiple, ext})` — the system's file picker (titled "<plugin> — <prompt>"),
   `[]` when cancelled; one file unless `multiple`; `ext` up to 20 extensions, letters and digits (`["md", "pdf"]`). Its
   window half's `ctx.onFileDrop` (§ Client half). `echoctl plugin call <id> <cmd> '<json>' --file <path>` (repeatable;
-  refused where the CLI's limits for runs hold — a minutes run, a thread's sync, Yolo, a routine preparing and asking —
-  never in a routine acting on its own, `notes::run_limited`). No picker opens inside a run Echo started, nor from its
+  refused where the CLI's limits for runs hold — a minutes run, a thread's sync, Yolo — never in a routine,
+  `notes::run_limited`). No picker opens inside a run Echo started, nor from its
   `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
-  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file, refused while Claude
-  prepares and asks); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
+  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
-- More of a folder it was given (each needs `uses.folders`; the writes `folders.write`, checked as `ctx.fs.write` and
-  refused while Claude prepares and asks; the reads and `snapshot` are not). Evidence: `jshost::folders`
+- More of a folder it was given (each needs `uses.folders`; the writes `folders.write`, checked as `ctx.fs.write`). Evidence: `jshost::folders`
   - `ctx.fs.write(root, path, text, {ifSha, createNew})`: `ifSha` writes only while the file's sha256 is still that
     (a file gone or changed: "“path” changed since you read it: read it again", nothing written; a file over 64 MB
     refused before it is hashed); `createNew: true` never over a file, also when writers race ("is there already").
@@ -321,8 +324,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     snapshot is made at a time per plugin, and it keeps 3 at most: a fourth, or one when its snapshots already hold
     2 GB, is refused until it removes one.
     `ctx.store.remove(path)` removes it; Echo sweeps it with `cache/` (Host § Store).
-- Git in a folder it was given (each needs `uses.folders`; `init` and `commit` also `folders.write` and are refused while
-  Claude prepares and asks; all async, off its time slice). No line on the sheet beyond the folder's. Evidence: `jshost::git`
+- Git in a folder it was given (each needs `uses.folders`; `init` and `commit` also `folders.write`; all async, off its time slice). No line on the sheet beyond the folder's. Evidence: `jshost::git`
   - `await ctx.git.info(root)` → `{repo: false}` or `{repo: true, branch, head, detached, busy, subfolder}`: `branch`
     null when detached; `head` the commit's id, null before the first commit; `busy` `merge`, `rebase`,
     `cherry-pick`, `revert`, `bisect` or null; `subfolder` true when the folder sits inside a larger repository.
@@ -359,8 +361,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 ## Thread values and shared values
 
 - `ctx.threads.set(thread, key, value)` — `key` 1–80 chars, `value` JSON of 16 KB at most, 64 keys a thread, 4 MB a
-  plugin in all; `null` removes it; refused in a routine's or Yolo's run preparing and asking and for a thread that
-  doesn't exist. `ctx.threads.get(thread, key)` (null when none), `ctx.threads.list(key)` (`[{thread, value}]`,
+  plugin in all; `null` removes it; refused for a thread that doesn't exist. `ctx.threads.get(thread, key)` (null when none), `ctx.threads.list(key)` (`[{thread, value}]`,
   threads gone left out). No grant needed. A `threads.json` that isn't JSON makes `get` and `list` fail and is moved
   aside as `threads.json.bad-<time>` at the next change; a thread id used again inherits nothing. A thread's changes
   arrive as `threads_changed` (§ Events). Evidence: `plugins::thread_values::changed`
@@ -380,14 +381,14 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 
 - `await ctx.signin.get(host)` for a host in `uses.signin.hosts` → `{token, from: "gh" | "git", user?}` (the GitHub
   CLI's token, else what git's credential helper keeps — for a self-hosted git maybe the user's own password) or
-  `null`; refused in a routine's or Yolo's run preparing and asking. The sign-in grants no network: the API host goes
+  `null`. The sign-in grants no network: the API host goes
   in `network.hosts`. `ctx.signin.get(host, {fresh: true})` asks again (after a 401). `ctx.signin.sources(host)` →
   `{gh, git}` says which programs are here, no sign-in read. Evidence: `plugins::signin::get`, `plugins::may_use_signin`
 - With `uses.signin.keep: true`, `ctx.signin.keep(host, token)` (one line, 8 KB at most) has Echo keep a sign-in the
   plugin made itself (its own client id and scopes, a device code or browser sign-in); `ctx.signin.get(host)` hands it
   back first as `{token, from: "echo"}`, to that plugin only; `ctx.signin.forget(host)` signs out. It goes when the
   plugin is removed; the same id from another marketplace, or a version that no longer says `keep`, starts without it;
-  keep and forget are refused in a routine's or Yolo's run preparing and asking. After a 401 on an `"echo"` sign-in,
+  After a 401 on an `"echo"` sign-in,
   `{fresh: true}` gives the same one. Evidence: `plugins::signin::keep`
 
 ## Claude in Echo: skills, commands and `agent/`
@@ -424,15 +425,14 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - `ctx.agent.set({summary?, entries: [{name, summary, guide}]})` gives what changes at run time (one entry per vault,
   per watched project) — needs `agent` in the manifest; `name` as a skill name, ≤ 20 entries, `summary` ≤ 200 chars (it
   replaces the manifest's when given), `guide` Markdown ≤ 16 KB; each entry is a row in Echo's core and a `CLAUDE.md`
-  Claude reads before working with it; entries not given again are removed; refused in a routine's or Yolo's run
-  preparing and asking. Evidence: `plugins::agent::set_runtime`
+  Claude reads before working with it; entries not given again are removed. Evidence: `plugins::agent::set_runtime`
 
 ## Scripts
 
-- Declared in `uses.scripts: [{skill, script, readonly?, timeout?}]`, 1–20 a plugin, each once: `skill` one of its
+- Declared in `uses.scripts: [{skill, script, timeout?}]`, 1–20 a plugin, each once: `skill` one of its
   package skills; `script` a file in that skill's folder, as a relative path of plain names (letters, digits, `.` `_`
-  `-`, none starting with a dot), ≤ 200 chars; `readonly: true` marks one that changes nothing (only such a script runs
-  in a routine's or Yolo's run preparing and asking); `timeout` the seconds it may take, 1–3600, 300 by default (the
+  `-`, none starting with a dot), ≤ 200 chars; `readonly` (true or false), from before every routine acted on its own, is still
+  accepted and changes nothing; `timeout` the seconds it may take, 1–3600, 300 by default (the
   sheet names one over 300). Evidence: `plugins::scripts::declared`
 - Interpreter: the shebang (`#!/usr/bin/env node`); on Windows a `.ps1` runs with PowerShell, another script with the
   interpreter its shebang names. Echo ships no interpreter; a missing one fails the run with its message.
@@ -446,8 +446,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - Arguments: at most 100, each ≤ 32 KB with no NUL, passed as plain words, never through a shell.
   Evidence: `plugins::scripts::run`
 - In a session: `SKILL.md` names a script by its path relative to the skill (`scripts/read.mjs <args>`); in Echo's
-  sessions that path is Echo's launcher of it, allowed only on its own by its full path (in a routine's or Yolo's run
-  preparing and asking only a `readonly` one). A session's run is bounded by Claude Code's Bash time (10 min at most).
+  sessions that path is Echo's launcher of it, allowed only on its own by its full path. A session's run is bounded by Claude Code's Bash time (10 min at most).
   Evidence: `plugins::scripts::wrapper`
 - From the host half: `await ctx.scripts.run(skill, script, args, {timeout})` → `{status, stdout, stderr, truncated?,
   timed_out?}`: `args` a list of strings, `timeout` in seconds up to the declared one (its default), never more; stdout

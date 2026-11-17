@@ -14,12 +14,12 @@ const data = useData(test, { set: 'standard', ai: 'virtual' })
 /** The lines of a run's log. */
 const lines = (text) => text.split('\n').filter(Boolean)
 
-/** Yolo acting on its own with every permission check skipped (on: Claude in the window "Auto", Yolo "Skip all
- * permission checks" — auto mode would ask the virtual model to judge each action), or as the data has them (off:
- * "Ask each time", Yolo "Auto"), through the served window's own IPC (the page loaded first). */
+/** Yolo with every permission check skipped (on: auto mode would ask a model to judge each action — on the virtual
+ * model's local profile Auto accepts edits instead, which refuses what the script runs), or on Auto as the data has it
+ * (off), through the served window's own IPC (the page loaded first). */
 async function setActs(page, on) {
   await page.goto(data.base + '/')
-  const set = { folder_permissions: on ? 'auto' : 'ask', yolo_permissions: on ? 'skip' : 'auto' }
+  const set = { yolo_permissions: on ? 'skip' : 'auto' }
   await page.evaluate(async (set) => {
     for (const [key, value] of Object.entries(set)) await fetch('ipc', { method: 'POST', body: JSON.stringify({ cmd: 'settings_set', key, value }) })
   }, set)
@@ -330,7 +330,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await expect(work.history.nth(1)).toContainText(fill(w.youSet, { field: w.fields.internal_owner }))
   })
 
-  test('4 · With Claude in the window asking each time, Yolo prepares and asks: its send refused, its mail drafted, its task closed as Echo\'s run', covers('tasks/TC-031', 'F-PLUG-35', 'F-M365-08'), async ({ page }) => {
+  test('4 · Yolo on Auto on a model without auto mode accepts edits: its send refused by Claude Code, its mail drafted, its task closed as Echo\'s run', covers('tasks/TC-031', 'F-PLUG-35', 'F-M365-08'), async ({ page }) => {
     const a = data.set.yoloAsks
     const c = data.text.claude
     data.model.use(a.script)
@@ -342,8 +342,9 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const ask = () => (data.exists(data.home, c.asks) ? data.json(data.home, c.asks) : []).find((x) => x.id === a.ask)
     await expect.poll(() => ask()?.state, { timeout: 60_000, intervals: [1_000] }).toBe('done')
     expect(ask().say).toBe(a.say)
-    // The send never reached Echo (Claude Code refused it: nothing allowed it without a prompt); the draft did. Another
-    // thread's work was refused: Yolo reads its own task's thread only, the user's choice on or off.
+    // On the virtual model (a local profile: no auto mode) Auto accepts edits: the send never reached Echo (Claude Code
+    // refused it: nothing allowed it by name); the draft did. Another thread's work was refused: Yolo reads its own
+    // task's thread only, whatever its permissions.
     expect(data.model.toolResults(0).map(Boolean)).toEqual(a.toolResults)
     const drafts = lines(data.read(data.dir, c.drafts))
     expect(drafts).toHaveLength(drafted + 1)

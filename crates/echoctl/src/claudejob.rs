@@ -2,16 +2,14 @@
 //! the user's AI profiles (strict routing, the profile's lease), with the Brain narrowed to that profile.
 //!
 //! A routine's or Yolo's run (`Spec::session`) runs as the folder session does (#590): in the data folder, with its
-//! arguments, settings and hooks (`folder_args::session`), and the user's choices (Settings → AI & minutes):
-//! - **acts on its own** (the folder session not on "ask each time") — in Claude Code's auto mode or with every
-//!   permission check skipped, as the routines' or Yolo's own setting says (`folder_args::run_permissions`), and the
-//!   CLI's limits for runs lifted as in the folder session (`notes::RUN_SESSION=acts`; Yolo keeps its own task and
-//!   thread), every change and send noted;
-//! - **prepares and asks** — Echo's reads and its own data's edits run without a prompt (`folder_args::FREE_COMMANDS`),
-//!   a mail is left as a draft (`compose`), anything else that would ask is refused.
+//! arguments, settings and hooks (`folder_args::session`). It acts on its own: in Claude Code's auto mode (where the
+//! profile's model has it) or with every permission check skipped — as the routine itself says (`tools`: `auto` or
+//! `skip`), else the user's routines' or Yolo's setting (Settings → AI & minutes, `folder_args::run_permissions`) —
+//! with the CLI's limits for runs lifted as in the folder session (`notes::RUN_SESSION=acts`; Yolo keeps its own task
+//! and thread), every change and send noted.
 //!
-//! The `tools` it asked for is kept in its record (`permissions.json`); only `none` (a plugin's analysis of what it
-//! read, Won't do) is honoured: no tools at all.
+//! What it asked for is kept in its record (`permissions.json`); `none` (a plugin's analysis of what it read, Won't
+//! do) keeps no tools at all.
 //!
 //! The plugin writes the prompt; Echo adds what only it knows — the time, and how to reach its data in the
 //! chosen mode. Each run leaves `prompt.md`, `log.txt` and `answer.md` in a folder of the plugin's store.
@@ -27,42 +25,46 @@ use serde_json::Value;
 
 use crate::{guard, notes, paths};
 
+/// The permissions a run asks for (`tools`): a routine's own choice, or the user's setting.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tools {
     /// No tools at all: the prompt holds everything (a plugin's analysis of what it read).
     None,
-    Read,
-    Folder,
+    /// The user's setting for routines (or Yolo's, for Yolo).
+    Setting,
+    Auto,
     Skip,
 }
 
 impl Tools {
+    /// `auto` or `skip` (a routine's choice in the Scheduler), `none`, or nothing (the user's setting). The values of
+    /// before, `read` and `folder`, are taken as `auto`.
     pub fn parse(s: &str) -> Result<Tools> {
         match s.trim() {
-            "" | "read" => Ok(Tools::Read),
-            "folder" => Ok(Tools::Folder),
+            "" => Ok(Tools::Setting),
+            "auto" | "read" | "folder" => Ok(Tools::Auto),
             "skip" => Ok(Tools::Skip),
             "none" => Ok(Tools::None),
-            o => bail!("tools “{o}”: none, read, folder or skip"),
+            o => bail!("tools “{o}”: auto, skip or none"),
         }
     }
 
-    /// As a plugin names it (`tools`).
+    /// As its record names it.
     pub fn name(self) -> &'static str {
         match self {
             Tools::None => "none",
-            Tools::Read => "read",
-            Tools::Folder => "folder",
+            Tools::Setting => "setting",
+            Tools::Auto => "auto",
             Tools::Skip => "skip",
         }
     }
 
-    pub fn word(self) -> &'static str {
+    /// The permissions it asked for itself (None: no tools, or the user's setting).
+    fn permissions(self) -> Option<crate::config::Permissions> {
         match self {
-            Tools::None => "no tools",
-            Tools::Read => "read",
-            Tools::Folder => "folder",
-            Tools::Skip => "skip",
+            Tools::Auto => Some(crate::config::Permissions::Auto),
+            Tools::Skip => Some(crate::config::Permissions::Skip),
+            Tools::None | Tools::Setting => None,
         }
     }
 }
@@ -131,21 +133,16 @@ impl Spec {
     }
 }
 
-/// What Echo tells the run around the plugin's prompt: `acts` — a routine's or Yolo's run as the folder session (some:
-/// the user lets it act on its own or not); none — no tools at all.
-fn preamble(acts: Option<bool>, cli: &str) -> String {
-    let reach = match acts {
-        None => "You have no tools: everything you need is below.".to_string(),
-        Some(true) => format!(
+/// What Echo tells the run around the plugin's prompt: `tools` — a routine's or Yolo's run as the folder session,
+/// acting on its own; else no tools at all.
+fn preamble(tools: bool, cli: &str) -> String {
+    let reach = if tools {
+        format!(
             "Echo's CLI is {cli}; what was said and who people are: the `echo` MCP tools. The user lets you act on your own: \
              you may change Echo's data and send through Echo's CLI, as in their own session. Every change and send you make with Echo's CLI is listed for them."
-        ),
-        Some(false) => format!(
-            "Echo's CLI is {cli}; what was said and who people are: the `echo` MCP tools. You may read Echo's data and edit its own \
-             data (a thread's work: `project work <thread> '<edit JSON>'`, its tree: `project work <thread>`) without asking; a \
-             plugin's commands only read, and only its scripts marked readonly run. Nothing is sent: leave a mail as a draft with \
-             `compose --to … --subject … --body '…'`. Anything else that would need the user's yes can't be done here: say what you didn't do and why."
-        ),
+        )
+    } else {
+        "You have no tools: everything you need is below.".to_string()
     };
     format!(
         "Started by Echo; nobody is watching: don't ask anything, do the work and answer. Now: {}. The working folder is Echo's data \
@@ -184,8 +181,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.
     let launcher = clis.iter().find(|c| c.contains('/') && c.contains("scripts")).cloned().unwrap_or_else(|| "echoctl".into());
-    // A routine or Yolo: acting on its own with its own permission setting, or (None) preparing and asking.
-    let acts = spec.session.then(|| crate::folder_args::run_permissions(spec.yolo));
+    // A routine or Yolo acts on its own: as the routine asked, else as the user set routines or Yolo.
+    let acts = spec.session.then(|| spec.tools.permissions().unwrap_or_else(|| crate::folder_args::run_permissions(spec.yolo)));
     // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
     #[cfg(feature = "brain")]
     // Only where the run gets the echo server (the window's builds; a run with tools).
@@ -194,37 +191,30 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let brain_text: Option<String> = None;
     let prompt = format!(
         "{}{}\n\n{}",
-        preamble(acts.map(|m| m.is_some()), &format!("`{launcher}` (its full path, exactly so)")),
+        preamble(acts.is_some(), &format!("`{launcher}` (its full path, exactly so)")),
         brain_text.map(|b| format!("\n\n<echo_recall>\n{b}\n</echo_recall>")).unwrap_or_default(),
         spec.prompt
     );
     let _ = fs::write(spec.run_dir.join("prompt.md"), &prompt);
-    // What it asked for, and what it runs with (a routine or Yolo: the folder session's permissions).
+    // What it asked for, and what it runs with (a routine or Yolo: the folder session's arguments, its own permissions).
     let used = match acts {
         None => "no tools".to_string(),
-        Some(Some(m)) => format!("the folder session's: acts on its own ({})", crate::folder_args::permission_args(m, profile, model.as_deref(), true).1),
-        Some(None) =>"the folder session's: prepares and asks (reads and Echo's own edits; nothing sent; what would ask is refused)".to_string(),
+        Some(m) => format!("the folder session's: acts on its own ({})", crate::folder_args::permission_args(m, profile, model.as_deref(), true).1),
     };
     let actions = spec.run_dir.join("actions.jsonl");
     let _ = fs::remove_file(&actions);
     let _ = fs::write(spec.run_dir.join("permissions.json"), serde_json::json!({"asked": spec.tools.name(), "used": used}).to_string());
-    let _ = writeln!(log, "{}  Echo runs “{}” on {}{} (asked: {} permissions; runs with {used})", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default(), spec.tools.word());
+    let _ = writeln!(log, "{}  Echo runs “{}” on {}{} (asked: {}; runs with {used})", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default(), spec.tools.name());
     let exe = std::env::current_exe().context("Echo's own program can't be found")?;
     let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
     let (settings_file, env) = match acts {
         // A routine or Yolo: the folder session's arguments, but for `-p` and its prompt.
         Some(acts) => {
             let f = crate::folder_args::run_settings();
-            a.extend(crate::folder_args::session(profile, &exe, &f, "routine", model.as_deref(), crate::folder_args::Who::Run { acts })?);
+            a.extend(crate::folder_args::session(profile, &exe, &f, "routine", model.as_deref(), crate::folder_args::Who::Run(acts))?);
             let mut env = crate::folder_args::env(&profile.id);
-            let acts = acts.is_some();
-            env.push((notes::RUN_SESSION, if acts { "acts" } else { "asks" }.into()));
+            env.push((notes::RUN_SESSION, "acts".into()));
             env.push((notes::RUN_ACTIONS, actions.display().to_string()));
-            // Preparing and asking: a plugin's commands it runs read and change nothing, and only its readonly scripts
-            // run (`jshost::read_only_here`, `echoctl plugin script`).
-            if !acts {
-                env.push((guard::RUN_MODE, "routine".into()));
-            }
             (Some(f), env)
         }
         // No tools at all: what it reads is in its prompt.
@@ -304,9 +294,6 @@ mod tests {
         c.save().unwrap();
     }
 
-    fn set_acts(on: bool) {
-        set_permissions(if on { Permissions::Skip } else { Permissions::Ask }, None, Some(Permissions::Skip));
-    }
 
     #[test]
     #[cfg(all(unix, feature = "tray"))]
@@ -317,16 +304,16 @@ mod tests {
         let home = dunce::canonicalize(paths::home()).unwrap();
         let file = |n: &str| fs::read_to_string(crate::ai::fake::file(&p, n)).unwrap_or_default();
         let lines = |n: &str| file(n).split('\0').filter(|a| !a.is_empty()).map(str::to_owned).collect::<Vec<String>>();
-        // A routine asking for read-only permissions, the user's choice "prepares and asks": the folder session's, in
-        // the data folder, its model the one it asked for, its ask kept.
-        set_acts(false);
-        let spec = Spec::from_value(&serde_json::json!({"prompt": "List what changed", "tools": "read", "profile": "work", "model": "opus-test", "dir": "runs/r1"}), &root.join("store")).unwrap();
+        // A routine that asked for the read-only permissions of before: the folder session's, in the data folder, acting
+        // on its own in auto mode, its model the one it asked for, its ask kept. The folder session in auto mode too.
+        set_permissions(Permissions::Auto, None, None);
+        let spec = Spec::from_value(&serde_json::json!({"prompt": "List what changed", "tools": "read", "profile": "work", "model": "claude-opus-4-7", "dir": "runs/r1"}), &root.join("store")).unwrap();
         assert!(spec.session);
         let (_, model, _) = run(&spec).unwrap_or_default();
         let routine = lines("p.args");
         assert_eq!(file("p.cwd").trim(), home.display().to_string());
-        assert!(routine.windows(2).any(|w| w[0] == "--model" && w[1] == "opus-test"), "{routine:?}");
-        assert!(fs::read_to_string(root.join("store/runs/r1/log.txt")).unwrap().contains(", model opus-test (asked: read permissions"));
+        assert!(routine.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-4-7"), "{routine:?}");
+        assert!(fs::read_to_string(root.join("store/runs/r1/log.txt")).unwrap().contains(", model claude-opus-4-7 (asked: auto; runs with the folder session's: acts on its own (auto mode"));
         // The profile's own model for a Claude name: what the run asks for, and what its log says.
         crate::ai::set_model_names("work", &["opus=acme-gw/opus-large".into()]).unwrap();
         let spec = Spec::from_value(&serde_json::json!({"prompt": "List what changed", "tools": "read", "profile": "work", "model": "opus", "dir": "runs/r1b"}), &root.join("store")).unwrap();
@@ -336,22 +323,23 @@ mod tests {
         crate::ai::set_model_names("work", &["opus=".into()]).unwrap();
         let _ = model;
         assert!(!routine.contains(&"--tools".to_string()) && !routine.contains(&"--dangerously-skip-permissions".to_string()), "{routine:?}");
-        // Echo's reads and its own data's edits without a prompt; never a send.
+        assert!(routine.windows(2).any(|w| w[0] == "--permission-mode" && w[1] == "auto"), "{routine:?}");
+        // Echo's reads and its own data's edits allowed by name; a send is left to Claude Code's auto mode.
         let cli = crate::notes::plugin_dir().map(|d| crate::notes::run_clis(&d)[0].clone()).unwrap();
         for rule in [format!("Bash({cli} status:*)"), format!("Bash({cli} project show:*)"), format!("Bash({cli} project work:*)"), format!("Bash({cli} compose:*)")] {
             assert!(routine.contains(&rule), "{rule}: {routine:?}");
         }
-        assert!(!routine.iter().any(|a| a.contains(" m365")), "no send without a prompt");
+        assert!(!routine.iter().any(|a| a.contains(" m365")), "no send allowed by name");
         let env = file("p.env");
-        assert!(env.contains("ECHOCTL_TERMINAL=1") && env.contains("ECHOCTL_SESSION_PROFILE=work") && env.contains("ECHOCTL_RUN_SESSION=asks") && env.contains("ECHOCTL_RUN_MODE=routine"), "preparing and asking: a plugin's commands only read: {env}");
+        assert!(env.contains("ECHOCTL_TERMINAL=1") && env.contains("ECHOCTL_SESSION_PROFILE=work") && env.contains("ECHOCTL_RUN_SESSION=acts") && !env.contains("ECHOCTL_RUN_MODE="), "{env}");
         let settings: Value = serde_json::from_str(&file("p.settings")).unwrap();
         let commands = |s: &Value, k: &str| s["hooks"][k].as_array().into_iter().flatten().flat_map(|h| h["hooks"].as_array().unwrap().iter().map(|c| c["command"].as_str().unwrap().to_string())).collect::<Vec<_>>();
         assert!(commands(&settings, "SessionStart").iter().any(|c| c.ends_with(" core --hook")) && commands(&settings, "SessionStart").iter().any(|c| c.ends_with(" view-hook")));
         assert!(commands(&settings, "PreToolUse").iter().any(|c| c.ends_with(" plugins-hook")));
         assert!(commands(&settings, "UserPromptSubmit").is_empty(), "what the window shows isn't an unattended run's");
         let record: Value = serde_json::from_str(&fs::read_to_string(root.join("store/runs/r1/permissions.json")).unwrap()).unwrap();
-        assert_eq!(record["asked"], "read");
-        assert!(record["used"].as_str().unwrap().contains("prepares and asks"));
+        assert_eq!(record["asked"], "auto", "`read` of before is auto");
+        assert!(record["used"].as_str().unwrap().contains("acts on its own (auto mode"));
         // The real folder session's arguments: the same, but for its own conversation, `-p` and the model.
         let id = crate::terminal::start_folder("claude:folder-test", Some("work"), None, 80, 20).unwrap();
         crate::paths::testenv::eventually("the folder session started", || crate::ai::fake::file(&p, "session.args").is_file());
@@ -361,22 +349,13 @@ mod tests {
         assert_eq!(file("session.cwd").trim(), file("p.cwd").trim());
         let fs_settings: Value = serde_json::from_str(&file("session.settings")).unwrap();
         assert!(!commands(&fs_settings, "UserPromptSubmit").is_empty(), "the folder session gets what the window shows");
-        // With the user's choice "acts on its own", a Yolo task skips prompts; off, it doesn't, whatever it asked.
-        set_acts(true);
-        let yolo = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Skip, run_dir: root.join("yolo/1"), timeout: Duration::from_secs(60), session: true, task: None, thread: None, yolo: true };
-        let _ = run(&yolo);
-        assert!(lines("p.args").contains(&"--dangerously-skip-permissions".to_string()) && file("p.env").contains("ECHOCTL_RUN_SESSION=acts") && !file("p.env").contains("ECHOCTL_RUN_MODE="));
-        set_acts(false);
-        let _ = run(&yolo);
-        assert!(!lines("p.args").contains(&"--dangerously-skip-permissions".to_string()));
-        // `tools: "none"` keeps no tools in either mode.
-        set_acts(true);
+        // `tools: "none"` keeps no tools, whatever the settings.
+        set_permissions(Permissions::Skip, Some(Permissions::Skip), Some(Permissions::Skip));
         let none = Spec::from_value(&serde_json::json!({"prompt": "Describe this", "tools": "none", "profile": "work", "dir": "runs/r2"}), &root.join("store")).unwrap();
         assert!(!none.session);
         let _ = run(&none);
         let args: Vec<String> = file("p.args").split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()) && !args.contains(&"--dangerously-skip-permissions".to_string()) && !args.contains(&"--settings".to_string()), "{args:?}");
-        set_acts(false);
     }
 
     #[test]
@@ -385,13 +364,12 @@ mod tests {
         let (_env, root) = crate::paths::testenv::folders("claudejob-wont");
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
-        set_acts(true);
+        set_permissions(Permissions::Skip, Some(Permissions::Skip), Some(Permissions::Skip));
         let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false };
         let _ = run(&wont);
         let args: Vec<String> = fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
         assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions" || a == "--settings" || a == "--plugin-dir" || a == "--permission-mode"), "{args:?}");
-        set_acts(false);
     }
 
     #[test]
@@ -413,15 +391,16 @@ mod tests {
             (a.contains(&"--dangerously-skip-permissions".to_string()), mode, session.unwrap_or_default(), used)
         };
         let n = std::cell::Cell::new(0);
-        let routine = || {
+        let routine_asking = |tools: &str| {
             n.set(n.get() + 1);
-            let s = Spec::from_value(&serde_json::json!({"prompt": "Sum it up", "tools": "folder", "profile": "work", "dir": format!("runs/p{}", n.get())}), &root.join("store")).unwrap();
+            let s = Spec::from_value(&serde_json::json!({"prompt": "Sum it up", "tools": tools, "profile": "work", "dir": format!("runs/p{}", n.get())}), &root.join("store")).unwrap();
             let _ = run(&s);
             started(&s.run_dir)
         };
+        let routine = || routine_asking("");
         let yolo = || {
             n.set(n.get() + 1);
-            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Skip, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true };
+            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true };
             let _ = run(&s);
             started(&s.run_dir)
         };
@@ -435,10 +414,16 @@ mod tests {
         assert_eq!((routine(), yolo()), (skip.clone(), auto.clone()));
         set_permissions(Permissions::Skip, None, Some(Permissions::Skip));
         assert_eq!((routine(), yolo()), (auto.clone(), skip.clone()), "the folder session's skip isn't the routines'");
-        // The folder session asking each time: both prepare and ask, as before, whatever their own settings.
-        set_permissions(Permissions::Ask, Some(Permissions::Skip), Some(Permissions::Skip));
-        let asks = (false, None, "asks".to_string(), "the folder session's: prepares and asks (reads and Echo's own edits; nothing sent; what would ask is refused)".to_string());
-        assert_eq!((routine(), yolo()), (asks.clone(), asks));
+        // The folder session asking each time: routines and Yolo still act on their own, each with its own setting.
+        set_permissions(Permissions::Ask, Some(Permissions::Skip), None);
+        assert_eq!((routine(), yolo()), (skip.clone(), auto.clone()));
+        // A routine's own choice wins over the setting: `auto` (and `read` / `folder` of before), or `skip`.
+        for tools in ["auto", "read", "folder"] {
+            assert_eq!(routine_asking(tools), auto, "{tools}");
+        }
+        set_permissions(Permissions::Auto, None, None);
+        assert_eq!(routine_asking("skip"), skip);
+        assert!(Spec::from_value(&serde_json::json!({"prompt": "x", "tools": "ask"}), &root.join("store")).unwrap_err().to_string().contains("auto, skip or none"));
     }
 
     #[test]

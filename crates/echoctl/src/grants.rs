@@ -433,9 +433,9 @@ pub fn session_skill_dir(id: &str, skill: &str) -> Result<PathBuf> {
 }
 
 /// Enabled plugins' declared scripts as Echo's sessions run them: the launcher at each one's path in the session
-/// copy, by its full path (both slash forms on Windows). `read_only`: only those marked `readonly`.
+/// copy, by its full path (both slash forms on Windows).
 #[cfg(test)]
-pub fn session_scripts(read_only: bool) -> Vec<String> {
+pub fn session_scripts() -> Vec<String> {
     let dirs = session_plugins();
     let mut out = vec![];
     for p in crate::plugins::enabled() {
@@ -444,7 +444,7 @@ pub fn session_scripts(read_only: bool) -> Vec<String> {
             continue;
         }
         let Ok(m) = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p)) else { continue };
-        for s in crate::plugins::scripts::declared(&m.uses).unwrap_or_default().into_iter().filter(|s| s.readonly || !read_only) {
+        for s in crate::plugins::scripts::declared(&m.uses).unwrap_or_default() {
             let f = dir.join("skills").join(&s.skill).join(&s.script);
             if f.is_file() {
                 for form in [f.display().to_string(), f.display().to_string().replace('\\', "/")] {

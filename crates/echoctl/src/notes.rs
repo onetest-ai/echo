@@ -145,14 +145,9 @@ pub fn run_acts() -> bool {
     headless() && std::env::var(RUN_SESSION).is_ok_and(|v| v == "acts")
 }
 
-/// Inside a routine's or Yolo's run, as the folder session (whatever the user's choice).
+/// Inside a routine's or Yolo's run, as the folder session.
 pub fn session_run() -> bool {
     headless() && std::env::var_os(RUN_SESSION).is_some()
-}
-
-/// Inside a routine's or Yolo's run that prepares and asks (the user's choice off).
-pub fn run_asks() -> bool {
-    session_run() && !run_acts()
 }
 
 /// Inside a routine's run (no Yolo task or thread of its own), as the folder session.

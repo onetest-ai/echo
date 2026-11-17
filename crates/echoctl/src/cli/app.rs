@@ -328,14 +328,14 @@ pub struct ConfigArgs {
     /// by itself), or none
     #[arg(long)]
     pub onedrive: Option<String>,
-    /// Claude in the window (the folder session): ask (Claude Code's prompts; routines and Yolo then prepare and ask),
-    /// auto (Claude Code's auto mode, the default) or skip (every permission check skipped)
+    /// Claude in the window (the folder session): ask (Claude Code's prompts), auto (Claude Code's auto mode where the
+    /// profile's model has it, else edits accepted; the default) or skip (every permission check skipped)
     #[arg(long, value_parser = ["ask", "auto", "skip"])]
     pub folder_permissions: Option<String>,
-    /// A routine acting on its own: auto (the default) or skip
+    /// A routine (and a plugin's run) that doesn't choose itself: auto (the default) or skip
     #[arg(long, value_parser = ["auto", "skip"])]
     pub routine_permissions: Option<String>,
-    /// Yolo acting on its own: auto (the default) or skip
+    /// Yolo: auto (the default) or skip
     #[arg(long, value_parser = ["auto", "skip"])]
     pub yolo_permissions: Option<String>,
 }

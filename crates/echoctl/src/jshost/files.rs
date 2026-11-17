@@ -80,7 +80,6 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
 /// `createNew: false` asked for it. Written whole into a hidden file of its own beside it first (made new: a link
 /// planted there isn't followed), then linked into place — which never replaces a file — or, asked, renamed over it.
 pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_new: bool) -> Result<Value> {
-    read_only_here("changing files or settings")?;
     uses_flag(plugin, "folders", "write")?;
     let (src, _) = own(plugin, file)?;
     let to = crate::grants::writable(plugin, root, rel)?;
@@ -299,11 +298,6 @@ mod tests {
         }
         let left: Vec<_> = std::fs::read_dir(vault.join("sources")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with('.') || n == "Big.bin").collect();
         assert!(left.is_empty(), "{left:?}");
-        // While Claude prepares and asks: nothing is copied.
-        std::env::set_var(crate::guard::RUN_MODE, "routine");
-        let asked = run("ingest", "copy", json!({"to": "sources/R.pdf"}), one);
-        std::env::remove_var(crate::guard::RUN_MODE);
-        assert!(asked.unwrap_err().contains("prepares and asks"));
         for id in ["ingest", "looker"] {
             plugins::remove(id, true).unwrap();
         }

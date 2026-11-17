@@ -835,7 +835,7 @@ mod tests {
         let auto = Expected::of(&args(&["-p", "x", "--permission-mode", "auto"]));
         assert!(auto.check(&init("2.1.400", "auto", &["Bash", "Write"], &["anything"])).is_ok());
         assert!(auto.check(&init("2.1.400", "bypassPermissions", &["Bash"], &[])).unwrap_err().contains("bypassPermissions"));
-        // Echo set no mode (a routine preparing and asking): the user's own default mode, never one skipping permissions.
+        // Echo set no mode (the folder session asking each time): the user's own default mode, never one skipping permissions.
         let own = Expected::of(&args(&["-p", "--tools", "Bash"]));
         assert_eq!(own.mode, None);
         assert!(own.check(&init("2.1.400", "acceptEdits", &["Bash"], &[])).is_ok());

@@ -61,9 +61,7 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   its skill's session copy. The host half reaches it by `ctx.scripts.run`; Echo's sessions through the launcher Echo
   writes at the script's path in the session copy and in the laid-out skill (`echoctl plugin script`, so Claude Code's
   environment never reaches it) — the laid-out one allowed by its full path in the shared session arguments
-  (`folder_args::build`): every declared one in the folder session and in a routine's or Yolo's run acting on its own,
-  only one marked `readonly` in a run preparing and asking (which `echoctl plugin script` checks again), with no
-  `RUN_PLUGIN_*` guard. Evidence: `plugins::scripts::run`
+  (`folder_args::build`): every declared one, in the folder session and in a routine's or Yolo's run alike. Evidence: `plugins::scripts::run`
 - A script runs without stdin, within its declared time (a call may ask for less, a routine uses it as declared), in
   its own process group, killed whole when its time is up or the plugin is unloaded, updated or removed, or Echo quits;
   its output capped (what is past the cap cut and flagged); one run of a script at a time across processes (a lock per

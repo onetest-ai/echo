@@ -998,7 +998,6 @@
       "runs any command and tool without asking",
       "Takes effect the next time the session starts."
     ],
-    "asksNow": "Now they prepare and ask: Claude in the window asks each time.",
     "autoOnProfiles": "Auto on your profiles:",
     "autoMode": "auto mode: Claude Code decides each action",
     "skipOn": "Skips every check."

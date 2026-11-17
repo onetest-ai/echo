@@ -1,6 +1,6 @@
 ---
 id: TC-074
-title: While Claude prepares and asks, a plugin's git commit is refused and its vault left as it was, and its git reads still answer
+title: Under the read-only marker of before, a plugin's git commit goes through and its git reads answer: no run prepares and asks any more
 priority: high
 type: functional
 requirements: [F-PLUG-57]
@@ -11,7 +11,7 @@ data: standard
 tags: [plugins, host-half, folders, git, routines]
 ---
 
-# TC-074: A plugin's commit is refused while Claude prepares and asks
+# TC-074: The read-only marker of before limits a plugin's commit no more
 
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 
@@ -50,11 +50,11 @@ echoctl plugin marketplace add "$M" --name acme-git
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-history --yes`; `ECHOCTL_PICK_FOLDER="$D/history" echoctl plugin call acme-history add`; `echoctl plugin call acme-history init`; `echoctl plugin call acme-history put '{"path":"Notes/Acme.md","text":"# Acme\nPilot planned.\n"}'`; `echoctl plugin call acme-history commit '{"paths":["Notes/Acme.md"],"message":"Acme: first notes"}'` | `Installed Acme history 0.1.0`; the vault's path; its `info`; `null`; `{"rev": "<40 hex>"}` |
 | 2 | `echoctl plugin call acme-history put '{"path":"Notes/Routine.md","text":"# Routine\n"}'`; `echoctl plugin call acme-history log '{"max":1}'` | `null`; one commit — note its `subject` and `rev` |
-| 3 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history commit '{"paths":["Notes/Routine.md"],"message":"x"}'` | Fails: `changing files or settings isn't allowed while Claude prepares and asks` |
-| 4 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history log '{"max":1}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history status` | The same one commit as in step 2 (nothing committed); the status lists `{"path": "Notes/Routine.md", "code": "??"}`: reads answer while Claude prepares and asks |
+| 3 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history commit '{"paths":["Notes/Routine.md"],"message":"Routine notes"}'` | `{"rev": "<40 hex>"}`: the marker limits nothing |
+| 4 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history log '{"max":1}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history status` | One commit, subject `Routine notes` (step 3's); the status lists nothing: reads answer too |
 
 ## Expected Final State
-`Notes/Routine.md` is in the vault, uncommitted; the history as before step 3.
+`Notes/Routine.md` is in the vault, committed by step 3.
 
 ## Teardown
 - `echoctl plugin remove acme-history --delete-data`; `echoctl plugin marketplace remove acme-git`

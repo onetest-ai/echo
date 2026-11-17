@@ -1485,16 +1485,18 @@ mod tests {
     #[test]
     fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
         let uses = |v: Value| v.as_object().cloned().unwrap();
-        // No `claude`: no run at all; with it any run — what it may do is the user's one choice, `skip` (from before
-        // that choice) taken and changing nothing, on the sheet too.
+        // No `claude`: no run at all. With it, any run; a run's own `skip` only when the sheet said so, else the user's
+        // setting for routines (`""`).
         assert!(may_run_claude(&uses(json!({})), "none").is_err());
         let plain = uses(json!({"claude": {}}));
-        for tools in ["none", "read", "folder", "skip"] {
-            assert!(may_run_claude(&plain, tools).is_ok(), "{tools}");
+        for tools in ["none", "", "auto", "read", "folder"] {
+            assert_eq!(may_run_claude(&plain, tools).unwrap(), tools);
         }
+        assert_eq!(may_run_claude(&plain, "skip").unwrap(), "", "not on its sheet: the user's setting");
+        assert_eq!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").unwrap(), "skip");
         let line = describe_claude(&json!({})).unwrap();
-        assert_eq!(describe_claude(&json!({"skip": true})).unwrap(), line);
-        assert!(line.contains("acting on its own or preparing and asking, as you set it in Settings"), "{line}");
+        assert!(line.contains("acting on its own as you set routines in Settings") && !line.contains("you mark so"), "{line}");
+        assert!(describe_claude(&json!({"skip": true})).unwrap().ends_with("; a run you mark so may skip every permission check"));
         // Sends: the ways its sheet named, or its own way.
         let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
         assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());

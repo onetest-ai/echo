@@ -138,28 +138,30 @@ variables (`ai::PASS`).
     (`--dangerously-skip-permissions`) (`folder_args::folder_permissions`). Each setting becomes flags only through
     `folder_args::permission_args`: `auto` is `--permission-mode auto` where the profile's model has auto mode, else
     `acceptEdits` (`dontAsk` read-only) (claude-code-runs reference, Starting Claude Code).
-  - A routine or Yolo acts on its own unless the folder session is on `ask`; then it prepares and asks.
-    `folder_args::run_permissions(yolo)`: `None` (preparing and asking, no flag), else `Config::routine_permissions` or
-    `Config::yolo_permissions` (`auto` or `skip`; an `ask` written by hand reads as `auto`). `claudejob::Spec::yolo`
-    says which.
-  - Its record (`permissions.json` `used`) and its log's first line name the mode: `acts on its own (auto mode: Claude
-    Code decides each action)`, `acts on its own (edits accepted: this profile's model has no auto mode)`,
-    `acts on its own (every permission check skipped)` or `prepares and asks (…)`.
+  - A routine and Yolo always act on their own, whatever the folder session's setting. A routine's own choice
+    (`claudejob::Tools`, `ctx.claude.run`'s `tools`: `auto`, or `skip` when its plugin's sheet has `claude.skip`
+    (`plugins::may_run_claude`); `read` and `folder` of before are `auto`) comes first; else
+    `folder_args::run_permissions(yolo)`: `Config::routine_permissions` (routines, plugins' runs, Echo's own jobs as
+    routines) or `Config::yolo_permissions` (`auto` or `skip`; an `ask` written by hand reads as `auto`).
+    `claudejob::Spec::yolo` says which.
+  - Its record (`permissions.json`: `asked` — `auto`, `skip`, `setting` or `none`; `used`) and its log's first line name
+    the mode: `acts on its own (auto mode: Claude Code decides each action)`, `acts on its own (edits accepted: this
+    profile's model has no auto mode)` or `acts on its own (every permission check skipped)`. A record of before may
+    say `prepares and asks (…)` (Yolo runs shows it as "Prepared and asked").
   - The switch before (`folder_skip_permissions`) is read once by `Config::load`: on becomes `folder_permissions: skip`,
     off stays unset (Auto); it is never written again.
-- `notes::run_acts` tells a run acting on its own (`ECHOCTL_RUN_SESSION=acts`), whatever its mode.
+- `notes::run_acts` tells a routine's or Yolo's run (`ECHOCTL_RUN_SESSION=acts`), whatever its mode.
 - A run with `tools: "none"` (Won't do, a plugin's analysis of what it read) keeps no tools.
 
-## Preparing and asking (the folder session on "Ask each time")
+## Allowed by name
 
-- Free without a prompt: `folder_args::FREE_COMMANDS`, each a fixed command and its own arguments — `context`,
-  `attention`, `prep`, `previous`, `status`, `calendar events`, `read`, `project list`, `project show`, `project of`,
-  `project tasks`, `project people`, `client list`, `org list`, `project work`, `compose`.
-- A Microsoft 365 send is refused, pointing to a draft (`compose --body`) (`m365::not_in_run`).
-- A plugin command's host half is read-only and only `readonly` scripts run (`guard::RUN_MODE=routine`:
-  `jshost::read_only_here`, `plugins::scripts::run`).
-- A thread's work refuses `delete`, `merge`, `xref`, `unxref`, `undo`, `accept`, `reject`, `state: cancelled` and a
-  task's `mode`, `prompt` or `skill` (`cli::project::refused_when_asking`).
+- Every session in the data folder gets Echo's reads and its own data's edits allowed by name (`--allowedTools`):
+  `folder_args::FREE_COMMANDS`, each a fixed command and its own arguments — `context`, `attention`, `prep`,
+  `previous`, `status`, `calendar events`, `read`, `project list`, `project show`, `project of`, `project tasks`,
+  `project people`, `client list`, `org list`, `project work`, `compose` — and every plugin's declared scripts and
+  session commands. What else a run does is its permission mode's to decide.
+- Preparing and asking (a run with the user's one switch off, a read-only routine) is gone: no run sets
+  `RUN_MODE=routine` or `ECHOCTL_RUN_SESSION=asks`, and the guard, the CLI and the plugin host have no limits for it.
 
 ## Run actions and markers
 

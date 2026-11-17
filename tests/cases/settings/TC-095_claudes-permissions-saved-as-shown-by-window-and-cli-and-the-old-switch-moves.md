@@ -1,6 +1,6 @@
 ---
 id: TC-095
-title: "Claude's permissions: each of the three settings is saved as shown, from the window or `echoctl config`, never from inside a run; the old switch 'Claude acts on its own' on becomes Skip all permission checks, off becomes Auto; what Auto gets on each profile is shown"
+title: "Claude's permissions: each of the three settings is saved as shown, from the window or `echoctl config`, never from inside a run; the old switch (`folder_skip_permissions`) on becomes Skip all permission checks, off becomes Auto; what Auto gets on each profile is shown"
 priority: high
 type: functional
 requirements: [F-SET-24]
@@ -27,7 +27,7 @@ tags: [settings, claude, permissions, cli]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/ai`; in the card "Claude's permissions" click "Auto" of "Claude in the window"; then `grep -E '"(folder\|routine\|yolo)_permissions"' "$C"` | "Auto" is pressed, "Ask each time" no longer; the rows of routines and Yolo no longer say "Now they prepare and ask…"; the file holds only `"folder_permissions": "auto",` |
+| 1 | Navigate to `{{base_url}}/#settings/ai`; in the card "Claude's permissions" click "Auto" of "Claude in the window"; then `grep -E '"(folder\|routine\|yolo)_permissions"' "$C"` | "Auto" is pressed, "Ask each time" no longer; the file holds only `"folder_permissions": "auto",` |
 | 2 | Click "Skip all permission checks" of "Yolo acting on its own"; `grep -E '"(routine\|yolo)_permissions"' "$C"` | It is pressed and its row shows "Skips every check."; the routines' row still has "Auto" pressed; the file holds `"yolo_permissions": "skip"` and no `routine_permissions` |
 | 3 | `$E config --routine-permissions skip \| grep -E '"(folder\|routine\|yolo)_permissions"'`; reload `{{base_url}}/#settings/ai` | It prints `"folder_permissions": "auto"`, `"routine_permissions": "skip"`, `"yolo_permissions": "skip"`; in the window "Skip all permission checks" is pressed for routines too |
 | 4 | `$E config --routine-permissions ask; echo "exit $?"`; `ECHOCTL_HEADLESS=1 $E config --yolo-permissions auto; echo "exit $?"`; `grep -E '"(routine\|yolo)_permissions"' "$C"` | The first is refused by its own options (`invalid value 'ask'` … `[possible values: auto, skip]`, exit 2): nobody answers a routine's prompt; the second (as inside a run Echo started) says `refused inside a run Echo started: how Claude handles permissions is the user's to choose`, exit 1; both still `"skip"` |
