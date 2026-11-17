@@ -141,10 +141,11 @@ function pluginCtx(id) {
     },
     /** Markdown as safe HTML by Echo's writer: `markdown(md, {breaks, links: {dest: href | null}, images: {dest: src |
      *  null}})` — only the hrefs Echo allows (https, echo://, its own `#<id>:` and `#brain/<id>:` routes; images from its
-     *  folder route), `null` a missing page (`data-md-missing`, no href); `markdown.links(md)` → {links, images}: what to
-     *  resolve first. The page goes in the request's body (4 MB at most; Echo renders 1 MB of text). */
+     *  folder route), `null` a missing page (`data-md-missing`, no href); `markdown.links(md, {detail})` → {links, images}
+     *  (detail: also `entries` [{dest, kind, embed}]): what to resolve first. The page goes in the request's body (4 MB at
+     *  most; Echo renders 2 MB of text). */
     markdown: Object.assign(async (md, opts) => pluginValue(await pluginPost(id, 'markdown', { md: String(md), opts: opts || {} })),
-      { links: async (md) => pluginValue(await pluginPost(id, 'markdown/links', { md: String(md) })) }),
+      { links: async (md, opts) => pluginValue(await pluginPost(id, 'markdown/links', { md: String(md), opts: opts || {} })) }),
     /** Echo's background jobs, when its manifest asks for `uses.echo.jobs` (echo-plugins R25): `list()` — every job, its
      *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
      *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */

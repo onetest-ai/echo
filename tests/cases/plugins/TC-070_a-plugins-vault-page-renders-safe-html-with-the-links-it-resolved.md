@@ -30,6 +30,8 @@ cat > "$M/plugins/acme-pages/main.js" <<'JS'
 export function apply(ctx) {
   ctx.command('add', async () => await ctx.system.pickFolder('a vault'))
   ctx.command('root', () => ctx.fs.folders()[0] || '')
+  ctx.command('dests', (a) => ctx.markdown.links(a.md, a.opts))
+  ctx.command('big', (a) => ctx.markdown('word '.repeat(a.n), {}).length)
 }
 JS
 cat > "$M/plugins/acme-pages/client.js" <<'JS'
@@ -81,6 +83,8 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 5 | Click "new idea" | `#acme-clicked` reads `click: Ideas`; the address is still `#acme-pages:main` |
 | 6 | Focus "new idea" (Tab or `focus()`), press Enter | `#acme-clicked` reads `keydown: Ideas`; the address is still `#acme-pages:main` |
 | 7 | Click "the roadmap" | The address is `#acme-pages:main/Roadmap`; the page still shows "Acme pages" |
+| 8 | `echoctl plugin call acme-pages dests '{"md":"[[Plan]] [Plan](Plan) [[Plan\|again]] ![[logo.png]] ![logo](logo.png)","opts":{"detail":true}}'`; the same without `"opts"` | `links` `["Plan"]`, `images` `["logo.png"]` and `entries` in order: `Plan` `wiki` not embed, `Plan` `md` not embed, `logo.png` `wiki` embed, `logo.png` `md` embed — the same destination written both ways twice, `again` adding nothing; without `opts`: only `links` and `images`, as before |
+| 9 | `echoctl plugin call acme-pages big '{"n":320000}'`; `echoctl plugin call acme-pages big '{"n":440000}'` | A page of 1.6 MB renders (a number over 1,600,000); one of 2.2 MB fails: `ctx.markdown renders 2 MB of text at most (2148 KB given): split the page` |
 
 ## Expected Final State
 Acme pages is installed with the vault given to it; nothing changed in the vault.

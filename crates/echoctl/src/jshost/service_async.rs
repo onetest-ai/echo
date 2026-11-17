@@ -66,14 +66,12 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             uses(id, "folders")?;
             let root = arg[0].as_str().unwrap_or("").to_string();
             let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
+            let strict = arg[3].as_bool() == Some(true);
             let mut out = vec![];
             for rel in arg[1].as_array().into_iter().flatten().take(5000) {
-                let text = crate::grants::resolve(id, &root, rel.as_str().unwrap_or("")).ok().and_then(|f| {
-                    use std::io::Read;
-                    let mut buf = vec![];
-                    std::fs::File::open(f).ok()?.take(max).read_to_end(&mut buf).ok()?;
-                    Some(String::from_utf8_lossy(&buf).into_owned())
-                });
+                let rel = rel.as_str().unwrap_or("");
+                // A file it can't read — with `strict` one that isn't UTF-8 too — is `null`.
+                let text = crate::grants::resolve(id, &root, rel).ok().and_then(|f| folders::read_text(&f, rel, max, strict).ok());
                 out.push(json!(text));
             }
             Ok(json!(out))
