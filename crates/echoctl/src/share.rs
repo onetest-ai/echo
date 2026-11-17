@@ -224,6 +224,21 @@ fn mail_messages(c: &rusqlite::Connection, src: &str) -> Result<Vec<Value>> {
     Ok(out.into_iter().map(|(_, m)| m).take(LIST_MAX).collect())
 }
 
+/// What `mail_item` routes a mail by, read once for a list or an event: the threads, the clients, the default AI profile.
+#[cfg(feature = "brain")]
+struct Routing {
+    threads: Vec<crate::projects::Project>,
+    clients: Vec<crate::projects::Client>,
+    default: String,
+}
+
+#[cfg(feature = "brain")]
+impl Routing {
+    fn load() -> Self {
+        Routing { threads: crate::projects::list(), clients: crate::projects::clients().unwrap_or_default(), default: crate::ai::default_id() }
+    }
+}
+
 /// What Recall decided of a mail conversation or channel post when it indexed it: `{id, kind, title, subject, at,
 /// threads, client, profile, from, people, trust, link, url}` — `threads` the threads whose sources matched it,
 /// `client` theirs (`client_of`), `profile` their AI profile when they share one, `from` who wrote the messages it
@@ -231,16 +246,15 @@ fn mail_messages(c: &rusqlite::Connection, src: &str) -> Result<Vec<Value>> {
 /// messages of senders the user trusts (a sender waiting for the user's decision, ignored, or unauthenticated stays
 /// out of it); `at` its last message's day.
 #[cfg(feature = "brain")]
-fn mail_item(c: &rusqlite::Connection, src: &str) -> Result<Value> {
+fn mail_item(c: &rusqlite::Connection, src: &str, routing: &Routing) -> Result<Value> {
     let (kind, title, date, refs): (String, Option<String>, Option<String>, Option<String>) = c
         .query_row("SELECT kind, title, event_date, refs FROM documents WHERE source = ?1", [src], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
         .map_err(|_| anyhow!("no {src:?} in Recall"))?;
     let refs: Value = refs.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
-    let (all, clients) = (crate::projects::list(), crate::projects::clients().unwrap_or_default());
+    let Routing { threads: all, clients, default } = routing;
     let mine: Vec<&crate::projects::Project> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| all.iter().find(|p| Some(p.id.as_str()) == ref_thread(t))).collect();
-    let threads: Vec<Value> = mine.iter().map(|p| thread_ref(p, &clients)).collect();
+    let threads: Vec<Value> = mine.iter().map(|p| thread_ref(p, clients)).collect();
     // Its threads' profile when they share one (strict routing: never a guess between two).
-    let default = crate::ai::default_id();
     let profiles: std::collections::BTreeSet<String> = mine.iter().map(|p| p.ai_profile.clone().unwrap_or_else(|| default.clone())).collect();
     let mut from: Vec<String> = vec![];
     for s in c.prepare("SELECT speaker FROM chunks WHERE source = ?1 AND speaker IS NOT NULL ORDER BY ord")?.query_map([src], |r| r.get::<_, String>(0))?.flatten() {
@@ -264,7 +278,7 @@ fn mail_item(c: &rusqlite::Connection, src: &str) -> Result<Value> {
 fn mail_source(src: &str) -> Result<Value> {
     anyhow::ensure!(matches!(crate::links::Link::parse(&format!("echo://mail/{src}")), Some(crate::links::Link::Mail(_))), "not a mail or post: {src}");
     let c = crate::brain::store::open(&crate::brain::store_path())?;
-    let mut out = mail_item(&c, src)?;
+    let mut out = mail_item(&c, src, &Routing::load())?;
     let text: Vec<String> = c.prepare("SELECT text FROM chunks WHERE source = ?1 ORDER BY ord")?.query_map([src], |r| r.get(0))?.collect::<Result<_, _>>()?;
     out["date"] = out["at"].clone();
     out["text"] = json!(text.join("\n\n"));
@@ -322,6 +336,7 @@ pub fn sources(opts: &Value) -> Result<Value> {
     #[cfg(feature = "brain")]
     if kind.is_empty() || kind == "mail" || kind == "channel" {
         if let Ok(c) = crate::brain::store::open(&crate::brain::store_path()) {
+            let routing = Routing::load();
             let rows: Vec<[String; 2]> = c
                 .prepare("SELECT source, kind FROM documents WHERE kind IN ('mail', 'channel') ORDER BY event_date DESC")?
                 .query_map([], |r| Ok([r.get(0)?, r.get(1)?]))?
@@ -330,7 +345,7 @@ pub fn sources(opts: &Value) -> Result<Value> {
                 if !kind.is_empty() && k != kind {
                     continue;
                 }
-                let Ok(mut it) = mail_item(&c, &src) else { continue };
+                let Ok(mut it) = mail_item(&c, &src, &routing) else { continue };
                 let hay = format!("{} {} {}", it["title"].as_str().unwrap_or(""), it["subject"].as_str().unwrap_or(""), it["from"]);
                 if it["at"].as_str().unwrap_or("") < since || !has_words(&words, &hay) || !routed(it["threads"].as_array().map_or(&[], |v| v), &it["client"]) {
                     continue;
@@ -397,8 +412,13 @@ pub fn calls(opts: &Value) -> Result<Value> {
 /// The meetings Echo last read from the calendar (its agenda — no new request to Microsoft 365), by start: `{id,
 /// subject, start, end, organizer, attendees, join_url, response, threads, client}` (`threads`: the ids of the threads
 /// Echo puts it in; `client` `{id, name}` when they have one between them). `opts`: `from` / `to` (YYYY-MM-DD, both days
-/// in, by its start).
+/// in, by the user's local day of its start, as Today's).
 pub fn calendar(opts: &Value) -> Result<Value> {
+    calendar_in(opts, &chrono::Local)
+}
+
+/// `calendar`, its days in the time zone `tz`.
+fn calendar_in<Tz: chrono::TimeZone>(opts: &Value, tz: &Tz) -> Result<Value> {
     let (from, to) = (opts["from"].as_str().unwrap_or(""), opts["to"].as_str().filter(|t| !t.is_empty()));
     let mut agenda = crate::watch::agenda();
     agenda.sort_by_key(crate::watch::meeting_start);
@@ -407,8 +427,8 @@ pub fn calendar(opts: &Value) -> Result<Value> {
     Ok(json!(agenda
         .iter()
         .filter(|m| {
-            let day = m.start.as_deref().and_then(|s| s.get(..10)).unwrap_or("");
-            day >= from && to.is_none_or(|t| day <= t)
+            let day = crate::watch::meeting_start(m).map(|s| s.with_timezone(tz).date_naive().to_string()).unwrap_or_default();
+            day.as_str() >= from && to.is_none_or(|t| day.as_str() <= t)
         })
         .map(|m| {
             let threads: Vec<Value> = crate::projects::for_event(m).iter().filter_map(|c| all.iter().find(|p| c["id"] == p.id.as_str())).map(|p| thread_ref(p, &clients)).collect();
@@ -564,7 +584,12 @@ pub(crate) fn sources_payload(touched: &[String], gone: &[String]) -> Option<Val
         return None;
     }
     #[cfg(feature = "brain")]
-    let items: Vec<Value> = crate::brain::store::open(&crate::brain::store_path()).map(|c| changed.iter().take(ITEMS_MAX).filter_map(|s| mail_item(&c, s).ok()).collect()).unwrap_or_default();
+    let items: Vec<Value> = crate::brain::store::open(&crate::brain::store_path())
+        .map(|c| {
+            let routing = Routing::load();
+            changed.iter().take(ITEMS_MAX).filter_map(|s| mail_item(&c, s, &routing).ok()).collect()
+        })
+        .unwrap_or_default();
     #[cfg(not(feature = "brain"))]
     let items: Vec<Value> = vec![];
     let ids = |v: Vec<String>| v.into_iter().map(|s| format!("mail:{s}")).collect::<Vec<_>>();
@@ -683,6 +708,24 @@ mod tests {
     }
 
     #[test]
+    fn the_calendar_by_days_is_the_users_local_day() {
+        let (_env, _root) = crate::paths::testenv::folders("share-calendar-local-day");
+        std::fs::create_dir_all(crate::paths::state_dir()).unwrap();
+        // 00:30 on the 20th in UTC+2 is 22:30 on the 19th in UTC; Graph's naive UTC too.
+        std::fs::write(
+            crate::paths::state_dir().join("agenda.json"),
+            r#"[{"id": "early", "subject": "Early sync", "start": "2026-11-19T22:30:00Z"}, {"id": "naive", "subject": "Late", "start": "2026-11-20T21:30:00.0000000"}]"#,
+        )
+        .unwrap();
+        let plus2 = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let ids = |v: Value| v.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(calendar_in(&json!({"from": "2026-11-20", "to": "2026-11-20"}), &plus2).unwrap()), ["early", "naive"]);
+        assert!(ids(calendar_in(&json!({"to": "2026-11-19"}), &plus2).unwrap()).is_empty(), "not the UTC day");
+        assert!(ids(calendar_in(&json!({"from": "2026-11-21"}), &plus2).unwrap()).is_empty(), "23:30 in UTC+2 is still the 20th");
+        assert_eq!(ids(calendar_in(&json!({"from": "2026-11-19", "to": "2026-11-19"}), &chrono::Utc).unwrap()), ["early"]);
+    }
+
+    #[test]
     fn russian_and_ukrainian_minutes_give_their_summary_decisions_and_questions() {
         let (_env, _root) = crate::paths::testenv::folders("share-minutes-languages");
         let call = |folder: &str, md: &str| {
@@ -753,6 +796,54 @@ mod tests {
         let mut other = json!({"call": "x", "title": "t"});
         crate::plugins::as_heard("recording_started", &mut other, false);
         assert_eq!(other, json!({"call": "x", "title": "t"}));
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn the_sources_list_and_event_give_each_mail_as_recall_decided_it() {
+        let (_env, _root) = crate::paths::testenv::folders("share-sources-golden");
+        let pilot = acme_pilot();
+        crate::projects::update(&pilot, |p| {
+            p.ai_profile = Some("work".into());
+            Ok(())
+        })
+        .unwrap();
+        crate::projects::add_client("Globex", &["globex.example".into()], false).unwrap();
+        let globex = crate::projects::create("Globex pilot", Some("globex"), None).unwrap().id;
+        let mut inputs = vec![];
+        for (src, title, day, threads) in [("mail/one", "Pilot dates", "2026-11-11", json!([{"id": pilot}])), ("mail/two", "Both pilots", "2026-11-12", json!([{"id": pilot}, {"id": globex}])), ("channel/three", "Standup", "2026-11-10", json!([{"id": globex}]))] {
+            let kind = src.split('/').next().unwrap();
+            let md = format!("# {title}\n\n### {day} 09:12 Jane Doe\n\n- {title}, a fact\n");
+            let refs = json!({"kind": kind, "people": ["jane@acme.example"], "url": format!("https://outlook.example/{src}"), "subjects": [title], "threads": threads});
+            inputs.push(crate::brain::store::Input {
+                source: src.into(), kind: kind.into(), title: title.into(), event_date: Some(day.into()), md, refs,
+                link: Box::new(|_| "https://outlook.example/x".into()), speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
+            });
+        }
+        crate::brain::store::sync_kinds(&crate::brain::store_path(), inputs, None, &[]).unwrap();
+        // Each mail as it was given before its threads and profiles were read once per list: one client and profile,
+        // two threads of two clients (no client, no profile), the default profile.
+        let (acme, globex_t) = (json!({"client": "acme", "client_name": "Acme", "id": "acme-pilot", "name": "Acme pilot"}), json!({"client": "globex", "client_name": "Globex", "id": "globex-pilot", "name": "Globex pilot"}));
+        let item = |src: &str, kind: &str, title: &str, at: &str, client: Value, profile: Value, threads: Value| {
+            json!({"at": at, "client": client, "from": ["Jane Doe"], "id": format!("mail:{src}"), "kind": kind, "link": format!("echo://mail/{src}"), "people": ["jane@acme.example"],
+                   "profile": profile, "subject": title, "threads": threads, "title": title, "trust": "trusted", "url": format!("https://outlook.example/{src}")})
+        };
+        let one = item("mail/one", "mail", "Pilot dates", "2026-11-11", json!({"id": "acme", "name": "Acme"}), json!("work"), json!([acme]));
+        let two = item("mail/two", "mail", "Both pilots", "2026-11-12", Value::Null, Value::Null, json!([acme, globex_t]));
+        let three = item("channel/three", "channel", "Standup", "2026-11-10", json!({"id": "globex", "name": "Globex"}), json!("system"), json!([globex_t]));
+        let event = sources_payload(&["mail/one".into(), "mail/two".into(), "channel/three".into()], &[]).unwrap();
+        assert_eq!(event["items"], json!([one, two, three]));
+        let row = |mut v: Value| {
+            v["date"] = v["at"].clone();
+            v["threads"] = json!(v["threads"].as_array().unwrap().iter().map(|t| t["id"].clone()).collect::<Vec<_>>());
+            v
+        };
+        assert_eq!(sources(&json!({"kind": "mail"})).unwrap(), json!([row(two), row(one)]));
+        assert_eq!(sources(&json!({"kind": "channel"})).unwrap(), json!([row(three.clone())]));
+        let s = source("mail:channel/three", &json!({})).unwrap();
+        for (k, v) in three.as_object().unwrap() {
+            assert_eq!(&s[k], v, "{k}");
+        }
     }
 
     #[cfg(feature = "brain")]
