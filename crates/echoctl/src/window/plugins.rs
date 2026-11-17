@@ -206,7 +206,8 @@ fn call_body(req: &Request<Vec<u8>>) -> Result<Value, Box<Response<Cow<'static, 
     if req.body().len() > BODY_MAX {
         return Err(refuse(413, TOO_MUCH));
     }
-    Ok(serde_json::from_slice(req.body()).unwrap_or(Value::Null))
+    // A body that isn't JSON (cut short, not UTF-8, nested too deep) runs nothing.
+    serde_json::from_slice::<Value>(req.body()).ok().filter(Value::is_object).ok_or_else(|| refuse(400, "a plugin's call sends a JSON object"))
 }
 
 /// Why a plugin's call over `BODY_MAX` is refused.
@@ -560,6 +561,10 @@ mod tests {
         assert!(big.len() > BODY_MAX);
         assert_eq!(native("POST", "/api/plugin/counter/call/len", big.clone()), (413, json!({"error": TOO_MUCH})));
         assert_eq!(served("POST", "/api/plugin/counter/call/len", &big, true), (413, json!({"error": TOO_MUCH})));
+        // A body that isn't a JSON object (cut short, not UTF-8, empty): refused, the command never run.
+        for bad in [&b"{\"args\": {\"text\": \"cut"[..], &[0xff, 0xfe, b'{'], b"", b"[1]"] {
+            assert_eq!(native("POST", "/api/plugin/counter/call/len", bad.to_vec()).0, 400, "{:?}", String::from_utf8_lossy(bad));
+        }
         // A GET — its body ignored, its address's arguments too: refused.
         let get = json!({"args": {"text": "x"}}).to_string().into_bytes();
         assert_eq!(native("GET", "/api/plugin/counter/call/len?args=%7B%22text%22%3A%22x%22%7D", get.clone()).0, 405);
