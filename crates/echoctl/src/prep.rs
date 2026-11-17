@@ -583,7 +583,10 @@ pub fn write(m: &MeetingContext) -> Result<Value> {
         // Who reads it: their own name in the facts is "you".
         let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| format!("The reader is {}.\n\n", m.name)).unwrap_or_default();
         let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&p));
-        match crate::ai::ready(&profile).and_then(|r| crate::livenotes::complete_text(r.profile(), SYSTEM, &facts, 900).map(|t| (t, Some(crate::livenotes::text_model(r.profile()))))) {
+        match crate::ai::ready(&profile).and_then(|r| {
+            let model = crate::livenotes::job_model(r.profile(), "prep");
+            crate::livenotes::complete_on(r.profile(), &model, SYSTEM, &facts, 900).map(|t| (t, Some(model)))
+        }) {
             Ok((text, model)) => match parse_answer(&text) {
                 Some((rel, short)) => {
                     keep(&mut p, Some(&rel));
@@ -650,10 +653,24 @@ pub fn start(m: MeetingContext) -> bool {
     true
 }
 
-/// The app: every 5 minutes (and at start), the preps due — one at a time, never while quitting.
+/// The app: as often as the prep job's settings say (every 5 minutes by default, a minute after start), the preps due —
+/// one at a time, never while quitting, nor in the night they pause it in.
 pub fn start_scheduler() {
-    std::thread::spawn(|| loop {
+    std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(60));
+        loop {
+            if !crate::jobs::paused("prep", chrono::Local::now().time()) {
+                prep_pass();
+                crate::jobs::ran("prep");
+            }
+            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::number("prep", "every") * 60));
+        }
+    });
+}
+
+/// One pass of the prep job: the preps due, then meeting types and task modes.
+fn prep_pass() {
+    {
         if !crate::notes::quitting() && !RUNNING.swap(true, Ordering::SeqCst) {
             for m in due() {
                 if crate::notes::quitting() {
@@ -684,8 +701,7 @@ pub fn start_scheduler() {
             // thread of its own, one pass at a time: its model calls never hold up a prep.
             crate::taskmodes::classify_in_background();
         }
-        std::thread::sleep(std::time::Duration::from_secs(240));
-    });
+    }
 }
 
 /// The agenda meeting of a prep id.

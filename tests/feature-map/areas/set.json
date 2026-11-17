@@ -200,6 +200,13 @@
    "axes": [
     "m365.signin"
    ]
+  },
+  {
+   "id": "F-SET-23",
+   "feature": "Echo's background jobs — Needs you now, thread sync, threads' mail and chat fetch, minutes, meeting prep, Recall, live notes — are listed with their settings and defaults, last run and runs today (`echoctl jobs`); the user tunes each one's timer, night pause and model (haiku, sonnet or opus, each profile running its own model for them) with `jobs set <job> key=value` (`key=` back to its default; `jobs set night from= to=`): values out of range, unknown keys or jobs and other model names are refused with nothing written, and never inside a run; each job follows its settings at its next pass (a live notes session from the next call), on its defaults until set",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

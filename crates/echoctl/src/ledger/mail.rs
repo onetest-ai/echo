@@ -143,14 +143,14 @@ pub(super) fn replies<'a>(msgs: &'a [Value], at: &str, mine: &dyn Fn(&str) -> bo
         .collect()
 }
 
-/// A mail source not checked for `CHAT_EVERY_MIN` (or never).
+/// A mail source not checked for the fetch job's `every` minutes (`jobs`; 30 by default), or never.
 pub fn mail_due(p: &crate::projects::Project) -> bool {
     // Without the Brain built in mail isn't read: never due (it would be every tick).
     if !cfg!(feature = "brain") {
         return false;
     }
     let st = mail_state(&p.id);
-    let due = |k: &str| st[k]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN));
+    let due = |k: &str| st[k]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(crate::jobs::number("fetch", "every") as i64));
     p.sources.iter().filter(|s| s.kind == "mail").any(|s| due(&s.id)) || followed(&p.id).iter().any(|f| due(&f.0))
 }
 

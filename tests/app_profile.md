@@ -391,7 +391,7 @@ reads none of it.
 - **Speakers** (`recording/TC-018`) need NVIDIA's NeMo-Speech runtime, which a debug build doesn't carry:
   `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run.
 - **Minutes on a call** need at least 3 minutes and 1,500 characters (`calls::gate`): a copy of the prepared
-  `minutes-call` (213 s). Automatic minutes come 15 minutes after the call (`notes::AUTO_DELAY`); on `--clock fast`
+  `minutes-call` (213 s). Automatic minutes come 15 minutes after the call (the minutes job's `delay`, `notes::auto_delay`); on `--clock fast`
   data the debug build makes it 90 s ("Recorded calls" above).
 
 ## The live check (real devices, a person, rarely)

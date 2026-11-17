@@ -23,8 +23,6 @@ const CAP: usize = 200;
 /// documents carry their own link;
 /// 4: only trusted senders, read into facts by the quarantine reader (`digest`), no message text.
 const READER: u64 = 4;
-/// Documents the reader reads at most a sync (the rest wait: their sources aren't read further).
-const DIGEST_MAX: usize = 30;
 /// Teams authors looked up by name at most a sync.
 const LOOKUPS_MAX: usize = 40;
 /// Mail to more people than this is a broadcast (a newsletter, a training invitation), not a thread's.
@@ -557,7 +555,9 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     // now waits, and its sources aren't read further until it is.
     let default = crate::ai::default_id();
     let profiles = super::access::thread_profiles(&default);
-    let mut budget = DIGEST_MAX;
+    // Documents the reader reads at most a sync (Recall's `per_pass`, 30 by default; the rest wait: their
+    // sources aren't read further).
+    let mut budget = crate::jobs::number("brain_reader", "per_pass") as usize;
     let mut errors: BTreeSet<String> = BTreeSet::new();
     let mut kept = vec![];
     // The reader waits while a call records or is transcribed (it would compete with it).

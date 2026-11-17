@@ -48,7 +48,7 @@ With no one asking, the minutes run started once, at the time Echo named (the ca
 - Run the prelude, then `target/debug/echoctl app quit`. In S-17: skipped (`claude/TC-010` goes on with the same app and quits it)
 
 ## Notes
-- The delay is `notes::AUTO_DELAY` (15 minutes) in a release build. The debug build's `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` changes only how long; the rule (the call's end or the last note, plus the delay; checked every 15 s) is the same code. A person can still check the real 15 minutes once a release.
+- The delay is the minutes job's `delay` (`echoctl jobs`, 15 minutes by default; `notes::auto_delay`) in a release build. The debug build's `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` changes only how long; the rule (the call's end or the last note, plus the delay; checked every 15 s) is the same code. A person can still check the real 15 minutes once a release.
 - What a real automatic run writes and runs (the minutes' parts with owners and dates, the log's commands, nothing sent) is checked on the local model in `claude/TC-007` (S-19), whose run is automatic too. Before 2026-11-08 this case waited the real 15 minutes and ran the local model itself.
 - The "Transcript ready" and "Minutes ready" notifications are not checked here (macOS shows them to the user: `lifecycle/TC-006`).
 - Run 2026-11-08 evening (S-17, CLI part, the scenario's app kept from the main call): PASS — call ended 19:29:23, the Minutes tab's `auto` (`/api/call/<name>`) `at` 19:30:53, nothing at 45 s, the run started 19:31:00 (`auto: true`), `failed` on the fake at once, `claude.log` "…to write the minutes (automatically)".
