@@ -22,7 +22,9 @@ A routine's or Yolo's run has no run guard: it runs as the folder session (One b
 - `notes::headless()`: true in every run. Checked by the always-on vocabulary and keeping a call's audio
   (`notes::refused_in_run`) and by every `echoctl plugin` command that changes plugins (`cli::plugin::refuse_in_run`):
   install, update, remove, enable, disable, `set` with a value, `marketplace add / remove / hide / show`; and by
-  `echoctl config --folder-permissions / --routine-permissions / --yolo-permissions` (`cli::app::config`).
+  `echoctl config --folder-permissions / --routine-permissions / --yolo-permissions` (`cli::app::config`); and by
+  `echoctl jobs set` (`jobs::set`: Echo's jobs and the switch and tuning of a plugin's routine) and `echoctl jobs run`
+  (`plugins::routines::run`: a plugin's routine runs only on its schedule or when the user runs it).
 - A mail draft is not refused: `echoctl compose`, `m365 mail draft`.
 
 ## Safe Markdown
@@ -129,7 +131,7 @@ variables (`ai::PASS`).
 ## One builder for the folder session, routines and Yolo
 
 - `folder_args::session` builds the context and permissions of the folder session (`terminal::start_folder`), a routine
-  (`ctx.claude.run`, `claudejob::run`) and a Yolo run. A routine and Yolo add only `-p`, the prompt and the model, and
+  (`ctx.claude.run`, a plugin's own routine `plugins::routines::run`, both `claudejob::run`) and a Yolo run. A routine and Yolo add only `-p`, the prompt and the model, and
   start in the data folder.
 - The user's permission settings (Settings → AI & minutes → Claude's permissions; `echoctl config --folder-permissions
   ask|auto|skip`, `--routine-permissions auto|skip`, `--yolo-permissions auto|skip`, refused in every run Echo started:

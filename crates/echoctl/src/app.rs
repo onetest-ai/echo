@@ -115,6 +115,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
         // This process is the app: the plugins hear Echo's events here, and what other processes queued for them.
         crate::jshost::as_app();
         crate::jshost::sync();
+        // Plugins' own routines the user switched on, each every so many minutes (`plugins::routines`).
+        #[cfg(feature = "tray")]
+        crate::plugins::routines::start_scheduler();
     }
     #[cfg(feature = "brain")]
     crate::brain::start_scheduler();

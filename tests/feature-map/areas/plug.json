@@ -496,6 +496,45 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-75",
+   "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again; a routine breaking a rule refuses the install with why",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-76",
+   "feature": "A plugin's routine is listed with Echo's jobs in the routines' one shape (`echoctl jobs routines`, `ctx.echo.routines`: id `<plugin>.<routine>`, `source` `plugin:<id>`, its every, night and model settings, last run, next run, the month) and in Settings → Plugins on its plugin; it is off until the user switches it on there or with `echoctl jobs set <id> on=on`, and tuned as Echo's jobs are (`every`, `night`, `model`); a plugin with `uses.echo.jobs` tunes it on the user's click but never switches it on or off",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
+   "id": "F-PLUG-77",
+   "feature": "A plugin's routine that is on runs every N minutes while Echo runs (not at night when it pauses then), or now with `echoctl jobs run <id>`, one run at a time: Claude Code on the user's default AI profile (its model setting mapped by the profile) as the folder session, with the prompt its package ships inside Echo's lines (its name, its plugin, its last run), acting on its own as the routines' setting or its own choice says (`skip` only when its sheet has `claude.skip`)",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-78",
+   "feature": "A plugin's routine's runs are recorded as Echo's jobs' are, in Echo's words and counts (\"done\", the changes and sends it made through Echo, tokens, cost; a failure \"the run failed: its log says why\"), never the model's text; `echoctl jobs outcome <id> [--run <run>]` gives the user its answer, the changes and sends it made and its log; Echo keeps its last 20 runs' folders",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-79",
+   "feature": "A routine of a plugin that is off doesn't run (`echoctl jobs run` refused, listed not enabled) and keeps the user's settings; removing the plugin switches its routines off; switching a routine on or running one is refused inside a run Echo started",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
   }
  ]
 }
