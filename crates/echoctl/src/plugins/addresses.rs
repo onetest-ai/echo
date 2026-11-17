@@ -61,8 +61,9 @@ fn host_pattern(h: &str) -> Result<Host> {
     if name.is_empty() || !name.iter().all(|l| label(l)) {
         bail!(SHAPE);
     }
-    // `0x7f.0.0.1`, `1.2.3`: a number curl could read as an IPv4 address, not a name (no top-level domain starts with a digit).
-    if name.last().is_some_and(|l| l.as_bytes()[0].is_ascii_digit()) {
+    // `0x7f.0.0.1`, `1.2.3`, `2130706433`: a last label that is a number (digits, or `0x` hex) makes curl and the
+    // window read the host as an IPv4 address, not a name; `3dprinter` is a name.
+    if name.last().is_some_and(|l| number(l)) {
         bail!("an IPv4 address is four plain numbers (e.g. 192.168.1.20); a name's last part is never a number");
     }
     if any_below && name.len() < 2 && name != ["local"] {
@@ -74,6 +75,14 @@ fn host_pattern(h: &str) -> Result<Host> {
 /// A number 0–255 written without leading zeros (curl reads those as octal).
 fn octet(p: &str) -> Option<u8> {
     (!p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()) && (p == "0" || !p.starts_with('0'))).then(|| p.parse().ok()).flatten()
+}
+
+/// A label curl and the window read as a number: all digits, or `0x` and hex digits.
+fn number(l: &str) -> bool {
+    match l.strip_prefix("0x").or_else(|| l.strip_prefix("0X")) {
+        Some(h) => h.bytes().all(|b| b.is_ascii_hexdigit()),
+        None => l.bytes().all(|b| b.is_ascii_digit()),
+    }
 }
 
 fn label(l: &str) -> bool {
@@ -112,6 +121,7 @@ pub fn notes(value: &str) -> Vec<String> {
 
 /// A CSP source expression the window may carry: `<http|https|ws|wss>://[*.]name-or-ipv4:<port|*>`, nothing else —
 /// checked again where the policy is written, whatever built it (no `;`, space, quote, keyword or bare `*`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn csp_source_ok(s: &str) -> bool {
     let Some((scheme, rest)) = s.split_once("://") else { return false };
     let Some((host, port)) = rest.rsplit_once(':') else { return false };
@@ -202,6 +212,11 @@ mod tests {
             "http://8.8.8.8",
             "http://172.32.0.1",
             "http://localhost.evil.example",
+            // A last label that starts with a digit but isn't a number is a name.
+            "https://3dprinter",
+            "http://3dprinter.local",
+            "http://printer.3d",
+            "http://0xbeef.0xcafe-box",
         ] {
             assert!(parse_list(ok).is_ok(), "{ok}");
         }
@@ -210,7 +225,7 @@ mod tests {
         // Wildcards too wide, in the wrong place, numbers curl could read another way, or not a pattern at all.
         for bad in [
             "http://*.*.*.*:*", "https://*", "https://*.com", "http://*.localhost", "https://a.*.example", "https://*a.example", "http://192.168.1.1*",
-            "http://010.0.0.1", "http://0x7f.0.0.1", "http://1.2.3", "", "192.168.1.1", "ftp://192.168.1.1", "http://", "http://192.168.1.1:0",
+            "http://010.0.0.1", "http://0x7f.0.0.1", "http://1.2.3", "http://2130706433", "http://0x7f000001", "https://a.0X1F", "http://a.example.0x", "http://*.lab.42", "", "192.168.1.1", "ftp://192.168.1.1", "http://", "http://192.168.1.1:0",
             "http://192.168.1.1:99999", "http://192.168.1.1:x", "http://192.168.1.1/path", "http://me@192.168.1.1", "http://[::1]", "https://a b.example",
             "ws://192.168.1.1",
         ] {
