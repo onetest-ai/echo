@@ -33,6 +33,16 @@ pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u
     }
 }
 
+/// One prompt, one answer, no tools, on the profile's live model (haiku unless the user chose another): the light
+/// checks Echo runs all day — Needs you now's.
+pub(crate) fn complete_quick(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
+    let model = p.live_model();
+    match p.kind {
+        Kind::Local => complete_local_body(p, &model, system, json!(user), max_tokens, true, &|| crate::notes::quitting()),
+        Kind::System | Kind::Claude | Kind::Wrapper => complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting()),
+    }
+}
+
 /// The model a one-shot job runs on — what it records (#294). A local profile: its live model, the one already loaded
 /// for live notes (these jobs run every few minutes, during calls too: a second, larger model would crowd it out);
 /// else its minutes model.

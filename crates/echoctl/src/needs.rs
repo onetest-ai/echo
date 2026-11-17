@@ -256,7 +256,7 @@ fn waiting_on_me(items: Vec<Value>, asked: &mut Asked) -> Vec<Value> {
     let fresh: Vec<&Value> = items.iter().filter(|x| asked.get(&key(x)).is_none()).collect();
     if !fresh.is_empty() {
         let list: String = fresh.iter().enumerate().map(|(i, x)| format!("{}. from {} ({}): {}\n", i + 1, x["from"].as_str().unwrap_or("someone"), x["where"].as_str().unwrap_or(""), x["line"].as_str().unwrap_or(""))).collect();
-        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), ASKS_SYSTEM, &list, 200));
+        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_quick(r.profile(), ASKS_SYSTEM, &list, 200));
         let keep: Option<Vec<u64>> = answer.ok().and_then(|t| {
             let v = crate::livenotes::json_answer(&t)?;
             Some(v["keep"].as_array()?.iter().filter_map(Value::as_u64).collect())
@@ -281,7 +281,7 @@ fn confirm(p: &crate::projects::Project, texts: &[(String, String)]) -> Result<V
     let profile = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
     let ready = crate::ai::ready(&profile)?;
     let body: String = texts.iter().rev().take(15).rev().map(|(a, t)| format!("{a}: {}\n", t.chars().take(400).collect::<String>())).collect();
-    let answer = crate::livenotes::complete_text(ready.profile(), HOT_SYSTEM, &body, 300)?;
+    let answer = crate::livenotes::complete_quick(ready.profile(), HOT_SYSTEM, &body, 300)?;
     let v = crate::livenotes::json_answer(&answer).ok_or_else(|| anyhow!("the answer couldn't be read"))?;
     let quote = v["quote"].as_str().unwrap_or("").trim().to_string();
     let quoted = !quote.is_empty() && texts.iter().any(|(_, t)| t.contains(&quote));
@@ -556,6 +556,19 @@ mod tests {
         let kept = load()["asked"].as_object().unwrap().clone();
         assert_eq!(kept.len(), ASKED_MAX + 10);
         assert!(kept.keys().all(|k| k.starts_with("ask:teams:")));
+    }
+
+    /// Needs you now asks the model all day: on the profile's live model (haiku by default), never its minutes model.
+    #[cfg(unix)]
+    #[test]
+    fn the_checks_run_on_the_profiles_live_model() {
+        let (_env, root) = paths::testenv::folders("needs-model");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        assert_ne!(p.live_model(), p.notes_model().unwrap_or_default(), "the fake's two models differ");
+        let _ = crate::livenotes::complete_quick(&p, HOT_SYSTEM, "Dana: the site is down", 300);
+        let args: Vec<String> = std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap_or_default().split('\0').map(str::to_owned).collect();
+        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == p.live_model()), "{args:?}");
     }
 
     #[test]
