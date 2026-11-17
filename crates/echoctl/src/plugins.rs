@@ -1170,6 +1170,10 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
             return Err(e);
         }
     }
+    // A version replaced: its routines this one adds or changes switched off before its files are in place.
+    if let Some(e) = before.as_ref().and_then(|b| routines::switch_off_changed(b, &new).err()) {
+        return Err(e).inspect_err(|_| { let _ = fs::remove_dir_all(&tmp); });
+    }
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
     // The files handed to the version replaced aren't the new one's.
@@ -1268,9 +1272,7 @@ pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
     if let Some(u) = rv.new_uses.iter().find(|u| !ok.contains(u)) {
         bail!("{} {} asks for more: {u}", rv.name, rv.version);
     }
-    let before = routines::digests(&p);
-    let done = install(id, Some(&p.market), &ok)?;
-    routines::after_update(&done, &before).map(|()| Some(done))
+    install(id, Some(&p.market), &ok).map(Some)
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
@@ -1309,7 +1311,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     // Its namespace's owner kept before it goes (`shared`): a plugin of the same source left keeps it.
     shared::bind_all();
     // Its routines off first (an install again never switches one on); with its data, their settings and runs go.
-    crate::jobs::forget_routines(id, !keep_data)?;
+    Registry::load()?.installed.get(id).ok_or_else(|| anyhow!("“{id}” isn't installed")).and_then(|_| crate::jobs::forget_routines(id, !keep_data))?;
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     #[cfg(feature = "js")]

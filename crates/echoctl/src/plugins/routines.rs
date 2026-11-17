@@ -134,16 +134,12 @@ pub(super) fn sheet_lines(m: &Manifest) -> Vec<String> {
         .collect()
 }
 
-/// Its routines' hashes as installed, before an update (`after_update`).
-pub(super) fn digests(p: &Installed) -> Vec<(String, Option<String>)> {
-    read_manifest(&plugin_dir(p)).map(|m| m.routines.into_iter().map(|r| (r.id, r.digest)).collect()).unwrap_or_default()
-}
-
-/// An update taken: each routine it added or changed is switched off (its line said "off until you switch it on"); one
-/// it left as it was keeps the user's switch.
-pub(super) fn after_update(p: &Installed, before: &[(String, Option<String>)]) -> Result<()> {
-    let changed: Vec<String> = read_manifest(&plugin_dir(p)).map(|m| m.routines.into_iter().filter(|r| !before.iter().any(|(i, d)| *i == r.id && *d == r.digest)).map(|r| r.id).collect()).unwrap_or_default();
-    crate::jobs::switch_off_routines(&p.id, &changed)
+/// A version of `old` about to replace it (an update, an install over it): each routine `new` adds or changes is switched
+/// off (its line said "off until you switch it on"); one it leaves as it was keeps the user's switch.
+pub(super) fn switch_off_changed(old: &Installed, new: &Manifest) -> Result<()> {
+    let before: Vec<RoutineDef> = read_manifest(&plugin_dir(old)).map(|m| m.routines).unwrap_or_default();
+    let changed: Vec<String> = new.routines.iter().filter(|r| !before.iter().any(|b| b.id == r.id && b.digest == r.digest)).map(|r| r.id.clone()).collect();
+    crate::jobs::switch_off_routines(&old.id, &changed)
 }
 
 /// A routine's id among Echo's jobs and routines: `<plugin>.<routine>` (Echo's jobs have no dot).
@@ -357,7 +353,7 @@ pub fn outcome(id: &str, run: Option<&str>) -> Result<Value> {
         "id": id, "run": stamp, "record": record, "answer": read("answer.md"),
         "actions": crate::notes::run_actions(&dir.join("actions.jsonl")),
         // The mail drafts it wrote (`echoctl compose`), as Yolo's outcome gives them.
-        "drafts": crate::notes::run_actions(&dir.join("drafts.jsonl")),
+        "drafts": crate::drafts::of_run(&dir.join("drafts.jsonl"), |_| None),
         "permissions": serde_json::from_str::<Value>(&read("permissions.json")).unwrap_or(Value::Null),
         "log": read("log.txt"),
     }))
@@ -509,6 +505,14 @@ mod tests {
         // keeps the user's switch.
         update("acme-routine", &rv.new_uses).unwrap().unwrap();
         assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::number("acme-routine.mail-notes", "every")), (false, 30));
+        // Installed over (not through `update`): the same.
+        crate::jobs::set("acme-routine.mail-notes", &["on=on".into()]).unwrap();
+        fs::write(pkg.join("routines/mail-notes.md"), "Read the mail, the chats and the channels.").unwrap();
+        m["version"] = json!("0.2.1");
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        install("acme-routine", Some(&name), &review("acme-routine", Some(&name)).unwrap().uses).unwrap();
+        assert!(!crate::jobs::on("acme-routine.mail-notes"));
         crate::jobs::set("acme-routine.mail-notes", &["on=on".into()]).unwrap();
         m["version"] = json!("0.3.0");
         fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
