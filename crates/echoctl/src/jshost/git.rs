@@ -1116,6 +1116,13 @@ mod tests {
     }
 
     #[cfg(unix)]
+    /// Whether the git on this computer is at least `major.minor` (`git version 2.54.0 (Apple Git-157)`).
+    fn git_at_least(major: u32, minor: u32) -> bool {
+        let out = std::process::Command::new("git").arg("--version").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        let v: Vec<u32> = out.split_whitespace().nth(2).unwrap_or("").split('.').take(2).filter_map(|n| n.parse().ok()).collect();
+        v.len() == 2 && (v[0], v[1]) >= (major, minor)
+    }
+
     #[test]
     fn a_repositorys_own_settings_run_nothing() {
         let (_env, root) = paths::testenv::folders("jshost-git-trap");
@@ -1158,6 +1165,10 @@ mod tests {
             ("pager-status", "status on a terminal"),
             ("pager", "--paginate"),
         ] {
+            // Hooks set in the settings came with git 2.54: an older git runs none, Echo's clearing stays.
+            if m == "config-hook" && !git_at_least(2, 54) {
+                continue;
+            }
             assert!(ran.contains(&m.to_string()), "the control ran {m} on {how}: {ran:?}");
         }
         // Echo's git, on a vault set up the same way: none of them.
@@ -1353,13 +1364,13 @@ mod tests {
         put_git(&crate::paths::home().join("bin"));
         put_git(&crate::paths::config_dir().join("bin"));
         let path = std::env::join_paths([PathBuf::from("bin"), granted.join("bin"), crate::paths::home().join("bin"), crate::paths::config_dir().join("bin"), root.join("tools/bin")]).unwrap();
-        assert_eq!(path_candidates(&path), [theirs.clone()]);
+        assert_eq!(path_candidates(&path), std::slice::from_ref(&theirs));
         // A PATH folder that is a link into the folder given to a plugin: skipped too.
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(granted.join("bin"), root.join("linked-bin")).unwrap();
             let path = std::env::join_paths([root.join("linked-bin"), root.join("tools/bin")]).unwrap();
-            assert_eq!(path_candidates(&path), [theirs.clone()]);
+            assert_eq!(path_candidates(&path), std::slice::from_ref(&theirs));
         }
         // A git file that can't be started (Unix: not executable) isn't one.
         #[cfg(unix)]
