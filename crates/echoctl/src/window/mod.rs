@@ -713,11 +713,27 @@ fn serve_conn(conn: &std::net::TcpStream, origin: &str, token: &str, name: &str)
         let ok = reader.read_exact(&mut body).is_ok() && cookie_ok && origin_ok;
         let answer = if ok {
             let h = handle(&String::from_utf8_lossy(&body));
-            json!({"reply": h.reply, "refresh": h.refresh}).to_string()
+            // The webview runs the reply outside the page's policy; here the page loads it as a script of this server
+            // (`GET /ipc/reply/<id>`, once), so the policy stays the window's — no eval.
+            let reply = h.reply.map(|script| {
+                let id: String = (0..32).map(|_| format!("{:x}", rand_nibble())).collect();
+                SERVED_REPLIES.lock().unwrap_or_else(|e| e.into_inner()).push((id.clone(), script));
+                id
+            });
+            json!({"reply": reply, "refresh": h.refresh}).to_string()
         } else {
             "{\"error\":\"refused\"}".into()
         };
         answer_json(out, if ok { 200 } else { 403 }, &answer);
+        return;
+    }
+    if let Some(id) = path.strip_prefix("/ipc/reply/").filter(|_| method == "GET") {
+        let script = if cookie_ok { take_served_reply(id) } else { None };
+        let (status, body) = match &script {
+            Some(s) => (200, s.as_str()),
+            None => (404, ""),
+        };
+        let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: text/javascript\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}", body.len());
         return;
     }
     let mut body = Vec::new();
@@ -751,6 +767,16 @@ fn serve_conn(conn: &std::net::TcpStream, origin: &str, token: &str, name: &str)
     let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: {name}={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
     let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{csp}{store}{cookie}Connection: close\r\n\r\n", body.len());
     let _ = out.write_all(&body);
+}
+
+/// The served window's IPC replies not loaded yet: (id, script).
+static SERVED_REPLIES: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// A reply `POST /ipc` kept for the page, handed out once.
+fn take_served_reply(id: &str) -> Option<String> {
+    let mut r = SERVED_REPLIES.lock().unwrap_or_else(|e| e.into_inner());
+    let i = r.iter().position(|(k, _)| k == id)?;
+    Some(r.swap_remove(i).1)
 }
 
 /// A random hex digit (the dev server's token), from the OS's randomness.
@@ -1045,6 +1071,43 @@ mod tests {
         let html = String::from_utf8(page.into_body().into_owned()).unwrap();
         assert!(html.contains(&format!("<meta name=\"echo-net\" content=\"{}\">", net_key(&[]))), "the page knows its key");
         assert_eq!(state()["net"], net_key(&[]), "and /api/state the current one: the same, so no reload");
+    }
+
+    #[test]
+    fn the_served_windows_reply_is_a_script_of_its_own_handed_out_once_under_the_windows_policy() {
+        // The page's policy has no 'unsafe-eval' (#706): the reply the webview would run comes as a script of this server.
+        use std::io::{Read, Write};
+        let (_env, _root) = crate::paths::testenv::folders("window-served-reply");
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (o, token, name) = (origin.clone(), "f".repeat(32), "echo_serve_test".to_string());
+        std::thread::spawn(move || {
+            for conn in listener.incoming().flatten() {
+                serve_conn(&conn, &o, &token, &name);
+            }
+        });
+        let ask = |req: String| {
+            let mut s = std::net::TcpStream::connect(origin.trim_start_matches("http://")).unwrap();
+            s.write_all(req.as_bytes()).unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).unwrap();
+            out
+        };
+        let cookie = format!("Cookie: echo_serve_test={}\r\n", "f".repeat(32));
+        let msg = r#"{"cmd":"event_respond","event":"ev-none","how":"accept"}"#;
+        let post = ask(format!("POST /ipc HTTP/1.1\r\nOrigin: {origin}\r\n{cookie}Content-Length: {}\r\n\r\n{msg}", msg.len()));
+        let answer: Value = serde_json::from_str(post.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let id = answer["reply"].as_str().expect("an id, not the script").to_string();
+        assert!(!post.contains("window.echo"), "{post}");
+        let get = |id: &str, cookie: &str| ask(format!("GET /ipc/reply/{id} HTTP/1.1\r\n{cookie}\r\n"));
+        assert!(get(&id, "").starts_with("HTTP/1.1 404"), "not without the run's cookie");
+        let script = get(&id, &cookie);
+        assert!(script.starts_with("HTTP/1.1 200") && script.contains("Content-Type: text/javascript"), "{script}");
+        assert!(script.ends_with(r#"window.echo && window.echo.notice("no meeting \"ev-none\" in today's agenda")"#), "{script}");
+        assert!(get(&id, &cookie).starts_with("HTTP/1.1 404"), "once");
+        // The page that loads it keeps the window's policy: no eval.
+        let page = ask(format!("GET / HTTP/1.1\r\n{cookie}\r\n"));
+        assert!(page.contains(&format!("Content-Security-Policy: {}", window_csp(&[]))) && !page.contains("unsafe-eval"));
     }
 
     #[test]

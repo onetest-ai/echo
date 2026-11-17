@@ -113,7 +113,9 @@ and Edit): Echo gives it its text, each item in an evidence block whose tag is r
 `echoctl window --serve` answers only on 127.0.0.1; its `POST /ipc` and any other POST — a plugin's call
 (`/api/plugin/<id>/call/<command>`, `/api/plugin/<id>/markdown`) — (with `ECHOCTL_SERVE_IPC=1`) only with that run's
 SameSite=Strict cookie and its own Origin (`window::serve_conn`); a plugin's call over 4 MB is refused (413) before it
-is read in.
+is read in. An `/ipc` answer's reply (the script the webview would run) is kept by the server under a random id and
+handed out once as `text/javascript` at `GET /ipc/reply/<id>`, only with that cookie; the page loads it as a `<script>`
+(`servedReply`, window script), so the served page keeps the window's policy, no `'unsafe-eval'`.
 
 ## Secrets
 
