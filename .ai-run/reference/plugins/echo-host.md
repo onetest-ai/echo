@@ -139,7 +139,7 @@ follows no redirect. On Windows the box's texts reach PowerShell through the env
   (`extensions.partialClone` or any `remote.*.promisor`) and `core.worktree` set anywhere. No settings file a plugin
   could change between that reading and git's own: read with `--show-origin`, each `include.path` /
   `includeIf.*.path` resolved as git does (`~/` from `HOME`, `%(prefix)/` from the folder above git's own, a relative
-  path from the including file's folder; `~user/` refused), there or not (git skips a missing file), by its real path
+  path from the including file's folder; `~user/` and a drive with no root, `C:tools\git.cfg`, refused), there or not (git skips a missing file), by its real path
   (the deepest existing folder canonical, `jshost::git::physical`); the repository is refused when one lies inside a
   folder given to any plugin, inside Echo's data or own folder, or in the work tree outside a hidden folder
   (`jshost::git::changeable`), or names bytes that aren't UTF-8 — and so when the user's `$XDG_CONFIG_HOME/git/config`,

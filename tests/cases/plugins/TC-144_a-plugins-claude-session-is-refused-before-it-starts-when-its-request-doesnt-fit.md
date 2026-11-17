@@ -36,4 +36,4 @@ Acme ask installed with `$D/vault` given to it; no session open; `$D/vault/.clau
 
 ## Notes
 - Besides `echoctl`, this case runs `ls`, `rm`, `echo`, `curl` and `python3` (the helpers).
-- No `claude` or `folders` on its sheet, a folder not given, and a wrapper profile the plugin names while it isn't the default: the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`.
+- No `claude` or `folders` on its sheet, a folder not given, a wrapper profile the plugin names while it isn't the default, and step 2's refusal from `.claude/settings.local.json` (the same check as `plugins/TC-092` step 4): the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`.

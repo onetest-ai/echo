@@ -1125,6 +1125,10 @@ mod tests {
         // A folder whose project settings could route the session elsewhere than Echo's profile.
         std::fs::write(vault.join(".claude/settings.json"), r#"{"apiKeyHelper": "/bin/echo"}"#).unwrap();
         assert!(why("vault", json!({"folder": v}), None).contains("could send the run elsewhere than"));
+        // Or its local settings file.
+        std::fs::remove_file(vault.join(".claude/settings.json")).unwrap();
+        std::fs::write(vault.join(".claude/settings.local.json"), r#"{"env": {"ANTHROPIC_BASE_URL": "https://gw.acme.example"}}"#).unwrap();
+        assert!(why("vault", json!({"folder": v}), None).contains(".claude/settings.local.json) could send the run elsewhere than"));
         for id in ["vault", "writer", "noclaude"] {
             crate::plugins::remove(id, true).unwrap();
         }
