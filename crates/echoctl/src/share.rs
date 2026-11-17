@@ -63,28 +63,39 @@ fn call_facts(meta: &Value) -> serde_json::Map<String, Value> {
     v.as_object().cloned().unwrap_or_default()
 }
 
-/// Everyone Echo knows (People's, as `echo.read('people')` lists them): what `participants` finds people in.
+/// Everyone `echo.read('people')` lists: People's, without those seen only in closed threads (`archived`).
 fn known_people() -> Vec<Value> {
-    crate::people::everyone(chrono::Local::now().date_naive()).ok().and_then(|v| v["people"].as_array().cloned()).unwrap_or_default()
+    let everyone = crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_default();
+    everyone["people"].as_array().into_iter().flatten().filter(|x| x["archived"].is_null()).cloned().collect()
 }
 
 /// Who took part as the invite names them (`attendees`), each with the person Echo knows them as: `person` their key in
-/// `echo.read('people')`, by address, else by name; null when Echo doesn't know them. At most `LIST_MAX`.
+/// `echo.read('people')` (`known_people`) by address, by name only when the invite gives no address; null when Echo
+/// doesn't know them. At most `LIST_MAX`.
 fn participants(dir: &Path, people: &[Value]) -> Vec<Value> {
     let invited = attendees(&crate::calls::read_json(&dir.join("meeting.json")));
     let same = |x: &Value, e: &str| x.as_str().is_some_and(|x| x.eq_ignore_ascii_case(e));
     let person = |name: &str, email: Option<&str>| -> Value {
-        let by_mail = email.and_then(|e| people.iter().find(|p| same(&p["email"], e) || p["also"].as_array().is_some_and(|a| a.iter().any(|x| same(x, e)))));
-        let n = crate::people::norm(name);
-        let by_name = || (!n.is_empty()).then(|| people.iter().find(|p| p["name"].as_str().is_some_and(|x| crate::people::norm(x) == n))).flatten();
-        by_mail.or_else(by_name).map(|p| p["key"].clone()).unwrap_or(Value::Null)
+        let found = match email.filter(|e| !e.is_empty()) {
+            Some(e) => people.iter().find(|p| same(&p["email"], e) || p["also"].as_array().is_some_and(|a| a.iter().any(|x| same(x, e)))),
+            None => {
+                let n = crate::people::norm(name);
+                (!n.is_empty()).then(|| people.iter().find(|p| p["name"].as_str().is_some_and(|x| crate::people::norm(x) == n))).flatten()
+            }
+        };
+        found.map(|p| p["key"].clone()).unwrap_or(Value::Null)
     };
     invited.into_iter().take(LIST_MAX).map(|p| json!({"name": p["name"], "email": p["email"], "person": person(p["name"].as_str().unwrap_or(""), p["email"].as_str())})).collect()
 }
 
+/// What a minutes heading has in it (lowercase) to open a part: its words in English, Ukrainian or Russian.
+const SUMMARY_WORDS: &[&str] = &["summary", "підсум", "резюм", "итог", "сводк"];
+const DECISION_WORDS: &[&str] = &["decision", "рішен", "решени", "решено"];
+const QUESTION_WORDS: &[&str] = &["question", "питан", "вопрос"];
+
 /// A call's minutes by section, from what Echo keeps: `{summary, decisions, actions, questions, revision}` — `summary`
-/// the text under a heading with "summary" in it, `decisions` and `questions` the bullets under headings with
-/// "decision" / "question" (as Today counts them), `actions` the call's action items as Echo keeps them
+/// the text under a heading with one of `SUMMARY_WORDS` in it, `decisions` and `questions` the bullets under headings
+/// with one of `DECISION_WORDS` / `QUESTION_WORDS`, `actions` the call's action items as Echo keeps them
 /// (`actions.json`: `{id, text, owner, due, done}`), `revision` a hash of the minutes that changes when they do. With
 /// `body`, also the minutes' Markdown from their first `## ` section on (without the header: title, date, who). None
 /// without minutes.
@@ -99,12 +110,13 @@ fn minutes_parts(dir: &Path, body: bool) -> Option<Value> {
             continue;
         }
         let bullet = l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")).map(|b| b.trim_start_matches("[ ] ").trim_start_matches("[x] ")).filter(|b| !b.trim().is_empty());
-        if section.contains("summary") {
+        let under = |words: &[&str]| words.iter().any(|w| section.contains(w));
+        if under(SUMMARY_WORDS) {
             summary.push(line);
         } else if let Some(b) = bullet {
-            if section.contains("decision") && decisions.len() < LIST_MAX {
+            if under(DECISION_WORDS) && decisions.len() < LIST_MAX {
                 decisions.push(cut(b, LINE_MAX));
-            } else if section.contains("question") && questions.len() < LIST_MAX {
+            } else if under(QUESTION_WORDS) && questions.len() < LIST_MAX {
                 questions.push(cut(b, LINE_MAX));
             }
         }
@@ -448,15 +460,11 @@ pub fn about_me(opts: &Value) -> Result<Value> {
 
 /// People across the threads: `{key, name, aliases, email, also, organisation, client, title, threads, link}` (People's
 /// own; roles stay there) — `aliases` the other names the user's directory knows them by, `also` their other addresses,
-/// `client` their organisation's id.
+/// `client` their organisation's id; `known_people`: never someone seen only in closed threads.
 pub fn people() -> Result<Value> {
-    let v = crate::people::everyone(chrono::Local::now().date_naive())?;
     let directory = crate::people::directory().unwrap_or_default();
-    Ok(json!(v["people"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|x| x["archived"] != true)
+    Ok(json!(known_people()
+        .iter()
         .map(|x| {
             let key = x["key"].as_str().unwrap_or("");
             let entry = directory.iter().find(|p| p.id == key || x["email"].as_str().is_some_and(|e| p.emails.iter().any(|m| m == e)));
@@ -672,6 +680,56 @@ mod tests {
         let ppl = people().unwrap();
         let jane = ppl.as_array().unwrap().iter().find(|p| p["key"] == "jane@acme.example").unwrap();
         assert_eq!((jane["email"].as_str(), jane["client"].as_str(), jane["aliases"].clone()), (Some("jane@acme.example"), Some("acme"), json!(["J. Doe"])), "{jane}");
+    }
+
+    #[test]
+    fn russian_and_ukrainian_minutes_give_their_summary_decisions_and_questions() {
+        let (_env, _root) = crate::paths::testenv::folders("share-minutes-languages");
+        let call = |folder: &str, md: &str| {
+            let d = crate::paths::calls_dir().join(folder);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("notes.md"), md).unwrap();
+            minutes_parts(&d, false).unwrap()
+        };
+        let ru = call(
+            "2026-11-10_100000-acme-ru",
+            "# Синк по пилоту Acme\n\n## Итоги\nСроки пилота сдвинулись.\n\n## Решения\n- Пилот переносится на 24 ноября\n\n## РЕШЕНО ПОЗЖЕ\n- Площадка — офис Acme\n\n## Открытые вопросы\n- Кто подписывает?\n",
+        );
+        assert_eq!(ru["summary"], "Сроки пилота сдвинулись.");
+        assert_eq!((ru["decisions"].clone(), ru["questions"].clone()), (json!(["Пилот переносится на 24 ноября", "Площадка — офис Acme"]), json!(["Кто подписывает?"])));
+        let ru2 = call("2026-11-10_110000-acme-ru", "# Acme\n\n## Сводка\nКоротко.\n\n## Вопросы\n- Когда старт?\n");
+        assert_eq!((ru2["summary"].as_str(), ru2["questions"].clone()), (Some("Коротко."), json!(["Когда старт?"])));
+        let uk = call(
+            "2026-11-11_100000-acme-uk",
+            "# Синк по пілоту Acme\n\n## Підсумки\nДати пілоту змінилися.\n\n## Рішення\n- Пілот переноситься на 24 листопада\n\n## Відкриті питання\n- Хто погоджує?\n",
+        );
+        assert_eq!(uk["summary"], "Дати пілоту змінилися.");
+        assert_eq!((uk["decisions"].clone(), uk["questions"].clone()), (json!(["Пілот переноситься на 24 листопада"]), json!(["Хто погоджує?"])));
+        let uk2 = call("2026-11-11_110000-acme-uk", "# Acme\n\n## Резюме\nКоротко.\n\n## Інше\n- не рішення\n");
+        assert_eq!((uk2["summary"].as_str(), uk2["decisions"].clone()), (Some("Коротко."), json!([])), "only a heading's words count");
+    }
+
+    #[test]
+    fn a_participant_is_a_listed_person_by_address_and_by_name_only_without_one() {
+        let (_env, _root) = crate::paths::testenv::folders("share-participants");
+        acme_pilot();
+        let old = crate::projects::create("Acme pilot 2025", Some("acme"), None).unwrap().id;
+        crate::people::place(&old, "Old Timer", Some("old@acme.example"), &json!({"role": "Sponsor"})).unwrap();
+        assert!(people().unwrap().as_array().unwrap().iter().any(|p| p["key"] == "old@acme.example"), "listed while their thread is open");
+        crate::projects::set_stage(&old, crate::projects::Stage::Done, None).unwrap();
+        let d = crate::paths::calls_dir().join("2026-11-12_100000-acme-sync");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("meeting.json"),
+            r#"{"subject": "Acme sync", "attendees": [{"name": "Jane Doe", "email": "jane.doe@other.example"}, {"name": "Jane Doe"}, {"name": "Old Timer", "email": "old@acme.example"}, {"name": "Old Timer"}]}"#,
+        )
+        .unwrap();
+        let person = |i: usize| participants(&d, &known_people())[i]["person"].clone();
+        assert_eq!(person(0), Value::Null, "an address Echo doesn't know: never matched by name");
+        assert_eq!(person(1), "jane@acme.example", "no address: by name");
+        assert_eq!((person(2), person(3)), (Value::Null, Value::Null), "seen only in a closed thread: not a person the people read lists");
+        let listed: Vec<Value> = people().unwrap().as_array().unwrap().iter().map(|p| p["key"].clone()).collect();
+        assert!(listed.contains(&json!("jane@acme.example")) && !listed.contains(&json!("old@acme.example")), "{listed:?}");
     }
 
     #[test]

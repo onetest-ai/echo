@@ -1,6 +1,6 @@
 ---
 id: TC-067
-title: A plugin's store updates from two terminal processes at once (two echoctl plugin call loops) both count — none lost
+title: A plugin's store updates from two terminal processes at once (two echoctl plugin call loops) both count — none lost; a store file that isn't UTF-8 is read only when asked lossy
 priority: high
 type: functional
 requirements: [F-PLUG-50]
@@ -45,6 +45,9 @@ export function apply(ctx) {
   ctx.command('drop', (a) => ctx.store.remove(a.path))
   ctx.command('bump', () => ctx.store.update('count.txt', (t) => String(Number(t || 0) + 1)))
   ctx.command('count', () => ctx.store.read('count.txt'))
+  ctx.command('read', (a) => ctx.fs.read(r(), a.path, a.opts))
+  ctx.command('readmany', async (a) => await ctx.fs.readMany(r(), a.paths, a.opts))
+  ctx.command('peek', (a) => ctx.store.read(a.path, a.opts))
 }
 JS
 echoctl plugin marketplace add "$M" --name acme-local
@@ -58,9 +61,10 @@ echoctl plugin marketplace add "$M" --name acme-local
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-vault --yes`; `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-vault add` | `Installed Acme vault 0.1.0`; the vault's path |
 | 2 | Two processes at once: `(for i in $(seq 15); do echoctl plugin call acme-vault bump >/dev/null; done) & (for i in $(seq 15); do echoctl plugin call acme-vault bump >/dev/null; done); wait; echoctl plugin call acme-vault count` | `"30"` — no update lost |
+| 3 | `printf 'caf\xe9\n' > "$ECHOCTL_HOME/.echo/plugins/acme-vault/latin.txt"` (Latin-1, not UTF-8); `echoctl plugin call acme-vault peek '{"path":"latin.txt"}'`; the same with `"opts":{"lossy":true}`; `echoctl plugin call acme-vault peek '{"path":"count.txt","opts":{"lossy":true}}'` | `Error: stream did not contain valid UTF-8` (exit 1, as before); `"caf�\n"` (the bad byte replaced); `"30"` |
 
 ## Expected Final State
-The plugin's store holds `count.txt` reading `30`.
+The plugin's store holds `count.txt` reading `30` and `latin.txt`.
 
 ## Teardown
 - `echoctl plugin remove acme-vault --delete-data`; `echoctl plugin marketplace remove acme-local`

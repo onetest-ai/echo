@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -487,17 +487,31 @@ pub fn page_html(md: &str, breaks: bool, dest: &dyn Fn(&str, bool) -> PageDest) 
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn page_dests(md: &str) -> (Vec<String>, Vec<String>) {
     let (mut links, mut images) = (Vec::<String>::new(), Vec::<String>::new());
-    for ev in Parser::new_ext(md, md_options() | Options::ENABLE_WIKILINKS) {
-        let (list, d) = match ev {
-            Event::Start(Tag::Link { dest_url, .. }) => (&mut links, dest_url),
-            Event::Start(Tag::Image { dest_url, .. }) => (&mut images, dest_url),
-            _ => continue,
-        };
-        if !list.iter().any(|x| *x == *d) {
-            list.push(d.to_string());
+    for (d, _, embed) in page_dest_entries(md) {
+        let list = if embed { &mut images } else { &mut links };
+        if !list.contains(&d) {
+            list.push(d);
         }
     }
     (links, images)
+}
+
+/// How a page's destinations were written, as `page_html` reads them: `(destination, a wikilink, an embed or image)`,
+/// each such way once, in order — a destination written as a wikilink and as a Markdown link is there twice.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn page_dest_entries(md: &str) -> Vec<(String, bool, bool)> {
+    let mut out: Vec<(String, bool, bool)> = vec![];
+    for ev in Parser::new_ext(md, md_options() | Options::ENABLE_WIKILINKS) {
+        let e = match ev {
+            Event::Start(Tag::Link { link_type, dest_url, .. }) => (dest_url.to_string(), matches!(link_type, LinkType::WikiLink { .. }), false),
+            Event::Start(Tag::Image { link_type, dest_url, .. }) => (dest_url.to_string(), matches!(link_type, LinkType::WikiLink { .. }), true),
+            _ => continue,
+        };
+        if !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out
 }
 
 /// A page's link: its `<a …>`, or none (text only).

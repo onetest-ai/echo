@@ -736,7 +736,7 @@ pub(super) fn show(id: &str, root: &str, rev: &str, path: &str, o: &Value) -> Re
     }
     let blob = g.ok(&["cat-file", "blob", &spec])?;
     let cut = blob.stdout.len() > max;
-    let text = String::from_utf8_lossy(&blob.stdout[..blob.stdout.len().min(max)]).into_owned();
+    let text = super::folders::text_of(blob.stdout[..blob.stdout.len().min(max)].to_vec(), cut, o["strict"] == true, &path)?;
     Ok(json!({"text": text, "size": size, "truncated": cut}))
 }
 
@@ -1942,6 +1942,14 @@ mod tests {
         for id in [user_git(&vault, &["rev-parse", "HEAD:a.md"]), user_git(&vault, &["rev-parse", "HEAD^{tree}"])] {
             assert!(run("edges", "show", json!({"rev": id.trim(), "path": "a.md"})).unwrap_err().contains("isn't a commit"), "{id}");
         }
+        // A version that isn't UTF-8: replaced by default, refused with `strict`; a character `max` cuts is dropped.
+        std::fs::write(vault.join("latin.md"), b"caf\xe9\n").unwrap();
+        std::fs::write(vault.join("utf.md"), "café\n").unwrap();
+        assert!(run("edges", "commit", json!({"paths": ["latin.md", "utf.md"], "message": "two"})).unwrap()["rev"].is_string());
+        assert_eq!(run("edges", "show", json!({"rev": "HEAD", "path": "latin.md"})).unwrap()["text"], "caf\u{FFFD}\n");
+        assert!(run("edges", "show", json!({"rev": "HEAD", "path": "latin.md", "strict": true})).unwrap_err().contains("not UTF-8: latin.md"));
+        assert_eq!(run("edges", "show", json!({"rev": "HEAD", "path": "utf.md", "strict": true})).unwrap()["text"], "café\n");
+        assert_eq!(run("edges", "show", json!({"rev": "HEAD", "path": "utf.md", "max": 4, "strict": true})).unwrap()["text"], "caf");
         // An ignored file: said so, nothing staged — the other new file named with it neither.
         std::fs::write(vault.join(".gitignore"), "ignored.md\n").unwrap();
         std::fs::write(vault.join("ignored.md"), "x\n").unwrap();
