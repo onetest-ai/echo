@@ -20,6 +20,14 @@ const MAX_NODES: usize = 250_000;
 /// Links and pictures listed at most.
 const MAX_LINKS: usize = 2_000;
 const MAX_IMAGES: usize = 500;
+/// A table's columns kept at most.
+const MAX_COLUMNS: usize = 64;
+/// Lists whose items indent what they hold (a deeper one's items sit at the same depth), and the largest number a
+/// numbered list starts at.
+const MAX_LIST_DEPTH: usize = 8;
+const MAX_LIST_START: u64 = 1_000_000;
+/// The Markdown written at most: ten times the HTML read, and never past 20 MB (`truncated`).
+const MAX_MD: usize = 20 << 20;
 /// A picture smaller than this on a side (when the page says its size) is a tracking pixel or an icon.
 const TINY: u32 = 32;
 /// Embedded JSON read at most: one script's text, and the values walked in it.
@@ -386,6 +394,17 @@ fn find_all<'a>(e: &'a El, name: &str, out: &mut Vec<&'a El>) {
     }
 }
 
+/// The outermost elements named `name` (none inside another): each part of the page in one of them at most.
+fn find_outer<'a>(e: &'a El, name: &str, out: &mut Vec<&'a El>) {
+    for k in e.els().filter(|k| !dropped(k)) {
+        if k.name == name {
+            out.push(k);
+        } else {
+            find_outer(k, name, out);
+        }
+    }
+}
+
 /// The text a reader sees, whitespace made single spaces.
 fn plain_text(e: &El, out: &mut String) {
     for k in &e.kids {
@@ -413,11 +432,16 @@ fn text_len(e: &El) -> usize {
     collapse(&s).chars().count()
 }
 
-/// The page's main part: its largest `<article>`, else its `<main>`, else its `<body>`.
+/// The page's main part: its largest `<article>`, else its `<main>`, else its `<body>`. An article holds the articles
+/// inside it, so only the outermost are measured (each word once).
 fn main_of(doc: &El) -> &El {
     for name in ["article", "main", "body"] {
         let mut found = vec![];
-        find_all(doc, name, &mut found);
+        if name == "article" {
+            find_outer(doc, name, &mut found);
+        } else {
+            find_all(doc, name, &mut found);
+        }
         let pick = if name == "article" { found.into_iter().max_by_key(|a| text_len(a)) } else { found.into_iter().next() };
         if let Some(e) = pick {
             return e;
@@ -543,12 +567,12 @@ fn dots(p: &str) -> String {
     s + tail
 }
 
-/// Text as Markdown shows it, never as markup: `\`, `<`, `[`, `]` and `!` escaped, so no HTML, link or image can
-/// come of a page's (or anyone's) words.
+/// Text as Markdown shows it, never as markup: `\`, `<`, `[`, `]`, `!` and `` ` `` escaped, so no HTML, link, image
+/// or code span can come of a page's (or anyone's) words.
 pub fn md_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if matches!(c, '\\' | '<' | '[' | ']' | '!') {
+        if matches!(c, '\\' | '<' | '[' | ']' | '!' | '`') {
             out.push('\\');
         }
         out.push(c);
@@ -631,11 +655,18 @@ struct Out<'a> {
     /// The pictures written, in order, each once; and the caption of the figure being written.
     images: Vec<Image>,
     caption: Option<String>,
+    /// The Markdown's bytes at most (`MAX_MD`), and whether the rest was left out for it.
+    most: usize,
+    full: bool,
+    /// Some of what was read was left out (`MAX_MD`, `MAX_COLUMNS`).
+    cut: bool,
 }
 
 impl<'a> Out<'a> {
-    fn new(base: &'a str, skip_h1: Option<String>) -> Out<'a> {
-        Out { base, md: String::new(), line: String::new(), lists: 0, indent: 0, marker: None, item: false, skip_h1, images: vec![], caption: None }
+    /// The Markdown of `html_len` bytes of HTML.
+    fn new(base: &'a str, skip_h1: Option<String>, html_len: usize) -> Out<'a> {
+        let most = html_len.saturating_mul(10).min(MAX_MD);
+        Out { base, md: String::new(), line: String::new(), lists: 0, indent: 0, marker: None, item: false, skip_h1, images: vec![], caption: None, most, full: false, cut: false }
     }
 
     fn push_text(&mut self, s: &str) {
@@ -650,16 +681,25 @@ impl<'a> Out<'a> {
         }
     }
 
+    /// Lines written as a block; a line that would take the Markdown past `most` is left out with all after it.
     fn write(&mut self, lines: &[String]) {
-        if lines.is_empty() {
+        if lines.is_empty() || self.full {
             return;
         }
         let item = self.lists > 0;
+        let before = self.md.len();
         if !self.md.is_empty() {
             self.md.push_str(if item && self.item { "\n" } else { "\n\n" });
         }
         let pad = " ".repeat(self.indent);
         for (i, l) in lines.iter().enumerate() {
+            let at = if i == 0 { before } else { self.md.len() };
+            if at + self.indent + l.len() + 2 > self.most {
+                self.md.truncate(at);
+                self.full = true;
+                self.cut = true;
+                return;
+            }
             if i == 0 {
                 match self.marker.take() {
                     Some(m) => {
@@ -763,6 +803,9 @@ impl<'a> Out<'a> {
     }
 
     fn walk(&mut self, n: &Node) {
+        if self.full {
+            return;
+        }
         let e = match n {
             Node::Text(t) => return self.push_text(t),
             Node::El(e) => e,
@@ -813,7 +856,7 @@ impl<'a> Out<'a> {
             "ul" | "ol" => {
                 self.flush();
                 self.lists += 1;
-                let mut n: usize = if e.name == "ol" { e.attr("start").and_then(|s| s.trim().parse().ok()).unwrap_or(1) } else { 0 };
+                let mut n: u64 = if e.name == "ol" { e.attr("start").and_then(|s| s.trim().parse::<u64>().ok()).map_or(1, |s| s.min(MAX_LIST_START)) } else { 0 };
                 for k in &e.kids {
                     match k {
                         Node::El(li) if li.name == "li" => {
@@ -852,10 +895,24 @@ impl<'a> Out<'a> {
                 self.rows(e, &mut rows);
                 let n = rows.iter().map(Vec::len).max().unwrap_or(0);
                 if n > 0 {
+                    // Every row as wide as the widest: the lines are made only while they fit what is left.
                     let line = |r: &[String]| format!("| {} |", (0..n).map(|i| r.get(i).map(String::as_str).unwrap_or("")).collect::<Vec<_>>().join(" | "));
+                    let room = self.most.saturating_sub(self.md.len());
                     let mut lines = vec![line(&rows[0]), format!("| {} |", vec!["---"; n].join(" | "))];
-                    lines.extend(rows[1..].iter().map(|r| line(r)));
+                    let mut size: usize = lines.iter().map(|l| l.len() + 1).sum();
+                    for r in &rows[1..] {
+                        if size > room {
+                            break;
+                        }
+                        let l = line(r);
+                        size += l.len() + 1;
+                        lines.push(l);
+                    }
                     self.write(&lines);
+                    if size > room {
+                        self.full = true;
+                        self.cut = true;
+                    }
                 }
             }
             name if is_block(name) => {
@@ -870,7 +927,9 @@ impl<'a> Out<'a> {
     fn item(&mut self, li: &El, marker: String) {
         self.flush();
         let saved = self.indent;
-        self.indent += marker.chars().count();
+        if self.lists <= MAX_LIST_DEPTH {
+            self.indent += marker.chars().count();
+        }
         self.marker = Some(marker);
         li.kids.iter().for_each(|k| self.walk(k));
         self.flush();
@@ -878,11 +937,17 @@ impl<'a> Out<'a> {
         self.indent = saved;
     }
 
-    /// A table's rows of cells (a table inside a cell is that cell's text).
-    fn rows(&self, e: &El, out: &mut Vec<Vec<String>>) {
+    /// A table's rows of cells, `MAX_COLUMNS` at most (a table inside a cell is that cell's text).
+    fn rows(&mut self, e: &El, out: &mut Vec<Vec<String>>) {
         for k in e.els().filter(|k| !dropped(k)) {
             match k.name.as_str() {
-                "tr" => out.push(k.els().filter(|c| c.name == "td" || c.name == "th").map(|c| collapse(&self.inline(c, false)).replace('|', "\\|")).collect()),
+                "tr" => {
+                    let cells: Vec<&El> = k.els().filter(|c| c.name == "td" || c.name == "th").collect();
+                    if cells.len() > MAX_COLUMNS {
+                        self.cut = true;
+                    }
+                    out.push(cells.iter().take(MAX_COLUMNS).map(|c| collapse(&self.inline(c, false)).replace('|', "\\|")).collect());
+                }
                 "table" => {}
                 _ => self.rows(k, out),
             }
@@ -897,14 +962,15 @@ fn code_of(e: &El) -> String {
     code_span(&collapse(&s))
 }
 
+/// `text` as a code span (CommonMark): fenced by one backtick more than its longest run, so none of its backticks
+/// ends it; a space inside the fence when it starts or ends with one.
 fn code_span(text: &str) -> String {
     if text.is_empty() {
-        String::new()
-    } else if text.contains('`') {
-        format!("`` {text} ``")
-    } else {
-        format!("`{text}`")
+        return String::new();
     }
+    let fence = "`".repeat(text.split(|c| c != '`').map(str::len).max().unwrap_or(0) + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+    format!("{fence}{pad}{text}{pad}{fence}")
 }
 
 /// A `<pre>`'s text as written.
@@ -1042,29 +1108,31 @@ fn json_of(text: &str) -> Option<Value> {
     serde_json::from_str(text.trim()).ok()
 }
 
-/// HTML (a piece of a page, a noscript's, a CMS body in JSON) as Markdown, with the pictures it shows.
-fn html_md(html: &str, base: &str) -> (String, Vec<Image>) {
-    let (doc, _) = parse(html);
-    let mut out = Out::new(base, None);
+/// HTML (a piece of a page, a noscript's, a CMS body in JSON) as Markdown, with the pictures it shows; and whether
+/// some of it was left out (`MAX_NODES`, `MAX_MD`).
+fn html_md(html: &str, base: &str) -> (String, Vec<Image>, bool) {
+    let (doc, truncated) = parse(html);
+    let mut out = Out::new(base, None, html.len());
     doc.kids.iter().for_each(|k| out.walk(k));
     out.flush();
-    (out.md.trim().to_string(), out.images)
+    (out.md.trim().to_string(), out.images, truncated || out.cut)
 }
 
-/// Plain text (paragraphs on their lines) as Markdown text.
-fn text_md(text: &str, base: &str) -> String {
-    let mut out = Out::new(base, None);
+/// Plain text (paragraphs on their lines) as Markdown text; and whether some of it was left out.
+fn text_md(text: &str, base: &str) -> (String, bool) {
+    let mut out = Out::new(base, None, text.len());
     for para in text.split('\n') {
         out.push_text(para);
         out.flush();
     }
-    out.md.trim().to_string()
+    (out.md.trim().to_string(), out.cut)
 }
 
-/// A string that may hold HTML as Markdown.
-fn any_md(s: &str, base: &str) -> String {
+/// A string that may hold HTML as Markdown; and whether some of it was left out.
+fn any_md(s: &str, base: &str) -> (String, bool) {
     if s.contains("</") || s.contains("<p>") || s.contains("<br") {
-        html_md(s, base).0
+        let (md, _, cut) = html_md(s, base);
+        (md, cut)
     } else {
         text_md(s, base)
     }
@@ -1088,7 +1156,7 @@ pub struct Page {
     pub source: &'static str,
     /// Little readable text on a page with scripts: it shows itself only by running them.
     pub needs_js: bool,
-    /// The page was too big to read whole (`MAX_NODES`).
+    /// The page was too big to read whole (`MAX_NODES`), or its Markdown to write whole (`MAX_MD`, `MAX_COLUMNS`).
     pub truncated: bool,
 }
 
@@ -1151,7 +1219,7 @@ pub fn read(html: &str, base: &str) -> Page {
     let og_title = meta(&["og:title", "twitter:title"]);
     let title = first_h1(root).or_else(|| ld.title.as_deref().and_then(|t| short(t, 500))).or(og_title).or_else(|| title_of(&doc)).and_then(|t| short(&t, 500)).unwrap_or_default();
 
-    let mut out = Out::new(base, Some(title.clone()).filter(|t| !t.is_empty()));
+    let mut out = Out::new(base, Some(title.clone()).filter(|t| !t.is_empty()), html.len());
     root.kids.iter().for_each(|k| out.walk(k));
     out.flush();
     let mut images = std::mem::take(&mut out.images);
@@ -1159,31 +1227,34 @@ pub fn read(html: &str, base: &str) -> Page {
 
     // What the page embeds, as Markdown; the fuller text wins, the page's own HTML on a near tie.
     let len = |md: &str| collapse(md).chars().count();
-    let mut best = (len(&html_text), html_text, "html");
-    let mut offer = |md: String, from: &'static str| {
+    let mut best = (len(&html_text), html_text, "html", out.cut);
+    let mut offer = |md: String, from: &'static str, cut: bool| {
         let n = len(&md);
         if n > best.0 + best.0 / 4 + 20 {
-            best = (n, md, from);
+            best = (n, md, from, cut);
         }
     };
     if let Some(b) = &ld.body {
-        offer(any_md(b, base), "json-ld");
+        let (md, cut) = any_md(b, base);
+        offer(md, "json-ld", cut);
     }
     if !state.is_empty() {
-        offer(state.iter().map(|s| any_md(s, base)).filter(|m| !m.is_empty()).collect::<Vec<_>>().join("\n\n"), "state");
+        let mds: Vec<(String, bool)> = state.iter().map(|s| any_md(s, base)).filter(|(m, _)| !m.is_empty()).collect();
+        offer(mds.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>().join("\n\n"), "state", mds.iter().any(|(_, cut)| *cut));
     }
     let mut noscripts = vec![];
     every(&doc, "noscript", 50, &mut noscripts);
-    let noscript: Vec<String> = noscripts.iter().map(|n| html_md(own_text(n), base).0).filter(|m| !m.is_empty()).collect();
+    let noscript: Vec<(String, Vec<Image>, bool)> = noscripts.iter().map(|n| html_md(own_text(n), base)).filter(|(m, _, _)| !m.is_empty()).collect();
     if !noscript.is_empty() {
-        offer(noscript.join("\n\n"), "noscript");
+        offer(noscript.iter().map(|(m, _, _)| m.as_str()).collect::<Vec<_>>().join("\n\n"), "noscript", noscript.iter().any(|(_, _, cut)| *cut));
     }
     let description = meta(&["og:description", "description", "twitter:description"]).or_else(|| ld.description.as_deref().and_then(|d| short(d, 2000)));
-    let (n, markdown, source) = best;
+    let (n, markdown, source, cut) = best;
     let (markdown, source) = match (&description, n) {
-        (Some(d), 0) => (text_md(d, base), "meta"),
+        (Some(d), 0) => (text_md(d, base).0, "meta"),
         _ => (markdown, source),
     };
+    let truncated = truncated || cut;
 
     // Pictures the page names for itself (Open Graph, JSON-LD) after those of its text.
     for src in meta(&["og:image", "og:image:url", "twitter:image"]).into_iter().chain(ld.images.iter().cloned()) {
@@ -1514,7 +1585,7 @@ mod tests {
         assert!(text.contains("## Tags \\<i> and \\[brackets\\]"), "{text}");
         assert!(text.contains("| \\<td> \\[c\\] | `a<b` |"), "code is code, cells are text: {text}");
         assert!(text.ends_with("![\\](javascript:alert(1)) \\<b>](https://contoso.example/p.png)"), "a picture's words can't end it: {text}");
-        assert_eq!(md_text("<b>[x]!\\"), "\\<b>\\[x\\]\\!\\\\");
+        assert_eq!(md_text("<b>[x]!\\`"), "\\<b>\\[x\\]\\!\\\\\\`");
     }
 
     #[test]
@@ -1522,6 +1593,92 @@ mod tests {
         let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
         let html = format!("<main><p>{filler}</p><ol start=\"18446744073709551615\"><li>First</li><li>Second</li></ol></main>");
         let text = read(&html, "https://contoso.example/").markdown;
-        assert!(text.contains("18446744073709551615. First\n18446744073709551615. Second"), "{text}");
+        assert!(text.contains("1000000. First\n1000001. Second"), "a list's start is capped: {text}");
+    }
+
+    /// `read` of `html` on a worker's stack: the page, how long it took, the HTML's size.
+    fn timed(html: String) -> (Page, std::time::Duration, usize) {
+        let n = html.len();
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                let at = std::time::Instant::now();
+                let p = read(&html, "https://contoso.example/");
+                (p, at.elapsed(), n)
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_table_of_one_wide_row_and_many_empty_ones_stays_small() {
+        // One row of 8,000 cells and 8,000 bare rows: each padded to the widest row, 64 million cells.
+        let html = format!("<main><table><tr>{}{}</table></main>", "<td>x</td>".repeat(8_000), "<tr>".repeat(8_000));
+        let (p, took, n) = timed(html);
+        assert!(p.markdown.len() <= 10 * n, "{} bytes of Markdown from {n} of HTML", p.markdown.len());
+        assert!(p.truncated && took < std::time::Duration::from_secs(5), "{took:?}");
+        let first = p.markdown.lines().next().unwrap();
+        assert_eq!(first.matches(" | ").count() + 1, MAX_COLUMNS, "a table keeps {MAX_COLUMNS} columns: {first}");
+    }
+
+    #[test]
+    fn deeply_nested_numbered_lists_with_many_lines_stay_small() {
+        let html = format!("<main>{}<li>{}end</li></main>", "<ol start=\"18446744073709551615\"><li>".repeat(127), "x<br>".repeat(120_000));
+        let (p, took, n) = timed(html);
+        assert!(p.markdown.len() <= 10 * n, "{} bytes of Markdown from {n} of HTML", p.markdown.len());
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        assert!(p.markdown.lines().all(|l| l.len() < 200), "the indent is capped");
+    }
+
+    #[test]
+    fn inline_code_never_lets_its_text_out() {
+        let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
+        let html = format!("<main><p>{filler}</p><p>A <code>a``[x](javascript:alert(1))``b</code> and <code>`tick</code> and ``<a href=\"/ok\">ok</a>`` and `<code>[y](javascript:alert(2))</code>.</p></main>");
+        let text = read(&html, "https://contoso.example/").markdown;
+        assert!(text.contains(r#"A ```a``[x](javascript:alert(1))``b``` and `` `tick `` and \`\`[ok](https://contoso.example/ok)\`\` and \``[y](javascript:alert(2))`."#), "{text}");
+        // Read as CommonMark reads code spans: outside them, every `](` is Echo's own link to the page's site.
+        let mut outside = String::new();
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find('`') {
+            if rest[..i].chars().rev().take_while(|c| *c == '\\').count() % 2 == 1 {
+                outside.push_str(&rest[..=i]);
+                rest = &rest[i + 1..];
+                continue;
+            }
+            outside.push_str(&rest[..i]);
+            let run = rest[i..].chars().take_while(|c| *c == '`').count();
+            let after = &rest[i + run..];
+            // The span ends at the next run of exactly as many backticks; with none, the run is literal.
+            let mut at = 0;
+            let end = loop {
+                let Some(j) = after[at..].find('`') else { break None };
+                let j = at + j;
+                let len = after[j..].chars().take_while(|c| *c == '`').count();
+                if len == run {
+                    break Some(j + run);
+                }
+                at = j + len;
+            };
+            rest = match end {
+                Some(e) => &after[e..],
+                None => {
+                    outside.push_str(&"`".repeat(run));
+                    after
+                }
+            };
+        }
+        outside.push_str(rest);
+        for (i, _) in outside.match_indices("](") {
+            assert!(outside[..i].ends_with('\\') || outside[i + 2..].starts_with("https://contoso.example/"), "a link out of {:?}", &outside[i.saturating_sub(40)..]);
+        }
+    }
+
+    #[test]
+    fn nested_articles_are_measured_once() {
+        let html = format!("<html><body>{}<p>{}</p>{}</body></html>", "<article>".repeat(255), "word ".repeat(200_000), "</article>".repeat(255));
+        let (p, took, _) = timed(html);
+        assert!(p.markdown.starts_with("word word"), "{}", p.markdown.chars().take(40).collect::<String>());
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     }
 }
