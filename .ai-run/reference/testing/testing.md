@@ -39,8 +39,8 @@ what the window's `open_url`, a sign-in, `echoctl join` or a Settings pane would
 
 ## Served test data
 
-`tests/fixtures/make_data.py` writes `<dir>/env` (it sets `ECHOCTL_HOME`, `ECHOCTL_CONFIG_DIR` and the open-log
-variables); every CLI step sources it first (`make_data.py::Data`).
+`tests/fixtures/make_data.py` writes `<dir>/env` (it sets `ECHOCTL_HOME`, `ECHOCTL_CONFIG_DIR`, the open-log
+variables and git's own settings, `GIT_CONFIG_GLOBAL` and `XDG_CONFIG_HOME`); every CLI step sources it first (`make_data.py::Data`).
 
 ## feature-map.py
 

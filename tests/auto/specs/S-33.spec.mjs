@@ -140,13 +140,18 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     const bash = fill(c.tool, { tool: c.tools.bash })
     const steps = log.filter((l) => l.includes(bash))
     expect(steps).toHaveLength(y.bashSteps)
-    y.bashOrder.forEach((words, k) => expect(steps[k]).toContain(words))
+    // A logged command is cut at 200 characters and starts with the launcher's full path, as long as the checkout's
+    // (#715): each line is the start of the command the model ran in its turn, whose words are read there, whole.
+    const commands = data.model.toolUses(y.rule, c.tools.bash).map((i) => i.command.split(/\s+/).join(' '))
+    expect(commands).toHaveLength(y.bashSteps)
+    steps.forEach((l, k) => expect(commands[k].startsWith(l.slice(l.indexOf(bash) + bash.length).trim().replace(/…$/, ''))).toBe(true))
+    y.bashOrder.forEach((words, k) => expect(commands[k]).toContain(words))
     const refused = log.map((l, i) => [l, i]).filter(([l]) => l.includes(run.logRefused))
     expect(refused).toHaveLength(y.refusals.length)
     y.refusals.forEach((r, k) => {
       const [line, i] = refused[k]
       expect(line).toContain(r.says)
-      expect(log.slice(0, i).findLast((l) => l.includes(bash))).toContain(r.after)
+      expect(commands[log.slice(0, i).filter((l) => l.includes(bash)).length - 1]).toContain(r.after)
     })
     expect(log.some((l) => l.includes(run.logOk))).toBe(true)
     const drafts = lines(data.read(data.dir, c.drafts))

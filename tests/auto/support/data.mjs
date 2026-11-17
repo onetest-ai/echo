@@ -227,6 +227,9 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
       const last = e.messages?.at(-1)?.content
       return Array.isArray(last) ? last.filter((b) => b.type === 'tool_result').map((b) => b.is_error ?? null) : []
     }),
+    /** The inputs of one rule's calls of tool `name`, in order, whole (its last turn holds them all). */
+    toolUses: (rule, name) => (data.model.turns(rule).at(-1)?.messages || []).flatMap((m) =>
+      m.role === 'assistant' && Array.isArray(m.content) ? m.content.filter((b) => b.type === 'tool_use' && b.name === name).map((b) => b.input) : []),
   }
   return data
 }
