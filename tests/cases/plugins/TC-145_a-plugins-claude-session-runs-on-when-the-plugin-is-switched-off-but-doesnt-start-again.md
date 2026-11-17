@@ -25,8 +25,8 @@ tags: [plugins, claude-code, terminal]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `open acme-ask '"path":"","mode":"read","profile":""'`; `$E plugin disable acme-ask`; `curl -s "$B/api/ptys"` | `\"ok\":true`; after the switch-off the session is still listed (`"key":"claude:plugin:acme-ask"`, `"exited":false`): it is the user's |
-| 2 | `close; open acme-ask '"path":"","mode":"read","profile":""'`; `$E plugin enable acme-ask` | Starting it again is refused: `\"ok\":false`, `acme-ask isn't installed and on` |
+| 1 | `open acme-ask '"path":"","mode":"read","profile":""'`; `$E plugin disable acme-ask`; `curl -s "$B/api/ptys"` | `"ok":true`; after the switch-off the session is still listed (`"key":"claude:plugin:acme-ask"`, `"exited":false`): it is the user's |
+| 2 | `close; open acme-ask '"path":"","mode":"read","profile":""'`; `$E plugin enable acme-ask` | Starting it again is refused: `"ok":false`, `acme-ask isn't installed and on` |
 
 ## Expected Final State
 Acme ask installed and on, with `$D/vault` given to it; no session open.

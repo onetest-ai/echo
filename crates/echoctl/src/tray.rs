@@ -800,8 +800,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                     let done = crate::window::handle(&msg);
                     #[cfg(windows)] // Settings → Layout → "Echo's own title bar": the window follows at once.
                     win.iter().for_each(|w| w.follow_settings(&msg));
-                    if let (Some(js), Some(w)) = (&done.reply, &win) {
-                        let _ = w.webview.evaluate_script(js);
+                    if let (Some(r), Some(w)) = (&done.reply, &win) {
+                        let _ = w.webview.evaluate_script(&crate::window::reply_script(r));
                     }
                     win.iter().for_each(|w| w.follow_mic());
                     if done.refresh {

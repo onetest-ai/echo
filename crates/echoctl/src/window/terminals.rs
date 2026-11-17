@@ -157,7 +157,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                     json!({ "ok": false, "kind": kind, "key": key, "error": format!("{e:#}"), "signin": signin })
                 }
             };
-            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.ptyOpened({answer})")) }
+            Handled::answer(false, "ptyOpened", json!([answer]))
         }
         "pty_input" => {
             if let (Some(id), Some(data)) = (v["id"].as_u64(), v["data"].as_str()) {

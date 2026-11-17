@@ -618,12 +618,25 @@ fn profile(v: &Value) -> Option<String> {
     v["profile"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)
 }
 
-/// What running a page's action did: refresh the page (and the menu), and a script to answer
-/// the page with.
+/// What running a page's action did: refresh the page (and the menu), and an answer for the page — `{fn, args}`, one of
+/// the page's own handlers (`window.echo.<fn>(...args)`) run by its `window.echo.reply`, in the window
+/// (`reply_script`) and served (`serve_conn`'s JSON) alike.
 #[derive(Default)]
 pub struct Handled {
     pub refresh: bool,
-    pub reply: Option<String>,
+    pub reply: Option<Value>,
+}
+
+impl Handled {
+    /// Answer the page with its handler `f` called with `args` (a JSON array).
+    pub fn answer(refresh: bool, f: &str, args: Value) -> Self {
+        Handled { refresh, reply: Some(json!({ "fn": f, "args": args })) }
+    }
+}
+
+/// The script that hands a reply to the window's page (served, the page dispatches the same JSON itself: no script).
+pub fn reply_script(reply: &Value) -> String {
+    format!("window.echo && window.echo.reply({reply})")
 }
 
 impl From<bool> for Handled {
@@ -695,7 +708,7 @@ fn call_named(v: &Value) -> Option<PathBuf> {
 
 /// A notice for the page (an action that couldn't be done).
 fn notice(text: &str) -> Handled {
-    Handled { refresh: true, reply: Some(format!("window.echo && window.echo.notice({})", json!(text))) }
+    Handled::answer(true, "notice", json!([text]))
 }
 
 /// Run an action the page posted.
@@ -965,8 +978,8 @@ pub fn selftest() -> anyhow::Result<()> {
             Event::UserEvent(msg) if msg.contains("\"probe\"") => probed = true,
             // The page's terminal check: open a shell, type into it (as the tray runs these).
             Event::UserEvent(msg) if msg.contains("\"cmd\":\"pty_") => {
-                if let (Some(js), Some(w)) = (handle(&msg).reply, &win) {
-                    let _ = w.webview.evaluate_script(&js);
+                if let (Some(r), Some(w)) = (handle(&msg).reply, &win) {
+                    let _ = w.webview.evaluate_script(&reply_script(&r));
                 }
             }
             Event::UserEvent(msg) if msg.contains("\"selftest\"") => {
@@ -1148,7 +1161,41 @@ mod tests {
         // The page's own request outside the self-test: refused before anything starts.
         assert!(!SELFTEST.load(std::sync::atomic::Ordering::SeqCst));
         let reply = handle(r#"{"cmd":"pty_open","kind":"shell","key":"t","cols":80,"rows":24}"#).reply.unwrap();
-        assert!(reply.contains(r#""ok":false"#) && reply.contains("no terminal of kind"), "{reply}");
+        assert_eq!((&reply["fn"], &reply["args"][0]["ok"]), (&json!("ptyOpened"), &json!(false)), "{reply}");
+        assert!(reply["args"][0]["error"].as_str().is_some_and(|e| e.contains("no terminal of kind")), "{reply}");
+    }
+
+    #[test]
+    fn a_reply_reaches_the_page_as_its_handler_and_arguments_the_window_by_one_script_served_as_json() {
+        let r = notice("a bad run id").reply.unwrap();
+        assert_eq!(r, json!({"fn": "notice", "args": ["a bad run id"]}));
+        // The window: one call of the page's dispatcher, the reply as a JSON literal (no script of its own).
+        let js = reply_script(&r);
+        let arg = js.strip_prefix("window.echo && window.echo.reply(").and_then(|s| s.strip_suffix(')')).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(arg).unwrap(), r, "{js}");
+        // Served: the same JSON in /ipc's answer, which the page dispatches without evaluating anything (#725).
+        let body = br#"{"cmd":"pty_open","kind":"shell","key":"t","cols":80,"rows":24}"#;
+        let (status, answer) = served_ipc(body);
+        assert_eq!((status, &answer["reply"]["fn"], &answer["reply"]["args"][0]["ok"]), (200, &json!("ptyOpened"), &json!(false)), "{answer}");
+    }
+
+    /// One POST to the served window's /ipc, from its page (the cookie and the Origin): the status and the JSON answer.
+    fn served_ipc(body: &[u8]) -> (u16, Value) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let server = {
+            let origin = origin.clone();
+            std::thread::spawn(move || serve_conn(&listener.accept().unwrap().0, &origin, "t0k", "echo_serve_test"))
+        };
+        let mut c = std::net::TcpStream::connect(origin.trim_start_matches("http://")).unwrap();
+        write!(c, "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nCookie: echo_serve_test=t0k\r\nOrigin: {origin}\r\n\r\n", body.len()).unwrap();
+        c.write_all(body).unwrap();
+        let mut out = String::new();
+        c.read_to_string(&mut out).unwrap();
+        server.join().unwrap();
+        let status = out.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, serde_json::from_str(out.split_once("\r\n\r\n").unwrap().1).unwrap())
     }
 
     #[test]

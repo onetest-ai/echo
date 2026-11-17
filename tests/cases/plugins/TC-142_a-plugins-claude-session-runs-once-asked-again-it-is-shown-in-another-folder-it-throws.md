@@ -25,7 +25,7 @@ tags: [plugins, claude-code, folders, terminal]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-ask:main`; click "Ask the vault"; read `#acme-ask`; reload `{{base_url}}/#acme-ask:main` (a served window doesn't run the app's IPC answers: the reload shows the session as the app has it) | `opened`; after the reload the bottom panel's tab "Claude · Acme ask" shows the session |
+| 1 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-ask:main`; click "Ask the vault"; read `#acme-ask` and the bottom panel | `opened`; the bottom panel's tab "Claude · Acme ask" shows the session |
 | 2 | `rm "$D/run-args"`; click "Ask the vault" again; read `#acme-ask`; `ls "$D/run-args"` | `opened`; the tab "Claude · Acme ask" is shown; `ls` fails: the running session was shown, not started twice |
 | 3 | Click "Ask Notes"; read `#acme-ask`; `ls "$D/run-args"` | `error: Claude is open for this plugin in another folder: close it in its panel first`; the tab "Claude · Acme ask" is shown, on the running session in `$D/vault`; `ls` fails |
 
