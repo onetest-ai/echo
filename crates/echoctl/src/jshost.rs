@@ -24,6 +24,7 @@ use crate::{paths, plugins};
 
 mod test_hosts;
 mod service_async;
+pub mod files;
 mod widgets;
 pub mod work;
 
@@ -40,7 +41,7 @@ use test_hosts::test_host;
 use test_hosts::test_host_in;
 
 /// How long one command may take before its caller is told so (the work may go on).
-const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// JavaScript running without a break longer than this is stopped.
 const SLICE: Duration = Duration::from_secs(5);
 
@@ -65,10 +66,10 @@ const PRELUDE: &str = r#"
     const p = pending[token]; delete pending[token]; if (!p) return
     const out = JSON.parse(json); out.error ? p[1](new Error(out.error)) : p[0](out.value)
   }
-  globalThis.__call = (id, name, args) => {
+  globalThis.__call = (id, name, args, files) => {
     const fn = commands[name]
     if (!fn) return host('reply', JSON.stringify({ call: id, error: `no command “${name}”` }))
-    Promise.resolve().then(() => fn(JSON.parse(args))).then(
+    Promise.resolve().then(() => fn(JSON.parse(args), { files: JSON.parse(files) })).then(
       (v) => host('reply', JSON.stringify({ call: id, value: v === undefined ? null : v })),
       (e) => host('reply', JSON.stringify({ call: id, error: String((e && e.message) || e) })))
   }
@@ -215,7 +216,13 @@ const PRELUDE: &str = r#"
       write: (root, path, text) => call('fs.write', [String(root), String(path), String(text)]),
       move: (root, from, to) => call('fs.move', [String(root), String(from), String(to)]),
       remove: (root, path) => call('fs.remove', [String(root), String(path)]),
+      /** A file handed to it (a handle) copied as it is into a folder it was given (`uses.folders.write`, 50 MB at
+       *  most), never over a file unless `createNew: false`: {path, size}. */
+      copyIn: (file, root, path, opts) => later('fs.copy_in', [file, String(root), String(path), opts || {}]),
     },
+    /** Files the user handed it — picked, dropped on its view, passed to a command — as handles {file, name, size}
+     *  (an hour): `read(file, {max})` → text (1 MB by default, 4 MB at most). */
+    files: { read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]) },
     system: {
       which: (name) => call('system.which', name),
       /** Another app's file its manifest names in `uses.files.read` (that very entry, e.g. "~/…/obsidian.json"):
@@ -223,6 +230,8 @@ const PRELUDE: &str = r#"
       readFile: (entry) => call('files.read', String(entry)),
       /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
+      /** The system's file picker: [{file, name, size}] handles of the files picked ([] cancelled); `multiple`, `ext`. */
+      pickFiles: (prompt, opts) => later('system.pick_files', [String(prompt || 'Choose files'), opts || {}]),
     },
     /** The user's own sign-in to a host its manifest names in `uses.signin.hosts`: the one Echo keeps for it (with
      *  `uses.signin.keep`), else the GitHub CLI's or git's on this computer: `get` resolves {token, from: 'echo' | 'gh'
@@ -251,7 +260,8 @@ const PRELUDE: &str = r#"
 enum Msg {
     Load(String, PathBuf),
     Unload(String),
-    Call { plugin: String, command: String, args: String, n: u64, reply: Sender<Result<Value, String>> },
+    /// `files`: the handles passed with it (JSON), the command's second argument `{files}`.
+    Call { plugin: String, command: String, args: String, files: String, n: u64, reply: Sender<Result<Value, String>> },
     /// A call's caller stopped waiting (its timeout): its reply is dropped, never kept for a plugin that doesn't settle.
     Forget(String, u64),
     Event(String, String),
@@ -520,13 +530,19 @@ pub fn call(plugin: &str, command: &str, args: &Value) -> Result<Value> {
 
 /// The same, waiting up to `timeout` (a terminal waiting for a run).
 pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration) -> Result<Value> {
+    call_with(plugin, command, args, &[], timeout)
+}
+
+/// The same, with handles of files the user handed this plugin (`files::make`), each checked as its own.
+pub fn call_with(plugin: &str, command: &str, args: &Value, files: &[Value], timeout: Duration) -> Result<Value> {
+    let files = json!(files::own_list(plugin, files)?).to_string();
     let h = host();
     if !h.loaded.lock().map(|l| l.contains_key(plugin)).unwrap_or(false) {
         sync_only(plugin);
     }
     let (tx, rx) = channel();
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
+    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), files, n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
     match rx.recv_timeout(timeout) {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => bail!("{e}"),
@@ -638,7 +654,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     l.remove(&id);
                 }
             }
-            Ok(Msg::Call { plugin, command, args, n, reply }) => {
+            Ok(Msg::Call { plugin, command, args, files, n, reply }) => {
                 let Some(p) = plugins.get_mut(&plugin) else {
                     let why = status().get(&plugin).and_then(|r| r.clone().err()).unwrap_or_else(|| "it isn't installed and on".into());
                     let _ = reply.send(Err(format!("{plugin} isn't loaded: {why}")));
@@ -652,7 +668,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 slice(&mut || {
                     ctx.with(|c| {
                         if let Ok(f) = c.globals().get::<_, Function>("__call") {
-                            if let Err(e) = f.call::<_, ()>((n, command.clone(), args.clone())).catch(&c) {
+                            if let Err(e) = f.call::<_, ()>((n, command.clone(), args.clone(), files.clone())).catch(&c) {
                                 current.lock().unwrap().replies.push((n, Err(e.to_string())));
                             }
                         }
@@ -1330,6 +1346,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             Value::Null
         }
+        "handles.read" => files::read(id, &arg[0], arg[1].as_u64())?,
         "files.read" => {
             let entry = s(arg);
             if !uses(id, "files")?["read"].as_array().is_some_and(|a| a.iter().any(|f| f.as_str() == Some(entry.as_str()))) {

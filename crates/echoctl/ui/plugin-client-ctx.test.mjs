@@ -27,13 +27,14 @@ listeners.window.push(['resize', onResize], ['resize', other])
 listeners.document.push(['keydown', onKey])
 let removed = 0
 const P = {
-  slots: {}, targets: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kn: '1' }, applied: { kn: true },
+  slots: {}, targets: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kn: '1' }, applied: { kn: true }, drops: { kn: [() => {}] },
   owned: { kn: { listeners: [['keydown', onKey]], windowListeners: [['resize', onResize]], styles: [{ remove: () => removed++ }],
     cleanups: [() => ran.push('timer'), () => { throw new Error('observer gone') }, () => ran.push('graph')] } },
 }
 const console = { error: (...m) => errors.push(m.map(String).join(' ')) }
-const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'document', 'window', 'console',
-  `${src.slice(f, g + 3)}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, target('document'), target('window'), console)
+let followed = 0
+const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'document', 'window', 'console', 'followDrops',
+  `${src.slice(f, g + 3)}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, target('document'), target('window'), console, () => followed++)
 unload('kn')
 assert.deepEqual(ran, ['timer', 'graph'], 'every cleanup ran, the one after a throw too')
 assert.equal(errors.length, 1); assert.match(errors[0], /plugin kn: its cleanup failed:.*observer gone/)
@@ -41,4 +42,6 @@ assert.deepEqual(listeners.window, [['resize', other]], 'its window listener rem
 assert.deepEqual(listeners.document, [], 'its document listener removed')
 assert.equal(removed, 1, 'its stylesheet taken out')
 assert.equal(P.owned.kn, undefined)
+assert.equal(P.drops.kn, undefined, 'its drop handlers gone')
+assert.equal(followed, 1, 'the app told again where dropped files go (its drop handler gone with it)')
 process.stdout.write('plugin-client-ctx: ok\n')

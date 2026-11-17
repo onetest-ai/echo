@@ -200,7 +200,9 @@ pub fn open<T: 'static>(
         Some(c) => format!("{}#call/{}", base_url(), urlencode(c)),
         None => base_url().to_string(),
     };
-    let webview = WebViewBuilder::new()
+    let to_app = std::rc::Rc::new(ipc);
+    let from_page_to_app = to_app.clone();
+    let builder = WebViewBuilder::new()
         // Answered off the main thread: a calendar request may wait on Microsoft 365.
         .with_asynchronous_custom_protocol("echo".into(), |_id, req, responder| {
             std::thread::spawn(move || responder.respond(respond(&req)));
@@ -208,7 +210,7 @@ pub fn open<T: 'static>(
         // Only the window's own page: WebKit lets frames post to the handler too (the minutes page).
         .with_ipc_handler(move |req: Request<String>| {
             if from_page(&req.uri().to_string(), base_url()) {
-                ipc(req.into_body())
+                (*from_page_to_app)(req.into_body())
             }
         })
         // The page never navigates away from echo:// (links to the web open in the browser).
@@ -218,10 +220,24 @@ pub fn open<T: 'static>(
                 open_external(&url);
             }
             ours
+        });
+    // macOS: files dropped on the window while a plugin's view is shown that listens for them (`ctx.onFileDrop`) are
+    // that plugin's handles, the page told (`plugin_dropped`); any other drag is the webview's own (a logo tile's, a
+    // card's). Windows: wry's handler would take every external drop from WebView2, the logo tiles' too — none there.
+    #[cfg(all(target_os = "macos", feature = "js"))]
+    let builder = {
+        let files = std::cell::Cell::new(false);
+        builder.with_drag_drop_handler(move |e| {
+            let (ours, paths) = drag(e, &files, plugins::drops_wanted());
+            if !paths.is_empty() && plugins::dropped(&paths) {
+                (*to_app)(json!({"cmd": "plugin_dropped"}).to_string());
+            }
+            ours
         })
-        .with_url(url)
-        .with_devtools(cfg!(debug_assertions))
-        .build(&window)?;
+    };
+    #[cfg(not(all(target_os = "macos", feature = "js")))]
+    drop(to_app);
+    let webview = builder.with_url(url).with_devtools(cfg!(debug_assertions)).build(&window)?;
     Ok(EchoWindow {
         window,
         webview,
@@ -230,6 +246,26 @@ pub fn open<T: 'static>(
         #[cfg(windows)]
         told_maximized: std::cell::Cell::new(None),
     })
+}
+
+/// A drag over the window: one carrying files while a plugin takes them (`wanted`) is Echo's from its start to its end
+/// (`files`: the drag going on is), its files given on the drop; any other is the webview's own. Whether Echo takes the
+/// event, and the files dropped.
+#[cfg(all(target_os = "macos", feature = "js"))]
+fn drag(e: wry::DragDropEvent, files: &std::cell::Cell<bool>, wanted: bool) -> (bool, Vec<PathBuf>) {
+    match e {
+        wry::DragDropEvent::Enter { paths, .. } => {
+            files.set(wanted && !paths.is_empty());
+            (files.get(), vec![])
+        }
+        wry::DragDropEvent::Over { .. } => (files.get(), vec![]),
+        wry::DragDropEvent::Drop { paths, .. } => {
+            let ours = files.replace(false) || (wanted && !paths.is_empty());
+            (ours, if ours { paths } else { vec![] })
+        }
+        wry::DragDropEvent::Leave => (files.replace(false), vec![]),
+        _ => (false, vec![]),
+    }
 }
 
 /// Is a message from the window's own page — `base` with the path `/` or `/index.html` — rather

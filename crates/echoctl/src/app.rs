@@ -1031,6 +1031,51 @@ pub fn choose_folder(prompt: &str) -> Option<PathBuf> {
     }
 }
 
+/// A native file picker: the files picked (several when `multiple`; of the extensions `ext`, lower case, when given),
+/// `[]` when cancelled.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn choose_files(prompt: &str, multiple: bool, ext: &[String]) -> Vec<PathBuf> {
+    // Development builds and tests: the files given (the OS's path-list separator between them), with no dialog (never
+    // in a release build).
+    #[cfg(debug_assertions)]
+    if let Some(list) = std::env::var_os("ECHOCTL_PICK_FILES") {
+        let _ = prompt;
+        let fits = |p: &PathBuf| p.is_file() && (ext.is_empty() || p.extension().is_some_and(|x| ext.contains(&x.to_string_lossy().to_lowercase())));
+        return std::env::split_paths(&list).filter(fits).take(if multiple { usize::MAX } else { 1 }).collect();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let types = if ext.is_empty() { String::new() } else { format!(" of type {{{}}}", ext.iter().map(|e| applescript_str(e)).collect::<Vec<_>>().join(", ")) };
+        let script = format!(
+            "set picked to choose file with prompt {}{types} default location (path to home folder){}\nif class of picked is not list then set picked to {{picked}}\nset out to \"\"\nrepeat with f in picked\nset out to out & POSIX path of (contents of f) & linefeed\nend repeat\nreturn out",
+            applescript_str(prompt),
+            if multiple { " with multiple selections allowed" } else { "" }
+        );
+        let Ok(out) = Command::new("osascript").args(["-e", &script]).output() else { return vec![] };
+        if !out.status.success() {
+            return vec![];
+        }
+        return String::from_utf8_lossy(&out.stdout).lines().map(PathBuf::from).filter(|p| p.is_file()).collect();
+    }
+    #[cfg(windows)]
+    {
+        let filter = if ext.is_empty() { String::new() } else { format!("$d.Filter = 'Files|{}'; ", ext.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";")) };
+        let script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+             $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = '{}'; $d.Multiselect = ${multiple}; {filter}\
+             if ($d.ShowDialog() -eq 'OK') {{ $d.FileNames }}",
+            prompt.replace('\'', "''")
+        );
+        let Ok(out) = Command::new("powershell").no_window().args(["-NoProfile", "-STA", "-Command", &script]).output() else { return vec![] };
+        return String::from_utf8_lossy(&out.stdout).lines().map(|l| PathBuf::from(l.trim())).filter(|p| p.is_file()).collect();
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (prompt, multiple, ext);
+        vec![]
+    }
+}
+
 /// A one-line text prompt; the text, or None if cancelled / empty.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {

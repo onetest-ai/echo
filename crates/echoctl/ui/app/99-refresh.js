@@ -68,6 +68,8 @@ const selftestTerm = (windows) => windows
 // end of the selftest-terminal block
 
 window.echo = {
+  /** Files dropped on the window for a plugin's view: their handles (names, never paths), to its `ctx.onFileDrop`. */
+  pluginDrop(id, files) { pluginDropped(id, files) },
   /** Echo's answer to a plugin's `ctx.echo.jobs.set`: the jobs after the change, or why it was refused. */
   jobsSet(a) {
     const w = a && JobsAsked[a.req]
