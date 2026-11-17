@@ -334,17 +334,20 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     1,000 at most; `date` ISO 8601; `echo` the id of the plugin that committed it through Echo, else null.
   - `await ctx.git.show(root, rev, path, {max})` → `{text, size, truncated}` or null when the file wasn't there: its
     text at that version as the repository holds it (no filter), cut at `max` (1 MB by default, 4 MB at most); `rev`
-    `HEAD`, `HEAD~N` or a commit's id (4–64 hex), nothing else; never a file of the repository outside the folder.
+    `HEAD`, `HEAD~N` or a commit's id (4–64 hex), nothing else (the id of a file or a folder is refused); never a file
+    of the repository outside the folder.
   - `await ctx.git.init(root, {branch})` → its `info`: a new repository in the folder, on `main` unless `branch`
     (letters, digits, `.` `_` `-` `/`), with no template; refused inside a repository.
   - `await ctx.git.commit(root, {paths, message})` → `{rev}`, or `{rev: null}` when they hold no change: one commit of
     exactly `paths` (1–1,000 files, each checked as `ctx.fs.write` checks it) as they are on the disk, a file gone
     committed as removed, the user's other staged and unstaged work left as it is; `message` plain text, 1–5,000
     characters. Committed by `Echo (<plugin id>) <<plugin id>@plugins.echo.invalid>`; its author the user's git name
-    and address when git knows both, else that too. No hook runs, nothing is signed.
-  - Refused: no git on the computer ("git isn't installed on this computer"), git older than 2.31, a repository whose
-    history lies outside its folder (a `gitdir:` file, `core.worktree`, a linked worktree or submodule) or that borrows
-    objects (alternates); git taking over 20 s is stopped. Nothing a repository's settings, hooks or attributes name
+    and address when git knows both, else that too. No hook runs, nothing is signed. Refused while a merge, rebase,
+    cherry-pick, revert or bisect is under way, and for a file the repository ignores.
+  - Refused: no git where the system installs it ("git isn't installed on this computer"), git older than 2.31, a
+    repository whose history lies outside its folder (a `gitdir:` file, `core.worktree`, a linked worktree or
+    submodule, a link in `.git`), that borrows objects (alternates), is a partial clone, or whose settings can't be read
+    whole (over 16 MB, a name that isn't UTF-8); git taking over 20 s is stopped. Nothing is fetched. Nothing a repository's settings, hooks or attributes name
     runs (Host § Git).
 - Its window half shows images of a folder it was given (with `uses.folders`) from
   `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and

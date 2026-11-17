@@ -74,35 +74,51 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 ## Git
 
 - `ctx.git.*` runs git only through `jshost::git::spawn`: the verbs of `VERBS` (`version`, `config`, `rev-parse`,
-  `symbolic-ref`, `status`, `log`, `cat-file`, `ls-files`, `init`, `add`, `commit`, `rm` — no network verb), the
-  program an absolute `git` found as other programs are (`app::program_candidates`; Windows: `git.exe` only, never a
-  `.cmd`), never through a shell, no stdin, `--no-pager`, in the granted folder, each path after `--` and literal
-  (`GIT_LITERAL_PATHSPECS=1`). Its own process group, SIGTERM then SIGKILL at 20 s; stdout kept to 16 MB, stderr to
-  64 KB, the rest read and dropped. Evidence: `jshost::git::spawn`
+  `symbolic-ref`, `status`, `log`, `cat-file`, `ls-files`, `init`, `add`, `commit`, `rm` — no network verb), never
+  through a shell, no stdin, `--no-pager`, in the granted folder, each path after `--` and literal
+  (`GIT_LITERAL_PATHSPECS=1`). Started with all it starts as one (`plugins::signin::Tree`: Unix its own session, TERM
+  then KILL to the whole group; Windows a job object killing them all) and stopped at 20 s; stdout kept to 16 MB,
+  stderr to 64 KB, the rest read and dropped; once it ends its output is waited for 2 s, then whatever it started is
+  stopped and the call fails if something still holds it. Evidence: `jshost::git::spawn`
+- The program (`jshost::git::candidates`): only where the system installs git, never `PATH` or the user's own folders
+  — macOS `/opt/homebrew/bin/git`, `/usr/local/bin/git`, then `/usr/bin/git` only when `xcode-select -p` names a
+  developer folder holding `usr/bin/git` (else that stub would open Apple's install dialog); Windows
+  `%ProgramW6432%`, `%ProgramFiles%`, `%ProgramFiles(x86)%` `\Git\cmd\git.exe` or `\Git\bin\git.exe` (never a
+  `.cmd`, which runs through cmd.exe); other Unix `/usr/bin/git`, `/usr/local/bin/git`. None: "git isn't installed
+  on this computer". Evidence: `jshost::git::candidates`
 - Its environment: only `PATH`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`,
   `XDG_CONFIG_HOME` of the user's (no `GIT_*`, `ECHOCTL*`, `CLAUDE*`, `ANTHROPIC*`), then `LC_ALL=C`,
-  `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1`, `GIT_EDITOR=:`, an empty `GIT_PAGER` and
-  the overrides as `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (git 2.31+, which is why older git
+  `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1`, `GIT_EDITOR=:`, an empty `GIT_PAGER`,
+  `GIT_NO_LAZY_FETCH=1` (a missing object is never fetched from a promisor remote) and an empty `GIT_ALLOW_PROTOCOL`
+  (no transport at all, whatever `protocol.*.allow` says), and the overrides as `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (git 2.31+, which is why older git
   is refused): the command line's own scope, above the system's, the user's and the repository's, and passed on to any
   git it starts. Evidence: `jshost::git::spawn`
 - The overrides (`jshost::git::overrides`), read for each call from `git config --list` (every scope, `include` and
-  `includeIf` files too): every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
+  `includeIf` files too), whole: a listing that fails or is over 16 MB, or a key that isn't UTF-8, refuses the
+  repository (a setting not read, or read under another name, couldn't be cleared), as does a partial clone
+  (`extensions.partialClone` or any `remote.*.promisor`). Every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
   `diff.*.command/textconv`, `merge.*.driver`, `credential.*.helper`, `gpg.*.program`, `*.sshCommand`, `*.askPass`,
   `*.editor`, `*.pager`, `*.proxy`, `remote.*.uploadpack/receivepack/vcs`, `uploadpack.packObjectsHook`, …) set empty,
-  `filter.*.required` and every `pager.<command>` false; then, winning, `core.hooksPath` an empty folder Echo keeps
+  `filter.*.required` and every `pager.<command>` false, every `protocol.<name>.allow` never, and each hook set in
+  the settings off (`hook.<name>.event` empty, `hook.<name>.enabled` false, its `command` empty); then, winning, `core.hooksPath` an empty folder Echo keeps
   (`<state>/plugins/.locks/git-no-hooks`, refused when not empty), `core.fsmonitor` and `core.useBuiltinFSMonitor`
   false, `core.pager` empty, `core.editor` and `sequence.editor` `:`, `credential.helper` and `diff.external` empty,
   `commit.gpgSign`, `tag.gpgSign` and `log.showSignature` false, `maintenance.auto` false and `gc.auto` 0,
   `submodule.recurse` false with submodules ignored (`diff.ignoreSubmodules=all`, `--ignore-submodules=all`),
   `protocol.allow` never, `core.quotePath` false, `color.ui` never. `commit` adds `--no-verify` and `--no-gpg-sign`,
-  `init` `--template=`; `show` reads with `cat-file blob` (no filter or textconv); `log` takes no diff.
+  `init` `--template=`; `show` reads with `cat-file blob` (no filter or textconv) only at a commit (`cat-file -t` of
+  `rev` is `commit`); `log` takes no diff.
   Evidence: `jshost::git::tests::a_repositorys_own_settings_run_nothing`
 - The repository (`jshost::git::Git::repo`): `rev-parse` gives the top, the git folder and the common one; each must be
-  inside the top and the granted folder inside the top, and `objects/info/alternates` absent; else refused. A folder
+  inside the top and the granted folder inside the top, and so must be, followed through links, the common folder's
+  `objects`, `refs`, `packed-refs`, `info`, `logs`, the git folder's `HEAD` and `index`, and each entry of `objects`,
+  `objects/pack` and `objects/info`; `objects/info/alternates` absent; else refused. A folder
   inside a larger repository works within the folder: `status` and `log` limited to `.` (or the paths asked), `show`
   as `<rev>:./<path>`, `commit` only paths `grants::writable` passes. Evidence: `jshost::git::Git::repo`
-- `commit`: `ls-files` names the paths git knows; the others (each there on disk) are `add`ed, then `commit --only
-  --cleanup=whitespace -- <paths>`; on a failure the added ones are taken out of the index again (`rm --cached`).
+- `commit`: refused while a merge, rebase, cherry-pick, revert or bisect is under way (`info`'s `busy`), and when a
+  path is one the repository ignores (`status --ignored=matching` gives `!!`). `ls-files` names the paths git knows;
+  the others (each there on disk) are `add`ed, then `commit --only --cleanup=whitespace -- <paths>`; when the add or
+  the commit fails the added ones are taken out of the index again (`rm --cached`).
   Identity as `committer.name` / `committer.email` (and `author.*` when `user.name` or `user.email` is unset) on the
   command line. Evidence: `jshost::git::commit`
 

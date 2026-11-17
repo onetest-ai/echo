@@ -38,17 +38,42 @@ const PROGRAM_KEYS: &[&str] = &[
     "fsmonitor", "virtualfilesystem", "defaultkeycommand", "proxy", "gitproxy", "uploadpack", "receivepack", "vcs", "external", "alternaterefscommand", "packobjectshook",
 ];
 
-/// The git program: an absolute `git` (Windows: `git.exe`, never a `.cmd`, which runs through cmd.exe).
+/// Where git is looked for: only where the system or its package manager installs it, never the user's own folders
+/// or `PATH` (Windows: `git.exe` of Git for Windows, never a `.cmd`, which runs through cmd.exe). macOS: `/usr/bin/git`
+/// only while developer tools are installed — without them it opens Apple's install dialog instead of running.
+fn candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .flat_map(|d| ["cmd", "bin"].map(|b| PathBuf::from(&d).join("Git").join(b).join("git.exe")))
+            .collect()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut list: Vec<PathBuf> = ["/opt/homebrew/bin/git", "/usr/local/bin/git"].map(PathBuf::from).into();
+        let tools = Command::new("/usr/bin/xcode-select").arg("-p").stdin(Stdio::null()).stderr(Stdio::null()).output();
+        if let Some(o) = tools.ok().filter(|o| o.status.success()) {
+            if Path::new(String::from_utf8_lossy(&o.stdout).trim()).join("usr/bin/git").is_file() {
+                list.push("/usr/bin/git".into());
+            }
+        }
+        list
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        ["/usr/bin/git", "/usr/local/bin/git"].map(PathBuf::from).into()
+    }
+}
+
+/// The git program, from `candidates`.
 fn program() -> Result<PathBuf> {
     #[cfg(test)]
     if std::env::var_os("ECHOCTL_TEST_NO_GIT").is_some() {
         bail!("git isn't installed on this computer");
     }
-    let name = if cfg!(windows) { "git.exe" } else { "git" };
-    crate::app::program_candidates("git")
-        .into_iter()
-        .find(|p| p.is_absolute() && p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name)) && p.is_file())
-        .ok_or_else(|| anyhow!("git isn't installed on this computer"))
+    candidates().into_iter().find(|p| p.is_file()).ok_or_else(|| anyhow!("git isn't installed on this computer"))
 }
 
 /// Git's answer: whether it succeeded, its output (cut at `OUT_MAX`, `over` when there was more) and its errors.
@@ -133,16 +158,32 @@ fn overrides(git: &Path, dir: &Path, hooks: &Path) -> Result<Vec<(String, String
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect();
-    // Read with the fixed ones in force (a config read runs nothing).
+    // Read with the fixed ones in force (a config read runs nothing) — whole, or the repository isn't used: a setting
+    // not read (past the cap, a listing that failed, a name that isn't text) couldn't be cleared.
     let listed = spawn(git, dir, &["config", "--list", "-z"], &fixed)?;
+    if !listed.ok || listed.over {
+        bail!("this repository's settings couldn't be read whole ({}): Echo doesn't use it", if listed.over { format!("over {} MB", OUT_MAX >> 20) } else { listed.why() });
+    }
     let mut out = vec![];
     for entry in listed.stdout.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        let entry = String::from_utf8_lossy(entry);
-        let key = entry.split('\n').next().unwrap_or("");
+        let key = entry.split(|b| *b == b'\n').next().unwrap_or_default();
+        let key = std::str::from_utf8(key).map_err(|_| anyhow!("a setting of this repository is named in bytes that aren't text (UTF-8): Echo doesn't use it"))?;
         let (section, last) = (key.split('.').next().unwrap_or("").to_ascii_lowercase(), key.rsplit('.').next().unwrap_or("").to_ascii_lowercase());
+        // A partial clone fetches what it lacks from its promisor remote, by any read: never used.
+        if (section == "extensions" && last == "partialclone") || (section == "remote" && last == "promisor") {
+            bail!("this repository is a partial clone, which fetches what it lacks from elsewhere: Echo doesn't use it");
+        }
         if section == "pager" || (section == "filter" && last == "required") {
             out.push((key.to_string(), "false".to_string()));
-        } else if PROGRAM_KEYS.contains(&last.as_str()) && key.contains('.') {
+        } else if section == "protocol" && last == "allow" {
+            out.push((key.to_string(), "never".to_string()));
+        } else if section == "hook" && key.matches('.').count() >= 2 {
+            // A hook set in the settings (`hook.<name>.command` run on `hook.<name>.event`): no event, off.
+            let name = &key[..key.rfind('.').unwrap_or(key.len())];
+            out.push((format!("{name}.event"), String::new()));
+            out.push((format!("{name}.enabled"), "false".to_string()));
+        }
+        if PROGRAM_KEYS.contains(&last.as_str()) && key.contains('.') {
             out.push((key.to_string(), String::new()));
         }
     }
@@ -173,72 +214,60 @@ fn spawn_within(git: &Path, dir: &Path, args: &[&str], config: &[(String, String
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_EDITOR", ":")
         .env("GIT_PAGER", "")
+        // Nothing fetched, by any protocol: a missing object is missing, never asked of a remote.
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_ALLOW_PROTOCOL", "")
         .env("GIT_CONFIG_COUNT", config.len().to_string());
     for (n, (k, v)) in config.iter().enumerate() {
         c.env(format!("GIT_CONFIG_KEY_{n}"), k).env(format!("GIT_CONFIG_VALUE_{n}"), v);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        c.process_group(0);
-    }
-    let mut child = c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| anyhow!("git couldn't start: {e}"))?;
-    fn drain<R: Read + Send + 'static>(r: Option<R>, cap: usize) -> std::thread::JoinHandle<(Vec<u8>, bool)> {
+    c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // With all it starts, stopped together (Unix: its own session; Windows: a job that ends them all).
+    let (mut child, tree) = crate::plugins::signin::Tree::spawn(c).ok_or_else(|| anyhow!("git couldn't start"))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (n, (r, cap)) in [(child.stdout.take().map(|r| Box::new(r) as Box<dyn Read + Send>), OUT_MAX), (child.stderr.take().map(|r| Box::new(r) as Box<dyn Read + Send>), ERR_MAX)].into_iter().enumerate() {
+        let tx = tx.clone();
         std::thread::spawn(move || {
             let (mut kept, mut over, mut buf) = (Vec::new(), false, [0u8; 65536]);
             if let Some(mut r) = r {
-                while let Ok(n) = r.read(&mut buf) {
-                    if n == 0 {
+                while let Ok(m) = r.read(&mut buf) {
+                    if m == 0 {
                         break;
                     }
                     let room = cap.saturating_sub(kept.len());
-                    kept.extend_from_slice(&buf[..n.min(room)]);
-                    over |= n > room;
+                    kept.extend_from_slice(&buf[..m.min(room)]);
+                    over |= m > room;
                 }
             }
-            (kept, over)
-        })
+            let _ = tx.send((n, kept, over));
+        });
     }
-    let (out, err) = (drain(child.stdout.take(), OUT_MAX), drain(child.stderr.take(), ERR_MAX));
     let t = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let ((stdout, over), (stderr, _)) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
-                return Ok(Out { ok: status.success(), stdout, over, stderr });
-            }
+            Ok(Some(status)) => break status,
             Ok(None) if t.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
             _ => {
-                stop(&mut child);
+                tree.stop(&mut child);
                 bail!("git took longer than {} s and was stopped", timeout.as_secs());
             }
         }
-    }
-}
-
-/// SIGTERM to its group first (git removes its lock files), SIGKILL a second later.
-fn stop(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pg = child.id() as i32;
-        // SAFETY: signalling the process group of our own child, which it leads (`process_group(0)`).
-        unsafe {
-            libc::kill(-pg, libc::SIGTERM);
-        }
-        let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(1) {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                return;
+    };
+    // Its output ends with it — unless something it started still holds it: that is stopped, and the call fails.
+    let mut got: [Option<(Vec<u8>, bool)>; 2] = [None, None];
+    let mut stopped = false;
+    while got.iter().any(Option::is_none) {
+        match rx.recv_timeout(Duration::from_secs(if stopped { 1 } else { 2 })) {
+            Ok((n, kept, over)) => got[n] = Some((kept, over)),
+            Err(_) if !stopped => {
+                tree.stop_rest();
+                stopped = true;
             }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        // SAFETY: as above.
-        unsafe {
-            libc::kill(-pg, libc::SIGKILL);
+            Err(_) => bail!("git's output didn't end: something it started still holds it"),
         }
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    let [Some((stdout, over)), Some((stderr, _))] = got else { unreachable!("both read") };
+    Ok(Out { ok: status.success(), stdout, over, stderr })
 }
 
 /// Git, ready to run in one granted folder: the program, the folder (canonical) and the overrides for it.
@@ -296,8 +325,15 @@ impl Git {
         let [prefix, top, git_dir, common] = lines[..] else { bail!("this folder isn't in a repository's files (a bare repository or inside .git)") };
         let real = |p: &str| dunce::canonicalize(p).map_err(|e| anyhow!("{p}: {e}"));
         let (top, git_dir, common) = (real(top)?, real(git_dir)?, real(common)?);
-        if !self.root.starts_with(&top) || !git_dir.starts_with(&top) || !common.starts_with(&top) {
-            bail!("this repository keeps its history outside its folder (a linked worktree, a submodule or core.worktree): Echo doesn't use it");
+        // Its history's parts too, each where it really is: a link to another repository's objects or refs (or a
+        // folder of objects, a pack linked in) would show that one's files.
+        let mut parts: Vec<PathBuf> = ["objects", "refs", "packed-refs", "info", "logs"].iter().map(|p| common.join(p)).chain(["HEAD", "index"].map(|p| git_dir.join(p))).collect();
+        for d in ["objects", "objects/pack", "objects/info"] {
+            parts.extend(std::fs::read_dir(common.join(d)).into_iter().flatten().flatten().map(|e| e.path()));
+        }
+        let outside = |p: &PathBuf| p.symlink_metadata().is_ok() && !dunce::canonicalize(p).is_ok_and(|r| r.starts_with(&top));
+        if !self.root.starts_with(&top) || !git_dir.starts_with(&top) || !common.starts_with(&top) || parts.iter().any(outside) {
+            bail!("this repository keeps its history outside its folder (a linked worktree, a submodule, core.worktree or a link in .git): Echo doesn't use it");
         }
         if common.join("objects/info/alternates").exists() {
             bail!("this repository borrows objects from another one (alternates): Echo doesn't use it");
@@ -356,7 +392,12 @@ pub(super) fn info(id: &str, root: &str) -> Result<Value> {
     // A branch with no commit yet has its name too; a detached HEAD has none.
     let branch = g.run(&["symbolic-ref", "-q", "--short", "HEAD"])?;
     let branch = Some(branch.text()).filter(|b| branch.ok && !b.is_empty());
-    let busy = [
+    Ok(json!({"repo": true, "branch": branch, "head": g.head()?, "detached": branch.is_none(), "busy": busy(&repo), "subfolder": !repo.prefix.is_empty()}))
+}
+
+/// What git is in the middle of in this repository, if anything: a merge, rebase, cherry-pick, revert or bisect.
+fn busy(repo: &Repo) -> Option<&'static str> {
+    [
         ("MERGE_HEAD", "merge"),
         ("rebase-merge", "rebase"),
         ("rebase-apply", "rebase"),
@@ -366,8 +407,7 @@ pub(super) fn info(id: &str, root: &str) -> Result<Value> {
     ]
     .iter()
     .find(|(f, _)| repo.git_dir.join(f).exists())
-    .map(|(_, w)| *w);
-    Ok(json!({"repo": true, "branch": branch, "head": g.head()?, "detached": branch.is_none(), "busy": busy, "subfolder": !repo.prefix.is_empty()}))
+    .map(|(_, w)| *w)
 }
 
 /// `ctx.git.status(root, {paths})`: `[{path, code, from?}]` — git's two-letter code (porcelain v1: `" M"`, `"A "`,
@@ -463,6 +503,14 @@ pub(super) fn show(id: &str, root: &str, rev: &str, path: &str, o: &Value) -> Re
     let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(SHOW_MAX).min(SHOW_MAX_ALL) as usize;
     let g = Git::new(real_root)?;
     g.need_repo()?;
+    // A commit's id, never a tree's or a file's.
+    let what = g.run(&["cat-file", "-t", rev])?;
+    if !what.ok {
+        return Ok(Value::Null);
+    }
+    if what.text() != "commit" {
+        bail!("“{rev}” isn't a commit");
+    }
     // `./` — relative to the root: never a file of the repository outside it.
     let spec = format!("{rev}:./{path}");
     let kind = g.run(&["cat-file", "-t", &spec])?;
@@ -539,7 +587,10 @@ pub(super) fn commit(id: &str, root: &str, o: &Value) -> Result<Value> {
         Ok(f)
     })?;
     let g = Git::new(real_root)?;
-    g.need_repo()?;
+    let repo = g.need_repo()?;
+    if let Some(what) = busy(&repo) {
+        bail!("a {what} is under way in this repository: Echo commits once it's done");
+    }
     // Files git doesn't know yet go into its index first (`--only` takes only known ones); taken out again on a failure.
     let mut known = vec!["ls-files", "-z", "--"];
     known.extend(paths.iter().map(String::as_str));
@@ -549,15 +600,32 @@ pub(super) fn commit(id: &str, root: &str, o: &Value) -> Result<Value> {
     if let Some(gone) = new.iter().find(|p| !g.root.join(p).exists()) {
         bail!("“{gone}” isn't there and git doesn't know it");
     }
-    let mut changed = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all", "--"];
+    let mut changed = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=all", "--"];
     changed.extend(paths.iter().map(String::as_str));
-    if g.ok(&changed)?.stdout.is_empty() {
+    let changed = g.ok(&changed)?.stdout;
+    // `!! <path>`: one the repository ignores, which git won't take.
+    if let Some(e) = changed.split(|b| *b == 0).find(|e| e.starts_with(b"!! ")) {
+        let path = String::from_utf8_lossy(&e[3..]);
+        bail!("“{}” is ignored by this repository (.gitignore): Echo doesn't commit it", path.strip_prefix(repo.prefix.as_str()).unwrap_or(&path));
+    }
+    if changed.is_empty() {
         return Ok(json!({"rev": null}));
     }
+    // What was added is taken out of the index again when anything after fails, the add itself too.
+    let back = || {
+        if !new.is_empty() {
+            let mut back = vec!["rm", "--cached", "-q", "--ignore-unmatch", "--"];
+            back.extend(new.iter().copied());
+            let _ = g.run(&back);
+        }
+    };
     if !new.is_empty() {
         let mut add = vec!["add", "--"];
         add.extend(new.iter().copied());
-        g.ok(&add)?;
+        if let Err(e) = g.ok(&add) {
+            back();
+            bail!("git didn't add them: {e:#}");
+        }
     }
     let message = format!("--message={message}");
     let mut args = vec!["commit", "--only", "-q", "--no-verify", "--no-gpg-sign", "--cleanup=whitespace", message.as_str(), "--"];
@@ -567,11 +635,7 @@ pub(super) fn commit(id: &str, root: &str, o: &Value) -> Result<Value> {
     match spawn(&g.git, &g.root, &args, &config) {
         Ok(o) if o.ok => Ok(json!({"rev": g.head()?})),
         other => {
-            if !new.is_empty() {
-                let mut back = vec!["rm", "--cached", "-q", "--ignore-unmatch", "--"];
-                back.extend(new.iter().copied());
-                let _ = g.run(&back);
-            }
+            back();
             bail!("git didn't commit: {}", other.map(|o| o.why()).unwrap_or_else(|e| format!("{e:#}")))
         }
     }
@@ -765,30 +829,27 @@ mod tests {
     /// run them.
     #[cfg(unix)]
     fn trap(dir: &Path, marks: &Path) {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::create_dir_all(dir).unwrap();
         std::fs::create_dir_all(marks).unwrap();
         let tag = dir.file_name().unwrap().to_string_lossy().into_owned();
-        let script = |name: &str| {
-            let f = marks.parent().unwrap().join(format!("{tag}-{name}.sh"));
-            std::fs::write(&f, format!("#!/bin/sh\ntouch \"{}/{name}\"\ncat\n", marks.display())).unwrap();
-            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
-            f.display().to_string()
-        };
+        let script = |name: &str, reads: bool| marker(&marks.parent().unwrap().join(format!("{tag}-{name}.sh")), &marks.join(name), reads);
         user_git(dir, &["init", "-q", "-b", "main"]);
         std::fs::write(dir.join("a.md"), "# A\n").unwrap();
-        std::fs::write(dir.join(".gitattributes"), "*.md filter=evil diff=evil\n").unwrap();
+        std::fs::write(dir.join("c.txt"), "C\n").unwrap();
+        std::fs::write(dir.join("d.inc"), "D\n").unwrap();
+        std::fs::write(dir.join(".gitattributes"), "*.md filter=evil diff=evil\n*.inc filter=inc\n").unwrap();
         user_git(dir, &["add", "-A"]);
         user_git(dir, &["-c", "core.hooksPath=/nonexistent", "commit", "-q", "-m", "start"]);
         for hook in ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "reference-transaction", "post-index-change"] {
-            let s = script(hook);
+            let s = script(hook, true);
             for d in [".git/hooks", "hooks-here"] {
                 std::fs::create_dir_all(dir.join(d)).unwrap();
                 std::fs::copy(&s, dir.join(d).join(hook)).unwrap();
             }
         }
+        // ssh reads nothing: git waits on it first.
         let included = marks.parent().unwrap().join(format!("{tag}-included.gitconfig"));
-        std::fs::write(&included, format!("[core]\n\tsshCommand = {}\n[filter \"inc\"]\n\tclean = {}\n", script("ssh"), script("included-filter"))).unwrap();
+        std::fs::write(&included, format!("[core]\n\tsshCommand = {}\n[filter \"inc\"]\n\tclean = {}\n", script("ssh", false), script("included-filter", true))).unwrap();
         let mut cfg = std::fs::read_to_string(dir.join(".git/config")).unwrap();
         cfg.push_str(&format!(
             "[core]\n\thooksPath = hooks-here\n\tfsmonitor = {}\n\tpager = {}\n\teditor = {}\n\taskPass = {}\n\
@@ -796,25 +857,29 @@ mod tests {
              [diff \"evil\"]\n\ttextconv = {}\n\tcommand = {}\n[diff]\n\texternal = {}\n\
              [pager]\n\tlog = {}\n\tstatus = {}\n[log]\n\tshowSignature = true\n\
              [commit]\n\tgpgSign = true\n[gpg]\n\tprogram = {}\n[credential]\n\thelper = {}\n\
+             [hook \"evil\"]\n\tevent = pre-commit\n\tevent = post-commit\n\tevent = reference-transaction\n\tcommand = {}\n\
              [include]\n\tpath = {}\n[gc]\n\tauto = 1\n[maintenance]\n\tauto = true\n",
-            script("fsmonitor"),
-            script("pager"),
-            script("editor"),
-            script("askpass"),
-            script("filter-clean"),
-            script("filter-smudge"),
-            script("textconv"),
-            script("diff-command"),
-            script("diff-external"),
-            script("pager-log"),
-            script("pager-status"),
-            script("gpg"),
-            script("credential"),
+            script("fsmonitor", true),
+            script("pager", true),
+            script("editor", true),
+            script("askpass", true),
+            script("filter-clean", true),
+            script("filter-smudge", true),
+            script("textconv", true),
+            script("diff-command", true),
+            script("diff-external", true),
+            script("pager-log", true),
+            script("pager-status", true),
+            script("gpg", true),
+            script("credential", true),
+            script("config-hook", true),
             included.display()
         ));
         std::fs::write(dir.join(".git/config"), cfg).unwrap();
         std::fs::write(dir.join("a.md"), "# A, changed\n").unwrap();
         std::fs::write(dir.join("b.md"), "# B\n").unwrap();
+        std::fs::write(dir.join("c.txt"), "C, changed\n").unwrap();
+        std::fs::write(dir.join("d.inc"), "D, changed\n").unwrap();
     }
 
     #[cfg(unix)]
@@ -822,6 +887,38 @@ mod tests {
         let mut m: Vec<String> = std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
         m.sort();
         m
+    }
+
+    /// Plain git as the user runs it in a terminal, so that it pages; with `input` on its stdin. Nothing of the test's
+    /// own environment picks the programs instead of the repository's settings, nor the system's keychain helper.
+    #[cfg(unix)]
+    fn plain_git_as_user(dir: &Path, args: &[&str], input: Option<&str>, terminal: bool) {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        let mut c = Command::new(program().unwrap());
+        c.arg("-C").arg(dir).args(args).env("GIT_CONFIG_NOSYSTEM", "1").stderr(Stdio::null());
+        for k in ["GIT_PAGER", "PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_EXTERNAL_DIFF"] {
+            c.env_remove(k);
+        }
+        let mut terminal_end = None;
+        if terminal {
+            let (mut main, mut other) = (0, 0);
+            // SAFETY: openpty fills two descriptors we then own.
+            assert_eq!(unsafe { libc::openpty(&mut main, &mut other, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
+            // SAFETY: both just opened, each owned once.
+            let (main, other) = unsafe { (std::fs::File::from_raw_fd(main), std::fs::File::from_raw_fd(other)) };
+            c.stdout(Stdio::from(other));
+            terminal_end = Some(main);
+        } else {
+            c.stdout(Stdio::null());
+        }
+        c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
+        let mut child = c.spawn().unwrap();
+        if let (Some(text), Some(mut w)) = (input, child.stdin.take()) {
+            let _ = w.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+        drop(terminal_end);
     }
 
     #[cfg(unix)]
@@ -832,14 +929,42 @@ mod tests {
             return;
         }
         user_identity(&root);
-        // The trap works: git as the user runs it, in a repository set up the same way, runs those programs.
+        // Each trap works: plain git, in a repository set up the same way, runs every one of those programs.
         let control = root.join("control");
         trap(&control, &root.join("control-marks"));
-        user_git(&control, &["status", "--porcelain"]);
-        let _ = Command::new(program().unwrap()).arg("-C").arg(&control).args(["commit", "-q", "-m", "x", "--", "a.md"]).output();
+        let plain = |args: &[&str]| plain_git_as_user(&control, args, None, false);
+        plain(&["status", "--porcelain"]);
+        plain(&["add", "a.md", "d.inc"]);
+        plain(&["diff", "HEAD", "--", "a.md"]);
+        plain(&["diff", "--no-ext-diff", "HEAD", "--", "a.md"]);
+        plain(&["diff", "HEAD", "--", "c.txt"]);
+        plain(&["commit", "-q", "-m", "x"]);
+        plain(&["-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty"]);
+        plain(&["ls-remote", "ssh://acme.example/notes"]);
+        plain_git_as_user(&control, &["credential", "fill"], Some("protocol=https\nhost=acme.example\n\n"), false);
+        for args in [&["log", "-1"][..], &["status"], &["--paginate", "rev-parse", "HEAD"]] {
+            plain_git_as_user(&control, args, None, true);
+        }
         let ran = marks(&root.join("control-marks"));
-        for m in ["fsmonitor", "filter-clean", "pre-commit"] {
-            assert!(ran.contains(&m.to_string()), "the control ran {m}: {ran:?}");
+        for (m, how) in [
+            ("fsmonitor", "status"),
+            ("filter-clean", "add"),
+            ("included-filter", "add of a file .gitattributes gives the included filter"),
+            ("diff-command", "diff"),
+            ("textconv", "diff --no-ext-diff"),
+            ("diff-external", "diff of a file without a driver"),
+            ("pre-commit", "commit (core.hooksPath)"),
+            ("config-hook", "commit (hook.evil.command)"),
+            ("gpg", "commit (commit.gpgSign)"),
+            ("editor", "commit without a message"),
+            ("ssh", "ls-remote over ssh"),
+            ("credential", "credential fill"),
+            ("askpass", "credential fill without a user"),
+            ("pager-log", "log on a terminal"),
+            ("pager-status", "status on a terminal"),
+            ("pager", "--paginate"),
+        ] {
+            assert!(ran.contains(&m.to_string()), "the control ran {m} on {how}: {ran:?}");
         }
         // Echo's git, on a vault set up the same way: none of them.
         let vault = root.join("vault");
@@ -849,13 +974,15 @@ mod tests {
         assert_eq!(run("safe", "info", json!({})).unwrap()["repo"], true);
         let mut st = rel(&run("safe", "status", json!({})).unwrap(), "path");
         st.sort();
-        assert_eq!(st, ["a.md", "b.md", "hooks-here/commit-msg", "hooks-here/post-commit", "hooks-here/post-index-change", "hooks-here/pre-commit", "hooks-here/prepare-commit-msg", "hooks-here/reference-transaction"]);
+        let hooks = ["commit-msg", "post-commit", "post-index-change", "pre-commit", "prepare-commit-msg", "reference-transaction"].map(|h| format!("hooks-here/{h}"));
+        assert_eq!(st, [&["a.md", "b.md", "c.txt", "d.inc"].map(String::from)[..], &hooks[..]].concat());
         assert_eq!(rel(&run("safe", "log", json!({"path": "a.md"})).unwrap(), "subject"), ["start"]);
         assert_eq!(run("safe", "show", json!({"rev": "HEAD", "path": "a.md"})).unwrap()["text"], "# A\n");
-        run("safe", "commit", json!({"paths": ["a.md", "b.md"], "message": "Echo: two notes"})).unwrap();
+        run("safe", "commit", json!({"paths": ["a.md", "b.md", "c.txt", "d.inc"], "message": "Echo: four notes"})).unwrap();
         let plain = |args: &[&str]| user_git(&vault, &[&["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/nonexistent", "-c", "log.showSignature=false"], args].concat());
         assert_eq!(plain(&["cat-file", "blob", "HEAD:b.md"]), "# B\n", "the file as it is on the disk: no filter");
-        assert_eq!(plain(&["log", "-1", "--format=%s"]).trim(), "Echo: two notes");
+        assert_eq!(plain(&["cat-file", "blob", "HEAD:d.inc"]), "D, changed\n", "no included filter");
+        assert_eq!(plain(&["log", "-1", "--format=%s"]).trim(), "Echo: four notes");
         assert_eq!(marks(&marked), Vec::<String>::new(), "nothing the repository named ran");
         // Init too: no template, nothing of the user's or system's run.
         let fresh = root.join("fresh");
@@ -972,7 +1099,7 @@ mod tests {
             for gone in ["ECHOCTL", "CLAUDE", "ANTHROPIC", "GIT_DIR", "GIT_CONFIG_PARAMETERS"] {
                 assert!(!env.lines().any(|l| l.starts_with(gone)), "{gone} in {env}");
             }
-            for want in ["GIT_LITERAL_PATHSPECS=1", "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false"] {
+            for want in ["GIT_LITERAL_PATHSPECS=1", "GIT_TERMINAL_PROMPT=0", "GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false"] {
                 assert!(env.lines().any(|l| l == want), "{want}");
             }
         }
@@ -998,5 +1125,242 @@ mod tests {
         std::fs::write(&fake, format!("#!/bin/sh\nhead -c {} /dev/zero\nhead -c 200000 /dev/zero >&2\n", OUT_MAX + 1000)).unwrap();
         let o = spawn_within(&fake, &root, &["log"], &[], Duration::from_secs(20)).unwrap();
         assert_eq!((o.stdout.len(), o.over, o.stderr.len()), (OUT_MAX, true, ERR_MAX));
+        // It ends, but leaves something of its own (outside its group) holding its output: the call doesn't wait for it.
+        let held = root.join("held-pid");
+        std::fs::write(&fake, format!("#!/bin/sh\nset -m\nsleep 30 &\necho $! > \"{}\"\necho partial\n", held.display())).unwrap();
+        let t = Instant::now();
+        let e = spawn_within(&fake, &root, &["log"], &[], Duration::from_secs(20)).err().unwrap();
+        assert!(e.to_string().contains("didn't end"), "{e}");
+        assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
+        if let Some(pid) = std::fs::read_to_string(&held).ok().and_then(|p| p.trim().parse::<i32>().ok()) {
+            // SAFETY: the sleep the stand-in started, ended by the test.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[test]
+    fn git_is_looked_for_only_where_the_system_installs_it() {
+        let (_env, root) = paths::testenv::folders("jshost-git-where");
+        // A git in the user's own folders (the test's home) is never taken, whatever PATH says.
+        for d in [".local/bin", ".npm-global/bin"] {
+            std::fs::create_dir_all(root.join("user").join(d)).unwrap();
+            std::fs::write(root.join("user").join(d).join(if cfg!(windows) { "git.exe" } else { "git" }), "").unwrap();
+        }
+        let list = candidates();
+        assert!(list.iter().all(|c| c.is_absolute() && !c.starts_with(&root) && !c.starts_with(crate::paths::user_home())), "{list:?}");
+        assert!(list.iter().all(|c| c.file_name().is_some_and(|n| n == if cfg!(windows) { "git.exe" } else { "git" })), "{list:?}");
+        if let Ok(git) = program() {
+            assert!(list.contains(&git), "{git:?}");
+        }
+    }
+
+    /// A script at `at` that leaves `mark` when it runs; `reads`: then passes its input on (a filter, a pager).
+    #[cfg(unix)]
+    fn marker(at: &Path, mark: &Path, reads: bool) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(at, format!("#!/bin/sh\ntouch \"{}\"\n{}", mark.display(), if reads { "cat\n" } else { "" })).unwrap();
+        std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o755)).unwrap();
+        at.display().to_string()
+    }
+
+    /// A repository with one commit of `a.md`, then `a.md` changed on the disk.
+    fn one_commit(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        user_git(dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("a.md"), "# A\n").unwrap();
+        user_git(dir, &["add", "a.md"]);
+        user_git(dir, &["commit", "-q", "-m", "start"]);
+        std::fs::write(dir.join("a.md"), "# A, changed\n").unwrap();
+    }
+
+    /// Plain git, as the user would run it, its answer ignored: only whether it ran the trap matters.
+    #[cfg(unix)]
+    fn plain_git(dir: &Path, args: &[&str]) {
+        let _ = Command::new(program().unwrap()).arg("-C").arg(dir).args(args).stdin(Stdio::null()).output();
+    }
+
+    /// A partial clone missing an object asks its promisor remote for it — a shell, through `ext::`: plain git runs it,
+    /// Echo's git never does (no lazy fetch, no protocol allowed), and refuses such a repository outright.
+    #[cfg(unix)]
+    #[test]
+    fn a_partial_clone_fetches_nothing_and_is_refused() {
+        let (_env, root) = paths::testenv::folders("jshost-git-lazy");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let mark = root.join("fetched");
+        let rig = |dir: &Path| {
+            one_commit(dir);
+            let blob = user_git(dir, &["rev-parse", "HEAD:a.md"]).trim().to_string();
+            std::fs::remove_file(dir.join(".git/objects").join(&blob[..2]).join(&blob[2..])).unwrap();
+            let url = format!("ext::sh -c touch% {}", mark.display());
+            for (k, v) in [("core.repositoryformatversion", "1"), ("extensions.partialClone", "origin"), ("remote.origin.url", url.as_str()), ("remote.origin.promisor", "true"), ("protocol.ext.allow", "always")] {
+                user_git(dir, &["config", k, v]);
+            }
+        };
+        let control = root.join("control");
+        rig(&control);
+        plain_git(&control, &["cat-file", "blob", "HEAD:a.md"]);
+        assert!(mark.exists(), "the control: plain git fetched it through the shell");
+        std::fs::remove_file(&mark).unwrap();
+
+        let vault = root.join("vault");
+        rig(&vault);
+        install(&root, "lazy", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        for (cmd, a) in [("info", json!({})), ("status", json!({})), ("log", json!({"path": "a.md"})), ("show", json!({"rev": "HEAD", "path": "a.md"})), ("commit", json!({"paths": ["a.md"], "message": "x"}))] {
+            assert!(run("lazy", cmd, a).unwrap_err().contains("partial clone"), "{cmd}");
+        }
+        // Even were it not refused, git as Echo starts it fetches nothing.
+        let _ = spawn(&program().unwrap(), &vault, &["cat-file", "blob", "HEAD:a.md"], &[]);
+        assert!(!mark.exists(), "nothing ran");
+        plugins::remove("lazy", true).unwrap();
+        sync();
+    }
+
+    /// A filter whose name isn't UTF-8 can't be cleared by its name read as text: the repository is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_setting_named_in_bytes_that_arent_text_refuses_the_repository() {
+        let (_env, root) = paths::testenv::folders("jshost-git-bytes");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let mark = root.join("filtered");
+        let rig = |dir: &Path| {
+            one_commit(dir);
+            let mut cfg = std::fs::read(dir.join(".git/config")).unwrap();
+            cfg.extend_from_slice(b"[filter \"\xff\"]\n\tclean = ");
+            cfg.extend_from_slice(marker(&dir.with_extension("sh"), &mark, true).as_bytes());
+            cfg.push(b'\n');
+            std::fs::write(dir.join(".git/config"), cfg).unwrap();
+            std::fs::write(dir.join(".gitattributes"), b"*.md filter=\xff\n").unwrap();
+        };
+        let control = root.join("control");
+        rig(&control);
+        plain_git(&control, &["add", "a.md"]);
+        assert!(mark.exists(), "the control: plain git ran the filter");
+        std::fs::remove_file(&mark).unwrap();
+
+        let vault = root.join("vault");
+        rig(&vault);
+        install(&root, "bytes", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        for (cmd, a) in [("status", json!({})), ("commit", json!({"paths": ["a.md"], "message": "x"}))] {
+            assert!(run("bytes", cmd, a).unwrap_err().contains("UTF-8"), "{cmd}");
+        }
+        assert!(!mark.exists(), "nothing ran");
+        plugins::remove("bytes", true).unwrap();
+        sync();
+    }
+
+    /// Settings past what Echo reads of them (a 17 MB file included first) would hide a filter after them: refused.
+    #[cfg(unix)]
+    #[test]
+    fn settings_too_long_to_read_whole_refuse_the_repository() {
+        let (_env, root) = paths::testenv::folders("jshost-git-long");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let mark = root.join("filtered");
+        let pad = root.join("pad.gitconfig");
+        let line = format!("\tk = {}\n", "x".repeat(1000));
+        std::fs::write(&pad, format!("[pad]\n{}", line.repeat((OUT_MAX + (1 << 20)) / line.len()))).unwrap();
+        let rig = |dir: &Path| {
+            one_commit(dir);
+            let mut cfg = std::fs::read_to_string(dir.join(".git/config")).unwrap();
+            cfg.push_str(&format!("[include]\n\tpath = {}\n[filter \"evil\"]\n\tclean = {}\n", pad.display(), marker(&dir.with_extension("sh"), &mark, true)));
+            std::fs::write(dir.join(".git/config"), cfg).unwrap();
+            std::fs::write(dir.join(".gitattributes"), "*.md filter=evil\n").unwrap();
+        };
+        let control = root.join("control");
+        rig(&control);
+        plain_git(&control, &["add", "a.md"]);
+        assert!(mark.exists(), "the control: plain git ran the filter");
+        std::fs::remove_file(&mark).unwrap();
+
+        let vault = root.join("vault");
+        rig(&vault);
+        install(&root, "long", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        assert!(run("long", "commit", json!({"paths": ["a.md"], "message": "x"})).unwrap_err().contains("settings"));
+        assert!(!mark.exists(), "nothing ran");
+        plugins::remove("long", true).unwrap();
+        sync();
+    }
+
+    /// `.git/objects`, `refs` or a folder of objects linked to another repository's: its files would show. Refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_whose_history_is_linked_from_elsewhere_is_refused() {
+        use std::os::unix::fs::symlink;
+        let (_env, root) = paths::testenv::folders("jshost-git-linked");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let other = root.join("private");
+        std::fs::create_dir_all(&other).unwrap();
+        user_git(&other, &["init", "-q", "-b", "main"]);
+        std::fs::write(other.join("secret.md"), "budget of someone else\n").unwrap();
+        user_git(&other, &["add", "-A"]);
+        user_git(&other, &["commit", "-q", "-m", "private"]);
+        let head = user_git(&other, &["rev-parse", "HEAD"]);
+        let vault = root.join("vault");
+        install(&root, "linked", json!({"folders": {"what": "vaults"}}), &vault);
+        let fresh = || {
+            let _ = std::fs::remove_dir_all(vault.join(".git"));
+            user_git(&vault, &["init", "-q", "-b", "main"]);
+        };
+        // Its objects folder a link to the other's, its branch at the other's commit.
+        fresh();
+        std::fs::remove_dir_all(vault.join(".git/objects")).unwrap();
+        symlink(other.join(".git/objects"), vault.join(".git/objects")).unwrap();
+        std::fs::write(vault.join(".git/refs/heads/main"), &head).unwrap();
+        assert!(run("linked", "show", json!({"rev": "HEAD", "path": "secret.md"})).unwrap_err().contains("outside its folder"), "objects");
+        // Its refs and objects of one prefix linked.
+        fresh();
+        std::fs::remove_dir_all(vault.join(".git/refs")).unwrap();
+        symlink(other.join(".git/refs"), vault.join(".git/refs")).unwrap();
+        assert!(run("linked", "log", json!({})).unwrap_err().contains("outside its folder"), "refs");
+        fresh();
+        let blob = user_git(&other, &["rev-parse", "HEAD:secret.md"]);
+        symlink(other.join(".git/objects").join(&blob[..2]), vault.join(".git/objects").join(&blob[..2])).unwrap();
+        assert!(run("linked", "info", json!({})).unwrap_err().contains("outside its folder"), "a folder of objects");
+        plugins::remove("linked", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_version_is_a_commit_and_a_commit_waits_for_a_merge_and_takes_no_ignored_file() {
+        let (_env, root) = paths::testenv::folders("jshost-git-edges");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let vault = root.join("vault");
+        install(&root, "edges", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        one_commit(&vault);
+        // A blob's or a tree's id isn't a version.
+        for id in [user_git(&vault, &["rev-parse", "HEAD:a.md"]), user_git(&vault, &["rev-parse", "HEAD^{tree}"])] {
+            assert!(run("edges", "show", json!({"rev": id.trim(), "path": "a.md"})).unwrap_err().contains("isn't a commit"), "{id}");
+        }
+        // An ignored file: said so, nothing staged — the other new file named with it neither.
+        std::fs::write(vault.join(".gitignore"), "ignored.md\n").unwrap();
+        std::fs::write(vault.join("ignored.md"), "x\n").unwrap();
+        std::fs::write(vault.join("new.md"), "x\n").unwrap();
+        assert!(run("edges", "commit", json!({"paths": ["ignored.md"], "message": "x"})).unwrap_err().contains("ignored"));
+        assert!(run("edges", "commit", json!({"paths": ["new.md", "ignored.md"], "message": "x"})).unwrap_err().contains("ignored"));
+        assert_eq!(user_git(&vault, &["diff", "--cached", "--name-only"]), "", "nothing staged");
+        // A merge under way: no commit until it's done.
+        std::fs::write(vault.join(".git/MERGE_HEAD"), user_git(&vault, &["rev-parse", "HEAD"])).unwrap();
+        assert_eq!(run("edges", "info", json!({})).unwrap()["busy"], "merge");
+        assert!(run("edges", "commit", json!({"paths": ["a.md"], "message": "x"})).unwrap_err().contains("merge"));
+        std::fs::remove_file(vault.join(".git/MERGE_HEAD")).unwrap();
+        assert!(run("edges", "commit", json!({"paths": ["a.md"], "message": "x"})).unwrap()["rev"].is_string());
+        plugins::remove("edges", true).unwrap();
+        sync();
     }
 }

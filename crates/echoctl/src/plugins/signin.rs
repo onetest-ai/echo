@@ -309,7 +309,7 @@ fn run(mut c: Command, input: Option<&str>) -> Option<(bool, String)> {
 /// A program and everything it starts, stopped together: on Unix its own process group (`ai::detach`); on Windows a
 /// job object it is started in (suspended until it is in), which ends them all when terminated or closed — even what
 /// outlives the program, which `taskkill /T` on an ended program can't reach.
-struct Tree {
+pub(crate) struct Tree {
     #[cfg(unix)]
     pid: u32,
     #[cfg(windows)]
@@ -318,7 +318,7 @@ struct Tree {
 
 #[cfg(unix)]
 impl Tree {
-    fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
+    pub(crate) fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
         crate::ai::detach(&mut c);
         let child = c.spawn().ok()?;
         let pid = child.id();
@@ -326,19 +326,19 @@ impl Tree {
     }
 
     /// The program and all it started, the program reaped.
-    fn stop(&self, child: &mut std::process::Child) {
+    pub(crate) fn stop(&self, child: &mut std::process::Child) {
         crate::ai::stop_child(child);
     }
 
     /// What it started, once it has ended.
-    fn stop_rest(&self) {
+    pub(crate) fn stop_rest(&self) {
         crate::ai::stop_group(self.pid);
     }
 }
 
 #[cfg(windows)]
 impl Tree {
-    fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
+    pub(crate) fn spawn(mut c: Command) -> Option<(std::process::Child, Tree)> {
         use std::os::windows::io::AsRawHandle;
         use std::os::windows::process::CommandExt;
         use windows::Win32::Foundation::{CloseHandle, HANDLE};
@@ -399,14 +399,14 @@ impl Tree {
     }
 
     /// The program and all it started, the program reaped.
-    fn stop(&self, child: &mut std::process::Child) {
+    pub(crate) fn stop(&self, child: &mut std::process::Child) {
         self.stop_rest();
         let _ = child.kill();
         let _ = child.wait();
     }
 
     /// Everything in the job (its pipe ends with them).
-    fn stop_rest(&self) {
+    pub(crate) fn stop_rest(&self) {
         // SAFETY: our own job's handle, open until drop.
         let _ = unsafe { windows::Win32::System::JobObjects::TerminateJobObject(self.job, 1) };
     }
