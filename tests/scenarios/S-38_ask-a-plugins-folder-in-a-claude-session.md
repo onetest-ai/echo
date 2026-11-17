@@ -1,5 +1,5 @@
 ---
-id: S-37
+id: S-38
 title: "Ask a plugin's folder in a Claude session: on the user's click, as that folder's own project, one per plugin in its own tab, found again, a new conversation, what is refused, the plugin off"
 run: agent
 data: small
@@ -14,7 +14,7 @@ cases:
   - tests/cases/plugins/TC-145_a-plugins-claude-session-runs-on-when-the-plugin-is-switched-off-but-doesnt-start-again.md
 ---
 
-# S-37: Ask a plugin's folder in a Claude session
+# S-38: Ask a plugin's folder in a Claude session
 
 **Story:** Sam gave a notes plugin his made-up vault. In its screen he clicks "Ask the vault": Claude Code opens in Echo's panel, in that folder, as he set Claude in the window. It opens only on his click, once per plugin; a second plugin's session gets a tab of its own; after the window reopens both are there, and Resume keeps the profile each ran on. He starts a new conversation from ⌘K. What doesn't fit is refused before Claude Code starts, and switching the plugin off leaves his open session running.
 

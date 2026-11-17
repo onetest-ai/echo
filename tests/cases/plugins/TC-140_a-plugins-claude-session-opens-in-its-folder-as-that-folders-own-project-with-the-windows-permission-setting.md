@@ -17,7 +17,7 @@ tags: [plugins, claude-code, folders, permissions, terminal]
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- Test data served: `tests/fixtures/serve.sh up <dir> <port>` (in S-37, the scenario's own), `{{base_url}}/` loaded first (its cookie); CLI steps in Bash, each starting with `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; E=target/debug/echoctl` (inside the repository, built right before the run; a debug build: `ECHOCTL_PICK_FOLDER` answers the folder picker); abort if `$ECHOCTL_HOME` isn't inside `<dir>`
+- Test data served: `tests/fixtures/serve.sh up <dir> <port>` (in S-38, the scenario's own), `{{base_url}}/` loaded first (its cookie); CLI steps in Bash, each starting with `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; E=target/debug/echoctl` (inside the repository, built right before the run; a debug build: `ECHOCTL_PICK_FOLDER` answers the folder picker); abort if `$ECHOCTL_HOME` isn't inside `<dir>`
 - A Claude AI profile of Echo's own on the data's fake (never a real account): `$E ai add-claude acme-work --email sam@initech.example`
 - **A fake `claude` that writes down how Echo starts it, then waits** (a session that stays open), in front of the data's fake: `mv "$D/bin/claude" "$D/bin/claude.fake"`, then write `$D/bin/claude` (`chmod +x`):
   ```sh
