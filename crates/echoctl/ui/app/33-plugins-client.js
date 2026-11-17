@@ -69,11 +69,15 @@ const JobsAsked = {}
 
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
-  const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
+  const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], windowListeners: [], styles: [], cleanups: [] }
   return {
     id,
     /** A document listener that goes when the plugin is switched off, updated or removed. */
     listen: (type, fn, opts) => { document.addEventListener(type, fn, opts); owned.listeners.push([type, fn, opts]) },
+    /** The same for a window listener (resize, focus, message). */
+    listenWindow: (type, fn, opts) => { window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
+    /** Its own cleanup (timers, observers), run when it is switched off, updated or removed. */
+    onUnload: (fn) => { owned.cleanups.push(fn) },
     call: async (command, args = {}) => {
       const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
       if (r && r.error) throw new Error(r.error)
@@ -161,6 +165,17 @@ function pluginCtx(id) {
     /** Echo's own pieces, so a plugin looks like Echo. */
     ui: {
       esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
+      /** Replace a box's HTML only when it changed (Echo's own `patch`): redrawn the same, its focus, typed text and scroll stay. */
+      patch,
+      /** A stylesheet of its installed package (`styles/view.css`), resolved when loaded; taken out when it unloads. */
+      stylesheet: (path) => new Promise((resolve, reject) => {
+        let href
+        try { href = pluginStylesheetHref(id, path, Plugins.loaded[id]) } catch (e) { reject(e); return }
+        const el = document.createElement('link')
+        el.rel = 'stylesheet'; el.dataset.plugin = id; el.href = href
+        el.onload = () => resolve(); el.onerror = () => reject(new Error(`Echo could not load ${path}`))
+        owned.styles.push(el); document.head.appendChild(el)
+      }),
       /** Put text on the clipboard (a code to paste elsewhere) on the user's click or key (`copyAllowed`: a guard
        *  against accidental copies, not a security boundary). At most 10,000 characters. */
       copy: (text) => {
@@ -221,6 +236,8 @@ function unloadPlugin(id) {
   setTimeout(() => { if (S.view && S.view.startsWith(id + ':') && !ACTIVITIES.some((a) => a.id === S.view)) { S.view = 'calls'; go('calls') } }, 1500)
   const owned = Plugins.owned[id]
   if (owned) {
+    for (const fn of owned.cleanups) { try { fn() } catch (e) { console.error(`plugin ${id}: its cleanup failed:`, e) } }
+    for (const [type, fn, opts] of owned.windowListeners) window.removeEventListener(type, fn, opts)
     for (const [type, fn, opts] of owned.listeners) document.removeEventListener(type, fn, opts)
     for (const el of owned.styles) el.remove()
     delete Plugins.owned[id]
@@ -236,6 +253,14 @@ function unloadPlugin(id) {
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
 }
+// ── plugin stylesheet: where `ctx.ui.stylesheet(path)` loads a package's CSS from (no DOM:
+// `plugin-client-ctx.test.mjs`). Only a plain relative `.css` path inside the package; versioned so an update reloads it.
+function pluginStylesheetHref(id, path, version) {
+  const p = String(path)
+  if (!/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_.-]+)*\.css$/.test(p) || p.split('/').some((x) => x === '..' || x === '.')) throw new Error(`Not a stylesheet of the plugin: ${p}`)
+  return `plugin/${encodeURIComponent(id)}/${p}?v=${encodeURIComponent(version || '')}`
+}
+// end of the plugin stylesheet block
 // ── plugin slot targets: which of a slot's items a target gets and which target a click is for (no DOM:
 // `plugin-work-rows.test.mjs`).
 /** A slot's items for `target`: those whose `when` says yes — a plugin's work row (`kind: 'plugin'`) only to the items

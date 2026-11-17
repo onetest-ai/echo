@@ -389,6 +389,15 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-43",
+   "feature": "A plugin's window half loads its own package stylesheets (`ctx.ui.stylesheet`, a plain relative `.css` path only), keeps window listeners and its own cleanup (`listenWindow`, `onUnload`) and redraws its boxes only when they changed (`ui.patch`: redrawn the same, a field's typed text stays); switching it off runs its cleanup and takes its stylesheets and listeners out",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
   }
  ]
 }
