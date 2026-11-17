@@ -1387,29 +1387,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "fs.stat" => folders::stat(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?,
         "fs.move" => {
-            uses_flag(id, "folders", "write")?;
-            let from = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
-            let to = crate::grants::writable(id, &s(&arg[0]), &s(&arg[2]))?;
-            if !from.exists() {
-                bail!("“{}” isn't there", s(&arg[1]));
-            }
-            // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
-            let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
-            if to.exists() && !same {
-                bail!("“{}” is there already", s(&arg[2]));
-            }
-            std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
-            std::fs::rename(&from, &to)?;
+            folders::move_to(id, &s(&arg[0]), &s(&arg[1]), &s(&arg[2]))?;
             Value::Null
         }
         "fs.remove" => {
-            uses_flag(id, "folders", "write")?;
-            let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
-            if f.is_dir() {
-                std::fs::remove_dir(&f).map_err(|_| anyhow!("“{}” is a folder with files in it", s(&arg[1])))?;
-            } else {
-                std::fs::remove_file(&f)?;
-            }
+            folders::remove(id, &s(&arg[0]), &s(&arg[1]))?;
             Value::Null
         }
         "handles.read" => files::read(id, &arg[0], arg[1].as_u64())?,

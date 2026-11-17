@@ -237,6 +237,36 @@ pub(super) fn mkdir(id: &str, root: &str, rel: &str) -> Result<()> {
     Ok(())
 }
 
+/// `ctx.fs.move(root, from, to)`: never over another file, inside a folder it may change.
+pub(super) fn move_to(id: &str, root: &str, rel_from: &str, rel_to: &str) -> Result<()> {
+    uses_flag(id, "folders", "write")?;
+    let from = crate::grants::writable(id, root, rel_from)?;
+    let to = crate::grants::writable(id, root, rel_to)?;
+    if !from.exists() {
+        bail!("“{rel_from}” isn't there");
+    }
+    // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
+    let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
+    if to.exists() && !same {
+        bail!("“{rel_to}” is there already");
+    }
+    std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
+    std::fs::rename(&from, &to)?;
+    Ok(())
+}
+
+/// `ctx.fs.remove(root, rel)`: a file, or an empty folder, inside a folder it may change.
+pub(super) fn remove(id: &str, root: &str, rel: &str) -> Result<()> {
+    uses_flag(id, "folders", "write")?;
+    let f = crate::grants::writable(id, root, rel)?;
+    if f.is_dir() {
+        std::fs::remove_dir(&f).map_err(|_| anyhow!("“{rel}” is a folder with files in it"))?;
+    } else {
+        std::fs::remove_file(&f)?;
+    }
+    Ok(())
+}
+
 /// `p` as a path under `root` with `/` between names.
 fn rel_of(root: &Path, p: &Path) -> String {
     p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/")
