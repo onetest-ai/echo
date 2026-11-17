@@ -295,17 +295,21 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
     `json-ld`, `state`, `noscript`, or `meta` for an Open Graph description alone). `needs_js`: under 200 characters of
     text on a page with scripts.
   - Links: absolute `http://` / `https://` only (relative ones against `url`); `javascript:`, `data:`, `file:`,
-    `mailto:`, the page's own anchors and an address with a user part (`https://bank.example@evil.example`) are their
-    words. `links` lists the main part's, each once (2,000 at most).
-  - Pictures: in place as `![alt](src)`, a figure's caption under it as text; `images` lists each once (500 at most),
+    `mailto:`, the page's own anchors, an address with a user part (`https://bank.example@evil.example`) and one over
+    2 KB once resolved are their words. `links` lists the main part's, each once (2,000 at most), with its text (500
+    characters at most); a link inside a link isn't listed again (a browser never nests them).
+  - Pictures: in place as `![alt](src)`, a figure's caption under it as text; `images` lists each once (500 at most,
+    its `alt` and `caption` 500 characters at most; a caption leaves out figures inside it),
     from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
     `data:` and a picture whose page-given width or height is under 32 left out.
   - The page's words are never markup: `\`, `<`, `[`, `]`, `!`, `` ` `` escaped, a line starting `#` or `>` escaped, an
-    inline code span fenced one backtick longer than the longest run in it, control
+    inline code span fenced one backtick longer than the longest run in it and never touching another backtick (a
+    space between), control
     characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064,
     U+2066–U+2069, U+FEFF) dropped from the text, title, links and pictures. Its work is bounded: 256 levels of nesting
     (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest left out), 2 MB of each
-    embedded JSON. Its output is bounded too: the Markdown is at most ten times the HTML and 20 MB, a table keeps 64
+    embedded JSON. Its output is bounded too, checked as it is written: the Markdown is at most ten times the HTML and
+    20 MB (a heading, a link or a table's rows made only while they fit; a line that doesn't is left out whole), a table keeps 64
     columns, list items indent for 8 levels (deeper ones sit at the 8th), a numbered list starts at 1,000,000 at most
     (`truncated` when something was left out). Evidence: `web::read::read`
   - `images: 'save'` also downloads its pictures: each entry gets `saved` — a file handle `{file, name, size, type}`
@@ -327,7 +331,8 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
   same rules; any type), 10 MB (`max` up to 50 MB, what `ctx.fs.copyIn` copies), 2 minutes; `name` the address's last
   segment in letters, digits, `.`, `_`, `-`.
 - `await ctx.web.markdown(html, {base})` → the same as `read` for HTML the plugin has (a mail's body, a page it fetched
-  itself), without `url` and `bytes`; `base` an http(s) address for its relative links (none: they are text). 5 MB.
+  itself), without `url` and `bytes`; `base` an http(s) address of 2 KB at most for its relative links (none: they are
+  text). 5 MB.
   Nothing is fetched. Also for a page's DOM rendered elsewhere.
 
 What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its

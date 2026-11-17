@@ -20,6 +20,10 @@ const MAX_NODES: usize = 250_000;
 /// Links and pictures listed at most.
 const MAX_LINKS: usize = 2_000;
 const MAX_IMAGES: usize = 500;
+/// A caption, a picture's words or a link's text in the lists, in characters at most; and a link's address in bytes
+/// (a longer one is no link).
+const MAX_LINE: usize = 500;
+const MAX_URL: usize = 2048;
 /// A table's columns kept at most.
 const MAX_COLUMNS: usize = 64;
 /// Lists whose items indent what they hold (a deeper one's items sit at the same depth), and the largest number a
@@ -422,6 +426,20 @@ fn plain_text(e: &El, out: &mut String) {
     }
 }
 
+/// The characters of `s` as `collapse` would leave them, counted without making it.
+fn text_chars(s: &str) -> usize {
+    let (mut n, mut gap) = (0, false);
+    for c in s.chars() {
+        if c.is_whitespace() {
+            gap = n > 0;
+        } else {
+            n += 1 + usize::from(gap);
+            gap = false;
+        }
+    }
+    n
+}
+
 fn collapse(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -505,8 +523,8 @@ pub fn web_link(base: &str, href: &str) -> Option<String> {
         return None;
     } else {
         let (sch, b) = base_web?;
-        let (host, path) = b.find(['/', '?', '#']).map_or((b, "/"), |i| (&b[..i], &b[i..]));
-        let path = if path.starts_with('/') { path.split(['?', '#']).next().unwrap_or("/") } else { "/" };
+        let (host, path) = first(b, &['/', '?', '#']).map_or((b, "/"), |i| (&b[..i], &b[i..]));
+        let path = if path.starts_with('/') { &path[..first(path, &['?', '#']).unwrap_or(path.len())] } else { "/" };
         let joined = if h.starts_with('/') {
             h.to_string()
         } else if h.starts_with('?') {
@@ -517,27 +535,38 @@ pub fn web_link(base: &str, href: &str) -> Option<String> {
         format!("{sch}://{host}{}", dots(&joined))
     };
     let (_, rest) = web_scheme(&abs)?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = &rest[..first(rest, &['/', '?', '#']).unwrap_or(rest.len())];
     // A user part makes a link pass for another host (`https://bank.example@evil.example`).
-    if host.is_empty() || host.contains(['@', '\\']) || abs.chars().count() > 4096 {
+    if host.is_empty() || host.contains(['@', '\\']) || abs.len() > MAX_URL {
         return None;
     }
     // Nothing that would end the Markdown link or the line.
-    Some(
-        abs.chars()
-            .filter(|&c| !c.is_control() && !bad_char(c))
-            .map(|c| match c {
-                ' ' => "%20".to_string(),
-                '(' => "%28".to_string(),
-                ')' => "%29".to_string(),
-                '<' => "%3C".to_string(),
-                '>' => "%3E".to_string(),
-                '"' => "%22".to_string(),
-                '\\' => "%5C".to_string(),
-                c => c.to_string(),
-            })
-            .collect(),
-    )
+    let mut out = String::with_capacity(abs.len());
+    let mut i = 0;
+    while i < abs.len() {
+        let b = abs.as_bytes()[i];
+        if b.is_ascii() {
+            match b {
+                b' ' => out.push_str("%20"),
+                b'(' => out.push_str("%28"),
+                b')' => out.push_str("%29"),
+                b'<' => out.push_str("%3C"),
+                b'>' => out.push_str("%3E"),
+                b'"' => out.push_str("%22"),
+                b'\\' => out.push_str("%5C"),
+                b if b.is_ascii_control() => {}
+                b => out.push(b as char),
+            }
+            i += 1;
+        } else {
+            let c = abs[i..].chars().next().expect("a character");
+            if !c.is_control() && !bad_char(c) {
+                out.push(c);
+            }
+            i += c.len_utf8();
+        }
+    }
+    Some(out).filter(|o| o.len() <= MAX_URL)
 }
 
 /// `x:` before any `/`, `?` or `#`: a scheme of its own.
@@ -547,9 +576,17 @@ fn has_scheme(h: &str) -> bool {
     h[i..].starts_with(':') && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && s.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
 }
 
+/// Where the first of `set` is in `s` (each looked for on its own, which is fast on a long address).
+fn first(s: &str, set: &[char]) -> Option<usize> {
+    set.iter().filter_map(|c| s.find(*c)).min()
+}
+
 /// A path with its `.` and `..` resolved.
 fn dots(p: &str) -> String {
-    let (path, tail) = p.find(['?', '#']).map_or((p, ""), |i| (&p[..i], &p[i..]));
+    let (path, tail) = first(p, &['?', '#']).map_or((p, ""), |i| (&p[..i], &p[i..]));
+    if !path.contains("/.") {
+        return p.to_string();
+    }
     let mut out: Vec<&str> = vec![];
     for seg in path.split('/').skip(1) {
         match seg {
@@ -613,28 +650,73 @@ fn best_of_srcset(set: &str) -> Option<(u64, &str)> {
         .max_by_key(|(w, _)| *w)
 }
 
-/// The text of an element as one plain line (no Markdown), for a caption or a link's text in the list.
-fn line_of(e: &El) -> String {
+/// The text of an element as one plain line (no Markdown), `MAX_LINE` characters at most, for a caption or a link's
+/// text in the list; what is inside a `skip` element isn't read (a figure in a caption).
+fn line_of(e: &El, skip: &str) -> String {
     let mut s = String::new();
-    plain_text(e, &mut s);
-    collapse(&s)
+    words_of(e, skip, &mut s, &mut 0);
+    s
 }
 
-/// The links of the main part, each once: `(text, href)`.
-fn links_of(e: &El, base: &str, out: &mut Vec<(String, String)>) {
+/// `line_of`'s words, `n` characters so far; true once full.
+fn words_of(e: &El, skip: &str, out: &mut String, n: &mut usize) -> bool {
+    for k in &e.kids {
+        match k {
+            Node::Text(t) => {
+                for w in t.split_whitespace() {
+                    if *n > 0 {
+                        if *n + 1 >= MAX_LINE {
+                            return true;
+                        }
+                        out.push(' ');
+                        *n += 1;
+                    }
+                    for c in w.chars() {
+                        if *n >= MAX_LINE {
+                            return true;
+                        }
+                        out.push(c);
+                        *n += 1;
+                    }
+                }
+            }
+            Node::El(k) if !dropped(k) && k.name != skip => {
+                if words_of(k, skip, out, n) {
+                    return true;
+                }
+            }
+            Node::El(_) => {}
+        }
+    }
+    false
+}
+
+/// The `href`s read and the addresses listed, for `links_of`.
+type Seen = (std::collections::HashSet<String>, std::collections::HashSet<String>);
+
+/// The links of the main part, each once: `(text, href)`. A link holds no link (a browser never nests them).
+fn links_of(e: &El, base: &str, out: &mut Vec<(String, String)>, seen: &mut Seen) {
     for k in e.els().filter(|k| !dropped(k)) {
         if out.len() >= MAX_LINKS {
             return;
         }
-        if k.name == "a" {
-            if let Some(href) = k.attr("href").and_then(|h| web_link(base, h)) {
-                if !out.iter().any(|(_, h)| *h == href) {
-                    out.push((line_of(k), href));
-                }
+        if k.name != "a" {
+            links_of(k, base, out, seen);
+        } else if let Some(href) = k.attr("href").filter(|h| seen.0.insert(h.to_string())).and_then(|h| web_link(base, h)) {
+            if seen.1.insert(href.clone()) {
+                out.push((line_of(k, ""), href));
             }
         }
-        links_of(k, base, out);
     }
+}
+
+/// `s` after `dst`, a space between when a backtick would meet a backtick: a code span's fence never runs into
+/// another's, so none ends early and lets its text out.
+fn join(dst: &mut String, s: &str) {
+    if dst.ends_with('`') && s.starts_with('`') {
+        dst.push(' ');
+    }
+    dst.push_str(s);
 }
 
 /// The Markdown being written.
@@ -654,6 +736,7 @@ struct Out<'a> {
     skip_h1: Option<String>,
     /// The pictures written, in order, each once; and the caption of the figure being written.
     images: Vec<Image>,
+    seen: std::collections::HashSet<String>,
     caption: Option<String>,
     /// The Markdown's bytes at most (`MAX_MD`), and whether the rest was left out for it.
     most: usize,
@@ -666,11 +749,40 @@ impl<'a> Out<'a> {
     /// The Markdown of `html_len` bytes of HTML.
     fn new(base: &'a str, skip_h1: Option<String>, html_len: usize) -> Out<'a> {
         let most = html_len.saturating_mul(10).min(MAX_MD);
-        Out { base, md: String::new(), line: String::new(), lists: 0, indent: 0, marker: None, item: false, skip_h1, images: vec![], caption: None, most, full: false, cut: false }
+        Out { base, md: String::new(), line: String::new(), lists: 0, indent: 0, marker: None, item: false, skip_h1, images: vec![], seen: Default::default(), caption: None, most, full: false, cut: false }
+    }
+
+    /// What the Markdown has room for still, the line being gathered counted.
+    fn room(&self) -> usize {
+        self.most.saturating_sub(self.md.len() + self.line.len())
+    }
+
+    /// The Markdown is full: the line gathered so far is written (as it fits), the rest left out.
+    fn fill(&mut self) {
+        self.flush();
+        self.full = true;
+        self.cut = true;
+    }
+
+    /// Markdown added to the line, while it fits (`join`).
+    fn add(&mut self, s: &str) {
+        if self.full {
+            return;
+        }
+        if s.len() + 1 > self.room() {
+            return self.fill();
+        }
+        join(&mut self.line, s);
     }
 
     fn push_text(&mut self, s: &str) {
         for c in s.chars() {
+            if self.full {
+                return;
+            }
+            if self.room() < 8 {
+                return self.fill();
+            }
             if c.is_whitespace() {
                 if !self.line.is_empty() && !self.line.ends_with([' ', '\n']) {
                     self.line.push(' ');
@@ -726,22 +838,27 @@ impl<'a> Out<'a> {
         self.write(&lines);
     }
 
-    /// An element's text on one line (as Markdown text), its links and code kept (headings, cells, link text).
-    fn inline(&self, e: &El, in_link: bool) -> String {
+    /// An element's text on one line (as Markdown text), its links and code kept (headings, cells, link text); no more
+    /// is gathered once it is past `most` bytes.
+    fn inline(&self, e: &El, in_link: bool, most: usize) -> String {
         let mut s = String::new();
         for k in &e.kids {
+            if s.len() > most {
+                break;
+            }
+            let left = most - s.len();
             match k {
                 Node::Text(t) => s.push_str(&md_text(t)),
                 Node::El(k) if dropped(k) || k.name == "img" || k.name == "picture" => {}
                 Node::El(k) if k.name == "br" => s.push(' '),
-                Node::El(k) if k.name == "a" && !in_link => s.push_str(&self.link(k)),
-                Node::El(k) if k.name == "code" => s.push_str(&code_of(k)),
+                Node::El(k) if k.name == "a" && !in_link => join(&mut s, &self.link(k, left)),
+                Node::El(k) if k.name == "code" => join(&mut s, &code_of(k)),
                 Node::El(k) => {
                     let block = is_block(&k.name) || matches!(k.name.as_str(), "td" | "th");
                     if block {
                         s.push(' ');
                     }
-                    s.push_str(&self.inline(k, in_link));
+                    join(&mut s, &self.inline(k, in_link, left));
                     if block {
                         s.push(' ');
                     }
@@ -751,12 +868,15 @@ impl<'a> Out<'a> {
         s
     }
 
-    /// A link as Markdown when it leads to an http(s) page, else its text.
-    fn link(&self, a: &El) -> String {
-        let text = collapse(&self.inline(a, true));
+    /// A link as Markdown when it leads to an http(s) page, else its text (`most` as for `inline`).
+    fn link(&self, a: &El, most: usize) -> String {
+        let text = collapse(&self.inline(a, true, most));
+        if text.is_empty() {
+            return text;
+        }
         match a.attr("href").and_then(|h| web_link(self.base, h)) {
-            Some(url) if !text.is_empty() => format!("[{text}]({url})"),
-            _ => text,
+            Some(url) => format!("[{text}]({url})"),
+            None => text,
         }
     }
 
@@ -764,19 +884,20 @@ impl<'a> Out<'a> {
     /// `data:`), not a tracking pixel.
     fn image_of(&self, e: &El) -> Option<Image> {
         let img = if e.name == "img" { Some(e) } else { e.els().find(|k| k.name == "img") };
+        let (width, height) = img.map_or((None, None), |i| (size_attr(i, "width"), size_attr(i, "height")));
+        if width.is_some_and(|w| w < TINY) || height.is_some_and(|h| h < TINY) {
+            return None;
+        }
         let mut sets: Vec<(u64, &str)> = vec![];
         if e.name == "picture" {
             sets.extend(e.els().filter(|k| k.name == "source").filter_map(|s| s.attr("srcset").and_then(best_of_srcset)));
         }
         sets.extend(img.and_then(|i| i.attr("srcset")).and_then(best_of_srcset));
-        let largest = sets.into_iter().filter_map(|(w, u)| web_link(self.base, u).map(|u| (w, u))).max_by_key(|(w, _)| *w).map(|(_, u)| u);
+        sets.sort_by_key(|(w, _)| std::cmp::Reverse(*w));
+        let largest = sets.into_iter().find_map(|(_, u)| web_link(self.base, u));
         // A lazy page keeps the picture in `data-src` and a placeholder (often `data:`) in `src`.
         let src = largest.or_else(|| ["src", "data-src", "data-original", "data-lazy-src"].iter().find_map(|k| img.and_then(|i| i.attr(k)).and_then(|u| web_link(self.base, u))))?;
-        let (width, height) = img.map_or((None, None), |i| (size_attr(i, "width"), size_attr(i, "height")));
-        if width.is_some_and(|w| w < TINY) || height.is_some_and(|h| h < TINY) {
-            return None;
-        }
-        let alt = img.and_then(|i| i.attr("alt")).map(collapse).unwrap_or_default();
+        let alt = img.and_then(|i| i.attr("alt")).and_then(|a| short(a, MAX_LINE)).unwrap_or_default();
         Some(Image { src, alt, caption: self.caption.clone(), width, height })
     }
 
@@ -784,7 +905,7 @@ impl<'a> Out<'a> {
     fn picture(&mut self, img: Image) {
         self.flush();
         self.write(&[format!("![{}]({})", md_text(&img.alt), img.src)]);
-        if self.images.len() < MAX_IMAGES && !self.images.iter().any(|i| i.src == img.src) {
+        if self.images.len() < MAX_IMAGES && self.seen.insert(img.src.clone()) {
             self.images.push(img);
         }
     }
@@ -814,7 +935,7 @@ impl<'a> Out<'a> {
             return;
         }
         match e.name.as_str() {
-            "br" => self.line.push('\n'),
+            "br" => self.add("\n"),
             "img" | "picture" => match self.image_of(e) {
                 Some(i) => self.picture(i),
                 // A picture with no picture of its own: whatever it holds is read as text.
@@ -822,14 +943,14 @@ impl<'a> Out<'a> {
             },
             "a" => {
                 self.pictures_in(e);
-                let l = self.link(e);
-                self.line.push_str(&l);
+                let l = self.link(e, self.room());
+                self.add(&l);
             }
-            "code" => self.line.push_str(&code_of(e)),
+            "code" => self.add(&code_of(e)),
             "figure" => {
                 // The picture first, its caption under it as text.
                 self.flush();
-                let caption = e.els().find(|k| k.name == "figcaption").map(line_of).filter(|c| !c.is_empty());
+                let caption = e.els().find(|k| k.name == "figcaption").map(|c| line_of(c, "figure")).filter(|c| !c.is_empty());
                 let outer = std::mem::replace(&mut self.caption, caption);
                 e.kids.iter().filter(|k| !matches!(k, Node::El(k) if k.name == "figcaption")).for_each(|k| self.walk(k));
                 self.caption = outer;
@@ -841,7 +962,7 @@ impl<'a> Out<'a> {
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
-                let text = collapse(&self.inline(e, false));
+                let text = collapse(&self.inline(e, false, self.room()));
                 if e.name == "h1" && self.skip_h1.as_deref().is_some_and(|t| md_text(t) == text) {
                     self.skip_h1 = None;
                     return;
@@ -892,12 +1013,12 @@ impl<'a> Out<'a> {
             "table" => {
                 self.flush();
                 let mut rows = vec![];
-                self.rows(e, &mut rows);
+                let room = self.room();
+                self.rows(e, &mut rows, &mut 0, room);
                 let n = rows.iter().map(Vec::len).max().unwrap_or(0);
                 if n > 0 {
                     // Every row as wide as the widest: the lines are made only while they fit what is left.
                     let line = |r: &[String]| format!("| {} |", (0..n).map(|i| r.get(i).map(String::as_str).unwrap_or("")).collect::<Vec<_>>().join(" | "));
-                    let room = self.most.saturating_sub(self.md.len());
                     let mut lines = vec![line(&rows[0]), format!("| {} |", vec!["---"; n].join(" | "))];
                     let mut size: usize = lines.iter().map(|l| l.len() + 1).sum();
                     for r in &rows[1..] {
@@ -937,19 +1058,31 @@ impl<'a> Out<'a> {
         self.indent = saved;
     }
 
-    /// A table's rows of cells, `MAX_COLUMNS` at most (a table inside a cell is that cell's text).
-    fn rows(&mut self, e: &El, out: &mut Vec<Vec<String>>) {
+    /// A table's rows of cells, `MAX_COLUMNS` at most (a table inside a cell is that cell's text), made while their
+    /// `used` bytes fit `room`: past it the rest is left out.
+    fn rows(&mut self, e: &El, out: &mut Vec<Vec<String>>, used: &mut usize, room: usize) {
         for k in e.els().filter(|k| !dropped(k)) {
+            if *used > room {
+                self.cut = true;
+                return;
+            }
             match k.name.as_str() {
                 "tr" => {
                     let cells: Vec<&El> = k.els().filter(|c| c.name == "td" || c.name == "th").collect();
                     if cells.len() > MAX_COLUMNS {
                         self.cut = true;
                     }
-                    out.push(cells.iter().take(MAX_COLUMNS).map(|c| collapse(&self.inline(c, false)).replace('|', "\\|")).collect());
+                    let mut row = vec![];
+                    *used += 4;
+                    for c in cells.iter().take(MAX_COLUMNS) {
+                        let cell = collapse(&self.inline(c, false, room.saturating_sub(*used))).replace('|', "\\|");
+                        *used += cell.len() + 3;
+                        row.push(cell);
+                    }
+                    out.push(row);
                 }
                 "table" => {}
-                _ => self.rows(k, out),
+                _ => self.rows(k, out, used, room),
             }
         }
     }
@@ -1226,7 +1359,7 @@ pub fn read(html: &str, base: &str) -> Page {
     let html_text = out.md.trim().to_string();
 
     // What the page embeds, as Markdown; the fuller text wins, the page's own HTML on a near tie.
-    let len = |md: &str| collapse(md).chars().count();
+    let len = text_chars;
     let mut best = (len(&html_text), html_text, "html", out.cut);
     let mut offer = |md: String, from: &'static str, cut: bool| {
         let n = len(&md);
@@ -1254,7 +1387,16 @@ pub fn read(html: &str, base: &str) -> Page {
         (Some(d), 0) => (text_md(d, base).0, "meta"),
         _ => (markdown, source),
     };
-    let truncated = truncated || cut;
+    let mut truncated = truncated || cut;
+    let mut markdown = markdown;
+    if markdown.len() > MAX_MD {
+        let mut at = MAX_MD;
+        while !markdown.is_char_boundary(at) {
+            at -= 1;
+        }
+        markdown.truncate(at);
+        truncated = true;
+    }
 
     // Pictures the page names for itself (Open Graph, JSON-LD) after those of its text.
     for src in meta(&["og:image", "og:image:url", "twitter:image"]).into_iter().chain(ld.images.iter().cloned()) {
@@ -1265,7 +1407,7 @@ pub fn read(html: &str, base: &str) -> Page {
         }
     }
     let mut links = vec![];
-    links_of(root, base, &mut links);
+    links_of(root, base, &mut links, &mut Default::default());
     let html_el = doc.els().find(|e| e.name == "html");
     let lang = html_el.and_then(|h| h.attr("lang")).map(str::trim).filter(|l| !l.is_empty() && l.len() <= 35 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).map(str::to_owned);
     let byline = meta(&["author", "article:author"]).filter(|a| web_scheme(a).is_none()).or_else(|| ld.author.as_deref().and_then(|a| short(a, 300)));
@@ -1636,7 +1778,7 @@ mod tests {
         let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
         let html = format!("<main><p>{filler}</p><p>A <code>a``[x](javascript:alert(1))``b</code> and <code>`tick</code> and ``<a href=\"/ok\">ok</a>`` and `<code>[y](javascript:alert(2))</code>.</p></main>");
         let text = read(&html, "https://contoso.example/").markdown;
-        assert!(text.contains(r#"A ```a``[x](javascript:alert(1))``b``` and `` `tick `` and \`\`[ok](https://contoso.example/ok)\`\` and \``[y](javascript:alert(2))`."#), "{text}");
+        assert!(text.contains(r#"A ```a``[x](javascript:alert(1))``b``` and `` `tick `` and \`\`[ok](https://contoso.example/ok)\`\` and \` `[y](javascript:alert(2))`."#), "{text}");
         // Read as CommonMark reads code spans: outside them, every `](` is Echo's own link to the page's site.
         let mut outside = String::new();
         let mut rest = text.as_str();
@@ -1672,6 +1814,22 @@ mod tests {
         for (i, _) in outside.match_indices("](") {
             assert!(outside[..i].ends_with('\\') || outside[i + 2..].starts_with("https://contoso.example/"), "a link out of {:?}", &outside[i.saturating_sub(40)..]);
         }
+        // Spans side by side: one's closing fence never runs into the next one's opening fence (in a paragraph, a link,
+        // a link that is only text, a table's cell, a heading). Read by a CommonMark reader, the only links are Echo's.
+        let two = "x <code>a</code><code>`[z](javascript:alert(1))</code> y";
+        let html = format!(
+            "<main><p>{filler}</p><p>{two}</p><p><a href=/ok>{two}</a></p><p><a href=/ok2>x <code>a</code><code>`](https://evil.example/swap) </code> y</a></p>\
+             <p><code>a</code><a href=\"javascript:x\"><code>`[w](javascript:alert(3))</code></a></p>\
+             <table><tr><th>Head</th></tr><tr><td>{two}</td></tr></table><h2>{two}</h2></main>"
+        );
+        let text = read(&html, "https://contoso.example/").markdown;
+        let mut links = vec![];
+        for ev in pulldown_cmark::Parser::new_ext(&text, pulldown_cmark::Options::ENABLE_TABLES) {
+            if let pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. } | pulldown_cmark::Tag::Image { dest_url, .. }) = ev {
+                links.push(dest_url.to_string());
+            }
+        }
+        assert_eq!(links, ["https://contoso.example/ok", "https://contoso.example/ok2"], "only Echo's links: {text}");
     }
 
     #[test]
@@ -1680,5 +1838,85 @@ mod tests {
         let (p, took, _) = timed(html);
         assert!(p.markdown.starts_with("word word"), "{}", p.markdown.chars().take(40).collect::<String>());
         assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// `read` of `html` at `base` on a worker's stack: the page, how long it took, its JSON's size.
+    fn timed_at(html: String, base: &str) -> (Page, std::time::Duration, usize) {
+        let base = base.to_string();
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                let at = std::time::Instant::now();
+                let p = read(&html, &base);
+                let took = at.elapsed();
+                let size = serde_json::to_string(&p.to_json()).unwrap().len();
+                (p, took, size)
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    /// Every field of a page read from `n` bytes of HTML within its bounds, and quickly.
+    fn bounded(p: &Page, took: std::time::Duration, size: usize, n: usize) {
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        assert!(p.markdown.len() <= (10 * n).min(MAX_MD), "{} bytes of Markdown from {n} of HTML", p.markdown.len());
+        assert!(p.links.len() <= MAX_LINKS && p.images.len() <= MAX_IMAGES, "{} links, {} pictures", p.links.len(), p.images.len());
+        for (text, href) in &p.links {
+            assert!(text.chars().count() <= MAX_LINE && href.len() <= MAX_URL, "a link of {} and {} bytes", text.len(), href.len());
+        }
+        for i in &p.images {
+            assert!(i.src.len() <= MAX_URL && i.alt.chars().count() <= MAX_LINE && i.caption.as_ref().is_none_or(|c| c.chars().count() <= MAX_LINE), "a picture of {} bytes", i.src.len() + i.alt.len());
+        }
+        assert!(size <= MAX_MD + MAX_LINKS * (4 * MAX_LINE + MAX_URL + 64) + MAX_IMAGES * (8 * MAX_LINE + MAX_URL + 128) + 64 * 1024, "{size} bytes of result");
+    }
+
+    #[test]
+    fn a_figures_caption_is_kept_short_for_each_of_its_pictures() {
+        let html = format!("<main><figure>{}<figcaption>{}</figcaption></figure></main>", (0..500).map(|i| format!("<img src=/p{i}.png>")).collect::<String>(), "caption ".repeat(500_000));
+        let n = html.len();
+        let (p, took, size) = timed_at(html, "https://contoso.example/");
+        assert_eq!(p.images.len(), 500);
+        assert!(p.images[0].caption.as_ref().is_some_and(|c| c.chars().count() > MAX_LINE - 10 && c.starts_with("caption caption")), "a caption cut to its first {MAX_LINE} characters");
+        bounded(&p, took, size, n);
+    }
+
+    #[test]
+    fn links_inside_a_link_are_not_listed_again() {
+        let html = format!("<main>{}<p>{}</p>{}</main>", (0..250).map(|i| format!("<a href=/l{i}>")).collect::<String>(), "word ".repeat(800_000), "</a>".repeat(250));
+        let n = html.len();
+        let (p, took, size) = timed_at(html, "https://contoso.example/");
+        assert_eq!(p.links.len(), 1, "a browser never nests links");
+        assert!(p.links[0].0.chars().count() > MAX_LINE - 10 && p.links[0].0.starts_with("word word"), "a link's text cut to its first {MAX_LINE} characters");
+        bounded(&p, took, size, n);
+    }
+
+    #[test]
+    fn many_links_against_a_long_base_stay_within_the_budget_while_written() {
+        // A plugin's base of about 2 KB makes each `<a href=x>` of 15 bytes a link of 2 KB.
+        let base = format!("https://contoso.example/{}", "d/".repeat(1_000));
+        for html in [
+            format!("<main><p>{}</p></main>", "<a href=x>y</a> ".repeat(300_000)),
+            format!("<main><h2>{}</h2></main>", "<a href=x>y</a> ".repeat(300_000)),
+            format!("<main><table><tr><th>h</th></tr>{}</table></main>", "<tr><td><a href=x>y</a>".repeat(200_000)),
+        ] {
+            let n = html.len();
+            let (p, took, size) = timed_at(html, &base);
+            // Written while it fits: a heading too long for what is left is left out whole, never cut inside a link.
+            assert!(p.truncated, "{}", &p.markdown[..200.min(p.markdown.len())]);
+            bounded(&p, took, size, n);
+        }
+        // An address longer than 2 KB is no link.
+        let long = format!("https://contoso.example/{}", "d/".repeat(1_100));
+        assert_eq!(web_link(&long, "x"), None);
+        assert!(web_link(&base, "x").is_some());
+    }
+
+    #[test]
+    fn figures_nested_in_captions_are_read_once() {
+        let html = format!("<main>{}<p>{}</p>{}</main>", "<figure><img src=/p.png><figcaption>".repeat(250), "word ".repeat(800_000), "</figcaption></figure>".repeat(250));
+        let n = html.len();
+        let (p, took, size) = timed_at(html, "https://contoso.example/");
+        bounded(&p, took, size, n);
     }
 }

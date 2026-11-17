@@ -117,7 +117,7 @@ pub(super) fn markdown(html: &str, opts: &Value) -> Result<Value> {
     }
     let base = opts["base"].as_str().unwrap_or("");
     if !base.is_empty() && page::web_link("", base).as_deref() != Some(base) {
-        bail!("base is an http(s) address");
+        bail!("base is an http(s) address of 2 KB at most");
     }
     Ok(page::read(html, base).to_json())
 }
