@@ -26,21 +26,20 @@ test('not while the user types: the next tick tries again', () => {
   assert.equal(netReload('a1', 'b2', true, null), false)
 })
 
-test('typing: any text box or area whose value changed, an editable region typed in', () => {
+test('typing: any focused text box, text area or editable region, whatever its value', () => {
   const box = (tagName, value, defaultValue, type) => ({ tagName, value, defaultValue, type })
   assert.equal(typingIn(null), false, 'nothing focused')
-  assert.equal(typingIn(box('INPUT', 'a', 'a', 'text')), false, 'focused, nothing typed')
-  assert.equal(typingIn(box('INPUT', 'ab', 'a', 'text')), true, 'a plugin setting, the search, the ask box: any text box')
+  assert.equal(typingIn(box('INPUT', 'ab', 'a', 'text')), true, 'a plugin setting, the search: any text box')
+  // Send to Claude and a live note are drawn again with each key saved: value and drawn value are the same mid-edit.
+  assert.equal(typingIn(box('INPUT', 'half a question', 'half a question', 'text')), true, 'drawn again with what was typed')
+  assert.equal(typingIn(box('TEXTAREA', 'a live note, half', 'a live note, half')), true)
   assert.equal(typingIn(box('INPUT', 'x', '', undefined)), true, 'no type: a text box')
   assert.equal(typingIn(box('INPUT', 'p', '', 'password')), true)
-  assert.equal(typingIn(box('TEXTAREA', 'my notes, more', 'my notes')), true, 'My notes, the profile, a plugin text area')
-  assert.equal(typingIn(box('TEXTAREA', 'same', 'same')), false)
   for (const type of ['checkbox', 'radio', 'range', 'button', 'file']) assert.equal(typingIn(box('INPUT', 'on', 'off', type)), false, type)
   assert.equal(typingIn(box('SELECT', 'b', 'a')), false, 'a choice made is saved, not typed')
-  const ed = { tagName: 'DIV', isContentEditable: true }
-  assert.equal(typingIn(ed, new WeakSet()), false, 'an editable region only focused')
-  assert.equal(typingIn(ed, new WeakSet([ed])), true, 'typed in')
-  assert.equal(netReload('a1', 'b2', typingIn(box('INPUT', 'ab', 'a', 'text')), null), false, 'held while typing')
+  assert.equal(typingIn({ tagName: 'DIV', isContentEditable: true }), true, 'an editable region focused')
+  assert.equal(typingIn({ tagName: 'BUTTON' }), false, 'a button focused')
+  assert.equal(netReload('a1', 'b2', typingIn(box('TEXTAREA', 'same', 'same')), null), false, 'held while a field has the focus')
 })
 
 test('once per key: a reload that did not take never loops', () => {
