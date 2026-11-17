@@ -26,8 +26,8 @@ const MAX_LINE: usize = 500;
 const MAX_URL: usize = 2048;
 /// A table's columns kept at most.
 const MAX_COLUMNS: usize = 64;
-/// Lists whose items indent what they hold (a deeper one's items sit at the same depth), and the largest number a
-/// numbered list starts at.
+/// List items nested this deep at most have a marker and indent what they hold (a deeper item's text sits at the
+/// deepest one's indent, with no marker), and the largest number a numbered list starts at.
 const MAX_LIST_DEPTH: usize = 8;
 const MAX_LIST_START: u64 = 1_000_000;
 /// The Markdown written at most: ten times the HTML read, and never past 20 MB (`truncated`).
@@ -540,7 +540,8 @@ pub fn web_link(base: &str, href: &str) -> Option<String> {
     if host.is_empty() || host.contains(['@', '\\']) || abs.len() > MAX_URL {
         return None;
     }
-    // Nothing that would end the Markdown link or the line.
+    // Nothing that would end the Markdown link or the line, split a table's cell (`|`) or pair with a code span's
+    // fence (`` ` ``).
     let mut out = String::with_capacity(abs.len());
     let mut i = 0;
     while i < abs.len() {
@@ -554,6 +555,8 @@ pub fn web_link(base: &str, href: &str) -> Option<String> {
                 b'>' => out.push_str("%3E"),
                 b'"' => out.push_str("%22"),
                 b'\\' => out.push_str("%5C"),
+                b'|' => out.push_str("%7C"),
+                b'`' => out.push_str("%60"),
                 b if b.is_ascii_control() => {}
                 b => out.push(b as char),
             }
@@ -604,17 +607,32 @@ fn dots(p: &str) -> String {
     s + tail
 }
 
-/// Text as Markdown shows it, never as markup: `\`, `<`, `[`, `]`, `!` and `` ` `` escaped, so no HTML, link, image
-/// or code span can come of a page's (or anyone's) words.
+/// The ASCII punctuation that means something to Markdown or GFM (HTML, links, pictures, code, emphasis, strikethrough,
+/// tables, headings, quotes, lists, rules, setext underlines, entities): escaped wherever a page's words are written.
+const MARKS: &str = "\\`*_~[]()<>|#!{}+-=&";
+
+/// Text as Markdown shows it, never as markup: each of `MARKS` escaped, so no HTML, link, picture, code span, emphasis,
+/// table or block of any kind can come of a page's (or anyone's) words. A line's start is `line_start`'s.
 pub fn md_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if matches!(c, '\\' | '<' | '[' | ']' | '!' | '`') {
+        if MARKS.contains(c) {
             out.push('\\');
         }
         out.push(c);
     }
     out
+}
+
+/// A line of text (`md_text`'s) as it starts a line: digits and a `.` can't start a numbered list (`1\.`); every other
+/// mark that starts a block is escaped already, and its indent is the writer's.
+fn line_start(l: &str) -> String {
+    let digits = l.bytes().take_while(u8::is_ascii_digit).count();
+    if digits > 0 && l[digits..].starts_with('.') {
+        format!("{}\\{}", &l[..digits], &l[digits..])
+    } else {
+        l.to_owned()
+    }
 }
 
 /// A picture of the page: its absolute address, its words (alt), the caption of the figure it is in, and its size
@@ -725,12 +743,15 @@ struct Out<'a> {
     md: String,
     /// The inline text being gathered; `\n` is a line break.
     line: String,
-    /// Lists open around what is written, and the columns an item's lines start at.
-    lists: usize,
+    /// List items open around what is written, and the column their lines start at: an item's marker sits at its
+    /// list's column and its lines at that column plus the marker's width, so none falls out of it.
+    depth: usize,
     indent: usize,
-    /// A list item's marker, for its first line.
+    /// A list item's marker, for its first line, and whether the item follows another of its list.
     marker: Option<String>,
-    /// The last block written was a list item (items are one line apart).
+    next: bool,
+    /// The last block written was in a list item: the next item of a list follows it one line apart (only a list's
+    /// next item with text on its first line: a list's first item, or an empty one, may not interrupt a paragraph).
     item: bool,
     /// The title's own heading, written once above the text.
     skip_h1: Option<String>,
@@ -746,15 +767,14 @@ struct Out<'a> {
 }
 
 impl<'a> Out<'a> {
-    /// The Markdown of `html_len` bytes of HTML.
-    fn new(base: &'a str, skip_h1: Option<String>, html_len: usize) -> Out<'a> {
-        let most = html_len.saturating_mul(10).min(MAX_MD);
-        Out { base, md: String::new(), line: String::new(), lists: 0, indent: 0, marker: None, item: false, skip_h1, images: vec![], seen: Default::default(), caption: None, most, full: false, cut: false }
+    /// Markdown of `most` bytes at most.
+    fn new(base: &'a str, skip_h1: Option<String>, most: usize) -> Out<'a> {
+        Out { base, md: String::new(), line: String::new(), depth: 0, indent: 0, marker: None, next: false, item: false, skip_h1, images: vec![], seen: Default::default(), caption: None, most, full: false, cut: false }
     }
 
-    /// What the Markdown has room for still, the line being gathered counted.
+    /// What the Markdown has room for still, the line being gathered and the blank line and indent before it counted.
     fn room(&self) -> usize {
-        self.most.saturating_sub(self.md.len() + self.line.len())
+        self.most.saturating_sub(self.md.len() + self.line.len() + 2 + self.indent)
     }
 
     /// The Markdown is full: the line gathered so far is written (as it fits), the rest left out.
@@ -793,54 +813,71 @@ impl<'a> Out<'a> {
         }
     }
 
-    /// Lines written as a block; a line that would take the Markdown past `most` is left out with all after it.
-    fn write(&mut self, lines: &[String]) {
+    /// Lines written as a block, the first after its list item's marker, the rest at the item's indent. What would take
+    /// the Markdown past `most` is left out: a fenced block (`whole`) all of it, else from the first line that doesn't
+    /// fit (a line of text holds whole inline constructs, a table's line a whole row), so a cut never falls inside a
+    /// code span, a link or a fence.
+    fn write(&mut self, lines: &[String], whole: bool) {
         if lines.is_empty() || self.full {
             return;
         }
-        let item = self.lists > 0;
-        let before = self.md.len();
-        if !self.md.is_empty() {
-            self.md.push_str(if item && self.item { "\n" } else { "\n\n" });
-        }
+        let marker = self.marker.take();
+        let sep = if self.md.is_empty() {
+            ""
+        } else if marker.is_some() && self.next && self.item && !lines[0].is_empty() {
+            "\n"
+        } else {
+            "\n\n"
+        };
         let pad = " ".repeat(self.indent);
+        let mut block = String::new();
+        let mut kept = 0;
         for (i, l) in lines.iter().enumerate() {
-            let at = if i == 0 { before } else { self.md.len() };
-            if at + self.indent + l.len() + 2 > self.most {
-                self.md.truncate(at);
-                self.full = true;
-                self.cut = true;
-                return;
-            }
+            let mut one = String::new();
             if i == 0 {
-                match self.marker.take() {
+                one.push_str(sep);
+                match &marker {
+                    // The item's lines start at `indent`, its marker's width further than the marker does.
                     Some(m) => {
-                        self.md.push_str(&" ".repeat(self.indent.saturating_sub(m.chars().count())));
-                        self.md.push_str(&m);
+                        one.push_str(&pad[m.len()..]);
+                        one.push_str(m);
                     }
-                    None => self.md.push_str(&pad),
+                    None => one.push_str(&pad),
                 }
             } else {
-                self.md.push('\n');
+                one.push('\n');
                 if !l.is_empty() {
-                    self.md.push_str(&pad);
+                    one.push_str(&pad);
                 }
             }
-            self.md.push_str(l);
+            one.push_str(l);
+            if self.md.len() + block.len() + one.len() > self.most {
+                break;
+            }
+            block.push_str(&one);
+            kept += 1;
         }
-        self.item = item;
+        if kept < lines.len() {
+            self.full = true;
+            self.cut = true;
+            if whole {
+                return;
+            }
+        }
+        self.md.push_str(&block);
+        self.item = self.depth > 0;
     }
 
     fn flush(&mut self) {
         let raw = std::mem::take(&mut self.line);
-        // A line of text that starts as a heading or a quote would read as one.
-        let lines: Vec<String> = raw.split('\n').map(str::trim).filter(|l| !l.is_empty()).map(|l| if l.starts_with(['#', '>']) { format!("\\{l}") } else { l.to_owned() }).collect();
-        self.write(&lines);
+        let lines: Vec<String> = raw.split('\n').map(str::trim).filter(|l| !l.is_empty()).map(line_start).collect();
+        self.write(&lines, false);
     }
 
     /// An element's text on one line (as Markdown text), its links and code kept (headings, cells, link text); no more
-    /// is gathered once it is past `most` bytes.
-    fn inline(&self, e: &El, in_link: bool, most: usize) -> String {
+    /// is gathered once it is past `most` bytes. In a table's `cell`, code holding a `|` is text (GFM splits a cell at
+    /// it even inside a code span).
+    fn inline(&self, e: &El, in_link: bool, cell: bool, most: usize) -> String {
         let mut s = String::new();
         for k in &e.kids {
             if s.len() > most {
@@ -851,14 +888,14 @@ impl<'a> Out<'a> {
                 Node::Text(t) => s.push_str(&md_text(t)),
                 Node::El(k) if dropped(k) || k.name == "img" || k.name == "picture" => {}
                 Node::El(k) if k.name == "br" => s.push(' '),
-                Node::El(k) if k.name == "a" && !in_link => join(&mut s, &self.link(k, left)),
-                Node::El(k) if k.name == "code" => join(&mut s, &code_of(k)),
+                Node::El(k) if k.name == "a" && !in_link => join(&mut s, &self.link(k, cell, left)),
+                Node::El(k) if k.name == "code" => join(&mut s, &code_of(k, cell)),
                 Node::El(k) => {
                     let block = is_block(&k.name) || matches!(k.name.as_str(), "td" | "th");
                     if block {
                         s.push(' ');
                     }
-                    join(&mut s, &self.inline(k, in_link, left));
+                    join(&mut s, &self.inline(k, in_link, cell, left));
                     if block {
                         s.push(' ');
                     }
@@ -868,9 +905,9 @@ impl<'a> Out<'a> {
         s
     }
 
-    /// A link as Markdown when it leads to an http(s) page, else its text (`most` as for `inline`).
-    fn link(&self, a: &El, most: usize) -> String {
-        let text = collapse(&self.inline(a, true, most));
+    /// A link as Markdown when it leads to an http(s) page, else its text (`cell`, `most` as for `inline`).
+    fn link(&self, a: &El, cell: bool, most: usize) -> String {
+        let text = collapse(&self.inline(a, true, cell, most));
         if text.is_empty() {
             return text;
         }
@@ -904,7 +941,7 @@ impl<'a> Out<'a> {
     /// A picture on a line of its own: `![alt](src)`, listed once.
     fn picture(&mut self, img: Image) {
         self.flush();
-        self.write(&[format!("![{}]({})", md_text(&img.alt), img.src)]);
+        self.write(&[format!("![{}]({})", md_text(&img.alt), img.src)], true);
         if self.images.len() < MAX_IMAGES && self.seen.insert(img.src.clone()) {
             self.images.push(img);
         }
@@ -943,10 +980,10 @@ impl<'a> Out<'a> {
             },
             "a" => {
                 self.pictures_in(e);
-                let l = self.link(e, self.room());
+                let l = self.link(e, false, self.room());
                 self.add(&l);
             }
-            "code" => self.add(&code_of(e)),
+            "code" => self.add(&code_of(e, false)),
             "figure" => {
                 // The picture first, its caption under it as text.
                 self.flush();
@@ -962,40 +999,34 @@ impl<'a> Out<'a> {
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
-                let text = collapse(&self.inline(e, false, self.room()));
+                let text = collapse(&self.inline(e, false, false, self.room()));
                 if e.name == "h1" && self.skip_h1.as_deref().is_some_and(|t| md_text(t) == text) {
                     self.skip_h1 = None;
                     return;
                 }
                 if !text.is_empty() {
                     let level = e.name[1..].parse::<usize>().unwrap_or(1);
-                    let lists = std::mem::take(&mut self.lists);
-                    self.write(&[format!("{} {text}", "#".repeat(level))]);
-                    self.lists = lists;
+                    self.write(&[format!("{} {text}", "#".repeat(level))], true);
                 }
             }
             "ul" | "ol" => {
                 self.flush();
-                self.lists += 1;
                 let mut n: u64 = if e.name == "ol" { e.attr("start").and_then(|s| s.trim().parse::<u64>().ok()).map_or(1, |s| s.min(MAX_LIST_START)) } else { 0 };
+                let mut next = false;
                 for k in &e.kids {
                     match k {
                         Node::El(li) if li.name == "li" => {
                             let marker = if e.name == "ol" { format!("{n}. ") } else { "- ".to_string() };
                             n = n.saturating_add(1);
-                            self.item(li, marker);
+                            self.item(li, marker, next);
+                            next = true;
                         }
                         other => self.walk(other),
                     }
                 }
                 self.flush();
-                self.lists -= 1;
             }
-            "li" => {
-                self.lists += 1;
-                self.item(e, "- ".into());
-                self.lists -= 1;
-            }
+            "li" => self.item(e, "- ".into(), false),
             "pre" => {
                 self.flush();
                 let mut code = String::new();
@@ -1007,7 +1038,7 @@ impl<'a> Out<'a> {
                     let mut lines = vec![fence.clone()];
                     lines.extend(code.lines().map(str::to_owned));
                     lines.push(fence);
-                    self.write(&lines);
+                    self.write(&lines, true);
                 }
             }
             "table" => {
@@ -1029,7 +1060,7 @@ impl<'a> Out<'a> {
                         size += l.len() + 1;
                         lines.push(l);
                     }
-                    self.write(&lines);
+                    self.write(&lines, false);
                     if size > room {
                         self.full = true;
                         self.cut = true;
@@ -1045,15 +1076,24 @@ impl<'a> Out<'a> {
         }
     }
 
-    fn item(&mut self, li: &El, marker: String) {
+    /// A list item: its marker, and its lines indented by the marker's width. Past `MAX_LIST_DEPTH` items (bare lists
+    /// without items don't count) an item has no marker and its lines sit at the deepest item's indent.
+    fn item(&mut self, li: &El, marker: String, next: bool) {
         self.flush();
-        let saved = self.indent;
-        if self.lists <= MAX_LIST_DEPTH {
-            self.indent += marker.chars().count();
+        // An item that holds a list before any text of its own: its marker on a line of its own first.
+        if self.marker.is_some() {
+            self.write(&[String::new()], true);
         }
-        self.marker = Some(marker);
+        let saved = self.indent;
+        if self.depth < MAX_LIST_DEPTH {
+            self.indent += marker.len();
+            self.marker = Some(marker);
+            self.next = next;
+        }
+        self.depth += 1;
         li.kids.iter().for_each(|k| self.walk(k));
         self.flush();
+        self.depth -= 1;
         self.marker = None;
         self.indent = saved;
     }
@@ -1075,7 +1115,7 @@ impl<'a> Out<'a> {
                     let mut row = vec![];
                     *used += 4;
                     for c in cells.iter().take(MAX_COLUMNS) {
-                        let cell = collapse(&self.inline(c, false, room.saturating_sub(*used))).replace('|', "\\|");
+                        let cell = collapse(&self.inline(c, false, true, room.saturating_sub(*used)));
                         *used += cell.len() + 3;
                         row.push(cell);
                     }
@@ -1088,11 +1128,16 @@ impl<'a> Out<'a> {
     }
 }
 
-/// Inline code: its text as written, on one line, in backticks.
-fn code_of(e: &El) -> String {
+/// Inline code: its text as written, on one line, in backticks; in a table's `cell`, code holding a `|` is text.
+fn code_of(e: &El, cell: bool) -> String {
     let mut s = String::new();
     raw_text(e, &mut s);
-    code_span(&collapse(&s))
+    let s = collapse(&s);
+    if cell && s.contains('|') {
+        md_text(&s)
+    } else {
+        code_span(&s)
+    }
 }
 
 /// `text` as a code span (CommonMark): fenced by one backtick more than its longest run, so none of its backticks
@@ -1241,19 +1286,19 @@ fn json_of(text: &str) -> Option<Value> {
     serde_json::from_str(text.trim()).ok()
 }
 
-/// HTML (a piece of a page, a noscript's, a CMS body in JSON) as Markdown, with the pictures it shows; and whether
-/// some of it was left out (`MAX_NODES`, `MAX_MD`).
-fn html_md(html: &str, base: &str) -> (String, Vec<Image>, bool) {
+/// HTML (a piece of a page, a noscript's, a CMS body in JSON) as Markdown of `most` bytes at most; and whether some of
+/// it was left out (`MAX_NODES`, `most`).
+fn html_md(html: &str, base: &str, most: usize) -> (String, bool) {
     let (doc, truncated) = parse(html);
-    let mut out = Out::new(base, None, html.len());
+    let mut out = Out::new(base, None, most);
     doc.kids.iter().for_each(|k| out.walk(k));
     out.flush();
-    (out.md.trim().to_string(), out.images, truncated || out.cut)
+    (out.md.trim().to_string(), truncated || out.cut)
 }
 
-/// Plain text (paragraphs on their lines) as Markdown text; and whether some of it was left out.
-fn text_md(text: &str, base: &str) -> (String, bool) {
-    let mut out = Out::new(base, None, text.len());
+/// Plain text (paragraphs on their lines) as Markdown text of `most` bytes at most; and whether some was left out.
+fn text_md(text: &str, base: &str, most: usize) -> (String, bool) {
+    let mut out = Out::new(base, None, most);
     for para in text.split('\n') {
         out.push_text(para);
         out.flush();
@@ -1261,14 +1306,35 @@ fn text_md(text: &str, base: &str) -> (String, bool) {
     (out.md.trim().to_string(), out.cut)
 }
 
-/// A string that may hold HTML as Markdown; and whether some of it was left out.
-fn any_md(s: &str, base: &str) -> (String, bool) {
+/// A string that may hold HTML as Markdown of `most` bytes at most; and whether some of it was left out.
+fn any_md(s: &str, base: &str, most: usize) -> (String, bool) {
     if s.contains("</") || s.contains("<p>") || s.contains("<br") {
-        let (md, _, cut) = html_md(s, base);
-        (md, cut)
+        html_md(s, base, most)
     } else {
-        text_md(s, base)
+        text_md(s, base, most)
     }
+}
+
+/// Pieces of Markdown, each made by `md` within what is left of one budget of `most` bytes, joined by blank lines: a
+/// piece is whole Markdown (its fences closed), so the joins are the only places it ends. And whether some was left out.
+fn joined<T>(items: &[T], most: usize, md: impl Fn(&T, usize) -> (String, bool)) -> (String, bool) {
+    let (mut out, mut cut) = (String::new(), false);
+    for it in items {
+        let sep = if out.is_empty() { 0 } else { 2 };
+        let left = most.saturating_sub(out.len() + sep);
+        if left == 0 {
+            return (out, true);
+        }
+        let (m, c) = md(it, left);
+        cut |= c;
+        if !m.is_empty() {
+            if sep > 0 {
+                out.push_str("\n\n");
+            }
+            out.push_str(&m);
+        }
+    }
+    (out, cut)
 }
 
 // ── the page ──
@@ -1322,6 +1388,11 @@ fn short(s: &str, most: usize) -> Option<String> {
 /// what it says of itself. `base` is the page's own address, for its relative links ("" for none: relative links are
 /// then text). Nothing of the page is run or fetched.
 pub fn read(html: &str, base: &str) -> Page {
+    read_in(html, base, html.len().saturating_mul(10).min(MAX_MD))
+}
+
+/// `read` with the Markdown kept to `most` bytes.
+fn read_in(html: &str, base: &str, most: usize) -> Page {
     let (doc, truncated) = parse(html);
     let root = main_of(&doc);
 
@@ -1352,13 +1423,14 @@ pub fn read(html: &str, base: &str) -> Page {
     let og_title = meta(&["og:title", "twitter:title"]);
     let title = first_h1(root).or_else(|| ld.title.as_deref().and_then(|t| short(t, 500))).or(og_title).or_else(|| title_of(&doc)).and_then(|t| short(&t, 500)).unwrap_or_default();
 
-    let mut out = Out::new(base, Some(title.clone()).filter(|t| !t.is_empty()), html.len());
+    let mut out = Out::new(base, Some(title.clone()).filter(|t| !t.is_empty()), most);
     root.kids.iter().for_each(|k| out.walk(k));
     out.flush();
     let mut images = std::mem::take(&mut out.images);
     let html_text = out.md.trim().to_string();
 
-    // What the page embeds, as Markdown; the fuller text wins, the page's own HTML on a near tie.
+    // What the page embeds, as Markdown within the same budget (all of a page's noscripts, or all of its framework
+    // state, within one); the fuller text wins, the page's own HTML on a near tie.
     let len = text_chars;
     let mut best = (len(&html_text), html_text, "html", out.cut);
     let mut offer = |md: String, from: &'static str, cut: bool| {
@@ -1368,35 +1440,26 @@ pub fn read(html: &str, base: &str) -> Page {
         }
     };
     if let Some(b) = &ld.body {
-        let (md, cut) = any_md(b, base);
+        let (md, cut) = any_md(b, base, most);
         offer(md, "json-ld", cut);
     }
     if !state.is_empty() {
-        let mds: Vec<(String, bool)> = state.iter().map(|s| any_md(s, base)).filter(|(m, _)| !m.is_empty()).collect();
-        offer(mds.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>().join("\n\n"), "state", mds.iter().any(|(_, cut)| *cut));
+        let (md, cut) = joined(&state, most, |s, left| any_md(s, base, left));
+        offer(md, "state", cut);
     }
     let mut noscripts = vec![];
     every(&doc, "noscript", 50, &mut noscripts);
-    let noscript: Vec<(String, Vec<Image>, bool)> = noscripts.iter().map(|n| html_md(own_text(n), base)).filter(|(m, _, _)| !m.is_empty()).collect();
-    if !noscript.is_empty() {
-        offer(noscript.iter().map(|(m, _, _)| m.as_str()).collect::<Vec<_>>().join("\n\n"), "noscript", noscript.iter().any(|(_, _, cut)| *cut));
+    if !noscripts.is_empty() {
+        let (md, cut) = joined(&noscripts, most, |n, left| html_md(own_text(n), base, left));
+        offer(md, "noscript", cut);
     }
     let description = meta(&["og:description", "description", "twitter:description"]).or_else(|| ld.description.as_deref().and_then(|d| short(d, 2000)));
     let (n, markdown, source, cut) = best;
     let (markdown, source) = match (&description, n) {
-        (Some(d), 0) => (text_md(d, base).0, "meta"),
+        (Some(d), 0) => (text_md(d, base, most).0, "meta"),
         _ => (markdown, source),
     };
-    let mut truncated = truncated || cut;
-    let mut markdown = markdown;
-    if markdown.len() > MAX_MD {
-        let mut at = MAX_MD;
-        while !markdown.is_char_boundary(at) {
-            at -= 1;
-        }
-        markdown.truncate(at);
-        truncated = true;
-    }
+    let truncated = truncated || cut;
 
     // Pictures the page names for itself (Open Graph, JSON-LD) after those of its text.
     for src in meta(&["og:image", "og:image:url", "twitter:image"]).into_iter().chain(ld.images.iter().cloned()) {
@@ -1474,7 +1537,7 @@ mod tests {
     fn navigation_scripts_and_forms_are_dropped() {
         let (title, text) = md("chrome");
         assert_eq!(title, "Pricing model notes");
-        assert!(text.contains("Per-seat pricing stays for teams under fifty people.") && text.contains("Discounts need a sign-off from Omar Reyes"), "{text}");
+        assert!(text.contains("Per\\-seat pricing stays for teams under fifty people.") && text.contains("Discounts need a sign\\-off from Omar Reyes"), "{text}");
         for gone in ["tracking", "Injected", "Home", "Careers", "Subscribe", "Popular", "spreadsheets", "Footer", "Sign up", "Email", "JavaScript", "font-family", "Fabrikam Insights"] {
             assert!(!text.contains(gone), "{gone} in {text}");
         }
@@ -1484,9 +1547,9 @@ mod tests {
     fn tables_become_markdown_tables() {
         let (_, text) = md("tables");
         assert!(text.contains(
-            "| Plan | Stores | Price |\n| --- | --- | --- |\n| Starter | 1–5 | €40 |\n| Growth | 6–50 | €32 \\| €28 with a two-year term |\n| Enterprise | 51+ | [Ask sales](https://contoso.example/sales) |"
+            "| Plan | Stores | Price |\n| --- | --- | --- |\n| Starter | 1–5 | €40 |\n| Growth | 6–50 | €32 \\| €28 with a two\\-year term |\n| Enterprise | 51\\+ | [Ask sales](https://contoso.example/sales) |"
         ), "{text}");
-        assert!(text.contains("## Add-ons\n\n| Analytics | €5 |\n| --- | --- |\n| Priority support | €9 |"), "rows without a head, cells left open: {text}");
+        assert!(text.contains("## Add\\-ons\n\n| Analytics | €5 |\n| --- | --- |\n| Priority support | €9 |"), "rows without a head, cells left open: {text}");
     }
 
     #[test]
@@ -1532,9 +1595,9 @@ mod tests {
         assert_eq!(
             text,
             "Each store goes through the same steps before the pilot starts, in this order, signed off by the store manager.\n\n\
-             1. Hardware\n   - Scanners tested\n   - Receipt printers on the new firmware\n\
+             1. Hardware\n\n   - Scanners tested\n   - Receipt printers on the new firmware\n\
              2. Staff training\n\
-             3. Go-live call with [support](https://northwind.example/support)\n\n\
+             3. Go\\-live call with [support](https://northwind.example/support)\n\n\
              Stores that miss a step move to the next wave."
         );
     }
@@ -1544,8 +1607,8 @@ mod tests {
         let (title, text) = md("unicode");
         assert_eq!(title, "Отчёт о пилоте — Север");
         assert!(text.contains("сократилось на треть."), "{text}");
-        assert!(text.contains("Team notes—in English too: the rollout’s second wave starts in December & covers 12 stores 🚀."), "{text}");
-        assert!(text.contains("Quotes stay as written: “fix forward, no rollback” … © Northwind \\<internal>."), "{text}");
+        assert!(text.contains("Team notes—in English too: the rollout’s second wave starts in December \\& covers 12 stores 🚀."), "{text}");
+        assert!(text.contains("Quotes stay as written: “fix forward, no rollback” … © Northwind \\<internal\\>."), "{text}");
     }
 
     #[test]
@@ -1598,7 +1661,7 @@ mod tests {
         assert_eq!(p.title, "Why Acme moved its pilot to November");
         assert_eq!(p.source, "json-ld");
         assert!(p.markdown.starts_with("Acme planned to start the checkout pilot in October.\n\nAfter two weeks"), "{}", p.markdown);
-        assert!(p.markdown.contains("\\[not a link\\](javascript:alert(1))"), "its words are never markup: {}", p.markdown);
+        assert!(p.markdown.contains("\\[not a link\\]\\(javascript:alert\\(1\\)\\)"), "its words are never markup: {}", p.markdown);
         assert_eq!(p.byline.as_deref(), Some("Omar Reyes, Lena Hartmann"));
         assert_eq!(p.published.as_deref(), Some("2026-10-28"));
         assert_eq!(p.images.iter().map(|i| i.src.as_str()).collect::<Vec<_>>(), ["https://acme.example/img/pilot.jpg"]);
@@ -1656,8 +1719,8 @@ mod tests {
             assert!(text[..i].ends_with('\\') || text[i + 2..].starts_with("https://acme.example/"), "a link out of {:?}", &text[i.saturating_sub(40)..]);
         }
         assert!(text.contains("script link, mixed case, tabbed, data link, file link, vb link, a bank, backslashes."), "links that aren't http(s) are their words: {text}");
-        assert!(text.contains("Raw \\<img src=x onerror=alert(7)> and \\[x\\](javascript:alert(8)) and \\!\\[i\\](https://evil.example/t.png) are text"), "{text}");
-        assert!(text.contains("Direction txt.exe and zerowidth and a NUL &#0; and bell are dropped."), "{text:?}");
+        assert!(text.contains(r"Raw \<img src\=x onerror\=alert\(7\)\> and \[x\]\(javascript:alert\(8\)\) and \!\[i\]\(https://evil.example/t.png\) are text"), "{text}");
+        assert!(text.contains(r"Direction txt.exe and zerowidth and a NUL \&\#0; and bell are dropped."), "{text:?}");
         assert!(text.contains("[a fine link](https://acme.example/ok)"), "{text}");
         assert_eq!(p.links, vec![("a fine link".to_string(), "https://acme.example/ok".to_string())]);
         assert!(p.images.iter().all(|i| i.src.starts_with("https://acme.example/")), "{:?}", p.images);
@@ -1721,13 +1784,15 @@ mod tests {
              <img src=\"/p.png\" alt=\"](javascript:alert(1)) <b>\"></article></body></html>"
         );
         let text = read(&html, "https://contoso.example/").markdown;
-        assert!(text.contains("Literal \\[x\\](javascript:alert(1)) and \\!\\[\\](http://tracker.example/p.png) stay text, as does \\<img src=http://tracker.example/q.png>."), "{text}");
+        assert!(text.contains(r"Literal \[x\]\(javascript:alert\(1\)\) and \!\[\]\(http://tracker.example/p.png\) stay text, as does \<img src\=http://tracker.example/q.png\>."), "{text}");
         assert!(text.contains("\n\\# not a heading\n") && text.contains("\n\\> not a quote\n"), "{text}");
         assert!(text.contains("Wow\\![pic](https://contoso.example/pic.png) and a back\\\\slash."), "the link stays, never an image: {text}");
-        assert!(text.contains("## Tags \\<i> and \\[brackets\\]"), "{text}");
-        assert!(text.contains("| \\<td> \\[c\\] | `a<b` |"), "code is code, cells are text: {text}");
-        assert!(text.ends_with("![\\](javascript:alert(1)) \\<b>](https://contoso.example/p.png)"), "a picture's words can't end it: {text}");
-        assert_eq!(md_text("<b>[x]!\\`"), "\\<b>\\[x\\]\\!\\\\\\`");
+        assert!(text.contains(r"## Tags \<i\> and \[brackets\]"), "{text}");
+        assert!(text.contains(r"| \<td\> \[c\] | `a<b` |"), "code is code, cells are text: {text}");
+        assert!(text.ends_with(r"![\]\(javascript:alert\(1\)\) \<b\>](https://contoso.example/p.png)"), "a picture's words can't end it: {text}");
+        assert_eq!(md_text("<b>[x]!\\`"), r"\<b\>\[x\]\!\\\`");
+        assert_eq!(md_text("~|*_(){}+-=#&. 1"), r"\~\|\*\_\(\)\{\}\+\-\=\#\&. 1", "every mark with a meaning, and no other");
+        assert_eq!((line_start("12. x"), line_start("12 x. y")), (r"12\. x".to_string(), "12 x. y".to_string()), "a line never starts a numbered list");
     }
 
     #[test]
@@ -1918,5 +1983,178 @@ mod tests {
         let n = html.len();
         let (p, took, size) = timed_at(html, "https://contoso.example/");
         bounded(&p, took, size, n);
+    }
+
+    const SITE: &str = "https://acme.example/notes/page";
+    /// Addresses a made-up page links to: those that are links (all on the page's site), and those that are only words.
+    const GOOD: [&str; 6] = ["/ok", "/a|b", "/p`q", "https://acme.example/z", "//acme.example/w?x=(1)", "/s p"];
+    const BAD: [&str; 5] = ["javascript:alert(9)", " JaVaScRiPt:alert(9)", "data:text/html,<b>x</b>", "#top", "mailto:a@acme.example"];
+
+    /// An address as Echo writes one from a page's `href` or `src`: on the page's site (every address these pages link
+    /// to is), and as `web_link` leaves it.
+    fn echos_own(dest: &str) -> bool {
+        dest.starts_with("https://acme.example/") && web_link(SITE, dest).as_deref() == Some(dest)
+    }
+
+    /// The Markdown read by a CommonMark reader with what Echo's renderer adds (GFM's tables, strikethrough and task
+    /// lists, wiki links): no HTML in it, and every link and picture Echo's own (never `javascript:` or `data:`).
+    fn assert_safe(md: &str, html: &str) {
+        use pulldown_cmark::{Event, Options, Parser, Tag};
+        let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_WIKILINKS;
+        for ev in Parser::new_ext(md, opts) {
+            match ev {
+                Event::Html(h) | Event::InlineHtml(h) => panic!("HTML {h:?} in\n{md}\n\nfrom\n{html}"),
+                Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => assert!(echos_own(&dest_url), "a link to {dest_url:?} in\n{md}\n\nfrom\n{html}"),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn the_third_reviews_shapes_stay_text() {
+        let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
+        let shapes = [
+            // A page's `~~~` opening a fence around Echo's, and a `~~~` line in the pre closing it.
+            format!("<main><p>{filler}</p><p>~~~</p><pre>~~~\n[x](javascript:alert(1))\n&lt;img src=x onerror=alert(2)&gt;</pre></main>"),
+            // A page's `|` and `---` making a table whose cell splits a code span.
+            format!("<main><p>{filler}</p><p>h <code>a|[x](javascript:alert(1))</code> | b<br>---|---|---</p></main>"),
+            // Nine bare nested lists: an item deeper than the cap whose lines fell out of it.
+            format!("<main><p>{filler}</p>{}<ol start=99999999><li><pre>[x](javascript:alert(1))\n&lt;img src=x onerror=alert(2)&gt;</pre></li></ol>{}</main>", "<ul>".repeat(9), "</ul>".repeat(9)),
+        ];
+        for html in &shapes {
+            assert_safe(&read(html, SITE).markdown, html);
+        }
+        // Noscripts joined past the budget, cut at every size: never inside a code span or a fence.
+        let one = format!("<p>{filler} <code>[x](javascript:alert(1))</code> and</p><pre>~~~\n[y](javascript:alert(2))\n&lt;b&gt;</pre>");
+        let html = format!("<html><body><script></script>{}</body></html>", format!("<noscript>{one}</noscript>").repeat(4));
+        for most in 1..html.len() * 3 {
+            let p = read_in(&html, SITE, most);
+            assert!(p.markdown.len() <= most, "{} bytes past {most}", p.markdown.len());
+            assert_safe(&p.markdown, &html);
+        }
+    }
+
+    /// A small seeded generator: the same documents every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (self.0 >> 33) as usize % n
+        }
+        fn pick<'a>(&mut self, xs: &[&'a str]) -> &'a str {
+            xs[self.below(xs.len())]
+        }
+    }
+
+    /// Pieces of a page's text that mean something to Markdown, GFM or HTML.
+    const HOSTILE: [&str; 68] = [
+        "~~~", "~~~\n", "```", "`", "``", "````\n", "|", " | ", "---", "<br>---|---|---<br>", "<br>---|---<br>", "<br>|-|<br>", "===", "\n===\n", "***", "[x](javascript:alert(1))", "![x](javascript:alert(2))", "[r]: javascript:alert(5)\n",
+        "<http://evil.example/a>", "&lt;img src=x onerror=alert(3)&gt;", "<img src=x onerror=alert(3)>", "<script>alert(4)</script>", "&lt;script&gt;", "&lt;", "&gt;", "&amp;lt;b&amp;gt;", "\\", "\\\\", "**",
+        "__", "*", "_", "~~", "1. ", "\n1. ", "1) ", "- ", "\n- ", "+ ", "> ", "\n> ", "# ", "\n# ", "    ", "\n    ", "\t", "&#96;", "&#124;", "&#126;&#126;&#126;", "{", "}", "(", ")", "[", "]", "!", "=", "-", "&",
+        "&amp;copy;", "word", " ", "\n", "<br>", "x", "\n12345. ", "[r]", "&lt;!-- x --&gt;",
+    ];
+
+    fn hostile_text(r: &mut Rng) -> String {
+        (0..1 + r.below(6)).map(|_| r.pick(&HOSTILE)).collect()
+    }
+
+    fn href(r: &mut Rng) -> &'static str {
+        if r.below(3) == 0 {
+            r.pick(&BAD)
+        } else {
+            r.pick(&GOOD)
+        }
+    }
+
+    /// Inline content: the page's text, links, code (side by side too), emphasis, pictures, line breaks.
+    fn gen_inline(r: &mut Rng, depth: usize) -> String {
+        let mut s = String::new();
+        for _ in 0..1 + r.below(5) {
+            match if depth == 0 { 0 } else { r.below(8) } {
+                1 => s += &format!("<a href=\"{}\">{}</a>", href(r), gen_inline(r, depth - 1)),
+                2 => s += &format!("<code>{}</code>", hostile_text(r)),
+                3 => s += &format!("<code>{}</code><code>{}</code>", hostile_text(r), hostile_text(r)),
+                4 => s += &format!("<em>{}</em>", gen_inline(r, depth - 1)),
+                5 => s += &format!("<img src=\"{}\" alt=\"{}\">", href(r), hostile_text(r).replace('"', "'")),
+                6 => s += "<br>",
+                _ => s += &hostile_text(r),
+            }
+        }
+        s
+    }
+
+    /// Blocks: paragraphs, pre, headings, lists (bare `<ul>` nesting too), tables, figures, quotes, noscript, JSON-LD
+    /// and a framework's state.
+    fn gen_blocks(r: &mut Rng, depth: usize) -> String {
+        let mut s = String::new();
+        for _ in 0..1 + r.below(4) {
+            let d = depth.saturating_sub(1);
+            match if depth == 0 { r.below(2) } else { r.below(13) } {
+                0 => s += &format!("<p>{}</p>", gen_inline(r, 2)),
+                1 => s += &format!("<pre>{}</pre>", (0..1 + r.below(5)).map(|_| hostile_text(r) + "\n").collect::<String>()),
+                2 => {
+                    let n = 1 + r.below(6);
+                    s += &format!("<h{n}>{}</h{n}>", gen_inline(r, 2));
+                }
+                3 | 4 => {
+                    let (open, close) = if r.below(2) == 0 { ("<ul>".to_string(), "</ul>") } else { (format!("<ol start={}>", ["1", "7", "123456789", "18446744073"][r.below(4)]), "</ol>") };
+                    s += &open;
+                    for _ in 0..1 + r.below(3) {
+                        s += &format!("<li>{}{}", gen_inline(r, 1), gen_blocks(r, d));
+                    }
+                    s += close;
+                }
+                5 => {
+                    let k = 1 + r.below(12);
+                    s += &format!("{}{}{}", "<ul>".repeat(k), gen_blocks(r, d), "</ul>".repeat(k));
+                }
+                6 => {
+                    s += "<table>";
+                    for row in 0..1 + r.below(3) {
+                        s += "<tr>";
+                        for _ in 0..1 + r.below(3) {
+                            let c = if row == 0 { "th" } else { "td" };
+                            s += &format!("<{c}>{}</{c}>", gen_inline(r, 2));
+                        }
+                    }
+                    s += "</table>";
+                }
+                7 => s += &format!("<figure><img src=\"{}\"><figcaption>{}</figcaption></figure>", href(r), gen_inline(r, 2)),
+                8 => s += &format!("<blockquote>{}</blockquote>", gen_blocks(r, d)),
+                9 => s += &format!("<noscript>{}</noscript>", gen_blocks(r, d)),
+                10 => s += &format!("<script type=\"application/ld+json\">{{\"@type\":\"Article\",\"articleBody\":{}}}</script>", serde_json::to_string(&gen_blocks(r, d)).unwrap()),
+                11 => {
+                    let prose = format!("{} {}", "words that read as prose here ".repeat(4), hostile_text(r));
+                    s += &format!("<script id=\"__NEXT_DATA__\" type=\"application/json\">{{\"a\":{}}}</script>", serde_json::to_string(&prose).unwrap());
+                }
+                _ => s += &format!("<div>{}</div>", gen_inline(r, 2)),
+            }
+        }
+        s
+    }
+
+    #[test]
+    fn no_page_text_becomes_markup_in_any_place_or_cut() {
+        // 5,000 made-up pages of hostile pieces in every place, read whole and with budgets small enough to cut them:
+        // read as GFM, the Markdown holds no HTML and no link or picture but Echo's own to the page's addresses.
+        let mut r = Rng(0x5eed_0003);
+        for _ in 0..5_000 {
+            let html = if r.below(4) == 0 {
+                let noscripts: String = (0..1 + r.below(4)).map(|_| format!("<noscript>{}</noscript>", gen_blocks(&mut r, 2))).collect();
+                format!("<html><body><script></script>{noscripts}</body></html>")
+            } else {
+                format!("<html><body><main>{}</main></body></html>", gen_blocks(&mut r, 3))
+            };
+            let most = match r.below(3) {
+                0 => html.len().saturating_mul(10).min(MAX_MD),
+                1 => 1 + r.below(300),
+                _ => 1 + r.below(html.len() * 2),
+            };
+            let p = read_in(&html, SITE, most);
+            assert!(p.markdown.len() <= most, "{} bytes past {most}", p.markdown.len());
+            assert_safe(&p.markdown, &html);
+            assert!(p.links.iter().all(|(_, h)| echos_own(h)) && p.images.iter().all(|i| echos_own(&i.src)), "{:?} {:?}", p.links, p.images);
+        }
     }
 }

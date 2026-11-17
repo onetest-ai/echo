@@ -302,16 +302,21 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
     its `alt` and `caption` 500 characters at most; a caption leaves out figures inside it),
     from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
     `data:` and a picture whose page-given width or height is under 32 left out.
-  - The page's words are never markup: `\`, `<`, `[`, `]`, `!`, `` ` `` escaped, a line starting `#` or `>` escaped, an
-    inline code span fenced one backtick longer than the longest run in it and never touching another backtick (a
-    space between), control
-    characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064,
-    U+2066–U+2069, U+FEFF) dropped from the text, title, links and pictures. Its work is bounded: 256 levels of nesting
-    (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest left out), 2 MB of each
-    embedded JSON. Its output is bounded too, checked as it is written: the Markdown is at most ten times the HTML and
-    20 MB (a heading, a link or a table's rows made only while they fit; a line that doesn't is left out whole), a table keeps 64
-    columns, list items indent for 8 levels (deeper ones sit at the 8th), a numbered list starts at 1,000,000 at most
-    (`truncated` when something was left out). Evidence: `web::read::read`
+  - The page's words are never markup: outside code, every ASCII mark with a meaning to Markdown or GFM is
+    backslash-escaped (`` \ ` * _ ~ [ ] ( ) < > | # ! { } + - = & ``), and digits and a `.` starting a line are
+    `1\.`; an inline code span is fenced one backtick longer than the longest run in it and never touches another
+    backtick (a space between), and in a table's cell code holding a `|` is escaped text; a `<pre>` is fenced by
+    backticks one longer than its longest run (never tildes); a link's or picture's address has `|` and `` ` ``
+    percent-encoded. Control characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E,
+    U+2060–U+2064, U+2066–U+2069, U+FEFF) are dropped from the text, title, links and pictures. Its work is bounded:
+    256 levels of nesting (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest
+    left out), 2 MB of each embedded JSON. Its output is bounded too, checked as it is written: the Markdown is at most
+    ten times the HTML and 20 MB, one budget for the main text and one for each alternative (all of a page's
+    noscripts together, all of its framework state together). A cut falls only between blocks or a paragraph's
+    lines: a fenced block, a heading, a picture is left out whole; a table's rows and a paragraph's lines are kept
+    while they fit. A table keeps 64 columns; list items have a marker and indent by its width for 8 levels of items
+    (lists without items don't count; a deeper item's text sits at the 8th level's indent, with no marker); a numbered
+    list starts at 1,000,000 at most (`truncated` when something was left out). Evidence: `web::read::read`
   - `images: 'save'` also downloads its pictures: each entry gets `saved` — a file handle `{file, name, size, type}`
     (§ Folders and files: `ctx.files.read`, `ctx.fs.copyIn`) — or `error`, why not. 50 pictures, 10 MB each, 50 MB and
     2 minutes for a page; PNG, JPEG, GIF, WebP, AVIF and SVG only (by the answer's type; Echo never shows an SVG: the
