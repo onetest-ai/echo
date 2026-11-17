@@ -80,11 +80,18 @@
     {
       "id": "data-demo",
       "source": "./plugins/data-demo"
-
     },
     {
       "id": "routine-demo",
       "source": "./plugins/routine-demo"
+    },
+    {
+      "id": "call-demo",
+      "source": "./plugins/call-demo"
+    },
+    {
+      "id": "menu-demo",
+      "source": "./plugins/menu-demo"
     }
   ]
 }

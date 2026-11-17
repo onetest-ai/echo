@@ -33,7 +33,12 @@ const Plugins = {
 // `client.profile`: a row of a client's Profile, under its Threads, shaped as `thread.profile`; `client` = {id, name}.
 // `call.row`: a chip on a call's row in the calls list ({id, label, chip(call) → short text or nothing}), `call` =
 // {name, title, started_at, status, memo}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'client.profile', 'call.row']
+// `call.menu`: items in a call's ⋯ menu ({label: text or (target) → text, run(target), when?(target)}), each plugin's
+// group after a separator; `target` = {kind: 'call', call}.
+// `call.header`: a box of the plugin's own on a call's header, before its buttons ({id, label, render(call) → HTML,
+// after?(box, call)}), and `call.minutes`: a line in the call's box while its minutes are coming ({id, label, render(call)
+// → HTML}); `call` = {name, title, started_at, notes, profile, memo, threads, client} (`slotCallPage`).
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'client.profile', 'call.row', 'call.header', 'call.minutes']
 // ── call row slot: the plugins' chips on a call's row (no DOM: `call-row-slot.test.mjs`) — each item's `chip(call)`
 // gives a short text (24 characters, the rest cut) or nothing; one that throws is left out (logged) and the row drawn
 // without it; a second item with the same plugin and id is left out. `chip` runs as a widget's draw does: a
@@ -200,7 +205,8 @@ function pluginCtx(id) {
       section: (v) => { Plugins.sections.push({ ...v, id: `${id}:${v.id || 'main'}`, plugin: id }); render() },
     },
     /** An activity of its own in the activity bar, under Echo's (`#<plugin>:<id>/<its route>`): {id, label, icon,
-     *  render() → HTML of the page, after(box) — after each render (draw a graph)}. */
+     *  render() → HTML of the page, after(box) — after each render (draw a graph), badge?() → '' | n | '!' on its icon,
+     *  editing?() → true while the user edits in it: Echo then leaves its box as it is}. */
     activities: {
       add: (a) => {
         const at = ACTIVITIES.findIndex((x) => x.bottom)
@@ -231,7 +237,7 @@ function pluginCtx(id) {
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
-    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? S.br.tab : undefined }),
+    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? S.br.tab : undefined, recall: brainOn() }),
     go: (hash) => go(hash),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
@@ -256,6 +262,16 @@ function pluginCtx(id) {
         if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('the clipboard is filled only on your click')
         send({ cmd: 'copy', text: String(text).slice(0, 10000) })
       },
+      /** A sheet over the window (Echo's modal frame around its `html`; `{label, onClose}`): one at a time — another
+       *  plugin's or its own earlier one closes first. Esc, a click beside it or `closeSheet()` close it, `onClose` then
+       *  called once; its plugin unloaded, it closes without it. Returns the sheet's box; its events through `listen`. */
+      sheet: (html, opts) => {
+        if (gone()) throw new Error('the plugin is no longer loaded')
+        if (!owned.sheet) { owned.sheet = true; owned.cleanups.push(() => sheetShut(id, true)) }
+        return sheetShow(id, html, opts || {})
+      },
+      /** Its sheet closed (its `onClose` called); another plugin's is left open. */
+      closeSheet: () => { sheetShut(id) },
       /** Its CSS in the page, taken out when it unloads. */
       style: (css) => { const el = document.createElement('style'); el.dataset.plugin = id; el.textContent = String(css); document.head.appendChild(el); owned.styles.push(el) },
       /** Echo's graph (Sigma over graphology, as the Brain's): draw(box, key, build, {click}), focus, select, find. */
@@ -469,9 +485,23 @@ function slotItems(slot, target, style = 'buttons', key = '') {
   if (!items.length) return ''
   Plugins.targets[slot + (key ? `#${key}` : '')] = target
   const k = key ? ` data-plug-key="${esc(key)}"` : ''
-  return items.map((x, i) => style === 'menu'
-    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}"${k}>${x.icon || ''}${esc(x.label)}</button>`
-    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}"${k} title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
+  // In a menu each plugin's items are a group, a separator before it (Echo's own items above). An item whose label
+  // throws or is empty is left out; the others keep their place (`data-plug-i`).
+  let group = null
+  return items.map((x, i) => {
+    const label = slotLabel(x, target)
+    if (!label) return ''
+    if (style !== 'menu') return `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}"${k} title="${esc(x.title || label)}">${x.icon || ''}${esc(label)}</button>`
+    const sep = x.plugin !== group ? '<div class="menu-sep" role="separator"></div>' : ''
+    group = x.plugin
+    return `${sep}<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}"${k}>${x.icon || ''}${esc(label)}</button>`
+  }).join('')
+}
+/** An item's label for `target`: its text, or what its function gives (a `ctx.render()` in it ignored); '' when it throws. */
+function slotLabel(x, target) {
+  if (typeof x.label !== 'function') return x.label == null ? '' : String(x.label)
+  Plugins.drawing = true
+  try { const l = x.label(target); return l == null ? '' : String(l).trim() } catch { return '' } finally { Plugins.drawing = false }
 }
 /** The target a slot's button was drawn for (`data-plug-slot`, `data-plug-key`). */
 const slotTarget = (slot, key) => Plugins.targets[slot + (key ? `#${key}` : '')]
@@ -495,7 +525,7 @@ document.addEventListener('click', (e) => {
   S.menuOpen = false
   if (!hit) return
   const { item, target } = hit
-  Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
+  Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${slotLabel(item, target) || item.plugin}: ${(err && err.message) || err}`; render() })
     // On a plugin's work row: what it shows is read again (its plugin's answer may have changed it), Today or the
     // thread's Work tab.
     .then(() => target && target.kind === 'plugin' ? (S.view === 'today' ? loadToday() : S.view === 'projects' ? loadProject() : null) : null)

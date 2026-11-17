@@ -1,0 +1,8 @@
+{
+  "id": "call-demo",
+  "name": "Call demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a box on a call's header, items in its menu, a line while its minutes come, a sheet, and an activity with a badge (tests/cases/plugins/TC-180 to TC-183).",
+  "main": "main.js",
+  "client": "client.js"
+}

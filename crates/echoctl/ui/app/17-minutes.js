@@ -65,8 +65,10 @@ function minutesHint(c, heading, lead) {
   const auto = c.auto || {}
   const cmd = `/echo:process-call ${c.name}`
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
+  // The plugins' lines (`call.minutes`), only while the minutes are coming.
+  const plug = callMinutesLines(Plugins.slots['call.minutes'], c, (m) => console.warn(`call.minutes: ${m}`))
   const box = (h, p, buttons, busy) => `<div class="empty" style="height:auto;padding:40px 0"><div>${mark(busy ? 'busy' : '')}<h3>${esc(h)}</h3>
-    ${p}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
+    ${p}${plug}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
   if (run && run.state === 'queued') {
     return box('Minutes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, notesNowBtn(run), true)
   }

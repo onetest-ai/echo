@@ -186,7 +186,9 @@ function renderNow() {
     primary.dataset.view = S.view
   }
   const pact = ACTIVITIES.find((a) => a.id === S.view && a.plugin)
-  if (pact) {
+  // A plugin's activity: left as it is while the user edits in it (its `editing()`), else drawn as `patch` draws.
+  if (pact && actHeld(pact, primary._html !== undefined, (m) => console.warn(`activity: ${m}`))) { /* kept */ }
+  else if (pact) {
     let html = ''
     try { html = pact.render() } catch (e) { html = `<p class="error">${esc(pact.label)}: ${esc(String((e && e.message) || e))}</p>` }
     patch(primary, `<main class="main plug-act">${html}</main>`)

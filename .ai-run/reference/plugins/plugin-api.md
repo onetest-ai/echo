@@ -806,14 +806,14 @@ Evidence: `jshost::work::check_rows`
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
-  `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
+  `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash)`, `render()`, `markdown(md, opts)` and
   `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
   4 MB at most, as `call`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
   stay), `setRow`, `setCard`, `sw`, `ICON`,
   `relDay`, `ago`, `notice`, `copy`, `style(css)`, `stylesheet(path)` (a `.css` file of its package by a plain relative
   path whose parts don't start with a dot, resolved once loaded; anything else is refused; what a plugin adds after it was
-  unloaded is refused), `graph`, `newGraph`). Echo takes out what a plugin added when
+  unloaded is refused), `graph`, `newGraph`, `sheet(html, opts)`, `closeSheet()`). Echo takes out what a plugin added when
   it unloads, and runs its `onUnload` cleanups first (one that throws is logged, the rest still run). Evidence:
   `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
@@ -844,8 +844,45 @@ Evidence: `jshost::work::check_rows`
   `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
   permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
   (window script), `window::plugins::mic_open`
-- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `knowledge.tab` and
-  `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
+- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `call.header`,
+  `call.minutes`, `knowledge.tab` and `knowledge.settings` (the last two change with Knowledge's rework). Evidence:
+  `SLOTS` (window script)
+- A slot draws only the HTML its plugin gives (its look ships in the plugin: its own CSS by `ctx.ui.style` /
+  `stylesheet`, or Echo's generic classes such as `btn`, `menu`, `menu-item`); every text in it through `ctx.ui.esc`.
+- `ctx.slots.add('call.menu', {label, run(target), when?(target), icon?})`: an item in a call's ⋯ menu, `target`
+  `{kind: 'call', call}` (the call as the page has it). `label` is a text or a function of the target (``(t) => `Open in ${…}` ``,
+  synchronous; a `ctx.render()` inside it ignored; one that throws or gives nothing leaves the item out).
+  Each plugin's items are a group after a separator, under Echo's own items and above Delete. `calendar.event` and
+  `task.actions` take a label function too. Evidence: `slotItems`, `slotLabel` (window script)
+- `ctx.slots.add('call.header', {id, label, render(call) → HTML, after?(box, call)})`: a box of the plugin's own on a
+  call's header, before its My notes and ⋯ buttons — a chip, a button and a popup it draws itself (the box is
+  `position: relative`, so a popup anchors to it). `call` is `{name, title, started_at, notes, profile, memo, threads,
+  client}`: the call's folder name, its title, its start, whether it has minutes, its AI profile (or null), whether it is
+  a memo, its threads' ids and the first of their clients (or null) — only what the page has; the plugin keeps its own
+  record of the call (its store, by `name`). As `thread.profile`: `render` synchronous, `after` once per box drawn
+  afresh (again for another call), one per id, one that throws left out (logged) and the header drawn without it.
+  Evidence: `slotCallPage`, `callHeadBoxes`, `callSlotAfter` (window script)
+- `ctx.slots.add('call.minutes', {id, label, render(call) → HTML})`: a line in the box that says the call's minutes are
+  coming, drawn only while they are (a run queued or going; Echo writing them by itself: due now or at a time, the call
+  not over or not transcribed yet, a Claude Code session holding it) — not when they are off, held ("Until I say"), too
+  thin, can't start, failed, or written. `call` as `call.header`; a line with nothing is not drawn; one that throws is
+  left out. Evidence: `minutesComing`, `callMinutesLines` (window script)
+- `ctx.ui.sheet(html, {label, onClose})` opens a sheet: the plugin's HTML in Echo's dialog frame (`td-dialog`, a
+  `role="dialog"` with `aria-modal` named `label`) over the window, the keyboard moved into it (an `[autofocus]`
+  element, else the first it can reach, else the sheet) and Tab going round inside it. One sheet at a time: opening
+  one closes the sheet open (its plugin's or another's). Esc, a click beside it, or `ctx.ui.closeSheet()` (its own
+  only) close it and call `onClose` once; its plugin switched off, updated or removed closes it without `onClose`.
+  Closed, the keyboard goes back where it was (from a menu's item: to the menu's button). It returns the sheet's box;
+  its clicks go through `ctx.listen`. Echo's redraws never replace it (its own holder after `#r-over`); the palette
+  and Echo's own dialogs open over it. Evidence: `sheetShow`, `sheetShut`, `sheetOpen`, `sheetClose`, `sheetTab`
+  (window script)
+- `ctx.activities.add({id, label, icon, render() → HTML, after?(box), badge?(), editing?()})`: `badge()` gives a count
+  (shown on its icon as Threads shows its count: 1–99, more as "99+") or `'!'` (Settings' attention mark); anything
+  else shows none. `editing()` true: Echo leaves the activity's box as it is on its redraws (a refresh, any plugin's
+  `ctx.render()`) — no `render`, no `after` — until it says otherwise; otherwise the box is replaced only when its HTML
+  changed (`patch`). Asked on every draw, synchronously (a `ctx.render()` inside ignored); one that throws is logged once
+  for that activity and taken as no badge / not editing. Evidence: `actBadgeText`, `actAsk`, `actHeld`, `actBadgeHtml`
+  (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
