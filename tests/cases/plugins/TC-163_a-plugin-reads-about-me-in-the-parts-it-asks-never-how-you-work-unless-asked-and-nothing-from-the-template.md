@@ -1,5 +1,5 @@
 ---
-id: TC-161
+id: TC-163
 title: A plugin reads About me in the parts it asks — never how the user works unless asked, a hash that follows an edit — and nothing when About me is missing, empty or the template
 priority: medium
 type: functional
@@ -11,7 +11,7 @@ data: standard
 tags: [plugins, host-half, about-me]
 ---
 
-# TC-161: A plugin reads About me in the parts it asks
+# TC-163: A plugin reads About me in the parts it asks
 
 **Module:** Plugins | **Priority:** Medium | **Type:** Functional
 

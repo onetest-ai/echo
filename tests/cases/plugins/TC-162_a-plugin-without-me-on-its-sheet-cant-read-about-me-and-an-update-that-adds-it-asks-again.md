@@ -1,5 +1,5 @@
 ---
-id: TC-160
+id: TC-162
 title: A plugin without “me” on its sheet can't read About me; an update that adds it asks again with Echo's line, and only the user's yes takes it
 priority: medium
 type: functional
@@ -11,7 +11,7 @@ data: standard
 tags: [plugins, host-half, about-me, sheet, update]
 ---
 
-# TC-160: A plugin without “me” can't read About me, and an update that adds it asks again
+# TC-162: A plugin without “me” can't read About me, and an update that adds it asks again
 
 **Module:** Plugins | **Priority:** Medium | **Type:** Functional
 
@@ -35,7 +35,7 @@ tags: [plugins, host-half, about-me, sheet, update]
 | 3 | `cp -R "$C/next/me-demo/." "$C/plugins/me-demo/"`; `$E plugin marketplace update test-plugins`; `$E plugin update me-demo` | Asks again: "Me demo 0.2.0", the line "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work (new)"; `Error: run again with --yes to agree` |
 | 4 | `$E plugin call me-demo me` | Still refused as in step 2: the update wasn't taken |
 | 5 | `$E plugin update me-demo --yes` | The same sheet; `Updated Me demo to 0.2.0` |
-| 6 | `$E plugin call me-demo me` | Exit 0: a JSON object with `text`, `name`, `parts` and `hash` (its values: TC-161) |
+| 6 | `$E plugin call me-demo me` | Exit 0: a JSON object with `text`, `name`, `parts` and `hash` (its values: TC-163) |
 
 ## Expected Final State
 Me demo 0.2.0 installed and on, asking for About me; About me unchanged.
