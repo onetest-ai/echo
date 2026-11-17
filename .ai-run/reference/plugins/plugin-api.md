@@ -71,7 +71,24 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   are not kept across loads: set them from `apply` on every load. Evidence: `grants::drop_plugin`
 - `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 chars) asks the
   user for a decision; `ctx.inbox.clear(key)` takes it away. Evidence: `attention::inbox_items`
-- `ctx.markdown(md)` renders Markdown to safe HTML in the host half. Evidence: `jshost::PRELUDE`
+- `ctx.markdown(md)` renders Markdown to safe HTML in the host half (raw HTML as text, each line kept, https and
+  `echo://` links only, no images). A page of a vault: `ctx.markdown(md, {breaks, links, images})` (both halves; the
+  window half's is `async`). The minutes' writer, raw HTML shown as text, no `[mm:ss]` marks, with `[[Page]]`,
+  `[[Page|label]]`, `[[Page#heading]]` and `![[image.png]]`; `breaks: true` makes a single newline a line break; a
+  ```` ```mermaid ```` fence is shown as its code. 1 MB of text at most (more throws "ctx.markdown renders 1 MB of text
+  at most"); the window half sends the page in its request's address, which Echo reads only up to 64 KB encoded (text
+  outside ASCII grows up to 9×, Cyrillic 6×): a longer page throws there — render it in the host half. Echo
+  can't call the plugin while it writes, so the plugin resolves first: `ctx.markdown.links(md)` → `{links, images}`, each
+  destination once as written (a wikilink's target: `Page#heading`; nothing in code), then passes `links` / `images`
+  as `{"<dest>": "<href>" | null}`. Echo keeps a link's href only when it is an `https://` URL, an `echo://` link Echo
+  knows (`data-echo-link`, the window opens it) or the plugin's own route — `#<id>:…`, or its Knowledge tab's `#brain/<id>:…`; an image's src only from its folder
+  route `plugin/<id>/folder/…` (§ Folders and files; no `.` or `..` segment, `%2e` and `%2F` decoded); nothing with
+  whitespace, control characters or a backslash, never `data:`, `http:`, `//host` or another plugin's route. Encode a
+  name with spaces (`encodeURIComponent`). A destination not given or not allowed is text; `null` is a page that isn't
+  there: `<a class="md-missing" data-md-missing="<dest>" role="link" tabindex="0">` with no href (an image:
+  `<span class="figref md-missing" …>`), for the plugin to style and catch: a click (`ctx.listen('click', …)`) and, as
+  it has no href, Enter on it (`ctx.listen('keydown', …)`). Headings get no `id`. Evidence:
+  `plugins::markdown::render`, `minutes::page_html`
 - In a terminal (`ctx.terminal` true: `echoctl plugin call`, `deliver`, `widget show`, `work show`) only the plugin asked is loaded
   (`work show`: the plugins that give work rows; `deliver`: all of them); skip start-up work there. Evidence: `plugins::session_commands`, `jshost::no_timers`
 
@@ -576,7 +593,8 @@ Evidence: `jshost::work::check_rows`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
-  `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `patch(el, html)`
+  `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
+  `markdown.links(md)` (§ Host half; `async`, by `/api/plugin/<id>/markdown`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
   stay), `setRow`, `setCard`, `sw`, `ICON`,
   `relDay`, `ago`, `notice`, `copy`, `style(css)`, `stylesheet(path)` (a `.css` file of its package by a plain relative

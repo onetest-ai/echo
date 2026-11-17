@@ -136,7 +136,7 @@ const PRELUDE: &str = r#"
     /** HTTPS to the hosts its manifest names (`uses.network.hosts`): {status, body}. */
     http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
-    markdown: (md) => call('markdown', String(md)),
+    markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md) => call('markdown.links', String(md)) }),
     /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
     crypto: { sha256: (text) => call('crypto.sha256', String(text)) },
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
@@ -1128,7 +1128,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             names.sort();
             json!(names)
         }
-        "markdown" => json!(crate::minutes::markdown_html(&s(arg))),
+        "markdown" => json!(if arg.is_array() { plugins::markdown::render(id, &s(&arg[0]), &arg[1])? } else { crate::minutes::markdown_html(&s(arg)) }),
+        "markdown.links" => plugins::markdown::links(&s(arg))?,
         "notify" => {
             crate::app::notify(&s(&arg[0]), &s(&arg[1]));
             Value::Null
@@ -1807,6 +1808,7 @@ mod tests {
               ctx.command('escape', () => ctx.store.read('../../config.json'))
               ctx.command('boom', () => { throw new Error('nope') })
               ctx.command('md', () => ctx.markdown('**hi** <b>'))
+              ctx.command('page', (a) => { const d = ctx.markdown.links(a.md); return [d, ctx.markdown(a.md, { links: { [d.links[0]]: '#hello:main/Plan', [d.links[1]]: null } })] })
               ctx.command('size', () => { ctx.store.write('cache/clip.mp3', '12345'); return [ctx.store.size(), ctx.cache.size(), ctx.store.size('notes')] })
             }
             "#,
@@ -1833,6 +1835,10 @@ mod tests {
         assert_eq!(call("hello", "boom", &json!({})).unwrap_err().to_string(), "nope");
         assert!(call("hello", "nothing", &json!({})).is_err());
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
+        // A page: its destinations first, then rendered with what the plugin resolved.
+        let page = call("hello", "page", &json!({"md": "[[Plan]] [[Idea|new]]"})).unwrap();
+        assert_eq!(page[0], json!({"links": ["Plan", "Idea"], "images": []}));
+        assert_eq!(page[1], "<p><a href=\"#hello:main/Plan\">Plan</a> <a class=\"md-missing\" data-md-missing=\"Idea\" role=\"link\" tabindex=\"0\">new</a></p>");
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
         sync();
