@@ -387,6 +387,11 @@ def write_call(d, c):
     `notes.rs`, `livenotes.rs` and `teams_transcript.rs` parse. Returns the folder name."""
     start = c.get("start")
     title = c["title"]
+    # Two calls never start in the same second (a stamp names one call, `calls::by_stamp`): one that would is moved a
+    # second on, and its spec keeps the start it got.
+    taken = os.listdir(d.path("calls")) if os.path.isdir(d.path("calls")) else []
+    while start and not c.get("folder") and any(n.startswith(start.strftime("%Y-%m-%d_%H%M%S")) for n in taken):
+        start = c["start"] = start + timedelta(seconds=1)
     stamp = (start or d.now.replace(year=2026, month=1, day=1, hour=0, minute=0, second=0)).strftime("%Y-%m-%d_%H%M%S")
     folder = c.get("folder") or f"{stamp}-{c.get('slug') or slug_of(title)}"
     p = d.path("calls", folder)
