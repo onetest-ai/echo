@@ -9,7 +9,7 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 
 - A plugin is one folder with `echo-plugin.json` at its root: required `id` (1–40 chars, a–z 0–9 `-`, no leading `-`),
   `name` (≤ 60) and `version` (`X.Y.Z[-pre]`); optional `echo` (`>=X.Y.Z`, the Echo it needs), `summary` (≤ 240),
-  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
+  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `routines` (§ Routines), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
   with a–z 0–9 `.` `_` `-` `/` only, ≤ 16 KB, shown only as an image beside its work rows and ⌘K entries).
   Evidence: `plugins::read_manifest`, `plugins::valid_id`
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
@@ -49,6 +49,15 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
+
+The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in Settings →
+Plugins: then every <every> min Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
+own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
+prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
+or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
+asks again, naming the changed routine; the user's yes to the update keeps the routine as they had it (on stays on).
+A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
+id left. Evidence: `plugins::routines::sheet_lines`, `plugins::routines::switch_off_new`
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s; an update that adds a script or changes any
@@ -245,7 +254,7 @@ too). A plugin never sets the address: not by its settings, its store or its win
 ## Routines
 
 The one shape for every routine, whoever's it is: the user's (the Scheduler's own, mapped by it), Echo's jobs
-(`source: "system"`) and later a plugin's (`"plugin:<id>"`). A plugin that shows routines draws them all from it.
+(`source: "system"`) and a plugin's own (`"plugin:<id>"`, below). A plugin that shows routines draws them all from it.
 
 - **Routine:** `{id, source, name, what, enabled, to: ["today" | "thread_work" | "thread_sources" | "minutes" | "prep" |
   "recall" | "live_notes" | "mail" | "teams" | …], schedule: {text, kind: "time" | "timer" | "event"}, next_run (ISO,
@@ -264,6 +273,35 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
   `ctx.echo.routines.runs(id, {limit})` (newest first, 20 by default, 500 at most), for a plugin with `uses.echo.jobs`;
   changes through `ctx.echo.jobs.set` (§ Client half). Echo keeps a job's runs 31 days; a pass that did nothing leaves
   none. `echoctl jobs routines [--runs <job>]` prints the same. Evidence: `jobs::routines`, `jobs::routine_runs`
+- **A plugin's own routines:** `"routines": [{id, name, what, prompt, every, night?, tools?, timeout?}]` in its
+  manifest, at most 4, with `uses.claude`: `id` a–z 0–9 `-` (≤ 40, once), `name` one line ≤ 60, `what` one line ≤ 200,
+  `prompt` a `.md` file of its package (UTF-8, not empty, ≤ 16 KB), `every` minutes 15–1440 (the default the user may
+  change), `night` paused at night by default (`true` when not said), `tools` `auto` / `skip` / `none` or left out (as
+  `ctx.claude.run`'s: § Claude runs), `timeout` minutes 1–60 (20). Each is a line of its sheet (§ `uses` and the
+  permission sheet). Its id among the routines is `<plugin>.<routine>`, `source` `"plugin:<id>"`, with `plugin` its
+  plugin's name, `to` `[]`, `schedule` `{text: "Every N min", kind: "timer"}`, `enabled` true only while the user
+  switched it on and its plugin is on, `next_run` then (else null), and `settings`: `on` (kind `"switch"`, false by
+  default), `every`, `night`, `model` (default "the profile's minutes model"). It is off until the user switches it on —
+  its row in Settings → Plugins, or `echoctl jobs set <plugin>.<routine> on=on` — and tuned as Echo's jobs are
+  (`echoctl jobs set … every=30 night=off model=sonnet`, never inside a run Echo started); a plugin with
+  `uses.echo.jobs` tunes `every`, `night` and `model` on the user's click (`ctx.echo.jobs.set`, which then resolves to
+  the routine) but never `on`: "a plugin can't switch a routine on or off: you do, in Settings → Plugins or with
+  echoctl jobs set". The plugin's own code neither switches nor starts it. Evidence: `plugins::routines`, `jobs::set_from_plugin`
+- It runs while Echo runs, one run at a time across processes, `every` minutes after its last run began (at once when
+  it never ran), not in a night it pauses in, while it is on and its plugin is on; `echoctl jobs run <plugin>.<routine>`
+  runs it now, on or off (its plugin on; refused inside a run Echo started). A run is `ctx.claude.run`'s (§ Claude
+  runs) on the user's default AI profile, its `model` setting as that profile maps it, with the prompt file read from
+  the installed package after Echo's lines: "This is the routine “<name>” of the plugin “<plugin>”, run by Echo for the
+  user (every N min while it is on). Its last run started <time>. | It hasn't run before. Its answer is kept for the
+  user with its run; nobody is sent it." It sends nothing itself; a send its run makes through Echo is noted.
+- Its runs are kept as Echo's jobs' (§ Routines' run, `jobs-runs/<plugin>.<routine>.jsonl`): `summary` "done" or "done:
+  N changes and M sends through Echo", `error` "the run failed: its log says why", with `run` (its folder),
+  `changes`, `sends`, tokens and cost — never the model's text. The run's folder (`<config dir>/jobs-runs/<id>/<run>/`:
+  `prompt.md`, `log.txt`, `answer.md`, `actions.jsonl`, `drafts.jsonl`, `permissions.json`; the newest 20 kept) is the
+  user's: `echoctl jobs outcome <id> [--run <run>]` → `{id, run, record, answer, actions, drafts, permissions, log}`. A
+  run that fails before Claude Code starts (its prompt gone, no profile) is recorded too, its log saying why. Removing the
+  plugin switches its routines off (an install again never switches one on); with its data, their settings and runs
+  go too. Evidence: `plugins::routines::run`, `plugins::routines::outcome`, `jobs::forget_routines`
 
 ## Delivery
 
@@ -707,7 +745,8 @@ Evidence: `jshost::work::check_rows`
   `echoctl jobs runs` (20 by default, 500 at most); `set(job, ["key=value", …])` — only on the
   user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
   `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
-  its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check
+  its default, `night` with `from` / `to`; a plugin's routine's `on` refused), resolving to the list after (a plugin's
+  routine: that routine in the routines' shape). The list is `/api/plugin/<id>/jobs`. Both check
   the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
   with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
   `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`

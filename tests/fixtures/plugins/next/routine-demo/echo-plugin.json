@@ -1,0 +1,18 @@
+{
+  "id": "routine-demo",
+  "name": "Routine demo",
+  "version": "0.2.0",
+  "summary": "A test plugin: a routine of its own, Mail → notes, off until you switch it on (tests/cases/plugins/TC-110 to TC-113).",
+  "uses": {
+    "claude": {}
+  },
+  "routines": [
+    {
+      "id": "mail-notes",
+      "name": "Mail → notes",
+      "what": "Reads the mail that came since its last run and keeps what lasts as notes",
+      "prompt": "routines/mail-notes.md",
+      "every": 60
+    }
+  ]
+}

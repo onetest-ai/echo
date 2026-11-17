@@ -6,6 +6,9 @@
 //! record says what happened in Echo's own words and counts: never a call's, thread's or person's name, nor a model's
 //! text (a plugin with `uses.echo.jobs` reads them: echo-plugins R25). Every job
 //! runs on its defaults when the file is missing or a value in it can't be read.
+//!
+//! A plugin's own routines (`plugins::routines`) are kept the same way, by their id `<plugin>.<routine>`: their
+//! settings — `on` (off until the user switches it on), `every`, `night`, `model` — and their runs.
 
 use crate::paths;
 use anyhow::{anyhow, bail, Result};
@@ -21,12 +24,14 @@ const KEEP: usize = 5000;
 const KEEP_DAYS: i64 = 31;
 
 /// A setting a job has: its key, what it means, its unit and default.
+#[derive(Clone, Copy)]
 pub struct Field {
     pub key: &'static str,
     pub label: &'static str,
     pub kind: FieldKind,
 }
 
+#[derive(Clone, Copy)]
 pub enum FieldKind {
     /// A whole number between `min` and `max` (its unit in the label), `default` when not set.
     Number { min: u64, max: u64, default: u64 },
@@ -35,6 +40,8 @@ pub enum FieldKind {
     /// One of Claude's names (haiku, sonnet, opus), which each profile maps to its provider's model; empty: the job's
     /// default.
     Model { default: &'static str },
+    /// A plugin's routine switched on by the user (`on`): never by default.
+    Switch { default: bool },
 }
 
 pub struct Job {
@@ -114,8 +121,28 @@ pub const JOBS: &[Job] = &[
 /// The night jobs pause in (those with "Paused at night" on): `from` to `to`, local time.
 pub const NIGHT: (&str, &str) = ("22:30", "07:00");
 
-fn job(id: &str) -> Result<&'static Job> {
-    JOBS.iter().find(|j| j.id == id).ok_or_else(|| anyhow!("no job “{id}”: {}", JOBS.iter().map(|j| j.id).collect::<Vec<_>>().join(", ")))
+/// The settings of a plugin's routine: the user's switch, how often (its manifest's `every` by default), the night
+/// (its `night`) and the model.
+pub fn routine_fields(every: u64, night_default: bool) -> Vec<Field> {
+    vec![
+        Field { key: "on", label: "On", kind: FieldKind::Switch { default: false } },
+        num("every", "Every (minutes)", crate::plugins::routines::EVERY.0, crate::plugins::routines::EVERY.1, every),
+        night(night_default),
+        model_field("the profile's minutes model"),
+    ]
+}
+
+/// The settings of `id`: one of Echo's jobs, or a plugin's routine (`<plugin>.<routine>`) while its plugin is
+/// installed.
+fn fields_of(id: &str) -> Option<Vec<Field>> {
+    match JOBS.iter().find(|j| j.id == id) {
+        Some(j) => Some(j.fields.to_vec()),
+        None => crate::plugins::routines::fields(id),
+    }
+}
+
+fn known(id: &str) -> Result<Vec<Field>> {
+    fields_of(id).ok_or_else(|| anyhow!("no job “{id}”: {}", JOBS.iter().map(|j| j.id).collect::<Vec<_>>().join(", ")))
 }
 
 fn load_from(file: &str) -> Map<String, Value> {
@@ -130,14 +157,19 @@ pub fn settings() -> Value {
 /// A number setting of a job: the user's when it is in range, else its default (1 for a key no job has: never a
 /// loop without a pause).
 pub fn number(id: &str, key: &str) -> u64 {
-    let Some(Field { kind: FieldKind::Number { min, max, default }, .. }) = JOBS.iter().find(|j| j.id == id).and_then(|j| j.fields.iter().find(|f| f.key == key)) else { return 1 };
-    settings()[id][key].as_u64().filter(|n| (*min..=*max).contains(n)).unwrap_or(*default)
+    let Some(Field { kind: FieldKind::Number { min, max, default }, .. }) = fields_of(id).and_then(|fs| fs.into_iter().find(|f| f.key == key)) else { return 1 };
+    settings()[id][key].as_u64().filter(|n| (min..=max).contains(n)).unwrap_or(default)
+}
+
+/// Is a plugin's routine switched on (the user's `on`)?
+pub fn on(id: &str) -> bool {
+    settings()[id]["on"].as_bool().unwrap_or(false)
 }
 
 /// Is `id` paused now: its night setting on (or its default) and `now` within the night (`night_window`)?
 pub fn paused(id: &str, now: NaiveTime) -> bool {
-    let Some(Field { kind: FieldKind::Night { default }, .. }) = JOBS.iter().find(|j| j.id == id).and_then(|j| j.fields.iter().find(|f| f.key == "night")) else { return false };
-    settings()[id]["night"].as_bool().unwrap_or(*default) && in_night(now)
+    let Some(Field { kind: FieldKind::Night { default }, .. }) = fields_of(id).and_then(|fs| fs.into_iter().find(|f| f.key == "night")) else { return false };
+    settings()[id]["night"].as_bool().unwrap_or(default) && in_night(now)
 }
 
 /// The night window: the user's `night.from` / `night.to` ("HH:MM"), else `NIGHT`.
@@ -299,9 +331,9 @@ pub fn add_usage(model: &str, v: &Value) {
     });
 }
 
-/// A run that happened elsewhere (its own process or session): `used` as `{calls, input, output, cache_read,
-/// cache_write, cost_usd, model}`, any of them absent.
-pub fn record(job: &'static str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
+/// A run that happened elsewhere (its own process or session, a plugin's routine): `used` as `{calls, input, output,
+/// cache_read, cache_write, cost_usd, model}` (a routine's also `run`, `changes`, `sends`), any of them absent.
+pub fn record(job: &str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
     write_run(job, started, result, used);
 }
 
@@ -352,7 +384,7 @@ fn write_run(job: &str, started: DateTime<Local>, result: Result<String, String>
         Ok(_) => {}
         Err(e) => line["error"] = json!(e.chars().take(500).collect::<String>()),
     }
-    for k in ["calls", "input", "output", "cache_read", "cache_write", "cost_usd", "model"] {
+    for k in ["calls", "input", "output", "cache_read", "cache_write", "cost_usd", "model", "run", "changes", "sends"] {
         if !used[k].is_null() && used[k] != json!("") {
             line[k] = used[k].clone();
         }
@@ -384,7 +416,7 @@ fn write_run(job: &str, started: DateTime<Local>, result: Result<String, String>
 
 /// A job's runs, newest first, at most `limit`.
 pub fn runs(job: &str, limit: usize) -> Result<Vec<Value>> {
-    self::job(job)?;
+    known(job)?;
     Ok(read_runs(job).into_iter().rev().take(limit).collect())
 }
 
@@ -400,55 +432,56 @@ fn read_runs(job: &str) -> Vec<Value> {
 pub fn list() -> Value {
     let s = settings();
     let next_runs = Value::Object(load_from(NEXT));
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let jobs: Vec<Value> = JOBS.iter().map(|j| job_value(j.id, j.name, j.what, j.to, j.fields, &s, &next_runs)).collect();
     let (from, to) = night_window();
-    let jobs: Vec<Value> = JOBS
+    json!({"jobs": jobs, "night": {"from": from.format("%H:%M").to_string(), "to": to.format("%H:%M").to_string()}, "night_default": {"from": NIGHT.0, "to": NIGHT.1}})
+}
+
+/// One job (or a plugin's routine) as `list` gives it: its settings (`s`: the user's), last run, month and today's counts.
+fn job_value(id: &str, name: &str, what: &str, to: &str, fields: &[Field], s: &Value, next_runs: &Value) -> Value {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let fields: Vec<Value> = fields
         .iter()
-        .map(|j| {
-            let fields: Vec<Value> = j
-                .fields
-                .iter()
-                .map(|f| {
-                    let (default, value, unit) = match &f.kind {
-                        FieldKind::Number { min, max, default } => (json!(default), json!(number(j.id, f.key)), json!({"min": min, "max": max})),
-                        FieldKind::Night { default } => (json!(default), json!(s[j.id]["night"].as_bool().unwrap_or(*default)), Value::Null),
-                        FieldKind::Model { default } => (json!(default), s[j.id]["model"].as_str().map_or(json!(""), |m| json!(m)), Value::Null),
-                    };
-                    let kind = match f.kind {
-                        FieldKind::Number { .. } => "number",
-                        FieldKind::Night { .. } => "night",
-                        FieldKind::Model { .. } => "model",
-                    };
-                    json!({"key": f.key, "label": f.label, "kind": kind, "value": value, "default": default, "range": unit, "set": s[j.id].get(f.key).is_some()})
-                })
-                .collect();
-            let all = read_runs(j.id);
-            let last = all.last().cloned().unwrap_or(Value::Null);
-            let todays: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(&today))).collect();
-            let cost_today: f64 = todays.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
-            let tokens_today: u64 = todays.iter().map(|r| ["input", "output", "cache_read", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
-            // The last 30 days, a day each (oldest first), as a routine's month.
-            let days: Vec<String> = (0..30).rev().map(|d| (Local::now().date_naive() - chrono::Days::new(d)).format("%Y-%m-%d").to_string()).collect();
-            let daily: Vec<Value> = days
-                .iter()
-                .map(|d| {
-                    let of: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(d.as_str()))).collect();
-                    let cost: f64 = of.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
-                    json!({"day": d, "runs": of.len(), "failed": of.iter().filter(|r| r["ok"] == false).count(), "cost": (cost * 1e6).round() / 1e6})
-                })
-                .collect();
-            let month = json!({"runs": daily.iter().map(|d| d["runs"].as_u64().unwrap_or(0)).sum::<u64>(),
-                               "failed": daily.iter().map(|d| d["failed"].as_u64().unwrap_or(0)).sum::<u64>(),
-                               "cost": (daily.iter().map(|d| d["cost"].as_f64().unwrap_or(0.0)).sum::<f64>() * 1e6).round() / 1e6, "daily": daily});
-            let next = next_words(j.id);
-            let next_run = if next.is_some() { Value::Null } else { next_runs[j.id].clone() };
-            json!({"id": j.id, "name": j.name, "what": j.what, "to": j.to, "fields": fields, "last_run": last["started"], "last": last,
-                   "next_run": next_run, "next": next, "month": month,
-                   "runs_today": todays.len(), "failed_today": todays.iter().filter(|r| r["ok"] == false).count(),
-                   "cost_today": (cost_today * 1e6).round() / 1e6, "tokens_today": tokens_today})
+        .map(|f| {
+            let (default, value, unit) = match &f.kind {
+                FieldKind::Number { min, max, default } => (json!(default), json!(number(id, f.key)), json!({"min": min, "max": max})),
+                FieldKind::Night { default } => (json!(default), json!(s[id]["night"].as_bool().unwrap_or(*default)), Value::Null),
+                FieldKind::Model { default } => (json!(default), s[id]["model"].as_str().map_or(json!(""), |m| json!(m)), Value::Null),
+                FieldKind::Switch { default } => (json!(default), json!(s[id][f.key].as_bool().unwrap_or(*default)), Value::Null),
+            };
+            let kind = match f.kind {
+                FieldKind::Number { .. } => "number",
+                FieldKind::Night { .. } => "night",
+                FieldKind::Model { .. } => "model",
+                FieldKind::Switch { .. } => "switch",
+            };
+            json!({"key": f.key, "label": f.label, "kind": kind, "value": value, "default": default, "range": unit, "set": s[id].get(f.key).is_some()})
         })
         .collect();
-    json!({"jobs": jobs, "night": {"from": from.format("%H:%M").to_string(), "to": to.format("%H:%M").to_string()}, "night_default": {"from": NIGHT.0, "to": NIGHT.1}})
+    let all = read_runs(id);
+    let last = all.last().cloned().unwrap_or(Value::Null);
+    let todays: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(&today))).collect();
+    let cost_today: f64 = todays.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
+    let tokens_today: u64 = todays.iter().map(|r| ["input", "output", "cache_read", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
+    // The last 30 days, a day each (oldest first), as a routine's month.
+    let days: Vec<String> = (0..30).rev().map(|d| (Local::now().date_naive() - chrono::Days::new(d)).format("%Y-%m-%d").to_string()).collect();
+    let daily: Vec<Value> = days
+        .iter()
+        .map(|d| {
+            let of: Vec<&Value> = all.iter().filter(|r| r["started"].as_str().is_some_and(|t| t.starts_with(d.as_str()))).collect();
+            let cost: f64 = of.iter().filter_map(|r| r["cost_usd"].as_f64()).sum();
+            json!({"day": d, "runs": of.len(), "failed": of.iter().filter(|r| r["ok"] == false).count(), "cost": (cost * 1e6).round() / 1e6})
+        })
+        .collect();
+    let month = json!({"runs": daily.iter().map(|d| d["runs"].as_u64().unwrap_or(0)).sum::<u64>(),
+                       "failed": daily.iter().map(|d| d["failed"].as_u64().unwrap_or(0)).sum::<u64>(),
+                       "cost": (daily.iter().map(|d| d["cost"].as_f64().unwrap_or(0.0)).sum::<f64>() * 1e6).round() / 1e6, "daily": daily});
+    let next = next_words(id);
+    let next_run = if next.is_some() { Value::Null } else { next_runs[id].clone() };
+    json!({"id": id, "name": name, "what": what, "to": to, "fields": fields, "last_run": last["started"], "last": last,
+           "next_run": next_run, "next": next, "month": month,
+           "runs_today": todays.len(), "failed_today": todays.iter().filter(|r| r["ok"] == false).count(),
+           "cost_today": (cost_today * 1e6).round() / 1e6, "tokens_today": tokens_today})
 }
 
 // ── as routines ──────────────────────────────────────────────────────────────────────────────
@@ -507,33 +540,62 @@ fn as_routine_run(r: &Value) -> Value {
     x
 }
 
-/// Echo's jobs as routines, the Scheduler's one shape for every routine (source "system"):
-/// `{routines: [...], night: {from, to, default}}`.
+/// Echo's jobs as routines (source "system"), then plugins' own (source "plugin:<id>"), the Scheduler's one shape for
+/// every routine: `{routines: [...], night: {from, to, default}}`.
 pub fn routines() -> Value {
     let l = list();
     let now = Local::now();
     let running = RUNNING.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let routines: Vec<Value> = l["jobs"]
+    let mut routines: Vec<Value> = l["jobs"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|j| {
             let id = j["id"].as_str().unwrap_or("");
-            let model = j["fields"].as_array().into_iter().flatten().find(|f| f["kind"] == "model").map_or(Value::Null, |f| json!({"value": f["value"], "default": f["default"]}));
-            let last = if j["last"].is_null() { Value::Null } else { as_routine_run(&j["last"]) };
-            let all = read_runs(id);
-            let since = (now.date_naive() - chrono::Days::new(29)).and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(now);
-            let month_runs: Vec<&Value> = all.iter().filter(|r| started_at(r).is_some_and(|t| t >= since)).collect();
-            let tokens: u64 = month_runs.iter().map(|r| ["input", "output", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
-            let cached: u64 = month_runs.iter().filter_map(|r| r["cache_read"].as_u64()).sum();
-            json!({"id": id, "source": "system", "name": j["name"], "what": j["what"], "enabled": enabled(id), "to": sends(id), "schedule": schedule(id),
-                   "next_run": j["next_run"], "next": j["next"], "paused_until": if paused(id, now.time()) { json!(after_night(now).to_rfc3339()) } else { Value::Null },
-                   "running": running.contains(&id), "last": last, "model": model,
-                   "month": {"runs": j["month"]["runs"], "failed": j["month"]["failed"], "tokens": tokens, "cached": cached, "cost": j["month"]["cost"], "daily": j["month"]["daily"]},
-                   "settings": j["fields"]})
+            as_routine(j, "system", enabled(id), json!(sends(id)), schedule(id), running.contains(&id), now)
         })
         .collect();
+    // Then the plugins' own routines (`plugins::routines`): on only while the user switched one on and its plugin is on.
+    let (s, next_runs) = (settings(), Value::Object(load_from(NEXT)));
+    for (p, r) in crate::plugins::routines::all() {
+        let id = crate::plugins::routines::id_of(&p.id, &r.id);
+        let mut j = job_value(&id, &r.name, &r.what, "", &routine_fields(r.every, r.night), &s, &next_runs);
+        let on = p.enabled && self::on(&id);
+        j["next_run"] = if on { json!(routine_next(&id, now).to_rfc3339()) } else { Value::Null };
+        let schedule = json!({"text": format!("Every {} min", number(&id, "every")), "kind": "timer"});
+        let mut x = as_routine(&j, &format!("plugin:{}", p.id), on, json!([]), schedule, crate::plugins::routines::running(&id), now);
+        x["plugin"] = json!(p.name);
+        routines.push(x);
+    }
     json!({"routines": routines, "night": {"from": l["night"]["from"], "to": l["night"]["to"], "default": l["night_default"]}})
+}
+
+/// A job as `list` gives it (`j`), in the routines' one shape.
+fn as_routine(j: &Value, source: &str, enabled: bool, to: Value, schedule: Value, running: bool, now: DateTime<Local>) -> Value {
+    let id = j["id"].as_str().unwrap_or("");
+    let model = j["fields"].as_array().into_iter().flatten().find(|f| f["kind"] == "model").map_or(Value::Null, |f| json!({"value": f["value"], "default": f["default"]}));
+    let last = if j["last"].is_null() { Value::Null } else { as_routine_run(&j["last"]) };
+    let all = read_runs(id);
+    let since = (now.date_naive() - chrono::Days::new(29)).and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(now);
+    let month_runs: Vec<&Value> = all.iter().filter(|r| started_at(r).is_some_and(|t| t >= since)).collect();
+    let tokens: u64 = month_runs.iter().map(|r| ["input", "output", "cache_write"].iter().filter_map(|k| r[*k].as_u64()).sum::<u64>()).sum();
+    let cached: u64 = month_runs.iter().filter_map(|r| r["cache_read"].as_u64()).sum();
+    json!({"id": id, "source": source, "name": j["name"], "what": j["what"], "enabled": enabled, "to": to, "schedule": schedule,
+           "next_run": j["next_run"], "next": j["next"], "paused_until": if paused(id, now.time()) { json!(after_night(now).to_rfc3339()) } else { Value::Null },
+           "running": running, "last": last, "model": model,
+           "month": {"runs": j["month"]["runs"], "failed": j["month"]["failed"], "tokens": tokens, "cached": cached, "cost": j["month"]["cost"], "daily": j["month"]["daily"]},
+           "settings": j["fields"]})
+}
+
+/// When a plugin's routine runs next: `every` minutes after its last run began (now when it never ran or that is
+/// past), at the night's end when that falls in a night it pauses in.
+pub fn routine_next(id: &str, now: DateTime<Local>) -> DateTime<Local> {
+    let last = read_runs(id).last().and_then(started_at);
+    let mut at = last.map_or(now, |t| (t + chrono::Duration::minutes(number(id, "every") as i64)).max(now));
+    if paused(id, at.time()) {
+        at = after_night(at);
+    }
+    at
 }
 
 /// A job's runs as routine runs, newest first.
@@ -569,7 +631,8 @@ fn set_in(id: &str, assignments: &[String], in_run: bool) -> Result<Value> {
             NaiveTime::parse_from_str(v, "%H:%M").map_err(|_| anyhow!("night {k}: “{v}” isn't a time (HH:MM)"))?;
             json!(v)
         } else {
-            let f = job(id)?.fields.iter().find(|f| f.key == k).ok_or_else(|| anyhow!("{id} has {}, not “{k}”", job(id).map(|j| j.fields.iter().map(|f| f.key).collect::<Vec<_>>().join(", ")).unwrap_or_default()))?;
+            let fields = known(id)?;
+            let f = *fields.iter().find(|f| f.key == k).ok_or_else(|| anyhow!("{id} has {}, not “{k}”", fields.iter().map(|f| f.key).collect::<Vec<_>>().join(", ")))?;
             match f.kind {
                 FieldKind::Number { min, max, .. } => {
                     let n: u64 = v.parse().map_err(|_| anyhow!("{id} {k}: “{v}” isn't a whole number"))?;
@@ -591,12 +654,17 @@ fn set_in(id: &str, assignments: &[String], in_run: bool) -> Result<Value> {
                     }
                     json!(v)
                 }
+                FieldKind::Switch { .. } => match v {
+                    "on" | "true" => json!(true),
+                    "off" | "false" => json!(false),
+                    _ => bail!("{id} {k}: on or off, not “{v}”"),
+                },
             }
         };
         want.push((k, Some(value)));
     }
     if id != "night" {
-        job(id)?;
+        known(id)?;
     }
     let _lock = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs.lock"), "Echo's jobs", std::time::Duration::from_secs(10))?;
     let mut s = load_from(FILE);
@@ -620,7 +688,73 @@ fn set_in(id: &str, assignments: &[String], in_run: bool) -> Result<Value> {
     }
     std::fs::create_dir_all(paths::config_dir())?;
     paths::write_atomic(&paths::config_dir().join(FILE), serde_json::to_string_pretty(&Value::Object(s))?.as_bytes())?;
-    Ok(list())
+    if id == "night" || JOBS.iter().any(|j| j.id == id) {
+        return Ok(list());
+    }
+    // A plugin's routine: as it reads now, in the one shape.
+    Ok(routines()["routines"].as_array().into_iter().flatten().find(|r| r["id"] == id).cloned().unwrap_or(Value::Null))
+}
+
+#[cfg_attr(not(all(feature = "js", feature = "tray")), allow(dead_code))]
+/// A plugin's change (`ctx.echo.jobs.set`, on the user's click in its screens): as `set`, but it never switches a
+/// plugin's routine on or off — the user does (Settings → Plugins, `echoctl jobs set`).
+pub fn set_from_plugin(id: &str, assignments: &[String]) -> Result<Value> {
+    if assignments.iter().any(|a| a.split('=').next().is_some_and(|k| k.trim() == "on")) {
+        bail!("a plugin can't switch a routine on or off: you do, in Settings → Plugins or with echoctl jobs set");
+    }
+    set(id, assignments)
+}
+
+/// A plugin updated: the routines its new version adds (`routines`) switched off — a routine of that id an earlier version
+/// had keeps no switch of before; the user switches it on.
+pub fn switch_off_routines(plugin: &str, routines: &[String]) -> Result<()> {
+    if routines.is_empty() {
+        return Ok(());
+    }
+    let _lock = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs.lock"), "Echo's jobs", std::time::Duration::from_secs(10))?;
+    let mut s = load_from(FILE);
+    let before = s.clone();
+    for r in routines {
+        let id = format!("{plugin}.{r}");
+        if let Some(o) = s.get_mut(&id).and_then(Value::as_object_mut) {
+            o.remove("on");
+            if o.is_empty() {
+                s.remove(&id);
+            }
+        }
+    }
+    if s != before {
+        paths::write_atomic(&paths::config_dir().join(FILE), serde_json::to_string_pretty(&Value::Object(s))?.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// A plugin removed: its routines switched off (`on` cleared), and with its data (`all`) their settings and runs gone too.
+pub fn forget_routines(plugin: &str, all: bool) -> Result<()> {
+    let prefix = format!("{plugin}.");
+    let _lock = crate::plugins::wait_lock_for(&paths::config_dir().join(".jobs.lock"), "Echo's jobs", std::time::Duration::from_secs(10))?;
+    let mut s = load_from(FILE);
+    let before = s.clone();
+    s.retain(|k, _| !(all && k.starts_with(&prefix)));
+    for (_, e) in s.iter_mut().filter(|(k, _)| k.starts_with(&prefix)) {
+        if let Some(o) = e.as_object_mut() {
+            o.remove("on");
+        }
+    }
+    s.retain(|k, e| !k.starts_with(&prefix) || e.as_object().is_none_or(|o| !o.is_empty()));
+    if s != before {
+        paths::write_atomic(&paths::config_dir().join(FILE), serde_json::to_string_pretty(&Value::Object(s))?.as_bytes())?;
+    }
+    if all {
+        let runs = paths::config_dir().join(RUNS);
+        for e in std::fs::read_dir(&runs).into_iter().flatten().flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) {
+                let p = e.path();
+                let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -766,6 +900,48 @@ mod tests {
         assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "brain_reader").unwrap()["running"], true);
         held.done(None);
         assert_eq!(routines()["routines"].as_array().unwrap().iter().find(|x| x["id"] == "brain_reader").unwrap()["running"], false);
+    }
+
+    #[test]
+    fn a_plugins_routine_reads_in_the_one_shape_off_until_the_user_switches_it_on_and_a_plugin_never_does() {
+        let (_env, root) = paths::testenv::folders("jobs-plugin-routine");
+        crate::plugins::routines::test_install(&root.join("market"), "acme-routine", json!({"claude": {}}), json!({"night": false}), "Read the mail.");
+        let id = "acme-routine.mail-notes";
+        let get = || routines()["routines"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
+        let field = |r: &Value, k: &str| r["settings"].as_array().unwrap().iter().find(|f| f["key"] == k).cloned().unwrap();
+        let r = get();
+        assert_eq!((r["source"].clone(), r["name"].clone(), r["plugin"].clone(), r["enabled"].clone(), r["to"].clone(), r["schedule"].clone(), r["next_run"].clone(), r["last"].clone()),
+                   (json!("plugin:acme-routine"), json!("Mail → notes"), json!("Acme routine"), json!(false), json!([]), json!({"text": "Every 60 min", "kind": "timer"}), Value::Null, Value::Null));
+        assert_eq!(r["model"], json!({"value": "", "default": "the profile's minutes model"}));
+        assert_eq!((field(&r, "on")["kind"].clone(), field(&r, "on")["value"].clone(), field(&r, "every")["value"].clone(), field(&r, "every")["range"].clone(), field(&r, "night")["value"].clone()),
+                   (json!("switch"), json!(false), json!(60), json!({"min": 15, "max": 1440}), json!(false)));
+        assert!(list()["jobs"].as_array().unwrap().iter().all(|j| j["id"] != id), "Echo's own jobs only");
+        // The user switches it on and tunes it; a set answers with the routine as it reads now.
+        let got = set(id, &["on=on".into(), "every=30".into(), "model=sonnet".into()]).unwrap();
+        assert_eq!((got["enabled"].clone(), got["schedule"]["text"].clone(), got["model"]["value"].clone()), (json!(true), json!("Every 30 min"), json!("sonnet")));
+        assert!(got["next_run"].is_string());
+        for bad in ["every=5", "on=maybe", "batch_wait=5"] {
+            assert!(set(id, &[bad.into()]).is_err(), "{bad}");
+        }
+        assert!(set(id, &["on=off".into()], ).is_ok() && !on(id));
+        set(id, &["on=on".into()]).unwrap();
+        // A plugin with Echo's jobs tunes it on the user's click, never switches it.
+        assert!(set_from_plugin(id, &["every=45".into()]).is_ok());
+        let e = set_from_plugin(id, &["every=50".into(), "on=off".into()]).unwrap_err().to_string();
+        assert_eq!(e, "a plugin can't switch a routine on or off: you do, in Settings → Plugins or with echoctl jobs set");
+        assert!(set_from_plugin(id, &["on=".into()]).is_err());
+        assert_eq!((on(id), number(id, "every")), (true, 45));
+        // Its plugin off: listed, not enabled, its settings kept.
+        crate::plugins::set_enabled("acme-routine", false).unwrap();
+        assert_eq!((get()["enabled"].clone(), get()["next_run"].clone(), on(id)), (json!(false), Value::Null, true));
+        // Removed: switched off, its tuning kept (an install again never switches it on); with its data, all gone.
+        record(id, Local::now(), Ok("done".into()), json!({}));
+        forget_routines("acme-routine", false).unwrap();
+        assert_eq!((on(id), settings()[id]["every"].clone()), (false, json!(45)));
+        assert!(runs_file(id).is_file());
+        forget_routines("acme-routine", true).unwrap();
+        assert!(settings().get(id).is_none() && !runs_file(id).exists());
+        assert!(runs("other-plugin.x", 1).is_err(), "a routine of no installed plugin");
     }
 
     #[test]

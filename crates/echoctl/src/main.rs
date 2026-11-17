@@ -130,6 +130,14 @@ enum JobsCmd {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Run a plugin's routine now (`<plugin>.<routine>`), on or off, and wait: its run (JSON)
+    Run { routine: String },
+    /// A plugin's routine's last run (or `--run <run>`): its answer, the changes and sends it made, its log (JSON)
+    Outcome {
+        routine: String,
+        #[arg(long)]
+        run: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -862,6 +870,11 @@ fn main() -> Result<()> {
                 Some(JobsCmd::Runs { job, limit }) => serde_json::json!(jobs::runs(&job, limit)?),
                 Some(JobsCmd::Routines { runs: None }) => jobs::routines(),
                 Some(JobsCmd::Routines { runs: Some(job) }) => serde_json::json!(jobs::routine_runs(&job, 20)?),
+                #[cfg(feature = "js")]
+                Some(JobsCmd::Run { routine }) => plugins::routines::run(&routine)?,
+                #[cfg(not(feature = "js"))]
+                Some(JobsCmd::Run { .. }) => anyhow::bail!("this Echo was built without plugins' code: no routine runs"),
+                Some(JobsCmd::Outcome { routine, run }) => plugins::routines::outcome(&routine, run.as_deref())?,
             };
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
