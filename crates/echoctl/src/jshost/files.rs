@@ -71,7 +71,7 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
     let (path, _) = own(plugin, file)?;
     let max = max.filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
     let mut buf = vec![];
-    std::fs::File::open(path)?.take(max).read_to_end(&mut buf)?;
+    crate::grants::open_regular(&path)?.take(max).read_to_end(&mut buf)?;
     Ok(json!(String::from_utf8_lossy(&buf)))
 }
 
@@ -90,7 +90,7 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     if create_new && std::fs::symlink_metadata(&to).is_ok() {
         bail!("“{rel}” is there already");
     }
-    let mut from = std::fs::File::open(&src)?;
+    let mut from = crate::grants::open_regular(&src)?;
     let size = from.metadata()?.len();
     if size > MAX_COPY {
         bail!("the file is {} MB: a plugin copies files up to 50 MB", size.div_ceil(1 << 20));
@@ -119,9 +119,23 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     Ok(json!({"path": rel.trim_start_matches("./"), "size": size}))
 }
 
+/// No native dialog inside a run Echo started (a nightly routine, a minutes run): no one is there to answer it.
+pub(super) fn no_picker_in_a_run() -> Result<()> {
+    if crate::notes::headless() {
+        bail!("a picker opens only for you, not inside a run Echo started");
+    }
+    Ok(())
+}
+
+/// Forget plugin `id`'s handles: switched off, updated or removed, it keeps none of the files it was handed.
+pub fn forget(id: &str) {
+    handles().retain(|_, h| h.plugin != id);
+}
+
 /// `ctx.system.pickFiles(prompt, {multiple, ext})`: the system's file picker (`app::choose_files`), each file picked a
 /// handle of this plugin; `[]` when the user cancelled.
 pub(super) fn pick(plugin: &str, prompt: &str, opts: &Value) -> Result<Value> {
+    no_picker_in_a_run()?;
     let ext: Vec<String> = opts["ext"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|e| e.trim_start_matches('.').to_ascii_lowercase()).collect();
     if ext.len() > 20 || ext.iter().any(|e| e.is_empty() || e.len() > 10 || !e.bytes().all(|b| b.is_ascii_alphanumeric())) {
         bail!("ext is a list of up to 20 file extensions, letters and digits only (\"md\", \"pdf\")");
@@ -148,6 +162,10 @@ mod tests {
               ctx.command('copyId', async (a) => await ctx.fs.copyIn(a.file, ctx.fs.folders()[0], a.to))
               ctx.command('pick', async (a) => await ctx.system.pickFiles('add sources', a))
               ctx.command('seen', (a, { files }) => files)
+              ctx.command('folder', async () => await ctx.system.pickFolder('a vault'))
+              ctx.command('heard', () => ctx.store.read('heard.txt'))
+              // From an event: no one at the screen asked — no picker.
+              ctx.on('call_ended', () => ctx.system.pickFiles('x').then(() => ctx.store.write('heard.txt', 'picked'), (e) => ctx.store.write('heard.txt', e.message))).catch(() => {})
             }
         "#;
         std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
@@ -194,9 +212,26 @@ mod tests {
         // Past its hour: gone.
         handles().get_mut(h["file"].as_str().unwrap()).unwrap().made -= KEEP;
         assert!(run("taker", "readOne", json!({"file": h["file"]}), &[]).unwrap_err().contains("over an hour ago"));
-        for id in ["taker", "other"] {
-            plugins::remove(id, true).unwrap();
+        // Switched off, updated or removed: it keeps none of the files it was handed.
+        let h2 = make("taker", &f).unwrap();
+        let o2 = make("other", &f).unwrap();
+        plugins::set_enabled("taker", false).unwrap();
+        assert!(own_list("taker", std::slice::from_ref(&h2)).is_err() && own_list("other", std::slice::from_ref(&o2)).is_ok(), "only its own go");
+        plugins::set_enabled("taker", true).unwrap();
+        let h3 = make("taker", &f).unwrap();
+        plugins::remove("taker", true).unwrap();
+        assert!(own_list("taker", &[h3]).is_err());
+        // A file handed over, replaced by a FIFO since: refused, never waited on.
+        #[cfg(unix)]
+        {
+            let p = root.join("pipe.md");
+            std::fs::write(&p, "x").unwrap();
+            let ph = make("other", &p).unwrap();
+            std::fs::remove_file(&p).unwrap();
+            assert!(std::process::Command::new("mkfifo").arg(&p).status().unwrap().success());
+            assert!(run("other", "readOne", json!({"file": ph["file"]}), &[]).unwrap_err().contains("isn't a file"));
         }
+        plugins::remove("other", true).unwrap();
         sync();
     }
 
@@ -247,6 +282,16 @@ mod tests {
         std::fs::File::create(&big).unwrap().set_len(MAX_COPY + 1).unwrap();
         let bh = make("ingest", &big).unwrap();
         assert!(run("ingest", "copy", json!({"to": "sources/Big.bin"}), &[bh]).unwrap_err().contains("up to 50 MB"));
+        // A handed file replaced by a FIFO since: refused, never waited on.
+        #[cfg(unix)]
+        {
+            let p = root.join("pipe.pdf");
+            std::fs::write(&p, "x").unwrap();
+            let ph = make("ingest", &p).unwrap();
+            std::fs::remove_file(&p).unwrap();
+            assert!(std::process::Command::new("mkfifo").arg(&p).status().unwrap().success());
+            assert!(run("ingest", "copy", json!({"to": "sources/pipe.pdf"}), &[ph]).unwrap_err().contains("isn't a file"));
+        }
         let left: Vec<_> = std::fs::read_dir(vault.join("sources")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with('.') || n == "Big.bin").collect();
         assert!(left.is_empty(), "{left:?}");
         // While Claude prepares and asks: nothing is copied.
@@ -265,7 +310,7 @@ mod tests {
     #[test]
     fn pick_files_takes_the_stand_in_in_a_debug_build_and_gives_handles() {
         let (_env, root) = paths::testenv::folders("jshost-pick-files");
-        install(&root, "picker", json!({}));
+        install(&root, "picker", json!({"folders": {"what": "vaults"}, "events": {"on": ["call_ended"]}}));
         sync();
         for n in ["a.md", "b.PDF", "c.txt"] {
             std::fs::write(root.join(n), n).unwrap();
@@ -284,6 +329,19 @@ mod tests {
         assert_eq!(names(one.unwrap()), ["a.md"], "one unless multiple");
         assert!(bad.unwrap_err().contains("file extensions"));
         assert_eq!(run("picker", "read", json!({}), &own_list("picker", &many.as_array().unwrap()[..1]).unwrap()).unwrap(), json!(["a.md"]));
+        // Inside a run Echo started (a nightly routine) and from an event handler: no picker, the stand-in set or not.
+        std::env::set_var("ECHOCTL_PICK_FILES", root.join("a.md"));
+        std::env::set_var("ECHOCTL_PICK_FOLDER", &root);
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let (files, folder) = (run("picker", "pick", json!({}), &[]), run("picker", "folder", json!({}), &[]));
+        std::env::remove_var(crate::notes::HEADLESS);
+        crate::jshost::event("call_ended", &json!({}));
+        let heard = (0..100).find_map(|_| run("picker", "heard", json!({}), &[]).ok().filter(|v| !v.is_null()).or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
+        std::env::remove_var("ECHOCTL_PICK_FILES");
+        std::env::remove_var("ECHOCTL_PICK_FOLDER");
+        assert!(files.unwrap_err().contains("not inside a run Echo started"));
+        assert!(folder.unwrap_err().contains("not inside a run Echo started"));
+        assert_eq!(heard, Some(json!("a picker opens only for what you asked, not from a timer or an event")));
         plugins::remove("picker", true).unwrap();
         sync();
     }

@@ -52,7 +52,8 @@ pub enum PluginCmd {
         command: String,
         /// JSON arguments (default {})
         args: Option<String>,
-        /// A file handed to the command, as a handle it reads or copies (repeatable; refused inside a run Echo started)
+        /// A file handed to the command, as a handle it reads or copies (repeatable). Refused inside a run Echo started —
+        /// a minutes run, a thread's sync, Yolo, a routine preparing and asking — but not a routine acting on its own
         #[arg(long = "file")]
         files: Vec<std::path::PathBuf>,
     },
@@ -319,13 +320,13 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
 }
 
 /// `plugin call --file`: a handle of plugin `id` for each file. Handing a plugin a file is the user's own act: refused
-/// inside a run Echo started (`notes::run_limited`).
+/// where the CLI's limits for runs hold (`notes::run_limited`: every run Echo started but a routine acting on its own).
 #[cfg(feature = "js")]
 fn file_handles(id: &str, files: &[std::path::PathBuf]) -> anyhow::Result<Vec<serde_json::Value>> {
     if files.is_empty() {
         return Ok(vec![]);
     }
-    anyhow::ensure!(!crate::notes::run_limited(), "--file is refused inside a run Echo started: handing a plugin a file is yours to do");
+    anyhow::ensure!(!crate::notes::run_limited(), "--file is refused inside a run Echo started (all but a routine acting on its own): handing a plugin a file is yours to do");
     anyhow::ensure!(crate::plugins::enabled().iter().any(|p| p.id == id), "{id} isn't installed and on");
     files.iter().map(|f| jshost::files::make(id, f)).collect()
 }

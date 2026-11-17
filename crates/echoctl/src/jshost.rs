@@ -592,6 +592,8 @@ struct Current {
     providing: bool,
     /// One of its widget providers runs now (`__widget:<id>`): a `ctx.widgets.changed()` from it is not heard.
     widget: bool,
+    /// A timer or an event handler runs now, no one at the screen asked: no picker opens (`host_async`).
+    unattended: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -648,6 +650,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
                 plugins::scripts::stop_plugin(&id);
+                files::forget(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
@@ -686,6 +689,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
                 for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
                     set_current(&current, id);
+                    current.lock().unwrap().unattended = true;
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
                 }
@@ -701,6 +705,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     }
                     let payload = payload.to_string();
                     set_current(&current, id);
+                    current.lock().unwrap().unattended = true;
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
                 }
@@ -725,6 +730,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             let now = chrono::Utc::now().timestamp_millis() as f64;
             for (id, p) in &plugins {
                 set_current(&current, id);
+                current.lock().unwrap().unattended = true;
                 let ctx = p.ctx.clone();
                 slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__tick").and_then(|f| f.call::<_, ()>((now,))))));
             }
@@ -748,6 +754,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
 fn set_current(current: &Mutex<Current>, id: &str) {
     if let Ok(mut c) = current.lock() {
         c.id = id.into();
+        c.unattended = false;
     }
 }
 
@@ -779,8 +786,12 @@ fn load(rt: &Runtime, id: &str, dir: &Path, current: &Arc<Mutex<Current>>, tx: &
                 let cur = current.clone();
                 let host_fn = Function::new(c.clone(), move |op: String, arg: String| -> String { host_op(&cur, &op, &arg) }).map_err(|e| anyhow!("{e}"))?;
                 g.set("__host", host_fn).map_err(|e| anyhow!("{e}"))?;
-                let (id2, tx2) = (id_s.clone(), tx.clone());
-                let async_fn = Function::new(c.clone(), move |op: String, arg: String| -> u64 { host_async(&id2, &tx2, op, arg) }).map_err(|e| anyhow!("{e}"))?;
+                let (id2, tx2, cur2) = (id_s.clone(), tx.clone(), current.clone());
+                let async_fn = Function::new(c.clone(), move |op: String, arg: String| -> u64 {
+                    let unattended = cur2.lock().is_ok_and(|c| c.unattended);
+                    host_async(&id2, &tx2, op, arg, unattended)
+                })
+                .map_err(|e| anyhow!("{e}"))?;
                 g.set("__hostAsync", async_fn).map_err(|e| anyhow!("{e}"))?;
                 c.eval::<(), _>(PRELUDE).catch(&c).map_err(|e| anyhow!("prelude: {e}"))?;
                 let module = Module::declare(c.clone(), main.clone(), source.clone()).catch(&c).map_err(|e| anyhow!("{main}: {e}"))?;
@@ -823,12 +834,14 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
 }
 
 /// `__hostAsync(op, json)`: started on a worker thread; its outcome settles the plugin's Promise.
-fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String) -> u64 {
+/// `unattended`: started by a timer or an event handler, where no picker opens.
+fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: bool) -> u64 {
     let token = NEXT.fetch_add(1, Ordering::Relaxed);
     let (id, tx) = (id.to_string(), tx.clone());
     std::thread::spawn(move || {
         let arg: Value = serde_json::from_str(&arg).unwrap_or(Value::Null);
-        let out = match service_async(&id, &op, &arg) {
+        let picker = op == "system.pick_folder" || op == "system.pick_files";
+        let out = match if picker && unattended { Err(anyhow!("a picker opens only for what you asked, not from a timer or an event")) } else { service_async(&id, &op, &arg) } {
             Ok(v) => json!({ "value": v }),
             Err(e) => json!({ "error": format!("{e:#}") }),
         };

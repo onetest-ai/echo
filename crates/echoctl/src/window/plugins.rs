@@ -87,9 +87,9 @@ fn folder_image(p: &crate::plugins::Installed, rest: &str) -> Response<Cow<'stat
             .ok_or_else(|| anyhow::anyhow!("not one of its folders"))?;
         let kind = image_kind(&rel).ok_or_else(|| anyhow::anyhow!("not an image"))?;
         let file = crate::grants::resolve(&p.id, &root, &rel)?;
-        let f = std::fs::File::open(&file)?;
-        let m = f.metadata()?;
-        anyhow::ensure!(m.is_file() && m.len() <= 10 << 20, "not an image of 10 MB at most");
+        // Never waiting on a FIFO or device put in the folder.
+        let f = crate::grants::open_regular(&file)?;
+        anyhow::ensure!(f.metadata()?.len() <= 10 << 20, "not an image of 10 MB at most");
         let mut bytes = vec![];
         use std::io::Read;
         f.take(10 << 20).read_to_end(&mut bytes)?;
@@ -395,6 +395,8 @@ mod tests {
         {
             std::os::unix::fs::symlink(outside.join("secret.png"), vault.join("assets/link.png")).unwrap();
             assert_eq!(got("pages", &format!("{real}/assets/link.png")).0, 404, "a link out of the folder isn't followed");
+            assert!(std::process::Command::new("mkfifo").arg(vault.join("assets/pipe.png")).status().unwrap().success());
+            assert_eq!(got("pages", &format!("{real}/assets/pipe.png")).0, 404, "a FIFO is never waited on");
         }
         crate::plugins::set_enabled("pages", false).unwrap();
         assert_eq!(got("pages", &format!("{real}/assets/logo.png")).0, 404, "off: nothing");

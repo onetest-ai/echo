@@ -217,7 +217,10 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - From: `await ctx.system.pickFiles(prompt, {multiple, ext})` — the system's file picker (titled "<plugin> — <prompt>"),
   `[]` when cancelled; one file unless `multiple`; `ext` up to 20 extensions, letters and digits (`["md", "pdf"]`). Its
   window half's `ctx.onFileDrop` (§ Client half). `echoctl plugin call <id> <cmd> '<json>' --file <path>` (repeatable;
-  refused inside a run Echo started). Evidence: `app::choose_files`, `cli::plugin::file_handles`
+  refused where the CLI's limits for runs hold — a minutes run, a thread's sync, Yolo, a routine preparing and asking —
+  never in a routine acting on its own, `notes::run_limited`). No picker opens inside a run Echo started, nor from a
+  timer's or an event handler's own call. File names come from the user's disk: untrusted text, put into the page only
+  through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file, refused while Claude
@@ -488,7 +491,8 @@ Evidence: `jshost::work::check_rows`
 
 - The client half exports `apply(ctx)`; its `ctx`: `call(command, args, {files})` (the host half's commands; `files`:
   handles it was given, passed to the command as its own), `onFileDrop(fn)` (macOS: files dropped on the window while its
-  activity or its Knowledge tab is shown go to `fn(files)` as handles — names and handles, never paths; with no such view
+  activity or its Knowledge tab is shown go to `fn(files)` as handles — names and handles, never paths; a name is untrusted text, drawn only through
+  `ctx.ui.esc`; with no such view
   shown, or on Windows, the drop is Echo's own), `listen`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),

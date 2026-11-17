@@ -27,7 +27,11 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - A handle is kept in the memory of the process that made it — the app's (a pick, a drop, the window's `ctx.call`) or a
   terminal's (`echoctl plugin call --file`) — for an hour, 1,000 at most (the oldest go), with its plugin, the file's real
   path, name and size; the plugin and the page see `{file, name, size}`. Every use checks it is the plugin's and not past
-  its hour. Evidence: `jshost::files::own`
+  its hour. They go when the plugin is switched off, updated or removed (`files::forget`, beside `scripts::stop_plugin`).
+  A picker opens only on a command (refused in a run Echo started, `notes::headless`, and in a timer's or event
+  handler's own slice); Windows' pickers read their prompt and filter from the environment, never quoted into the
+  PowerShell script. A handed file, and an image served, is opened without blocking and refused unless it is a regular
+  file (a FIFO put in its place is never waited on: `grants::open_regular`). Evidence: `jshost::files::own`
 - `copyIn` writes the bytes into a hidden `.<name>.<pid>.<n>.part` beside the target (made new), then links it into place
   (never replacing a file) or, with `createNew: false`, renames it over the file; the part is removed either way.
   Evidence: `jshost::files::copy_in`

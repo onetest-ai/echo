@@ -41,7 +41,8 @@ cases:
   - tests/cases/plugins/TC-016_plugin-hears-only-the-events-its-sheet-named.md
   - tests/cases/plugins/TC-017_plugin-claude-runs-and-session-skills-only-as-its-sheet-said.md
   - tests/cases/plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md
-  - tests/cases/plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles-and-shows-a-granted-folders-images.md
+  - tests/cases/plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md
+  - tests/cases/plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -110,7 +111,8 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 35 | `plugins/TC-017_plugin-claude-runs-and-session-skills-only-as-its-sheet-said.md` | — | — |
 | 36 | `settings/TC-031_colleagues-photos-row-before-a-sign-in.md` | — | — |
 | 37 | `plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md` | — | — |
-| 38 | `plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles-and-shows-a-granted-folders-images.md` | — | — |
+| 38 | `plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md` | — | — |
+| 39 | `plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md` | — | — |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

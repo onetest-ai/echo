@@ -157,6 +157,23 @@ pub fn device_name(name: &str) -> bool {
     matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit())
 }
 
+/// A plain file opened for reading, never waiting on a FIFO, socket or device put in its place: opened without
+/// blocking (macOS), then refused when it isn't a regular file.
+pub fn open_regular(path: &Path) -> Result<std::fs::File> {
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NONBLOCK);
+    }
+    let f = o.open(path)?;
+    if !f.metadata()?.is_file() {
+        bail!("{} isn't a file", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    }
+    Ok(f)
+}
+
 /// `rel` (relative, plain names, no Windows device names) joined to the canonical `root`, kept inside it once links are
 /// followed.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {

@@ -1015,12 +1015,8 @@ pub fn choose_folder(prompt: &str) -> Option<PathBuf> {
     }
     #[cfg(windows)]
     {
-        let script = format!(
-            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
-             $d.Description = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.SelectedPath }}",
-            prompt.replace('\'', "''")
-        );
-        let out = Command::new("powershell").no_window().args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?;
+        let (script, env) = folder_dialog_ps(prompt);
+        let out = Command::new("powershell").no_window().envs(env).args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?;
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (!p.is_empty()).then(|| PathBuf::from(p));
     }
@@ -1059,14 +1055,8 @@ pub fn choose_files(prompt: &str, multiple: bool, ext: &[String]) -> Vec<PathBuf
     }
     #[cfg(windows)]
     {
-        let filter = if ext.is_empty() { String::new() } else { format!("$d.Filter = 'Files|{}'; ", ext.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";")) };
-        let script = format!(
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
-             $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = '{}'; $d.Multiselect = ${multiple}; {filter}\
-             if ($d.ShowDialog() -eq 'OK') {{ $d.FileNames }}",
-            prompt.replace('\'', "''")
-        );
-        let Ok(out) = Command::new("powershell").no_window().args(["-NoProfile", "-STA", "-Command", &script]).output() else { return vec![] };
+        let (script, env) = files_dialog_ps(prompt, multiple, ext);
+        let Ok(out) = Command::new("powershell").no_window().envs(env).args(["-NoProfile", "-STA", "-Command", &script]).output() else { return vec![] };
         return String::from_utf8_lossy(&out.stdout).lines().map(|l| PathBuf::from(l.trim())).filter(|p| p.is_file()).collect();
     }
     #[allow(unreachable_code)]
@@ -1074,6 +1064,29 @@ pub fn choose_files(prompt: &str, multiple: bool, ext: &[String]) -> Vec<PathBuf
         let _ = (prompt, multiple, ext);
         vec![]
     }
+}
+
+// Windows' pickers: the text goes in through the environment, never quoted into the script — PowerShell also ends a
+// '…' string at a curly quote (‘ ’ ‚ ‛), so a quote in a plugin's prompt would end it and run what follows.
+
+/// The PowerShell script of Windows' folder picker and the environment it reads its prompt from.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn folder_dialog_ps(prompt: &str) -> (String, Vec<(&'static str, String)>) {
+    let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
+                  $d.Description = $env:ECHO_PICK_PROMPT; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }";
+    (script.to_string(), vec![("ECHO_PICK_PROMPT", prompt.to_string())])
+}
+
+/// The PowerShell script of Windows' file picker and the environment it reads its prompt and filter from.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn files_dialog_ps(prompt: &str, multiple: bool, ext: &[String]) -> (String, Vec<(&'static str, String)>) {
+    let filter = if ext.is_empty() { String::new() } else { format!("Files|{}", ext.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";")) };
+    let script = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+         $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = $env:ECHO_PICK_PROMPT; $d.Multiselect = ${multiple}; \
+         if ($env:ECHO_PICK_FILTER) {{ $d.Filter = $env:ECHO_PICK_FILTER }}; if ($d.ShowDialog() -eq 'OK') {{ $d.FileNames }}"
+    );
+    (script, vec![("ECHO_PICK_PROMPT", prompt.to_string()), ("ECHO_PICK_FILTER", filter)])
 }
 
 /// A one-line text prompt; the text, or None if cancelled / empty.
@@ -1364,6 +1377,21 @@ pub mod notifications {
 #[cfg(test)]
 mod tests {
     use super::{run_args, translocated};
+
+    #[test]
+    fn windows_pickers_take_the_prompt_from_the_environment_never_in_the_script() {
+        let evil = "x’; Start-Process calc; ‘ 'y' \"z\" $(calc)";
+        let (folder, fenv) = super::folder_dialog_ps(evil);
+        let (files, env) = super::files_dialog_ps(evil, true, &["md".into(), "pdf".into()]);
+        for script in [&folder, &files] {
+            assert!(!script.contains("calc") && !script.contains('’') && !script.contains('‘'), "{script}");
+            assert!(script.contains("$env:ECHO_PICK_PROMPT"));
+        }
+        assert_eq!(fenv, vec![("ECHO_PICK_PROMPT", evil.to_string())]);
+        assert_eq!(env, vec![("ECHO_PICK_PROMPT", evil.to_string()), ("ECHO_PICK_FILTER", "Files|*.md;*.pdf".to_string())]);
+        assert!(files.contains("$d.Multiselect = $true") && super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
+        assert_eq!(super::files_dialog_ps("p", false, &[]).1[1].1, "", "no filter: every file");
+    }
 
     #[test]
     fn a_started_app_runs_without_its_tray_when_the_one_it_follows_had_none() {

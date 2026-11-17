@@ -17,7 +17,7 @@ tags: [plugins, client-half, files, drop]
 
 ## Preconditions
 - The person's own Echo dev build (`cargo build`, then `target/debug/echoctl watch` on made-up data — the native window: a drop of files from Finder can't be driven in a served browser)
-- TC-061's Acme files, with its window half adding to `apply`: `ctx.onFileDrop(async (files) => { const r = await ctx.call('take', {}, { files }); document.body.dataset.acmeDropped = JSON.stringify(r) })`
+- TC-061's Acme files (installed, the vault given to it), plus a window half — `"client":"client.js"` in its manifest, and `client.js`: `export function apply(ctx) { ctx.activities.add({ id: 'main', label: 'Acme files', icon: '', render: () => '<h2>Acme files</h2>' }); ctx.onFileDrop(async (files) => { const r = await ctx.call('take', {}, { files }); document.body.dataset.acmeDropped = JSON.stringify(r) }) }`
 - A made-up file `Kickoff.md` in Finder
 
 ## Steps
