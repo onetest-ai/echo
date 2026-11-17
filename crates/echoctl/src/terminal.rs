@@ -591,16 +591,16 @@ fn plugin_store_key(profile: &str, plugin: &str, cwd: &Path) -> String {
 /// A plugin's session (`ctx.claude.session`, opened only on the user's click in its view): Claude Code in a folder the
 /// user gave plugin `plugin` (`req`: `{folder, path, mode}`), as that folder's own project — its setup, the mode's tools,
 /// no MCP server (`claudejob::in_folder_session`) — with the folder session's permission setting (Ask each time, Auto,
-/// Skip), on `profile` (a wrapper only when it is the default) or the default. Nothing is typed into it but the user's
-/// keys; the plugin gets no handle on it. With the plugin switched off it keeps running, the user's, but doesn't start
-/// again.
+/// Skip), on `profile` (a wrapper only when it is the default) or the default; `pick` as `choose_session` (`new`: a new
+/// conversation). Nothing is typed into it but the user's keys; the plugin's ctx gets no handle on it. With the plugin
+/// switched off it keeps running, the user's, but doesn't start again.
 #[cfg(feature = "js")]
-pub fn start_plugin(key: &str, plugin: &str, req: &serde_json::Value, profile: Option<&str>, cols: u16, rows: u16) -> Result<(u64, serde_json::Value)> {
+pub fn start_plugin(key: &str, plugin: &str, req: &serde_json::Value, profile: Option<&str>, pick: Option<&str>, cols: u16, rows: u16) -> Result<(u64, serde_json::Value)> {
     running_already(key)?;
     if stopping(key) {
         bail!("the previous session is still stopping — try again in a moment");
     }
-    let (cmd, ready, forget, proof, about) = plugin_command(plugin, req, profile)?;
+    let (cmd, ready, forget, proof, about) = plugin_command(plugin, req, profile, pick)?;
     let p = ready.profile().id.clone();
     let id = open_with(key, cmd, cols, rows, Some((p, Box::new(ready))), Some(unmark_on_exit(forget, proof.clone())))?;
     note_proof(id, proof);
@@ -610,7 +610,7 @@ pub fn start_plugin(key: &str, plugin: &str, req: &serde_json::Value, profile: O
 
 /// `start_plugin`'s command, profile lease, exit handler, wrapper mark and what the panel shows.
 #[cfg(feature = "js")]
-fn plugin_command(plugin: &str, req: &serde_json::Value, profile: Option<&str>) -> Result<(CommandBuilder, ai::Ready, OnExit, Option<String>, serde_json::Value)> {
+fn plugin_command(plugin: &str, req: &serde_json::Value, profile: Option<&str>, pick: Option<&str>) -> Result<(CommandBuilder, ai::Ready, OnExit, Option<String>, serde_json::Value)> {
     let f = crate::jshost::folders::session_folder(plugin, req)?;
     if let Some(id) = profile {
         ai::plugin_may_name(&ai::Settings::load()?, id, None)?;
@@ -619,7 +619,9 @@ fn plugin_command(plugin: &str, req: &serde_json::Value, profile: Option<&str>) 
     let ready = ai::ready(&id)?;
     let p = ready.profile().clone();
     let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten().map(|m| p.model(&m));
-    let (mut args, _, forget) = session_args(&plugin_store_key(&p.id, plugin, &f.cwd));
+    let store = plugin_store_key(&p.id, plugin, &f.cwd);
+    choose_session(&store, pick)?;
+    let (mut args, _, forget) = session_args(&store);
     let perm = crate::folder_args::folder_permissions();
     args.extend(crate::claudejob::in_folder_session(&p, model.as_deref(), &f, perm)?);
     // Through a wrapper, its own settings file's session-start hook answering is the check (claude-code-runs R14).
@@ -1064,7 +1066,7 @@ mod tests {
         };
         let argv = |c: &CommandBuilder| c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
         let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
-        let start = |id: &str, req: serde_json::Value, profile: Option<&str>| plugin_command(id, &req, profile).map(|(c, _ready, _, _, about)| (argv(&c), c.get_cwd().map(|d| d.to_string_lossy().into_owned()), about));
+        let start = |id: &str, req: serde_json::Value, profile: Option<&str>| plugin_command(id, &req, profile, None).map(|(c, _ready, _, _, about)| (argv(&c), c.get_cwd().map(|d| d.to_string_lossy().into_owned()), about));
         // In the folder (or a subfolder), its own project last, the mode's tools, no MCP server, a conversation of its
         // own; the folder session's setting — Ask each time: Claude Code's own prompts, no mode of Echo's.
         set(Permissions::Ask);
@@ -1081,6 +1083,16 @@ mod tests {
         let id = after(&a, "--session-id").unwrap();
         let (b, ..) = start("vault", json!({"folder": v}), None).unwrap();
         assert_eq!(after(&b, "--resume"), Some(id.clone()));
+        // A new conversation (⌘K): a new id, resumed after that.
+        let c = plugin_command("vault", &json!({"folder": v}), None, Some("new")).map(|(c, ..)| argv(&c)).unwrap();
+        let fresh = after(&c, "--session-id").unwrap();
+        assert!(fresh != id && after(&c, "--resume").is_none(), "{c:?}");
+        let (d, ..) = start("vault", json!({"folder": v}), None).unwrap();
+        assert_eq!(after(&d, "--resume"), Some(fresh));
+        // Started again on the profile it ran on, named (a session found running after the window reopened): the same
+        // conversation; a wrapper that isn't the default is refused there too (below).
+        let (e, ..) = start("vault", json!({"folder": v}), Some("work")).unwrap();
+        assert_eq!(after(&e, "--resume"), after(&d, "--resume"));
         // A subfolder is a conversation of its own; edit (with folders.write) adds Edit and Write; Auto and Skip.
         set(Permissions::Auto);
         let (a, cwd, _) = start("writer", json!({"folder": v, "path": "Notes", "mode": "edit"}), None).unwrap();

@@ -332,8 +332,10 @@ CLICKS.push(
   { sel: '[data-br-pclosed]', area: 'brain', when: (t) => t.dataset.brPclosed !== undefined, run: (t) => { S.br.pClosed = !S.br.pClosed; return render() } },
   { sel: '[data-conv-keep]', area: 'terminals', when: (t) => t.dataset.convKeep !== undefined, run: (t) => { S.convAsk = null; return render() } },
   { sel: '[data-conv],[data-conv-go]', area: 'terminals', when: (t) => t.dataset.conv || t.dataset.convGo !== undefined, run: (t) => {
-    const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
     const key = t.dataset.termKey
+    // A plugin's session: as it was asked (`S.plugSessions`).
+    const ps = t.dataset.termKind === 'claude-plugin' && (S.plugSessions || {})[key]
+    const extra = ps ? ps.extra : t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
     const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
     const e = Terms.get(key)
     // A running session: asked first (the confirmation's own button goes on).
@@ -342,8 +344,8 @@ CLICKS.push(
     return termRestart(t.dataset.termKind, key, extra, v)
   } },
   { sel: '[data-term-start]', area: 'terminals', when: (t) => t.dataset.termStart, run: (t) => {
-    // A plugin's session: again as it was asked (`S.plugSession`).
-    if (t.dataset.termStart === 'claude-plugin') return S.plugSession && termStart('claude-plugin', S.plugSession.key, S.plugSession.extra)
+    // A plugin's session: again as it was asked (`S.plugSessions`).
+    if (t.dataset.termStart === 'claude-plugin') { const s = (S.plugSessions || {})[t.dataset.termKey]; return s && termStart('claude-plugin', s.key, s.extra) }
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
     if (sel) S.folderProfile = sel.value
     return termStart(t.dataset.termStart, t.dataset.termKey, { call: t.dataset.termCall, profile: sel ? sel.value : undefined })

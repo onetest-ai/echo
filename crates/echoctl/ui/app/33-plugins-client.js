@@ -192,9 +192,10 @@ function pluginCtx(id) {
         const key = `claude:plugin:${id}`, e = Terms.get(key)
         const live = !!(e && e.id != null && !e.exited)
         const a = pluginSessionAsk(id, opts, typeof navigator === 'undefined' ? null : navigator, live ? (S.ptyAbout || {})[key] || {} : null)
-        if (a.other) { S.plugSession = { key, extra: aboutExtra((S.ptyAbout || {})[key]) }; claudePanel('claude-plugin'); throw new Error('Claude is open for this plugin in another folder: close it in its panel first') }
-        if (a.start || !S.plugSession || S.plugSession.key !== key) S.plugSession = { key, extra: a.extra }
-        claudePanel('claude-plugin')
+        // Its own tab (each plugin's session has one), shown; started only when it isn't running.
+        if (a.start || !(S.plugSessions || {})[key]) plugSessionNote(id, a.other ? { ...aboutExtra((S.ptyAbout || {})[key]), plugin: id } : a.extra)
+        claudePanel(plugSessionView(id))
+        if (a.other) throw new Error('Claude is open for this plugin in another folder: close it in its panel first')
         if (a.start) termStart('claude-plugin', key, a.extra)
       },
     },
@@ -295,7 +296,8 @@ function unloadPlugin(id) {
   // Its work rows' targets (`task.actions#<plugin>:<row>`) go with it.
   slotForget(Plugins.targets, id)
   // Its Claude session is the user's: it stays while it runs, but its panel goes once it has ended (it can't start again).
-  if (S.plugSession && S.plugSession.extra.plugin === id) { const e = Terms.get(S.plugSession.key); if (!(e && e.id != null && !e.exited)) S.plugSession = null }
+  const sk = `claude:plugin:${id}`
+  if (S.plugSessions && S.plugSessions[sk]) { const e = Terms.get(sk); if (!(e && e.id != null && !e.exited)) delete S.plugSessions[sk] }
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
   delete Plugins.drops[id]
@@ -357,6 +359,9 @@ function pluginSessionAsk(id, o, nav, running) {
   const other = !!running && (running.folder !== folder || (running.path || '') !== extra.path)
   return { key: `claude:plugin:${id}`, extra, start: !running, other }
 }
+/** What starts a plugin's session found running (`api/ptys`' `about`) again: the same request on the profile it runs on,
+ *  so Start resumes the same conversation (Echo checks the profile again). */
+const aboutExtra = (a = {}) => ({ plugin: a.plugin, folder: a.folder, path: a.path || '', mode: a.mode, profile: a.profile || '' })
 // end of the plugin session block
 const slotFor = (slot, target) => (Plugins.slots[slot] || []).filter((x) => { try { return x.when ? x.when(target) : !(target && target.kind === 'plugin') } catch { return false } })
 /** A slot's buttons for `target`: `menu` (menu items) or `buttons`; `key` when the slot is drawn for several targets at

@@ -238,10 +238,13 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
   model has no auto mode; Skip all permission checks — `--dangerously-skip-permissions`), never the plugin's. `profile`:
   one of the user's AI profiles (a wrapper only when it is the default), else the default. It opens only on the user's
   click or key in the plugin's screens (`copyAllowed`, else it throws before anything is sent); asked again while it
-  runs, it is shown (in another folder it throws: one session per plugin). The panel names the plugin, the folder, the
-  mode, the permissions and the profile. The plugin gets no handle on it: it can't type into it or read its screen, and
-  nothing is typed in by Echo — only the user's keys. Switched off or removed, its session runs on as the user's (its
-  panel goes once it has ended) and doesn't start again. Refused before Claude Code starts: no `claude` or `folders` on
+  runs, it is shown (in another folder it throws: one session per plugin). Each plugin's session has its own tab, so
+  sessions of several plugins run side by side; one found running when the window opens gets its tab back, and its
+  Resume keeps the profile it ran on (Echo checks it again). ⌘K has "Restart" and "New conversation" for each, as for
+  the Claude · Echo folder session. The panel names the plugin, the folder, the mode, the permissions and the profile.
+  Its `ctx` has no way to type into or read the session, and Echo types nothing in — only the user's keys. Switched off
+  or removed, its session runs on as the user's (its tab goes once it has ended) and doesn't start again. Refused
+  before Claude Code starts: no `claude` or `folders` on
   its sheet, a folder not given, a path outside it or not a folder, `edit` without `folders.write`, another mode, a
   wrapper profile that isn't the default, the plugin off. Evidence: `terminal::start_plugin`,
   `jshost::folders::session_folder`, `claudejob::in_folder_session`, `pluginSessionAsk` (window script)

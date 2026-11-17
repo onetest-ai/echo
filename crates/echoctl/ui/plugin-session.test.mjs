@@ -12,9 +12,9 @@ const block = (from, to) => {
   assert.ok(start >= 0 && end > start, `${from} not found in app.js`)
   return src.slice(start, end)
 }
-const { pluginSessionAsk } = new Function(`${block('// ── copy guard:', '// end of the copy guard block')}
+const { pluginSessionAsk, aboutExtra } = new Function(`${block('// ── copy guard:', '// end of the copy guard block')}
 ${block('// ── plugin session:', '// end of the plugin session block')}
-return { pluginSessionAsk }`)()
+return { pluginSessionAsk, aboutExtra }`)()
 
 const click = { userActivation: { isActive: true } }
 const vault = '/Users/sam/Acme vault'
@@ -45,6 +45,11 @@ assert.deepEqual(pluginSessionAsk('acme-vault', { folder: vault }, click, { fold
 })
 assert.equal(pluginSessionAsk('acme-vault', { folder: vault, path: 'Notes' }, click, { folder: vault, path: '' }).other, true)
 assert.equal(pluginSessionAsk('acme-vault', { folder: '/Users/sam/Other' }, click, { folder: vault, path: '' }).other, true)
+// Found running after the window reopened: started again (Resume) as it was, on the profile it runs on — the same
+// conversation, not the default's.
+assert.deepEqual(aboutExtra({ plugin: 'acme-vault', name: 'Acme vault', folder: vault, path: 'Notes', mode: 'edit', profile: 'work', profile_name: 'Work', permissions: 'auto' }),
+  { plugin: 'acme-vault', folder: vault, path: 'Notes', mode: 'edit', profile: 'work' })
+assert.equal(aboutExtra({ plugin: 'acme-vault', folder: vault, mode: 'read' }).profile, '')
 // The plugin's ctx: the guard first, and no way to type into the session or read it.
 assert.ok(/session: \(opts\) => \{(?:(?!termStart|claudePanel)[\s\S]){0,300}?pluginSessionAsk\(id, opts,/.test(src), 'ctx.claude.session asks pluginSessionAsk first')
 const ctx = block('function pluginCtx(id)', '/** Load the client halves')

@@ -173,13 +173,17 @@ function claudeTools(key, kind, extra, running) {
   const confirm = ask ? `<div class="term-stale term-ask" role="alert"><span class="grow">${esc(askText)}</span><button class="btn ghost sm" data-conv-keep>Keep it running</button><button class="btn primary sm" data-conv-go="${esc(ask.session)}" ${data}>${ask.session === '' ? 'Restart' : 'Start new'}</button></div>` : ''
   return confirm || hint
 }
-/** ⌘K: restart a Claude panel's session (plugins and settings read afresh) or start a new conversation there. */
+/** ⌘K: restart a Claude panel's session (plugins and settings read afresh) or start a new conversation there — the
+ *  folder session's and each plugin's session's (`S.plugSessions`). */
 function claudeSessionActions(add) {
-  const panels = [['claude-folder', 'claude:folder', 'Claude', { profile: S.folderProfile || ai().default || undefined }]]
-  for (const [kind, key, label, extra] of panels) {
+  const panels = [['claude-folder', 'claude:folder', 'Claude', { profile: S.folderProfile || ai().default || undefined }, 'claude-folder']]
+  for (const s of Object.values(S.plugSessions || {})) {
+    panels.push(['claude-plugin', s.key, `Claude · ${((S.ptyAbout || {})[s.key] || {}).name || s.extra.plugin}`, s.extra, plugSessionView(s.extra.plugin)])
+  }
+  for (const [kind, key, label, extra, view] of panels) {
     const e = Terms.get(key), running = !!(e && e.id != null && !e.exited)
     const act = (session) => () => {
-      claudePanel(kind)
+      claudePanel(view)
       // While it runs the panel asks first; else it starts at once.
       if (running) { S.convAsk = { key, session }; render() } else termRestart(kind, key, extra, session)
     }
@@ -254,24 +258,35 @@ function claudeFolderView() {
 PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(CLAUDE_MARK), area: 'bottom', render: claudeFolderView })
 
 // ── A plugin's Claude session (`ctx.claude.session`, `terminal::start_plugin`): Claude Code in a folder the user gave
-// the plugin, as that folder's own project — the last one a plugin opened here, or one found running. The panel says
-// whose and where; only the user types in it.
-/** What starts a plugin's session again (Resume), from what Echo says it is (`about`): the default profile. */
-const aboutExtra = (a = {}) => ({ plugin: a.plugin, folder: a.folder, path: a.path || '', mode: a.mode, profile: '' })
-/** What the app says of its plugins' sessions (`api/ptys`): kept by key; one running is shown when none was opened here. */
+// the plugin, as that folder's own project — each plugin's in its own tab (`S.plugSessions`, by terminal key), opened
+// here or found running. The panel says whose and where; only the user types in it.
+/** The bottom-panel view of plugin `plugin`'s session, made once (shown while `S.plugSessions` has it): its id. */
+function plugSessionView(plugin) {
+  const id = `claude-plugin:${plugin}`, key = `claude:plugin:${plugin}`
+  if (!PANEL_VIEWS.some((v) => v.id === id)) {
+    PANEL_VIEWS.push({ id, get label() { const a = (S.ptyAbout || {})[key]; return `Claude · ${(a && a.name) || plugin}` }, icon: ICON(CLAUDE_MARK), area: 'bottom', when: () => !!(S.plugSessions || {})[key], render: () => claudePluginView(key) })
+  }
+  return id
+}
+/** Plugin `plugin`'s session as asked (`extra`: what starts it again), with its tab: the tab's view id. */
+function plugSessionNote(plugin, extra) {
+  const key = `claude:plugin:${plugin}`
+  S.plugSessions = S.plugSessions || {}
+  S.plugSessions[key] = { key, extra }
+  return plugSessionView(plugin)
+}
+/** What the app says of its plugins' sessions (`api/ptys`): kept by key; each one running gets its tab. */
 function notePluginSessions(list) {
   S.ptyAbout = Object.fromEntries(list.filter((t) => t.about).map((t) => [t.key, t.about]))
-  const t = !S.plugSession && list.find((x) => x.about && !x.exited)
-  if (t) S.plugSession = { key: t.key, extra: aboutExtra(t.about) }
+  for (const t of list) if (t.about && !t.exited && !(S.plugSessions || {})[t.key]) plugSessionNote(t.about.plugin, aboutExtra(t.about))
 }
-function claudePluginView() {
-  const s = S.plugSession
+function claudePluginView(key) {
+  const s = (S.plugSessions || {})[key]
   if (!s) return ''
-  const a = (S.ptyAbout || {})[s.key] || {}
+  const a = (S.ptyAbout || {})[key] || {}
   const where = [a.folder || s.extra.folder, a.path || s.extra.path].filter(Boolean).join('/')
   const how = (a.mode || s.extra.mode) === 'edit' ? 'it may edit files there' : 'it reads only'
   const head = `<div class="term-stale"><span class="grow">${esc(a.name || s.extra.plugin)} · Claude Code in ${esc(where)}, as that folder's own project — ${how}${a.permissions ? `; ${esc(a.permissions)}` : ''}${a.profile_name ? ` · ${esc(a.profile_name)}` : ''}</span></div>`
-  return head + termView(s.key, 'claude-plugin', 'Start Claude', '', s.extra)
+  return head + termView(key, 'claude-plugin', 'Start Claude', '', s.extra)
 }
-PANEL_VIEWS.push({ id: 'claude-plugin', get label() { const a = S.plugSession && (S.ptyAbout || {})[S.plugSession.key]; return `Claude · ${(a && a.name) || (S.plugSession && S.plugSession.extra.plugin) || 'plugin'}` }, icon: ICON(CLAUDE_MARK), area: 'bottom', when: () => !!S.plugSession, render: claudePluginView })
 

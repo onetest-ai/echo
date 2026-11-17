@@ -373,7 +373,7 @@
   },
   {
    "id": "F-PLUG-92",
-   "feature": "A plugin's Claude session opens only on the user's click or key in the plugin's screens (without the page's user activation `ctx.claude.session` throws and nothing is sent); the plugin's ctx can't type into it or read it, and Echo types nothing in; asked again while it runs it is shown, in another folder it throws (one session per plugin)",
+   "feature": "A plugin's Claude session opens only on the user's click or key in the plugin's screens (without the page's user activation `ctx.claude.session` throws and nothing is sent); its `ctx` has no way to type into or read the session, and Echo types nothing in; asked again while it runs it is shown, in another folder it throws (one session per plugin)",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -384,6 +384,15 @@
    "id": "F-PLUG-93",
    "feature": "A plugin's Claude session is refused before Claude Code starts, the reason in its panel: no `claude` or `folders` on its sheet, a folder not given to it, a path outside it or not a folder, `edit` without `folders.write`, `copy` or another mode, a wrapper profile that isn't the default, the plugin off, and on a profile of Echo's own a folder whose `.claude/settings.json` could route it; a session open when its plugin is switched off runs on as the user's but doesn't start again",
    "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-94",
+   "feature": "Each plugin's Claude session has its own bottom-panel tab ('Claude · <plugin name>'): another plugin's session opening never takes it away, so every running one can be reached and ended; one found running when the window opens gets its tab back, and its Start/Resume keeps the profile it ran on (the same conversation, the profile checked again by Echo); ⌘K has 'Restart Claude · <plugin name>' and 'New conversation in Claude · <plugin name>' for each, as for the folder session",
+   "priority": "medium",
    "check": "agent",
    "axes": [
     "plugin.uses"

@@ -141,7 +141,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 "claude-plugin" => {
                     let plugin = v["plugin"].as_str().unwrap_or("");
                     let key = format!("claude:plugin:{plugin}");
-                    crate::terminal::start_plugin(&key, plugin, v, v["profile"].as_str().filter(|p| !p.is_empty()), cols, rows).map(|(id, a)| {
+                    crate::terminal::start_plugin(&key, plugin, v, v["profile"].as_str().filter(|p| !p.is_empty()), v["session"].as_str(), cols, rows).map(|(id, a)| {
                         about = a;
                         (id, key)
                     })
