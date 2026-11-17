@@ -1,0 +1,8 @@
+{
+  "id": "vault-demo",
+  "name": "Vault demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: three tabs of Echo's Knowledge section — Pages (hidden until a vault exists), Inbox and Vaults — with badges, a header strip, a search, dropped files and a Knowledge settings card (tests/cases/plugins/TC-170 to TC-176).",
+  "main": "main.js",
+  "client": "client.js"
+}

@@ -239,7 +239,7 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-split],[data-br-retag],[data-br-move],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-merge-into],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
-  if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
+  if (d.brTab) { S.br.tab = d.brTab; go(knowledgeGo(d.brTab)); return loadBrain().then(render) }
   if (d.brNode) {
     S.br.node = d.brNode; S.br.edit = null; S.br.nodeData = null; S.br.doc = null
     const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)

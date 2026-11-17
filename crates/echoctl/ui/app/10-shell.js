@@ -168,8 +168,11 @@ function barButton() {
 function actbar() {
   const btn = (a, i) => {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
+    // Knowledge: its plugin tabs' badges, summed ('!' when one needs the user).
+    const kn = a.id === 'brain' ? knowledgeBadge(knowledgeGroupsNow()) : ''
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
-      : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : ''
+      : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>`
+      : kn === '!' ? '<span class="act-badge" aria-label="Needs you">!</span>' : kn ? `<span class="act-badge new" aria-label="${kn} new">${kn}</span>` : ''
     const key = a.id === 'settings' ? MOD + ',' : MOD + (i + 1)
     return `<button class="act" data-go="${esc(a.id)}"${S.view === a.id ? ' aria-current="page"' : ''} aria-label="${esc(a.label)}" data-hint="${esc(a.label)}" data-key="${esc(key)}">${a.icon}<span class="act-label">${esc(a.label)}</span>${badge}</button>`
   }

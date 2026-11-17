@@ -82,6 +82,7 @@ node crates/echoctl/ui/thread-slot.test.mjs
 node crates/echoctl/ui/client-slot.test.mjs
 # The plugins' chips on a call's row in the calls list (callRowChips).
 node crates/echoctl/ui/call-row-slot.test.mjs
+node crates/echoctl/ui/knowledge-tabs.test.mjs
 # A plugin's window half: the stylesheets it may load, and what unloading it takes out.
 node crates/echoctl/ui/plugin-client-ctx.test.mjs
 # Which plugin files dropped on the window go to: the one whose view is shown and listens, else Echo's own (dropTarget).

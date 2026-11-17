@@ -55,7 +55,7 @@ assert.equal(forBeta, 1, 'another thread in the same box: after runs for it')
 
 // A plugin switched off: its thread.profile row goes with it.
 const u = src.indexOf('function unloadPlugin('), v = src.indexOf('\n}\n', u)
-const P = { slots: { 'thread.profile': [{ plugin: 'gh', id: 'repos' }, { plugin: 'jira', id: 'project' }] }, targets: {}, owned: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { gh: '1' }, applied: { gh: true }, drops: {} }
+const P = { slots: { 'thread.profile': [{ plugin: 'gh', id: 'repos' }, { plugin: 'jira', id: 'project' }] }, targets: {}, owned: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { gh: '1' }, applied: { gh: true }, drops: {}, names: { gh: 'GitHub' } }
 // With the helper it calls for the work rows' slot targets (slotForget), taken from the same script.
 const f = src.indexOf('function slotForget('), g = src.indexOf('\n}\n', f)
 const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'followDrops', 'micClose', `${f >= 0 ? src.slice(f, g + 3) : ''}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, () => {}, () => {})

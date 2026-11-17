@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-KNOW-01",
-   "feature": "Knowledge shows in the activity bar only with Recall on or a plugin's tab; otherwise `#brain` opens Calls",
+   "feature": "Knowledge shows in the activity bar only with Recall on or a plugin's tab shown; otherwise `#brain` opens Calls; with Recall off only the plugins' tabs show and the first one opens",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -42,9 +42,51 @@
   },
   {
    "id": "F-KNOW-06",
-   "feature": "Plugins add tabs and settings rows to Knowledge (e.g. Obsidian vaults)",
+   "feature": "Plugins add tabs to Knowledge, each plugin's a group under its name after Recall's, with their icons, and a card in Settings → Knowledge under Recall's (an old single tab still works)",
    "priority": "low",
-   "check": "person",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-07",
+   "feature": "A plugin tab's address `#brain/<plugin>:<tab>/<rest>` opens it with its rest as written, from a link, back and forward or a reload; a link to its hidden tab opens the plugin's first shown tab",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-08",
+   "feature": "A plugin's tab is hidden while it says so, and shows its badge (a number or !); the activity bar's Knowledge badge sums them, ! when any is !",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-09",
+   "feature": "A plugin's header strip shows over its tabs; moving between its tabs keeps each tab's scroll, what was typed and the plugin's state (nothing unloads until the plugin does)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-10",
+   "feature": "The tab row's search box runs the shown plugin tab's own search and is hidden where that tab has none; Recall is never searched from a plugin tab",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-11",
+   "feature": "Files dropped on the window while any of a plugin's Knowledge tabs is shown go to that plugin",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-12",
+   "feature": "The gear at the end of Knowledge's tab row opens Settings → Knowledge",
+   "priority": "low",
+   "check": "agent",
    "axes": []
   }
  ]

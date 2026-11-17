@@ -5,8 +5,6 @@
 /** Recall's tabs. Topics, numbers, coverage and the graph were the Brain's and didn't survive our tests (0.8.0, `brain::EXTRAS`):
  *  their views stay in the code until removed, never shown. */
 const RECALL_EXTRAS = false
-/** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
-const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
 const BRAIN_TABS = RECALL_EXTRAS
   ? [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
   : [['sources', 'Sources'], ['terms', 'Dictionary'], ['people', 'People']]
@@ -35,30 +33,22 @@ async function loadBrainNode() {
 }
 const clientName = (id) => id === '-' ? 'No client' : ((projClient(id) || {}).name || id)
 const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
-/** Draws the Knowledge view in the primary area (`renderNow`). */
+/** Draws the Knowledge view in the primary area (`renderNow`): a plugin's tab (`drawKnowledgePlugin`) or Recall's. */
 function drawBrain(primary) {
-  patch(primary, `<main class="main">${brainView()}</main>`)
-  // A plugin's Knowledge tab draws after the page is in (its graph).
-  const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
-  const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
-  try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
+  const groups = knowledgeGroupsNow(), tab = knowledgeTabNow(groups)
+  const kt = groups.flatMap((g) => g.tabs).find((t) => t.key === tab)
+  if (kt) {
+    // `#brain` alone, or a Recall tab with Recall off: the address names the tab shown (its drops, its microphone).
+    const h = knowledgeHash(location.hash)
+    if (h && !/^[a-z0-9-]+:/.test(h.tab)) { replaceUrl(`#brain/${kt.key}`); followDrops() }
+    return drawKnowledgePlugin(primary, groups, kt)
+  }
+  patch(primary, `<main class="main">${brainView(groups)}</main>`)
   drawGraph()
   drawPeople()
 }
-function brainView() {
-  const ktabs = knowledgeTabs()
-  const kt = ktabs.find((x) => x.tab === S.br.tab)
-  const ktabsHtml = ktabs.map((x) => `<button class="tab" role="tab" data-br-tab="${esc(x.tab)}" aria-selected="${S.br.tab === x.tab}">${esc(x.label)}</button>`).join('')
-  // Recall off: only the plugins' tabs.
-  if (kt || !brainOn()) {
-    const t = kt || ktabs[0]
-    if (!t) return ''
-    S.br.tab = t.tab
-    let html = ''
-    try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
-    const recallTabs = brainOn() ? BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="false">${l}</button>`).join('') : ''
-    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
-  }
+function brainView(groups) {
+  if (!brainOn()) return ''
   const d = S.br.data
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
   if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
@@ -67,10 +57,10 @@ function brainView() {
   const [sk, sv] = (S.br.scope || '').split(':')
   const inScope = sk ? ((sc[sk === 'client' ? 'clients' : 'threads'] || []).find((x) => x.id === sv) || {}).documents : null
   const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
-  const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Knowledge">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
+  const tabs = knowledgeTabRow(BRAIN_TABS.map(([id, l]) => [id, l, n[id] ? nf(n[id]) : '']), groups, S.br.tab)
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}</div><div class="kn-row"><div class="tabs" role="tablist">${tabs}</div><span class="kn-end">${knGear()}</span></div></header>`
   const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }

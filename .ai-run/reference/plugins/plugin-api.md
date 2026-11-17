@@ -799,14 +799,14 @@ Evidence: `jshost::work::check_rows`
   handles it was given, passed to the command as its own; sent as `POST /api/plugin/<id>/call/<command>` with
   `{args, files}` as its JSON body, 4 MB at most — more is refused, "too much for one plugin call: 4 MB at most"; any
   other method is refused; the plugin installed and on), `onFileDrop(fn)` (macOS: files dropped on the window while its
-  activity or its Knowledge tab is shown go to `fn(files)` as handles — names and handles, never paths; a name is untrusted text, drawn only through
+  activity or any of its Knowledge tabs is shown go to `fn(files)` as handles — names and handles, never paths; a name is untrusted text, drawn only through
   `ctx.ui.esc`; with no such view
   shown, or on Windows, the drop is Echo's own), `listen`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
-  `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
+  `where()` (the activity and Settings section shown; `route`: the rest of the address, decoded; in Knowledge `tab`: the tab shown), `go(hash)`, `render()`, `markdown(md, opts)` and
   `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
   4 MB at most, as `call`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
@@ -844,8 +844,36 @@ Evidence: `jshost::work::check_rows`
   `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
   permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
   (window script), `window::plugins::mic_open`
-- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `knowledge.tab` and
-  `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
+- Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `knowledge.tab`,
+  `knowledge.header` and `knowledge.settings`. Evidence: `SLOTS` (window script)
+- `ctx.slots.add('knowledge.tab', {id, label, icon?, order?, badge?, visible?, search?, onSearch?, render(rest) → HTML,
+  after?(box, rest)})`: a tab of Echo's Knowledge section (activity `#brain`), as many as it adds. A plugin's tabs are
+  drawn after Recall's (Sources, Dictionary, People) as a group headed by its name, in the order the plugins loaded,
+  its own by `order` (a number; without one, after them as added); `icon` an SVG string drawn before the label (15 px);
+  `visible()` false (or throwing) leaves the tab out; `badge()` '' | a number ≥ 1 | `'!'` on the tab (anything else:
+  none). Its address is `#brain/<plugin>:<id>/<rest>`: `rest` goes to `render` and `after` as written in the address
+  (its parts still URL-encoded, so a `/` inside a part stays `%2F`), `ctx.where().route` gives it decoded; back and
+  forward follow, `ctx.go('brain/<plugin>:<id>/…')` (and a link to it from `ctx.markdown`, ⌘K, an Inbox item's `go`,
+  a widget) switches the tab. A link to a tab hidden now opens the plugin's first shown tab (the address kept); `#brain`
+  alone opens Recall's Sources with Recall on, else the first shown plugin tab. Each tab's pane is the section's full
+  width and height with no padding and its own scroll; each tab keeps its own box, so moving between tabs leaves a
+  tab's scroll and what was typed in it, and a tab opens on the rest it last had; nothing unloads until the plugin does
+  (`onUnload` only then). `render` runs on every draw (return the same HTML for the same state: `ctx.ui.patch` keeps the
+  box then), `after` after each draw. A search box at the end of the tab row is shown for a tab with `onSearch(q)`
+  (called on every keystroke; each tab keeps its words) unless `search: false`; Recall is never searched from it. Files
+  dropped while any of its tabs is shown go to its `onFileDrop`. With Recall off, Knowledge is in the activity bar while
+  any plugin tab is shown, Recall's tabs not. The activity bar's Knowledge badge: `'!'` when any tab's is `'!'`, else
+  their numbers summed. A second tab with the same id is left out. An old tab `{id, label, render(), after(box)}` works
+  as before, in its plugin's group. Evidence: `knowledgeGroups`, `knowledgeTab`, `knowledgeHash`, `drawKnowledgePlugin`
+  (window script)
+- `ctx.slots.add('knowledge.header', {header() → HTML, after?(box)})`: one per plugin (a second is left out), a strip
+  under the tab row while any of its tabs is shown (a vault switcher, an "Ask" box); the same box for all its tabs, so
+  what is typed in it stays while the user moves between them; empty HTML hides it. Evidence: `knowledgeHeaders`
+  (window script)
+- `ctx.slots.add('knowledge.settings', {label, render() → setRow(…) HTML})`: its card in Settings → Knowledge
+  (`#settings/brain`), under Recall's, headed by the plugin's name; the gear at the end of Knowledge's tab row opens
+  that page, and its own Settings section can link there with `ctx.go('settings/brain')`. Evidence: `knowledgeSettings`
+  (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /

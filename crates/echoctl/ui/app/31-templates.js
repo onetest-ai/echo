@@ -435,12 +435,12 @@ function documentsSettings(b, s, field) {
   return setCard('Documents (thread folders)', rows)
 }
 
-/** The plugins' rows of Settings → Knowledge (the Knowledge plugin's switch and reading state), each its own card. */
+/** The plugins' cards of Settings → Knowledge (`knowledge.settings`), under Recall's: each headed by its plugin's name. */
 function knowledgeSettings() {
   return (Plugins.slots['knowledge.settings'] || []).map((x) => {
     let html = ''
     try { html = x.render() } catch (e) { html = `<p class="error">${esc(String((e && e.message) || e))}</p>` }
-    return html ? setCard(x.label || 'Notes', [html]) : ''
+    return html ? setCard(Plugins.names[x.plugin] || x.label || x.plugin, [html]) : ''
   }).join('')
 }
 

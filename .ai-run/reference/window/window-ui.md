@@ -16,6 +16,12 @@ rules are in `.ai-run/guides/window/window-ui.md`.
   (`window::plugins::call_body`; another method 405, longer 413), in the window (wry's handler gets the body, macOS and
   WebView2) and the served window (`window::serve_conn`: a POST only with its cookie and Origin, as `/ipc`).
 
+- Knowledge (`#brain`): `#brain/<tab>` for Recall's tabs (`sources`, `terms`, `people`), `#brain/<plugin>:<tab>/<rest>`
+  for a plugin's (`route`, `knowledgeHash`: `S.br.rest` as written, `S.plRoute` decoded, each tab's last rest in
+  `S.br.rests`); the tab shown is `knowledgeTab` (`knowledge-tabs.test.mjs`). A plugin tab is drawn by
+  `drawKnowledgePlugin` (part `49-knowledge-plugins`): a fixed frame (head, `.kn-strip`, `.kn-panes`) with one
+  `.kn-pane` box per tab, hidden when another is shown and its scroll put back when shown again.
+
 ## IPC
 
 - `window::from_page` accepts IPC only from the top page.

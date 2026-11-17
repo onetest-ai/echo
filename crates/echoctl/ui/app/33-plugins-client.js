@@ -24,16 +24,21 @@ const Plugins = {
   targets: {},
   /** plugin id → its `ctx.onFileDrop` handlers */
   drops: {},
+  /** plugin id → its name (a group of Knowledge's tabs is headed by it) */
+  names: {},
 }
-// `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
-// `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
+// `knowledge.tab`: a tab of the Knowledge activity ({id, label, icon (svg), order, badge() → '' | n | '!', visible() → bool,
+// search: false, onSearch(q), render(rest) → HTML, after(box, rest)}), `#brain/<plugin>:<id>/<rest>` — its plugin's tabs
+// a group under its name after Recall's (`knowledgeGroups`).
+// `knowledge.header`: a strip over its plugin's tabs while one is shown ({header() → HTML, after(box)}), one per plugin.
+// `knowledge.settings`: its card in Settings → Knowledge ({label, render() → setRow(…) HTML}), under Recall's.
 // `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 // `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
 // `thread` = {id, name, client}.
 // `client.profile`: a row of a client's Profile, under its Threads, shaped as `thread.profile`; `client` = {id, name}.
 // `call.row`: a chip on a call's row in the calls list ({id, label, chip(call) → short text or nothing}), `call` =
 // {name, title, started_at, status, memo}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'client.profile', 'call.row']
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.header', 'knowledge.settings', 'thread.profile', 'client.profile', 'call.row']
 // ── call row slot: the plugins' chips on a call's row (no DOM: `call-row-slot.test.mjs`) — each item's `chip(call)`
 // gives a short text (24 characters, the rest cut) or nothing; one that throws is left out (logged) and the row drawn
 // without it; a second item with the same plugin and id is left out. `chip` runs as a widget's draw does: a
@@ -124,7 +129,7 @@ function pluginCtx(id) {
     listenWindow: (type, fn, opts) => { if (gone()) return; window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
     /** Its own cleanup (timers, observers), run when it is switched off, updated or removed. */
     onUnload: (fn) => { if (!gone()) owned.cleanups.push(fn) },
-    /** Files dropped on the window while one of its views is shown (its activity, its Knowledge tab): `fn(files)`, each
+    /** Files dropped on the window while one of its views is shown (its activity, any of its Knowledge tabs): `fn(files)`, each
      *  a handle {file, name, size} for `call(…, {files})`. macOS. */
     onFileDrop: (fn) => { if (gone()) return; (Plugins.drops[id] = Plugins.drops[id] || []).push(fn); followDrops() },
     /** Its host half's command; `{files}`: handles it was given (a drop's), the command's own `{files}`. */
@@ -186,7 +191,12 @@ function pluginCtx(id) {
     },
     slots: {
       list: () => SLOTS.slice(),
-      add: (slot, item) => { if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`); add(Plugins.slots[slot] = Plugins.slots[slot] || [], item) },
+      add: (slot, item) => {
+        if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`)
+        add(Plugins.slots[slot] = Plugins.slots[slot] || [], item)
+        // The window opened at one of its Knowledge tabs before it loaded (Recall off: routed to Calls): routed again.
+        if (slot === 'knowledge.tab' && S.view !== 'brain' && knowledgeHash(hashText())) { route(); render() }
+      },
     },
     panels: { add: (v) => { PANEL_VIEWS.push({ area: 'right', ...v, id: `${id}:${v.id}`, plugin: id }); render() } },
     /** Its `page` widgets (kind `page` in its manifest): draw(widget, ({data, size, theme}) => HTML) — data from its
@@ -231,7 +241,7 @@ function pluginCtx(id) {
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
-    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? S.br.tab : undefined }),
+    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? knowledgeTabNow() || S.br.tab : undefined }),
     go: (hash) => go(hash),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
@@ -353,6 +363,7 @@ async function loadPluginClientsNow(snapshot) {
     if (Plugins.loaded[x.id]) continue
     changed = true
     Plugins.loaded[x.id] = key(x)
+    Plugins.names[x.id] = x.name || x.id
     try {
       const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(key(x))}`, location.href).href)
       if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
@@ -399,6 +410,7 @@ function unloadPlugin(id) {
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
   delete Plugins.drops[id]
+  delete Plugins.names[id]
   followDrops()
 }
 // ── plugin stylesheet: where `ctx.ui.stylesheet(path)` loads a package's CSS from (no DOM:
@@ -620,7 +632,7 @@ const ownTitleBarCard = (st, state) => (state || {}).platform !== 'windows' ? ''
 // end of the own-title-bar block
 const SETTINGS_BODY = {
   templates: () => templatesSettings(),
-  brain: (st) => knowledgeSettings() + brainSettings(st),
+  brain: (st) => brainSettings(st) + knowledgeSettings(),
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')

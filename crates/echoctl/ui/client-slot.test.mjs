@@ -47,7 +47,7 @@ assert.deepEqual(err, ['kb: Vault: later'], 'an after that throws is logged')
 
 // A plugin switched off: its client.profile row goes with it.
 const u = src.indexOf('function unloadPlugin('), v = src.indexOf('\n}\n', u)
-const P = { slots: { 'client.profile': [{ plugin: 'kb', id: 'vault' }, { plugin: 'crm', id: 'deal' }] }, targets: {}, owned: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kb: '1' }, applied: { kb: true }, drops: {} }
+const P = { slots: { 'client.profile': [{ plugin: 'kb', id: 'vault' }, { plugin: 'crm', id: 'deal' }] }, targets: {}, owned: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kb: '1' }, applied: { kb: true }, drops: {}, names: { kb: 'Knowledge' } }
 const f = src.indexOf('function slotForget('), g = src.indexOf('\n}\n', f)
 const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'followDrops', 'micClose', `${f >= 0 ? src.slice(f, g + 3) : ''}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, () => {}, () => {})
 unload('kb')

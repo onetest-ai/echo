@@ -27,7 +27,7 @@ listeners.window.push(['resize', onResize], ['resize', other])
 listeners.document.push(['keydown', onKey])
 let removed = 0
 const P = {
-  slots: {}, targets: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kn: '1' }, applied: { kn: true }, drops: { kn: [() => {}] },
+  slots: {}, targets: {}, palette: [], sections: [], settings: {}, widgetDraw: {}, loaded: { kn: '1' }, applied: { kn: true }, drops: { kn: [() => {}] }, names: { kn: 'Knowledge' },
   owned: { kn: { listeners: [['keydown', onKey]], windowListeners: [['resize', onResize]], styles: [{ remove: () => removed++ }],
     cleanups: [() => ran.push('timer'), () => { throw new Error('observer gone') }, () => ran.push('graph')] } },
 }
@@ -45,5 +45,6 @@ assert.deepEqual(listeners.document, [], 'its document listener removed')
 assert.equal(removed, 1, 'its stylesheet taken out')
 assert.equal(P.owned.kn, undefined)
 assert.equal(P.drops.kn, undefined, 'its drop handlers gone')
+assert.equal(P.names.kn, undefined, 'its name gone (it headed its Knowledge tabs)')
 assert.equal(followed, 1, 'the app told again where dropped files go (its drop handler gone with it)')
 process.stdout.write('plugin-client-ctx: ok\n')
