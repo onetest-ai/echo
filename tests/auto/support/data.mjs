@@ -227,6 +227,23 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
       const last = e.messages?.at(-1)?.content
       return Array.isArray(last) ? last.filter((b) => b.type === 'tool_result').map((b) => b.is_error ?? null) : []
     }),
+    /** The inputs of one rule's calls of tool `name`, in order, whole (its last turn holds them all). */
+    toolUses: (rule, name) => (data.model.turns(rule).at(-1)?.messages || []).flatMap((m) =>
+      m.role === 'assistant' && Array.isArray(m.content) ? m.content.filter((b) => b.type === 'tool_use' && b.name === name).map((b) => b.input) : []),
+    /** Every tool call the model was told was refused, once each, in order: its input and what it was told, whole. */
+    refused: () => {
+      const calls = new Map()
+      const out = new Map()
+      for (const e of data.model.requests()) {
+        for (const m of e.messages || []) {
+          for (const b of Array.isArray(m.content) ? m.content : []) {
+            if (b.type === 'tool_use') calls.set(b.id, b.input)
+            if (b.type === 'tool_result' && b.is_error && !out.has(b.tool_use_id)) out.set(b.tool_use_id, { input: calls.get(b.tool_use_id), told: textOf(b.content) })
+          }
+        }
+      }
+      return [...out.values()]
+    },
   }
   return data
 }

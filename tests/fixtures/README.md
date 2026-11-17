@@ -114,6 +114,7 @@ Every set is hermetic. `<dir>/env` puts these in front of the app, and `serve.sh
 - `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network) — except on plain `small`, whose Discover reads the real one (the plugins cases expect `onetest-ai/echo-plugins`).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
+- `GIT_CONFIG_GLOBAL` is `<dir>/gitconfig` (the made-up user, Sam Rivera <sam@initech.example>) and `XDG_CONFIG_HOME` `<dir>/xdg-config`; `GIT_AUTHOR_*` and `GIT_COMMITTER_*` are unset: git run with the env reads none of the user's settings and commits as the made-up user. `ctx.git` keeps only `HOME` and `XDG_CONFIG_HOME` of the environment, so it still reads the user's `~/.gitconfig` (#707).
 
 The `hostile` set also has **Vendor onboarding**, a plain call whose other side orders the model writing its minutes
 to break out (run commands, write `PWNED` files, edit other calls, change settings, send the transcript), each order

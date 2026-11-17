@@ -688,9 +688,16 @@ def setup_env(d, stale_plugin=True, test_market=True):
              # A development build writes a mail draft's mailto: link here instead of opening a mail app (`drafts::open`, any OS).
              "ECHOCTL_TEST_MAIL_DRAFTS": f"{b}/mail-drafts.log",
              # The window's Export as HTML saves here, never into the user's Downloads (`paths::downloads_dir`).
-             "ECHOCTL_DOWNLOADS": f"{b}/downloads"}
+             "ECHOCTL_DOWNLOADS": f"{b}/downloads",
+             # git reads the test's own settings, not the user's (#707): a commit on test data is the made-up user's.
+             "GIT_CONFIG_GLOBAL": f"{b}/gitconfig", "XDG_CONFIG_HOME": f"{b}/xdg-config"}
+    d.write(f"{b}/gitconfig", f"[user]\n\tname = {ME['name']}\n\temail = {ME['email']}\n")
+    git_ident = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+    for k in git_ident:
+        d.env.pop(k, None)
     d.env.update(extra)
     with open(f"{b}/env", "a") as f:
+        f.write(f"unset {' '.join(git_ident)}\n")
         f.write(f"export PATH={sh(b + '/bin')}:\"$PATH\" " + " ".join(f"{k}={sh(v)}" for k, v in extra.items() if k != "PATH") + "\n")
 
 

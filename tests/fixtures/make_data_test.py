@@ -29,6 +29,30 @@ class Binary(unittest.TestCase):
             self.assertEqual(md.Data("unused", "small").bin, "/somewhere/echoctl")
 
 
+class Git(unittest.TestCase):
+    def test_git_under_the_data_env_reads_the_tests_own_settings_and_commits_as_the_made_up_user(self):
+        """#707: never the user's ~/.gitconfig, ~/.config/git or GIT_AUTHOR_* — a commit on test data is Sam Rivera's."""
+        real = {"GIT_AUTHOR_NAME": "Real Person", "GIT_AUTHOR_EMAIL": "real@person.example",
+                "GIT_COMMITTER_NAME": "Real Person", "GIT_COMMITTER_EMAIL": "real@person.example"}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, real):
+            base = os.path.realpath(tmp)
+            d = md.Data(base, "small")
+            md.setup_env(d)
+            for k in ("GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME"):
+                self.assertTrue(d.env[k].startswith(base + os.sep), d.env[k])
+            # A shell that sources <dir>/env (serve.sh, a case's step) over a user's identity variables.
+            r = subprocess.run(["/bin/sh", "-c", '. "$1/env" && cd "$1" && git init -q repo && cd repo && git commit -q --allow-empty -m x'
+                                ' && git log -1 --format="%an <%ae>|%cn <%ce>" && printf "%s|%s\\n" "$GIT_CONFIG_GLOBAL" "$XDG_CONFIG_HOME"', "sh", base],
+                               capture_output=True, text=True, env=os.environ)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            ident, cfg = r.stdout.strip().split("\n")
+            self.assertEqual(ident, "Sam Rivera <sam@initech.example>|Sam Rivera <sam@initech.example>")
+            self.assertEqual(cfg, f"{base}/gitconfig|{base}/xdg-config")
+            # What make_data itself runs with: the same, the user's identity variables gone.
+            for k in real:
+                self.assertNotIn(k, d.env)
+
+
 BIN = md.Data("unused", "standard").bin
 
 
