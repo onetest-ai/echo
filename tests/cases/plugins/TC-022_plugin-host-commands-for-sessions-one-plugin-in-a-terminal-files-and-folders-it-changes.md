@@ -67,4 +67,3 @@ Acme vault changed only its vault, read only the one file it named; Acme noisy s
 
 ## Notes
 - Written from the features' text (F-PLUG-15–18), not from the code.
-- That a read-only routine may run `plugin call acme-vault search` and nothing else of it is the guard's: `guard::a_read_only_routine_reads_the_data_folder_and_changes_nothing`.

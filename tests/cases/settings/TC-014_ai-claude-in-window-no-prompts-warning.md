@@ -34,4 +34,4 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 The three settings show their defaults; nothing changed.
 
 ## Notes
-- No button is pressed here: changing them, the CLI and the old switch's move are `settings/TC-095`.
+- No button is pressed here: saving them from the window and the CLI is `settings/TC-036`, refusals `TC-037`, the old switch's move `TC-038`, Auto on a local model `TC-039`.

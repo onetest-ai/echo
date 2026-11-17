@@ -39,5 +39,5 @@ tags: [plugins, threads, stage, host-half]
 - `$E project set globex-pilot --stage active`; `$E plugin remove tracker-demo --delete-data`; `$E plugin marketplace remove test-plugins`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- Refusals (no sheet line, while Claude prepares and asks, a Yolo run on another thread) and the stage rule itself: the Rust tests `jshost::tests::a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says_and_never_while_claude_prepares` and `projects::stage::tests::a_plugin_moves_the_stage_until_the_user_overrides_it_and_again_once_they_hand_it_back`; the window's rule `projects.test.mjs`.
+- Refusals (no sheet line, a Yolo run on another thread) and the stage rule itself: the Rust tests `jshost::tests::a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says` and `projects::stage::tests::a_plugin_moves_the_stage_until_the_user_overrides_it_and_again_once_they_hand_it_back`; the window's rule `projects.test.mjs`.
 - The CLI's way back: `$E project set globex-pilot --stage-back-to tracker-demo`.
