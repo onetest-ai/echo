@@ -71,6 +71,41 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   answers its other calls while a script runs. Evidence: `plugins::scripts::run`, `plugins::scripts::stop_plugin`
 - Its environment: `plugin-api.md` § Scripts. Evidence: `plugins::scripts::run`, `plugins::scripts::run_markers`
 
+## Git
+
+- `ctx.git.*` runs git only through `jshost::git::spawn`: the verbs of `VERBS` (`version`, `config`, `rev-parse`,
+  `symbolic-ref`, `status`, `log`, `cat-file`, `ls-files`, `init`, `add`, `commit`, `rm` — no network verb), the
+  program an absolute `git` found as other programs are (`app::program_candidates`; Windows: `git.exe` only, never a
+  `.cmd`), never through a shell, no stdin, `--no-pager`, in the granted folder, each path after `--` and literal
+  (`GIT_LITERAL_PATHSPECS=1`). Its own process group, SIGTERM then SIGKILL at 20 s; stdout kept to 16 MB, stderr to
+  64 KB, the rest read and dropped. Evidence: `jshost::git::spawn`
+- Its environment: only `PATH`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`,
+  `XDG_CONFIG_HOME` of the user's (no `GIT_*`, `ECHOCTL*`, `CLAUDE*`, `ANTHROPIC*`), then `LC_ALL=C`,
+  `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1`, `GIT_EDITOR=:`, an empty `GIT_PAGER` and
+  the overrides as `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` (git 2.31+, which is why older git
+  is refused): the command line's own scope, above the system's, the user's and the repository's, and passed on to any
+  git it starts. Evidence: `jshost::git::spawn`
+- The overrides (`jshost::git::overrides`), read for each call from `git config --list` (every scope, `include` and
+  `includeIf` files too): every key whose last part names a program (`PROGRAM_KEYS`: `filter.*.clean/smudge/process`,
+  `diff.*.command/textconv`, `merge.*.driver`, `credential.*.helper`, `gpg.*.program`, `*.sshCommand`, `*.askPass`,
+  `*.editor`, `*.pager`, `*.proxy`, `remote.*.uploadpack/receivepack/vcs`, `uploadpack.packObjectsHook`, …) set empty,
+  `filter.*.required` and every `pager.<command>` false; then, winning, `core.hooksPath` an empty folder Echo keeps
+  (`<state>/plugins/.locks/git-no-hooks`, refused when not empty), `core.fsmonitor` and `core.useBuiltinFSMonitor`
+  false, `core.pager` empty, `core.editor` and `sequence.editor` `:`, `credential.helper` and `diff.external` empty,
+  `commit.gpgSign`, `tag.gpgSign` and `log.showSignature` false, `maintenance.auto` false and `gc.auto` 0,
+  `submodule.recurse` false with submodules ignored (`diff.ignoreSubmodules=all`, `--ignore-submodules=all`),
+  `protocol.allow` never, `core.quotePath` false, `color.ui` never. `commit` adds `--no-verify` and `--no-gpg-sign`,
+  `init` `--template=`; `show` reads with `cat-file blob` (no filter or textconv); `log` takes no diff.
+  Evidence: `jshost::git::tests::a_repositorys_own_settings_run_nothing`
+- The repository (`jshost::git::Git::repo`): `rev-parse` gives the top, the git folder and the common one; each must be
+  inside the top and the granted folder inside the top, and `objects/info/alternates` absent; else refused. A folder
+  inside a larger repository works within the folder: `status` and `log` limited to `.` (or the paths asked), `show`
+  as `<rev>:./<path>`, `commit` only paths `grants::writable` passes. Evidence: `jshost::git::Git::repo`
+- `commit`: `ls-files` names the paths git knows; the others (each there on disk) are `add`ed, then `commit --only
+  --cleanup=whitespace -- <paths>`; on a failure the added ones are taken out of the index again (`rm --cached`).
+  Identity as `committer.name` / `committer.email` (and `author.*` when `user.name` or `user.email` is unset) on the
+  command line. Evidence: `jshost::git::commit`
+
 ## Sessions
 
 - A plugin's session skills (its runtime text skills and its package skills) go only to Echo's sessions: the folder

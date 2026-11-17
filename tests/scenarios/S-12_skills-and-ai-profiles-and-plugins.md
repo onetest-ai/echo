@@ -50,6 +50,7 @@ cases:
   - tests/cases/plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md
   - tests/cases/plugins/TC-070_a-plugins-vault-page-renders-safe-html-with-the-links-it-resolved.md
   - tests/cases/plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md
+  - tests/cases/plugins/TC-075_a-plugin-keeps-its-vaults-git-history-and-the-repositorys-settings-run-nothing.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -128,6 +129,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 44 | `plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md` | — | Its marketplace is its own `acme-local` (stage 31 removed the shared one): run its precondition lines as written |
 | 45 | `plugins/TC-070_a-plugins-vault-page-renders-safe-html-with-the-links-it-resolved.md` | — | — |
 | 46 | `plugins/TC-085_a-plugins-window-half-sends-its-host-half-up-to-4-mb.md` | — | — |
+| 47 | `plugins/TC-075_a-plugin-keeps-its-vaults-git-history-and-the-repositorys-settings-run-nothing.md` | — | — |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.
