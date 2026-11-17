@@ -65,8 +65,9 @@ pub fn skill_md_ok(md: &str) -> Result<()> {
     if md.contains("!`") {
         bail!("a skill can't run commands: “!`” in it runs one when the skill loads");
     }
-    // `!$ARGUMENTS` (`!$0`, `!${…}`) becomes `!`…`` when an argument starts with a backtick.
-    if md.match_indices("!$").any(|(i, _)| md[..i].chars().next_back().is_none_or(char::is_whitespace)) {
+    // `!$ARGUMENTS` (`!$0`, `!${…}`) becomes `!`…`` when an argument starts with a backtick — anywhere, as the text
+    // before it can be an argument too (`$0!$1`).
+    if md.contains("!$") {
         bail!("a skill can't run commands: “!$” turns an argument into one");
     }
     // Claude Code's YAML ends a line at a CR alone; ours wouldn't see the key after one.
@@ -308,7 +309,7 @@ mod tests {
             "\u{feff}---\r\nname: acme-notes\r\ndescription: \"Acme: notes\"\r\n---\r\nBody.\r\n",
             "---\nname: acme\n# a comment\ndescription: >-\n  Folded text\n  over lines: fine\nwhen_to_use: when asked about Acme\nargument-hint: \"[topic]\"\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
             "No frontmatter, just `code`, a ```js\nblock\n``` and ! alone, apart: ! `x`.",
-            "Costs $5, not!$ a command; `$ARGUMENTS` alone is fine.\r\n",
+            "Costs $5, not a command; `$ARGUMENTS` alone is fine.\r\n",
             "Text first\n---\nhooks: a rule, not frontmatter\n",
         ] {
             skill_md_ok(ok).unwrap_or_else(|e| panic!("{ok:?}: {e}"));
@@ -342,7 +343,7 @@ mod tests {
             refused(md, "carriage return");
         }
         // `!$…` becomes a command when the argument starts with a backtick.
-        for md in ["Run !$ARGUMENTS", "!$0 now", "Then\n!${1}"] {
+        for md in ["Run !$ARGUMENTS", "!$0 now", "Then\n!${1}", "a\u{feff}!$0", "$0!$1"] {
             refused(md, "“!$”");
         }
         // Commands run when the skill loads: `!`…`` anywhere, a code block opened with `!`.
