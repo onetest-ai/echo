@@ -78,7 +78,8 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
 /// `ctx.fs.copyIn(file, root, rel, {createNew})`: the file's bytes, as they are, into `rel` of a folder the plugin was
 /// given (`uses.folders.write`, `grants::writable`: never through a link). Never over a file there unless
 /// `createNew: false` asked for it. Written whole into a hidden file of its own beside it first (made new: a link
-/// planted there isn't followed), then linked into place — which never replaces a file — or, asked, renamed over it.
+/// planted there isn't followed), then put into place only where nothing is (`paths::place_new`) or, asked, renamed
+/// over it.
 pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_new: bool) -> Result<Value> {
     uses_flag(plugin, "folders", "write")?;
     let (src, _) = own(plugin, file)?;
@@ -106,7 +107,7 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     drop(out);
     let placed = match copied {
         Ok(n) if n > MAX_COPY => Err(anyhow!("the file grew past 50 MB while it was copied")),
-        Ok(_) if create_new => std::fs::hard_link(&tmp, &to).map_err(|e| match e.kind() {
+        Ok(_) if create_new => paths::place_new(&tmp, &to).map_err(|e| match e.kind() {
             std::io::ErrorKind::AlreadyExists => anyhow!("“{rel}” is there already"),
             _ => anyhow!("“{rel}”: {e}"),
         }),
