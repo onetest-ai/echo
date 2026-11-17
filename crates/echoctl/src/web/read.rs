@@ -321,7 +321,7 @@ pub fn clean(s: &str) -> String {
 }
 
 pub(super) fn bad_char(c: char) -> bool {
-    (c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+    (c.is_control() && !matches!(c, '\n' | '\t'))
         || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}' | '\u{061c}')
 }
 
@@ -499,6 +499,23 @@ fn title_of(e: &El) -> Option<String> {
         }
     }
     None
+}
+
+/// An address as a Markdown link's destination: an `&` that would start an entity (`&#64;`, `&amp;`) escaped, as
+/// CommonMark decodes entities there — the link leads where `links` says.
+fn dest(url: &str) -> String {
+    let mut out = String::with_capacity(url.len());
+    for (i, c) in url.char_indices() {
+        if c == '&' {
+            let rest = &url[i + 1..];
+            let name = rest.bytes().take_while(u8::is_ascii_alphanumeric).count();
+            if rest.starts_with('#') || (name > 0 && rest.as_bytes().get(name) == Some(&b';')) {
+                out.push('\\');
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The ASCII punctuation that means something to Markdown or GFM wherever it stands (HTML, links, pictures, code,
@@ -820,7 +837,7 @@ impl<'a> Out<'a> {
             return text;
         }
         match a.attr("href").and_then(|h| web_link(self.base, h)) {
-            Some(url) => format!("[{text}]({url})"),
+            Some(url) => format!("[{text}]({})", dest(&url)),
             None => text,
         }
     }
@@ -849,7 +866,7 @@ impl<'a> Out<'a> {
     /// A picture on a line of its own: `![alt](src)`, listed once.
     fn picture(&mut self, img: Image) {
         self.flush();
-        self.write(&[format!("![{}]({})", md_text(&img.alt), img.src)], true);
+        self.write(&[format!("![{}]({})", md_text(&img.alt), dest(&img.src))], true);
         if self.images.len() < MAX_IMAGES && self.seen.insert(img.src.clone()) {
             self.images.push(img);
         }
@@ -1301,7 +1318,10 @@ pub fn read(html: &str, base: &str) -> Page {
 
 /// `read` with the Markdown kept to `most` bytes.
 fn read_in(html: &str, base: &str, most: usize) -> Page {
-    let (doc, truncated) = parse(html);
+    // As HTML reads its input: a CR, alone or before a LF, is a LF — CommonMark ends a line at a lone CR too, so one
+    // kept would start a line Echo didn't indent.
+    let html = html.replace("\r\n", "\n").replace('\r', "\n");
+    let (doc, truncated) = parse(&html);
     let root = main_of(&doc);
 
     let mut metas = vec![];
@@ -1925,6 +1945,28 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_cr_and_an_entity_in_an_address_mean_what_they_say() {
+        use pulldown_cmark::{Event, Options, Parser, Tag};
+        let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
+        // A lone CR in a list item's pre: a line ending to CommonMark, so a line out of the item.
+        let html = format!("<main><p>{filler}</p><ul><li>item<pre>a\r[x](javascript:alert(1))\r&lt;img src=x onerror=alert(1)&gt;</pre></li></ul></main>");
+        let md = read(&html, SITE).markdown;
+        assert!(!md.contains('\r'), "{md:?}");
+        assert_safe(&md, &html);
+        // `&amp;#64;` in an href: the address is `…&#64;…`, and the Markdown must not decode it to a user part.
+        let html = format!("<main><p>{filler} <a href=\"https://acme.example/a&amp;#64;evil.example/x?b=1&amp;c=2\">go</a> <img src=\"https://acme.example/p&amp;amp;q.png\" alt=p width=400></p></main>");
+        let page = read(&html, SITE);
+        let mut dests = vec![];
+        for ev in Parser::new_ext(&page.markdown, Options::empty()) {
+            if let Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) = ev {
+                dests.push(dest_url.to_string());
+            }
+        }
+        assert_eq!(dests, vec!["https://acme.example/a&#64;evil.example/x?b=1&c=2".to_string(), "https://acme.example/p&amp;q.png".to_string()], "{}", page.markdown);
+        assert!(page.markdown.contains("x?b=1&c=2"), "a plain & stays as it is: {}", page.markdown);
+    }
+
+    #[test]
     fn the_third_reviews_shapes_stay_text() {
         let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
         let shapes = [
@@ -1962,11 +2004,11 @@ mod tests {
     }
 
     /// Pieces of a page's text that mean something to Markdown, GFM or HTML.
-    const HOSTILE: [&str; 74] = [
+    const HOSTILE: [&str; 77] = [
         "~~~", "~~~\n", "```", "`", "``", "````\n", "|", " | ", "---", "<br>---|---|---<br>", "<br>---|---<br>", "<br>|-|<br>", "<br>- ", "<br>+ ", "<br>===<br>", "<br>---<br>", "&amp;#35;", "&amp;x;", "===", "\n===\n", "***", "[x](javascript:alert(1))", "![x](javascript:alert(2))", "[r]: javascript:alert(5)\n",
         "<http://evil.example/a>", "&lt;img src=x onerror=alert(3)&gt;", "<img src=x onerror=alert(3)>", "<script>alert(4)</script>", "&lt;script&gt;", "&lt;", "&gt;", "&amp;lt;b&amp;gt;", "\\", "\\\\", "**",
         "__", "*", "_", "~~", "1. ", "\n1. ", "1) ", "- ", "\n- ", "+ ", "> ", "\n> ", "# ", "\n# ", "    ", "\n    ", "\t", "&#96;", "&#124;", "&#126;&#126;&#126;", "{", "}", "(", ")", "[", "]", "!", "=", "-", "&",
-        "&amp;copy;", "word", " ", "\n", "<br>", "x", "\n12345. ", "[r]", "&lt;!-- x --&gt;",
+        "&amp;copy;", "word", " ", "\n", "<br>", "x", "\n12345. ", "[r]", "&lt;!-- x --&gt;", "\r", "\r\n", "a\r[x](javascript:alert(1))\r",
     ];
 
     fn hostile_text(r: &mut Rng) -> String {
