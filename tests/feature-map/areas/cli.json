@@ -78,7 +78,7 @@
   },
   {
    "id": "F-CLI-09",
-   "feature": "`read <echo://…>` gives the text behind a call (around a moment), thread, client, person, task or prep link, read only",
+   "feature": "`read <echo://…>` gives the text behind a call (around a moment; a link saved before the call was retitled still finds it by its stamp), thread, client, person, task or prep link, read only",
    "priority": "medium",
    "check": "agent",
    "axes": []

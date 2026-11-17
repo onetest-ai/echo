@@ -216,6 +216,11 @@ scenario(test, 'S-28', 'Echo from the terminal: help, threads, links, sends, ser
 
     const missing = read(r.missing.link)
     expect([missing.code, err(missing)]).toEqual([1, r.missing.err])
+    // A link saved before its call was retitled: the call by its stamp; a stamp no call has is nothing.
+    const retitled = read(r.retitled.link)
+    expect([retitled.code, retitled.out.split('\n')[0]]).toEqual([0, r.retitled.head])
+    const gone = read(r.retitled.gone)
+    expect([gone.code, err(gone)]).toEqual([1, r.retitled.err])
     for (const [link, e] of r.foreign) {
       const x = read(link)
       expect([x.code, err(x)]).toEqual([1, e])

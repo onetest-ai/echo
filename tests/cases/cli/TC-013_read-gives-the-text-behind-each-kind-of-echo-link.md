@@ -30,6 +30,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | `echo://person/dana@acme.example` | Dana Lee's card |
 | `echo://task/acme-rollout/T001` | Send the SSO checklist (done) |
 | `echo://prep/e11de173ab857a8b` | the prep of Globex sponsor update |
+| `echo://call/2025-11-20_100000-an-old-title` | Acme rollout kickoff (folder `2025-11-20_100000-acme-rollout-kickoff`), linked by a title it no longer has |
 
 ## Steps
 
@@ -44,6 +45,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 | 7 | Run `target/debug/echoctl read echo://prep/e11de173ab857a8b` | Starts "# Prep"; "In short: Globex sponsor update: the SSO checklist is done, the questionnaire waits for legal, the access list is late."; "Meeting: Globex sponsor update (…)" |
 | 8 | Run `target/debug/echoctl read echo://thread/no-such-thread` | Exit code 1; "Error: no thread \"no-such-thread\"" |
 | 9 | Run `target/debug/echoctl read https://acme.example` and `target/debug/echoctl read "echo://call/../../etc"` | Exit code 1 each; "Error: not an echo:// link Echo knows: https://acme.example" and "Error: not an echo:// link Echo knows: echo://call/../../etc" |
+| 10 | Run `target/debug/echoctl read echo://call/2025-11-20_100000-an-old-title` (the kickoff's stamp, a title it no longer has: a link saved before the call was retitled), then `target/debug/echoctl read echo://call/2025-11-20_100001-an-old-title` | The first: exit code 0, first line "# Call: Acme rollout kickoff — 2025-11-20 10:00". The second: exit code 1; "Error: no call \"2025-11-20_100001-an-old-title\"" (no call has that stamp) |
 
 ## Expected Final State
 Read only: nothing in the data folder changed.
