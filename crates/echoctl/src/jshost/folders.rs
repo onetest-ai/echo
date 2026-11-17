@@ -112,7 +112,9 @@ pub(super) fn put(f: &Path, name: &str, text: &str, opts: &Value) -> Result<()> 
     let if_sha = opts.get("ifSha");
     let create_new = opts["createNew"] == true || if_sha.is_some_and(Value::is_null);
     if let Some(want) = if_sha.filter(|v| !v.is_null()) {
-        let Some(want) = want.as_str() else { bail!("ifSha is a sha256 in hex, or null for a file that isn't there yet") };
+        let Some(want) = want.as_str().filter(|w| w.len() == 64 && w.bytes().all(|b| b.is_ascii_hexdigit())) else {
+            bail!("ifSha is a sha256 in hex (64 characters), or null for a file that isn't there yet")
+        };
         if create_new {
             bail!("ifSha and createNew: one or the other");
         }
@@ -389,28 +391,38 @@ fn snapshot_room(id: &str) -> Result<(crate::app::FileLock, u64)> {
     Ok((l, SNAP_ALL - used))
 }
 
-/// One file copied whole into `to` (made new): Ok(None) when it can't be read (gone since it was listed, not allowed,
-/// locked) — the part written removed; an error when the copy can't be written.
-fn copy_file(from: &Path, to: &Path) -> Result<Option<u64>> {
-    let Ok(src) = open_no_link(from) else { return Ok(None) };
+/// What became of one file a snapshot copies.
+#[derive(Debug, PartialEq)]
+enum Copied {
+    Whole(u64),
+    /// Over 50 MB — grown past it while it was copied too.
+    Large,
+    /// Gone since it was listed, not allowed, locked.
+    Unreadable,
+}
+
+/// One file copied whole into `to` (made new), or nothing of it left there (`Large`, `Unreadable`); an error when the
+/// copy can't be written.
+fn copy_file(from: &Path, to: &Path) -> Result<Copied> {
+    let Ok(src) = open_no_link(from) else { return Ok(Copied::Unreadable) };
     std::fs::create_dir_all(to.parent().unwrap_or(to))?;
     let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
-    let (mut src, mut buf, mut n) = (src.take(files::MAX_COPY), vec![0u8; 64 << 10], 0u64);
-    loop {
+    let (mut src, mut buf, mut n) = (src.take(files::MAX_COPY + 1), vec![0u8; 64 << 10], 0u64);
+    let left_out = loop {
         match src.read(&mut buf) {
-            Ok(0) => return Ok(Some(n)),
+            Ok(0) if n > files::MAX_COPY => break Copied::Large,
+            Ok(0) => return Ok(Copied::Whole(n)),
             Ok(k) => {
                 out.write_all(&buf[..k])?;
                 n += k as u64;
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => {
-                drop(out);
-                let _ = std::fs::remove_file(to);
-                return Ok(None);
-            }
+            Err(_) => break Copied::Unreadable,
         }
-    }
+    };
+    drop(out);
+    let _ = std::fs::remove_file(to);
+    Ok(left_out)
 }
 
 /// `ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})`: the folder's files copied into the plugin's store,
@@ -455,12 +467,16 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
             return false;
         }
         match copy_file(p, &dest.join(rel)) {
-            Ok(Some(n)) => {
+            Ok(Copied::Whole(n)) => {
                 files += 1;
                 bytes += n;
                 true
             }
-            Ok(None) => {
+            Ok(Copied::Large) => {
+                large += 1;
+                true
+            }
+            Ok(Copied::Unreadable) => {
                 unreadable += 1;
                 true
             }
@@ -556,7 +572,10 @@ mod tests {
         assert!(run("keeper", "write", json!({"path": "Notes/Acme.md", "text": "x", "opts": {"ifSha": null}})).unwrap_err().contains("is there already"));
         run("keeper", "write", json!({"path": "Notes/Null.md", "text": "first", "opts": {"ifSha": null}})).unwrap();
         assert_eq!(std::fs::read_to_string(vault.join("Notes/Null.md")).unwrap(), "first");
-        assert!(run("keeper", "write", json!({"path": "Notes/Null.md", "text": "x", "opts": {"ifSha": 12}})).unwrap_err().contains("sha256 in hex"));
+        for bad in [json!(12), json!(""), json!("not-a-sha"), json!("z".repeat(64)), json!(read[..63].to_string())] {
+            assert!(run("keeper", "write", json!({"path": "Notes/Null.md", "text": "x", "opts": {"ifSha": bad}})).unwrap_err().contains("64 characters"), "{bad}");
+        }
+        assert_eq!(std::fs::read_to_string(vault.join("Notes/Null.md")).unwrap(), "first");
         assert!(run("keeper", "write", json!({"path": "Notes/Null.md", "text": "x", "opts": {"ifSha": sha_hex(b"first"), "createNew": true}})).unwrap_err().contains("one or the other"));
         // Over 64 MB: refused before it is hashed.
         std::fs::File::create(vault.join("Notes/Huge.bin")).unwrap().set_len(SHA_MAX + 1).unwrap();
@@ -758,6 +777,14 @@ mod tests {
         let big = run("copier", "snapshot", json!({})).unwrap();
         #[cfg(unix)]
         assert_eq!((big["files"].as_u64(), big["skipped"].as_u64(), &big["why"]), (Some(3), Some(2), &json!({"large": 1, "unreadable": 1})));
+        // A file grown past 50 MB while it was copied (here: given to the copy as it is now): left out, nothing kept of it.
+        let grown = root.join("grown.bin");
+        std::fs::File::create(&grown).unwrap().set_len(files::MAX_COPY + 1).unwrap();
+        let to = root.join("copy/grown.bin");
+        assert_eq!(copy_file(&grown, &to).unwrap(), Copied::Large);
+        assert!(!to.exists());
+        std::fs::write(&grown, "small").unwrap();
+        assert_eq!(copy_file(&grown, &to).unwrap(), Copied::Whole(5));
         // Three kept: a fourth refused until one is removed.
         assert!(run("copier", "snapshot", json!({})).unwrap_err().contains("keeps 3 snapshots already"));
         // Removed with ctx.store.remove.

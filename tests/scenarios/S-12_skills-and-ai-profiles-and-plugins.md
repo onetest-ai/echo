@@ -73,7 +73,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 ## Prelude
 
 1. Load `{{base_url}}/`.
-2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). The plugin stages use this folder; none writes it again.
+2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). Stages 22–31 use this folder as written; the later plugin stages (32–43), after stage 31 removed `acme-local`, each write their own `echo-marketplace.json` and plugin into it again (their preconditions) and remove their marketplace in their teardown — stage 40 writes it for Acme vault, which stages 41–43 use.
 
 ## Stages
 

@@ -436,7 +436,7 @@
   },
   {
    "id": "F-PLUG-49",
-   "feature": "With `uses.folders` a plugin copies a folder it was given into its store (`ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → {path: `cache/snapshots/<id>`, files, bytes, skipped, why: {large, unreadable}}) to work on: no link followed, never a `.git` folder or `.obsidian/plugins` at any depth, nor the paths `exclude` names (over 100 refused), dot names only with `hidden`; over 20,000 files or 512 MB (or the plugin's lower caps) refused with nothing left, a file over 50 MB or one it can't read left out and counted; one made at a time, 3 kept and 2 GB in all a plugin, more refused; read with `ctx.store.read`, removed with `ctx.store.remove(path)`, swept with `cache/`",
+   "feature": "With `uses.folders` a plugin copies a folder it was given into its store (`ctx.fs.snapshot(root, {exclude, hidden, maxFiles, maxBytes})` → {path: `cache/snapshots/<id>`, files, bytes, skipped, why: {large, unreadable}}) to work on: no link followed, never a `.git` folder or `.obsidian/plugins` at any depth, nor the paths `exclude` names (over 100 refused), dot names only with `hidden`; over 20,000 files or min(512 MB, 2 GB less what its snapshots already hold) (or the plugin's lower caps) refused with nothing left, a file over 50 MB (grown past it while copied too) or one it can't read left out and counted; one made at a time, 3 kept and 2 GB in all a plugin, more refused; read with `ctx.store.read`, removed with `ctx.store.remove(path)`, swept with `cache/`",
    "priority": "high",
    "check": "agent",
    "axes": []

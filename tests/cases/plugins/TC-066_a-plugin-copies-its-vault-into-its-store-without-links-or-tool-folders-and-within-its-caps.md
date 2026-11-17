@@ -25,6 +25,7 @@ mkdir -p "$D/vault/.git" "$D/vault/Archive/.git" "$D/outside"
 printf '[remote] pilot budget token\n' > "$D/vault/.git/config"
 printf 'ref: pilot budget\n' > "$D/vault/Archive/.git/HEAD"
 printf 'pilot budget of someone else\n' > "$D/outside/leak.md"
+printf '# Initech wiki\nMade-up notes for tests.\n' > "$D/vault/Wiki.md"
 ln -s "$D/outside" "$D/vault/Out"
 M="$D/market"; mkdir -p "$M/plugins/acme-vault"
 echo '{"name":"acme-local","plugins":[{"id":"acme-vault","source":"./plugins/acme-vault"}]}' > "$M/echo-marketplace.json"
@@ -56,7 +57,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-vault --yes`; `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-vault add` | `Installed Acme vault 0.1.0`; the vault's path |
-| 2 | `echoctl plugin call acme-vault snap`; `find "$ECHOCTL_HOME/.echo/plugins/acme-vault/<its path>" -type f \| sort`; `find "$D/vault" -type f -not -path '*/.*' \| sort` | `{"path": "cache/snapshots/<16 hex>", "files": N, "bytes": …, "skipped": 0, "why": {"large": 0, "unreadable": 0}}` — no path of `$D` in it; the copy holds the same files (by their path under the vault) as the vault's own listing, `N` of them: no `.git`, nothing of `Out` |
+| 2 | `echoctl plugin call acme-vault snap`; `find "$ECHOCTL_HOME/.echo/plugins/acme-vault/<its path>" -type f \| sort`; `find "$D/vault" -type f -not -path '*/.*' \| sort` | `{"path": "cache/snapshots/<16 hex>", "files": N, "bytes": …, "skipped": 0, "why": {"large": 0, "unreadable": 0}}` — no path of `$D` in it; the copy holds the same files (by their path under the vault) as the vault's own listing, `N` of them — `Wiki.md` among them (on its own, `N` is 1: `Wiki.md` alone): no `.git`, nothing of `Out` |
 | 3 | `echoctl plugin call acme-vault snap '{"hidden":true}'`; `find "$ECHOCTL_HOME/.echo/plugins/acme-vault/<its path>" -path '*.git*'` | A second snapshot; no output — neither `.git/` nor `Archive/.git/`, hidden files asked or not |
 | 4 | `echoctl plugin call acme-vault snap '{"n":101}'` | It fails: `exclude names 100 paths at most` |
 | 5 | `echoctl plugin call acme-vault snap` (a third); then `snap` again (a fourth) | A third snapshot; the fourth fails: `this plugin keeps 3 snapshots already: remove one (ctx.store.remove) first` |

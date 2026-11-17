@@ -25,6 +25,7 @@ mkdir -p "$D/vault/.git" "$D/vault/Archive/.git" "$D/outside"
 printf '[remote] pilot budget token\n' > "$D/vault/.git/config"
 printf 'ref: pilot budget\n' > "$D/vault/Archive/.git/HEAD"
 printf 'pilot budget of someone else\n' > "$D/outside/leak.md"
+printf '# Initech wiki\nMade-up notes for tests.\n' > "$D/vault/Wiki.md"
 ln -s "$D/outside" "$D/vault/Out"
 M="$D/market"; mkdir -p "$M/plugins/acme-vault"
 echo '{"name":"acme-local","plugins":[{"id":"acme-vault","source":"./plugins/acme-vault"}]}' > "$M/echo-marketplace.json"
@@ -64,7 +65,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 7 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault log '{"path":"log.md","text":"x"}'`; `wc -l < "$D/vault/log.md"` | It fails: `changing files or settings isn't allowed while Claude prepares and asks`; `2` |
 
 ## Expected Final State
-`$D/vault/` holds `Notes/Acme.md` (two lines), `Notes/Globex.md`, `log.md` (two lines), `Projects/Acme/2026/`, the two `.git` folders and the link `Out`; `$D/outside` holds `leak.md` alone.
+`$D/vault/` holds `Wiki.md`, `Notes/Acme.md` (two lines), `Notes/Globex.md`, `log.md` (two lines), `Projects/Acme/2026/`, the two `.git` folders and the link `Out`; `$D/outside` holds `leak.md` alone.
 
 ## Teardown
 - `echoctl plugin remove acme-vault --delete-data`; `echoctl plugin marketplace remove acme-local`

@@ -257,10 +257,12 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
     {large, unreadable}}`: the folder's files copied into the store's `cache/snapshots/<id>/` (`path`, a store path) to
     work on with `ctx.store`; no link followed, never a `.git` folder or `.obsidian/plugins` at any depth (with
     `hidden` too), nor the paths under the root `exclude` names (more than 100: refused); dot names only with
-    `hidden`. Over 20,000 files or 512 MB (or the lower `maxFiles` / `maxBytes`): refused, nothing left; a file over
-    50 MB (`large`) or one that can't be read — gone since it was listed, not allowed, locked (`unreadable`) — is left
-    out and counted in `skipped`. One snapshot is made at a time per plugin, and it keeps 3 at most and 2 GB in all
-    (its snapshots' bytes count against the 512 MB): over either, refused until it removes one.
+    `hidden`. Its bytes are capped at the smallest of 512 MB, `maxBytes` and 2 GB less what the plugin's snapshots
+    already hold; its files at 20,000 or the lower `maxFiles`. Over either cap it is refused and nothing is left. A
+    file over 50 MB, or one grown past it while it was copied (`large`), or one that can't be read — gone since it was
+    listed, not allowed, locked (`unreadable`) — is left out, nothing of it kept, and counted in `skipped`. One
+    snapshot is made at a time per plugin, and it keeps 3 at most: a fourth, or one when its snapshots already hold
+    2 GB, is refused until it removes one.
     `ctx.store.remove(path)` removes it; Echo sweeps it with `cache/` (Host § Store).
 - Its window half shows images of a folder it was given (with `uses.folders`) from
   `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and

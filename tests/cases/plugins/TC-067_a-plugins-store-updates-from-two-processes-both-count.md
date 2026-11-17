@@ -1,6 +1,6 @@
 ---
 id: TC-067
-title: A plugin's store updates from two processes at once (the app and a terminal's plugin call) both count — none lost
+title: A plugin's store updates from two terminal processes at once (two echoctl plugin call loops) both count — none lost
 priority: high
 type: functional
 requirements: [F-PLUG-50]
@@ -25,6 +25,7 @@ mkdir -p "$D/vault/.git" "$D/vault/Archive/.git" "$D/outside"
 printf '[remote] pilot budget token\n' > "$D/vault/.git/config"
 printf 'ref: pilot budget\n' > "$D/vault/Archive/.git/HEAD"
 printf 'pilot budget of someone else\n' > "$D/outside/leak.md"
+printf '# Initech wiki\nMade-up notes for tests.\n' > "$D/vault/Wiki.md"
 ln -s "$D/outside" "$D/vault/Out"
 M="$D/market"; mkdir -p "$M/plugins/acme-vault"
 echo '{"name":"acme-local","plugins":[{"id":"acme-vault","source":"./plugins/acme-vault"}]}' > "$M/echo-marketplace.json"
