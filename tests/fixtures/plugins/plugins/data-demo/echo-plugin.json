@@ -1,0 +1,13 @@
+{
+  "id": "data-demo",
+  "name": "Data demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: reads Echo's calls, calendar and the user, Microsoft 365 read-only, fetches an address the user typed, and puts a chip on calls with a chat (tests/cases/plugins/TC-100 to TC-105).",
+  "main": "main.js",
+  "client": "client.js",
+  "uses": {
+    "echo": { "read": ["calls", "source", "calendar", "me"] },
+    "m365": { "read": ["mail", "chats"] },
+    "network": { "ask": true }
+  }
+}
