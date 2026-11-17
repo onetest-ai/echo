@@ -48,6 +48,8 @@ pub mod presets;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub mod markdown;
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod signin;
 
 /// Our public marketplace, always listed (it can be hidden, not removed).

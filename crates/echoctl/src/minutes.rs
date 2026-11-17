@@ -454,6 +454,83 @@ pub fn markdown_html(md: &str) -> String {
     body(&lines.join("\n"), &mut images).html
 }
 
+/// What a page's caller decided for one of its links or images (`page_html`).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub enum PageDest {
+    /// The link's `href` or the image's `src`, as the caller checked it.
+    Href(String),
+    /// A page that isn't there: a link with no `href`, marked `data-md-missing` for the caller's page to catch.
+    Missing,
+    /// Text only.
+    Text,
+}
+
+/// What `body` writes a page with, in place of the minutes' links, screenshots and `[mm:ss]` marks.
+struct Page<'a> {
+    breaks: bool,
+    dest: &'a dyn Fn(&str, bool) -> PageDest,
+}
+
+/// A page's Markdown (a plugin's vault page) as safe HTML: the minutes' writer — raw HTML shown as text — without their
+/// `[mm:ss]` marks and screenshots, with `[[wikilinks]]` and `![[embeds]]`; every link and image as
+/// `dest(destination as written, is an image)` decides. `breaks`: a single newline is a line break.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn page_html(md: &str, breaks: bool, dest: &dyn Fn(&str, bool) -> PageDest) -> String {
+    let load = |_: &str| None;
+    let mut images = Images { load: &load, frames: &[], embedded: vec![], left: 0 };
+    body_with(md, &mut images, Some(&Page { breaks, dest })).html
+}
+
+/// The destinations of a page's links and of its images as `page_html` reads them (a wikilink's target), each once, in
+/// order.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn page_dests(md: &str) -> (Vec<String>, Vec<String>) {
+    let (mut links, mut images) = (Vec::<String>::new(), Vec::<String>::new());
+    for ev in Parser::new_ext(md, md_options() | Options::ENABLE_WIKILINKS) {
+        let (list, d) = match ev {
+            Event::Start(Tag::Link { dest_url, .. }) => (&mut links, dest_url),
+            Event::Start(Tag::Image { dest_url, .. }) => (&mut images, dest_url),
+            _ => continue,
+        };
+        if !list.iter().any(|x| *x == *d) {
+            list.push(d.to_string());
+        }
+    }
+    (links, images)
+}
+
+/// A page's link: its `<a …>`, or none (text only).
+fn page_link(dest: &str, page: &Page) -> Option<String> {
+    Some(match (page.dest)(dest, false) {
+        PageDest::Href(h) if crate::links::Link::parse(&h).is_some() => format!("<a href=\"{}\" data-echo-link>", esc(&h)),
+        PageDest::Href(h) if h.starts_with("https://") => format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(&h)),
+        PageDest::Href(h) => format!("<a href=\"{}\">", esc(&h)),
+        PageDest::Missing => format!("<a class=\"md-missing\" data-md-missing=\"{}\">", esc(dest)),
+        PageDest::Text => return None,
+    })
+}
+
+/// A page's image: an `<img>`, or its alt text (else its destination) in brackets.
+fn page_image(dest: &str, alt: &str, page: &Page) -> String {
+    let alt = alt.trim();
+    let shown = esc(if alt.is_empty() { dest } else { alt });
+    match (page.dest)(dest, true) {
+        PageDest::Href(src) => format!("<img src=\"{}\" alt=\"{}\" loading=\"lazy\">", esc(&src), esc(alt)),
+        PageDest::Missing => format!("<span class=\"figref md-missing\" data-md-missing=\"{}\">[{shown}]</span>", esc(dest)),
+        PageDest::Text => format!("<span class=\"figref\">[{shown}]</span>"),
+    }
+}
+
+/// A minutes link: https, and echo:// links Echo knows (a call at a moment, a thread, a client, a person, a mail) — the
+/// window routes those (`window.echo.openLink`), the system opens Echo at them; anything else text only.
+fn note_link(dest: &str) -> Option<String> {
+    if crate::links::Link::parse(dest).is_some() {
+        Some(format!("<a href=\"{}\" data-echo-link>", esc(dest)))
+    } else {
+        dest.starts_with("https://").then(|| format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(dest)))
+    }
+}
+
 /// How the notes' Markdown is read, for the page and for finding its diagrams (`mermaid_blocks`).
 fn md_options() -> Options {
     let mut opts = Options::empty();
@@ -502,7 +579,13 @@ pub(crate) fn mermaid_blocks(md: &str) -> Vec<MermaidBlock> {
 
 /// The notes' Markdown as HTML. Raw HTML in it is shown as text.
 fn body(md: &str, images: &mut Images) -> Body {
-    let opts = md_options();
+    body_with(md, images, None)
+}
+
+/// The writer of minutes and, with `page`, of a page (`page_html`).
+fn body_with(md: &str, images: &mut Images, page: Option<&Page>) -> Body {
+    let opts = if page.is_some() { md_options() | Options::ENABLE_WIKILINKS } else { md_options() };
+    let plain = |t: &str| if page.is_some() { esc(t) } else { times(&esc(t)) };
     let mut b = Body { html: String::new(), mermaid: false };
     let out = &mut b.html;
     let mut text = String::new(); // a run of text, written once complete (so `[mm:ss]` is whole)
@@ -536,14 +619,14 @@ fn body(md: &str, images: &mut Images) -> Body {
                 text.push_str(t);
                 continue;
             }
-            Event::SoftBreak => {
+            Event::SoftBreak if !page.is_some_and(|p| p.breaks) => {
                 text.push('\n');
                 continue;
             }
             _ => {}
         }
         if !text.is_empty() {
-            out.push_str(&times(&esc(&text)));
+            out.push_str(&plain(&text));
             text.clear();
         }
         match ev {
@@ -589,16 +672,9 @@ fn body(md: &str, images: &mut Images) -> Body {
                 Tag::Strong => out.push_str("<strong>"),
                 Tag::Strikethrough => out.push_str("<del>"),
                 Tag::Link { dest_url, .. } => {
-                    // https, and echo:// links Echo knows (a call at a moment, a thread, a client, a person, a mail):
-                    // the window routes those (`window.echo.openLink`), the system opens Echo at them.
-                    let echo = crate::links::Link::parse(&dest_url).is_some();
-                    let ok = dest_url.starts_with("https://") || echo;
-                    if echo {
-                        out.push_str(&format!("<a href=\"{}\" data-echo-link>", esc(&dest_url)));
-                    } else if ok {
-                        out.push_str(&format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(&dest_url)));
-                    }
-                    links.push(ok);
+                    let a = page.map_or_else(|| note_link(&dest_url), |p| page_link(&dest_url, p));
+                    out.push_str(a.as_deref().unwrap_or(""));
+                    links.push(a.is_some());
                 }
                 Tag::Image { dest_url, .. } => image = Some((dest_url.to_string(), String::new())),
                 _ => {} // footnotes, HTML blocks, metadata: their text still comes through as text
@@ -639,20 +715,20 @@ fn body(md: &str, images: &mut Images) -> Body {
                 TagEnd::Link => out.push_str(if links.pop() == Some(true) { "</a>" } else { "" }),
                 TagEnd::Image => {
                     let (dest, alt) = image.take().unwrap_or_default();
-                    out.push_str(&figure(&dest, &alt, images));
+                    out.push_str(&page.map_or_else(|| figure(&dest, &alt, images), |p| page_image(&dest, &alt, p)));
                 }
                 _ => {}
             },
             Event::Code(t) => out.push_str(&format!("<code>{}</code>", esc(&t))),
             Event::Html(t) | Event::InlineHtml(t) => out.push_str(&esc(&t)), // shown, never markup
-            Event::HardBreak => out.push_str("<br>"),
+            Event::HardBreak | Event::SoftBreak => out.push_str("<br>"), // a soft one only with `breaks`
             Event::Rule => out.push_str("<hr>"),
             Event::TaskListMarker(done) => out.push_str(if done { "<input type=\"checkbox\" checked disabled> " } else { "<input type=\"checkbox\" disabled> " }),
             _ => {}
         }
     }
     if !text.is_empty() {
-        out.push_str(&times(&esc(&text)));
+        out.push_str(&plain(&text));
     }
     b
 }

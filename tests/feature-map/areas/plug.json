@@ -457,6 +457,13 @@
     "plugin.enabled",
     "plugin.setting"
    ]
+  },
+  {
+   "id": "F-PLUG-53",
+   "feature": "A plugin renders a vault page as safe HTML with its links working (`ctx.markdown(md, {breaks, links, images})`, both halves): `ctx.markdown.links(md)` gives each destination once as written (wikilink targets `Page`, `Page#heading`, `![[embeds]]`, ordinary links and images; nothing in code), the plugin resolves them and Echo keeps only an `https://` link, an `echo://` link it knows or the plugin's own `#<id>:` route, and images only from the plugin's folder route (no `data:`, `http:`, `//host`, another plugin's route, dot segments or whitespace); anything else is text, `null` a missing page (`data-md-missing`, no href) the plugin catches; raw HTML shown as text; `breaks` keeps single newlines",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

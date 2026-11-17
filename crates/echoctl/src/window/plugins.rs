@@ -248,6 +248,15 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     Err(e) => json!({"error": format!("{e:#}")}),
                 }));
             }
+            // A page of its Markdown as safe HTML, and its destinations to resolve first (`ctx.markdown`, read only).
+            for (suffix, links) in [("/markdown", false), ("/markdown/links", true)] {
+                if let Some(id) = rest.strip_suffix(suffix).filter(|id| crate::plugins::enabled().iter().any(|p| p.id == *id)) {
+                    let q = req.uri().query().unwrap_or("");
+                    let md = query_param(q, "md").unwrap_or_default();
+                    let opts: Value = query_param(q, "opts").and_then(|o| serde_json::from_str(&o).ok()).unwrap_or(Value::Null);
+                    return Some(json_reply(json!({"value": if links { crate::plugins::markdown::links(&md) } else { json!(crate::plugins::markdown::render(id, &md, &opts)) }})));
+                }
+            }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
                     let q = req.uri().query().unwrap_or("");
@@ -404,6 +413,33 @@ mod tests {
         }
         crate::plugins::set_enabled("pages", false).unwrap();
         assert_eq!(got("pages", &format!("{real}/assets/logo.png")).0, 404, "off: nothing");
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_window_half_gets_its_markdown_as_safe_html_with_only_its_own_routes() {
+        let (_env, root) = crate::paths::testenv::folders("window-markdown");
+        let mk = root.join("market");
+        let d = mk.join("plugins/pages");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "pages", "name": "pages", "version": "0.1.0"}).to_string()).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "pages", "source": "./plugins/pages"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("pages", Some(&name)).unwrap().uses;
+        crate::plugins::install("pages", Some(&name), &agreed).unwrap();
+        let ask = |path: &str| {
+            let req = Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).unwrap();
+            let r = route(&super::super::urldecode(req.uri().path()), &req).unwrap();
+            serde_json::from_slice::<Value>(r.body()).unwrap_or(Value::Null)
+        };
+        let md = super::super::urlencode("[[Plan]] [[Other]] <b>x</b>");
+        assert_eq!(ask(&format!("/api/plugin/pages/markdown/links?md={md}"))["value"], json!({"links": ["Plan", "Other"], "images": []}));
+        let opts = super::super::urlencode(&json!({"links": {"Plan": "#pages:main/Plan", "Other": "#another:main/Other"}}).to_string());
+        assert_eq!(ask(&format!("/api/plugin/pages/markdown?md={md}&opts={opts}"))["value"], "<p><a href=\"#pages:main/Plan\">Plan</a> Other &lt;b&gt;x&lt;/b&gt;</p>");
+        // A plugin that isn't installed and on gets no answer of its own.
+        crate::plugins::set_enabled("pages", false).unwrap();
+        assert_eq!(ask(&format!("/api/plugin/pages/markdown?md={md}")), Value::Null);
     }
 
     #[cfg(feature = "js")]
