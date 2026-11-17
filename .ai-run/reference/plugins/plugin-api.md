@@ -302,9 +302,9 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
     its `alt` and `caption` 500 characters at most; a caption leaves out figures inside it),
     from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
     `data:` and a picture whose page-given width or height is under 32 left out.
-  - The page's words are never markup: outside code, every ASCII mark with a meaning to Markdown or GFM is
-    backslash-escaped (`` \ ` * _ ~ [ ] ( ) < > | # ! { } + - = & ``), and digits and a `.` starting a line are
-    `1\.`; an inline code span is fenced one backtick longer than the longest run in it and never touches another
+  - The page's words are never markup: outside code, every ASCII mark with a meaning to Markdown or GFM wherever it
+    stands is backslash-escaped (`` \ ` * _ ~ [ ] ( ) < > | # ! { } ``), an `&` only where it starts an entity (`&#…`,
+    `&name;`), and at a line's start (after its indent) a `-`, `+` or `=` (`\-`) and digits with a `.` (`1\.`); an inline code span is fenced one backtick longer than the longest run in it and never touches another
     backtick (a space between), and in a table's cell code holding a `|` is escaped text; a `<pre>` is fenced by
     backticks one longer than its longest run (never tildes); a link's or picture's address has `|` and `` ` ``
     percent-encoded. Control characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E,

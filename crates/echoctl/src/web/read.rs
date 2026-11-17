@@ -607,28 +607,42 @@ fn dots(p: &str) -> String {
     s + tail
 }
 
-/// The ASCII punctuation that means something to Markdown or GFM (HTML, links, pictures, code, emphasis, strikethrough,
-/// tables, headings, quotes, lists, rules, setext underlines, entities): escaped wherever a page's words are written.
-const MARKS: &str = "\\`*_~[]()<>|#!{}+-=&";
+/// The ASCII punctuation that means something to Markdown or GFM wherever it stands (HTML, links, pictures, code,
+/// emphasis, strikethrough, tables, headings, quotes): escaped wherever a page's words are written. `-`, `+` and `=`
+/// mean something only where a line starts (`line_start`), `&` only where it starts an entity (`md_char`).
+const MARKS: &str = "\\`*_~[]()<>|#!{}";
 
-/// Text as Markdown shows it, never as markup: each of `MARKS` escaped, so no HTML, link, picture, code span, emphasis,
-/// table or block of any kind can come of a page's (or anyone's) words. A line's start is `line_start`'s.
+/// Text as Markdown shows it, never as markup: each of `MARKS` escaped, and an `&` that starts something entity-like,
+/// so no HTML, link, picture, code span, emphasis, table or block of any kind can come of a page's (or anyone's)
+/// words. A line's start is `line_start`'s.
 pub fn md_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if MARKS.contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
+    for (i, c) in s.char_indices() {
+        md_char(c, &s[i + c.len_utf8()..], &mut out);
     }
     out
 }
 
-/// A line of text (`md_text`'s) as it starts a line: digits and a `.` can't start a numbered list (`1\.`); every other
-/// mark that starts a block is escaped already, and its indent is the writer's.
+/// One character of text as `md_text` writes it, `rest` the text after it.
+fn md_char(c: char, rest: &str, out: &mut String) {
+    let entity = || {
+        let name = rest.bytes().take_while(u8::is_ascii_alphanumeric).count();
+        rest.starts_with('#') || (name > 0 && rest[name..].starts_with(';'))
+    };
+    if MARKS.contains(c) || (c == '&' && entity()) {
+        out.push('\\');
+    }
+    out.push(c);
+}
+
+/// A line of text (`md_text`'s) as it starts a line: a `-`, `+` or `=` there can't start a list, a rule or a setext
+/// underline (`\-`), nor digits and a `.` a numbered list (`1\.`); every other mark that starts a block is escaped
+/// already, and its indent is the writer's.
 fn line_start(l: &str) -> String {
     let digits = l.bytes().take_while(u8::is_ascii_digit).count();
-    if digits > 0 && l[digits..].starts_with('.') {
+    if l.starts_with(['-', '+', '=']) {
+        format!("\\{l}")
+    } else if digits > 0 && l[digits..].starts_with('.') {
         format!("{}\\{}", &l[..digits], &l[digits..])
     } else {
         l.to_owned()
@@ -796,7 +810,7 @@ impl<'a> Out<'a> {
     }
 
     fn push_text(&mut self, s: &str) {
-        for c in s.chars() {
+        for (i, c) in s.char_indices() {
             if self.full {
                 return;
             }
@@ -808,7 +822,7 @@ impl<'a> Out<'a> {
                     self.line.push(' ');
                 }
             } else {
-                self.line.push_str(&md_text(c.encode_utf8(&mut [0; 4])));
+                md_char(c, &s[i + c.len_utf8()..], &mut self.line);
             }
         }
     }
@@ -1537,7 +1551,7 @@ mod tests {
     fn navigation_scripts_and_forms_are_dropped() {
         let (title, text) = md("chrome");
         assert_eq!(title, "Pricing model notes");
-        assert!(text.contains("Per\\-seat pricing stays for teams under fifty people.") && text.contains("Discounts need a sign\\-off from Omar Reyes"), "{text}");
+        assert!(text.contains("Per-seat pricing stays for teams under fifty people.") && text.contains("Discounts need a sign-off from Omar Reyes"), "{text}");
         for gone in ["tracking", "Injected", "Home", "Careers", "Subscribe", "Popular", "spreadsheets", "Footer", "Sign up", "Email", "JavaScript", "font-family", "Fabrikam Insights"] {
             assert!(!text.contains(gone), "{gone} in {text}");
         }
@@ -1547,9 +1561,9 @@ mod tests {
     fn tables_become_markdown_tables() {
         let (_, text) = md("tables");
         assert!(text.contains(
-            "| Plan | Stores | Price |\n| --- | --- | --- |\n| Starter | 1–5 | €40 |\n| Growth | 6–50 | €32 \\| €28 with a two\\-year term |\n| Enterprise | 51\\+ | [Ask sales](https://contoso.example/sales) |"
+            "| Plan | Stores | Price |\n| --- | --- | --- |\n| Starter | 1–5 | €40 |\n| Growth | 6–50 | €32 \\| €28 with a two-year term |\n| Enterprise | 51+ | [Ask sales](https://contoso.example/sales) |"
         ), "{text}");
-        assert!(text.contains("## Add\\-ons\n\n| Analytics | €5 |\n| --- | --- |\n| Priority support | €9 |"), "rows without a head, cells left open: {text}");
+        assert!(text.contains("## Add-ons\n\n| Analytics | €5 |\n| --- | --- |\n| Priority support | €9 |"), "rows without a head, cells left open: {text}");
     }
 
     #[test]
@@ -1597,7 +1611,7 @@ mod tests {
             "Each store goes through the same steps before the pilot starts, in this order, signed off by the store manager.\n\n\
              1. Hardware\n\n   - Scanners tested\n   - Receipt printers on the new firmware\n\
              2. Staff training\n\
-             3. Go\\-live call with [support](https://northwind.example/support)\n\n\
+             3. Go-live call with [support](https://northwind.example/support)\n\n\
              Stores that miss a step move to the next wave."
         );
     }
@@ -1607,7 +1621,7 @@ mod tests {
         let (title, text) = md("unicode");
         assert_eq!(title, "Отчёт о пилоте — Север");
         assert!(text.contains("сократилось на треть."), "{text}");
-        assert!(text.contains("Team notes—in English too: the rollout’s second wave starts in December \\& covers 12 stores 🚀."), "{text}");
+        assert!(text.contains("Team notes—in English too: the rollout’s second wave starts in December & covers 12 stores 🚀."), "{text}");
         assert!(text.contains("Quotes stay as written: “fix forward, no rollback” … © Northwind \\<internal\\>."), "{text}");
     }
 
@@ -1719,7 +1733,7 @@ mod tests {
             assert!(text[..i].ends_with('\\') || text[i + 2..].starts_with("https://acme.example/"), "a link out of {:?}", &text[i.saturating_sub(40)..]);
         }
         assert!(text.contains("script link, mixed case, tabbed, data link, file link, vb link, a bank, backslashes."), "links that aren't http(s) are their words: {text}");
-        assert!(text.contains(r"Raw \<img src\=x onerror\=alert\(7\)\> and \[x\]\(javascript:alert\(8\)\) and \!\[i\]\(https://evil.example/t.png\) are text"), "{text}");
+        assert!(text.contains(r"Raw \<img src=x onerror=alert\(7\)\> and \[x\]\(javascript:alert\(8\)\) and \!\[i\]\(https://evil.example/t.png\) are text"), "{text}");
         assert!(text.contains(r"Direction txt.exe and zerowidth and a NUL \&\#0; and bell are dropped."), "{text:?}");
         assert!(text.contains("[a fine link](https://acme.example/ok)"), "{text}");
         assert_eq!(p.links, vec![("a fine link".to_string(), "https://acme.example/ok".to_string())]);
@@ -1784,15 +1798,18 @@ mod tests {
              <img src=\"/p.png\" alt=\"](javascript:alert(1)) <b>\"></article></body></html>"
         );
         let text = read(&html, "https://contoso.example/").markdown;
-        assert!(text.contains(r"Literal \[x\]\(javascript:alert\(1\)\) and \!\[\]\(http://tracker.example/p.png\) stay text, as does \<img src\=http://tracker.example/q.png\>."), "{text}");
+        assert!(text.contains(r"Literal \[x\]\(javascript:alert\(1\)\) and \!\[\]\(http://tracker.example/p.png\) stay text, as does \<img src=http://tracker.example/q.png\>."), "{text}");
         assert!(text.contains("\n\\# not a heading\n") && text.contains("\n\\> not a quote\n"), "{text}");
         assert!(text.contains("Wow\\![pic](https://contoso.example/pic.png) and a back\\\\slash."), "the link stays, never an image: {text}");
         assert!(text.contains(r"## Tags \<i\> and \[brackets\]"), "{text}");
         assert!(text.contains(r"| \<td\> \[c\] | `a<b` |"), "code is code, cells are text: {text}");
         assert!(text.ends_with(r"![\]\(javascript:alert\(1\)\) \<b\>](https://contoso.example/p.png)"), "a picture's words can't end it: {text}");
         assert_eq!(md_text("<b>[x]!\\`"), r"\<b\>\[x\]\!\\\`");
-        assert_eq!(md_text("~|*_(){}+-=#&. 1"), r"\~\|\*\_\(\)\{\}\+\-\=\#\&. 1", "every mark with a meaning, and no other");
-        assert_eq!((line_start("12. x"), line_start("12 x. y")), (r"12\. x".to_string(), "12 x. y".to_string()), "a line never starts a numbered list");
+        assert_eq!(md_text("~|*_(){}+-=#. 1"), r"\~\|\*\_\(\)\{\}+-=\#. 1", "every mark with a meaning wherever it stands, and no other");
+        assert_eq!(md_text("R&D & co &copy; &#38; &x"), r"R&D & co \&copy; \&\#38; &x", "an `&` only where it starts an entity");
+        for (line, md) in [("12. x", r"12\. x"), ("12 x. y", "12 x. y"), ("- x", r"\- x"), ("+ x", r"\+ x"), ("===", r"\==="), ("a - b = c + d", "a - b = c + d")] {
+            assert_eq!(line_start(line), md, "a line never starts a list, a rule or an underline");
+        }
     }
 
     #[test]
@@ -2001,10 +2018,13 @@ mod tests {
     fn assert_safe(md: &str, html: &str) {
         use pulldown_cmark::{Event, Options, Parser, Tag};
         let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_WIKILINKS;
-        for ev in Parser::new_ext(md, opts) {
+        for (ev, at) in Parser::new_ext(md, opts).into_offset_iter() {
             match ev {
                 Event::Html(h) | Event::InlineHtml(h) => panic!("HTML {h:?} in\n{md}\n\nfrom\n{html}"),
                 Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => assert!(echos_own(&dest_url), "a link to {dest_url:?} in\n{md}\n\nfrom\n{html}"),
+                // Echo writes no rule and only `#` headings: one of the page's text is its words made structure.
+                Event::Rule => panic!("a rule in\n{md}\n\nfrom\n{html}"),
+                Event::Start(Tag::Heading { .. }) => assert!(md[at].starts_with('#'), "a setext heading in\n{md}\n\nfrom\n{html}"),
                 _ => {}
             }
         }
@@ -2048,8 +2068,8 @@ mod tests {
     }
 
     /// Pieces of a page's text that mean something to Markdown, GFM or HTML.
-    const HOSTILE: [&str; 68] = [
-        "~~~", "~~~\n", "```", "`", "``", "````\n", "|", " | ", "---", "<br>---|---|---<br>", "<br>---|---<br>", "<br>|-|<br>", "===", "\n===\n", "***", "[x](javascript:alert(1))", "![x](javascript:alert(2))", "[r]: javascript:alert(5)\n",
+    const HOSTILE: [&str; 74] = [
+        "~~~", "~~~\n", "```", "`", "``", "````\n", "|", " | ", "---", "<br>---|---|---<br>", "<br>---|---<br>", "<br>|-|<br>", "<br>- ", "<br>+ ", "<br>===<br>", "<br>---<br>", "&amp;#35;", "&amp;x;", "===", "\n===\n", "***", "[x](javascript:alert(1))", "![x](javascript:alert(2))", "[r]: javascript:alert(5)\n",
         "<http://evil.example/a>", "&lt;img src=x onerror=alert(3)&gt;", "<img src=x onerror=alert(3)>", "<script>alert(4)</script>", "&lt;script&gt;", "&lt;", "&gt;", "&amp;lt;b&amp;gt;", "\\", "\\\\", "**",
         "__", "*", "_", "~~", "1. ", "\n1. ", "1) ", "- ", "\n- ", "+ ", "> ", "\n> ", "# ", "\n# ", "    ", "\n    ", "\t", "&#96;", "&#124;", "&#126;&#126;&#126;", "{", "}", "(", ")", "[", "]", "!", "=", "-", "&",
         "&amp;copy;", "word", " ", "\n", "<br>", "x", "\n12345. ", "[r]", "&lt;!-- x --&gt;",
