@@ -685,8 +685,10 @@ Evidence: `jshost::work::check_rows`
   microphone". It stops — tracks stopped, the page's IPC command `plugin_mic` — on Stop, `close()`, the address leaving its view,
   the plugin switched off, updated or removed (`unloadPlugin`), the page loaded again, every track ended, or a
   recording starting (the page says "Echo started recording, so the plugin's microphone stopped"). One plugin at a
-  time; calling `open` again while open returns the same stream. Evidence: `micRefusal`, `micOpen`, `micClose` (window
-  script), `window::plugins::mic_open`
+  time; calling `open` again while open returns the same stream. The native window refuses the camera and a page's own
+  `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
+  permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
+  (window script), `window::plugins::mic_open`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or

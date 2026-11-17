@@ -143,6 +143,9 @@ struct Mic {
     grant: bool,
 }
 static MIC: std::sync::Mutex<Option<Mic>> = std::sync::Mutex::new(None);
+/// The webview owes one microphone reset (macOS `setMicrophoneCaptureState(None)`): a grant was given or a holder
+/// released since the last reset, so WebKit may keep that grant though no plugin holds the microphone any more.
+static MIC_RESET_OWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The name of the plugin that has the microphone now (Echo's recording sign shows it).
 pub(super) fn mic_holder() -> Option<String> {
@@ -152,7 +155,19 @@ pub(super) fn mic_holder() -> Option<String> {
 /// The webview asks for the microphone (a page's `getUserMedia`): granted once for each opening Echo allowed, else
 /// refused — a page's own call, a timer's, a second one.
 pub(super) fn mic_grant() -> bool {
-    MIC.lock().ok().and_then(|mut m| m.as_mut().map(|m| std::mem::replace(&mut m.grant, false))).unwrap_or(false)
+    let granted = MIC.lock().ok().and_then(|mut m| m.as_mut().map(|m| std::mem::replace(&mut m.grant, false))).unwrap_or(false);
+    if granted {
+        MIC_RESET_OWED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    granted
+}
+
+/// Whether the webview's microphone is to be reset now: a reset is owed and no plugin holds the microphone. Taking it
+/// clears it, so the reset runs once after each release, not on every tick.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn mic_reset_due() -> bool {
+    let held = MIC.lock().map_or(true, |m| m.is_some());
+    !held && MIC_RESET_OWED.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// The microphone taken from `id` (from whichever plugin has it: None). Whether one had it.
@@ -160,6 +175,7 @@ pub(super) fn mic_release(id: Option<&str>) -> bool {
     let Ok(mut m) = MIC.lock() else { return false };
     if m.as_ref().is_some_and(|m| id.is_none_or(|id| m.id == id)) {
         *m = None;
+        MIC_RESET_OWED.store(true, std::sync::atomic::Ordering::SeqCst);
         return true;
     }
     false
@@ -713,17 +729,24 @@ mod tests {
         assert_eq!(ask("voice"), json!({"value": "Acme voice"}));
         assert_eq!(mic_holder().as_deref(), Some("Acme voice"));
         assert!(mic_grant() && !mic_grant(), "one grant an opening");
+        // The webview's reset is owed from the grant on, but never taken while the plugin holds the microphone.
+        assert!(!mic_reset_due() && !mic_reset_due());
         // Another plugin while it is held: refused; its close doesn't take the first one's.
         assert_eq!(ask("talk")["error"], "Acme voice has the microphone now");
         close(json!("talk"));
         assert_eq!(mic_holder().as_deref(), Some("Acme voice"));
-        // Closed: nothing held, nothing granted.
+        // Closed: nothing held, nothing granted; the reset is due once, whatever the capture state, then not again.
         close(json!("voice"));
         assert!(mic_holder().is_none() && !mic_grant());
-        // A page loaded again closes whatever it had (no id).
+        assert!(mic_reset_due() && !mic_reset_due(), "one reset a release");
+        // A page loaded again closes whatever it had (no id): released, so a reset is owed though no grant was taken.
         ask("talk");
         close(Value::Null);
         assert!(mic_holder().is_none());
+        assert!(mic_reset_due() && !mic_reset_due());
+        // A release with nothing held owes nothing.
+        close(Value::Null);
+        assert!(!mic_reset_due());
         // Echo records a call (or a memo): refused, and why.
         std::fs::create_dir_all(crate::paths::state_dir()).unwrap();
         std::fs::write(crate::paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now().to_rfc3339(), "app": "teams",

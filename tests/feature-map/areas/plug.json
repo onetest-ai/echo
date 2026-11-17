@@ -506,7 +506,7 @@
   },
   {
    "id": "F-PLUG-86",
-   "feature": "A plugin's window half opens the microphone (`ctx.microphone.open`) on the user's click in its own view (its activity or its Knowledge tab) and gets a live audio stream; while it is open the window's top pill reads \"<plugin> hears your microphone\" with Stop (and the tray shows the recording icon and that line); Stop, `close()`, leaving its view, the plugin switched off, updated or removed, or the page loading again stops every track and takes the pill away",
+   "feature": "A plugin's window half opens the microphone (`ctx.microphone.open`) on the user's click in its own view (its activity or its Knowledge tab) and gets a live audio stream; while it is open the window's top pill reads \"<plugin> hears your microphone\" with Stop (and the tray shows the recording icon and that line); Stop, `close()`, every track ending, leaving its view, the plugin switched off, updated or removed, or the page loading again stops every track and takes the pill away",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -522,7 +522,7 @@
   },
   {
    "id": "F-PLUG-88",
-   "feature": "In the native window (macOS WKWebView, Windows WebView2) the webview gets the microphone only for an opening Echo allowed, once for each; a page's own `getUserMedia` outside one, the camera and screen capture are refused, and a capture no plugin holds is stopped within a second (macOS) or never granted (Windows asks Echo on every request); macOS's own microphone indicator shows while it is open",
+   "feature": "In the native window (macOS WKWebView, Windows WebView2) the webview gets the microphone only for an opening Echo allowed, once for each; a page's own `getUserMedia` for the microphone outside one, also right after a plugin's microphone stopped, and the camera are refused; a capture no plugin holds is stopped within a second (macOS) or never granted (Windows asks Echo on every request); macOS's own microphone indicator shows while it is open. Screen sharing is not gated by Echo: WKWebView doesn't send `getDisplayMedia` through Echo's permission handler, and WebView2 shows its own picker",
    "priority": "high",
    "check": "person",
    "axes": []

@@ -82,9 +82,11 @@ impl EchoWindow {
         self.follow_mic();
     }
 
-    /// macOS: no plugin holds the microphone, yet the webview hears it (a page's own `getUserMedia` WebKit let through
-    /// on an earlier grant): stopped — which also makes WebKit ask Echo again next time. On every state tick and after
-    /// each page command. (Windows asks Echo on every request: `gate_media`.)
+    /// macOS: no plugin holds the microphone, yet the webview may hear it or keep its grant (a page's own `getUserMedia`
+    /// WebKit let through on an earlier grant, a plugin that stopped its own tracks): reset — which stops any capture
+    /// and makes WebKit ask Echo again next time. Once whenever a reset is owed (a grant given, the microphone released:
+    /// `mic_reset_due`), whatever the capture state, and whenever a capture runs that no plugin holds. On every state
+    /// tick and after each page command. (Windows asks Echo on every request: `gate_media`.)
     pub fn follow_mic(&self) {
         #[cfg(target_os = "macos")]
         {
@@ -94,7 +96,7 @@ impl EchoWindow {
                 let wk = self.webview.webview();
                 // SAFETY: on the main thread (the event loop), the webview alive for the call.
                 unsafe {
-                    if wk.microphoneCaptureState() != WKMediaCaptureState::None {
+                    if plugins::mic_reset_due() || wk.microphoneCaptureState() != WKMediaCaptureState::None {
                         wk.setMicrophoneCaptureState_completionHandler(WKMediaCaptureState::None, None);
                     }
                 }
@@ -278,7 +280,9 @@ pub fn open<T: 'static>(
     #[cfg(not(all(target_os = "macos", feature = "js")))]
     drop(to_app);
     // The microphone only for a plugin's opening Echo allowed (`uses.microphone`, on the user's click in its view), once
-    // for each; the camera and the screen never. Windows: `gate_media` (wry's handler would let WebView2 keep a grant).
+    // for each; the camera never. A display-capture request is refused if one comes, but WKWebView doesn't send a page's
+    // `getDisplayMedia` through this handler, so it doesn't decide screen sharing. Windows: `gate_media` (wry's handler
+    // would let WebView2 keep a grant).
     #[cfg(target_os = "macos")]
     let builder = builder.with_permission_handler(|kind| {
         use wry::{PermissionKind, PermissionResponse};
@@ -302,7 +306,8 @@ pub fn open<T: 'static>(
 }
 
 /// Windows: WebView2's permission requests — the microphone only for a plugin's opening Echo allowed, once for each; the
-/// camera never — each decision for that request only (`SavesInProfile` off), so the next one asks Echo again.
+/// camera never — each decision for that request only (`SavesInProfile` off), so the next one asks Echo again. Any other
+/// kind keeps WebView2's default (a page's `getDisplayMedia` shows WebView2's own picker).
 #[cfg(windows)]
 fn gate_media(webview: &WebView) -> wry::Result<()> {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
