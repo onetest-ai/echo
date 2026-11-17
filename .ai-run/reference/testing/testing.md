@@ -20,7 +20,7 @@ in the same PR. The rules are in `.ai-run/guides/testing/testing.md`; how to wri
 ## The test environment (Rust)
 
 `paths::testenv::folders(name)` returns a guard that, while alive, points `ECHOCTL_HOME`, `ECHOCTL_CONFIG_DIR`, `HOME`
-and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for the last two) and unsets `ZDOTDIR`.
+and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for the last two) and unsets `ZDOTDIR` and `GIT_CONFIG_GLOBAL`.
 
 ## Helpers
 

@@ -55,9 +55,10 @@ echoctl plugin marketplace add "$M" --name acme-git
 | 5 | `echoctl plugin call acme-history commit '{"paths":["Notes/Acme.md"],"message":"again"}'` | `{"rev": null}`: nothing changed in that note |
 | 6 | `echoctl plugin call acme-history put '{"path":"a*.md","text":"star\n"}'`; `echoctl plugin call acme-history put '{"path":"ab.md","text":"plain\n"}'`; `echoctl plugin call acme-history commit '{"paths":["a*.md"],"message":"a star"}'`; `echoctl plugin call acme-history status` | The commit's `{"rev": "<40 hex>"}`; the status still lists `ab.md` (`??`) and `Notes/Globex.md` (`??`): `a*.md` was that one file, not a pattern |
 | 7 | `printf 'scratch.md\n' > "$D/history/.gitignore"`; `echoctl plugin call acme-history put '{"path":"scratch.md","text":"draft\n"}'`; `echoctl plugin call acme-history commit '{"paths":["scratch.md"],"message":"x"}'` | `null`; the commit fails: `“scratch.md” is ignored by this repository (.gitignore): Echo doesn't commit it` (not `{"rev": null}`) |
+| 8 | `git -C "$D/history" log --format='%an <%ae> / %cn <%ce>'` | Two lines, each `Sam Rivera <sam@initech.example> / Echo (acme-history) <acme-history@plugins.echo.invalid>`: the author is the test data's made-up user (its `GIT_CONFIG_GLOBAL`), never this computer's |
 
 ## Expected Final State
-`$D/history` is a repository with two commits by `Echo (acme-history)` (`Acme: first notes`, `a star`); `ab.md`, `Notes/Globex.md`, `.gitignore` and `scratch.md` uncommitted.
+`$D/history` is a repository with two commits by `Echo (acme-history)`, authored by `Sam Rivera` (`Acme: first notes`, `a star`); `ab.md`, `Notes/Globex.md`, `.gitignore` and `scratch.md` uncommitted.
 
 ## Teardown
 - `echoctl plugin remove acme-history --delete-data`; `echoctl plugin marketplace remove acme-git`
