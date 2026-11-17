@@ -468,12 +468,18 @@ Evidence: `jshost::work::check_rows`
 
 ## Client half
 
-- The client half exports `apply(ctx)`; its `ctx`: `call(command, args)` (the host half's commands), `listen`,
+- The client half exports `apply(ctx)`; its `ctx`: `call(command, args)` (the host half's commands), `listen`
+  (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
-  `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `setRow`, `setCard`,
-  `sw`, `ICON`, `relDay`, `ago`, `notice`, `copy`, `style(css)`, `graph`, `newGraph`). Echo takes out what a plugin
-  added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
+  `where()` (the activity and Settings section shown), `go(hash)`, `render()` and `ui` (`esc`, `patch(el, html)`
+  (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
+  stay), `setRow`, `setCard`, `sw`, `ICON`,
+  `relDay`, `ago`, `notice`, `copy`, `style(css)`, `stylesheet(path)` (a `.css` file of its package by a plain relative
+  path whose parts don't start with a dot, resolved once loaded; anything else is refused; what a plugin adds after it was
+  unloaded is refused), `graph`, `newGraph`). Echo takes out what a plugin added when
+  it unloads, and runs its `onUnload` cleanups first (one that throws is logged, the rest still run). Evidence:
+  `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, where
   it shows, its fields with value, default and range, its last run, next run or what it waits for, the last 30 days by
