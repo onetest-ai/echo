@@ -62,6 +62,12 @@ pub(super) fn read_text(f: &Path, rel: &str, max: u64, strict: bool) -> Result<S
     std::fs::File::open(f)?.take(max + 1).read_to_end(&mut buf)?;
     let cut = buf.len() as u64 > max;
     buf.truncate(max as usize);
+    text_of(buf, cut, strict, rel)
+}
+
+/// Bytes read (`cut`: more were there) as text: bad bytes replaced, or with `strict` refused as "not UTF-8: <rel>" — a
+/// character the cut split at the end dropped, not refused. Shared by `fs.read` and `git.show`.
+pub(super) fn text_of(buf: Vec<u8>, cut: bool, strict: bool, rel: &str) -> Result<String> {
     if !strict {
         return Ok(String::from_utf8_lossy(&buf).into_owned());
     }
