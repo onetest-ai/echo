@@ -286,7 +286,7 @@ too). A plugin never sets the address: not by its settings, its store or its win
   `--dangerously-skip-permissions` in every mode. A plugin can't choose a permission mode or tools of its own (`tools`
   is ignored there). Its record (`permissions.json`) and log name the mode it asked (`read`, `edit` or `copy`) and the
   permissions it runs with; a start in another permission mode than asked is said there too. On a profile of Echo's
-  own, a folder whose `.claude/settings.json` could route the run elsewhere (a routing variable in its `env`, a key or
+  own, a folder whose `.claude/settings.json` or `settings.local.json` could route the run elsewhere (a routing variable in its `env`, a key or
   policy helper; or not JSON) is refused. A call's text reaches the run only as the plugin puts it in the prompt: Echo
   can't see it there, so a plugin that does passes the call's `profile` (`ctx.echo.read('source', …)`). Evidence:
   `claudejob::in_folder`, `jshost::folders::claude_folder`
@@ -295,7 +295,7 @@ too). A plugin never sets the address: not by its settings, its store or its win
   "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's
   own project — as a folder run: the folder's setup (`--setting-sources user,project` on a profile of Echo's own, last),
   `mode` `read` (the default, `--tools Read,Grep,Glob,Skill`) or `edit` (needs `folders.write`, also `Edit,Write`; no
-  `copy`), no MCP server, never Bash or the web, refused on a folder whose `.claude/settings.json` could route it — but
+  `copy`), no MCP server, never Bash or the web, refused on a folder whose `.claude/settings.json` or `settings.local.json` could route it — but
   interactive, its conversation kept (`--session-id`, then `--resume` for that plugin and folder on that profile), and
   its permissions the user's setting for Claude in the window (Settings → AI & minutes → Claude's permissions: Ask each
   time — Claude Code's own prompts, no flag; Auto — `--permission-mode auto`, or `acceptEdits` / `dontAsk` where the
@@ -609,7 +609,8 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   and `ECHOCTL_BIN` set to the running Echo's, so an echoctl it starts acts on the same data, and inside a routine's or
   Yolo's run its markers, so that echoctl is limited and recorded as the run) and every `CLAUDE*` / `ANTHROPIC*` key;
   a PATH of the app's plus the usual program folders (Homebrew, `~/.local/bin`, nvm's newest version);
-  `ECHO_PLUGIN_SCRIPT=1` (nobody is there to answer a prompt) and `ECHO_PLUGIN_CACHE` (the store's `cache/`, never the
+  `ECHO_PLUGIN_SCRIPT=1` (nobody is there to answer a prompt; an echoctl it starts refuses every change to Echo plugins:
+  installs, updates, removals, switching on or off, their settings, marketplaces, certificates) and `ECHO_PLUGIN_CACHE` (the store's `cache/`, never the
   store itself). No stdin; it runs in its copied skill folder. Evidence: `plugins::scripts::run`,
   `plugins::scripts::run_markers`
 - Arguments: at most 100, each ≤ 32 KB with no NUL, passed as plain words, never through a shell.

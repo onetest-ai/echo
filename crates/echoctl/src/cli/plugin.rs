@@ -135,9 +135,12 @@ pub enum MarketCmd {
 
 /// Why a run Echo started can't change plugins.
 const REFUSED: &str = "plugins are installed, updated and changed by you, not from inside a run Echo started";
+/// Why a plugin's script can't change plugins (Echo sets `ECHO_PLUGIN_SCRIPT` for every script it runs).
+const SCRIPT_REFUSED: &str = "plugins are installed, updated and changed by you, not from a plugin's script";
 
 /// Plugins are installed, updated, set up, switched on and off and removed by the user, and so are their marketplaces:
-/// never from inside a run Echo started, a routine acting on its own too (a setting may list addresses a plugin reaches).
+/// never from inside a run Echo started, a routine acting on its own too (a setting may list addresses a plugin reaches),
+/// nor from a plugin's script (it would widen its own reach).
 fn refuse_in_run(cmd: &PluginCmd) -> Result<()> {
     let changes = matches!(
         cmd,
@@ -153,6 +156,9 @@ fn refuse_in_run(cmd: &PluginCmd) -> Result<()> {
     );
     if changes && crate::notes::headless() {
         anyhow::bail!(REFUSED);
+    }
+    if changes && std::env::var_os("ECHO_PLUGIN_SCRIPT").is_some() {
+        anyhow::bail!(SCRIPT_REFUSED);
     }
     Ok(())
 }
@@ -504,6 +510,31 @@ mod tests {
         assert!(refused(in_runs(|| PluginCmd::Marketplace { cmd: MarketCmd::Show { name: name.clone() } })));
         assert!(on(), "still installed and on");
         assert!(crate::plugins::snapshot()["markets"].as_array().unwrap().iter().all(|m| m["name"] != "o"), "no marketplace added");
+    }
+
+    #[test]
+    fn a_plugins_script_cant_set_its_addresses_or_install_enable_or_trust() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-script");
+        installed(&root);
+        crate::plugins::set_enabled("acme-feed", false).unwrap();
+        let cmds = [
+            PluginCmd::Set { id: "acme-feed".into(), key: "feed".into(), value: Some("https://evil.acme.example".into()) },
+            PluginCmd::Enable { id: "acme-feed".into() },
+            PluginCmd::Install { id: "acme-other".into(), from: None, yes: true },
+            PluginCmd::Trust { id: "acme-feed".into(), address: "feed.acme.example".into(), key: None },
+        ];
+        std::env::set_var("ECHO_PLUGIN_SCRIPT", "1");
+        let errs: Vec<String> = cmds.into_iter().map(|c| plugin_command(c).unwrap_err().to_string()).collect();
+        // Showing a setting still works there.
+        let shown = plugin_command(PluginCmd::Set { id: "acme-feed".into(), key: "feed".into(), value: None });
+        std::env::remove_var("ECHO_PLUGIN_SCRIPT");
+        assert!(errs.iter().all(|e| e == super::SCRIPT_REFUSED), "{errs:?}");
+        shown.unwrap();
+        assert_eq!(value("feed"), json!(null));
+        assert!(!on());
+        // The user, outside a script, still sets it.
+        plugin_command(PluginCmd::Set { id: "acme-feed".into(), key: "feed".into(), value: Some("https://feed.acme.example".into()) }).unwrap();
+        assert_eq!(value("feed"), json!("https://feed.acme.example"));
     }
 
     #[test]
