@@ -148,7 +148,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
   `sent` where its result went; `trial` a "Try it" run. A run with no model has no tokens or cost. An Echo job's
   `summary` / `error` is Echo's own words and counts, never a call's, thread's or person's name nor a model's text.
 - Echo's jobs: `enabled` is false while what turns a job off elsewhere is off (Recall, live notes, automatic minutes,
-  "Keep threads' work current"); `running` is true while a run Echo's app started on its own thread is under way
+  "Keep threads' work current"; for minutes, off means not automatic: minutes the user asks for still run and show); `running` is true while a run Echo's app started on its own thread is under way
   (Needs you now, prep, Recall, a live notes summary, a minutes run the app writes) — a thread's sync, the fetch, a
   live notes session and a minutes run in another process never show running. `ctx.echo.routines.list()` → `{routines, night: {from, to, default: {from, to}}}` and
   `ctx.echo.routines.runs(id, {limit})` (newest first, 20 by default, 500 at most), for a plugin with `uses.echo.jobs`;
