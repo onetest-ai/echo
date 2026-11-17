@@ -620,10 +620,6 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
         lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
     }
-    // Skills it may add to the user's own Claude Code (`uses.claude.skills`), each on a click.
-    if m.uses.get("claude").is_some_and(|c| c["skills"] == true) {
-        lines.push(CLAUDE_SKILLS_LINE.into());
-    }
     // Its routines: each named, with what its run may do and the hash of its definition and prompt.
     lines.extend(routines::sheet_lines(m));
     // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.

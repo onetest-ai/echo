@@ -31,7 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it); with `{"skills": true}` also its own line: "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" (§ Client half: `ctx.claude.installSkill`; `skills` true or false) |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -46,6 +46,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
+| `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -487,13 +488,13 @@ Hidden files and folders (a name starting with `.`) are read, never written — 
 (`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
 `append`, `move` (to and from), `remove` and `copyIn` and `ctx.git.commit` take as files, `ctx.fs.mkdir` and an empty
 folder's `remove` as folders. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
-- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`); Markdown in a
+- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`; not `community-plugins.json` or `core-plugins.json`, which switch Obsidian plugins on); Markdown in a
   skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
   `<file>` not hidden, ending in `.md`);
 - folders: `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
   place;
 - everything else hidden is refused ("is hidden"): `.claude/settings*.json`, `.claude/hooks`, `agents`, `commands`,
-  anything under `.claude` that isn't such Markdown (`SKILL.md.js` too), `.obsidian/plugins`, `themes`, `snippets`,
+  anything under `.claude` that isn't such Markdown (`SKILL.md.js` too), `.obsidian/plugins`, `themes`, `snippets`, `community-plugins.json`, `core-plugins.json`,
   `.git/**`, `.mcp.json`, `.gitattributes`, `.env`, a hidden note.
 
 Files the user hands a plugin come as **handles** `{file, name, size}`: `file` an opaque id of that plugin's alone (another
@@ -949,7 +950,7 @@ Evidence: `jshost::work::check_rows`
   control character, or a `\\?\` path, is refused; a closing `\` left off). On test data
   (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it opens nothing and logs `reveal <path>` to the open log. Evidence:
   `window::plugins::reveal_target`, `app::reveal_command`
-- `ctx.claude.installSkill(name, md)` / `ctx.claude.removeSkill(name)` (manifest `uses.claude.skills: true`, the plugin
+- `ctx.claude.installSkill(name, md)` / `ctx.claude.removeSkill(name)` (manifest `uses.skills: true`, the plugin
   on; client half only — the host half's `ctx.claude` has neither): a skill in the user's own Claude Code, not Echo's
   sessions — `<Claude Code folder>/skills/<name>/SKILL.md`, the folder `CLAUDE_CONFIG_DIR` when Echo has it, else
   `~/.claude`. `async`: each rejects, before anything is sent, unless the page has the user's click or key

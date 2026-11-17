@@ -234,7 +234,7 @@ function pluginCtx(id) {
         if (a.other) throw new Error('Claude is open for this plugin in another folder: close it in its panel first')
         if (a.start) termStart('claude-plugin', key, a.extra)
       },
-      /** A skill in the user's own Claude Code (`uses.claude.skills`): `installSkill(name, md)` writes
+      /** A skill in the user's own Claude Code (`uses.skills`): `installSkill(name, md)` writes
        *  `~/.claude/skills/<name>/SKILL.md`, `removeSkill(name)` takes one it added out — each only on the user's click
        *  or key (else it rejects before anything is sent); Echo checks the rest. */
       installSkill: async (name, md) => {

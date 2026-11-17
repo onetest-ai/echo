@@ -47,7 +47,7 @@ A write into a plugin's granted folder (`grants::writable`, `writable_folder`) a
 given and as it really is (a link inside the root, a Windows short name), but for the exact names `grants::hidden_ok`
 takes: `.gitignore`, `.obsidian/<name>.json`, `.claude/skills/<name>/<file>.md` (folders: `.obsidian`, `.claude`,
 `.claude/skills`, `.claude/skills/<name>`) — never Claude Code's settings, hooks, agents or commands, `.git`,
-`.mcp.json` or Obsidian's plugins and themes (plugin-api.md § Folders and files).
+`.mcp.json` or Obsidian's plugins, themes and the lists that switch its plugins on (`community-plugins.json`, `core-plugins.json`) (plugin-api.md § Folders and files).
 
 A plugin's skill in the user's own Claude Code (`plugins::claude_skills`) is written only on the user's click, as
 `<Claude Code folder>/skills/<name>/SKILL.md` alone (`<name>` 1–64 of `a-z`, `0-9`, `-`; 256 KB at most; never through

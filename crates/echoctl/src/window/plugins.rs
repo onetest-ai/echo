@@ -906,7 +906,7 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/twin");
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "twin", "name": "Twin", "version": "0.1.0", "uses": {"claude": {"skills": true}}}).to_string()).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "twin", "name": "Twin", "version": "0.1.0", "uses": {"skills": true}}).to_string()).unwrap();
         std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "twin", "source": "./plugins/twin"}]}).to_string()).unwrap();
         let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         crate::plugins::refresh(&name).unwrap();

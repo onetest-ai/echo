@@ -1,5 +1,5 @@
 //! Skills a plugin adds to the user's own Claude Code (`ctx.claude.installSkill` / `removeSkill`, manifest
-//! `uses.claude.skills: true`): each on the user's click in its window half, only `<Claude Code folder>/skills/<name>/SKILL.md`
+//! `uses.skills: true`): each on the user's click in its window half, only `<Claude Code folder>/skills/<name>/SKILL.md`
 //! (Markdown, nothing else). Which plugin added which skill Echo keeps in `<config dir>/plugins/claude-skills.json`
 //! (`{name: plugin id}`), never in the skill: a plugin changes or removes only the skills it added, never one that
 //! was there already, and its skills go when it is removed.
@@ -45,11 +45,11 @@ fn skills_dir() -> Result<PathBuf> {
     Ok(paths::own_claude_folder().join("skills"))
 }
 
-/// May plugin `id` add skills? Installed and on, its sheet naming `uses.claude.skills`. Its name.
+/// May plugin `id` add skills? Installed and on, its sheet naming `uses.skills`. Its name.
 fn may(id: &str) -> Result<String> {
     let Some(p) = super::enabled().into_iter().find(|p| p.id == id) else { bail!("{id} isn't installed and on") };
     let m = super::read_manifest(&super::plugin_dir(&p))?;
-    ensure!(m.uses.get("claude").is_some_and(|c| c["skills"] == true), "{} didn't ask to add skills to your Claude Code when it was installed", m.name);
+    ensure!(m.uses.get("skills") == Some(&Value::Bool(true)), "{} didn't ask to add skills to your Claude Code when it was installed", m.name);
     Ok(m.name)
 }
 
@@ -156,11 +156,14 @@ mod tests {
     fn a_plugin_adds_and_removes_only_its_own_skills_in_your_claude_code_and_they_go_with_it() {
         let (_env, root) = paths::testenv::folders("plugin-claude-skills");
         let skills = root.join("user/.claude/skills");
-        let market = install_test_plugins(&root, &[("twin", json!({"claude": {"skills": true}})), ("other", json!({"claude": {"skills": true}})), ("runs", json!({"claude": {}}))]);
+        let market = install_test_plugins(&root, &[("twin", json!({"skills": true})), ("other", json!({"skills": true})), ("runs", json!({"claude": {}}))]);
         let sheet = super::super::review("twin", Some(&market)).unwrap().uses;
-        assert!(sheet.iter().any(|l| l == super::super::CLAUDE_SKILLS_LINE), "{sheet:?}");
-        assert!(!super::super::review("runs", Some(&market)).unwrap().uses.iter().any(|l| l == super::super::CLAUDE_SKILLS_LINE));
-        assert!(super::super::describe(json!({"claude": {"skills": "yes"}}).as_object().unwrap()).is_err(), "skills is true or false");
+        // Its own capability: the sheet says only that, not that it runs Claude Code.
+        assert_eq!(sheet, vec![super::super::SKILLS_LINE.to_string()]);
+        assert!(!super::super::review("runs", Some(&market)).unwrap().uses.iter().any(|l| l == super::super::SKILLS_LINE));
+        for bad in [json!({"skills": "yes"}), json!({"skills": false}), json!({"skills": {}})] {
+            assert!(super::super::describe(bad.as_object().unwrap()).is_err(), "{bad}: skills is true");
+        }
 
         // Added, then changed: only SKILL.md in its own folder, in the test's own Claude Code folder.
         let f = install("twin", "acme-notes", "---\nname: acme-notes\n---\nNotes.").unwrap();
@@ -228,7 +231,7 @@ mod tests {
     #[test]
     fn on_test_data_a_skill_goes_only_to_the_tests_own_claude_code_folder() {
         let (_env, root) = paths::testenv::folders("plugin-claude-skills-test-data");
-        install_test_plugins(&root, &[("twin", json!({"claude": {"skills": true}}))]);
+        install_test_plugins(&root, &[("twin", json!({"skills": true}))]);
         // Only ever set here, never unset: a test process opens nothing either way.
         std::env::set_var("ECHOCTL_TEST_OPEN_LOG_ONLY", "1");
         std::env::remove_var("CLAUDE_CONFIG_DIR");

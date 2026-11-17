@@ -3140,6 +3140,8 @@ mod tests {
             ".obsidian/snippets/x.css",
             ".obsidian/.hidden.json",
             ".obsidian/app.js",
+            ".obsidian/community-plugins.json",
+            ".obsidian/core-plugins.json",
             ".claude/settings.json",
             ".claude/settings.local.json",
             ".claude/hooks/x.sh",

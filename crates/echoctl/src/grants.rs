@@ -142,7 +142,7 @@ pub fn skill_name(name: &str) -> bool {
 
 /// The only hidden paths a plugin writes in a folder it may change, by their exact names (`.Claude` is not `.claude`):
 /// a file `.gitignore` in any folder that isn't hidden, Obsidian's `.obsidian/<name>.json` (not its plugins, themes or
-/// snippets: code and styles), and Markdown in a skill of the folder's own Claude Code project,
+/// snippets, nor `community-plugins.json` / `core-plugins.json`: code and what switches it on), and Markdown in a skill of the folder's own Claude Code project,
 /// `.claude/skills/<name>/<file>.md` — never Claude Code's settings, hooks, agents, commands or anything else under
 /// `.claude`, never `.git` or `.mcp.json`. A folder: `.obsidian`, `.claude`, `.claude/skills` and
 /// `.claude/skills/<name>`. Nothing else hidden.
@@ -156,7 +156,8 @@ pub fn hidden_ok(rel: &Path, shape: Shape) -> bool {
     let p: Vec<&str> = parts.iter().map(String::as_str).collect();
     match (shape, p.as_slice()) {
         (Shape::File, [above @ .., ".gitignore"]) => !above.iter().any(|s| s.starts_with('.')),
-        (Shape::File, [".obsidian", n]) => named(n, ".json"),
+        // Not the lists of Obsidian plugins switched on: switching one on runs its code.
+        (Shape::File, [".obsidian", n]) => named(n, ".json") && !matches!(*n, "community-plugins.json" | "core-plugins.json"),
         (Shape::File, [".claude", "skills", s, f]) => skill_name(s) && named(f, ".md"),
         (Shape::Folder, [".obsidian"] | [".claude"] | [".claude", "skills"]) => true,
         (Shape::Folder, [".claude", "skills", s]) => skill_name(s),

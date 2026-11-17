@@ -26,7 +26,7 @@ printf '# Acme plan\n' > "$D/vault/Projects/Plan.md"
 printf -- '---\nname: acme-mine\ndescription: Mine\n---\nThe user'"'"'s own.\n' > "$CLAUDE_CONFIG_DIR/skills/acme-mine/SKILL.md"
 M="$D/market-twin"; mkdir -p "$M/plugins/acme-twin"
 echo '{"name":"acme-local","plugins":[{"id":"acme-twin","source":"./plugins/acme-twin"}]}' > "$M/echo-marketplace.json"
-echo '{"id":"acme-twin","name":"Acme twin","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","client":"client.js","uses":{"folders":{"what":"vaults","write":true},"claude":{"skills":true}}}' > "$M/plugins/acme-twin/echo-plugin.json"
+echo '{"id":"acme-twin","name":"Acme twin","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js","client":"client.js","uses":{"folders":{"what":"vaults","write":true},"skills":true}}' > "$M/plugins/acme-twin/echo-plugin.json"
 cat > "$M/plugins/acme-twin/main.js" <<'JS'
 export function apply(ctx) {
   ctx.command('add', async () => await ctx.system.pickFolder('vault'))
@@ -56,14 +56,14 @@ echoctl plugin marketplace add "$M" --name acme-local
 
 | Field | Value |
 |---|---|
-| Plugin | Acme twin (`acme-twin`) 0.1.0 with `uses.folders.write` and `uses.claude.skills` |
+| Plugin | Acme twin (`acme-twin`) 0.1.0 with `uses.folders.write` and `uses.skills` |
 | `S` (read in the page, `browser_evaluate`) | `({ load: document.body.dataset.acmeLoad, skill: document.body.dataset.acmeSkill })` |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `echoctl plugin install acme-twin --yes`; `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-twin add` | `Installed Acme twin 0.1.0`; the sheet it printed has the line "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: …"; the vault's path |
+| 1 | `echoctl plugin install acme-twin --yes`; `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-twin add` | `Installed Acme twin 0.1.0`; the sheet it printed has the line "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: …" and no line starting "Runs Claude Code"; the vault's path |
 | 2 | `echoctl plugin call acme-twin vault-skill`; `head -2 "$D/vault/.claude/skills/acme-notes/SKILL.md"` | `null`; `---` and `name: acme-notes` |
 | 3 | `echoctl plugin call acme-twin settings`; `ls -a "$D/vault/.claude"` | The call fails, saying `“.claude/settings.json” is hidden`; the listing is `.`, `..` and `skills` only |
 | 4 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-twin:main`; nothing touching the page, wait 3 s; read `S`; `ls "$CLAUDE_CONFIG_DIR/skills"` | The page shows "Acme twin" with its three buttons; `load` is `refused: A skill is added to your Claude Code only on your click`; the listing is `acme-mine` only |
@@ -80,4 +80,4 @@ Acme twin is removed; the test's Claude Code folder has only the user's `acme-mi
 
 ## Notes
 - Written from the features' text (F-PLUG-118, F-PLUG-119), not from the code. Never run step 5 without the test data's `env`: the skill would go to this computer's `~/.claude/skills`.
-- Every other hidden shape (`.gitignore`, `.obsidian/<name>.json`, hooks, agents, commands, `SKILL.md.js`, `.Claude`, `..`, links, Windows short names, a folder moved in) is the Rust test `jshost::tests::a_plugin_changes_files_only_in_folders_it_was_given_and_only_if_it_asked`; names, size, another plugin's skill, links in the skills folder and the test-data guard are `plugins::claude_skills::tests`; the route is `window::plugins::tests::a_plugins_window_half_adds_and_removes_a_skill_in_your_claude_code_by_post_only`; the click guard is `node crates/echoctl/ui/copy-guard.test.mjs`.
+- Every other hidden shape (`.gitignore`, `.obsidian/<name>.json`, `.obsidian/community-plugins.json` and `core-plugins.json` refused, hooks, agents, commands, `SKILL.md.js`, `.Claude`, `..`, links, Windows short names, a folder moved in) is the Rust test `jshost::tests::a_plugin_changes_files_only_in_folders_it_was_given_and_only_if_it_asked`; names, size, another plugin's skill, links in the skills folder and the test-data guard are `plugins::claude_skills::tests`; the route is `window::plugins::tests::a_plugins_window_half_adds_and_removes_a_skill_in_your_claude_code_by_post_only`; the click guard is `node crates/echoctl/ui/copy-guard.test.mjs`.
