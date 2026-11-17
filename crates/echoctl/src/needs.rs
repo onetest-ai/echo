@@ -339,19 +339,23 @@ impl Asked {
 }
 
 /// A read: what was asked of the model so far in, `read` (slow: Teams, mail, the model) out, then only what it found
-/// kept (`keep_read`, under the lock) — never a copy of the file from before the read. The answers kept are those this
-/// read used; after a read that failed in part, the earlier ones too (what it couldn't see may still be there).
+/// kept (`keep_read`, under the lock) — never a copy of the file from before the read. The answers kept: every one this
+/// read used, then earlier ones (a chat it couldn't read this time may be back) while fewer than `ASKED_MAX` are kept.
 fn read_and_keep(read: impl FnOnce(&mut Asked) -> (Vec<Value>, Vec<String>)) -> Result<()> {
     let mut asked = Asked { old: load()["asked"].as_object().cloned().unwrap_or_default(), now: serde_json::Map::new() };
     let (items, errors) = read(&mut asked);
     let Asked { old, mut now } = asked;
-    if !errors.is_empty() {
-        for (k, v) in old {
-            now.entry(k).or_insert(v);
+    for (k, v) in old {
+        if now.len() >= ASKED_MAX {
+            break;
         }
+        now.entry(k).or_insert(v);
     }
     keep_read(items, now, errors)
 }
+
+/// How many of the model's answers `needs.json` keeps at most, beyond those the last read used.
+const ASKED_MAX: usize = 500;
 
 fn read_graph(me: &str, since: DateTime<Utc>, asked: &mut Asked) -> (Vec<Value>, Vec<String>) {
     let mut tagged = vec![];
@@ -524,8 +528,8 @@ mod tests {
     #[test]
     fn an_answer_still_needed_is_kept_and_never_asked_again() {
         let (_env, _) = paths::testenv::folders("needs-asked");
-        // More answers kept than any cap, the one still needed sorting first.
-        let mut old: serde_json::Map<String, Value> = (0..300).map(|i| (format!("ask:mail:z{i:03}:Old"), json!(false))).collect();
+        // More answers kept than the cap, the ones still needed sorting first.
+        let mut old: serde_json::Map<String, Value> = (0..ASKED_MAX + 100).map(|i| (format!("ask:mail:z{i:03}:Old"), json!(false))).collect();
         old.insert("19:chat:m1".into(), json!({"hot": false}));
         old.insert("ask:mail:a1:Budget".into(), json!(true));
         save(&json!({"asked": old})).unwrap();
@@ -536,15 +540,22 @@ mod tests {
             (vec![], vec![])
         })
         .unwrap();
-        let kept: Vec<String> = load()["asked"].as_object().unwrap().keys().cloned().collect();
-        assert_eq!(kept, ["19:chat:m1", "ask:mail:a1:Budget", "ask:mail:b2:New"], "those this read used, no others");
-        // A read that failed in part keeps the earlier answers too.
+        let kept = load()["asked"].as_object().unwrap().clone();
+        assert_eq!(kept.len(), ASKED_MAX, "earlier answers only fill up to the cap");
+        for k in ["19:chat:m1", "ask:mail:a1:Budget", "ask:mail:b2:New"] {
+            assert!(kept.contains_key(k), "{k}: used by the read, kept whatever its key");
+        }
+        // More used than the cap: all of them kept, no earlier ones.
         read_and_keep(|asked| {
-            asked.insert("ask:mail:c3:Later".into(), json!(true));
-            (vec![], vec!["Teams: unreachable".into()])
+            for i in 0..ASKED_MAX + 10 {
+                asked.insert(format!("ask:teams:{i}"), json!(true));
+            }
+            (vec![], vec![])
         })
         .unwrap();
-        assert_eq!(load()["asked"].as_object().unwrap().len(), 4);
+        let kept = load()["asked"].as_object().unwrap().clone();
+        assert_eq!(kept.len(), ASKED_MAX + 10);
+        assert!(kept.keys().all(|k| k.starts_with("ask:teams:")));
     }
 
     #[test]
