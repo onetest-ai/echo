@@ -192,6 +192,25 @@ pub(super) fn refresh_plugin_markets() {
     }
 }
 
+/// The most a plugin's call from its window half may send (`ctx.call`'s arguments, `ctx.markdown`'s page).
+pub(super) const BODY_MAX: usize = 4 << 20;
+
+/// The body of a plugin's call from its window half (`ctx.call`, `ctx.markdown`): a POST of JSON, 4 MB at most; any
+/// other method, or a longer body, is refused with the reason.
+#[cfg(feature = "js")]
+fn call_body(req: &Request<Vec<u8>>) -> Result<Value, Box<Response<Cow<'static, [u8]>>>> {
+    let refuse = |status: u16, why: &str| Box::new(reply(status, "application/json", json!({"error": why}).to_string().into_bytes()));
+    if req.method() != wry::http::Method::POST {
+        return Err(refuse(405, "a plugin's call is a POST"));
+    }
+    if req.body().len() > BODY_MAX {
+        return Err(refuse(413, TOO_MUCH));
+    }
+    Ok(serde_json::from_slice(req.body()).unwrap_or(Value::Null))
+}
+
+/// Why a plugin's call over `BODY_MAX` is refused.
+pub(super) const TOO_MUCH: &str = "too much for one plugin call: 4 MB at most";
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
@@ -248,23 +267,32 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     Err(e) => json!({"error": format!("{e:#}")}),
                 }));
             }
-            // A page of its Markdown as safe HTML, and its destinations to resolve first (`ctx.markdown`, read only).
+            // A page of its Markdown as safe HTML, and its destinations to resolve first (`ctx.markdown`, read only):
+            // `{md, opts}` in a POST body.
             for (suffix, links) in [("/markdown", false), ("/markdown/links", true)] {
                 if let Some(id) = rest.strip_suffix(suffix).filter(|id| crate::plugins::enabled().iter().any(|p| p.id == *id)) {
-                    let q = req.uri().query().unwrap_or("");
-                    let md = query_param(q, "md").unwrap_or_default();
-                    let opts: Value = query_param(q, "opts").and_then(|o| serde_json::from_str(&o).ok()).unwrap_or(Value::Null);
-                    let v = if links { crate::plugins::markdown::links(&md) } else { crate::plugins::markdown::render(id, &md, &opts).map(Value::from) };
+                    let body = match call_body(req) {
+                        Ok(b) => b,
+                        Err(refused) => return Some(*refused),
+                    };
+                    let md = body["md"].as_str().unwrap_or_default();
+                    let v = if links { crate::plugins::markdown::links(md) } else { crate::plugins::markdown::render(id, md, &body["opts"]).map(Value::from) };
                     return Some(json_reply(v.map_or_else(|e| json!({"error": format!("{e:#}")}), |v| json!({"value": v}))));
                 }
             }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
-                    let q = req.uri().query().unwrap_or("");
-                    let args: Value = query_param(q, "args").and_then(|a| serde_json::from_str(&a).ok()).unwrap_or(Value::Null);
-                    // Handles of files the user handed this plugin (`ctx.call(…, {files})`), each checked as its own.
-                    let files: Vec<Value> = query_param(q, "files").and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default();
-                    json_reply(match crate::jshost::call_with(id, cmd, &args, &files, crate::jshost::CALL_TIMEOUT) {
+                    // `{args, files}` in a POST body; `files`: handles of files the user handed this plugin
+                    // (`ctx.call(…, {files})`), each checked as its own.
+                    let body = match call_body(req) {
+                        Ok(b) => b,
+                        Err(refused) => return Some(*refused),
+                    };
+                    if !crate::plugins::enabled().iter().any(|p| p.id == id) {
+                        return Some(json_reply(json!({"error": format!("{id} isn't installed and on")})));
+                    }
+                    let files: Vec<Value> = body["files"].as_array().cloned().unwrap_or_default();
+                    json_reply(match crate::jshost::call_with(id, cmd, &body["args"], &files, crate::jshost::CALL_TIMEOUT) {
                         Ok(v) => json!({"value": v}),
                         Err(e) => json!({"error": format!("{e:#}")}),
                     })
@@ -429,18 +457,120 @@ mod tests {
         crate::plugins::refresh(&name).unwrap();
         let agreed = crate::plugins::review("pages", Some(&name)).unwrap().uses;
         crate::plugins::install("pages", Some(&name), &agreed).unwrap();
-        let ask = |path: &str| {
-            let req = Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).unwrap();
+        let ask = |path: &str, body: Value| {
+            let req = Request::builder().method("POST").uri(format!("echo://localhost{path}")).body(body.to_string().into_bytes()).unwrap();
             let r = route(&super::super::urldecode(req.uri().path()), &req).unwrap();
             serde_json::from_slice::<Value>(r.body()).unwrap_or(Value::Null)
         };
-        let md = super::super::urlencode("[[Plan]] [[Other]] <b>x</b>");
-        assert_eq!(ask(&format!("/api/plugin/pages/markdown/links?md={md}"))["value"], json!({"links": ["Plan", "Other"], "images": []}));
-        let opts = super::super::urlencode(&json!({"links": {"Plan": "#pages:main/Plan", "Other": "#another:main/Other"}}).to_string());
-        assert_eq!(ask(&format!("/api/plugin/pages/markdown?md={md}&opts={opts}"))["value"], "<p><a href=\"#pages:main/Plan\">Plan</a> Other &lt;b&gt;x&lt;/b&gt;</p>");
+        let md = "[[Plan]] [[Other]] <b>x</b>";
+        assert_eq!(ask("/api/plugin/pages/markdown/links", json!({"md": md}))["value"], json!({"links": ["Plan", "Other"], "images": []}));
+        let opts = json!({"links": {"Plan": "#pages:main/Plan", "Other": "#another:main/Other"}});
+        assert_eq!(ask("/api/plugin/pages/markdown", json!({"md": md, "opts": opts}))["value"], "<p><a href=\"#pages:main/Plan\">Plan</a> Other &lt;b&gt;x&lt;/b&gt;</p>");
+        // A page far past what an address holds (64 KB): 300 000 Cyrillic letters, 600 KB, in the body.
+        let long = format!("[[План]] {}", "п".repeat(300_000));
+        let html = ask("/api/plugin/pages/markdown", json!({"md": long, "opts": {"links": {"План": "#pages:main/План"}}}))["value"].as_str().unwrap().to_string();
+        assert!(html.starts_with("<p><a href=\"#pages:main/План\">План</a> пппп") && html.matches('п').count() == 300_000, "the whole page");
+        // Asked with a GET (the page in its address, as before): refused, nothing rendered.
+        let req = Request::builder().uri("echo://localhost/api/plugin/pages/markdown?md=x").body(json!({"md": "x"}).to_string().into_bytes()).unwrap();
+        let r = route("/api/plugin/pages/markdown", &req).unwrap();
+        assert_eq!(r.status().as_u16(), 405);
         // A plugin that isn't installed and on gets no answer of its own.
         crate::plugins::set_enabled("pages", false).unwrap();
-        assert_eq!(ask(&format!("/api/plugin/pages/markdown?md={md}")), Value::Null);
+        assert_eq!(ask("/api/plugin/pages/markdown", json!({"md": md})), Value::Null);
+    }
+
+    /// The host half's `len` command: how many letters it was sent, its first three, and the files it was handed.
+    #[cfg(feature = "js")]
+    fn install_counter(root: &Path) {
+        let mk = root.join("market");
+        let d = mk.join("plugins/counter");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "counter", "name": "Counter", "version": "0.1.0", "main": "main.js"}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { ctx.command('len', (a, { files }) => [a.text.length, a.text.slice(0, 3), files.map((f) => f.name)]) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "counter", "source": "./plugins/counter"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("counter", Some(&name)).unwrap().uses;
+        crate::plugins::install("counter", Some(&name), &agreed).unwrap();
+        crate::jshost::sync();
+    }
+
+    /// A window's request to `route`: its status and JSON answer (Null when it isn't JSON).
+    #[cfg(feature = "js")]
+    fn native(method: &str, path: &str, body: Vec<u8>) -> (u16, Value) {
+        let req = Request::builder().method(method).uri(format!("echo://localhost{path}")).body(body).unwrap();
+        let r = route(&super::super::urldecode(req.uri().path()), &req).unwrap();
+        assert_eq!(r.headers().get("Cache-Control").unwrap(), "no-store");
+        (r.status().as_u16(), serde_json::from_slice(r.body()).unwrap_or(Value::Null))
+    }
+
+    /// The same request to the served window (`window --serve`): raw HTTP over a socket, with or without the page's
+    /// cookie and Origin.
+    #[cfg(feature = "js")]
+    fn served(method: &str, path: &str, body: &[u8], from_page: bool) -> (u16, Value) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let server = {
+            let origin = origin.clone();
+            std::thread::spawn(move || {
+                let (conn, _) = listener.accept().unwrap();
+                super::super::serve_conn(&conn, &origin, "t0k", "echo_serve_test");
+            })
+        };
+        let mut c = std::net::TcpStream::connect(origin.trim_start_matches("http://")).unwrap();
+        let auth = if from_page { format!("Cookie: echo_serve_test=t0k\r\nOrigin: {origin}\r\n") } else { String::new() };
+        write!(c, "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n{auth}\r\n", body.len()).unwrap();
+        let _ = c.write_all(body);
+        let mut out = Vec::new();
+        c.read_to_end(&mut out).unwrap();
+        server.join().unwrap();
+        let text = String::from_utf8_lossy(&out);
+        let status = text.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let (head, json) = text.split_once("\r\n\r\n").unwrap();
+        assert!(head.contains("Cache-Control: no-store"), "{head}");
+        (status, serde_json::from_str(json).unwrap_or(Value::Null))
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_window_halfs_call_sends_its_arguments_in_a_post_body_of_up_to_4_mb_in_both_windows() {
+        let (_env, root) = crate::paths::testenv::folders("window-call-body");
+        install_counter(&root);
+        // 1 MB of Cyrillic (a million letters, 2 MB as UTF-8, ~6 MB in an address): the whole of it reaches the command.
+        let text = "ж".repeat(1 << 20);
+        let body = json!({"args": {"text": text}, "files": []}).to_string().into_bytes();
+        let want = json!({"value": [1 << 20, "жжж", []]});
+        let call = |b: &[u8]| (0..100).map(|_| native("POST", "/api/plugin/counter/call/len", b.to_vec())).find(|r| {
+            let loading = r.1["error"].as_str().is_some_and(|e| e.contains("no command") || e.contains("isn't loaded"));
+            if loading { std::thread::sleep(std::time::Duration::from_millis(50)) }
+            !loading
+        }).unwrap();
+        assert_eq!(call(&body), (200, want.clone()), "the native window");
+        assert_eq!(served("POST", "/api/plugin/counter/call/len", &body, true), (200, want), "the served window, from its page");
+        // A file handed to it (#684) goes by its handle in the body, as before.
+        let f = root.join("Kickoff.md");
+        std::fs::write(&f, "# Kickoff").unwrap();
+        let h = crate::jshost::files::make("counter", &f).unwrap();
+        let with_file = json!({"args": {"text": "ok"}, "files": [h["file"]]}).to_string().into_bytes();
+        assert_eq!(call(&with_file), (200, json!({"value": [2, "ok", ["Kickoff.md"]]})));
+        assert_eq!(served("POST", "/api/plugin/counter/call/len", &with_file, true), (200, json!({"value": [2, "ok", ["Kickoff.md"]]})));
+        // Over 4 MB: refused with the reason, the command never run.
+        let big = json!({"args": {"text": "ж".repeat(2_200_000)}}).to_string().into_bytes();
+        assert!(big.len() > BODY_MAX);
+        assert_eq!(native("POST", "/api/plugin/counter/call/len", big.clone()), (413, json!({"error": TOO_MUCH})));
+        assert_eq!(served("POST", "/api/plugin/counter/call/len", &big, true), (413, json!({"error": TOO_MUCH})));
+        // A GET — its body ignored, its address's arguments too: refused.
+        let get = json!({"args": {"text": "x"}}).to_string().into_bytes();
+        assert_eq!(native("GET", "/api/plugin/counter/call/len?args=%7B%22text%22%3A%22x%22%7D", get.clone()).0, 405);
+        assert_eq!(served("GET", "/api/plugin/counter/call/len?args=%7B%22text%22%3A%22x%22%7D", &get, true).0, 405);
+        // The served window takes a call only from its own page (the cookie and the Origin), as its IPC.
+        assert_eq!(served("POST", "/api/plugin/counter/call/len", &with_file, false), (403, json!({"error": "refused"})));
+        // A plugin that isn't installed, or is switched off: refused.
+        assert!(native("POST", "/api/plugin/nobody/call/len", get.clone()).1["error"].is_string());
+        crate::plugins::set_enabled("counter", false).unwrap();
+        assert!(native("POST", "/api/plugin/counter/call/len", get.clone()).1["error"].is_string());
+        assert!(served("POST", "/api/plugin/counter/call/len", &get, true).1["error"].is_string());
     }
 
     #[cfg(feature = "js")]

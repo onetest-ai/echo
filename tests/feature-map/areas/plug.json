@@ -471,6 +471,15 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-62",
+   "feature": "A plugin's window half sends its host half up to 4 MB in one call (`ctx.call(command, args, {files})`, and the page of its `ctx.markdown`) — a page of a megabyte of Cyrillic arrives whole, in the window and the served window alike; more is refused with \"too much for one plugin call: 4 MB at most\", the command never run; a plugin that isn't installed and on is refused",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
   }
  ]
 }

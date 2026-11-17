@@ -12,6 +12,9 @@ rules are in `.ai-run/guides/window/window-ui.md`.
 - A page action is a `cmd` arm of its area's `handle`; an `/api/...` request is an arm of its area's `route`; both in
   `window/<area>.rs`. A path under another area's prefix goes in that area.
 - Exemplar: `window::settings::handle`; test `window::only_the_windows_own_page_reaches_its_actions`.
+- A plugin's call from its window half (`ctx.call`, `ctx.markdown`) is a POST with a JSON body of 4 MB at most
+  (`window::plugins::call_body`; another method 405, longer 413), in the window (wry's handler gets the body, macOS and
+  WebView2) and the served window (`window::serve_conn`: a POST only with its cookie and Origin, as `/ipc`).
 
 ## IPC
 

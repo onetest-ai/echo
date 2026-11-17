@@ -3,7 +3,7 @@ id: TC-070
 title: A plugin's vault page renders as safe HTML with the wikilinks, embeds and links it resolved, and nothing Echo doesn't allow
 priority: high
 type: functional
-requirements: [F-PLUG-53]
+requirements: [F-PLUG-53, F-PLUG-62]
 module: plugins
 run: agent
 platform: macos
@@ -30,6 +30,7 @@ cat > "$M/plugins/acme-pages/main.js" <<'JS'
 export function apply(ctx) {
   ctx.command('add', async () => await ctx.system.pickFolder('a vault'))
   ctx.command('root', () => ctx.fs.folders()[0] || '')
+  ctx.command('size', (a) => [a.text.length, a.text.slice(0, 6)])
 }
 JS
 cat > "$M/plugins/acme-pages/client.js" <<'JS'
@@ -62,7 +63,13 @@ export function apply(ctx) {
   const missing = (e) => { const m = e.target.closest && e.target.closest('[data-md-missing]'); if (m) { clicked = `${e.type}: ${m.dataset.mdMissing}`; ctx.render() } }
   ctx.listen('click', missing)
   ctx.listen('keydown', (e) => { if (e.key === 'Enter') missing(e) })
-  ctx.activities.add({ id: 'main', label: 'Acme pages', icon: '', render: () => `<h2>Acme pages</h2><pre id="acme-dests">${ctx.ui.esc(JSON.stringify(dests))}</pre><div id="acme-page">${html}</div><p id="acme-clicked">${ctx.ui.esc(clicked)}</p>` })
+  // Long pages: far past what a request's address holds (64 KB). Shown in #acme-big when each answered.
+  const big = { call: '…', page: '…', over: '…' }
+  const show = (k) => [(v) => { big[k] = v; ctx.render() }, (e) => { big[k] = `error: ${e.message}`; ctx.render() }]
+  ctx.call('size', { text: 'Привіт '.repeat(140000) }).then((r) => r.join(' ')).then(...show('call'))
+  ctx.markdown('Привіт '.repeat(70000)).then((h) => `${h.split('Привіт').length - 1} words`).then(...show('page'))
+  ctx.call('size', { text: 'ж'.repeat(2200000) }).then((r) => r.join(' ')).then(...show('over'))
+  ctx.activities.add({ id: 'main', label: 'Acme pages', icon: '', render: () => `<h2>Acme pages</h2><pre id="acme-dests">${ctx.ui.esc(JSON.stringify(dests))}</pre><div id="acme-page">${html}</div><p id="acme-clicked">${ctx.ui.esc(clicked)}</p><p id="acme-big">${ctx.ui.esc(`${big.call} | ${big.page} | ${big.over}`)}</p>` })
 }
 JS
 echoctl plugin marketplace add "$M" --name acme-local
@@ -81,6 +88,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 5 | Click "new idea" | `#acme-clicked` reads `click: Ideas`; the address is still `#acme-pages:main` |
 | 6 | Focus "new idea" (Tab or `focus()`), press Enter | `#acme-clicked` reads `keydown: Ideas`; the address is still `#acme-pages:main` |
 | 7 | Click "the roadmap" | The address is `#acme-pages:main/Roadmap`; the page still shows "Acme pages" |
+| 8 | Navigate to `{{base_url}}/#acme-pages:main`; after a moment read the text of `#acme-big` | `980000 Привіт | 70000 words | error: too much for one plugin call: 4 MB at most` — the host half got all 980,000 letters of the long call, the window half's long page came back whole, the call over 4 MB was refused; no `…` left |
 
 ## Expected Final State
 Acme pages is installed with the vault given to it; nothing changed in the vault.
