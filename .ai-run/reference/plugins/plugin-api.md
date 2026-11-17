@@ -269,6 +269,69 @@ another plugin, a second fetch, another method, headers or a body is refused as 
 type in Echo's own box when it asks — that page only, once each time" (after the `Talks to …` line when it names hosts
 too). A plugin never sets the address: not by its settings, its store or its window half. Evidence: `jshost::typed`
 
+### Reading a web page (`ctx.web`)
+
+No capability of its own and no line on the sheet: reading a page is a GET under the network grants above, made
+through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in
+`network.hosts` over https, an address the user listed (its pinned key too), or the page the user typed in Echo's box
+(`askAddress`, once). Like every fetch it follows no redirect, and in a run Echo started it is allowed or refused as
+`ctx.http.fetch` is. Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
+`User-Agent: Mozilla/5.0 (compatible; Echo)`, `Accept-Encoding: identity`. Evidence: `jshost::web`
+
+- `await ctx.web.read(url, {max, timeout, images})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
+  caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}`. `url` is the
+  address asked for (no redirect followed: a page that moved rejects with its 3xx). HTML only (`text/html`,
+  `application/xhtml+xml`; anything else rejects "this is <type>, not a web page"), never compressed (a
+  `Content-Encoding` other than identity rejects before its body is read), 5 MB (`max` less) read as it comes and
+  stopped past it, 30 s (`timeout` less); the charset the server or the page names (else UTF-8; bytes that aren't in it
+  become �). Off the plugin's 5 s slice, as every async service.
+  - `markdown`: the main part (the largest `<article>`, else `<main>`, else `<body>`) without scripts, styles,
+    navigation, headers, footers, asides, forms, frames, objects, SVG or templates; headings, paragraphs, lists, code,
+    tables, links and pictures kept. The title (its first `<h1>`, else JSON-LD's headline, else `og:title`, else
+    `<title>`) isn't repeated in it. A page that builds itself with JavaScript is never run: what it embeds — JSON-LD
+    (an article's `articleBody`, `headline`, `author`, `datePublished`, `image`), a framework's JSON state
+    (`__NEXT_DATA__`, `__NUXT_DATA__`, `application/json` scripts: its strings that read as prose, HTML in them read as
+    HTML), `<noscript>` — is read as data, and its text is taken when clearly fuller than the HTML's (`source`: `html`,
+    `json-ld`, `state`, `noscript`, or `meta` for an Open Graph description alone). `needs_js`: under 200 characters of
+    text on a page with scripts.
+  - Links: absolute `http://` / `https://` only (relative ones against `url`); `javascript:`, `data:`, `file:`,
+    `mailto:`, the page's own anchors and an address with a user part (`https://bank.example@evil.example`) are their
+    words. `links` lists the main part's, each once (2,000 at most).
+  - Pictures: in place as `![alt](src)`, a figure's caption under it as text; `images` lists each once (500 at most),
+    from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
+    `data:` and a picture whose page-given width or height is under 32 left out.
+  - The page's words are never markup: `\`, `<`, `[`, `]`, `!` escaped, a line starting `#` or `>` escaped, control
+    characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064,
+    U+2066–U+2069, U+FEFF) dropped from the text, title, links and pictures. Its work is bounded: 256 levels of nesting
+    (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest left out), 2 MB of each
+    embedded JSON. Evidence: `web::read::read`
+  - `images: 'save'` also downloads its pictures: each entry gets `saved` — a file handle `{file, name, size, type}`
+    (§ Folders and files: `ctx.files.read`, `ctx.fs.copyIn`) — or `error`, why not. 50 pictures, 10 MB each, 50 MB and
+    2 minutes for a page; PNG, JPEG, GIF, WebP, AVIF and SVG only (by the answer's type; Echo never shows an SVG: the
+    folder picture route serves raster only). Saved in the store's `cache/web/` (swept with `cache/`) as `NN.<ext>`;
+    the Markdown keeps each picture's `src`, and the plugin maps `src` → `saved.name` when it writes them elsewhere.
+    A picture is fetched as anything the plugin may reach — or, **the one widening**, as a browser shows a page: a page
+    on the public internet may have Echo fetch its pictures from their own hosts though the plugin wasn't granted them,
+    only these pictures, GET only, https (http only for an http page), and only from a public address: Echo looks the
+    host up, refuses it when any of its addresses is this computer or a private, link-local, shared or unique-local
+    range (an address written as a number other than plain IPv4 or IPv6 refused too), and connects to the address it
+    checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
+    may reach. Evidence: `jshost::web::picture_reach`
+- `await ctx.web.fetch(url, {max})` → a file handle `{file, name, size, type}` for one file the plugin may reach (the
+  same rules; any type), 10 MB (`max` up to 50 MB, what `ctx.fs.copyIn` copies), 2 minutes; `name` the address's last
+  segment in letters, digits, `.`, `_`, `-`.
+- `await ctx.web.markdown(html, {base})` → the same as `read` for HTML the plugin has (a mail's body, a page it fetched
+  itself), without `url` and `bytes`; `base` an http(s) address for its relative links (none: they are text). 5 MB.
+  Nothing is fetched. Also for a page's DOM rendered elsewhere.
+
+What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its
+links and pictures only as that allows: § Host half) — never as HTML of its own, never in a prompt as instructions.
+
+| Rejected | When |
+|---|---|
+| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it) |
+| the answer | not 2xx (a 3xx: "it moved", never followed), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
+
 ## Claude runs
 
 - `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})`, only with `claude` in `uses`. It runs

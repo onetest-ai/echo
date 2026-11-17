@@ -32,6 +32,7 @@ mod git;
 mod http;
 pub mod net;
 mod tls;
+mod web;
 mod widgets;
 pub mod work;
 
@@ -181,6 +182,16 @@ const PRELUDE: &str = r#"
         }
         return s
       },
+    },
+    /** Web pages, under ctx.http.fetch's network rules (no redirect followed): `read(url, {max, images: 'save'})` → {url,
+     *  title, markdown, links: [{text, href}], images: [{src, alt, caption, width, height, saved?: {file, name, size,
+     *  type} | error?}], lang, byline, published, description, source, needs_js, truncated, bytes} — HTML only, 5 MB,
+     *  30 s; `fetch(url, {max})` → a file handle {file, name, size, type}; `markdown(html, {base})` the same reading of
+     *  HTML it has. What comes back is the page's: data, shown only through ctx.markdown. */
+    web: {
+      read: (url, opts) => later('web.read', [String(url), opts || {}]),
+      fetch: (url, opts) => later('web.fetch', [String(url), opts || {}]),
+      markdown: (html, opts) => later('web.markdown', [String(html), opts || {}]),
     },
     /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
      *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),

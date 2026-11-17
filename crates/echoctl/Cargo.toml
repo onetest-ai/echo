@@ -15,7 +15,7 @@ transcribe = ["dep:whisper-rs", "dep:ureq", "dep:libloading"]
 # Windows run without it (--no-default-features), as without whisper.cpp.
 brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render", "dep:regex"]
 # Plugins' host halves in JavaScript (QuickJS), with their WebSocket and pinned TLS to the addresses the user listed.
-js = ["dep:rquickjs", "dep:tungstenite", "dep:rustls", "dep:rustls-platform-verifier", "dep:webpki"]
+js = ["dep:rquickjs", "dep:tungstenite", "dep:rustls", "dep:rustls-platform-verifier", "dep:webpki", "dep:encoding_rs"]
 # Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
 # Vulkan SDK (VULKAN_SDK); running needs vulkan-1.dll, which GPU drivers install.
 vulkan = ["transcribe", "whisper-rs/vulkan"]
@@ -65,6 +65,8 @@ pdfium-render = { version = "0.9.4", optional = true }
 # Plugins' host halves (`plugins/host.rs`): JavaScript run by QuickJS inside Echo (C, compiled in; so the
 # Windows cross-check runs without it, as without SQLite).
 rquickjs = { version = "0.14", default-features = false, features = ["classes", "properties"], optional = true }
+# A web page read for a plugin (`jshost/web.rs`) in the charset it says it is in (already built for the Brain).
+encoding_rs = { version = "0.8", optional = true }
 # A host half's WebSocket to an address the user listed (`jshost/net.rs`): the protocol only; TLS is rustls below.
 tungstenite = { version = "0.27", default-features = false, features = ["handshake"], optional = true }
 # wss:// for a host half: the OS's certificate store, or the key the user pinned for that address (`jshost/tls.rs`).
