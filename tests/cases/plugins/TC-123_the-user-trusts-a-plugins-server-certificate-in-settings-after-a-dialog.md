@@ -16,8 +16,8 @@ tags: [plugins, host-half, network, tls, pinning, settings]
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- **The user's answer set to yes** (a development build answers the system's dialog from `ECHOCTL_ALLOW_PINS`; the dialog itself is for a person): data built right before the run with `ECHOCTL_ALLOW_PINS=yes tests/fixtures/serve.sh up <dir> 48120 --set small`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first (its cookie lets clicks reach the app); the browser 1440 × 900. In S-12 the prelude starts the server so
-- TC-120's preconditions (in S-12: kept from that stage), every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
+- **The user's answer set to yes** (a development build answers the system's dialog from `ECHOCTL_ALLOW_PINS`; the dialog itself is for a person): data built right before the run with `ECHOCTL_ALLOW_PINS=yes tests/fixtures/serve.sh up <dir> 48120 --set small`; the window served at `{{base_url}}`, `{{base_url}}/` loaded first (its cookie lets clicks reach the app); the browser 1440 × 900. In S-39 the prelude starts the server so
+- TC-120's preconditions (in S-39: kept from that stage), every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
 - The voice server with TLS on 48122 showing certificate A (TC-122's precondition line, `voice-a.*`), its address listed: `echoctl plugin set acme-relay voice "http://127.0.0.1:48121, https://127.0.0.1:48122"`, and nothing trusted there (`echoctl plugin untrust acme-relay 127.0.0.1:48122`)
 - Echo met its certificate once: `echoctl plugin call acme-relay rpc '{"url":"wss://127.0.0.1:48122/rpc"}'` fails naming `sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=`
 
@@ -35,7 +35,7 @@ tags: [plugins, host-half, network, tls, pinning, settings]
 Acme relay trusts no certificate.
 
 ## Teardown
-- `kill $(cat "$D/wss.pid")`. In S-12 kept for TC-124; on its own: TC-120's teardown.
+- `kill $(cat "$D/wss.pid")`. In S-39 the rest is kept for the next stages; on its own: TC-120's teardown.
 
 ## Notes
 - Written from the feature's text (F-PLUG-82). The page can't be told apart from a plugin's own window half, so Trust asks in a dialog of the system's; "no" (nothing trusted, and the page can't ask again for a minute) and a key Echo didn't meet (refused at once) are proven by the Rust test `plugins::pins::the_window_trusts_only_the_key_echo_met_and_only_on_the_users_yes`.

@@ -37,11 +37,19 @@ pub(super) fn reach(id: &str, url: &str) -> Result<Reach> {
     Ok(Reach { listed: false, fake: test_host(url, &hosts)? })
 }
 
+/// A file the user handed the plugin, sent as a request's body: opened by Echo, its bytes given to curl's stdin as
+/// they go (never in memory), exactly `size` of them.
+pub(super) struct Upload {
+    file: std::fs::File,
+    size: u64,
+}
+
 /// The method, headers and body of a request as curl's config lines, each checked: a NUL would end a config line
 /// early; a header name is a plain token (curl reads `@file` as a file). `file`: a handle the user gave the plugin,
-/// sent as the body as it is (`upload-file`: read by curl as it goes, never in memory); `body` text is sent as
+/// sent as the body as it is (`Upload`: `upload-file = "-"`, so curl never adds the file's name to the URL's path as it
+/// does to an empty one or one ending in `/`; its length Echo's, so it isn't sent in chunks); `body` text is sent as
 /// written (`data-raw`; `data-binary` would read a body starting with `@` as a file).
-fn request_lines(id: &str, opts: &Value) -> Result<(String, String, bool)> {
+fn request_lines(id: &str, opts: &Value) -> Result<(String, String, Option<Upload>)> {
     let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
     if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
         bail!("method {method}");
@@ -52,10 +60,14 @@ fn request_lines(id: &str, opts: &Value) -> Result<(String, String, bool)> {
         bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
     }
     let mut cfg = String::new();
-    for (k, v) in headers {
+    for (k, v) in &headers {
         cfg.push_str(&format!("header = {}\n", curl_quote(&format!("{k}: {}", v.as_str().unwrap_or("")))));
     }
     let file = opts.get("file").filter(|f| !f.is_null());
+    if file.is_some() && headers.keys().any(|k| k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("transfer-encoding")) {
+        bail!("a file's Content-Length and Transfer-Encoding Echo sets itself");
+    }
+    let mut upload = None;
     match (file, body) {
         (Some(_), Some(_)) => bail!("a request sends a body or a file, not both"),
         (Some(f), None) => {
@@ -63,17 +75,56 @@ fn request_lines(id: &str, opts: &Value) -> Result<(String, String, bool)> {
                 bail!("a file goes with POST, PUT or PATCH, not {method}");
             }
             let (path, _) = files::own(id, f)?;
-            let size = crate::grants::open_regular(&path)?.metadata()?.len();
+            let file = crate::grants::open_regular(&path)?;
+            let size = file.metadata()?.len();
             if size > BIG {
                 bail!("the file is {} MB: a plugin sends files up to {} MB", size.div_ceil(1 << 20), BIG >> 20);
             }
-            // curl's -T sends `Expect: 100-continue` and waits for it; most servers never say it.
-            cfg.push_str(&format!("upload-file = {}\nheader = \"Expect:\"\n", curl_quote(&path.to_string_lossy())));
+            // An upload sends `Expect: 100-continue` and waits for it; most servers never say it. From stdin curl
+            // doesn't know the length and would send chunks: Echo says it, and no chunks.
+            cfg.push_str(&format!("upload-file = \"-\"\nheader = \"Expect:\"\nheader = \"Transfer-Encoding:\"\nheader = \"Content-Length: {size}\"\n"));
+            upload = Some(Upload { file, size });
         }
         (None, Some(body)) => cfg.push_str(&format!("data-raw = {}\n", curl_quote(&body))),
         (None, None) => {}
     }
-    Ok((method, cfg, file.is_some()))
+    Ok((method, cfg, upload))
+}
+
+/// curl's config in a file of its own (only the user can read it: it holds the headers), gone once dropped — kept
+/// until curl ends. For a request whose body comes on stdin.
+struct CfgFile(PathBuf);
+
+impl Drop for CfgFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// curl with config `cfg`, its answer on stdout, its words on stderr. `-q` first: the user's own ~/.curlrc (a
+/// `location` that follows redirects) isn't read. The config on stdin; with an upload, the file's bytes go there and
+/// the config in a `CfgFile` (keep it until curl ends).
+fn curl(cfg: &str, upload: Option<Upload>) -> Result<(std::process::Child, Option<CfgFile>)> {
+    use crate::app::NoWindow;
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let Some(Upload { file, size }) = upload else {
+        let mut child = Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
+        return Ok((child, None));
+    };
+    let at = CfgFile(std::env::temp_dir().join(format!("echo-curl-{}-{}.cfg", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))));
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(&at.0)?.write_all(cfg.as_bytes())?;
+    let mut child = Command::new("curl").no_window().args(["-q", "-sS", "-K"]).arg(&at.0).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let mut to = child.stdin.take().unwrap();
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut file.take(size), &mut to);
+    });
+    Ok((child, Some(at)))
 }
 
 /// The lines that pin the key the user trusts for an https address they listed: curl checks that key alone, not the
@@ -105,8 +156,6 @@ fn failed(id: &str, url: &str, reach: &Reach, code: Option<i32>, stderr: &str) -
 /// minutes — and the answer is {status, body: "", saved, bytes}: the body is text, so audio and images can't come
 /// through it. With `file: <handle>` that file is the body (up to 512 MB, 15 minutes).
 pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    use crate::app::NoWindow;
-    use std::io::Write as _;
     let reach = reach(id, url)?;
     let url = reach.fake.as_deref().unwrap_or(url);
     if url.contains('\0') {
@@ -129,8 +178,8 @@ pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
         }
         None => None,
     };
-    let (method, lines, sends_file) = request_lines(id, opts)?;
-    let big = save.is_some() || sends_file;
+    let (method, lines, upload) = request_lines(id, opts)?;
+    let big = save.is_some() || upload.is_some();
     let mut cfg = curl_head(url, &method, reach.fake.is_some());
     if big {
         cfg = cfg.replace("max-time = 60\n", "max-time = 900\n").replace(&format!("max-filesize = {SMALL}\n"), &format!("max-filesize = {BIG}\n"));
@@ -140,9 +189,7 @@ pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
         cfg.push_str(&format!("output = {}\n", curl_quote(&part.0.to_string_lossy())));
     }
     cfg.push_str(&lines);
-    // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
-    let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
+    let (child, _cfg) = curl(&cfg, upload)?;
     let out = child.wait_with_output()?;
     if !out.status.success() {
         return Err(failed(id, url, &reach, out.status.code(), &String::from_utf8_lossy(&out.stderr)));
@@ -186,33 +233,35 @@ pub(super) fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
 /// {bytes, cancelled?} or `error` {message}. No time limit (an event stream stays open), 512 MB at most; `cancel` ends
 /// it. Counted with the plugin's WebSockets (`net::MOST`).
 pub(super) fn stream(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    use crate::app::NoWindow;
-    use std::io::Write as _;
     let reach = reach(id, url)?;
     let target = reach.fake.clone().unwrap_or_else(|| url.to_string());
     if target.contains('\0') {
         bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
     }
-    let (method, lines, _) = request_lines(id, opts)?;
+    let (method, lines, upload) = request_lines(id, opts)?;
     let mut cfg = curl_head(&target, &method, reach.fake.is_some()).replace("max-time = 60\n", "").replace("write-out = \"\\n%{http_code}\"\n", "");
     cfg = cfg.replace(&format!("max-filesize = {SMALL}\n"), &format!("max-filesize = {BIG}\nconnect-timeout = 15\ninclude\nno-buffer\n"));
     cfg.push_str(&pin_lines(id, &target, &reach).unwrap_or_default());
     cfg.push_str(&lines);
     let conn = super::net::reserve(id)?;
-    let child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn();
-    let mut child = match child {
+    let (mut child, cfg_file) = match curl(&cfg, upload) {
         Ok(c) => c,
         Err(e) => {
             super::net::done(conn);
-            return Err(e.into());
+            return Err(e);
         }
     };
-    let _ = child.stdin.take().map(|mut s| s.write_all(cfg.as_bytes()));
     let (mut out, mut err) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
     let child = Arc::new(Mutex::new(Some(child)));
-    super::net::keep_child(conn, child.clone());
+    if !super::net::keep_child(conn, child.clone()) {
+        // Its plugin went meanwhile: killed by `keep_child`, reaped here.
+        let _ = child.lock().ok().and_then(|mut c| c.take()).map(|mut c| c.wait());
+        super::net::done(conn);
+        bail!("that connection is closed");
+    }
     let (id, url) = (id.to_string(), url.to_string());
     std::thread::spawn(move || {
+        let _cfg_file = cfg_file;
         let said = std::thread::spawn(move || {
             let mut s = String::new();
             let _ = err.read_to_string(&mut s);

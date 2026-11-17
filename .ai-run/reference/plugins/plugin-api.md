@@ -193,12 +193,14 @@ Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::
   address and port (never a `network.hosts` host). `send(text)`, `send(base64, {binary: true})`, `send(handle)` (a file
   the user handed it, as one binary message); `onMessage(data, {binary})` (binary as base64), `onClose({code,
   reason})`, `onError({message})`; `close(code, reason)` (1000 or 3000–4999). Events wait for their handler, set after
-  the `await`. Headers can't be the WebSocket's own (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-*`); `protocols`
+  the `await` — up to 1,000 of them and 8 MB of their data, all the plugin's WebSockets together; past that the
+  connection is closed and `onError` says why. Headers can't be the WebSocket's own (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-*`); `protocols`
   are plain words. Evidence: `jshost::net::websocket`
 - Each runs on a thread of its own; its events reach the plugin's JavaScript like Echo's other events, one slice each.
-  A plugin keeps 8 connections (WebSockets and streams) open at once; a message is 16 MB at most either way (in
-  practice the host half's 64 MB holds less text); while the plugin lags 256 events behind, Echo reads no more from that
-  connection. Switching the plugin off, updating or removing it closes every one (no event follows). Evidence:
+  A plugin keeps 8 connections (WebSockets and streams) open at once. A WebSocket message is 16 MB at most out and 4 MB
+  in (binary in arrives as base64, in the 64 MB every plugin's host half shares): a bigger one in closes the connection
+  (code 1009) with an error saying so. While the plugin is 256 events behind on a connection, or its connections' events
+  waiting for it pass 16 MB together, Echo reads no more from them. Switching the plugin off, updating or removing it closes every one (no event follows). Evidence:
   `jshost::net::MOST`, `jshost::net::stop_plugin`
 
 **Certificates the system doesn't trust** (a server of the user's own, self-signed or from an internal CA): https and
@@ -207,7 +209,8 @@ wss to an address the user listed fail the first time with the key of the certif
 Plugins → `<name>`, or with `echoctl plugin trust <id> <host:port>`" — and Echo keeps that key as met. The user trusts
 it in the plugin's detail under Certificates ("Trust": a dialog of the system's asks again) or with `echoctl plugin
 trust <id> <host:port> [--key sha256//…]`; `echoctl plugin certs <id>` lists them, `echoctl plugin untrust <id>
-<host:port>` (or "Forget") drops one. From then on that address is reached with that key alone — not the system's
+<host:port>` (or "Forget") drops one. Without `--key` `trust` takes the key `certs` shows as met, and is refused (give
+`--key`) once Echo met more than one key there since the user last trusted or forgot one. From then on that address is reached with that key alone — not the system's
 trust, its name or dates — and another key is refused ("… changed since you trusted it (its key is now …; you trusted
 …): refused until you …") until the user trusts it. A key is the SHA-256 of the certificate's public key, as curl's
 `--pinnedpubkey` writes it (`openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst
@@ -220,9 +223,9 @@ is changed from inside a run Echo started. A plugin removed with its data loses 
 |---|---|
 | the host | not granted: neither `https://` to a host in `network.hosts` (named with no port and no user) nor an address the user listed (`network.hosts_from`); a WebSocket: not an address the user listed |
 | the certificate | https / wss to a listed address the system doesn't trust and no key trusted, or not the key the user trusted |
-| too many | a 9th connection open at once, a message over 16 MB, a file sent over 512 MB |
+| too many | a 9th connection open at once, a WebSocket message over 16 MB out or 4 MB in, a file sent over 512 MB |
 | the method | other than `GET`, `POST`, `PUT`, `PATCH` or `DELETE` |
-| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too) |
+| a header | a name that isn't a plain token, a value with a NUL or a line break (a NUL in the URL or body too); `Content-Length` or `Transfer-Encoding` with `file` (Echo sets them) |
 | the request | the host can't be reached, the 60 s or the 10 MB passed (15 minutes, 512 MB with `save` or `file`) |
 
 ## Claude runs

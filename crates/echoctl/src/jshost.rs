@@ -87,6 +87,22 @@ const PRELUDE: &str = r#"
       Promise.resolve().then(t.fn).catch((e) => call('log', ['error', `timer: ${(e && e.message) || e}`]))
     }
   }
+  // A WebSocket's events waiting for their handler (set after the await), every connection's together: at most 1,000
+  // and 8 MB of their data (the heap is every plugin's). Past that the connection is closed, an error waiting after
+  // what came; once it closed, what still waits no longer counts.
+  let waiting = 0, waitingBytes = 0
+  const hold = (id, q, ev) => {
+    if (ev.kind === 'close') return q.push(ev)
+    if (q.over) return
+    const size = String(ev.data || ev.message || '').length
+    if (waiting >= 1000 || waitingBytes + size > (8 << 20)) {
+      q.over = true
+      try { call('net.close', [id, 1000, '']) } catch (e) {}
+      return q.push({ kind: 'error', message: 'more than 8 MB or 1,000 messages waited for this WebSocket\'s handlers, so it is closed: set onMessage, onClose and onError right after the await' })
+    }
+    ev.size = size; waiting++; waitingBytes += size; q.push(ev)
+  }
+  const letGo = (ev) => { if (ev.size !== undefined) { waiting--; waitingBytes -= ev.size; ev.size = undefined } return ev }
   // A connection's events (`net.rs`): each to its own handler, by id; a handler's error is logged.
   const conns = {}, fire = (fn, ...a) => Promise.resolve().then(() => fn && fn(...a)).catch((e) => call('log', ['error', `net: ${(e && e.message) || e}`]))
   globalThis.__net = (id, json) => { const c = conns[id]; if (c) c(JSON.parse(json)) }
@@ -168,13 +184,13 @@ const PRELUDE: &str = r#"
         const id = call('net.websocket', [String(url), opts || {}]), h = {}, q = []
         const ws = { protocol: '', send: (d, o) => call('net.send', [id, d, o || {}]), close: (code, reason) => call('net.close', [id, code || 1000, String(reason || '')]) }
         const run = (ev) => { const fn = h[{ message: 'onMessage', close: 'onClose', error: 'onError' }[ev.kind]]; if (fn) fire(fn, ...(ev.kind === 'message' ? [ev.data, { binary: !!ev.binary }] : [ev])); return !!fn }
-        for (const k of ['onMessage', 'onClose', 'onError']) Object.defineProperty(ws, k, { get: () => h[k], set: (fn) => { h[k] = fn; while (q.length && run(q[0])) q.shift() } })
+        for (const k of ['onMessage', 'onClose', 'onError']) Object.defineProperty(ws, k, { get: () => h[k], set: (fn) => { h[k] = fn; while (q.length && run(q[0])) letGo(q.shift()) } })
         let open = false
         conns[id] = (ev) => {
-          if (ev.kind === 'close') delete conns[id]
+          if (ev.kind === 'close') { delete conns[id]; q.forEach(letGo) }
           if (ev.kind === 'open') { open = true; ws.protocol = ev.protocol; return resolve(ws) }
           if (!open) return ev.kind === 'error' && reject(new Error(ev.message))
-          if (q.length || !run(ev)) q.length < 1000 && q.push(ev)
+          if (q.length || !run(ev)) hold(id, q, ev)
         }
       }),
     },
@@ -713,7 +729,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 }
             }
             Ok(Msg::Net(id, n, ev)) => {
-                net::delivered(n);
+                net::delivered(n, ev.len());
                 if let Some(p) = plugins.get(&id) {
                     set_current(&current, &id);
                     current.lock().unwrap().unattended = true;

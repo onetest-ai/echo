@@ -49,7 +49,8 @@ pub enum PluginCmd {
     /// The certificates you trust for a plugin's https / wss addresses, and those Echo met there and refused (JSON)
     Certs { id: String },
     /// Trust the certificate at an address you listed for a plugin (host:port): the one Echo met there, or the key you
-    /// give (sha256//… of its public key); Echo then reaches it with that key alone and refuses another
+    /// give (sha256//… of its public key; needed once Echo met more than one key there); Echo then reaches it with that
+    /// key alone and refuses another
     Trust {
         id: String,
         address: String,
@@ -224,7 +225,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                 eprintln!("Note: {}", n.as_str().unwrap_or(""));
             }
         }
-        PluginCmd::Certs { id } => print_json(&serde_json::json!(pins::view(&id))),
+        PluginCmd::Certs { id } => print_json(&serde_json::json!(pins::view(&id)?)),
         PluginCmd::Trust { id, address, key } => {
             let key = pins::trust(&id, &address, key.as_deref())?;
             println!("Trusted {} for {id}: {key}", pins::host_port(&address)?);
@@ -458,14 +459,14 @@ mod tests {
         const KEY: &str = "sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=";
         let trust = || PluginCmd::Trust { id: "acme-feed".into(), address: "feed.acme.example".into(), key: Some(KEY.into()) };
         assert!(refused(in_runs(trust)));
-        assert!(crate::plugins::pins::view("acme-feed").is_empty());
+        assert!(crate::plugins::pins::view("acme-feed").unwrap().is_empty());
         // Listing them still works there; outside a run the user trusts and forgets.
         assert_eq!(in_runs(|| PluginCmd::Certs { id: "acme-feed".into() }), [None, None]);
         plugin_command(trust()).unwrap();
         assert_eq!(crate::plugins::pins::pinned("acme-feed", "feed.acme.example:443").as_deref(), Some(KEY));
         assert!(refused(in_runs(|| PluginCmd::Untrust { id: "acme-feed".into(), address: "feed.acme.example:443".into() })));
         plugin_command(PluginCmd::Untrust { id: "acme-feed".into(), address: "https://feed.acme.example".into() }).unwrap();
-        assert!(crate::plugins::pins::view("acme-feed").is_empty());
+        assert!(crate::plugins::pins::view("acme-feed").unwrap().is_empty());
     }
 
     #[test]

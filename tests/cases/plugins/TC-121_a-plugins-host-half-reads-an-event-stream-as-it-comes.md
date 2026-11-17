@@ -16,8 +16,8 @@ tags: [plugins, host-half, network, sse, cli]
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- TC-120's preconditions, run as written (in S-12: kept from that stage): Acme relay installed, the voice server on 48121 (`GET /events`: `data: one`, `data: два`, `data: three`, 300 ms apart), every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
-- Its address listed: `echoctl plugin set acme-relay voice "http://127.0.0.1:48121"` (in S-12: TC-120's step 3 did it)
+- TC-120's preconditions, run as written (in S-39: kept from that stage): Acme relay installed, the voice server on 48121 (`GET /events`: `data: one`, `data: два`, `data: three`, 300 ms apart), every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
+- Its address listed: `echoctl plugin set acme-relay voice "http://127.0.0.1:48121"` (in S-39: TC-120's step 3 did it)
 
 ## Steps
 
@@ -31,7 +31,7 @@ tags: [plugins, host-half, network, sse, cli]
 Unchanged: Acme relay installed, its address listed.
 
 ## Teardown
-- Kept for TC-122 in S-12. On its own: TC-120's teardown.
+- Kept for the next stages in S-39. On its own: TC-120's teardown.
 
 ## Notes
 - Written from the feature's text (F-PLUG-81). Cancelling a stream that never ends (the server sees the client go), a letter cut across two pieces of the network, and a stream to an https address with a trusted key are the Rust tests' (`jshost::net`).

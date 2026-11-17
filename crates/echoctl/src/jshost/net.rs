@@ -1,22 +1,27 @@
 //! A host half's open connections: `ctx.net.websocket` (here) and `ctx.http.stream` (`http.rs`). Each runs on a thread
 //! of its own and reaches the plugin's JavaScript only as events (`Msg::Net` → `__net`), one slice each, so nothing
 //! waits inside the 5 s slice. Only to the addresses the user listed (a WebSocket) or what `http::reach` lets through
-//! (a stream); a plugin keeps `MOST` open at once, a message is `MAX_MESSAGE` at most, and a plugin switched off,
-//! updated or removed loses them all (`stop_plugin`).
+//! (a stream); a plugin keeps `MOST` open at once, a message is `MAX_SEND` at most out and `MAX_RECEIVE` in, what
+//! waits for its JavaScript is bounded (`behind`), and a plugin switched off, updated or removed loses them all
+//! (`stop_plugin`).
 
 use std::collections::BTreeMap;
 use std::io::Read as _;
-use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use super::*;
 
 /// Connections (WebSockets and streams) a plugin keeps open at once.
 pub(super) const MOST: usize = 8;
-/// The largest WebSocket message, either way.
-pub(super) const MAX_MESSAGE: usize = 16 << 20;
+/// The largest WebSocket message a plugin sends.
+pub(super) const MAX_SEND: usize = 16 << 20;
+/// The largest it receives: it reaches JavaScript as an event (base64 when binary) parsed in QuickJS, whose heap all
+/// plugins share (64 MB); a bigger one closes the connection (1009) with an error saying so.
+pub(super) const MAX_RECEIVE: usize = 4 << 20;
 /// Events of one connection the plugin hasn't been given yet: past this, its thread waits before reading more.
 const BACKLOG: usize = 256;
+/// Bytes of events all of a plugin's connections have waiting for it: past this, they wait before reading more.
+const QUEUE_BYTES: usize = 16 << 20;
 
 pub(super) enum Out {
     Text(String),
@@ -32,7 +37,9 @@ struct Conn {
     open: bool,
     out: Option<Sender<Out>>,
     child: Option<Child>,
-    backlog: Arc<AtomicUsize>,
+    /// Its events not given to the plugin yet, and their bytes.
+    backlog: usize,
+    bytes: usize,
 }
 
 static CONNS: Mutex<BTreeMap<u64, Conn>> = Mutex::new(BTreeMap::new());
@@ -48,14 +55,23 @@ pub(super) fn reserve(plugin: &str) -> Result<u64> {
         bail!("{plugin} has {MOST} connections open: close one first");
     }
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    all.insert(n, Conn { plugin: plugin.into(), open: true, out: None, child: None, backlog: Arc::new(AtomicUsize::new(0)) });
+    all.insert(n, Conn { plugin: plugin.into(), open: true, out: None, child: None, backlog: 0, bytes: 0 });
     Ok(n)
 }
 
-/// The curl behind a stream, killed on `cancel` or `stop_plugin`.
-pub(super) fn keep_child(n: u64, child: Child) {
-    if let Some(c) = conns().get_mut(&n) {
-        c.child = Some(child);
+/// The curl behind a stream, killed on `cancel` or `stop_plugin` — or now, when either came first (false).
+pub(super) fn keep_child(n: u64, child: Child) -> bool {
+    let mut all = conns();
+    match all.get_mut(&n).filter(|c| c.open) {
+        Some(c) => {
+            c.child = Some(child);
+            true
+        }
+        None => {
+            drop(all);
+            kill(&Some(child));
+            false
+        }
     }
 }
 
@@ -81,25 +97,38 @@ pub(super) fn done(n: u64) {
 
 /// An event for the plugin's JavaScript (`__net(n, json)`).
 pub(super) fn emit(plugin: &str, n: u64, ev: Value) {
-    if let Some(b) = conns().get(&n).map(|c| c.backlog.clone()) {
-        b.fetch_add(1, Ordering::Relaxed);
-    }
-    let _ = host().tx.send(Msg::Net(plugin.into(), n, ev.to_string()));
+    let ev = ev.to_string();
+    queued(n, ev.len());
+    let _ = host().tx.send(Msg::Net(plugin.into(), n, ev));
 }
 
-/// The host gave the plugin one of `n`'s events.
-pub(super) fn delivered(n: u64) {
-    if let Some(c) = conns().get(&n) {
-        // Only the host thread takes away (workers add): never below zero.
-        if c.backlog.load(Ordering::Relaxed) > 0 {
-            c.backlog.fetch_sub(1, Ordering::Relaxed);
-        }
+/// One of `n`'s events, of `len` bytes, waits for the plugin.
+fn queued(n: u64, len: usize) {
+    if let Some(c) = conns().get_mut(&n) {
+        c.backlog += 1;
+        c.bytes += len;
     }
 }
 
-/// Wait while the plugin is behind on `n`'s events (and still wants it).
+/// The host gave the plugin one of `n`'s events, of `len` bytes.
+pub(super) fn delivered(n: u64, len: usize) {
+    if let Some(c) = conns().get_mut(&n) {
+        c.backlog = c.backlog.saturating_sub(1);
+        c.bytes = c.bytes.saturating_sub(len);
+    }
+}
+
+/// The plugin is behind on what `n` (still wanted) read: over `BACKLOG` of its events, or over `QUEUE_BYTES` of all
+/// its connections' together, wait for it.
+fn behind(n: u64) -> bool {
+    let all = conns();
+    let Some(c) = all.get(&n).filter(|c| c.open) else { return false };
+    c.backlog > BACKLOG || all.values().filter(|o| o.plugin == c.plugin).map(|o| o.bytes).sum::<usize>() > QUEUE_BYTES
+}
+
+/// Wait while the plugin is behind on what `n` read (`behind`).
 pub(super) fn wait_backlog(n: u64) {
-    while conns().get(&n).is_some_and(|c| c.open && c.backlog.load(Ordering::Relaxed) > BACKLOG) {
+    while behind(n) {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -142,7 +171,7 @@ pub(super) fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 // A file the user handed it, sent as one binary message.
                 let (path, _) = files::own(id, &arg[1])?;
                 let mut buf = vec![];
-                crate::grants::open_regular(&path)?.take(MAX_MESSAGE as u64 + 1).read_to_end(&mut buf)?;
+                crate::grants::open_regular(&path)?.take(MAX_SEND as u64 + 1).read_to_end(&mut buf)?;
                 Out::Binary(buf)
             } else if arg[2]["binary"].as_bool() == Some(true) {
                 use base64::Engine as _;
@@ -155,8 +184,8 @@ pub(super) fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 Out::Binary(b) => b.len(),
                 Out::Close(..) => 0,
             };
-            if size > MAX_MESSAGE {
-                bail!("a message is {} MB at most", MAX_MESSAGE >> 20);
+            if size > MAX_SEND {
+                bail!("a message is {} MB at most", MAX_SEND >> 20);
             }
             conns().get(&n).and_then(|c| c.out.clone()).ok_or_else(|| anyhow!("that connection isn't a WebSocket"))?.send(msg).map_err(|_| anyhow!("that connection is closed"))?;
             Ok(Value::Null)
@@ -250,7 +279,7 @@ fn run_ws(plugin: &str, n: u64, req: tungstenite::handshake::client::Request, ho
         Ok(s) => s,
         Err(e) => return fail(format!("{e:#}")),
     };
-    let config = WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));
+    let config = WebSocketConfig::default().max_message_size(Some(MAX_RECEIVE)).max_frame_size(Some(MAX_RECEIVE));
     let (mut ws, answer) = match tungstenite::client::client_with_config(req, stream, Some(config)) {
         Ok(x) => x,
         Err(tungstenite::HandshakeError::Failure(e)) => return fail(format!("{host}:{port} refused the WebSocket: {e}")),
@@ -299,6 +328,12 @@ fn run_ws(plugin: &str, n: u64, req: tungstenite::handshake::client::Request, ho
             Err(WsError::ConnectionClosed | WsError::AlreadyClosed) => {
                 let (code, reason) = closed_by.unwrap_or((1000, String::new()));
                 return emit(json!({"kind": "close", "code": code, "reason": reason}));
+            }
+            Err(WsError::Capacity(_)) => {
+                let _ = ws.close(Some(CloseFrame { code: CloseCode::Size, reason: "too big".into() }));
+                let _ = ws.flush();
+                emit(json!({"kind": "error", "message": format!("{host}:{port} sent a message over {} MB, the most a plugin receives: the connection is closed", MAX_RECEIVE >> 20)}));
+                return emit(json!({"kind": "close", "code": 1009, "reason": ""}));
             }
             Err(e) => return fail(format!("{e}")),
         }
@@ -361,7 +396,8 @@ mod tests {
     }
 
     /// A made-up voice server: JSON-RPC over WebSocket (each request answered with its method and params), a binary
-    /// message echoed, "bye" closed with 4001; each connection and its end a line in the log.
+    /// message echoed, "big N" answered with N bytes of text, "bye" closed with 4001; each connection and its end a line
+    /// in the log.
     fn voice_server(shows: Option<Shows>) -> (u16, Arc<Mutex<Vec<String>>>) {
         let log = Arc::new(Mutex::new(vec![]));
         let l = log.clone();
@@ -370,6 +406,10 @@ mod tests {
             l.lock().unwrap().push("ws".into());
             loop {
                 match ws.read() {
+                    Ok(tungstenite::Message::Text(t)) if t.as_str().starts_with("big ") => {
+                        let n: usize = t.as_str()[4..].parse().unwrap_or(0);
+                        let _ = ws.send(tungstenite::Message::text("x".repeat(n)));
+                    }
                     Ok(tungstenite::Message::Text(t)) if t.as_str() == "bye" => {
                         let _ = ws.close(Some(tungstenite::protocol::CloseFrame { code: 4001.into(), reason: "done".into() }));
                     }
@@ -405,8 +445,8 @@ mod tests {
     }
 
     /// A made-up web server: `/events` an event stream in three pieces (one cut inside a Cyrillic letter), `/forever`
-    /// a tick every 50 ms until the client goes (then "gone" in the log), `/big` 12 MB, `/upload` the body's size and
-    /// sha256, anything else "secure".
+    /// a tick every 50 ms until the client goes (then "gone" in the log), `/big` 12 MB; anything else: a body's size and
+    /// sha256, none "secure" (each such request's method and path in the log).
     fn web_server(shows: Option<Shows>) -> (u16, Arc<Mutex<Vec<String>>>) {
         let log = Arc::new(Mutex::new(vec![]));
         let l = log.clone();
@@ -441,7 +481,7 @@ mod tests {
                 }
                 p => {
                     use sha2::Digest as _;
-                    let said = if p == "/upload" { format!("{} {:x}", body.len(), sha2::Sha256::digest(&body)) } else { "secure".into() };
+                    let said = if body.is_empty() { "secure".into() } else { format!("{} {:x}", body.len(), sha2::Sha256::digest(&body)) };
                     if !head.is_empty() {
                         l.lock().unwrap().push(format!("{} {p}", head.split_whitespace().next().unwrap_or("")));
                     }
@@ -460,8 +500,9 @@ mod tests {
       const got = []
       ctx.command('open', async (a) => {
         ws = await ctx.net.websocket(a.url, a.opts || {})
-        ws.onMessage = (d, o) => got.push(o.binary ? 'binary ' + d : d)
+        ws.onMessage = (d, o) => got.push(o.binary ? 'binary ' + d : d.length > 1000 ? 'text of ' + d.length : d)
         ws.onClose = (c) => got.push('close ' + c.code + ' ' + c.reason)
+        ws.onError = (e) => got.push('error ' + e.message)
         return ws.protocol
       })
       ctx.command('try', async (a) => { try { await ctx.net.websocket(a.url); return 'open' } catch (e) { return e.message } })
@@ -469,13 +510,25 @@ mod tests {
       ctx.command('sendFile', (a, { files }) => { ws.send(files[0]); return true })
       ctx.command('got', () => got.splice(0))
       ctx.command('close', () => { ws.close(4000, 'bye'); return true })
+      // A WebSocket whose handlers are set only when asked: what came meanwhile waits for them.
+      let lazy = null
+      ctx.command('openLazy', async (a) => { lazy = await ctx.net.websocket(a.url); return true })
+      ctx.command('sendLazy', (a) => { lazy.send(a.data); return true })
+      ctx.command('hearLazy', async () => {
+        const out = []
+        lazy.onError = (e) => out.push('error ' + e.message)
+        lazy.onClose = (c) => out.push('close ' + c.code)
+        lazy.onMessage = (d) => out.push('text of ' + d.length)
+        for (let i = 0; i < 5; i++) await null
+        return out
+      })
       ctx.command('stream', (a) => new Promise((res) => {
         const parts = []
         const s = ctx.http.stream(a.url, a.opts || {}, (t) => { parts.push(t); if (a.cancelAfter && parts.length === a.cancelAfter) s.cancel() })
         s.done.then((d) => res({ status: s.status, type: s.headers['content-type'], text: parts.join(''), done: d }), (e) => res({ error: e.message }))
       }))
       ctx.command('get', async (a) => await ctx.http.fetch(a.url, a.opts || {}))
-      ctx.command('upload', async (a, { files }) => await ctx.http.fetch(a.url, { method: 'PUT', file: files[0] }))
+      ctx.command('upload', async (a, { files }) => await ctx.http.fetch(a.url, { method: a.method || 'PUT', file: files[0], headers: a.headers || {} }))
       ctx.command('pinIt', () => ctx.store.write('pins.json', '{"pins":{"127.0.0.1:1":{"key":"sha256//x"}}}'))
     }
     "#;
@@ -552,9 +605,31 @@ mod tests {
         assert_eq!(heard(1), ["binary AQIDBAU="]);
         // Too big a message is refused at send, nothing sent.
         let big = root.join("big.bin");
-        std::fs::write(&big, vec![0u8; MAX_MESSAGE + 1]).unwrap();
+        std::fs::write(&big, vec![0u8; MAX_SEND + 1]).unwrap();
         let e = call_with("netty", "sendFile", &json!({}), &[files::make("netty", &big).unwrap()], CALL_TIMEOUT).unwrap_err().to_string();
         assert!(e.contains("16 MB at most"), "{e}");
+        // A message in is 4 MB at most: one over it closes the connection (1009, "too big") with an error saying so.
+        cmd("send", json!({"data": format!("big {MAX_RECEIVE}")}));
+        assert_eq!(heard(1), [format!("text of {MAX_RECEIVE}")]);
+        cmd("send", json!({"data": format!("big {}", MAX_RECEIVE + 1)}));
+        let refused = heard(2);
+        assert!(refused[0].starts_with("error ") && refused[0].contains("over 4 MB"), "{refused:?}");
+        assert_eq!(refused[1], "close 1009 ");
+        paths::testenv::eventually("its connection freed", || open_of("netty") == 0);
+        // What waits for handlers not set yet is bounded too (8 MB in all): past it the connection is closed, the
+        // messages that fit and an error saying why given once the handlers are set.
+        cmd("openLazy", json!({"url": url}));
+        for _ in 0..3 {
+            cmd("sendLazy", json!({"data": format!("big {MAX_RECEIVE}")}));
+        }
+        paths::testenv::eventually("closed past 8 MB", || open_of("netty") == 0);
+        let lazy = cmd("hearLazy", json!({}));
+        let lazy: Vec<&str> = lazy.as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(lazy.len(), 4, "{lazy:?}");
+        assert_eq!(lazy[..2], [format!("text of {MAX_RECEIVE}"), format!("text of {MAX_RECEIVE}")]);
+        assert!(lazy[2].starts_with("error more than 8 MB"), "{lazy:?}");
+        assert_eq!(lazy[3], "close 1000");
+        cmd("open", json!({"url": url}));
         cmd("send", json!({"data": "bye"}));
         assert_eq!(heard(1), ["close 4001 done"]);
         assert!(call("netty", "send", &json!({"data": "late"})).unwrap_err().to_string().contains("closed"));
@@ -573,6 +648,51 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_behind_on_its_events_stops_its_connections_reading_past_256_events_or_16_mb_in_all() {
+        let (a, b) = (reserve("lagging").unwrap(), reserve("lagging").unwrap());
+        let other = reserve("keeping-up").unwrap();
+        // Bytes waiting count across the plugin's connections, not another plugin's.
+        queued(a, 10 << 20);
+        assert!(!behind(a) && !behind(b));
+        queued(b, 7 << 20);
+        assert!(behind(a) && behind(b) && !behind(other));
+        delivered(b, 7 << 20);
+        assert!(!behind(a));
+        // Many small events: one connection at a time.
+        for _ in 0..=BACKLOG {
+            queued(b, 10);
+        }
+        assert!(behind(b) && !behind(a));
+        delivered(b, 10);
+        assert!(!behind(b));
+        // A connection its plugin closed waits for nothing.
+        queued(a, 20 << 20);
+        conns().get_mut(&a).unwrap().open = false;
+        assert!(!behind(a));
+        for n in [a, b, other] {
+            done(n);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_streams_curl_started_as_its_plugin_goes_is_killed_not_kept() {
+        let n = reserve("going").unwrap();
+        stop_plugin("going");
+        let child: Child = Arc::new(Mutex::new(Some(std::process::Command::new("sleep").arg("30").spawn().unwrap())));
+        assert!(!keep_child(n, child.clone()));
+        let status = child.lock().unwrap().take().unwrap().wait().unwrap();
+        assert!(!status.success(), "killed, not left to run");
+        // Cancelled before its curl was kept: the same.
+        let m = reserve("going").unwrap();
+        conns().get_mut(&m).unwrap().open = false;
+        let child: Child = Arc::new(Mutex::new(Some(std::process::Command::new("sleep").arg("30").spawn().unwrap())));
+        assert!(!keep_child(m, child.clone()));
+        assert!(!child.lock().unwrap().take().unwrap().wait().unwrap().success());
+        done(m);
+    }
+
+    #[test]
     fn a_certificate_the_system_doesnt_trust_is_reached_only_once_the_user_trusts_its_key_and_refused_when_it_changes() {
         let (_env, root) = paths::testenv::folders("jshost-pins");
         install(&root);
@@ -588,7 +708,7 @@ mod tests {
         let e = call("netty", "get", &json!({"url": web_url})).unwrap_err().to_string();
         assert!(e.contains("isn't one this computer trusts") && e.contains(KEY_OF_A), "{e}");
         assert!(ws_log.lock().unwrap().iter().all(|l| l != "ws") && web_log.lock().unwrap().is_empty(), "nothing went over");
-        let met = plugins::pins::view("netty");
+        let met = plugins::pins::view("netty").unwrap();
         assert_eq!(met.len(), 2);
         assert!(met.iter().all(|c| c["seen"] == KEY_OF_A && c["pinned"].is_null()), "{met:?}");
         // The plugin can't pin: its store's files aren't where pins are kept.
@@ -612,7 +732,7 @@ mod tests {
         assert!(changed.as_str().unwrap().contains("changed since you trusted it") && changed.as_str().unwrap().contains(KEY_OF_A), "{changed}");
         let e = call("netty", "get", &json!({"url": web_url})).unwrap_err().to_string();
         assert!(e.contains("changed since you trusted it"), "{e}");
-        let now = plugins::pins::view("netty");
+        let now = plugins::pins::view("netty").unwrap();
         assert!(now.iter().all(|c| c["pinned"] == KEY_OF_A && c["changed"] == true), "{now:?}");
         plugins::pins::trust("netty", &format!("127.0.0.1:{wss}"), None).unwrap();
         assert_eq!(cmd("try", json!({"url": ws_url})), json!("open"));
@@ -622,7 +742,7 @@ mod tests {
         // Its pins go with its data.
         plugins::remove("netty", false).unwrap();
         sync();
-        assert!(plugins::pins::view("netty").is_empty());
+        assert!(plugins::pins::view("netty").unwrap().is_empty());
     }
 
     #[test]
@@ -653,6 +773,20 @@ mod tests {
         use sha2::Digest as _;
         assert_eq!(up["body"], format!("300000 {:x}", sha2::Sha256::digest(&bytes)));
         assert!(log.lock().unwrap().iter().any(|l| l == "PUT /upload"));
+        // It goes to the path asked, never with the file's name added (curl's `upload-file` adds it to an empty path or
+        // one ending in `/`), and as one plain body, not in chunks.
+        for (path, arrives) in [("", "POST /"), ("/", "POST /"), ("/api/", "POST /api/"), ("/api", "POST /api"), ("/api/?x=1", "POST /api/?x=1")] {
+            log.lock().unwrap().clear();
+            let up = call_with("netty", "upload", &json!({"url": at(path), "method": "POST"}), std::slice::from_ref(&h), CALL_TIMEOUT).unwrap();
+            assert_eq!(up["body"], format!("300000 {:x}", sha2::Sha256::digest(&bytes)), "{path}");
+            assert_eq!(*log.lock().unwrap(), vec![arrives.to_string()], "{path}");
+        }
+        // curl's config (its headers) went with the request: nothing left in the temporary folder.
+        let mine = format!("echo-curl-{}-", std::process::id());
+        assert!(!std::fs::read_dir(std::env::temp_dir()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(&mine)));
+        // Its length is Echo's to say.
+        let own_length = call_with("netty", "upload", &json!({"url": at("/api"), "headers": {"Content-Length": "1"}}), std::slice::from_ref(&h), CALL_TIMEOUT);
+        assert!(own_length.unwrap_err().to_string().contains("Echo sets"));
         assert!(call_with("netty", "get", &json!({"url": at("/upload"), "opts": {"file": h["file"], "body": "x", "method": "PUT"}}), &[], CALL_TIMEOUT).unwrap_err().to_string().contains("not both"));
         assert!(call("netty", "get", &json!({"url": at("/upload"), "opts": {"file": "0123", "method": "PUT"}})).unwrap_err().to_string().contains("isn't a file handed to netty"));
         // Over 10 MB: refused into memory, saved into its store.

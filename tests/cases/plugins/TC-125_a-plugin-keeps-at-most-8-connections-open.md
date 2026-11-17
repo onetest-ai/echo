@@ -16,7 +16,7 @@ tags: [plugins, host-half, network, websocket, caps, cli]
 **Module:** Plugins | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- TC-120's preconditions, run as written (in S-12: kept from that stage): Acme relay installed, the voice server on 48121, every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
+- TC-120's preconditions, run as written (in S-39: kept from that stage): Acme relay installed, the voice server on 48121, every Bash call with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; export D`
 - Its address listed: `echoctl plugin set acme-relay voice "http://127.0.0.1:48121"`
 
 ## Steps
@@ -32,4 +32,4 @@ Unchanged; the terminal's process ended, and its connections with it.
 - `kill $(cat "$D/ws.pid")`; `echoctl plugin remove acme-relay --delete-data`; `echoctl plugin marketplace remove acme-net`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- Written from the feature's text (F-PLUG-84). Connections closed when the plugin is switched off, updated or removed (in the app's process, which runs the plugins' host halves) and the 16 MB message cap are proven by the Rust test `jshost::net::tests::a_plugin_talks_json_rpc_over_a_websocket_only_to_an_address_the_user_listed_and_loses_it_when_switched_off`.
+- Written from the feature's text (F-PLUG-84). Connections closed when the plugin is switched off, updated or removed (in the app's process, which runs the plugins' host halves) and the message caps (16 MB out, 4 MB in) are proven by the Rust test `jshost::net::tests::a_plugin_talks_json_rpc_over_a_websocket_only_to_an_address_the_user_listed_and_loses_it_when_switched_off`; a stream's curl killed when its plugin goes as it starts by `…::a_streams_curl_started_as_its_plugin_goes_is_killed_not_kept`.

@@ -22,7 +22,7 @@ tags: [plugins, host-half, network, websocket, cli]
 ```bash
 nohup python3 tests/fixtures/ws_echo.py 48121 "$D/ws.log" > "$D/ws.out" 2>&1 & echo $! > "$D/ws.pid"
 ```
-- A made-up local marketplace `acme-net` with **Acme relay**, a host half only (`main.js`); its manifest lists the setting `voice` in `network.hosts_from` and names `api.acme.example` in `network.hosts`. Its commands: `rpc` opens a WebSocket to `url`, sends one JSON-RPC request (`speak`, `{text}`) and answers what came back; `stream` reads `url` as it comes and answers its status, content type, pieces and bytes; `many` opens `n` WebSockets and answers how each went; `get` is `ctx.http.fetch(url, opts)`. The only files this case writes, in the run's scratch folder:
+- A made-up local marketplace `acme-net` with **Acme relay**, a host half only (`main.js`); its manifest lists the setting `voice` in `network.hosts_from` and names `api.acme.example` in `network.hosts`. Its commands: `rpc` opens a WebSocket to `url`, sends one JSON-RPC request (`speak`, `{text}`) and answers what came back; `stream` reads `url` as it comes and answers its status, content type, pieces and bytes; `many` opens `n` WebSockets and answers how each went; `get` is `ctx.http.fetch(url, opts)`; `upload` sends the file handed to it (`--file`) as the body of a `method` (POST by default) request to `url`. The only files this case writes, in the run's scratch folder:
 
 ```bash
 M="$D/market-net"; mkdir -p "$M/plugins/acme-relay"
@@ -43,6 +43,7 @@ export function apply(ctx) {
   }))
   ctx.command('many', async (a) => { const out = []; for (let i = 0; i < a.n; i++) { try { await ctx.net.websocket(a.url); out.push('open') } catch (e) { out.push(e.message) } } return out })
   ctx.command('get', (a) => ctx.http.fetch(a.url, a.opts || {}))
+  ctx.command('upload', (a, { files }) => ctx.http.fetch(a.url, { method: a.method || 'POST', file: files[0] }))
 }
 EOF
 echoctl plugin marketplace add "$M" --name acme-net
@@ -71,8 +72,8 @@ echoctl plugin install acme-relay --yes
 Acme relay is installed with `http://127.0.0.1:48121` listed; the voice server's log holds one connection.
 
 ## Teardown
-- Kept for TC-121 to TC-124 in S-12. On its own: `kill $(cat "$D/ws.pid")`; `echoctl plugin remove acme-relay --delete-data`; `echoctl plugin marketplace remove acme-net`; `tests/fixtures/serve.sh down <dir>`
+- Kept for the next stages in S-39. On its own: `kill $(cat "$D/ws.pid")`; `echoctl plugin remove acme-relay --delete-data`; `echoctl plugin marketplace remove acme-net`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
 - Written from the feature's text (F-PLUG-80), not from the code. The host half runs here in the terminal's own process (`echoctl plugin call`), as in the app.
-- A binary message, a file sent as one, the close code heard and the 16 MB message cap are proven by the Rust tests (`jshost::net`).
+- A binary message, a file sent as one and the close code heard are proven by the Rust tests (`jshost::net::tests::a_plugin_talks_json_rpc_over_a_websocket_only_to_an_address_the_user_listed_and_loses_it_when_switched_off`), and so are the message caps (16 MB out; 4 MB in, a bigger one closing the connection with code 1009) and what waits for a plugin bounded (256 events or 16 MB read ahead, 8 MB waiting for handlers: `…_reading_past_256_events_or_16_mb_in_all`).

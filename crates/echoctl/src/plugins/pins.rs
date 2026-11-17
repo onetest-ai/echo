@@ -13,17 +13,22 @@ use super::*;
 /// Keys Echo keeps as met, per plugin: an address listed with a `*` can meet many.
 const SEEN_MOST: usize = 20;
 
-fn file(id: &str) -> PathBuf {
-    plugins_dir().join("pins").join(format!("{id}.json"))
+/// The file of plugin `id`'s pins: refused for anything but a plugin id (it names the file; `../../ai` would be
+/// another of Echo's), whoever asks — the window, the CLI or Echo itself.
+fn file(id: &str) -> Result<PathBuf> {
+    if !valid_id(id) {
+        bail!("“{id}” isn't a plugin");
+    }
+    Ok(plugins_dir().join("pins").join(format!("{id}.json")))
 }
 
-fn read(id: &str) -> Value {
-    let v = Value::Object(read_map(&file(id)));
-    json!({"pins": v["pins"].as_object().cloned().unwrap_or_default(), "seen": v["seen"].as_object().cloned().unwrap_or_default()})
+fn read(id: &str) -> Result<Value> {
+    let v = Value::Object(read_map(&file(id)?));
+    Ok(json!({"pins": v["pins"].as_object().cloned().unwrap_or_default(), "seen": v["seen"].as_object().cloned().unwrap_or_default()}))
 }
 
 fn write(id: &str, v: &Value) -> Result<()> {
-    let f = file(id);
+    let f = file(id)?;
     fs::create_dir_all(f.parent().unwrap())?;
     paths::write_atomic(&f, serde_json::to_string_pretty(v)?.as_bytes())?;
     Ok(())
@@ -54,20 +59,23 @@ pub fn is_key(k: &str) -> bool {
 /// The key the user pinned for `host:port` of plugin `id`.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn pinned(id: &str, hp: &str) -> Option<String> {
-    read(id)["pins"][hp]["key"].as_str().map(str::to_owned)
+    read(id).ok()?["pins"][hp]["key"].as_str().map(str::to_owned)
 }
 
 /// A key Echo met at `host:port` on a connection that failed (untrusted, or not the one pinned): kept for the user to
 /// trust. Only Echo calls it, for an address the user listed.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn saw(id: &str, hp: &str, key: &str) -> Result<()> {
+    file(id)?;
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    let mut v = read(id);
+    let mut v = read(id)?;
     if v["seen"][hp]["key"].as_str() == Some(key) {
         return Ok(());
     }
+    // Another key than the one met before: `trust` without a key no longer knows which one the user saw.
+    let several = v["seen"][hp]["several"].as_bool() == Some(true) || v["seen"][hp]["key"].is_string();
     let seen = v["seen"].as_object_mut().unwrap();
-    seen.insert(hp.into(), json!({"key": key, "at": chrono::Local::now().to_rfc3339()}));
+    seen.insert(hp.into(), json!({"key": key, "at": chrono::Local::now().to_rfc3339(), "several": several}));
     while seen.len() > SEEN_MOST {
         let oldest = seen.iter().min_by_key(|(_, s)| s["at"].as_str().unwrap_or("").to_string()).map(|(k, _)| k.clone()).unwrap_or_default();
         seen.remove(&oldest);
@@ -82,18 +90,23 @@ fn listed_https(id: &str, hp: &str) -> Result<bool> {
     Ok(address_settings(&m.uses).iter().filter_map(|k| listed_addresses(id, k)).filter_map(|v| addresses::parse_list(&v).ok()).flatten().any(|a| a.matches(&url)))
 }
 
-/// The user trusts `key` (or, none given, the one Echo met there) for `address` of plugin `id`.
+/// The user trusts `key` (or, none given, the one Echo met there — refused when it met more than one there since the
+/// user last trusted or forgot one: they may have seen another) for `address` of plugin `id`.
 pub fn trust(id: &str, address: &str, key: Option<&str>) -> Result<String> {
+    file(id)?;
     let hp = host_port(address)?;
     let name = installed_manifest(id)?.name;
     if !listed_https(id, &hp)? {
         bail!("{hp} isn't an https address you listed for {name}: list it in its settings first");
     }
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    let mut v = read(id);
+    let mut v = read(id)?;
     let key = match key.map(str::trim) {
         Some(k) if !is_key(k) => bail!("“{k}” isn't a key's fingerprint (sha256// and 44 characters of base64)"),
         Some(k) => k.to_string(),
+        None if v["seen"][&hp]["several"].as_bool() == Some(true) => {
+            bail!("Echo met more than one key at {hp}: give the one you trust with --key (`echoctl plugin certs {id}` shows the last one met)")
+        }
         None => v["seen"][&hp]["key"].as_str().map(str::to_owned).ok_or_else(|| anyhow!("Echo hasn't met a certificate at {hp} yet: let {name} connect once, or give its key's fingerprint"))?,
     };
     v["pins"][&hp] = json!({"key": key, "at": chrono::Local::now().to_rfc3339()});
@@ -104,9 +117,10 @@ pub fn trust(id: &str, address: &str, key: Option<&str>) -> Result<String> {
 
 /// The user no longer trusts what they pinned at `address` (and forgets a key met there).
 pub fn forget(id: &str, address: &str) -> Result<bool> {
+    file(id)?;
     let hp = host_port(address)?;
     let _lock = wait_lock(&paths::config_dir().join("plugins.lock"))?;
-    let mut v = read(id);
+    let mut v = read(id)?;
     let had = v["pins"].as_object_mut().unwrap().remove(&hp).is_some() | v["seen"].as_object_mut().unwrap().remove(&hp).is_some();
     write(id, &v)?;
     Ok(had)
@@ -114,22 +128,25 @@ pub fn forget(id: &str, address: &str) -> Result<bool> {
 
 /// Each address with a pin or a key met: `[{address, pinned, seen, changed}]` (`changed`: met another key than the
 /// one pinned), for the settings row and `echoctl plugin certs`.
-pub fn view(id: &str) -> Vec<Value> {
-    let v = read(id);
+pub fn view(id: &str) -> Result<Vec<Value>> {
+    let v = read(id)?;
     let mut at: Vec<String> = v["pins"].as_object().into_iter().chain(v["seen"].as_object()).flat_map(|m| m.keys().cloned()).collect();
     at.sort();
     at.dedup();
-    at.into_iter()
+    Ok(at
+        .into_iter()
         .map(|hp| {
             let (pinned, seen) = (v["pins"][&hp]["key"].clone(), v["seen"][&hp]["key"].clone());
             json!({"address": hp, "pinned": pinned, "seen": seen, "changed": !pinned.is_null() && !seen.is_null()})
         })
-        .collect()
+        .collect())
 }
 
 /// Its pins and keys met go with the plugin's data.
 pub(super) fn remove_plugin(id: &str) {
-    let _ = fs::remove_file(file(id));
+    if let Ok(f) = file(id) {
+        let _ = fs::remove_file(f);
+    }
 }
 
 /// The window's `cert_trust` / `cert_forget`. Trusting asks the user in a dialog of the system's (the page can't be
@@ -138,12 +155,13 @@ pub(super) fn remove_plugin(id: &str) {
 pub(super) fn page_op(v: &Value) -> Result<()> {
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let (id, address) = (s("id"), s("address"));
+    file(&id)?;
     if s("op") == "cert_forget" {
         return forget(&id, &address).map(|_| ());
     }
     let hp = host_port(&address)?;
     let key = s("key");
-    if read(&id)["seen"][&hp]["key"].as_str() != Some(key.as_str()) {
+    if read(&id)?["seen"][&hp]["key"].as_str() != Some(key.as_str()) {
         bail!("Not trusted: Echo met another certificate at {hp} meanwhile — look again");
     }
     if BUSY.lock().is_ok_and(|b| b.contains_key(&format!("plugin:{id}"))) {
@@ -192,9 +210,8 @@ mod tests {
         assert!(!is_key("Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc="));
     }
 
-    #[test]
-    fn the_window_trusts_only_the_key_echo_met_and_only_on_the_users_yes() {
-        let (_env, root) = paths::testenv::folders("plugin-pins-window");
+    /// Plugin `voice`, installed, with `https://voicecho.local` listed.
+    fn voice_listing_voicecho(root: &Path) {
         let mk = root.join("market");
         let d = mk.join("plugins/voice");
         fs::create_dir_all(&d).unwrap();
@@ -204,6 +221,36 @@ mod tests {
         refresh(&name).unwrap();
         install("voice", Some(&name), &review("voice", Some(&name)).unwrap().uses).unwrap();
         set_setting("voice", "at", &json!("https://voicecho.local")).unwrap();
+    }
+
+    #[test]
+    fn trusting_without_a_key_takes_the_one_echo_met_and_is_refused_once_it_met_two() {
+        let (_env, root) = paths::testenv::folders("plugin-pins-two-keys");
+        voice_listing_voicecho(&root);
+        const A: &str = "sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=";
+        const B: &str = "sha256//FnAJ8/qwoiAdJV/I5uE+TYf9kpG5WbHcCqDlA/p972I=";
+        // One key met (again and again): trusted without naming it.
+        saw("voice", "voicecho.local:443", A).unwrap();
+        saw("voice", "voicecho.local:443", A).unwrap();
+        assert_eq!(trust("voice", "voicecho.local", None).unwrap(), A);
+        // Then B and A met there: which one the user looked at is unknown — they name it.
+        saw("voice", "voicecho.local:443", B).unwrap();
+        saw("voice", "voicecho.local:443", A).unwrap();
+        let e = trust("voice", "voicecho.local", None).unwrap_err().to_string();
+        assert!(e.contains("more than one key") && e.contains("--key"), "{e}");
+        assert_eq!(pinned("voice", "voicecho.local:443").as_deref(), Some(A));
+        assert_eq!(trust("voice", "voicecho.local", Some(B)).unwrap(), B);
+        assert_eq!(pinned("voice", "voicecho.local:443").as_deref(), Some(B));
+        // Forgotten, then one key met: without a key again.
+        forget("voice", "voicecho.local").unwrap();
+        saw("voice", "voicecho.local:443", A).unwrap();
+        assert_eq!(trust("voice", "voicecho.local", None).unwrap(), A);
+    }
+
+    #[test]
+    fn the_window_trusts_only_the_key_echo_met_and_only_on_the_users_yes() {
+        let (_env, root) = paths::testenv::folders("plugin-pins-window");
+        voice_listing_voicecho(&root);
         const MET: &str = "sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=";
         const OTHER: &str = "sha256//FnAJ8/qwoiAdJV/I5uE+TYf9kpG5WbHcCqDlA/p972I=";
         saw("voice", "voicecho.local:443", MET).unwrap();
@@ -222,9 +269,31 @@ mod tests {
         op(MET).unwrap();
         paths::testenv::eventually("pinned", || pinned("voice", "voicecho.local:443").as_deref() == Some(MET));
         std::env::remove_var("ECHOCTL_ALLOW_PINS");
-        assert_eq!(view("voice"), vec![json!({"address": "voicecho.local:443", "pinned": MET, "seen": null, "changed": false})]);
+        assert_eq!(view("voice").unwrap(), vec![json!({"address": "voicecho.local:443", "pinned": MET, "seen": null, "changed": false})]);
         // Forgetting needs no dialog.
         page_op(&json!({"op": "cert_forget", "id": "voice", "address": "voicecho.local:443"})).unwrap();
-        assert!(view("voice").is_empty());
+        assert!(view("voice").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_plugin_id_that_isnt_one_names_no_file_and_writes_nothing() {
+        let (_env, _root) = paths::testenv::folders("plugin-pins-ids");
+        let ai = paths::config_dir().join("ai.json");
+        fs::create_dir_all(ai.parent().unwrap()).unwrap();
+        fs::write(&ai, "{\"profiles\": []}").unwrap();
+        const KEY: &str = "sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=";
+        for id in ["../../ai", "../ai", "..", "a/b", "a\\b", "", "Voice", "voice.json"] {
+            let forget_op = page_op(&json!({"op": "cert_forget", "id": id, "address": "voicecho.local:443"}));
+            assert!(forget_op.unwrap_err().to_string().contains("isn't a plugin"), "{id}");
+            assert!(page_op(&json!({"op": "cert_trust", "id": id, "address": "voicecho.local:443", "key": KEY})).is_err(), "{id}");
+            assert!(forget(id, "voicecho.local:443").is_err(), "{id}");
+            assert!(trust(id, "voicecho.local:443", Some(KEY)).is_err(), "{id}");
+            assert!(saw(id, "voicecho.local:443", KEY).is_err(), "{id}");
+            assert!(view(id).is_err(), "{id}");
+            assert_eq!(pinned(id, "voicecho.local:443"), None, "{id}");
+            remove_plugin(id);
+        }
+        assert_eq!(fs::read_to_string(&ai).unwrap(), "{\"profiles\": []}");
+        assert!(!plugins_dir().join("pins").exists() || fs::read_dir(plugins_dir().join("pins")).unwrap().next().is_none());
     }
 }

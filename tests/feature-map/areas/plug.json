@@ -494,7 +494,7 @@
   },
   {
    "id": "F-PLUG-82",
-   "feature": "https / wss to an address the user listed whose certificate the system doesn't trust (self-signed, an internal CA) fails the first time naming the key met there (`sha256//…`) and how to trust it; the user trusts it under the plugin's Certificates in Settings → Plugins (\"Trust\", then a dialog of the system's) or with `echoctl plugin trust <id> <host:port>` (`certs` lists them, `untrust` / \"Forget\" drops one); from then on that address is reached with that key alone, and a changed key is refused, named, until the user trusts it; a plugin can't trust one, Echo keeps them outside its store, a run Echo started can't change them, and removing the plugin with its data drops them",
+   "feature": "https / wss to an address the user listed whose certificate the system doesn't trust (self-signed, an internal CA) fails the first time naming the key met there (`sha256//…`) and how to trust it; the user trusts it under the plugin's Certificates in Settings → Plugins (\"Trust\", then a dialog of the system's) or with `echoctl plugin trust <id> <host:port>` (the key `certs` showed; `--key` needed once Echo met more than one there; `certs` lists them, `untrust` / \"Forget\" drops one); from then on that address is reached with that key alone, and a changed key is refused, named, until the user trusts it; a plugin can't trust one, Echo keeps them outside its store, a run Echo started can't change them, and removing the plugin with its data drops them",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -503,7 +503,7 @@
   },
   {
    "id": "F-PLUG-83",
-   "feature": "A plugin's `ctx.http.fetch` sends a file the user handed it as the body (`{file}` with POST, PUT or PATCH, never with `body`) and saves an answer over 10 MB into its store with `save` (512 MB, 15 minutes at most each way); without `save` an answer over 10 MB is refused",
+   "feature": "A plugin's `ctx.http.fetch` sends a file the user handed it as the body (`{file}` with POST, PUT or PATCH, never with `body` nor a `Content-Length` of its own) to the path asked — never with the file's name added — whole and not in chunks, and saves an answer over 10 MB into its store with `save` (512 MB, 15 minutes at most each way); without `save` an answer over 10 MB is refused",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -512,7 +512,7 @@
   },
   {
    "id": "F-PLUG-84",
-   "feature": "A plugin keeps at most 8 connections (WebSockets and streams) open at once — the 9th is refused saying so — and a WebSocket message is 16 MB at most; switching the plugin off, updating or removing it closes every connection it has open",
+   "feature": "A plugin keeps at most 8 connections (WebSockets and streams) open at once — the 9th is refused saying so — and a WebSocket message is 16 MB at most out and 4 MB in (a bigger one in closes the connection, code 1009, saying so); what waits for the plugin is bounded (256 events or 16 MB read ahead, 8 MB waiting for handlers); switching the plugin off, updating or removing it closes every connection it has open",
    "priority": "medium",
    "check": "agent",
    "axes": [

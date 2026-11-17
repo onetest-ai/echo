@@ -7,8 +7,10 @@ self-signed: no system trusts them).
   {"method": <method>, "params": <params>}}` (an error object for a message that isn't JSON).
 - `GET /ping`: `{"ok": true}` with `Access-Control-Allow-Origin: *` (a page's `fetch` passes CORS).
 - `GET /events`: an event stream, `data: one`, `data: два`, `data: three` 300 ms apart, then its end.
+- `POST` / `PUT` / `PATCH` on any path: its body read by its Content-Length and answered `{"ok": true, "bytes": <n>,
+  "chunked": <whether it came in chunks>}`; logged as `<method> <path> <bytes> <sha256>`.
 
-Every connection is a line in <log> (`ws <path>`, `get <path>`, `rpc <method>`), so a case can tell a connection the
+Every connection is a line in <log> (`ws <path>`, `get <path>`, `post <path> …`, `rpc <method>`), so a case can tell a connection the
 page's policy blocked (no line) from one that failed. Python's standard library only; one thread per connection.
 """
 import base64
@@ -50,6 +52,12 @@ class Handler(socketserver.StreamRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.3)
             self.wfile.write(b"0\r\n\r\n")
+            return
+        if not key and head[0] in ("POST", "PUT", "PATCH"):
+            body = self.rfile.read(int(headers.get("content-length", "0") or "0"))
+            self.note(f"{head[0].lower()} {path} {len(body)} {hashlib.sha256(body).hexdigest()}")
+            answer = json.dumps({"ok": True, "bytes": len(body), "chunked": "transfer-encoding" in headers}).encode()
+            self.wfile.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(answer)}\r\nConnection: close\r\n\r\n".encode() + answer)
             return
         if not key:
             self.note(f"get {path}")
