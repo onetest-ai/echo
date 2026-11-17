@@ -87,8 +87,16 @@ and Edit): Echo gives it its text, each item in an evidence block whose tag is r
 
 - Mermaid on a minutes page: `securityLevel: 'strict'` (`minutes::MERMAID_INIT`).
 - The minutes render in an `<iframe sandbox="allow-scripts">` (`minutes::render`).
-- The window is served with `window::reply`'s CSP (`'self'`/`echo:`); the minutes page with its own hashed CSP through
-  `window::page_reply`.
+- The window is served with `window::window_csp`: `default-src 'self' echo: http://echo.localhost`, `img-src` the same
+  and `data:`, `style-src` the same and `'unsafe-inline'`, `script-src` the same; `connect-src` and `media-src` the
+  same plus the addresses the user listed for plugins that are on (`plugins::window_sources`: each listed address as its
+  scheme and the matching ws/wss with its port; an IPv4 pattern with a `*` number left out). The builder lets in only a
+  plain source expression (`plugins::addresses::csp_source_ok`: `http|https|ws|wss://[*.]host:port|*`, lowercase, no
+  quote, `;`, space, keyword or bare `*`), whatever reaches it. Only the page (`/`) carries that list; every other
+  answer the list-less policy. The page knows its list by a key (`<meta name="echo-net">`) and loads again when
+  `/api/state`'s `net` differs (`netReload`, window script).
+- The minutes page with its own hashed CSP through `window::page_reply`.
+- The served window (`window --serve`) sends a page's policy in its header too.
 
 ## Served window
 

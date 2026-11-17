@@ -1,11 +1,44 @@
+// ── net reload
+/** The page's policy (its CSP) names the addresses the user listed for plugins that are on, and is fixed for the
+ *  page: when Echo's key of them (`net` of /api/state) isn't the one this page was served with (`<meta
+ *  name="echo-net">`), the page loads again — not while the user types (their text would be lost: the next tick), and
+ *  once per key (`tried`: a key whose reload didn't take never reloads in a loop). */
+const netReload = (served, now, typing, tried) => !!served && !!now && served !== now && !typing && tried !== now
+/** Whether the user may be typing: a text box, text area or editable region has the focus. Its value can't tell —
+ *  fields saved on each key (Send to Claude, a live note) are drawn again with what was typed — so focus alone holds
+ *  the reload; the next tick tries again. */
+const NOT_TEXT = ['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']
+const typingIn = (el) => {
+  if (!el) return false
+  if (el.isContentEditable) return true
+  const tag = String(el.tagName || '').toLowerCase()
+  if (tag === 'input') return !NOT_TEXT.includes(String(el.type || 'text').toLowerCase())
+  return tag === 'textarea'
+}
+// end of the net-reload block
+
 // ── refresh: cheap local polling (the files change under us during a call) ─────────────────
 let ticks = 0
+/** Loads the page again when its policy is stale (`netReload`); the hash route (the user's place) stays, and the plugin
+ *  picked in Settings → Plugins stays picked (`#settings/plugins/<id>` routes to it). */
+function netCheck() {
+  const meta = document.querySelector('meta[name="echo-net"]')
+  const now = S.state && S.state.net
+  let tried = null
+  try { tried = sessionStorage.getItem('echo-net-tried') } catch { /* no storage: reload at most as the key changes */ }
+  if (!netReload(meta && meta.content, now, typingIn(document.activeElement), tried)) return false
+  try { sessionStorage.setItem('echo-net-tried', now) } catch { /* as above */ }
+  if (S.view === 'settings' && S.setSection === 'plugins' && (S.plTab || 'installed') === 'installed' && /^[a-z0-9-]+$/.test(S.plSel || '')) replaceUrl('#settings/plugins/' + S.plSel)
+  location.reload()
+  return true
+}
 async function tick() {
   // A window nobody sees (minimised, hidden, covered by the call app) fetches and draws nothing: it catches up when shown.
   if (document.hidden) return
   ticks++
   const before = JSON.stringify(S.state)
   await loadState()
+  if (netCheck()) return
   const changed = JSON.stringify(S.state) !== before
   // Against the last stamp read (a tick whose read failed has none and changes nothing).
   const plugins = S.state && S.state.plugins

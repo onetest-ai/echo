@@ -376,7 +376,7 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
 }
 
 /// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, or to an address the user listed in a setting its
-/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, inside the user's own network), through
+/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, to any listed host), through
 /// curl (its config on stdin, so headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
 /// With `save: <path>` (relative, in the plugin's store) a 2xx answer's bytes go to that file and the answer is {status,
 /// body: "", saved, bytes}: the body is text, so audio and images can't come through it.
@@ -2280,7 +2280,7 @@ mod tests {
         // Until the user enters an address, the plugin reaches nothing.
         assert!(refused(call("fetcher", "get", &at("/text"))).contains("may reach only"));
         // An address that isn't allowed is refused where it is saved, and nothing is kept.
-        assert!(plugins::set_setting("fetcher", "tts", &json!("http://example.com")).unwrap_err().to_string().contains("isn't an address the plugin may reach"));
+        assert!(plugins::set_setting("fetcher", "tts", &json!("ftp://example.com")).unwrap_err().to_string().contains("isn't an address the plugin may reach"));
         assert!(refused(call("fetcher", "get", &at("/text"))).contains("may reach only"));
         // The user's own addresses (plain http, wildcards): reached, and only what they match.
         plugins::set_setting("fetcher", "tts", &json!(format!("http://192.168.*.*:*, http://127.0.0.*:{port}"))).unwrap();

@@ -1,6 +1,6 @@
 ---
 id: TC-018
-title: A plugin reaches only the addresses the user listed (wildcards allowed) in a setting its sheet named (plain http inside their own network), can't widen that list itself, saves a download in its store as it came, and the window serves that audio or picture and nothing else of the store
+title: A plugin reaches only the addresses the user listed (wildcards allowed) in a setting its sheet named (plain http too, with a warning outside the user's network), can't widen that list itself, saves a download in its store as it came, and the window serves that audio or picture and nothing else of the store
 priority: high
 type: functional
 requirements: [F-PLUG-11, F-PLUG-12]
@@ -55,9 +55,9 @@ JS
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `echoctl plugin install acme-speaker --yes` | It prints `• Runs its own code in Echo, with your rights (new)` and `• Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network) (new)`; then `Installed Acme speaker 0.1.0` |
+| 1 | `echoctl plugin install acme-speaker --yes` | It prints `• Runs its own code in Echo, with your rights (new)` and `• Talks to the addresses you list in its setting “tts” (wildcards allowed, plain http too; its window part also over WebSocket) (new)`; then `Installed Acme speaker 0.1.0` |
 | 2 | `echoctl plugin call acme-speaker ping` (if it answers `no command “ping”`, wait 2 s and run it again); then `echoctl plugin call acme-speaker get '{"url":"http://127.0.0.1:'$P'/hello.txt"}'` | `pong`; then it fails: the message contains `may reach only the hosts its manifest names` and `the addresses you list in its settings` — no address entered yet, so nothing is reachable |
-| 3 | `echoctl plugin set acme-speaker tts http://example.com`; the same with `http://*.*.*.*:*`, with `http://172.*.*.*` and with `https://*.com` | Each fails, saying `isn't an address the plugin may reach` and why: plain http is only for addresses inside your own network (or use https); a wildcard may not cover the whole internet or a whole top-level domain |
+| 3 | `echoctl plugin set acme-speaker tts ftp://example.com`; the same with `http://*.*.*.*:*`, with `https://*.com` and with `http://0x7f.0.0.1` | Each fails, saying `isn't an address the plugin may reach` and why: an address starts with http:// or https://; a wildcard may not cover the whole internet or a whole top-level domain; an IPv4 address is four plain numbers |
 | 4 | `echoctl plugin set acme-speaker tts` | `value` is `null`: the refused addresses were not kept |
 | 5 | `echoctl plugin set acme-speaker tts "http://192.168.*.*:*, http://127.0.0.*:$P"`; then `echoctl plugin set acme-speaker tts` | It saves; `value` is the list as entered |
 | 6 | `echoctl plugin call acme-speaker get '{"url":"http://127.0.0.1:'$P'/hello.txt"}'` | `{"status": 200, "body": "hello"}`: `127.0.0.1` matches `127.0.0.*` on port P |
@@ -68,9 +68,11 @@ JS
 | 11 | `echoctl plugin call acme-speaker save '{"url":"http://127.0.0.1:'$P'/clip.mp3","to":"../x.mp3"}'`; the same with `"to":"settings.json"` | Both fail: the first isn't inside the plugin's folder, the second is the plugin's settings |
 | 12 | `curl -s -o "$D/got.mp3" -w '%{http_code} %{content_type}\n' {{base_url}}/plugin/acme-speaker/store/audio/a.mp3; cmp "$D/got.mp3" "$D/srv/clip.mp3"` | `200 audio/mpeg`; `cmp` prints nothing: the window gets the saved audio as it is |
 | 13 | `curl -s -o /dev/null -w '%{http_code}\n' {{base_url}}/plugin/acme-speaker/store/settings.json`; the same for `.../store/audio/none.mp3` and `.../store/../x.mp3` | `404` each: the store's other files, missing ones and a path out of the store are not served |
+| 14 | `echoctl plugin set acme-speaker tts "http://127.0.0.1:$P, http://tts.acme.example:8808"`; then `echoctl plugin set acme-speaker tts` | It saves and prints `Note: http://tts.acme.example:8808 — plain http: anyone on the way can read it` and `Note: Echo's window is one page: while this plugin is on, the window part of any plugin you have on can reach these addresses too`, no other `Note:` line (`127.0.0.1` is the user's own computer): plain http to a name outside the user's network is allowed, not refused; `value` is the list as entered |
+| 15 | Load `{{base_url}}/#settings/plugins`; on the tab "Installed" click "Acme speaker" and look at its setting "TTS server" | The field holds both addresses; under it a line reads `http://tts.acme.example:8808 — plain http: anyone on the way can read it`, then `Echo's window is one page: while this plugin is on, the window part of any plugin you have on can reach these addresses too`; no line for `http://127.0.0.1:P` |
 
 ## Expected Final State
-Acme speaker holds the addresses the user listed, reached only what they match, couldn't change them itself, kept `audio/a.mp3` byte for byte and nothing from the failed download; the window served that one file and refused everything else of the store.
+Acme speaker holds the addresses the user listed last (step 14, its plain-http one warned of), reached only what they match, couldn't change them itself, kept `audio/a.mp3` byte for byte and nothing from the failed download; the window served that one file and refused everything else of the store.
 
 ## Teardown
 - `kill $(cat "$D/srv.pid")`
@@ -80,4 +82,4 @@ Acme speaker holds the addresses the user listed, reached only what they match, 
 ## Notes
 - Written from the feature's text (F-PLUG-11, F-PLUG-12), not from the code.
 - Steps 12 and 13 read the window's file route over HTTP; if the served window asks for its cookie on a file, load `{{base_url}}/` first and pass its cookie to `curl`.
-- Plain http is allowed only for `localhost`, `*.local` and private IPv4 ranges; the Rust tests in `plugins::addresses` hold the full list of accepted and refused patterns and the URLs each matches.
+- Plain http is allowed to any listed host; outside `localhost`, `*.local` and the private IPv4 ranges its row (and `echoctl plugin set`) warns that anyone on the way can read it. The Rust tests in `plugins::addresses` hold the full list of accepted and refused patterns and the URLs each matches.

@@ -117,9 +117,50 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 
 `ctx.http.fetch(url, {method, headers, body, save?})` resolves `{status, body}` for any HTTP answer, a redirect too
 (never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. Plain http is allowed only to
-an address the user listed, inside their own network; only the user enters those addresses (window or CLI), never the
-plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence: `jshost::fetch`, `jshost::curl_head`,
-`plugins::addresses`, `plugins::listed_addresses`
+an address the user listed, any host; one outside the user's own network (private IPv4 ranges, `localhost`, `*.local`)
+gets a note on the setting's row and from `echoctl plugin set` ("plain http: anyone on the way can read it"). Only the
+user enters those addresses (window or CLI), never the plugin (`ctx.settings.set`, its `settings.json`, a manifest
+`default`). The sheet's line: "Talks to the addresses you list in its setting “<key>” (wildcards allowed, plain http
+too; its window part also over WebSocket)". Evidence: `jshost::fetch`, `jshost::curl_head`, `plugins::addresses`,
+`plugins::listed_addresses`, `plugins::addresses::notes`
+
+The list is `scheme://host[:port]` patterns (http or https; no port: the scheme's own; `:*` any), comma- or
+space-separated; `*` for a number of an IPv4 address (not the first), a leading name label (`*.lab.local`: one or more
+labels; `*.local` alone is allowed, any other one-label name isn't) or the port. A name's last label is never a number
+— all digits or `0x` and hex digits, which curl and the window read as an IPv4 address (`0x7f.0.0.1`, `1.2.3`,
+`2130706433` are refused: an IPv4 address is four plain numbers); `https://3dprinter`, `http://3dprinter.local` are
+names.
+
+**The window half** reaches the same addresses with the page's own Web APIs — `WebSocket`, `fetch` (streams too),
+`EventSource`, `<audio>` / `<video>` — and no other outside address: the window's content security policy lists, in
+`connect-src` and `media-src`, every address the user listed for a plugin that is on, each for its scheme and the
+matching WebSocket one with its port (`http://*.local:*` → `http://*.local:*` and `ws://*.local:*`;
+`https://voicecho.local` → `https://voicecho.local:443` and `wss://voicecho.local:443`). An IPv4 pattern with a `*` number
+can't be said in a policy and isn't added: the setting's row says its window part can't reach it (list each address).
+The policy is fixed for the page: when the list changes (an address added or removed, such a plugin switched on, off or
+removed) the page loads again by itself on the same route (the plugin picked in Settings → Plugins stays picked), but
+not while a focused text box, text area or editable region holds text the user typed. The policy is the page's, not
+one plugin's: while a plugin with listed addresses is on, the window part of every enabled plugin can reach them. Each
+plugin's sheet names only its own setting; the setting's row (and `echoctl plugin set`) says "Echo's window is one
+page: while this plugin is on, the window part of any plugin you have on can reach these addresses too" once the list
+holds an address the window may reach. Evidence: `plugins::SHARED_WINDOW`
+- The platform's own network rules apply on top of the policy:
+  - macOS: App Transport Security lets the window (WKWebView) reach plain `http://` / `ws://` only to an IP address,
+    a `.local` name or a single-label name — not to a public name (`http://tts.acme.example` is blocked there even
+    when listed); use https for those. The host half's `ctx.http.fetch` runs through curl and isn't affected.
+  - macOS 15 and later may ask the user once for Local Network access the first time the window reaches the local
+    network; refused, those connections fail (System Settings → Privacy & Security → Local Network turns it back on).
+  - Windows: WebView2 may apply Chromium's local-network-access rules (a public page reaching a private address);
+    Echo's page is `http://echo.localhost`, a local origin, but a future WebView2 may still ask or block.
+- `fetch` and `EventSource` still go through CORS: the server must allow Echo's origin (`echo://localhost` on macOS,
+  `http://echo.localhost` on Windows; `Access-Control-Allow-Origin: *` covers both). WebSocket has no CORS: the
+  server sees the page's `Origin` and decides.
+- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview (no pinning yet); use plain
+  `ws://` / `http://` inside the user's own network, or a certificate the system trusts.
+- The host half has no WebSocket or streaming (`ctx.http.fetch` only), and no microphone.
+
+Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::Address::csp_sources`, `netReload`
+(window script)
 
 | Rejected | When |
 |---|---|

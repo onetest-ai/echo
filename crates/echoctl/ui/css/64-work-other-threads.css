@@ -12,6 +12,7 @@
 .pl-field b { font-size: 12.5px; font-weight: 600; }
 .pl-field-ctl { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .pl-field-ctl .set-in { flex: 1; width: auto; min-width: 0; }
+.pl-field .set-sub.warn { color: var(--warn); }
 .main.plug-act { overflow: hidden; }
 /* the ring stands where the octopus would (#42) */
 .empty > div:has(> .mn-ring) { display: flex; flex-direction: column; align-items: center; }

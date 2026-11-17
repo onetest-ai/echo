@@ -344,11 +344,30 @@ fn reply(status: u16, mime: &str, body: Vec<u8>) -> Response<Cow<'static, [u8]>>
     Response::builder()
         .status(status)
         .header(CONTENT_TYPE, mime)
-        // The page only ever talks to echo:// itself.
-        .header("Content-Security-Policy", "default-src 'self' echo: http://echo.localhost; img-src 'self' echo: http://echo.localhost data:; style-src 'self' 'unsafe-inline' echo: http://echo.localhost; script-src 'self' echo: http://echo.localhost")
+        .header("Content-Security-Policy", window_csp(&[]))
         .header("Cache-Control", "no-store")
         .body(Cow::Owned(body))
         .expect("valid response")
+}
+
+/// Echo's own page: echo:// (macOS) or http://echo.localhost (Windows), and 'self' (the served window).
+const OWN: &str = "'self' echo: http://echo.localhost";
+
+/// The window's content security policy. The page talks to echo:// itself; its connections and media (`fetch`,
+/// WebSocket, EventSource, `<audio>`) reach also `reach`, the addresses the user listed for plugins that are on
+/// (`plugins::window_sources`) — each checked again here, so nothing but a plain source expression gets in.
+fn window_csp(reach: &[String]) -> String {
+    let reach: String = reach.iter().filter(|s| crate::plugins::addresses::csp_source_ok(s)).map(|s| format!(" {s}")).collect();
+    format!("default-src {OWN}; img-src {OWN} data:; style-src 'self' 'unsafe-inline' echo: http://echo.localhost; script-src {OWN}; connect-src {OWN}{reach}; media-src {OWN}{reach}")
+}
+
+/// What the page's policy lets it reach, as one short key: the page is served with it (`<meta name="echo-net">`) and
+/// `/api/state` gives the current one, so the page loads again when they differ (a policy is fixed per document).
+fn net_key(reach: &[String]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    reach.hash(&mut h);
+    format!("{:x}", h.finish())
 }
 
 /// A page shown in a frame, under its own CSP (the window's would block its hashed inline scripts).
@@ -476,6 +495,8 @@ fn state() -> Value {
         "attention": crate::attention::generation(),
         // What is installed and on: the window's plugin parts follow its change.
         "plugins": plugins,
+        // What the page's policy may reach now: a page served with another loads again (`netReload`).
+        "net": net_key(&crate::plugins::window_sources()),
         "recording": w.as_ref().and_then(|w| w.recording.clone()),
         "recording_memo": w.as_ref().is_some_and(|w| w.memo),
         // The recording call's language, which the pill changes (`call_language::change`).
@@ -690,9 +711,14 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
             let res = respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
             let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
             let status = res.status().as_u16();
+            // A page keeps its policy here too, as in the window: the window's, or the minutes page's own.
+            let csp = match res.headers().get("Content-Security-Policy").and_then(|v| v.to_str().ok()) {
+                Some(p) if ctype.starts_with("text/html") => format!("Content-Security-Policy: {p}\r\n"),
+                _ => String::new(),
+            };
             let body = res.into_body();
             let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: {name}={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
-            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{cookie}Connection: close\r\n\r\n", body.len());
+            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{csp}{cookie}Connection: close\r\n\r\n", body.len());
             let _ = out.write_all(&body);
         });
     }
@@ -963,6 +989,34 @@ mod tests {
         }
         assert_eq!(get("/api/client/acme/logo"), 404, "an id with no logo: still 404");
         assert_eq!(get("/api/client/acme/people"), 200, "an id: the people view");
+    }
+
+    #[test]
+    fn the_windows_policy_lets_its_connections_and_media_reach_only_the_listed_addresses() {
+        let own = "'self' echo: http://echo.localhost";
+        let fixed = format!("default-src {own}; img-src {own} data:; style-src 'self' 'unsafe-inline' echo: http://echo.localhost; script-src {own}; ");
+        assert_eq!(window_csp(&[]), format!("{fixed}connect-src {own}; media-src {own}"), "nothing listed: Echo's own page only");
+        let reach = ["http://*.local:*", "ws://*.local:*", "https://voicecho.local:443", "wss://voicecho.local:443"].map(String::from);
+        let csp = window_csp(&reach);
+        assert!(csp.starts_with(&fixed), "img-src, style-src and script-src stay as they were: {csp}");
+        let list = format!("{own} http://*.local:* ws://*.local:* https://voicecho.local:443 wss://voicecho.local:443");
+        assert!(csp.ends_with(&format!("connect-src {list}; media-src {list}")), "{csp}");
+        // Whatever reaches the builder, only a plain source expression gets in: no new directive, keyword or scheme.
+        let hostile = ["http://a.example:80; script-src *", "'unsafe-eval'", "*", "data:", "http://a.example:80 'unsafe-inline'", "https:", "http://*:*", "http://ok.local:80"].map(String::from);
+        assert_eq!(window_csp(&hostile), format!("{fixed}connect-src {own} http://ok.local:80; media-src {own} http://ok.local:80"));
+        assert_ne!(net_key(&reach), net_key(&[]), "another set, another key");
+        assert_eq!(net_key(&reach), net_key(&reach.clone()));
+    }
+
+    #[test]
+    fn the_page_is_served_under_the_policy_and_key_of_what_the_user_listed() {
+        let (_env, _root) = crate::paths::testenv::folders("window-page-policy");
+        let page = respond(&Request::builder().uri("echo://localhost/").body(Vec::new()).expect("request"));
+        let csp = page.headers()["Content-Security-Policy"].to_str().unwrap().to_string();
+        assert_eq!(csp, window_csp(&[]));
+        let html = String::from_utf8(page.into_body().into_owned()).unwrap();
+        assert!(html.contains(&format!("<meta name=\"echo-net\" content=\"{}\">", net_key(&[]))), "the page knows its key");
+        assert_eq!(state()["net"], net_key(&[]), "and /api/state the current one: the same, so no reload");
     }
 
     #[test]

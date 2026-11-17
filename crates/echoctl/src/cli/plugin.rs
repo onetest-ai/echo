@@ -190,7 +190,13 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Enable { id } => set_enabled(&id, true)?,
         PluginCmd::Disable { id } => set_enabled(&id, false)?,
         PluginCmd::Set { id, key, value: None } => print_json(&serde_json::json!(settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()))),
-        PluginCmd::Set { id, key, value: Some(v) } => set_setting(&id, &key, &serde_json::Value::String(v))?,
+        PluginCmd::Set { id, key, value: Some(v) } => {
+            set_setting(&id, &key, &serde_json::Value::String(v))?;
+            // An address list: what the user should know about what they listed, as the window's row says it.
+            for n in settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()).and_then(|s| s["notes"].as_array().cloned()).unwrap_or_default() {
+                eprintln!("Note: {}", n.as_str().unwrap_or(""));
+            }
+        }
         #[cfg(feature = "js")]
         PluginCmd::Call { id, command, args, files } => {
             let args: serde_json::Value = serde_json::from_str(args.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the arguments aren't JSON: {e}"))?;
