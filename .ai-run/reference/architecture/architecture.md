@@ -79,6 +79,15 @@ reads the data folder's files.
 - Clients learn what happened from `events.jsonl`, written by `watch::emit`, tailed and never replayed.
 - Long or periodic work runs on its own thread started from a `start_scheduler` (`notes::start_scheduler`,
   `projectsync::start_scheduler`) and reports through a state file the window polls.
+- Echo's own background jobs are listed in `jobs::JOBS`: Needs you now (`needs`), the thread sync (`thread_sync`), the
+  threads' mail and chat fetch (`fetch`), minutes (`minutes`), meeting prep with meeting types and task modes (`prep`),
+  the Recall reader (`brain_reader`) and live notes (`live_notes`). Each has fields, a number (with its range and
+  default), `night` (paused in `jobs::night_window`, 22:30–07:00 by default) and `model` (empty: the job's own
+  default). A job reads its settings on every tick (`jobs::number`, `jobs::paused`, `jobs::model`;
+  `livenotes::job_model` for one-shot jobs) and records a run with `jobs::ran`. The settings are
+  `<config dir>/jobs.json`, changed only by `jobs::set` (`echoctl jobs set <job> key=value …`, `key=` its default;
+  `night from=HH:MM to=HH:MM`) under `.jobs.lock`: all checked, then written at once, never inside a run Echo started.
+  Runs are `<config dir>/jobs-state.json` (last run, runs today). `echoctl jobs` lists them all.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

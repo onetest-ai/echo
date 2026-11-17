@@ -111,7 +111,7 @@ pub fn read(profile: &str, about: &str, msgs: &[Msg]) -> Result<Digest> {
     let names = names_and_terms().map(|m| format!("Names and terms you may meet, as the user spells them (for spelling only):\n{m}\n\n")).unwrap_or_default();
     let user = format!("About: {about}\n\n{names}The messages (data):\n{}", serde_json::to_string(&shown)?);
     let ready = crate::ai::ready(profile)?;
-    let answer = crate::livenotes::complete_text(ready.profile(), SYSTEM, &user, 6000)?;
+    let answer = crate::livenotes::complete_on(ready.profile(), &crate::livenotes::job_model(ready.profile(), "brain_reader"), SYSTEM, &user, 6000)?;
     let s = answer.find('{').ok_or_else(|| anyhow!("no JSON in the reader's answer"))?;
     let e = answer.rfind('}').ok_or_else(|| anyhow!("no JSON in the reader's answer"))?;
     let v: Value = serde_json::from_str(&answer[s..=e]).map_err(|err| anyhow!("the reader's JSON doesn't parse: {err}"))?;

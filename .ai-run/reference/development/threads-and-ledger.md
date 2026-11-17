@@ -89,14 +89,14 @@ without changing it; each such edit can be undone.
 `ledger::mail_sync` and `ledger::chat_sync` take mail and chat only from the user, colleagues and trusted,
 authenticated senders.
 
-- The app's scheduler (`projectsync::start_scheduler`, every 5 minutes but from 22:30 to 07:00, `projectsync::quiet`;
-  `echoctl project ledger <id> run --scheduled`,
+- The app's scheduler (`projectsync::start_scheduler`, every 5 minutes but in the night the thread sync job pauses in,
+  `projectsync::quiet` — `jobs`, 22:30–07:00 by default; `echoctl project ledger <id> run --scheduled`,
   `projectsync::run_scheduled`) fetches due mail and chat sources, but reads mail and chat items with the model only as
-  a batch (`batch_ready`): once the first has waited `BATCH_WAIT` (2 h) since it was first seen waiting, or
-  `BATCH_ITEMS` (5) wait, or with a call read anyway (calls keep `SETTLE`, 15 min). When each waiting item was first
+  a batch (`batch_ready`): once the first has waited the thread sync job's `batch_wait` (2 h by default) since it was
+  first seen waiting, or its `batch_items` (5) wait, or with a call read anyway (calls keep `SETTLE`, 15 min). When each waiting item was first
   seen waiting is kept in `ledger/waiting.json` (`projectsync::waiting`, under `ledger/.waiting.lock`, re-read inside it;
   an item read since its kept time — a chat re-queued once it changed — or with a kept time that can't be read waits
-  from now). A held sync ends `done` saying how many wait and when they're read — a time in the night moved to 07:00 (`projectsync::after_quiet`), and in the night itself without "or once 5 wait"; also under the other passes' reports
+  from now). A held sync ends `done` saying how many wait and when they're read — a time in the night moved to its end (`projectsync::after_quiet`), and in the night itself without "or once 5 wait"; also under the other passes' reports
   when those ran. Sync now (`projectsync::run`, the window's and `ledger <id> run`)
   reads them at once.
 

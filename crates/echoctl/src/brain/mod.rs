@@ -298,8 +298,10 @@ pub fn start_scheduler() {
         let mut last: Option<u64> = None;
         let mut failed_at: Option<std::time::Instant> = None;
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { 300 }));
-            if crate::notes::quitting() || !settings().enabled() || !settings().auto() {
+            // As often as the Recall reader's job settings say (5 minutes by default; a minute after start), never in
+            // the night they pause it in.
+            std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::number("brain_reader", "every") * 60 }));
+            if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) {
                 continue;
             }
             let fp = fingerprint();
@@ -309,6 +311,7 @@ pub fn start_scheduler() {
             }
             match sync() {
                 Ok(r) => {
+                    crate::jobs::ran("brain_reader");
                     // New sections get their topics once a taxonomy exists (Claude, on the default profile).
                     if EXTRAS && r.chunks > 0 && taxonomy::current().is_some() {
                         if let Err(e) = taxonomy::classify(None, false, &|_| {}) {

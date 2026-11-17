@@ -259,7 +259,7 @@ pub fn classify(meetings: &[MeetingContext]) -> Result<usize> {
             ));
         }
         // No answer (no AI ready, the network, an answer that can't be read): nothing noted — the next pass asks again.
-        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), CLASSIFY_SYSTEM, &format!("Kinds:\n{kinds}\nMeetings:\n{list}"), 800))?;
+        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_on(r.profile(), &crate::livenotes::job_model(r.profile(), "prep"), CLASSIFY_SYSTEM, &format!("Kinds:\n{kinds}\nMeetings:\n{list}"), 800))?;
         let v = crate::livenotes::json_answer(&answer).ok_or_else(|| anyhow::anyhow!("the classifier's answer couldn't be read"))?;
         n += update_state(&event_types_file(), |all: &mut serde_json::Map<String, Value>| {
             let mut n = 0;

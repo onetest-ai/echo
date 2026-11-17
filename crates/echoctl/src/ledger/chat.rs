@@ -12,9 +12,6 @@ pub(super) const CHAT_AGAIN_DAYS: i64 = 7;
 pub(super) const CHAT_MAX: usize = 2000;
 /// Messages this close to one of this thread's calls on the same chat belong to that call's item.
 pub(super) const CALL_MARGIN_MIN: i64 = 2;
-/// A chat is read at most this often (the sync looks every 5 minutes).
-pub const CHAT_EVERY_MIN: i64 = 30;
-
 pub(super) fn chats_file(project: &str) -> PathBuf {
     crate::projects::dir().join(project).join("ledger").join("chats.json")
 }
@@ -33,7 +30,7 @@ pub(super) fn short(id: &str) -> String {
 pub fn chat_due(p: &crate::projects::Project) -> bool {
     let st = chat_state(&p.id);
     p.sources.iter().filter(|s| s.kind == "teams_chat").any(|s| {
-        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
+        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(crate::jobs::number("fetch", "every") as i64))
     })
 }
 
@@ -183,6 +180,7 @@ pub fn chat_sync(project: &str) -> Result<Vec<String>> {
             since = since.max(t.with_timezone(&chrono::Utc));
         }
         state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
+        crate::jobs::ran("fetch");
         let msgs = match crate::graph::chat_history(&s.id, since, now, CHAT_MAX) {
             Ok(m) => m,
             Err(e) => {

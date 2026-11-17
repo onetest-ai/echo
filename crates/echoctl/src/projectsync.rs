@@ -69,13 +69,24 @@ pub fn run(id: &str) -> Result<Value> {
 
 /// As the app's scheduler syncs (`echoctl project ledger <id> run --scheduled`): mail and chat wait for their batch.
 pub fn run_scheduled(id: &str) -> Result<Value> {
-    run_with(id, true)
+    let v = run_with(id, true)?;
+    // A sync that went to the model (one held for its batch, or with nothing new, didn't): the thread sync job ran.
+    if v.get("run").is_some() {
+        crate::jobs::ran("thread_sync");
+    }
+    Ok(v)
 }
 
-/// Mail and chat wait for one another: a thread's sync reads them once the first has waited `BATCH_WAIT`, or
-/// `BATCH_ITEMS` wait, or with a call; calls keep their own settle time (`SETTLE`).
-const BATCH_WAIT: chrono::Duration = chrono::Duration::hours(2);
-const BATCH_ITEMS: usize = 5;
+/// Mail and chat wait for one another: a thread's sync reads them once the first has waited `batch_wait()`, or
+/// `batch_items()` wait, or with a call; calls keep their own settle time (`SETTLE`). Both from the thread sync's job
+/// settings (`jobs`; 2 hours and 5 by default).
+fn batch_wait() -> chrono::Duration {
+    chrono::Duration::minutes(crate::jobs::number("thread_sync", "batch_wait") as i64)
+}
+
+fn batch_items() -> usize {
+    crate::jobs::number("thread_sync", "batch_items") as usize
+}
 
 /// When each mail or chat item still waiting was first seen waiting (`ledger/waiting.json`): a chat read again
 /// once it changed waits from then, not from its first message.
@@ -128,22 +139,19 @@ fn waiting(id: &str, now: chrono::DateTime<Local>) -> Vec<(String, chrono::DateT
     v
 }
 
-/// The night: the scheduler starts no sync from 22:30 to 07:00 (Sync now still does).
-const QUIET_FROM: (u32, u32) = (22, 30);
-const QUIET_TO: (u32, u32) = (7, 0);
-
+/// The night the thread sync pauses in (its job settings: on by default, 22:30 to 07:00): the scheduler starts no sync
+/// then (Sync now still does).
 fn quiet(t: chrono::NaiveTime) -> bool {
-    let hm = |(h, m): (u32, u32)| chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap_or_default();
-    t >= hm(QUIET_FROM) || t < hm(QUIET_TO)
+    crate::jobs::paused("thread_sync", t)
 }
 
-/// When the scheduler can read at `at`: `at`, or the night's end when it falls in the night.
+/// When the scheduler can read at `at`: `at`, or the night's end when it falls in a night the sync pauses in.
 fn after_quiet(at: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
-    if !quiet(at.time()) {
-        return at;
+    if quiet(at.time()) {
+        crate::jobs::after_night(at)
+    } else {
+        at
     }
-    let day = if at.time() < chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap_or_default() { at.date_naive() } else { at.date_naive() + chrono::Days::new(1) };
-    day.and_hms_opt(QUIET_TO.0, QUIET_TO.1, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(at)
 }
 
 /// "N mail or chat items wait: read at HH:MM or once 5 wait" (at night, when 5 waiting don't start a read: "read at
@@ -153,12 +161,12 @@ fn waits(n: usize, at: chrono::DateTime<Local>, now: chrono::DateTime<Local>) ->
     if quiet(now.time()) {
         return format!("{n} mail or chat item{s} wait{verb}: read at {}", after_quiet(at).format("%H:%M"));
     }
-    format!("{n} mail or chat item{s} wait{verb}: read at {} or once {BATCH_ITEMS} wait", after_quiet(at).format("%H:%M"))
+    format!("{n} mail or chat item{s} wait{verb}: read at {} or once {} wait", after_quiet(at).format("%H:%M"), batch_items())
 }
 
-/// Mail and chat are due a read: the first has waited `BATCH_WAIT`, or `BATCH_ITEMS` wait.
+/// Mail and chat are due a read: the first has waited `batch_wait()`, or `batch_items()` wait.
 fn batch_ready(w: &[(String, chrono::DateTime<Local>)], now: chrono::DateTime<Local>) -> bool {
-    w.len() >= BATCH_ITEMS || w.first().is_some_and(|(_, t)| now.signed_duration_since(*t) >= BATCH_WAIT)
+    w.len() >= batch_items() || w.first().is_some_and(|(_, t)| now.signed_duration_since(*t) >= batch_wait())
 }
 
 /// A sync; `batch`: mail and chat wait for their batch unless a call is read anyway.
@@ -187,7 +195,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     if batch && pending.iter().all(|i| mail_or_chat(i)) {
         let w = waiting(id, started);
         if !batch_ready(&w, started) {
-            held = w.first().map(|(_, t)| (w.len(), *t + BATCH_WAIT));
+            held = w.first().map(|(_, t)| (w.len(), *t + batch_wait()));
             pending.clear();
         }
     }
@@ -243,7 +251,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         let profile_id = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
         let ready = crate::ai::ready(&profile_id)?;
         let profile = ready.profile();
-        let model = p.model.clone().or_else(|| profile.notes_model()).map(|m| profile.model(&m));
+        let model = p.model.clone().or_else(|| crate::jobs::model("thread_sync")).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
         let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
         let cwd = if !profile.kind.managed() { crate::ai::system_folder()? } else { paths::home() };
         crate::ai::hooks_conflict(profile, &cwd).map_err(|w| anyhow!(w))?;
@@ -961,7 +969,8 @@ fn due() -> Vec<String> {
             // re-queues counted.
             let read = ledger::processed(&events);
             let unread_mail = known.keys().any(|k| mail_or_chat(k) && !read.contains(k));
-            if ledger::chat_due(p) || ledger::mail_due(p) || (unread_mail && batch_ready(&waiting(&p.id, now), now)) {
+            let fetch = !crate::jobs::paused("fetch", now.time()) && (ledger::chat_due(p) || ledger::mail_due(p));
+            if fetch || (unread_mail && batch_ready(&waiting(&p.id, now), now)) {
                 return true;
             }
             projects::calls_of(p).unwrap_or_default().iter().rev().take(BACKFILL).any(|(d, _)| {
@@ -976,7 +985,8 @@ fn due() -> Vec<String> {
         .collect()
 }
 
-/// The app's scheduler: every 5 minutes but at night (`quiet`), sync the projects that are due, one at a time.
+/// The app's scheduler: every 5 minutes but in the night its job settings pause it in (`quiet`), sync the projects
+/// that are due, one at a time.
 pub fn start_scheduler() {
     std::thread::spawn(|| loop {
         std::thread::sleep(Duration::from_secs(300));
@@ -1014,6 +1024,7 @@ mod tests {
 
     #[test]
     fn the_night_holds_the_scheduler_and_says_when_it_reads() {
+        let (_env, _) = crate::paths::testenv::folders("sync-night");
         let at = |h, m| Local::now().date_naive().and_hms_opt(h, m, 0).unwrap().and_local_timezone(Local).earliest().unwrap();
         for (h, m, q) in [(22, 29, false), (22, 30, true), (23, 59, true), (0, 0, true), (6, 59, true), (7, 0, false), (12, 0, false)] {
             assert_eq!(quiet(at(h, m).time()), q, "{h}:{m}");
@@ -1132,12 +1143,16 @@ mod tests {
 
     #[test]
     fn mail_and_chat_are_due_once_the_first_has_waited_two_hours_or_five_wait() {
+        let (_env, _) = crate::paths::testenv::folders("sync-batch-ready");
         let now = Local::now();
         let w = |n: usize, mins: i64| (0..n).map(|i| (format!("mail-{i}"), now - chrono::Duration::minutes(mins))).collect::<Vec<_>>();
         assert!(!batch_ready(&[], now));
         assert!(!batch_ready(&w(4, 119), now), "four items, under two hours");
         assert!(batch_ready(&w(5, 0), now), "five wait");
         assert!(batch_ready(&w(1, 120), now), "the first has waited two hours");
+        // The thread sync's job settings change both.
+        crate::jobs::set("thread_sync", &["batch_wait=30".into(), "batch_items=2".into()]).unwrap();
+        assert!(batch_ready(&w(1, 30), now) && batch_ready(&w(2, 0), now) && !batch_ready(&w(1, 29), now));
     }
 
     #[test]

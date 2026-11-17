@@ -16,6 +16,7 @@ mod calls_week;
 mod announce;
 mod call_language;
 mod config;
+mod jobs;
 mod deliver;
 mod m365;
 mod memo;
@@ -113,6 +114,14 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum JobsCmd {
+    /// Every job, its settings (value and default), last run and runs today, and the night (JSON)
+    List,
+    /// Tune a job (`echoctl jobs` lists their keys): key=value …, key= for its default; `night from=HH:MM to=HH:MM`
+    Set { job: String, settings: Vec<String> },
+}
+
+#[derive(Subcommand)]
 enum Cmd {
     /// What waits for your decision (the window's Needs you), and what was done this week (JSON)
     Attention,
@@ -202,6 +211,12 @@ enum Cmd {
     Ai {
         #[command(subcommand)]
         cmd: Option<cli::app::AiCmd>,
+    },
+    /// Echo's own background jobs: list them (JSON), or tune one — how often it runs, its night pause, its model:
+    /// `echoctl jobs set needs every=10 night=off model=haiku` (`key=` its default), `echoctl jobs set night from=22:30 to=07:00`
+    Jobs {
+        #[command(subcommand)]
+        cmd: Option<JobsCmd>,
     },
     /// Live notes during a call: ask a question, pause or resume them, show them (JSON)
     Live {
@@ -829,6 +844,14 @@ fn main() -> Result<()> {
         Cmd::Calendar { cmd } => cli::calendar::calendar(cmd),
         Cmd::Notes { call, wait, auto, session: _, profile, without_policy } => cli::calls::notes(call, wait, auto, profile, without_policy),
         Cmd::Ai { cmd } => cli::app::ai(cmd),
+        Cmd::Jobs { cmd } => {
+            let v = match cmd {
+                None | Some(JobsCmd::List) => jobs::list(),
+                Some(JobsCmd::Set { job, settings }) => jobs::set(&job, &settings)?,
+            };
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            Ok(())
+        }
         Cmd::Live { cmd } => cli::capture::live(cmd),
         Cmd::Prep { call, upcoming, show, write } => cli::calendar::prep(call, upcoming, show, write),
         Cmd::Pending { session } => calls::pending(session.as_deref()),

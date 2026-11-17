@@ -112,14 +112,12 @@ pub enum Intent {
     Auto,
 }
 
-/// How long after the call (or after the user's last note) the app writes the minutes.
-pub const AUTO_DELAY: Duration = Duration::from_secs(15 * 60);
-
-/// The env variable a debug build reads to shorten `AUTO_DELAY` for functional tests (seconds).
+/// The env variable a debug build reads to shorten the minutes delay for functional tests (seconds).
 #[cfg(debug_assertions)]
 const TEST_AUTO_DELAY: &str = "ECHOCTL_TEST_AUTO_MINUTES_DELAY_S";
 
-/// `AUTO_DELAY`, or — functional tests only, in a debug build — the seconds `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`
+/// How long after the call (or after the user's last note) the app writes the minutes: the minutes job's `delay` (15
+/// minutes by default, `jobs`), or — functional tests only, in a debug build — the seconds `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`
 /// gives (`tests/fixtures/make_data.py --clock fast`), so a case waits seconds instead of 15 minutes. A release
 /// build never reads it.
 pub fn auto_delay() -> Duration {
@@ -127,7 +125,7 @@ pub fn auto_delay() -> Duration {
     if let Some(d) = test_delay(std::env::var(TEST_AUTO_DELAY).ok().as_deref()) {
         return d;
     }
-    AUTO_DELAY
+    Duration::from_secs(crate::jobs::number("minutes", "delay") * 60)
 }
 
 /// The test delay a value of `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` gives: whole seconds, else none.
@@ -930,7 +928,8 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         }
     };
     let profile = ready.profile();
-    let model = profile.notes_model().map(|m| profile.model(&m));
+    let model = crate::jobs::model("minutes").or_else(|| profile.notes_model()).map(|m| profile.model(&m));
+    crate::jobs::ran("minutes");
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.
     let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
@@ -1958,6 +1957,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn a_debug_build_takes_the_test_delay_in_seconds_and_nothing_else() {
+        let (_env, _) = crate::paths::testenv::folders("notes-auto-delay");
         assert_eq!(test_delay(Some("90")), Some(Duration::from_secs(90)));
         assert_eq!(test_delay(Some(" 5 ")), Some(Duration::from_secs(5)));
         // Unset or not whole seconds: the real 15 minutes.
@@ -1967,7 +1967,10 @@ mod tests {
         assert_eq!(test_delay(Some("-3")), None);
         // The tests never set the variable: auto_due here runs on the real delay.
         if std::env::var_os(TEST_AUTO_DELAY).is_none() {
-            assert_eq!(auto_delay(), AUTO_DELAY);
+            assert_eq!(auto_delay(), Duration::from_secs(15 * 60));
+            // The minutes job's delay, when the user set one.
+            crate::jobs::set("minutes", &["delay=3".into()]).unwrap();
+            assert_eq!(auto_delay(), Duration::from_secs(180));
         }
     }
 

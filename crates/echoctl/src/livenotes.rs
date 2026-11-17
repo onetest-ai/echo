@@ -185,7 +185,15 @@ pub const STATE: &str = "live-state.json";
 /// The live transcript (`live.rs` writes it; named here too, for builds without transcription).
 const LIVE_FILE: &str = "live.jsonl";
 
-const SUMMARY_EVERY: Duration = Duration::from_secs(90);
+/// How often a call's running summary is written: the live notes job's `every_s` (90 s by default).
+fn summary_every() -> Duration {
+    Duration::from_secs(crate::jobs::number("live_notes", "every_s"))
+}
+
+/// The model live notes ask `p` for: the live notes job's, else the profile's live model.
+pub(crate) fn live_model_of(p: &Profile) -> String {
+    crate::jobs::model("live_notes").unwrap_or_else(|| p.live_model())
+}
 /// Characters (not bytes: a Cyrillic letter counts once) of new transcript before a summary.
 const MIN_NEW_CHARS: usize = 400;
 /// The most new transcript one summary reads, in characters, each line + 16 for its
@@ -992,11 +1000,14 @@ fn next_job(s: &mut Shared, now: Instant) -> Option<Job> {
     if pick.is_none() {
         for (stamp, c) in s.calls.iter_mut() {
             if c.recording && !c.paused && c.next_summary.is_some_and(|t| t <= now) {
-                c.next_summary = Some(now + SUMMARY_EVERY);
+                c.next_summary = Some(now + summary_every());
                 pick = Some(Job::Summary { stamp: stamp.clone(), generation: c.summary_gen });
                 break;
             }
         }
+    }
+    if matches!(pick, Some(Job::Summary { .. })) {
+        crate::jobs::ran("live_notes");
     }
     let (stamp, kind) = match &pick {
         Some(Job::Ask { stamp, .. }) => (stamp.clone(), JobKind::Ask),
@@ -1185,7 +1196,7 @@ fn run_summary(stamp: &str, generation: u64) {
             gaps.extend(gap);
             let notes = Notes {
                 profile: p.id.clone(),
-                model: p.live_model(),
+                model: live_model_of(p),
                 updated_at: Local::now(),
                 cursor: all.len(),
                 covered_until: duration,
@@ -1248,7 +1259,7 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
             question: ask.text.clone(),
             answer,
             profile: profile.map(|p| p.id.clone()),
-            model: profile.map(|p| p.live_model()),
+            model: profile.map(live_model_of),
             error,
         };
         let line = format!("{}\n", json!(a));
