@@ -224,6 +224,35 @@ pub fn me() -> Result<Value> {
     Ok(json!({"name": name, "email": email}))
 }
 
+/// The parts of About me a plugin may ask for (`calls::me_parts`); all but `patterns` when it names none — as the
+/// Brain's readers, never how the user works unless asked.
+const ME_KINDS: &[&str] = &["identity", "people", "terms", "style", "patterns"];
+
+/// About me for a plugin with `uses.me` (`ctx.me({kinds})`): null when it is missing, empty or still the template;
+/// else `{text, name, parts, hash}` — the blocks of the kinds asked in About me's order, the name (its `Name:` line,
+/// else Echo's) when `identity` is asked, each kind's blocks, and a hash of `text` that changes when the user edits it.
+pub fn about_me(opts: &Value) -> Result<Value> {
+    let mut kinds: Vec<&str> = vec![];
+    for k in opts["kinds"].as_array().into_iter().flatten() {
+        match k.as_str().and_then(|k| ME_KINDS.iter().find(|x| **x == k)) {
+            Some(k) => kinds.push(k),
+            None => bail!("About me has no part “{}” ({})", k.as_str().map(str::to_owned).unwrap_or_else(|| k.to_string()), ME_KINDS.join(", ")),
+        }
+    }
+    if kinds.is_empty() {
+        kinds = ME_KINDS.iter().copied().filter(|k| *k != "patterns").collect();
+    }
+    let Some(about) = crate::calls::me_profile() else { return Ok(Value::Null) };
+    const MAX: usize = 20_000;
+    let text = crate::calls::me_parts(&about, &kinds, MAX).unwrap_or_default();
+    let parts: serde_json::Map<String, Value> = kinds.iter().filter_map(|k| crate::calls::me_parts(&about, &[k], MAX).map(|p| (k.to_string(), json!(p)))).collect();
+    let name = kinds.contains(&"identity").then(|| {
+        let line = about.lines().find_map(|l| l.trim().strip_prefix("Name:").map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned));
+        line.or_else(|| me().ok().and_then(|v| v["name"].as_str().map(str::to_owned)))
+    });
+    Ok(json!({"text": text, "name": name.flatten(), "parts": parts, "hash": crate::calls::me_hash(Some(&text))}))
+}
+
 /// People across the threads: `{key, name, organisation, title, threads, link}` (People's own; roles stay there).
 pub fn people() -> Result<Value> {
     let v = crate::people::everyone(chrono::Local::now().date_naive())?;

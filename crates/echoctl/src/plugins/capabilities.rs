@@ -33,7 +33,19 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "ai", ready: true, describe: describe_ai },
     Capability { id: "microphone", ready: true, describe: describe_microphone },
     Capability { id: "m365", ready: true, describe: describe_m365 },
+    Capability { id: "me", ready: true, describe: describe_me },
 ];
+
+/// The sheet's line for `uses.me` (`ctx.me`, `share::about_me`).
+pub const ME_LINE: &str = "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work";
+
+/// `uses.me: {}`: its host half reads About me, read-only.
+pub(super) fn describe_me(v: &Value) -> Result<String> {
+    if !v.as_object().is_some_and(|o| o.is_empty()) {
+        bail!("“me” is {{}}");
+    }
+    Ok(ME_LINE.into())
+}
 
 /// The sheet's line for `uses.microphone` (`window::plugins` opens it only as it says).
 pub const MICROPHONE_LINE: &str = "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach";
@@ -486,6 +498,17 @@ pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugin_asks_for_about_me_as_an_empty_object_and_the_sheet_says_all_it_may_read() {
+        let uses = serde_json::json!({"me": {}});
+        assert_eq!(describe(uses.as_object().unwrap()).unwrap(), vec![ME_LINE.to_string()]);
+        assert!(ME_LINE.contains("About me") && ME_LINE.contains("how you like things written") && ME_LINE.contains("how you work"));
+        assert!(not_ready(uses.as_object().unwrap()).is_empty(), "this Echo has it");
+        for bad in [serde_json::json!(true), serde_json::json!({"kinds": ["style"]}), serde_json::json!("yes")] {
+            assert!(describe_me(&bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_plugin_asks_for_the_microphone_as_an_empty_object_and_the_sheet_says_when_it_opens() {
