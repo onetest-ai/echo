@@ -341,7 +341,7 @@ function projectProfile(p, data) {
   const sources = threadSources(p, cl)
   // The plugins' rows (`thread.profile`), under Sources; drawn again after the page is in (`drawProjects`).
   const plugRows = threadSlotRows(Plugins.slots['thread.profile'], slotThread(p), (m) => console.warn(`thread.profile: ${m}`))
-    .map((r) => row(r.label, `<div class="pf-plug" data-thread-slot="${esc(r.key)}">${r.html}</div>`)).join('')
+    .map((r) => row(r.label, `<div class="pf-plug" data-profile-slot="${esc(r.key)}">${r.html}</div>`)).join('')
   const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
     : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
   // Look and AI: not on the board; the same row style.
@@ -446,6 +446,9 @@ function clientView(data) {
     + (S.pj.adding === 'cproject' ? `<span class="tok-in"><input id="pj-add-cproject" data-add="cproject" placeholder="New thread for ${esc(c.name)}" aria-label="New thread name" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="cproject">+ New thread</button>`)
   const del = S.pj.confirmDelete ? `<span class="pf-sub">Remove ${esc(c.name)}?</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="client-remove" data-id="${id}">Remove</button>`
     : ps.length ? `<span class="pf-sub">A client with threads stays: move or delete them first.</span>` : `<button class="btn ghost danger" data-pj="delete-ask">Remove this client…</button>`
+  // The plugins' rows (`client.profile`), under Threads; drawn again after the page is in (`drawProjects`).
+  const plugRows = threadSlotRows(Plugins.slots['client.profile'], slotClient(c), (m) => console.warn(`client.profile: ${m}`))
+    .map((r) => row(r.label, `<div class="pf-plug" data-profile-slot="${esc(r.key)}">${r.html}</div>`)).join('')
   const cd = S.pj.cdata && S.pj.cdata.client && S.pj.cdata.client.id === c.id ? S.pj.cdata : null
   const openTasks = cd && cd.work ? TASK_PILES.reduce((n, [k]) => n + ((cd.work.piles || {})[k] || []).length, 0) : 0
   const tabs = withBoards('client', clientTabs(cd && cd.calls, openTasks, peopleCount()))
@@ -465,6 +468,7 @@ function clientView(data) {
     ${row('Kind', internal)}
     ${row('Logo', logo)}
     ${row('Threads', projects)}
+    ${plugRows}
     ${row('', del)}
   </div><p class="pf-foot">Saved as you change it · <code>projects/clients.json</code></p></div>`
 }

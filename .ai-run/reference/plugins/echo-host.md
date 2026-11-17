@@ -21,11 +21,14 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   inside the root as they are entered; a file that can't be opened or read, or that grows past 50 MB while it is copied, is left out (its part removed), and on a
   cap or a copy that can't be written the folder made is removed. One snapshot of a plugin is made at a time, under
   `.locks/<id>.snapshot.lock` (taken without waiting; removed with its data). Evidence: `jshost::folders::snapshot`
-- Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json` and `work.json` there;
-  `threads.json` and `work.json` each change under its own lock across processes (`.locks/<id>.threads.lock`,
-  `.locks/<id>.work.lock`); a `threads.json` that isn't JSON is moved aside as `threads.json.bad-<time>`. The plugin
-  writes none of those five and removes none of `settings.json`, `threads.json`, `work.json` and the store folder
-  itself; a name at the store's top level is plain ASCII. Evidence: `jshost::not_echos`
+- Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and
+  `work.json` there; `threads.json`, `client-values.json` and `work.json` each change under its own lock across
+  processes (`.locks/<id>.threads.lock`, `.locks/<id>.clients.lock`, `.locks/<id>.work.lock`); a `threads.json` or
+  `client-values.json` that isn't its shape is moved aside as `<name>.bad-<time>`. The plugin writes none of those six
+  and removes none of `settings.json`, `threads.json`, `client-values.json`, `work.json` and the store folder itself;
+  a name at the store's top level is plain ASCII. `client-values.json` is `{"v": 1, "clients": {client id: {key:
+  value}}}`; removing a client (`projects::remove_client`) drops its entry from every plugin's file. Evidence:
+  `jshost::not_echos`, `plugins::client_values`
 - A marketplace namespace's shared values (`<ns>.<name>`) live beside the stores in `@<ns>/` (`threads.json`,
   `shared.json`), each under its own lock (`.locks/@<ns>.threads.lock`, `.locks/@<ns>.shared.lock`), no plugin's store
   and never removed with one. Evidence: `plugins::shared`

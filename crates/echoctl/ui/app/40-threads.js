@@ -67,7 +67,13 @@ const projClient = (id) => ((S.pj.data && S.pj.data.clients) || []).find((c) => 
 function drawProjects(primary) {
   patch(primary, `<main class="main">${projectsView()}</main>`)
   drawOrgLinks()
-  // A plugin's Profile row draws into its box once it is in (`thread.profile`'s after), once per box drawn afresh.
+  // A plugin's Profile row draws into its box once it is in (`thread.profile`'s or `client.profile`'s after), once per
+  // box drawn afresh.
+  if (S.pj.client) {
+    const c = ((S.pj.data && S.pj.data.clients) || []).find((x) => x.id === S.pj.client)
+    if (c && S.pj.ctab === 'profile') threadSlotAfter(primary, Plugins.slots['client.profile'], slotClient(c), (m) => console.warn(`client.profile: ${m}`))
+    return
+  }
   const p = S.pj.detail
   if (!p || p.error || S.pj.tab !== 'profile') return
   threadSlotAfter(primary, Plugins.slots['thread.profile'], slotThread(p), (m) => console.warn(`thread.profile: ${m}`))
