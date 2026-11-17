@@ -139,10 +139,11 @@ pub fn in_folder_session(p: &crate::ai::Profile, model: Option<&str>, f: &InFold
 fn folder_project(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions, kept: bool) -> Result<Vec<String>> {
     let managed = p.kind.managed();
     if managed {
-        let s = f.cwd.join(".claude").join("settings.json");
-        if let Ok(b) = fs::read(&s) {
-            if serde_json::from_slice::<Value>(&b).map_or(true, |v| crate::ai::routes(&v)) {
-                bail!("this folder's Claude Code settings (.claude/settings.json) could send the run elsewhere than {} — run it on Claude Code (as configured), or take that out of the folder's settings", p.name);
+        for name in ["settings.json", "settings.local.json"] {
+            if let Ok(b) = fs::read(f.cwd.join(".claude").join(name)) {
+                if serde_json::from_slice::<Value>(&b).map_or(true, |v| crate::ai::routes(&v)) {
+                    bail!("this folder's Claude Code settings (.claude/{name}) could send the run elsewhere than {} — run it on Claude Code (as configured), or take that out of the folder's settings", p.name);
+                }
             }
         }
     }
@@ -743,6 +744,12 @@ mod tests {
         let _ = fs::remove_file(crate::ai::fake::file(&p, "p.args"));
         let e = run(&spec(FolderMode::Read, "routed")).unwrap_err();
         assert!(e.to_string().contains("could send the run elsewhere than"), "{e}");
+        assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
+        // The same in the folder's local settings file, which Claude Code also reads from a project.
+        fs::remove_file(vault.join(".claude/settings.json")).unwrap();
+        fs::write(vault.join(".claude/settings.local.json"), r#"{"apiKeyHelper": "/bin/echo"}"#).unwrap();
+        let e = run(&spec(FolderMode::Read, "routed locally")).unwrap_err();
+        assert!(e.to_string().contains(".claude/settings.local.json) could send the run elsewhere than"), "{e}");
         assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
     }
 

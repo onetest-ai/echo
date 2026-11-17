@@ -10,7 +10,7 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - `local` / `claude` jobs run with `--setting-sources user` (never on `claude auth …`); `ai::policy_conflict` refuses them
   when admin policy could route. A plugin's run in a folder it was given names its own, `--setting-sources user,project`
   as its last arguments (`claudejob::in_folder`; `ai::build_command` then adds none), and is refused when that folder's `.claude/settings.json`
-  could route (`ai::routes`) or isn't JSON. A plugin's session in Echo's terminal (`terminal::start_plugin`) is built
+  or `.claude/settings.local.json` could route (`ai::routes`) or isn't JSON. A plugin's session in Echo's terminal (`terminal::start_plugin`) is built
   the same way, keeping its conversation (`claudejob::in_folder_session`: no `--no-session-persistence`).
 - Children start in their own session (`ai::detach`); only `echoctl ai login`'s child stays in the terminal's foreground.
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
