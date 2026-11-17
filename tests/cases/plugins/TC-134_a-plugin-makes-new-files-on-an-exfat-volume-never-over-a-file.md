@@ -53,7 +53,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 2 | `echoctl plugin call acme-exfat new '{"path":"Notes/Acme.md","text":"# Acme kickoff\nSSO first.\n"}'`; `cat "$D/mnt/vault/Notes/Acme.md"` | `null` (no `Operation not supported`); the file reads `# Acme kickoff` / `SSO first.` |
 | 3 | The same `new` with `"text":"lost"`; `cat "$D/mnt/vault/Notes/Acme.md"` | It fails: `“Notes/Acme.md” is there already`; the file still reads `# Acme kickoff` / `SSO first.` |
 | 4 | `echoctl plugin call acme-exfat take '{"to":"sources/Deck.txt"}' --file "$D/in/Deck.txt"`; `cat "$D/mnt/vault/sources/Deck.txt"` | `{"path": "sources/Deck.txt", "size": 33}`; the copy reads `Globex deck v3 — made-up bytes` |
-| 5 | `printf 'other\n' > "$D/in/Other.txt"`; `echoctl plugin call acme-exfat take '{"to":"sources/Deck.txt"}' --file "$D/in/Other.txt"`; `cat "$D/mnt/vault/sources/Deck.txt"` | It fails: `“sources/Deck.txt” is there already`; the copy still reads `Globex deck v3 — made-up bytes` |
+| 5 | `printf 'other\n' > "$D/in/Other.txt"`; `echoctl plugin call acme-exfat take '{"to":"sources/Deck.txt"}' --file "$D/in/Other.txt"`; `cat "$D/mnt/vault/sources/Deck.txt"` | It fails: `“sources/Deck.txt” is there already` (copyIn's own check before it copies; step 3 is the volume's refusal); the copy still reads `Globex deck v3 — made-up bytes` |
 | 6 | `find "$D/mnt/vault" -name '.*' ! -name '._*'` | Nothing: no hidden `.part` file left (`._*` files are macOS's own on exFAT) |
 
 ## Expected Final State

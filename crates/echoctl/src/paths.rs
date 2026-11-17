@@ -150,8 +150,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// The finished file `tmp` put at `to` (its folder) only where nothing is there: never over a file, also when writers
 /// race (one wins, the others get `AlreadyExists`). An exclusive rename (`renamex_np(RENAME_EXCL)` on macOS,
 /// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` on Windows); on a volume without it a hard link; on one with
-/// neither (exFAT, FAT, many SMB/NFS shares) `to` taken new (`O_EXCL`) and `tmp` renamed over it — empty there for that
-/// moment. Never through a link: none of them follows one at `to`. `tmp` is gone once it is placed.
+/// neither (exFAT and FAT on macOS, SMB shares without hard links) `to` taken new (`O_EXCL`) and `tmp` renamed over it:
+/// for that moment `to` is empty, another program writing it then is overwritten, and a crash then leaves it empty.
+/// Never through a link: none of them follows one at `to`. `tmp` is gone once it is placed.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn place_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
     match rename_excl(tmp, to) {
@@ -222,7 +223,10 @@ fn link_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
 fn claim_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
     fs::OpenOptions::new().write(true).create_new(true).open(to)?;
     fs::rename(tmp, to).inspect_err(|_| {
-        let _ = fs::remove_file(to);
+        // Only the empty file claimed: one put there meanwhile is left as it is.
+        if fs::symlink_metadata(to).is_ok_and(|m| m.is_file() && m.len() == 0) {
+            let _ = fs::remove_file(to);
+        }
     })
 }
 
