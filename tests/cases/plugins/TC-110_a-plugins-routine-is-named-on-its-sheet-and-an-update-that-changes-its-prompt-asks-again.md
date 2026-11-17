@@ -44,4 +44,5 @@ Routine demo 0.2.0 installed, its routine on (kept by the update); the marketpla
 
 ## Notes
 - Besides `echoctl`, this case runs `cp`, `mktemp`, `rm` and `python3 -c` (editing the copy's manifest).
+- That a routine an update adds starts off (also one whose id an earlier version had, switched on): the same Rust test, below.
 - The rules of a routine's manifest and the hash over its definition and prompt: the Rust test `plugins::routines::a_routine_is_checked_named_on_the_sheet_and_its_prompt_change_asks_again`.

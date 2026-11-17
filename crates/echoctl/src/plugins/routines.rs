@@ -506,8 +506,8 @@ mod tests {
         // Taken: the user's yes to the update, whose sheet named the change, keeps the routine as they had it.
         update("acme-routine", &rv.new_uses).unwrap().unwrap();
         assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::number("acme-routine.mail-notes", "every")), (true, 30));
-        // A version without it, then one that adds it again: the added routine starts off, whatever was left of before
-        // (the same through an install over the installed version).
+        // A version without it (installed over the installed one), then an update that adds it again: the added routine
+        // starts off, whatever was left of before.
         let routine = m["routines"].clone();
         m["routines"] = json!([]);
         m["version"] = json!("0.3.0");
