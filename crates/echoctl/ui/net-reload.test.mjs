@@ -8,7 +8,7 @@ const src = appSource()
 const from = '// ── net reload', to = '// end of the net-reload block'
 const start = src.indexOf(from), end = src.indexOf(to, start)
 assert.ok(start >= 0 && end > start, 'net-reload block not found in app.js')
-const { netReload } = new Function(`${src.slice(start, end)}\nreturn { netReload }`)()
+const { netReload, typingIn } = new Function(`${src.slice(start, end)}\nreturn { netReload, typingIn }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -24,6 +24,23 @@ test('another key: the page loads again, under the new policy', () => {
 
 test('not while the user types: the next tick tries again', () => {
   assert.equal(netReload('a1', 'b2', true, null), false)
+})
+
+test('typing: any text box or area whose value changed, an editable region typed in', () => {
+  const box = (tagName, value, defaultValue, type) => ({ tagName, value, defaultValue, type })
+  assert.equal(typingIn(null), false, 'nothing focused')
+  assert.equal(typingIn(box('INPUT', 'a', 'a', 'text')), false, 'focused, nothing typed')
+  assert.equal(typingIn(box('INPUT', 'ab', 'a', 'text')), true, 'a plugin setting, the search, the ask box: any text box')
+  assert.equal(typingIn(box('INPUT', 'x', '', undefined)), true, 'no type: a text box')
+  assert.equal(typingIn(box('INPUT', 'p', '', 'password')), true)
+  assert.equal(typingIn(box('TEXTAREA', 'my notes, more', 'my notes')), true, 'My notes, the profile, a plugin text area')
+  assert.equal(typingIn(box('TEXTAREA', 'same', 'same')), false)
+  for (const type of ['checkbox', 'radio', 'range', 'button', 'file']) assert.equal(typingIn(box('INPUT', 'on', 'off', type)), false, type)
+  assert.equal(typingIn(box('SELECT', 'b', 'a')), false, 'a choice made is saved, not typed')
+  const ed = { tagName: 'DIV', isContentEditable: true }
+  assert.equal(typingIn(ed, new WeakSet()), false, 'an editable region only focused')
+  assert.equal(typingIn(ed, new WeakSet([ed])), true, 'typed in')
+  assert.equal(netReload('a1', 'b2', typingIn(box('INPUT', 'ab', 'a', 'text')), null), false, 'held while typing')
 })
 
 test('once per key: a reload that did not take never loops', () => {
