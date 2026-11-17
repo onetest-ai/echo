@@ -50,5 +50,5 @@ Every stage after 1 runs in Bash with TC-140's prelude (`D`, `E`, `B` and the he
 | 8 | `plugins/TC-145_a-plugins-claude-session-runs-on-when-the-plugin-is-switched-off-but-doesnt-start-again.md` | 1 | As for stage 2, but its teardown in full: `close`, then TC-140's (Acme ask, `acme-ask`, `acme-work` and `$D/vault` go, the data's fake `claude` back) |
 
 ## Notes
-- A served window doesn't run the app's IPC answers (the page's CSP), so the cases reload the page to see a session as the app has it; a reload is also the window reopening (sessions found running).
+- A reload of the page is the window reopening (sessions found running).
 - Nothing is fetched from the network: the marketplaces are local folders in the run's scratch folder.

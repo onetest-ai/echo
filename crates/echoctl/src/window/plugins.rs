@@ -402,7 +402,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 Ok(list) => json!({"req": v["req"], "value": list}),
                 Err(e) => json!({"req": v["req"], "error": format!("{e:#}")}),
             };
-            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.jobsSet({answer})")) }
+            Handled::answer(false, "jobsSet", json!([answer]))
         }
         // The plugin whose view is shown and listens for dropped files (`ctx.onFileDrop`), or none.
         #[cfg(feature = "js")]
@@ -417,7 +417,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         // never the paths.
         #[cfg(feature = "js")]
         "plugin_dropped" => match DROPPED.lock().ok().and_then(|mut d| d.take()) {
-            Some((id, files)) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.pluginDrop({}, {})", json!(id), json!(files))) },
+            Some((id, files)) => Handled::answer(false, "pluginDrop", json!([id, files])),
             None => false.into(),
         },
         // A plugin's microphone stopped (`ctx.microphone`: its view left, the plugin gone, Stop) — or, with no id, the
@@ -684,10 +684,11 @@ mod tests {
         // Its view shown and listening: the files become its handles; the page gets names and handles, never paths.
         page(json!({"cmd": "plugin_drops", "id": "ingest"}));
         assert!(drops_wanted() && dropped(&[f.clone(), root.join("gone.md")]));
-        let js = page(json!({"cmd": "plugin_dropped"})).unwrap();
-        assert!(js.starts_with("window.echo && window.echo.pluginDrop(\"ingest\", [{") && js.contains("\"name\":\"Kickoff notes.md\""), "{js}");
+        let r = page(json!({"cmd": "plugin_dropped"})).unwrap();
+        assert_eq!((&r["fn"], &r["args"][0], &r["args"][1][0]["name"]), (&json!("pluginDrop"), &json!("ingest"), &json!("Kickoff notes.md")), "{r}");
+        let js = r.to_string();
         assert!(!js.contains(root.to_str().unwrap()) && !js.contains("gone.md"), "{js}");
-        let file: Value = serde_json::from_str(js.split_once(", ").unwrap().1.trim_end_matches(')')).unwrap();
+        let file = &r["args"][1];
         assert!(crate::jshost::files::own_list("ingest", file.as_array().unwrap()).is_ok());
         assert!(crate::jshost::files::own_list("other", file.as_array().unwrap()).is_err(), "its own only");
         assert_eq!(page(json!({"cmd": "plugin_dropped"})), None, "taken once");

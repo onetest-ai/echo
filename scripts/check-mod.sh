@@ -64,6 +64,7 @@ node crates/echoctl/ui/call-url.test.mjs
 node crates/echoctl/ui/human-history.test.mjs
 # When the window loads again for its policy: the plugins' listed addresses changed, nobody typing (netReload).
 node crates/echoctl/ui/net-reload.test.mjs
+node crates/echoctl/ui/replies.test.mjs
 # My notes' timeline with live notes among the user's own (LiveTimeline).
 node crates/echoctl/ui/live-timeline.test.mjs
 # Which transcript turn a moment (a minutes chip, a note's time) opens on (jumpTurn).

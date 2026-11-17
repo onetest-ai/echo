@@ -620,7 +620,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         "save_my_notes" => {
             let id = v["id"].clone();
             let name = v["call"].clone();
-            let answer = |r: Value| Handled { refresh: true, reply: Some(format!("window.echo && window.echo.saved({r})")) };
+            let answer = |r: Value| Handled::answer(true, "saved", json!([r]));
             let Some(dir) = call_named(v) else {
                 return Some(answer(json!({ "call": name, "id": id, "error": "this call can't be found any more" })));
             };
