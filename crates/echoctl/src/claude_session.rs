@@ -89,7 +89,7 @@ pub(crate) fn complete_claude_with(p: &Profile, model: &str, system: &str, user:
         Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
         None => user.to_string(),
     };
-    let mut child = command(p, &args(model, system, blocks.is_some())?)?.spawn()?;
+    let mut child = command(p, &args(&p.model(model), system, blocks.is_some())?)?.spawn()?;
     let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled).map_err(|e| anyhow!("{}: {e:#}", p.name))?;
     let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
     if let Some(v) = &result {

@@ -114,7 +114,7 @@ pub(super) fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: 
 
 pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let body = json!({
-        "model": model,
+        "model": p.model(model),
         "max_tokens": max_tokens,
         "thinking": {"type": "disabled"},
         "system": system,

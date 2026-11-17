@@ -285,6 +285,18 @@ document.addEventListener('click', (e) => {
   const done = (w) => { if (w.added || w.updated) { S.wrapForm = null; S.notice = (wrapperState(w) || {}).text; loadState().then(render) } }
   if (at('[data-wrap-form]')) { S.wrapForm = S.wrapForm && !S.wrapForm.plugin ? null : { command: '', name: '' }; return render() }
   if (at('[data-wrap-cancel]')) { S.wrapForm = null; return render() }
+  // A profile's own models for haiku, sonnet and opus: edited in its row, saved together.
+  const medit = at('[data-models-edit]')
+  if (medit) { S.modelsForm = medit.dataset.modelsEdit; return render() }
+  if (at('[data-models-cancel]')) { S.modelsForm = null; return render() }
+  const msave = at('[data-models-save]')
+  if (msave) {
+    const v = { id: msave.dataset.modelsSave }
+    for (const k of ['haiku', 'sonnet', 'opus']) v[k] = (($(`#mdl-${k}`) || {}).value || '').trim()
+    S.modelsForm = null
+    send({ cmd: 'settings_set', key: 'profile_models', value: v })
+    return setTimeout(() => loadState().then(render), 400)
+  }
   const offer = at('[data-wrap-offer]')
   if (offer) {
     const o = wrapperOffers(ai()).find((x) => x.plugin === offer.dataset.wrapOffer)
@@ -416,8 +428,13 @@ const SETTINGS_BODY = {
         : esc(profileWhere(p))
       const upLine = up ? `<div class="warn">${esc(up.plugin_name)}'s update offers <code>${esc(up.command)}</code> instead — this profile keeps starting its program until you take it.</div>` : ''
       const isDef = p.id === a.default
+      const m = p.models || {}
+      const mapped = ['haiku', 'sonnet', 'opus'].filter((k) => m[k]).map((k) => `${k} → ${esc(m[k])}`).join(' · ')
+      const modelsLine = p.kind === 'system' ? '' : S.modelsForm === p.id
+        ? `<div class="stt-form">${['haiku', 'sonnet', 'opus'].map((k) => `<label class="set-sub">${k[0].toUpperCase() + k.slice(1)} → <input class="set-in" id="mdl-${k}" value="${esc(m[k] || '')}" placeholder="${k}" aria-label="${k[0].toUpperCase() + k.slice(1)} runs" spellcheck="false"></label>`).join('')}<button class="btn primary" data-models-save="${esc(p.id)}">Save</button><button class="btn ghost" data-models-cancel>Cancel</button></div>`
+        : `<div class="set-sub">${mapped ? `Models: ${mapped}` : 'Models: Claude\'s names as they are'} <button class="btn ghost" data-models-edit="${esc(p.id)}">Models…</button></div>`
       const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (up ? `<button class="btn primary" data-wrap-update="${esc(p.id)}"${busy ? ' disabled' : ''}>Use it</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
-      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}${upLine}`, ctl, '', p.name)
+      return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}${upLine}${modelsLine}`, ctl, '', p.name)
     })
     const offers = wrapperOffers(a).map((o) => setRow(`${esc(o.name)} <span class="tag">Offered by ${esc(o.plugin_name)}</span>`,
       `Starts <code>${esc(o.command)}</code> — a program you install yourself — in place of Claude Code. ${WRAPPER_WARNING}`,

@@ -149,6 +149,10 @@ pub enum AiCmd {
         /// "default" = Claude Code's own setting)
         #[arg(long)]
         notes_model: Option<String>,
+        /// What this profile runs for one of Claude's names: haiku=<model>, sonnet=<model> or opus=<model> (empty:
+        /// the name as it is), for a gateway or wrapper whose models are named otherwise; repeatable
+        #[arg(long = "model")]
+        models: Vec<String>,
     },
     Remove { id: String },
     /// Sign a Claude profile in, here in this terminal (`claude auth login`; Ctrl-C stops it)
@@ -448,8 +452,12 @@ pub fn ai(cmd: Option<AiCmd>) -> Result<()> {
             (None, None) => anyhow::bail!("--command or --plugin"),
         },
         AiCmd::UpdateWrapper { id } => ai::update_wrapper(&id).map(drop),
-        AiCmd::Set { id, email, no_email, sso, notes_model } => {
-            anyhow::ensure!(notes_model.is_some() || email.is_some() || no_email || sso.is_some(), "nothing to set: --notes-model, --email, --no-email or --sso");
+        AiCmd::Set { id, email, no_email, sso, notes_model, models } => {
+            anyhow::ensure!(notes_model.is_some() || email.is_some() || no_email || sso.is_some() || !models.is_empty(), "nothing to set: --notes-model, --model, --email, --no-email or --sso");
+            for m in &models {
+                let (name, alias, now) = ai::set_model_name(&id, m)?;
+                println!("{name}: {alias} runs {now}");
+            }
             if let Some(m) = notes_model {
                 let (name, now) = ai::set_notes_model(&id, &m)?;
                 println!("{name}: minutes model {now}");

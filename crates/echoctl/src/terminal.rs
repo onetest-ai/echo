@@ -557,7 +557,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
         extra_env.extend(ch.env.iter().map(|(k, v)| (k.as_str(), v.clone())));
     }
     let exe = std::env::current_exe()?;
-    let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten();
+    let model = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten().map(|m| p.model(&m));
     args.extend(crate::folder_args::session(&p, &exe, &paths::config_dir().join("minutes-run").join("session-folder.json"), "folder", model.as_deref(), crate::folder_args::Who::Folder)?);
     let mut env = crate::folder_args::env(&p.id);
     env.extend(extra_env);
@@ -627,7 +627,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
     }
     if p.kind == ai::Kind::Local {
         if let Some(m) = p.notes_model() {
-            args.extend(["--model".into(), m]);
+            args.extend(["--model".into(), p.model(&m)]);
         }
     }
     choose_session(&format!("{}:{}", p.id, calls::stamp_of(&dir)), pick)?;

@@ -59,6 +59,7 @@ pub fn add_local(id: &str, name: Option<String>, model: &str, live_model: Option
         account: None,
         email: None,
         sso: false,
+        models: Default::default(),
         wrapper: None,
     })
 }
@@ -76,6 +77,7 @@ pub fn add_claude(id: &str, name: Option<String>, live_model: Option<String>, no
         account: None,
         email: email_arg(email)?,
         sso,
+        models: Default::default(),
         wrapper: None,
     })?;
     println!("sign it in once: Sign in… in the Echo window, or echoctl ai login {id}");
@@ -88,6 +90,8 @@ pub struct Offer {
     pub market: String,
     pub plugin_name: String,
     pub command: String,
+    /// What it says the wrapper runs for haiku, sonnet and opus (`uses.ai.wrapper.models`)
+    pub models: Models,
 }
 
 const IN_RUN: &str = "refused inside a run Echo started: which program Echo starts as Claude Code is the user's to choose";
@@ -120,6 +124,7 @@ fn add_wrapper_in(id: &str, command: &str, name: Option<String>, offer: Option<O
         account: None,
         email: None,
         sso: false,
+        models: offer.as_ref().map(|o| o.models.clone()).unwrap_or_default(),
         wrapper: Some(match offer {
             Some(o) => wrapper::Wrapper { command: path.display().to_string(), offered_by: Some(o.plugin), offered_market: Some(o.market), offered_name: Some(o.plugin_name), offered_command: Some(o.command) },
             None => wrapper::Wrapper { command: path.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None },
@@ -174,7 +179,8 @@ pub(super) fn offered_in(plugins: &[(String, String, String, Value)], s: &Settin
                 return None;
             }
             let update = taken.and_then(|p| p.wrapper.as_ref()).filter(|w| w.offered_command.as_deref() != Some(command)).map(|w| w.command.clone());
-            Some(json!({"plugin": id, "market": market, "plugin_name": plugin_name, "name": name, "command": command, "profile": taken.map(|p| &p.id), "update": update}))
+            let models = Models::from_offer(&w["models"]).unwrap_or_default();
+            Some(json!({"plugin": id, "market": market, "plugin_name": plugin_name, "name": name, "command": command, "models": models, "profile": taken.map(|p| &p.id), "update": update}))
         })
         .collect()
 }
@@ -207,7 +213,7 @@ fn add_offered_in(offers: &[Value], s: &Settings, plugin: &str, id: Option<&str>
             (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") }).find(|c| !s.profiles.iter().any(|p| p.id == *c)).unwrap_or(base)
         }
     };
-    let o = Offer { plugin: plugin.into(), market: offer["market"].as_str().unwrap_or("").into(), plugin_name: offer["plugin_name"].as_str().unwrap_or(plugin).into(), command: command.clone() };
+    let o = Offer { plugin: plugin.into(), market: offer["market"].as_str().unwrap_or("").into(), plugin_name: offer["plugin_name"].as_str().unwrap_or(plugin).into(), command: command.clone(), models: serde_json::from_value(offer["models"].clone()).unwrap_or_default() };
     add_wrapper_in(&id, &command, offer["name"].as_str().map(str::to_owned), Some(o), checked, false)
 }
 
@@ -291,6 +297,25 @@ pub fn set_notes_model(id: &str, model: &str) -> Result<(String, String)> {
     })
 }
 
+/// `echoctl ai set <id> --model haiku=<name>`: what the profile runs for one of Claude's three names (empty: the name as
+/// it is). Not `system`, which is the user's own Claude Code setup. Returns the profile's name and what it runs now.
+pub fn set_model_name(id: &str, assignment: &str) -> Result<(String, String, String)> {
+    let (name, value) = assignment.split_once('=').ok_or_else(|| anyhow!("--model takes haiku=<model>, sonnet=<model> or opus=<model>"))?;
+    let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
+    if id == SYSTEM {
+        bail!("{SYSTEM} runs your own Claude Code setup: set its models there");
+    }
+    if !value.is_empty() && !model_name(&value) {
+        bail!("“{value}” isn't a model name");
+    }
+    Settings::update(|s| {
+        let p = s.profiles.iter_mut().find(|p| p.id == id).ok_or_else(|| anyhow!("no profile \"{id}\""))?;
+        let slot = p.models.slot(&name).ok_or_else(|| anyhow!("--model names haiku, sonnet or opus, not “{name}”"))?;
+        *slot = Some(value).filter(|v| !v.is_empty());
+        Ok((p.name.clone(), name.clone(), p.model(&name)))
+    })
+}
+
 /// `echoctl ai remove <id>` (its Claude Code folder, with the sign-in, is kept).
 pub fn remove(id: &str) -> Result<()> {
     let was_default = Settings::update(|s| {
@@ -330,7 +355,7 @@ pub fn status(id: Option<&str>) -> Result<()> {
         let conflict = p.kind.managed().then(|| policy_conflict(&p)).flatten();
         out.push(crate::ollama::with_context(&p, json!({
             "id": p.id, "name": p.name, "kind": p.kind, "default": s.default_id() == p.id,
-            "live_model": p.live_model(), "notes_model": p.notes_model(), "base_url": p.base_url,
+            "live_model": p.live_model(), "notes_model": p.notes_model(), "models": p.models, "base_url": p.base_url,
             "command": p.wrapper.as_ref().map(|w| &w.command), "offered_by": p.wrapper.as_ref().and_then(|w| w.offered_by.as_ref()), "offered_name": p.wrapper.as_ref().and_then(|w| w.offered_name.as_ref().or(w.offered_by.as_ref())),
             "signed_in": signed_in, "account": account, "expected_account": p.account,
             "problem": problem.or(conflict),
@@ -349,7 +374,7 @@ pub fn summary() -> Value {
             "live_notes": s.live_notes,
             "wrapper_offers": offered(),
             "profiles": s.all().iter().map(|p| json!({
-                "id": p.id, "name": p.name, "kind": p.kind, "live_model": p.live_model(),
+                "id": p.id, "name": p.name, "kind": p.kind, "live_model": p.live_model(), "models": p.models,
                 "notes_model": p.notes_model(), "notes_model_label": p.notes_model_label(), "account": p.account, "email": p.email, "sso": p.sso,
                 // `local`: where the requests go when it isn't this computer
                 "host": (p.kind == Kind::Local && !p.on_this_computer()).then(|| p.base_url.clone()).flatten(),
@@ -369,6 +394,7 @@ mod tests {
 
     fn wrapper(id: &str, command: &str, by: Option<(&str, &str)>, offered: Option<&str>) -> Profile {
         Profile { id: id.into(), name: id.into(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false,
+            models: Default::default(),
             wrapper: Some(wrapper::Wrapper { command: command.into(), offered_by: by.map(|b| b.0.to_owned()), offered_market: by.map(|b| b.1.to_owned()), offered_name: by.map(|b| b.0.to_uppercase()), offered_command: offered.map(str::to_owned) }) }
     }
 
@@ -397,6 +423,31 @@ mod tests {
         assert!(offered_in(&plugins, &same)[0]["update"].is_null(), "the program it took: nothing to ask");
         // The plugin off or removed: its offer goes; the profile the user added stays theirs.
         assert!(offered_in(&plugins[1..], &s).iter().all(|x| x["plugin"] != "acme-tools"));
+    }
+
+    #[test]
+    fn an_offer_carries_its_models_and_a_bad_mapping_none() {
+        let mut p = plugin("acme-tools", "m", "acme-claude");
+        p.3["ai"]["wrapper"]["models"] = json!({"sonnet": "acme-gw/sonnet-large"});
+        assert_eq!(offered_in(std::slice::from_ref(&p), &settings(vec![], None))[0]["models"], json!({"sonnet": "acme-gw/sonnet-large"}));
+        p.3["ai"]["wrapper"]["models"] = json!({"sonnet": "two words"});
+        assert_eq!(offered_in(&[p], &settings(vec![], None))[0]["models"], json!({}), "not a model name: nothing mapped");
+    }
+
+    #[test]
+    fn a_profile_maps_claudes_names_set_one_by_one_and_never_on_system() {
+        let (_env, _) = crate::paths::testenv::folders("ai-model-names");
+        add(wrapper("acme", "/opt/acme/acme-claude", None, None)).unwrap();
+        assert_eq!(set_model_name("acme", "Sonnet = acme-gw/sonnet-large").unwrap(), ("acme".into(), "sonnet".into(), "acme-gw/sonnet-large".into()));
+        set_model_name("acme", "haiku=acme-small").unwrap();
+        let p = Settings::load().unwrap().profiles.into_iter().find(|p| p.id == "acme").unwrap();
+        assert_eq!((p.model("sonnet"), p.model("HAIKU"), p.model("opus"), p.model("claude-opus-4-1")), ("acme-gw/sonnet-large".into(), "acme-small".into(), "opus".into(), "claude-opus-4-1".into()));
+        assert_eq!(set_model_name("acme", "haiku=").unwrap().2, "haiku", "cleared: the name as it is");
+        for bad in ["haiku", "gpt=x", "haiku=two words"] {
+            assert!(set_model_name("acme", bad).is_err(), "{bad}");
+        }
+        assert!(set_model_name(SYSTEM, "haiku=x").unwrap_err().to_string().contains("your own Claude Code setup"));
+        assert!(set_model_name("nobody", "haiku=x").is_err());
     }
 
     #[test]

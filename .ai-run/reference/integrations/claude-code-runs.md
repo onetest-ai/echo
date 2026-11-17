@@ -22,6 +22,15 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - `ai::lease` is kept by the `Ready` that `ai::ready` returns.
 - During a sign-in `ai::for_call` fails at once with `SigningIn`; live jobs are deferred (`livenotes::defer`).
 - `ai::accept_account`: a `claude` profile signed in to another account than the one recorded waits for the user.
+- A profile's `models` (`ai::Models`: `haiku`, `sonnet`, `opus`, each optional) is what it runs for Claude's three
+  names: `Profile::model(name)` is the one set, else `name` as it is (any other model name passes unchanged). Applied
+  where a model reaches the provider: `claude_session::complete_claude_with`, `livenotes::complete_local_body`, the
+  live-notes agent's `--model`, minutes (`notes`), thread sync (`projectsync`), routine and Yolo runs (`claudejob`), the
+  local terminal session's `--model`, and for a `local` profile its `ANTHROPIC_DEFAULT_*_MODEL` /
+  `ANTHROPIC_SMALL_FAST_MODEL` (each name its own model when set, else the profile's minutes model). Set by the user:
+  `echoctl ai set <id> --model <name>=<model>` (empty clears), Settings → AI & minutes → Models… (`profile_models`),
+  or seeded from a plugin's wrapper offer when the user adds it (`uses.ai.wrapper.models`). Not on `system` (the user's
+  own Claude Code setup).
 
 ## Routing variables
 

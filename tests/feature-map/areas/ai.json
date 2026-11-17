@@ -153,6 +153,15 @@
    "axes": [
     "ai.kind"
    ]
+  },
+  {
+   "id": "F-AI-17",
+   "feature": "Each AI profile but the built-in one maps Claude's names (haiku, sonnet, opus) to its provider's own models: set in AI & minutes (Models… on its row; the row says what each runs) or `ai set <id> --model <name>=<model>` (empty clears); every job on the profile asking for one of those names runs the mapped model (minutes, live notes, thread sync, Needs you now, prep, the Brain, routines, Yolo), a local profile's Claude Code background names too; a plugin's wrapper offer may name the mapping (`uses.ai.wrapper.models`), on its sheet and taken with the profile",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind"
+   ]
   }
  ]
 }

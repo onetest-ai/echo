@@ -204,6 +204,7 @@ pub fn outside_echo(path: &Path) -> Result<()> {
 /// would start it (the login shell's environment: a `#!/usr/bin/env node` wrapper finds its node).
 pub fn claude_version(path: &Path) -> Result<String> {
     let p = Profile { id: "wrapper-check".into(), name: path.display().to_string(), kind: Kind::Wrapper, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false,
+        models: Default::default(),
         wrapper: Some(Wrapper { command: path.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None }) };
     let mut child = super::claude_command(&p, &["--version".into()], &paths::home(), false).map_err(|e| anyhow!("{} can't be started: {e:#}", path.display()))?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).with_context(|| format!("asking {} its version", path.display()))?;

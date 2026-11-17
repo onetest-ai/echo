@@ -260,7 +260,7 @@ mod tests {
     }
 
     fn local(url: &str) -> Profile {
-        Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("small-model".into()), notes_model: Some("small-model".into()), account: None, email: None, sso: false, wrapper: None }
+        Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("small-model".into()), notes_model: Some("small-model".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None }
     }
 
     fn requests(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {

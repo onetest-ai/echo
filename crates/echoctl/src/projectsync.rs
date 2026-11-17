@@ -243,7 +243,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         let profile_id = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
         let ready = crate::ai::ready(&profile_id)?;
         let profile = ready.profile();
-        let model = p.model.clone().or_else(|| profile.notes_model());
+        let model = p.model.clone().or_else(|| profile.notes_model()).map(|m| profile.model(&m));
         let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
         let cwd = if !profile.kind.managed() { crate::ai::system_folder()? } else { paths::home() };
         crate::ai::hooks_conflict(profile, &cwd).map_err(|w| anyhow!(w))?;
