@@ -3440,6 +3440,8 @@ mod tests {
         assert!(run("tracker", "stage", json!({"thread": other, "stage": "lead"})).unwrap_err().contains("closed thread"));
     }
 
+    // The folder picker is answered by ECHOCTL_PICK_FOLDER in development builds only.
+    #[cfg(debug_assertions)]
     #[test]
     fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
         let (_env, root) = paths::testenv::folders("jshost-sessions");
