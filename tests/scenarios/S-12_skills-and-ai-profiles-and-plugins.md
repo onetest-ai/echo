@@ -43,6 +43,7 @@ cases:
   - tests/cases/plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md
   - tests/cases/plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md
   - tests/cases/plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md
+  - tests/cases/plugins/TC-064_a-plugin-keeps-a-vault-with-guarded-writes-stat-search-snapshots-and-store-updates.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -113,6 +114,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 37 | `plugins/TC-060_a-plugins-window-half-loads-its-stylesheet-and-cleans-up-when-switched-off.md` | — | — |
 | 38 | `plugins/TC-061_a-plugin-takes-files-the-user-hands-it-as-handles.md` | — | — |
 | 39 | `plugins/TC-063_a-plugins-page-shows-images-of-a-granted-folder-but-no-svg-and-nothing-outside.md` | — | — |
+| 40 | `plugins/TC-064_a-plugin-keeps-a-vault-with-guarded-writes-stat-search-snapshots-and-store-updates.md` | — | — |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

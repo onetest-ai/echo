@@ -191,6 +191,20 @@ pub fn open_regular(path: &Path) -> Result<std::fs::File> {
 /// followed.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim_start_matches("./");
+    let full = root.join(plain(root, rel)?);
+    // A link inside may point anywhere: what it resolves to must stay inside too — and that resolved path is
+    // what is used, so a link swapped in afterwards isn't followed again.
+    match dunce::canonicalize(&full) {
+        Ok(real) if real.starts_with(root) => Ok(real),
+        Ok(_) => bail!("“{rel}” leads outside {}", root.display()),
+        Err(_) => Ok(full),
+    }
+}
+
+/// `rel` as a path under `root`, checked by its names alone (relative, plain names, no Windows device names), nothing
+/// on the disk followed.
+pub fn plain<'a>(root: &Path, rel: &'a str) -> Result<&'a Path> {
+    let rel = rel.trim_start_matches("./");
     let p = Path::new(rel);
     // A name ending in a dot or a space is another name on Windows (`...` is the folder itself, `CON .txt` a device).
     if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(n) if !n.to_string_lossy().ends_with(['.', ' ']))) {
@@ -205,14 +219,7 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     if p.components().any(|c| c.as_os_str().to_string_lossy().chars().any(|ch| matches!(ch, ':' | '<' | '>' | '"' | '|' | '?' | '*') || ch.is_control())) {
         bail!("“{rel}” isn't a file name Windows takes");
     }
-    let full = root.join(p);
-    // A link inside may point anywhere: what it resolves to must stay inside too — and that resolved path is
-    // what is used, so a link swapped in afterwards isn't followed again.
-    match dunce::canonicalize(&full) {
-        Ok(real) if real.starts_with(root) => Ok(real),
-        Ok(_) => bail!("“{rel}” leads outside {}", root.display()),
-        Err(_) => Ok(full),
-    }
+    Ok(p)
 }
 
 // ── Claude in Echo ──

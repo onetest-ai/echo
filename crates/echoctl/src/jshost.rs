@@ -25,6 +25,7 @@ use crate::{paths, plugins};
 mod test_hosts;
 mod service_async;
 pub mod files;
+pub mod folders;
 mod widgets;
 pub mod work;
 
@@ -104,7 +105,25 @@ const PRELUDE: &str = r#"
     },
     store: {
       read: (path) => call('store.read', path),
-      write: (path, text) => call('store.write', [path, String(text)]),
+      /** `opts`: {ifSha} written only while the file is still the one with that sha256 (else "changed since you read
+       *  it"), {createNew} never over a file. Every store write takes the plugin's lock across processes. */
+      write: (path, text, opts) => call('store.write', [path, String(text), opts || {}]),
+      /** Read, change, write — only over what was read: `fn(text | null)` gives the new text (undefined or the same:
+       *  nothing written); when another process wrote meanwhile it reads again and calls `fn` again. → the text kept. */
+      update: (path, fn) => {
+        for (let i = 0; i < 50; i++) {
+          const cur = call('store.read', path)
+          const next = fn(cur)
+          if (next === undefined || next === null || String(next) === cur) return cur
+          try {
+            call('store.write', [path, String(next), cur === null ? { createNew: true } : { ifSha: call('crypto.sha256', cur) }])
+            return String(next)
+          } catch (e) {
+            if (!/changed since you read it|is there already/.test(String(e && e.message))) throw e
+          }
+        }
+        throw new Error(`${path} kept changing while it was updated: try again`)
+      },
       list: (dir) => call('store.list', dir || ''),
       remove: (path) => call('store.remove', path),
       path: (path) => call('store.path', path || ''),
@@ -118,6 +137,8 @@ const PRELUDE: &str = r#"
     http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
     markdown: (md) => call('markdown', String(md)),
+    /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
+    crypto: { sha256: (text) => call('crypto.sha256', String(text)) },
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
     inbox: { set: (key, item) => call('inbox.set', [key, item]), clear: (key) => call('inbox.clear', key) },
     /** Today's widgets it declares (`widgets` in its manifest): `provide` answers Echo's ask ({size}) with the data,
@@ -209,11 +230,25 @@ const PRELUDE: &str = r#"
       read: (root, path, max) => call('fs.read', [String(root), String(path), max || 0]),
       /** Many files at once, off the plugin's own time slice (a vault's notes): [text | null] in order. */
       readMany: (root, paths, max) => later('fs.read_many', [String(root), (paths || []).map(String), max || 0]),
-      /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime}] up to `max`. */
+      /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime, sha?}] up to `max`
+       *  (`sha`: each file's sha256, up to 64 MB). */
       walk: (root, opts) => later('fs.walk', [String(root), opts || {}]),
-      /** With `uses.folders.write`: write a file (atomically), move one (never over another), delete one or an empty
-       *  folder — inside the folders the user gave it, never through a link. */
-      write: (root, path, text) => call('fs.write', [String(root), String(path), String(text)]),
+      /** What is at `path`: {kind: file | dir | link | other, size, mtime, real, sha?} or null — a link never followed;
+       *  `real` its place relative to the root (null when that is outside); `{sha: true}` hashes a file. */
+      stat: (root, path, opts) => call('fs.stat', [String(root), String(path || ''), opts || {}]),
+      /** Lines holding `query` as typed (no pattern), off its time slice: [{path, line, text}] — `path`, `ext`,
+       *  `hidden`, `max` (200, at most 1,000), `caseSensitive`. */
+      search: (root, query, opts) => later('fs.search', [String(root), String(query), opts || {}]),
+      /** A copy of the folder in its store's cache/snapshots/<id>/ to work on: {path, files, bytes, skipped} — no link
+       *  followed, never .git or .obsidian/plugins, `exclude` paths, dot names with `hidden`; 20,000 files and 512 MB
+       *  at most (`maxFiles`, `maxBytes` less), a file over 50 MB left out. ctx.store.remove(path) removes it. */
+      snapshot: (root, opts) => later('fs.snapshot', [String(root), opts || {}]),
+      /** With `uses.folders.write`: write a file (atomically; {ifSha} only over the file it read, {createNew} never over
+       *  one), add to one's end (append, under its lock), make folders (mkdir), move one (never over another), delete
+       *  one or an empty folder — inside the folders the user gave it, never through a link. */
+      write: (root, path, text, opts) => call('fs.write', [String(root), String(path), String(text), opts || {}]),
+      append: (root, path, text) => call('fs.append', [String(root), String(path), String(text)]),
+      mkdir: (root, path) => call('fs.mkdir', [String(root), String(path)]),
       move: (root, from, to) => call('fs.move', [String(root), String(from), String(to)]),
       remove: (root, path) => call('fs.remove', [String(root), String(path)]),
       /** A file handed to it (a handle) copied as it is into a folder it was given (`uses.folders.write`, 50 MB at
@@ -995,6 +1030,16 @@ fn sweep_store(id: &str) {
             let _ = std::fs::remove_file(p);
         }
     });
+    // The folders of `cache/` left empty (a snapshot swept), deepest first; `cache/` itself stays.
+    fn prune(dir: &Path) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                prune(&e.path());
+                let _ = std::fs::remove_dir(e.path());
+            }
+        }
+    }
+    prune(&cache);
 }
 
 fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
@@ -1019,13 +1064,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Err(e) => return Err(e.into()),
         },
         "store.write" => {
-            let p = writable_store_path(id, &s(&arg[0]))?;
-            if let Some(parent) = p.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            paths::write_atomic(&p, s(&arg[1]).as_bytes())?;
+            folders::store_write(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
             Value::Null
         }
+        "crypto.sha256" => json!(folders::sha_hex(s(arg).as_bytes())),
         "store.list" => {
             let p = if s(arg).is_empty() { plugins::data_dir(id) } else { store_path(id, &s(arg))? };
             let mut names: Vec<String> = std::fs::read_dir(&p).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
@@ -1325,16 +1367,18 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!(String::from_utf8_lossy(&buf))
         }
         "fs.write" => {
-            read_only_here("changing files or settings")?;
-            uses_flag(id, "folders", "write")?;
-            let f = crate::grants::writable(id, &s(&arg[0]), &s(&arg[1]))?;
-            if f.is_dir() {
-                bail!("“{}” is a folder", s(&arg[1]));
-            }
-            std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
-            paths::write_atomic(&f, s(&arg[2]).as_bytes())?;
+            folders::write(id, &s(&arg[0]), &s(&arg[1]), &s(&arg[2]), &arg[3])?;
             Value::Null
         }
+        "fs.append" => {
+            folders::append(id, &s(&arg[0]), &s(&arg[1]), &s(&arg[2]))?;
+            Value::Null
+        }
+        "fs.mkdir" => {
+            folders::mkdir(id, &s(&arg[0]), &s(&arg[1]))?;
+            Value::Null
+        }
+        "fs.stat" => folders::stat(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?,
         "fs.move" => {
             read_only_here("changing files or settings")?;
             uses_flag(id, "folders", "write")?;

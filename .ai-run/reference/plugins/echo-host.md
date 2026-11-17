@@ -7,8 +7,19 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 
 ## Store
 
-- A plugin's store is the plugin's to clean; Echo removes only what lay in its `cache/` over 7 days and its own
-  half-written downloads (`.part`) over an hour, when its host half starts. Evidence: `jshost::sweep_store`
+- A plugin's store is the plugin's to clean; Echo removes only what lay in its `cache/` over 7 days (and the folders
+  of `cache/` that leaves empty: a snapshot swept whole) and its own half-written downloads (`.part`) over an hour,
+  when its host half starts. Evidence: `jshost::sweep_store`
+- A plugin's writes of a file — `ctx.store.write` / `update` and `ctx.fs.write` / `append` — take one lock of its own
+  across processes, `.locks/<id>.files.lock` beside the stores (removed with its data). A conditional write reads the
+  file's sha256 inside the lock; `createNew` writes a hidden `.<name>.<pid>.<n>.part` beside the target (made new) and
+  links it into place, which never replaces a file, the part removed either way. The lock holds only Echo's own
+  processes: another program changing a granted folder's file meanwhile isn't held off. Evidence:
+  `jshost::folders::put`
+- `ctx.fs.snapshot` copies into `cache/snapshots/<16 hex>/` of the store, each file opened without following a link
+  (`O_NOFOLLOW`; Windows: the reparse point opened as itself and refused) and refused unless regular, folders checked
+  inside the root as they are entered; on a cap or a failed copy the folder made is removed. Evidence:
+  `jshost::folders::snapshot`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json` and `work.json` there;
   `threads.json` and `work.json` each change under its own lock across processes (`.locks/<id>.threads.lock`,
   `.locks/<id>.work.lock`); a `threads.json` that isn't JSON is moved aside as `threads.json.bad-<time>`. The plugin
@@ -113,6 +124,7 @@ and with the registry (`off`, `gone`, `dropped`), reading the registry and manif
 |---|---|---|
 | adding a host service | `jshost::service` | `jshost::a_host_half_gets_echos_services_and_answers_commands` |
 | adding to the client-half `ctx` | `pluginCtx` (window script) | no covering test |
+| adding a granted folder's service | `jshost::folders::stat` | `jshost::folders::stat_reports_links_as_links_and_never_an_absolute_path` |
 | handing a plugin files | `jshost::files::make` | `jshost::files::a_handle_is_its_plugins_alone_and_never_names_the_path` |
 | changing install, update or remove | `plugins::install` | `plugins::install_update_and_remove_from_a_local_marketplace` |
 | letting a plugin run Claude | `claudejob::Spec::from_value` | `claudejob::a_spec_stays_in_the_plugins_store` |
