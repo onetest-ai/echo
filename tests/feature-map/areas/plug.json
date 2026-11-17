@@ -398,6 +398,27 @@
    "axes": [
     "plugin.enabled"
    ]
+  },
+  {
+   "id": "F-PLUG-44",
+   "feature": "Files the user hands a plugin come as handles `{file, name, size}` — the plugin's own (another's refused), never the path, for an hour: picked in the system's dialog (`ctx.system.pickFiles`, `multiple`, `ext`; `ECHOCTL_PICK_FILES` in a debug build) or named with `echoctl plugin call <id> <cmd> --file <path>` (refused where the CLI's run limits hold: a minutes run, a thread's sync, Yolo, a routine preparing and asking — not a routine acting on its own); no picker inside a run Echo started, from its start-up, a timer, an event handler or a widget's or work rows' provider; the host half reads one (`ctx.files.read`, 4 MB at most) or copies its bytes into a folder it was given (`ctx.fs.copyIn`, `folders.write`, 50 MB at most, never through a link, never over a file unless `createNew: false`); no new line on the sheet",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-45",
+   "feature": "A plugin's window half shows images of a folder it was given (`plugin/<id>/folder/<root>/<path>`, `uses.folders`): png, jpg, gif and webp up to 10 MB; never SVG, nothing outside the folder (a link out of it too), nothing for a plugin that didn't ask for folders or is off",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-46",
+   "feature": "macOS: files dropped on the Echo window while a plugin's view that listens is shown (its activity, its Knowledge tab; `ctx.onFileDrop`) go to it as handles (names, never paths), for its `ctx.call(command, args, {files})`; dropped anywhere else they stay Echo's own (a logo tile's)",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }

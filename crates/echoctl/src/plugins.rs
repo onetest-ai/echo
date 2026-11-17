@@ -1161,6 +1161,9 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
     }
     // Its scripts running from the version replaced stop with everything they started.
     scripts::stop_plugin(id);
+    // The files handed to the version replaced aren't the new one's.
+    #[cfg(feature = "js")]
+    crate::jshost::files::forget(id);
     let _ = fs::remove_dir_all(&dest);
     forget_read(id);
     fs::rename(&tmp, &dest)?;
@@ -1280,6 +1283,9 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
         let _ = agent::lay_out(id);
     } else {
         agent::remove(id);
+        // Off: the files handed to it go (the app's host forgets them too as it unloads it).
+        #[cfg(feature = "js")]
+        crate::jshost::files::forget(id);
     }
     changed();
     Ok(())
@@ -1291,6 +1297,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     shared::bind_all();
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
+    #[cfg(feature = "js")]
+    crate::jshost::files::forget(id);
     let _ = fs::remove_dir_all(installed_dir(id));
     forget_read(id);
     crate::grants::remove_plugin(id);

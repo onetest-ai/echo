@@ -22,6 +22,27 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - The addresses a plugin may reach by `network.hosts_from` are entered only by the user, in the window or the CLI, and
   kept outside the plugin's store. Evidence: `plugins::listed_addresses`
 
+## Files handed to a plugin
+
+- A handle is kept in the memory of the process that made it — the app's (a pick, a drop, the window's `ctx.call`) or a
+  terminal's (`echoctl plugin call --file`) — for an hour, 1,000 at most (the oldest go), with its plugin, the file's real
+  path, name and size; the plugin and the page see `{file, name, size}`. Every use checks it is the plugin's and not past
+  its hour. They go when the plugin is switched off, updated or removed (`files::forget`, beside `scripts::stop_plugin`).
+  A picker opens only on a command (refused in a run Echo started, `notes::headless`, and in its `apply`, a timer's
+  or event handler's own slice and Echo's asks for its widgets' data and work rows); Windows' pickers read their prompt and filter from the environment, never quoted into the
+  PowerShell script. A handed file, and an image served, is opened without blocking and refused unless it is a regular
+  file (a FIFO put in its place is never waited on: `grants::open_regular`). Evidence: `jshost::files::own`
+- `copyIn` writes the bytes into a hidden `.<name>.<pid>.<n>.part` beside the target (made new), then links it into place
+  (never replacing a file) or, with `createNew: false`, renames it over the file; the part is removed either way.
+  Evidence: `jshost::files::copy_in`
+- Drops (macOS): the page tells the app which plugin listens with its view shown (`plugin_drops`, on every change of
+  address and of listeners); the window's drag handler takes a drag of files only then, from its start to its end, and
+  makes the handles; the page takes them once (`plugin_dropped` → `window.echo.pluginDrop`) and hands them to the
+  plugin's handlers if its view is still shown. Any other drag is the webview's own. Windows has no drop handler: wry's
+  would take every external drop from WebView2. Evidence: `window::plugins::dropped`, `dropTarget` (window script)
+- The window serves a granted folder's images as `/plugin/<id>/folder/<root>/<path>` (§ Store's media rule, by folder).
+  Evidence: `window::plugins::folder_image`
+
 ## Script runs
 
 - Every run goes through `plugins::scripts::run`: the original from the installed package, made runnable by Echo, in
@@ -92,6 +113,7 @@ and with the registry (`off`, `gone`, `dropped`), reading the registry and manif
 |---|---|---|
 | adding a host service | `jshost::service` | `jshost::a_host_half_gets_echos_services_and_answers_commands` |
 | adding to the client-half `ctx` | `pluginCtx` (window script) | no covering test |
+| handing a plugin files | `jshost::files::make` | `jshost::files::a_handle_is_its_plugins_alone_and_never_names_the_path` |
 | changing install, update or remove | `plugins::install` | `plugins::install_update_and_remove_from_a_local_marketplace` |
 | letting a plugin run Claude | `claudejob::Spec::from_value` | `claudejob::a_spec_stays_in_the_plugins_store` |
 | changing package skills or scripts | `plugins::scripts::run` | `jshost::a_plugins_package_skill_reaches_the_sessions_and_its_declared_script_runs` |

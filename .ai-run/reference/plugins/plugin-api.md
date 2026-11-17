@@ -59,7 +59,9 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   Evidence: `jshost::load`
 - It is one file with no `import` of other files (the client half may import its own modules).
   Evidence: `window::plugins::plugin_file`
-- `ctx.command(name, fn)`: `fn` takes JSON arguments, may be `async`, returns JSON and throws an `Error` to fail. A
+- `ctx.command(name, fn)`: `fn` takes JSON arguments and, second, `{files}` (the handles its caller passed: its window
+  half's `ctx.call(…, {files})`, `echoctl plugin call … --file`; `[]` otherwise, § Folders and files), may be `async`,
+  returns JSON and throws an `Error` to fail. A
   window-called command has 30 s. More than 5 s of JavaScript between awaits is interrupted; bulk file reads go through
   `ctx.fs.readMany` / `ctx.fs.walk`, which run off that slice. Evidence: `jshost::CALL_TIMEOUT`, `jshost::SLICE`
 - `ctx.every(seconds, fn)`: periodic work, 10 s minimum; there are no timers in `echoctl plugin call`,
@@ -208,6 +210,25 @@ change or delete the task), and decides only the proposal still waiting. Evidenc
 through `ctx.fs.readMany/walk`; with `folders.write`, `ctx.fs.write/move/remove` change it (never through a link,
 never over another file). In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
 named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `plugins::app_file`
+
+Files the user hands a plugin come as **handles** `{file, name, size}`: `file` an opaque id of that plugin's alone (another
+plugin's is refused as one that isn't there), never the path; kept in the process's memory for an hour (1,000 at most).
+No line on the sheet: handing a file over is the user's own act. Evidence: `jshost::files::make`
+- From: `await ctx.system.pickFiles(prompt, {multiple, ext})` — the system's file picker (titled "<plugin> — <prompt>"),
+  `[]` when cancelled; one file unless `multiple`; `ext` up to 20 extensions, letters and digits (`["md", "pdf"]`). Its
+  window half's `ctx.onFileDrop` (§ Client half). `echoctl plugin call <id> <cmd> '<json>' --file <path>` (repeatable;
+  refused where the CLI's limits for runs hold — a minutes run, a thread's sync, Yolo, a routine preparing and asking —
+  never in a routine acting on its own, `notes::run_limited`). No picker opens inside a run Echo started, nor from its
+  `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
+  through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
+- `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
+- `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
+  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file, refused while Claude
+  prepares and asks); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
+  `jshost::files::copy_in`
+- Its window half shows images of a folder it was given (with `uses.folders`) from
+  `plugin/<id>/folder/<encodeURIComponent(root)>/<path>` (`root` as `ctx.fs.folders()` names it): png, jpg / jpeg, gif and
+  webp only (no svg), 10 MB at most, inside the folder once links are followed. Evidence: `window::plugins::folder_image`
 
 ## Thread values and shared values
 
@@ -468,7 +489,11 @@ Evidence: `jshost::work::check_rows`
 
 ## Client half
 
-- The client half exports `apply(ctx)`; its `ctx`: `call(command, args)` (the host half's commands), `listen`
+- The client half exports `apply(ctx)`; its `ctx`: `call(command, args, {files})` (the host half's commands; `files`:
+  handles it was given, passed to the command as its own), `onFileDrop(fn)` (macOS: files dropped on the window while its
+  activity or its Knowledge tab is shown go to `fn(files)` as handles — names and handles, never paths; a name is untrusted text, drawn only through
+  `ctx.ui.esc`; with no such view
+  shown, or on Windows, the drop is Echo's own), `listen`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
@@ -516,7 +541,8 @@ Evidence: `jshost::work::check_rows`
   apart are served on different ports. A release build never reads it. Evidence: `jshost::test_hosts::test_host`
 - Made-up `gh` / `git` first on `PATH` (`gh.cmd` / `git.cmd` on Windows) answer `ctx.signin.get` in any build
   (`tests/app_profile.md` → Plugins against fake services).
-- `ECHOCTL_PICK_FOLDER=<dir>` answers the folder picker in a debug build.
+- `ECHOCTL_PICK_FOLDER=<dir>` answers the folder picker in a debug build; `ECHOCTL_PICK_FILES=<path>[:<path>…]` (`;` on
+  Windows) the file picker (the files there, as `multiple` and `ext` take them).
 
 ## Publishing
 

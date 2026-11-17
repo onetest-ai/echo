@@ -52,6 +52,10 @@ pub enum PluginCmd {
         command: String,
         /// JSON arguments (default {})
         args: Option<String>,
+        /// A file handed to the command, as a handle it reads or copies (repeatable). Refused inside a run Echo started —
+        /// a minutes run, a thread's sync, Yolo, a routine preparing and asking — but not a routine acting on its own
+        #[arg(long = "file")]
+        files: Vec<std::path::PathBuf>,
     },
     /// Run a plugin's declared script (`uses.scripts`) as Echo runs it: its output, its exit status (124 when its time ran out)
     Script {
@@ -188,12 +192,13 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Set { id, key, value: None } => print_json(&serde_json::json!(settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()))),
         PluginCmd::Set { id, key, value: Some(v) } => set_setting(&id, &key, &serde_json::Value::String(v))?,
         #[cfg(feature = "js")]
-        PluginCmd::Call { id, command, args } => {
+        PluginCmd::Call { id, command, args, files } => {
             let args: serde_json::Value = serde_json::from_str(args.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the arguments aren't JSON: {e}"))?;
+            let handles = file_handles(&id, &files)?;
             // A terminal's host runs commands, never the plugins' timers: those are the app's.
             jshost::no_timers();
-            // `call_within` loads this plugin only.
-            print_json(&jshost::call_within(&id, &command, &args, std::time::Duration::from_secs(3600))?);
+            // `call_with` loads this plugin only.
+            print_json(&jshost::call_with(&id, &command, &args, &handles, std::time::Duration::from_secs(3600))?);
         }
         #[cfg(not(feature = "js"))]
         PluginCmd::Call { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
@@ -314,8 +319,35 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
     Ok(())
 }
 
+/// `plugin call --file`: a handle of plugin `id` for each file. Handing a plugin a file is the user's own act: refused
+/// where the CLI's limits for runs hold (`notes::run_limited`: every run Echo started but a routine acting on its own).
+#[cfg(feature = "js")]
+fn file_handles(id: &str, files: &[std::path::PathBuf]) -> anyhow::Result<Vec<serde_json::Value>> {
+    if files.is_empty() {
+        return Ok(vec![]);
+    }
+    anyhow::ensure!(!crate::notes::run_limited(), "--file is refused inside a run Echo started (all but a routine acting on its own): handing a plugin a file is yours to do");
+    anyhow::ensure!(crate::plugins::enabled().iter().any(|p| p.id == id), "{id} isn't installed and on");
+    files.iter().map(|f| jshost::files::make(id, f)).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "js")]
+    #[test]
+    fn plugin_call_file_is_refused_inside_a_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-call-file");
+        let f = root.join("Brief.md");
+        std::fs::write(&f, "# Brief").unwrap();
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let r = super::file_handles("acme", std::slice::from_ref(&f));
+        std::env::remove_var(crate::notes::HEADLESS);
+        assert!(r.unwrap_err().to_string().contains("refused inside a run Echo started"));
+        assert!(super::file_handles("acme", &[]).unwrap().is_empty(), "no --file: nothing to refuse");
+        // Outside a run: only for a plugin installed and on.
+        assert!(super::file_handles("acme", &[f]).unwrap_err().to_string().contains("isn't installed and on"));
+    }
+
     #[test]
     fn the_guide_gives_the_authoring_rules_then_the_api_reference() {
         let rules = super::GUIDE.find("# Plugin Authoring").expect("the rules");

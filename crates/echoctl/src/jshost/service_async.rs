@@ -33,6 +33,7 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "system.pick_folder" => {
             uses(id, "folders")?;
+            files::no_picker_in_a_run()?;
             let name = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
             let prompt: String = format!("{} — {}", name, arg.as_str().unwrap_or("Choose a folder")).chars().take(200).collect();
             Ok(match crate::app::choose_folder(&prompt) {
@@ -40,6 +41,8 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 None => Value::Null,
             })
         }
+        "system.pick_files" => files::pick(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "fs.copy_in" => files::copy_in(id, &arg[0], arg[1].as_str().unwrap_or(""), arg[2].as_str().unwrap_or(""), arg[3]["createNew"].as_bool().unwrap_or(true)),
         "fs.read_many" => {
             uses(id, "folders")?;
             let root = arg[0].as_str().unwrap_or("").to_string();

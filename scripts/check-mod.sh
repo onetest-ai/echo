@@ -73,6 +73,8 @@ node crates/echoctl/ui/plugin-work-rows.test.mjs
 node crates/echoctl/ui/thread-slot.test.mjs
 # A plugin's window half: the stylesheets it may load, and what unloading it takes out.
 node crates/echoctl/ui/plugin-client-ctx.test.mjs
+# Which plugin files dropped on the window go to: the one whose view is shown and listens, else Echo's own (dropTarget).
+node crates/echoctl/ui/plugin-file-drop.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs
 # Settings search: sections by their names and their settings' own labels (SettingsSearch).

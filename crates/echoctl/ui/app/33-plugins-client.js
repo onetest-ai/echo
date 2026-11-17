@@ -22,6 +22,8 @@ const Plugins = {
   errors: {},
   /** What each slot was last drawn for: its buttons run on that. */
   targets: {},
+  /** plugin id → its `ctx.onFileDrop` handlers */
+  drops: {},
 }
 // `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
 // `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
@@ -80,8 +82,13 @@ function pluginCtx(id) {
     listenWindow: (type, fn, opts) => { if (gone()) return; window.addEventListener(type, fn, opts); owned.windowListeners.push([type, fn, opts]) },
     /** Its own cleanup (timers, observers), run when it is switched off, updated or removed. */
     onUnload: (fn) => { if (!gone()) owned.cleanups.push(fn) },
-    call: async (command, args = {}) => {
-      const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
+    /** Files dropped on the window while one of its views is shown (its activity, its Knowledge tab): `fn(files)`, each
+     *  a handle {file, name, size} for `call(…, {files})`. macOS. */
+    onFileDrop: (fn) => { if (gone()) return; (Plugins.drops[id] = Plugins.drops[id] || []).push(fn); followDrops() },
+    /** Its host half's command; `{files}`: handles it was given (a drop's), the command's own `{files}`. */
+    call: async (command, args = {}, opts) => {
+      const files = opts && opts.files ? `&files=${encodeURIComponent(JSON.stringify(opts.files.map((f) => (f && f.file) || String(f))))}` : ''
+      const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}${files}`)
       if (r && r.error) throw new Error(r.error)
       return r ? r.value : null
     },
@@ -256,6 +263,8 @@ function unloadPlugin(id) {
   slotForget(Plugins.targets, id)
   delete Plugins.loaded[id]
   delete Plugins.applied[id]
+  delete Plugins.drops[id]
+  followDrops()
 }
 // ── plugin stylesheet: where `ctx.ui.stylesheet(path)` loads a package's CSS from (no DOM:
 // `plugin-client-ctx.test.mjs`). Only a plain relative `.css` path inside the package; versioned so an update reloads it.
@@ -265,6 +274,30 @@ function pluginStylesheetHref(id, path, version) {
   return `plugin/${encodeURIComponent(id)}/${p}?v=${encodeURIComponent(version || '')}`
 }
 // end of the plugin stylesheet block
+// ── plugin file drops: which plugin files dropped on the window go to (no DOM: `plugin-file-drop.test.mjs`) — the one
+// whose view the address shows (its activity `#<plugin>:<id>…`, its Knowledge tab `#brain/<plugin>:<id>…`) when it
+// listens (`ctx.onFileDrop`); else none, and the drop is Echo's own (a logo tile's).
+function dropTarget(hash, listening) {
+  const parts = String(hash || '').replace(/^#/, '').split('/')
+  const m = (parts[0] === 'brain' ? parts[1] || '' : parts[0]).match(/^([a-z0-9-]+):/)
+  return m && (listening[m[1]] || []).length ? m[1] : null
+}
+// end of the plugin file drops block
+/** The app is told which plugin takes dropped files now (the window's drop handler asks it as a drag comes in). */
+let dropsSent
+function followDrops() {
+  const id = dropTarget(hashText(), Plugins.drops)
+  if (id === dropsSent) return
+  dropsSent = id
+  send({ cmd: 'plugin_drops', id })
+}
+window.addEventListener('hashchange', followDrops)
+followDrops()
+/** Files were dropped for plugin `id` (`window.echo.pluginDrop`): its handlers get the handles — its view still shown. */
+function pluginDropped(id, files) {
+  if (dropTarget(hashText(), Plugins.drops) !== id) return
+  for (const fn of Plugins.drops[id]) Promise.resolve().then(() => fn(files)).catch((e) => { S.notice = `${id}: ${(e && e.message) || e}`; render() })
+}
 // ── plugin slot targets: which of a slot's items a target gets and which target a click is for (no DOM:
 // `plugin-work-rows.test.mjs`).
 /** A slot's items for `target`: those whose `when` says yes — a plugin's work row (`kind: 'plugin'`) only to the items
