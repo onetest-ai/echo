@@ -1128,8 +1128,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             names.sort();
             json!(names)
         }
-        "markdown" => json!(if arg.is_array() { plugins::markdown::render(id, &s(&arg[0]), &arg[1]) } else { crate::minutes::markdown_html(&s(arg)) }),
-        "markdown.links" => plugins::markdown::links(&s(arg)),
+        "markdown" => json!(if arg.is_array() { plugins::markdown::render(id, &s(&arg[0]), &arg[1])? } else { crate::minutes::markdown_html(&s(arg)) }),
+        "markdown.links" => plugins::markdown::links(&s(arg))?,
         "notify" => {
             crate::app::notify(&s(&arg[0]), &s(&arg[1]));
             Value::Null
@@ -1838,7 +1838,7 @@ mod tests {
         // A page: its destinations first, then rendered with what the plugin resolved.
         let page = call("hello", "page", &json!({"md": "[[Plan]] [[Idea|new]]"})).unwrap();
         assert_eq!(page[0], json!({"links": ["Plan", "Idea"], "images": []}));
-        assert_eq!(page[1], "<p><a href=\"#hello:main/Plan\">Plan</a> <a class=\"md-missing\" data-md-missing=\"Idea\">new</a></p>");
+        assert_eq!(page[1], "<p><a href=\"#hello:main/Plan\">Plan</a> <a class=\"md-missing\" data-md-missing=\"Idea\" role=\"link\" tabindex=\"0\">new</a></p>");
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
         sync();

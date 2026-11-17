@@ -254,7 +254,8 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     let q = req.uri().query().unwrap_or("");
                     let md = query_param(q, "md").unwrap_or_default();
                     let opts: Value = query_param(q, "opts").and_then(|o| serde_json::from_str(&o).ok()).unwrap_or(Value::Null);
-                    return Some(json_reply(json!({"value": if links { crate::plugins::markdown::links(&md) } else { json!(crate::plugins::markdown::render(id, &md, &opts)) }})));
+                    let v = if links { crate::plugins::markdown::links(&md) } else { crate::plugins::markdown::render(id, &md, &opts).map(Value::from) };
+                    return Some(json_reply(v.map_or_else(|e| json!({"error": format!("{e:#}")}), |v| json!({"value": v}))));
                 }
             }
             match rest.split_once("/call/") {

@@ -459,7 +459,8 @@ pub fn markdown_html(md: &str) -> String {
 pub enum PageDest {
     /// The link's `href` or the image's `src`, as the caller checked it.
     Href(String),
-    /// A page that isn't there: a link with no `href`, marked `data-md-missing` for the caller's page to catch.
+    /// A page that isn't there: a link with no `href`, marked `data-md-missing` for the caller's page to catch (focusable,
+    /// `role="link"`).
     Missing,
     /// Text only.
     Text,
@@ -505,7 +506,7 @@ fn page_link(dest: &str, page: &Page) -> Option<String> {
         PageDest::Href(h) if crate::links::Link::parse(&h).is_some() => format!("<a href=\"{}\" data-echo-link>", esc(&h)),
         PageDest::Href(h) if h.starts_with("https://") => format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(&h)),
         PageDest::Href(h) => format!("<a href=\"{}\">", esc(&h)),
-        PageDest::Missing => format!("<a class=\"md-missing\" data-md-missing=\"{}\">", esc(dest)),
+        PageDest::Missing => format!("<a class=\"md-missing\" data-md-missing=\"{}\" role=\"link\" tabindex=\"0\">", esc(dest)),
         PageDest::Text => return None,
     })
 }
@@ -642,7 +643,7 @@ fn body_with(md: &str, images: &mut Images, page: Option<&Page>) -> Body {
                         CodeBlockKind::Fenced(l) => l.split_whitespace().next().unwrap_or("").to_ascii_lowercase(),
                         CodeBlockKind::Indented => String::new(),
                     };
-                    code = Some((lang == "mermaid", String::new()));
+                    code = Some((lang == "mermaid" && page.is_none(), String::new())); // a page draws no diagram: its code
                 }
                 Tag::List(Some(1)) => out.push_str("<ol>"),
                 Tag::List(Some(n)) => out.push_str(&format!("<ol start=\"{n}\">")),

@@ -72,6 +72,13 @@ const JobsAsked = {}
 // A plugin request's answer: its value, or the error thrown.
 const pluginValue = (r) => { if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer'); return r.value }
 
+// A plugin's Markdown request (`ctx.markdown`): its text in the address, which Echo reads only up to 64 KB.
+const markdownPath = (id, what, md, rest) => {
+  const path = `api/plugin/${encodeURIComponent(id)}/markdown${what}?md=${encodeURIComponent(String(md))}${rest}`
+  if (path.length > 65000) throw new Error('This page is too long for ctx.markdown in the window half (64 KB encoded): render it in the host half')
+  return path
+}
+
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], windowListeners: [], styles: [], cleanups: [] }
@@ -96,10 +103,12 @@ function pluginCtx(id) {
       return r ? r.value : null
     },
     /** Markdown as safe HTML by Echo's writer: `markdown(md, {breaks, links: {dest: href | null}, images: {dest: src |
-     *  null}})` — only the hrefs Echo allows (https, echo://, its own `#<id>:` routes; images from its folder route),
-     *  `null` a missing page (`data-md-missing`, no href); `markdown.links(md)` → {links, images}: what to resolve first. */
-    markdown: Object.assign(async (md, opts) => pluginValue(await get(`api/plugin/${encodeURIComponent(id)}/markdown?md=${encodeURIComponent(String(md))}&opts=${encodeURIComponent(JSON.stringify(opts || {}))}`)),
-      { links: async (md) => pluginValue(await get(`api/plugin/${encodeURIComponent(id)}/markdown/links?md=${encodeURIComponent(String(md))}`)) }),
+     *  null}})` — only the hrefs Echo allows (https, echo://, its own `#<id>:` and `#brain/<id>:` routes; images from its
+     *  folder route), `null` a missing page (`data-md-missing`, no href); `markdown.links(md)` → {links, images}: what to
+     *  resolve first. The page goes in the request's address (64 KB at most, encoded): a longer one throws — render it in
+     *  the host half. */
+    markdown: Object.assign(async (md, opts) => pluginValue(await get(markdownPath(id, '', md, `&opts=${encodeURIComponent(JSON.stringify(opts || {}))}`))),
+      { links: async (md) => pluginValue(await get(markdownPath(id, '/links', md, ''))) }),
     /** Echo's background jobs, when its manifest asks for `uses.echo.jobs` (echo-plugins R25): `list()` — every job, its
      *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
      *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */

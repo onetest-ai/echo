@@ -30,9 +30,9 @@ A routine's or Yolo's run has no run guard: it runs as the folder session (One b
 
 A plugin's vault page (`ctx.markdown(md, opts)`) goes through the same writer, `minutes::page_html`, its links and
 images as the plugin resolved them and `plugins::markdown::render` allows: a link to `https://`, an `echo://` link Echo
-knows or the plugin's own `#<id>:` route; an image only from that plugin's folder route `plugin/<id>/folder/…` (no dot
+knows or the plugin's own `#<id>:` or `#brain/<id>:` route; an image only from that plugin's folder route `plugin/<id>/folder/…` (no dot
 segment, encoded or not), never `data:` or another host; nothing with whitespace, control characters or a backslash.
-Anything else is text; a page that isn't there is a link with no href (`data-md-missing`).
+Anything else is text; a page that isn't there is a link with no href (`data-md-missing`); a mermaid fence is code.
 
 ## Path checks
 

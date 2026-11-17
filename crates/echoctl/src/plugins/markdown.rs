@@ -2,29 +2,40 @@
 //! (`minutes::page_html`), its links and images resolved by the plugin beforehand (`ctx.markdown.links`) — Echo can't
 //! call back into the plugin's JavaScript while it writes — and each `href` / `src` kept only as `allowed` lets it.
 
+use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 
 use crate::minutes::PageDest;
 
+/// The most Markdown a plugin renders at once: 1 MB of text.
+const MAX_MD: usize = 1 << 20;
+
+fn fits(md: &str) -> Result<()> {
+    ensure!(md.len() <= MAX_MD, "ctx.markdown renders 1 MB of text at most ({} KB given): split the page", md.len() >> 10);
+    Ok(())
+}
+
 /// `md` as HTML for plugin `id`; `opts`: `{breaks, links: {dest: href | null}, images: {dest: src | null}}` (a
 /// destination as `links` gives it). `null`: a page that isn't there; an href Echo doesn't allow, or none given: text.
-pub fn render(id: &str, md: &str, opts: &Value) -> String {
+pub fn render(id: &str, md: &str, opts: &Value) -> Result<String> {
+    fits(md)?;
     let dest = |d: &str, image: bool| match opts[if image { "images" } else { "links" }].get(d) {
         Some(Value::Null) => PageDest::Missing,
         Some(Value::String(h)) if allowed(id, h, image) => PageDest::Href(h.clone()),
         _ => PageDest::Text,
     };
-    crate::minutes::page_html(md, opts["breaks"].as_bool() == Some(true), &dest)
+    Ok(crate::minutes::page_html(md, opts["breaks"].as_bool() == Some(true), &dest))
 }
 
 /// The destinations of `md`'s links and images, as written (a wikilink's target), each once: `{links, images}`.
-pub fn links(md: &str) -> Value {
+pub fn links(md: &str) -> Result<Value> {
+    fits(md)?;
     let (links, images) = crate::minutes::page_dests(md);
-    json!({"links": links, "images": images})
+    Ok(json!({"links": links, "images": images}))
 }
 
 /// Whether plugin `id`'s page may carry `h`: a link to an `https://` page, an `echo://` link Echo knows or the plugin's
-/// own route (`#<id>:…`); an image only from the plugin's folder route (`plugin/<id>/folder/…`, `window::plugins`) —
+/// own routes (`#<id>:…`, its Knowledge tab's `#brain/<id>:…`); an image only from the plugin's folder route (`plugin/<id>/folder/…`, `window::plugins`) —
 /// never `data:`, which would skip that route's checks (no SVG, 10 MB, the folder's grant), nor another host. Nothing
 /// with whitespace, control characters or a backslash, which browsers drop or read as `/`.
 fn allowed(id: &str, h: &str, image: bool) -> bool {
@@ -43,7 +54,8 @@ fn allowed(id: &str, h: &str, image: bool) -> bool {
     if h.starts_with("echo://") {
         return crate::links::Link::parse(h).is_some();
     }
-    h.strip_prefix('#').and_then(|r| r.strip_prefix(id)).is_some_and(|r| r.starts_with(':'))
+    let route = h.strip_prefix("#brain/").or_else(|| h.strip_prefix('#'));
+    route.and_then(|r| r.strip_prefix(id)).is_some_and(|r| r.starts_with(':'))
 }
 
 /// `%XX` decoded (anything else kept), as the window decodes a request's path.
@@ -71,14 +83,14 @@ mod tests {
     use super::*;
 
     fn page(md: &str, opts: Value) -> String {
-        render("acme-vault", md, &opts)
+        render("acme-vault", md, &opts).unwrap()
     }
 
     #[test]
     fn links_lists_each_destination_as_written_and_nothing_inside_code() {
         let md = "[[Page]] [[Page|label]] [[Other#Plan]] ![[assets/logo.png]] [x](https://acme.example/a) ![p](pics/a.png)\n\n`[[Code]]`\n\n```\n[[Fenced]]\n```\n\n[[Page]]";
         assert_eq!(
-            links(md),
+            links(md).unwrap(),
             json!({"links": ["Page", "Other#Plan", "https://acme.example/a"], "images": ["assets/logo.png", "pics/a.png"]})
         );
     }
@@ -97,7 +109,7 @@ mod tests {
     #[test]
     fn a_missing_page_is_a_link_without_href_the_plugin_catches() {
         let html = page("[[New \"idea\"|start it]] and ![[gone.png]]", json!({"links": {"New \"idea\"": null}, "images": {"gone.png": null}}));
-        assert!(html.contains("<a class=\"md-missing\" data-md-missing=\"New &quot;idea&quot;\">start it</a>"), "{html}");
+        assert!(html.contains("<a class=\"md-missing\" data-md-missing=\"New &quot;idea&quot;\" role=\"link\" tabindex=\"0\">start it</a>"), "{html}");
         assert!(html.contains("<span class=\"figref md-missing\" data-md-missing=\"gone.png\">[gone.png]</span>"), "{html}");
         assert!(!html.contains("href"), "{html}");
     }
@@ -112,7 +124,7 @@ mod tests {
 
     #[test]
     fn echo_keeps_only_https_echo_links_and_the_plugins_own_routes() {
-        for ok in ["https://acme.example/x?a=1&b=2", "#acme-vault:main/Page", "echo://thread/atlas"] {
+        for ok in ["https://acme.example/x?a=1&b=2", "#acme-vault:main/Page", "#brain/acme-vault:notes/Page", "echo://thread/atlas"] {
             assert!(allowed("acme-vault", ok, false), "{ok}");
         }
         for bad in [
@@ -133,6 +145,12 @@ mod tests {
             "#acme-vault-x:main",
             "#acme-vault",
             "#calls",
+            "#brain/other:notes/Page",
+            "#brain/acme-vault-x:notes",
+            "#brain/acme-vault",
+            "#brain/recall",
+            "#brain//acme-vault:notes",
+            "#brain/#acme-vault:notes",
             "Page.md",
             "../Page",
             "echo://nothing-echo-knows",
@@ -198,5 +216,15 @@ mod tests {
         let html = page("[t](t) [w](w)", json!({"links": {"t": "echo://thread/atlas", "w": "https://acme.example/w"}}));
         assert!(html.contains("<a href=\"echo://thread/atlas\" data-echo-link>t</a>"), "{html}");
         assert!(html.contains("<a href=\"https://acme.example/w\" rel=\"noopener noreferrer\">w</a>"), "{html}");
+    }
+
+    #[test]
+    fn a_diagram_on_a_page_is_its_code_and_a_page_over_1_mb_is_refused() {
+        let html = page("```mermaid\nflowchart TD\n  A[\"<b>x</b>\"] --> B\n```", json!({}));
+        assert_eq!(html, "<pre><code>flowchart TD\n  A[&quot;&lt;b&gt;x&lt;/b&gt;&quot;] --&gt; B\n</code></pre>");
+        let big = "a".repeat((1 << 20) + 1);
+        assert!(render("acme-vault", &big, &json!({})).unwrap_err().to_string().contains("1 MB of text at most"));
+        assert!(links(&big).is_err());
+        assert!(render("acme-vault", &big[1..], &json!({})).is_ok());
     }
 }
