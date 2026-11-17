@@ -226,6 +226,19 @@ impl Run {
         }
     }
 
+    /// A minutes run of `dir` concluded (`notes`): its Claude Code result's usage, and done or why not.
+    pub fn minutes(self, dir: &std::path::Path, result: Option<&Value>, model: Option<&str>, state: &str, message: Option<&str>) {
+        if let Some(v) = result {
+            add_usage(model.unwrap_or(""), v);
+        }
+        let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        if state == "done" {
+            self.done(Some(format!("minutes of {call}")));
+        } else {
+            self.failed(&format!("{call}: {}", message.unwrap_or(state)));
+        }
+    }
+
     /// It failed: always recorded, with why.
     pub fn failed(mut self, error: &str) {
         self.ended = true;
