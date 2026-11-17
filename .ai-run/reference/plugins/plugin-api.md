@@ -76,8 +76,7 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   window half's is `async`). The minutes' writer, raw HTML shown as text, no `[mm:ss]` marks, with `[[Page]]`,
   `[[Page|label]]`, `[[Page#heading]]` and `![[image.png]]`; `breaks: true` makes a single newline a line break; a
   ```` ```mermaid ```` fence is shown as its code. 1 MB of text at most (more throws "ctx.markdown renders 1 MB of text
-  at most"); the window half sends the page in its request's address, which Echo reads only up to 64 KB encoded (text
-  outside ASCII grows up to 9×, Cyrillic 6×): a longer page throws there — render it in the host half. Echo
+  at most"); the window half sends the page in a POST's body, as `ctx.call` does (§ Client half). Echo
   can't call the plugin while it writes, so the plugin resolves first: `ctx.markdown.links(md)` → `{links, images}`, each
   destination once as written (a wikilink's target: `Page#heading`; nothing in code), then passes `links` / `images`
   as `{"<dest>": "<href>" | null}`. Echo keeps a link's href only when it is an `https://` URL, an `echo://` link Echo
@@ -586,7 +585,9 @@ Evidence: `jshost::work::check_rows`
 ## Client half
 
 - The client half exports `apply(ctx)`; its `ctx`: `call(command, args, {files})` (the host half's commands; `files`:
-  handles it was given, passed to the command as its own), `onFileDrop(fn)` (macOS: files dropped on the window while its
+  handles it was given, passed to the command as its own; sent as `POST /api/plugin/<id>/call/<command>` with
+  `{args, files}` as its JSON body, 4 MB at most — more is refused, "too much for one plugin call: 4 MB at most"; any
+  other method is refused; the plugin installed and on), `onFileDrop(fn)` (macOS: files dropped on the window while its
   activity or its Knowledge tab is shown go to `fn(files)` as handles — names and handles, never paths; a name is untrusted text, drawn only through
   `ctx.ui.esc`; with no such view
   shown, or on Windows, the drop is Echo's own), `listen`
@@ -594,7 +595,8 @@ Evidence: `jshost::work::check_rows`
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
-  `markdown.links(md)` (§ Host half; `async`, by `/api/plugin/<id>/markdown`) and `ui` (`esc`, `patch(el, html)`
+  `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
+  4 MB at most, as `call`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
   stay), `setRow`, `setCard`, `sw`, `ICON`,
   `relDay`, `ago`, `notice`, `copy`, `style(css)`, `stylesheet(path)` (a `.css` file of its package by a plain relative

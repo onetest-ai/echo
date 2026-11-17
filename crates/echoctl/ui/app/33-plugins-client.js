@@ -1,7 +1,7 @@
 // ── Plugins' client halves (docs/plugins-design.md, v4) ──
 // Each enabled plugin's `client` module is loaded into this page (trusted, as in dsh-desktop) and its
 // `apply(ctx)` adds to Echo: buttons in Echo's own places (slots), panel views, its card in Settings →
-// Plugins, ⌘K actions. `ctx.call` runs a command of its host half (`/api/plugin/<id>/call/<command>`).
+// Plugins, ⌘K actions. `ctx.call` runs a command of its host half (`POST /api/plugin/<id>/call/<command>`).
 // Everything a plugin added goes when it is switched off or removed (`unloadPlugin`).
 const Plugins = {
   /** Its `page` widgets' drawing, by widget id (`plugin:<id>:<widget>`): ({data, size, theme}) → HTML. */
@@ -72,11 +72,14 @@ const JobsAsked = {}
 // A plugin request's answer: its value, or the error thrown.
 const pluginValue = (r) => { if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer'); return r.value }
 
-// A plugin's Markdown request (`ctx.markdown`): its text in the address, which Echo reads only up to 64 KB.
-const markdownPath = (id, what, md, rest) => {
-  const path = `api/plugin/${encodeURIComponent(id)}/markdown${what}?md=${encodeURIComponent(String(md))}${rest}`
-  if (path.length > 65000) throw new Error('This page is too long for ctx.markdown in the window half (64 KB encoded): render it in the host half')
-  return path
+// A plugin's call with what it sends (`ctx.call`, `ctx.markdown`): JSON in a POST's body, which Echo takes up to 4 MB;
+// Echo's answer, its refusal's reason included.
+const pluginPost = async (id, what, body) => {
+  const path = `api/plugin/${encodeURIComponent(id)}/${what}`
+  const r = await fetch(path, { method: 'POST', body: JSON.stringify(body) })
+  const v = await r.json().catch(() => null)
+  if (!r.ok && !(v && v.error)) throw new Error(`${r.status} ${path}`)
+  return v
 }
 
 function pluginCtx(id) {
@@ -97,18 +100,17 @@ function pluginCtx(id) {
     onFileDrop: (fn) => { if (gone()) return; (Plugins.drops[id] = Plugins.drops[id] || []).push(fn); followDrops() },
     /** Its host half's command; `{files}`: handles it was given (a drop's), the command's own `{files}`. */
     call: async (command, args = {}, opts) => {
-      const files = opts && opts.files ? `&files=${encodeURIComponent(JSON.stringify(opts.files.map((f) => (f && f.file) || String(f))))}` : ''
-      const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}${files}`)
+      const files = opts && opts.files ? opts.files.map((f) => (f && f.file) || String(f)) : []
+      const r = await pluginPost(id, `call/${encodeURIComponent(command)}`, { args, files })
       if (r && r.error) throw new Error(r.error)
       return r ? r.value : null
     },
     /** Markdown as safe HTML by Echo's writer: `markdown(md, {breaks, links: {dest: href | null}, images: {dest: src |
      *  null}})` — only the hrefs Echo allows (https, echo://, its own `#<id>:` and `#brain/<id>:` routes; images from its
      *  folder route), `null` a missing page (`data-md-missing`, no href); `markdown.links(md)` → {links, images}: what to
-     *  resolve first. The page goes in the request's address (64 KB at most, encoded): a longer one throws — render it in
-     *  the host half. */
-    markdown: Object.assign(async (md, opts) => pluginValue(await get(markdownPath(id, '', md, `&opts=${encodeURIComponent(JSON.stringify(opts || {}))}`))),
-      { links: async (md) => pluginValue(await get(markdownPath(id, '/links', md, ''))) }),
+     *  resolve first. The page goes in the request's body (4 MB at most; Echo renders 1 MB of text). */
+    markdown: Object.assign(async (md, opts) => pluginValue(await pluginPost(id, 'markdown', { md: String(md), opts: opts || {} })),
+      { links: async (md) => pluginValue(await pluginPost(id, 'markdown/links', { md: String(md) })) }),
     /** Echo's background jobs, when its manifest asks for `uses.echo.jobs` (echo-plugins R25): `list()` — every job, its
      *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
      *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */

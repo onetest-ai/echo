@@ -649,10 +649,10 @@ pub fn handle(msg: &str) -> Handled {
 /// (`python3 -m http.server`).
 /// `echoctl window --serve <port>` (dev): the page and its API answered live on 127.0.0.1, by the same `respond` as
 /// the window, so a browser shows real data with paging and search working. With `ECHOCTL_SERVE_IPC=1` the page's
-/// messages are taken too (`POST /ipc` → `handle`, as the window's), from that page only: a per-run token in a
-/// SameSite=Strict cookie, and the request's Origin must be this server — a dev data folder's actions, never the user's.
+/// messages are taken too (`POST /ipc` → `handle`, as the window's), and its plugins' calls (`POST /api/plugin/…`),
+/// from that page only: a per-run token in a SameSite=Strict cookie, and the request's Origin must be this server — a
+/// dev data folder's actions, never the user's.
 pub fn serve(port: u16) -> anyhow::Result<()> {
-    use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
     let origin = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
     let ipc = std::env::var("ECHOCTL_SERVE_IPC").is_ok_and(|v| v == "1");
@@ -675,54 +675,82 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
     println!("{origin}/{}{}", if ipc { "  (IPC on)" } else { "" }, if app { "  (as the app: plugins' events here)" } else { "" });
     for conn in listener.incoming().flatten() {
         let (origin, token, name) = (origin.clone(), token.clone(), name.clone());
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(&conn);
-            let mut line = String::new();
-            if reader.read_line(&mut line).is_err() {
-                return;
-            }
-            let (mut length, mut cookie_ok, mut origin_ok) = (0usize, false, false);
-            let mut h = String::new();
-            while reader.read_line(&mut h).is_ok_and(|n| n > 2) {
-                let (k, v) = h.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).unwrap_or_default();
-                match k.as_str() {
-                    "content-length" => length = v.parse().unwrap_or(0).min(1 << 20),
-                    "cookie" => cookie_ok = !token.is_empty() && v.split(';').any(|c| c.trim() == format!("{name}={token}")),
-                    "origin" => origin_ok = v == origin,
-                    _ => {}
-                }
-                h.clear();
-            }
-            let mut parts = line.split_whitespace();
-            let (method, path) = (parts.next().unwrap_or("GET").to_string(), parts.next().unwrap_or("/").to_string());
-            let mut out = &conn;
-            if method == "POST" && path == "/ipc" {
-                let mut body = vec![0u8; length];
-                let ok = reader.read_exact(&mut body).is_ok() && cookie_ok && origin_ok;
-                let answer = if ok {
-                    let h = handle(&String::from_utf8_lossy(&body));
-                    json!({"reply": h.reply, "refresh": h.refresh}).to_string()
-                } else {
-                    "{\"error\":\"refused\"}".into()
-                };
-                let _ = write!(out, "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", if ok { 200 } else { 403 }, answer.len());
-                return;
-            }
-            let res = respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
-            let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
-            let status = res.status().as_u16();
-            // A page keeps its policy here too, as in the window: the window's, or the minutes page's own.
-            let csp = match res.headers().get("Content-Security-Policy").and_then(|v| v.to_str().ok()) {
-                Some(p) if ctype.starts_with("text/html") => format!("Content-Security-Policy: {p}\r\n"),
-                _ => String::new(),
-            };
-            let body = res.into_body();
-            let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: {name}={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
-            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{csp}{cookie}Connection: close\r\n\r\n", body.len());
-            let _ = out.write_all(&body);
-        });
+        std::thread::spawn(move || serve_conn(&conn, &origin, &token, &name));
     }
     Ok(())
+}
+
+/// One request to the served window (`serve`): `origin` this server, `token` the run's cookie value (empty: IPC off),
+/// `name` the cookie's. A POST — the page's IPC, a plugin's call — is taken only from the page itself (the cookie and
+/// the Origin), its body read up to its cap; any other method gets no body.
+fn serve_conn(conn: &std::net::TcpStream, origin: &str, token: &str, name: &str) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let mut reader = BufReader::new(conn);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() {
+        return;
+    }
+    let (mut length, mut cookie_ok, mut origin_ok) = (0usize, false, false);
+    let mut h = String::new();
+    while reader.read_line(&mut h).is_ok_and(|n| n > 2) {
+        let (k, v) = h.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).unwrap_or_default();
+        match k.as_str() {
+            "content-length" => length = v.parse().unwrap_or(0),
+            "cookie" => cookie_ok = !token.is_empty() && v.split(';').any(|c| c.trim() == format!("{name}={token}")),
+            "origin" => origin_ok = v == origin,
+            _ => {}
+        }
+        h.clear();
+    }
+    let mut parts = line.split_whitespace();
+    let (method, path) = (parts.next().unwrap_or("GET").to_string(), parts.next().unwrap_or("/").to_string());
+    let mut out = conn;
+    let answer_json = |mut out: &std::net::TcpStream, status: u16, answer: &str| {
+        let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{answer}", answer.len());
+    };
+    if method == "POST" && path == "/ipc" {
+        let mut body = vec![0u8; length.min(1 << 20)];
+        let ok = reader.read_exact(&mut body).is_ok() && cookie_ok && origin_ok;
+        let answer = if ok {
+            let h = handle(&String::from_utf8_lossy(&body));
+            json!({"reply": h.reply, "refresh": h.refresh}).to_string()
+        } else {
+            "{\"error\":\"refused\"}".into()
+        };
+        answer_json(out, if ok { 200 } else { 403 }, &answer);
+        return;
+    }
+    let mut body = Vec::new();
+    if method == "POST" {
+        if length > plugins::BODY_MAX {
+            // Read (up to 64 MB) before answering, so the browser sees the answer, not a reset connection.
+            let _ = std::io::copy(&mut reader.take(length.min(64 << 20) as u64), &mut std::io::sink());
+            answer_json(out, 413, &json!({"error": plugins::TOO_MUCH}).to_string());
+            return;
+        }
+        body = vec![0u8; length];
+        if reader.read_exact(&mut body).is_err() || !cookie_ok || !origin_ok {
+            answer_json(out, 403, "{\"error\":\"refused\"}");
+            return;
+        }
+    }
+    let req = Request::builder().method(if method == "POST" { "POST" } else { "GET" }).uri(format!("echo://localhost{path}")).body(body).expect("request");
+    let res = respond(&req);
+    let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
+    let status = res.status().as_u16();
+    // A page keeps its policy here too, as in the window: the window's, or the minutes page's own.
+    let csp = match res.headers().get("Content-Security-Policy").and_then(|v| v.to_str().ok()) {
+        Some(p) if ctype.starts_with("text/html") => format!("Content-Security-Policy: {p}\r\n"),
+        _ => String::new(),
+    };
+    let store = match res.headers().get("Cache-Control").and_then(|v| v.to_str().ok()) {
+        Some(c) => format!("Cache-Control: {c}\r\n"),
+        None => String::new(),
+    };
+    let body = res.into_body();
+    let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: {name}={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
+    let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{csp}{store}{cookie}Connection: close\r\n\r\n", body.len());
+    let _ = out.write_all(&body);
 }
 
 /// A random hex digit (the dev server's token), from the OS's randomness.

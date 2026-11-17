@@ -523,7 +523,7 @@ document.addEventListener('click', async (e) => {
     try { args = JSON.parse(act.dataset.pwArgs || '{}') } catch { /* none */ }
     // The call answers {value} or {error}: a refused or failing command says so.
     try {
-      const r = await get(`api/plugin/${encodeURIComponent(plugin)}/call/${encodeURIComponent(act.dataset.pwCmd)}?args=${encodeURIComponent(JSON.stringify(args))}`)
+      const r = await pluginPost(plugin, `call/${encodeURIComponent(act.dataset.pwCmd)}`, { args })
       if (r && r.error) window.echo.notice(`${act.textContent}: ${r.error}`)
     } catch (x) { window.echo.notice(`${act.textContent}: ${x.message || x}`) }
     return (S.view === 'today' ? loadToday() : loadDashboard()).then(render)
