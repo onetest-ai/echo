@@ -1,5 +1,5 @@
 ---
-id: S-41
+id: S-42
 title: "A plugin reads About me once its sheet says so: refused before, an update that asks again, then only the parts it asks"
 run: agent
 data: standard
@@ -8,7 +8,7 @@ cases:
   - tests/cases/plugins/TC-163_a-plugin-reads-about-me-in-the-parts-it-asks-never-how-you-work-unless-asked-and-nothing-from-the-template.md
 ---
 
-# S-41: A plugin reads About me once its sheet says so
+# S-42: A plugin reads About me once its sheet says so
 
 **Story:** Sam installs a coaching plugin. Its first version can't read his About me; its update asks for it, and
 Echo's sheet says what that means. Once Sam agrees, it greets him by name and writes the way he likes — but how he

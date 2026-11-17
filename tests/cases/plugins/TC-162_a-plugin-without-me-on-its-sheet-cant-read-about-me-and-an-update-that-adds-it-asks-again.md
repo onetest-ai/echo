@@ -41,7 +41,7 @@ tags: [plugins, host-half, about-me, sheet, update]
 Me demo 0.2.0 installed and on, asking for About me; About me unchanged.
 
 ## Teardown
-- In S-41: keep Me demo and the marketplace copy for stage 2. On its own: `$E plugin remove me-demo --delete-data`; `$E plugin marketplace remove test-plugins`; `rm -rf "$C"`; `tests/fixtures/serve.sh down <dir>`
+- In S-42: keep Me demo and the marketplace copy for stage 2. On its own: `$E plugin remove me-demo --delete-data`; `$E plugin marketplace remove test-plugins`; `rm -rf "$C"`; `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
 - Besides `echoctl`, this case runs `cp`, `mktemp` and `rm` on its own copy of the marketplace.

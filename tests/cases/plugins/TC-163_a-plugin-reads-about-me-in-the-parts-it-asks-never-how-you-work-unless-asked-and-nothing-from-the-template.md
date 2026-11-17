@@ -17,7 +17,7 @@ tags: [plugins, host-half, about-me]
 
 ## Preconditions
 - Test data built right before the run, served (the case uses only the CLI): `tests/fixtures/serve.sh up <dir> <port> --set standard --ai fake`; every `echoctl` command is `$E …` (`E=target/debug/echoctl`, built right before) after `. <dir>/env`; abort if `$ECHOCTL_HOME` isn't inside `<dir>`
-- Me demo 0.2.0 installed (it asks for `me`): in S-41, stage 1. On its own: `C=$(mktemp -d)/m`; `cp -R tests/fixtures/plugins "$C"`; `cp -R "$C/next/me-demo/." "$C/plugins/me-demo/"`; `$E plugin marketplace add "$C" --name test-plugins`; `$E plugin install me-demo --from test-plugins --yes`
+- Me demo 0.2.0 installed (it asks for `me`): in S-42, stage 1. On its own: `C=$(mktemp -d)/m`; `cp -R tests/fixtures/plugins "$C"`; `cp -R "$C/next/me-demo/." "$C/plugins/me-demo/"`; `$E plugin marketplace add "$C" --name test-plugins`; `$E plugin install me-demo --from test-plugins --yes`
 
 **Changes:** `$ECHOCTL_HOME/.echo/me.md` (About me): rewritten, then removed, then the template
 
