@@ -31,8 +31,20 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "signin", ready: true, describe: describe_signin },
     Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
     Capability { id: "ai", ready: true, describe: describe_ai },
+    Capability { id: "microphone", ready: true, describe: describe_microphone },
     Capability { id: "m365", ready: true, describe: describe_m365 },
 ];
+
+/// The sheet's line for `uses.microphone` (`window::plugins` opens it only as it says).
+pub const MICROPHONE_LINE: &str = "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach";
+
+/// `uses.microphone: {}`: its window part hears the microphone, on the user's click in its view.
+pub(super) fn describe_microphone(v: &Value) -> Result<String> {
+    if !v.as_object().is_some_and(|o| o.is_empty()) {
+        bail!("“microphone” is {{}}");
+    }
+    Ok(MICROPHONE_LINE.into())
+}
 
 /// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.
 pub(super) fn describe_work(v: &Value) -> Result<String> {
@@ -474,6 +486,17 @@ pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugin_asks_for_the_microphone_as_an_empty_object_and_the_sheet_says_when_it_opens() {
+        let uses = serde_json::json!({"microphone": {}});
+        assert_eq!(describe(uses.as_object().unwrap()).unwrap(), vec![MICROPHONE_LINE.to_string()]);
+        assert!(MICROPHONE_LINE.contains("only after you click there") && MICROPHONE_LINE.contains("never while Echo records"));
+        assert!(not_ready(uses.as_object().unwrap()).is_empty(), "this Echo has it");
+        for bad in [serde_json::json!(true), serde_json::json!({"always": true}), serde_json::json!("yes")] {
+            assert!(describe_microphone(&bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn the_sheet_says_each_write_to_echos_data_and_names_one_it_doesnt_know() {

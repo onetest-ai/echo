@@ -526,6 +526,7 @@ CLICKS.push(
   { sel: '[data-frame]', area: 'call', when: (t) => t.dataset.frame, run: (t) => { S.lightbox = t.dataset.frame; return render() } },
   { sel: '[data-close]', area: 'call', when: (t) => t.dataset.close, run: (t) => { S.lightbox = null; return render() } },
   { sel: '[data-copy]', area: 'page', when: (t) => t.dataset.copy, run: (t) => { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return } },
+  { sel: '[data-mic-stop]', area: 'shell', when: (t) => t.dataset.micStop !== undefined, run: () => micClose(Mic.id) },
   { sel: '[data-arm]', area: 'calls', when: (t) => t.dataset.arm !== undefined, run: (t) => send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() }) },
   { sel: '[data-join]', area: 'calendar', when: (t) => t.dataset.join !== undefined, run: (t) => send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() }) },
   // The `data-cmd` buttons: recording, the window's own, the open call's. No case: nothing.

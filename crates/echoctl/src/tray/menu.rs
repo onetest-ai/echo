@@ -4,7 +4,7 @@ use super::*;
 
 impl Ui {
     pub(super) fn new(proxy: tao::event_loop::EventLoopProxy<UiEvent>) -> tray_icon::Result<Self> {
-        let (icon, _) = icon_for(&UiState::Idle { in_call: None });
+        let (icon, _) = icon_for(&UiState::Idle { in_call: None }, false);
         let builder = TrayIconBuilder::new().with_tooltip("Echo");
         #[cfg(target_os = "macos")]
         let builder = builder.with_icon_templated(icon);
@@ -23,6 +23,7 @@ impl Ui {
             actions: HashMap::new(),
             state: None,
             dark: taskbar_dark(),
+            mic: None,
             model: None,
             health: health(),
             last_refresh: Instant::now(),
@@ -348,16 +349,19 @@ impl Ui {
 
     pub(super) fn apply(&mut self, state: UiState) {
         let dark = taskbar_dark();
-        if self.state.as_ref() == Some(&state) && self.dark == dark {
+        // A plugin hearing the microphone (`uses.microphone`) shows Echo's recording sign too.
+        let mic = crate::window::plugin_mic();
+        if self.state.as_ref() == Some(&state) && self.dark == dark && self.mic == mic {
             return;
         }
         self.dark = dark;
-        let (icon, template) = icon_for(&state);
+        self.mic = mic;
+        let (icon, template) = icon_for(&state, self.mic.is_some());
         #[cfg(target_os = "macos")]
         let _ = if template { self.tray.set_icon_templated(Some(icon)) } else { self.tray.set_icon(Some(icon)) };
         #[cfg(not(target_os = "macos"))]
         let _ = (template, self.tray.set_icon(Some(icon)));
-        let text = status_text(&state);
+        let text = status_text(&state, self.mic.as_deref());
         self.status.set_text(&text);
         let _ = self.tray.set_tooltip(Some(format!("Echo — {text}")));
         match &state {

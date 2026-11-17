@@ -48,6 +48,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
+| `microphone` | `{}` (nothing else): its window half hears the microphone through `ctx.microphone` (§ Client half). The sheet: "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach". Nothing in its host half. Evidence: `capabilities::describe_microphone`, `window::plugins::mic_open` |
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
 
 The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in Settings →
@@ -816,6 +817,22 @@ Evidence: `jshost::work::check_rows`
   the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
   with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
   `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`
+- `ctx.microphone` (manifest `uses.microphone`, the plugin on): `open(audio)` → a `MediaStream` (`audio`: getUserMedia's
+  audio constraints, `true` by default; no video); `close()`; `isOpen()`. `open` throws, before anything is sent, unless
+  the page has the user's click or key (`copyAllowed`) and the address shows the plugin's own view (its activity
+  `#<plugin>:<id>…` or its Knowledge tab `#brain/<plugin>:<id>…`), nothing records and no other plugin has the
+  microphone; then the page asks Echo (`POST /api/plugin/<id>/microphone`, any other method refused), which checks the
+  plugin (on, its sheet naming `uses.microphone`), that no recording runs (a call or a memo: "Echo is recording — a
+  plugin gets the microphone once the recording stops") and that no other plugin holds it ("<name> has the microphone
+  now"), and answers `{value: <its name>}` or `{error}`; only then does the page call `getUserMedia`. While it is open the window's top
+  pill reads "<name> hears your microphone" with Stop, and the tray shows the recording icon and "● <name> hears your
+  microphone". It stops — tracks stopped, the page's IPC command `plugin_mic` — on Stop, `close()`, the address leaving its view,
+  the plugin switched off, updated or removed (`unloadPlugin`), the page loaded again, every track ended, or a
+  recording starting (the page says "Echo started recording, so the plugin's microphone stopped"). One plugin at a
+  time; calling `open` again while open returns the same stream. The native window refuses the camera and a page's own
+  `getUserMedia` outside an opening; screen sharing (`getDisplayMedia`) is not one of Echo's capabilities and Echo's
+  permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
+  (window script), `window::plugins::mic_open`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `call.row`, `knowledge.tab` and
   `knowledge.settings` (the last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or

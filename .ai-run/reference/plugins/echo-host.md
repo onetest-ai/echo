@@ -64,6 +64,19 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   makes the handles; the page takes them once (`plugin_dropped` → `window.echo.pluginDrop`) and hands them to the
   plugin's handlers if its view is still shown. Any other drag is the webview's own. Windows has no drop handler: wry's
   would take every external drop from WebView2. Evidence: `window::plugins::dropped`, `dropTarget` (window script)
+- A plugin's microphone (`uses.microphone`): the app keeps which plugin holds it (`window::plugins::MIC`: id, name, and
+  one webview grant for each opening). The webview's permission requests: the microphone is granted only while a
+  plugin holds it, once for each opening; the camera is refused; anything else keeps the engine's default (macOS: wry's
+  `with_permission_handler`, which also refuses a display-capture request, though WKWebView doesn't send a page's
+  `getDisplayMedia` through it; Windows: Echo's own `PermissionRequested` handler with `SavesInProfile` off, so
+  WebView2 asks again on every request, `window::gate_media`; a page's `getDisplayMedia` there shows WebView2's own
+  picker). Screen sharing is not gated by Echo on either. WebKit keeps a page's grant and doesn't ask again, so the app
+  resets the webview's microphone (`setMicrophoneCaptureState(None)`: any capture stops and WebKit asks again next
+  time) once after each grant given or microphone released, whatever the capture state (a reset owed:
+  `window::plugins::mic_reset_due`), and whenever a capture runs that no plugin holds — checked on every watcher tick
+  and after every page command (`EchoWindow::follow_mic`). A recording starting takes the microphone from the plugin and tells the page
+  (`window.echo.micStopped`); the window closing releases it. Without a handler (before this) wry granted every
+  request on macOS. Evidence: `window::plugins::mic_grant`, `EchoWindow::follow_mic`
 - The window serves a granted folder's images as `/plugin/<id>/folder/<root>/<path>` (§ Store's media rule, by folder).
   Evidence: `window::plugins::folder_image`
 
