@@ -171,6 +171,19 @@ pub fn open_regular(path: &Path) -> Result<std::fs::File> {
     if !f.metadata()?.is_file() {
         bail!("{} isn't a file", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     }
+    // A regular file: read as any other, blocking again.
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = f.as_raw_fd();
+        // SAFETY: `fd` is the open file's own descriptor; F_GETFL / F_SETFL only read and set its status flags.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            if flags >= 0 {
+                libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+            }
+        }
+    }
     Ok(f)
 }
 

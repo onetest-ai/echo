@@ -667,6 +667,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 set_current(&current, &plugin);
                 current.lock().unwrap().providing = command == "__work";
                 current.lock().unwrap().widget = command.starts_with("__widget:");
+                // Echo's own asks (its work rows, a widget's data) aren't the user's: no picker from them.
+                current.lock().unwrap().unattended = command == "__work" || command.starts_with("__widget:");
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -774,6 +776,8 @@ fn load(rt: &Runtime, id: &str, dir: &Path, current: &Arc<Mutex<Current>>, tx: &
     let source = std::fs::read_to_string(&file).map_err(|e| anyhow!("{main}: {e}"))?;
     let ctx = Context::full(rt).map_err(|e| anyhow!("{e}"))?;
     set_current(current, id);
+    // `apply(ctx)` runs on every load (each sync): no one asked for a picker there.
+    current.lock().unwrap().unattended = true;
     let mut outcome: Result<()> = Ok(());
     {
         let current = current.clone();

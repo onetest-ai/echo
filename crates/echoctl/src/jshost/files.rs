@@ -166,6 +166,11 @@ mod tests {
               ctx.command('heard', () => ctx.store.read('heard.txt'))
               // From an event: no one at the screen asked — no picker.
               ctx.on('call_ended', () => ctx.system.pickFiles('x').then(() => ctx.store.write('heard.txt', 'picked'), (e) => ctx.store.write('heard.txt', e.message))).catch(() => {})
+              // From its own start-up and from Echo's ask for a widget's data: no one at the screen asked either.
+              let atStart = 'waiting', inWidget = 'waiting'
+              ctx.system.pickFiles('x').then(() => { atStart = 'picked' }, (e) => { atStart = e.message })
+              ctx.widgets.provide('w', () => { ctx.system.pickFiles('x').then(() => { inWidget = 'picked' }, (e) => { inWidget = e.message }); return { value: 1 } })
+              ctx.command('unasked', () => ({ atStart, inWidget }))
             }
         "#;
         std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
@@ -221,8 +226,8 @@ mod tests {
         let h3 = make("taker", &f).unwrap();
         plugins::remove("taker", true).unwrap();
         assert!(own_list("taker", &[h3]).is_err());
-        // A file handed over, replaced by a FIFO since: refused, never waited on.
-        #[cfg(unix)]
+        // A file handed over, replaced by a FIFO since: refused, never waited on (opened without blocking on macOS).
+        #[cfg(target_os = "macos")]
         {
             let p = root.join("pipe.md");
             std::fs::write(&p, "x").unwrap();
@@ -282,8 +287,8 @@ mod tests {
         std::fs::File::create(&big).unwrap().set_len(MAX_COPY + 1).unwrap();
         let bh = make("ingest", &big).unwrap();
         assert!(run("ingest", "copy", json!({"to": "sources/Big.bin"}), &[bh]).unwrap_err().contains("up to 50 MB"));
-        // A handed file replaced by a FIFO since: refused, never waited on.
-        #[cfg(unix)]
+        // A handed file replaced by a FIFO since: refused, never waited on (opened without blocking on macOS).
+        #[cfg(target_os = "macos")]
         {
             let p = root.join("pipe.pdf");
             std::fs::write(&p, "x").unwrap();
@@ -342,6 +347,11 @@ mod tests {
         assert!(files.unwrap_err().contains("not inside a run Echo started"));
         assert!(folder.unwrap_err().contains("not inside a run Echo started"));
         assert_eq!(heard, Some(json!("a picker opens only for what you asked, not from a timer or an event")));
+        // Its own start-up (`apply`, on every load) and Echo's ask for a widget's data: refused too.
+        run("picker", "__widget:w", json!({}), &[]).unwrap();
+        let refused = json!("a picker opens only for what you asked, not from a timer or an event");
+        let unasked = (0..100).find_map(|_| run("picker", "unasked", json!({}), &[]).ok().filter(|v| v["atStart"] != "waiting" && v["inWidget"] != "waiting").or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
+        assert_eq!(unasked, Some(json!({"atStart": refused, "inWidget": refused})));
         plugins::remove("picker", true).unwrap();
         sync();
     }

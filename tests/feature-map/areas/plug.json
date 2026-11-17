@@ -401,7 +401,7 @@
   },
   {
    "id": "F-PLUG-44",
-   "feature": "Files the user hands a plugin come as handles `{file, name, size}` — the plugin's own (another's refused), never the path, for an hour: picked in the system's dialog (`ctx.system.pickFiles`, `multiple`, `ext`; `ECHOCTL_PICK_FILES` in a debug build) or named with `echoctl plugin call <id> <cmd> --file <path>` (refused where the CLI's run limits hold: a minutes run, a thread's sync, Yolo, a routine preparing and asking — not a routine acting on its own); no picker inside a run Echo started or from a timer or event handler; the host half reads one (`ctx.files.read`, 4 MB at most) or copies its bytes into a folder it was given (`ctx.fs.copyIn`, `folders.write`, 50 MB at most, never through a link, never over a file unless `createNew: false`); no new line on the sheet",
+   "feature": "Files the user hands a plugin come as handles `{file, name, size}` — the plugin's own (another's refused), never the path, for an hour: picked in the system's dialog (`ctx.system.pickFiles`, `multiple`, `ext`; `ECHOCTL_PICK_FILES` in a debug build) or named with `echoctl plugin call <id> <cmd> --file <path>` (refused where the CLI's run limits hold: a minutes run, a thread's sync, Yolo, a routine preparing and asking — not a routine acting on its own); no picker inside a run Echo started, from its start-up, a timer, an event handler or a widget's or work rows' provider; the host half reads one (`ctx.files.read`, 4 MB at most) or copies its bytes into a folder it was given (`ctx.fs.copyIn`, `folders.write`, 50 MB at most, never through a link, never over a file unless `createNew: false`); no new line on the sheet",
    "priority": "high",
    "check": "agent",
    "axes": []

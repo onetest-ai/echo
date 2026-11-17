@@ -28,8 +28,8 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   terminal's (`echoctl plugin call --file`) — for an hour, 1,000 at most (the oldest go), with its plugin, the file's real
   path, name and size; the plugin and the page see `{file, name, size}`. Every use checks it is the plugin's and not past
   its hour. They go when the plugin is switched off, updated or removed (`files::forget`, beside `scripts::stop_plugin`).
-  A picker opens only on a command (refused in a run Echo started, `notes::headless`, and in a timer's or event
-  handler's own slice); Windows' pickers read their prompt and filter from the environment, never quoted into the
+  A picker opens only on a command (refused in a run Echo started, `notes::headless`, and in its `apply`, a timer's
+  or event handler's own slice and Echo's asks for its widgets' data and work rows); Windows' pickers read their prompt and filter from the environment, never quoted into the
   PowerShell script. A handed file, and an image served, is opened without blocking and refused unless it is a regular
   file (a FIFO put in its place is never waited on: `grants::open_regular`). Evidence: `jshost::files::own`
 - `copyIn` writes the bytes into a hidden `.<name>.<pid>.<n>.part` beside the target (made new), then links it into place

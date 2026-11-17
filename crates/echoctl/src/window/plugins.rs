@@ -395,6 +395,10 @@ mod tests {
         {
             std::os::unix::fs::symlink(outside.join("secret.png"), vault.join("assets/link.png")).unwrap();
             assert_eq!(got("pages", &format!("{real}/assets/link.png")).0, 404, "a link out of the folder isn't followed");
+        }
+        // A FIFO in the folder: never waited on (opened without blocking on macOS).
+        #[cfg(target_os = "macos")]
+        {
             assert!(std::process::Command::new("mkfifo").arg(vault.join("assets/pipe.png")).status().unwrap().success());
             assert_eq!(got("pages", &format!("{real}/assets/pipe.png")).0, 404, "a FIFO is never waited on");
         }

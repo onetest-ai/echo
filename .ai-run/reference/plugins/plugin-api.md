@@ -218,8 +218,8 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   `[]` when cancelled; one file unless `multiple`; `ext` up to 20 extensions, letters and digits (`["md", "pdf"]`). Its
   window half's `ctx.onFileDrop` (§ Client half). `echoctl plugin call <id> <cmd> '<json>' --file <path>` (repeatable;
   refused where the CLI's limits for runs hold — a minutes run, a thread's sync, Yolo, a routine preparing and asking —
-  never in a routine acting on its own, `notes::run_limited`). No picker opens inside a run Echo started, nor from a
-  timer's or an event handler's own call. File names come from the user's disk: untrusted text, put into the page only
+  never in a routine acting on its own, `notes::run_limited`). No picker opens inside a run Echo started, nor from its
+  `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
