@@ -147,6 +147,89 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     })
 }
 
+/// The finished file `tmp` put at `to` (its folder) only where nothing is there: never over a file, also when writers
+/// race (one wins, the others get `AlreadyExists`). An exclusive rename (`renamex_np(RENAME_EXCL)` on macOS,
+/// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` on Windows); on a volume without it a hard link; on one with
+/// neither (exFAT and FAT on macOS, SMB shares without hard links) `to` taken new (`O_EXCL`) and `tmp` renamed over it:
+/// for that moment `to` is empty, another program writing it then is overwritten, and a crash then leaves it empty.
+/// Never through a link: none of them follows one at `to`. `tmp` is gone once it is placed.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn place_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
+    match rename_excl(tmp, to) {
+        Err(e) if unsupported(&e) => {}
+        r => return r,
+    }
+    match link_new(tmp, to) {
+        Err(e) if unsupported(&e) => claim_new(tmp, to),
+        r => r,
+    }
+}
+
+/// The volume can't do it: a mode `place_new` tries the next way for.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn unsupported(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    let codes = [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS, libc::EINVAL, libc::EPERM];
+    // ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED.
+    #[cfg(not(unix))]
+    let codes = [1, 50];
+    e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error().is_some_and(|c| codes.contains(&c))
+}
+
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+#[cfg(target_os = "macos")]
+fn rename_excl(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = |p: &Path| std::ffi::CString::new(p.as_os_str().as_bytes()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    let (from, to) = (c(from)?, c(to)?);
+    // SAFETY: two NUL-terminated paths that outlive the call.
+    match unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) } {
+        0 => Ok(()),
+        _ => Err(std::io::Error::last_os_error()),
+    }
+}
+
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+#[cfg(windows)]
+fn rename_excl(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVE_FILE_FLAGS};
+    let w = |p: &Path| p.as_os_str().encode_wide().chain([0]).collect::<Vec<u16>>();
+    let (from, to) = (w(from), w(to));
+    // SAFETY: two NUL-terminated wide paths that outlive the call; no flags: a file at `to` is never replaced.
+    unsafe { MoveFileExW(windows_core::PCWSTR(from.as_ptr()), windows_core::PCWSTR(to.as_ptr()), MOVE_FILE_FLAGS(0)) }.map_err(|e| {
+        // An HRESULT made from a Win32 error carries it in its low 16 bits (ERROR_ALREADY_EXISTS → AlreadyExists).
+        let c = e.code().0 as u32;
+        std::io::Error::from_raw_os_error(if c & 0xFFFF_0000 == 0x8007_0000 { (c & 0xFFFF) as i32 } else { c as i32 })
+    })
+}
+
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+#[cfg(not(any(target_os = "macos", windows)))]
+fn rename_excl(_: &Path, _: &Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
+/// `place_new` on a volume with hard links but no exclusive rename.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn link_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
+    fs::hard_link(tmp, to)?;
+    let _ = fs::remove_file(tmp);
+    Ok(())
+}
+
+/// `place_new` on a volume with neither: the name taken first, so only one writer gets it, then filled by a rename.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn claim_new(tmp: &Path, to: &Path) -> std::io::Result<()> {
+    fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    fs::rename(tmp, to).inspect_err(|_| {
+        // Only the empty file claimed: one put there meanwhile is left as it is.
+        if fs::symlink_metadata(to).is_ok_and(|m| m.is_file() && m.len() == 0) {
+            let _ = fs::remove_file(to);
+        }
+    })
+}
+
 /// `<dir>/<name><ext>`, or `<name>-2<ext>`, `-3`… when that is taken: a place in the trash nothing has yet, so two
 /// things trashed within the same second (or millisecond) keep both.
 pub fn unused(dir: &Path, name: &str, ext: &str) -> PathBuf {
@@ -232,6 +315,77 @@ mod tests {
         assert_eq!(unused(&dir, "mine-20261109120000", ".md"), dir.join("mine-20261109120000-2.md"));
         fs::create_dir_all(dir.join("mine-20261109120000-2.md")).unwrap();
         assert_eq!(unused(&dir, "mine-20261109120000", ".md"), dir.join("mine-20261109120000-3.md"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Eight writers placing their own finished file at `to` the `place` way: exactly one wins and its whole text is
+    /// there; the others get `AlreadyExists` and nothing of theirs is left; the winner's file is never replaced.
+    fn one_of_racing_writers_wins(name: &str, place: fn(&Path, &Path) -> std::io::Result<()>) {
+        let dir = std::env::temp_dir().join(format!("echo-place-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let to = dir.join("Race.md");
+        let won: Vec<std::io::Result<()>> = (0..8)
+            .map(|i| {
+                let (dir, to) = (dir.clone(), to.clone());
+                std::thread::spawn(move || {
+                    let tmp = dir.join(format!(".Race.md.{i}.part"));
+                    fs::write(&tmp, format!("writer {i}")).unwrap();
+                    let r = place(&tmp, &to);
+                    let _ = fs::remove_file(&tmp);
+                    r
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .collect();
+        assert_eq!(won.iter().filter(|r| r.is_ok()).count(), 1, "{name}: {won:?}");
+        assert!(won.iter().filter_map(|r| r.as_ref().err()).all(|e| e.kind() == std::io::ErrorKind::AlreadyExists), "{name}: {won:?}");
+        let text = fs::read_to_string(&to).unwrap();
+        assert!(text.starts_with("writer "), "{name}: {text}");
+        let tmp = dir.join(".late.part");
+        fs::write(&tmp, "late").unwrap();
+        assert_eq!(place(&tmp, &to).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists, "{name}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), text, "{name}: never replaced");
+        assert!(tmp.exists(), "{name}: a refused file is left to its caller");
+        fs::remove_file(&tmp).unwrap();
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "{name}: no part left");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_file_is_placed_only_where_nothing_is_and_one_of_racing_writers_wins() {
+        one_of_racing_writers_wins("place", place_new);
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn the_exclusive_rename_refuses_a_file_that_is_there() {
+        one_of_racing_writers_wins("rename", rename_excl);
+    }
+
+    #[test]
+    fn the_fallbacks_for_volumes_without_an_exclusive_rename_never_replace_a_file_either() {
+        one_of_racing_writers_wins("link", link_new);
+        one_of_racing_writers_wins("claim", claim_new);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_file_is_never_placed_through_a_link_at_its_name() {
+        let dir = std::env::temp_dir().join(format!("echo-place-through-a-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (to, target) = (dir.join("Note.md"), dir.join("target.md"));
+        std::os::unix::fs::symlink(&target, &to).unwrap();
+        for place in [place_new, link_new, claim_new] {
+            let tmp = dir.join(".Note.md.part");
+            fs::write(&tmp, "x").unwrap();
+            assert_eq!(place(&tmp, &to).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+            assert!(!target.exists() && fs::symlink_metadata(&to).unwrap().file_type().is_symlink());
+            fs::remove_file(&tmp).unwrap();
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }

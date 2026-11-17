@@ -701,6 +701,13 @@
    "priority": "high",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-95",
+   "feature": "A plugin's `ctx.fs.write(…, {createNew: true})` and `ctx.fs.copyIn` make a new file in a folder it was given on a volume without hard links too (exFAT, FAT, many SMB/NFS shares): still never over a file there (\"is there already\", the file untouched) and no hidden part left",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }

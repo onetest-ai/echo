@@ -13,7 +13,7 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
 - A plugin's writes of a file — `ctx.store.write` / `update` and `ctx.fs.write` / `append` — take one lock of its own
   across processes, `.locks/<id>.files.lock` beside the stores (removed with its data). A conditional write reads the
   file's sha256 inside the lock; `createNew` writes a hidden `.<name>.<pid>.<n>.part` beside the target (made new) and
-  links it into place, which never replaces a file, the part removed either way. The lock holds only Echo's own
+  puts it into place with `paths::place_new`, which never replaces a file, the part removed either way. The lock holds only Echo's own
   processes: another program changing a granted folder's file meanwhile isn't held off. Evidence:
   `jshost::folders::put`
 - `ctx.fs.snapshot` copies into `cache/snapshots/<16 hex>/` of the store, each file opened without following a link
@@ -56,8 +56,9 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   or event handler's own slice and Echo's asks for its widgets' data and work rows); Windows' pickers read their prompt and filter from the environment, never quoted into the
   PowerShell script. A handed file, and an image served, is opened without blocking and refused unless it is a regular
   file (a FIFO put in its place is never waited on: `grants::open_regular`). Evidence: `jshost::files::own`
-- `copyIn` writes the bytes into a hidden `.<name>.<pid>.<n>.part` beside the target (made new), then links it into place
-  (never replacing a file) or, with `createNew: false`, renames it over the file; the part is removed either way.
+- `copyIn` writes the bytes into a hidden `.<name>.<pid>.<n>.part` beside the target (made new), then puts it into place
+  with `paths::place_new` (never replacing a file) or, with `createNew: false`, renames it over the file; the part is
+  removed either way.
   Evidence: `jshost::files::copy_in`
 - Drops (macOS): the page tells the app which plugin listens with its view shown (`plugin_drops`, on every change of
   address and of listeners); the window's drag handler takes a drag of files only then, from its start to its end, and

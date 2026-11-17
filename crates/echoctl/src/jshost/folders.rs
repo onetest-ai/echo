@@ -104,7 +104,7 @@ fn sha_file(p: &Path) -> Result<Option<String>> {
 
 /// `text` into `f` (its folder there), as `opts` asks — under the plugin's lock (the caller's):
 /// - `ifSha`: only while the file there is still the one with that sha256 (atomically, as any write);
-/// - `createNew`: never over a file — a hidden part beside it linked into place, which never replaces one;
+/// - `createNew`: never over a file — a hidden part beside it put into place only where nothing is (`paths::place_new`);
 /// - neither: atomically, over whatever is there.
 pub(super) fn put(f: &Path, name: &str, text: &str, opts: &Value) -> Result<()> {
     // `ifSha: null` (said, not left out) is "nothing there": never an unconditional write.
@@ -129,8 +129,9 @@ pub(super) fn put(f: &Path, name: &str, text: &str, opts: &Value) -> Result<()> 
         let file = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let tmp = f.with_file_name(format!(".{file}.{}.{}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-        let placed = out.write_all(text.as_bytes()).and_then(|_| out.flush()).and_then(|_| std::fs::hard_link(&tmp, f));
+        let written = out.write_all(text.as_bytes()).and_then(|_| out.flush());
         drop(out);
+        let placed = written.and_then(|_| paths::place_new(&tmp, f));
         let _ = std::fs::remove_file(&tmp);
         return placed.map_err(|e| match e.kind() {
             std::io::ErrorKind::AlreadyExists => anyhow!("“{name}” is there already"),
