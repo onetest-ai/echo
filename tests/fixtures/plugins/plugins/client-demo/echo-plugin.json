@@ -1,0 +1,8 @@
+{
+  "id": "client-demo",
+  "name": "Client demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a row in each client's Profile and a value kept per client (tests/cases/plugins/TC-160).",
+  "main": "main.js",
+  "client": "client.js"
+}

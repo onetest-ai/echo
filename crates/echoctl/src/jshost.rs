@@ -238,6 +238,15 @@ const PRELUDE: &str = r#"
        *  the stage away from this plugin's, not applied until they let it set the stage again. */
       setStage: (thread, stage, reason) => call('threads.set_stage', [String(thread), String(stage), reason == null ? null : String(reason)]),
     },
+    /** Its own values per client (no grant: its data, by client id), as `threads`: `get(client, key)` → value | null,
+     *  `set(client, key, value)` (JSON, 16 KB at most, 64 keys a client, 4 MB in all; null removes it; a key without a
+     *  dot), `list(key)` → [{client, value}] of the clients that have it. Kept when a client is renamed, gone when it is
+     *  removed. */
+    clients: {
+      get: (client, key) => call('clients.get', [String(client), String(key)]),
+      set: (client, key, value) => call('clients.set', [String(client), String(key), value === undefined ? null : value]),
+      list: (key) => call('clients.list', String(key)),
+    },
     /** Values the plugins of its marketplace share, one for the computer: get(key) → the value or null, set(key, value)
      *  (null removes it; created when it isn't there). `key` is `<ns>.<name>`, `ns` the marketplace's declared name in
      *  lower case; every plugin reads it, only its marketplace's plugins set it. ctx.threads takes such a key too: one
@@ -935,7 +944,7 @@ fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
 }
 
 /// Not one of Echo's files in the plugin's store (written or removed only by Echo, under their locks): its settings,
-/// its work rows, its values per thread.
+/// its work rows, its values per thread and per client.
 fn not_echos(rel: &str) -> Result<()> {
     let first = Path::new(rel.trim_start_matches("./")).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     // A file system may fold a name onto another (APFS: `ſettings.json` is `settings.json`): a name at the top of the
@@ -947,6 +956,7 @@ fn not_echos(rel: &str) -> Result<()> {
         Some("settings.json") => bail!("the plugin's settings.json isn't its to write: use ctx.settings.set"),
         Some(work::FILE) => bail!("the plugin's {} isn't its to write: Echo keeps what ctx.work.provide answers", work::FILE),
         Some(plugins::thread_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.threads.set", plugins::thread_values::FILE),
+        Some(plugins::client_values::FILE) => bail!("the plugin's {} isn't its to write: use ctx.clients.set", plugins::client_values::FILE),
         _ => Ok(()),
     }
 }
@@ -1158,6 +1168,12 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 st => plugins::thread_values::list(&st.unwrap_or_else(|| id.to_string()), &key)?,
             }
         }
+        "clients.get" => plugins::client_values::get(id, &s(&arg[0]), &s(&arg[1]))?,
+        "clients.set" => {
+            plugins::client_values::set(id, &s(&arg[0]), &s(&arg[1]), &arg[2])?;
+            Value::Null
+        }
+        "clients.list" => plugins::client_values::list(id, &s(arg))?,
         "shared.get" => plugins::shared::get(&s(arg))?,
         "shared.set" => {
             let key = s(&arg[0]);
@@ -2694,6 +2710,48 @@ mod tests {
         assert!(!paths::state_dir().join("plugin-events.jsonl").exists(), "taken");
         APP.store(false, Ordering::Relaxed); // the other tests' processes aren't the app
         plugins::remove("repos", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_keeps_its_own_values_per_client_and_they_go_with_the_client() {
+        let (_env, root) = paths::testenv::folders("jshost-clients");
+        let acme = crate::projects::add_client("Acme", &[], false).unwrap().id;
+        let mk = root.join("market");
+        let d = mk.join("plugins/vaults");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js"}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('set', (a) => { ctx.clients.set(a.client, a.key || 'vault', a.value); return ctx.clients.get(a.client, a.key || 'vault') })
+              ctx.command('list', () => ctx.clients.list('vault'))
+              ctx.command('sneak', () => ctx.store.write('client-values.json', '{}'))
+              ctx.command('wipe', () => ctx.store.remove('./client-values.json'))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "vaults", "source": "./plugins/vaults"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let review = plugins::review("vaults", Some(&name)).unwrap();
+        plugins::install("vaults", Some(&name), &review.uses).unwrap();
+        sync();
+        let set = (0..50).find_map(|_| call("vaults", "set", &json!({"client": acme, "value": "Acme notes"})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(set.unwrap(), json!("Acme notes"));
+        assert_eq!(call("vaults", "list", &json!({})).unwrap(), json!([{"client": acme, "value": "Acme notes"}]));
+        assert!(call("vaults", "set", &json!({"client": "nope", "value": 1})).unwrap_err().to_string().contains("no client “nope”"));
+        assert!(call("vaults", "set", &json!({"client": acme, "key": "t.vault", "value": 1})).unwrap_err().to_string().contains("no dot"));
+        assert!(call("vaults", "sneak", &json!({})).unwrap_err().to_string().contains("ctx.clients.set"), "its client-values.json is Echo's to write");
+        assert!(call("vaults", "wipe", &json!({})).unwrap_err().to_string().contains("ctx.clients.set"), "…and not its to remove");
+        crate::projects::remove_client(&acme).unwrap();
+        assert_eq!(call("vaults", "list", &json!({})).unwrap(), json!([]), "removed with the client");
+        plugins::remove("vaults", false).unwrap();
         sync();
     }
 

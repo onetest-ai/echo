@@ -78,6 +78,8 @@ node crates/echoctl/ui/fingerprint.test.mjs
 node crates/echoctl/ui/plugin-work-rows.test.mjs
 # The plugins' rows of a thread's Profile: each drawn on its own, one that throws or repeats left out, after once per box drawn afresh, gone with its plugin (threadSlotRows, threadSlotAfter, #464).
 node crates/echoctl/ui/thread-slot.test.mjs
+# The same for a client's Profile (client.profile): its rows for {id, name}, after per box and client, gone with its plugin.
+node crates/echoctl/ui/client-slot.test.mjs
 # The plugins' chips on a call's row in the calls list (callRowChips).
 node crates/echoctl/ui/call-row-slot.test.mjs
 # A plugin's window half: the stylesheets it may load, and what unloading it takes out.

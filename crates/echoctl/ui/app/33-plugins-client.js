@@ -30,9 +30,10 @@ const Plugins = {
 // `task.actions` also on a plugin's work row, for an item whose `when` is true for {kind: 'plugin', source, row}.
 // `thread.profile`: a row of a thread's Profile, under its Sources ({id, label, render(thread) → HTML, after(box, thread)}),
 // `thread` = {id, name, client}.
+// `client.profile`: a row of a client's Profile, under its Threads, shaped as `thread.profile`; `client` = {id, name}.
 // `call.row`: a chip on a call's row in the calls list ({id, label, chip(call) → short text or nothing}), `call` =
 // {name, title, started_at, status, memo}.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'call.row']
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings', 'thread.profile', 'client.profile', 'call.row']
 // ── call row slot: the plugins' chips on a call's row (no DOM: `call-row-slot.test.mjs`) — each item's `chip(call)`
 // gives a short text (24 characters, the rest cut) or nothing; one that throws is left out (logged) and the row drawn
 // without it; a second item with the same plugin and id is left out. `chip` runs as a widget's draw does: a
@@ -55,10 +56,11 @@ function callRowChips(items, call, log) {
 /** The call a `call.row` chip is drawn for: the row's own facts. */
 const slotCall = (c) => ({ name: c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
 // end of the call row slot block
-// ── thread slot: the plugins' rows of a thread's Profile, each drawn on its own — one that throws is left out (and
-// logged), the Profile draws without it; a second row with the same plugin and id is left out too (logged).
-// `render` runs as a widget's draw does: a `ctx.render()` asked for in it is ignored (no loop).
-function threadSlotRows(items, thread, log) {
+// ── thread slot: the plugins' rows of a thread's or a client's Profile (`thread.profile`, `client.profile`), each
+// drawn on its own — one that throws is left out (and logged), the Profile draws without it; a second row with the same
+// plugin and id is left out too (logged). `render` runs as a widget's draw does: a `ctx.render()` asked for in it is
+// ignored (no loop).
+function threadSlotRows(items, target, log) {
   const out = [], seen = new Set()
   for (const x of items || []) {
     const key = `${x.plugin}:${x.id}`
@@ -66,30 +68,33 @@ function threadSlotRows(items, thread, log) {
     seen.add(key)
     Plugins.drawing = true
     try {
-      const html = x.render(thread)
+      const html = x.render(target)
       out.push({ key, label: String(x.label || x.id), html: html == null ? '' : String(html), after: x.after })
     } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) } finally { Plugins.drawing = false }
   }
   return out
 }
-/** Each row's `after(box, thread)`, once per box drawn afresh (a redraw that left the page as it was keeps the boxes,
- *  marked): `after` may fetch and `ctx.render()` without drawing itself again forever. */
-function threadSlotAfter(root, items, thread, log) {
-  const boxes = [...root.querySelectorAll('[data-thread-slot]')]
+/** Each row's `after(box, target)` for the boxes marked `data-profile-slot`, once per box drawn afresh (a redraw that
+ *  left the page as it was keeps the boxes, marked): `after` may fetch and `ctx.render()` without drawing itself again
+ *  forever. */
+function threadSlotAfter(root, items, target, log) {
+  const boxes = [...root.querySelectorAll('[data-profile-slot]')]
   const seen = new Set()
   for (const x of items || []) {
     const key = `${x.plugin}:${x.id}`
     if (seen.has(key)) continue
     seen.add(key)
-    const box = x.after && boxes.find((b) => b.dataset.threadSlot === key)
-    if (!box || box._afterFor === thread.id) continue
-    box._afterFor = thread.id
-    try { x.after(box, thread) } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) }
+    const box = x.after && boxes.find((b) => b.dataset.profileSlot === key)
+    if (!box || box._afterFor === target.id) continue
+    box._afterFor = target.id
+    try { x.after(box, target) } catch (e) { log(`${x.plugin}: ${x.label || x.id}: ${(e && e.message) || e}`) }
   }
 }
 // end of the thread slot block
 /** The thread a `thread.profile` row is drawn for. */
 const slotThread = (p) => ({ id: p.id, name: p.name, client: p.client || null })
+/** The client a `client.profile` row is drawn for. */
+const slotClient = (c) => ({ id: c.id, name: c.name })
 /** `ctx.echo.jobs.set` requests waiting for Echo's answer (`window.echo.jobsSet`), by request id. */
 const JobsAsked = {}
 

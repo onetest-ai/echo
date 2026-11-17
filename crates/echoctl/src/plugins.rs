@@ -49,6 +49,7 @@ pub mod presets;
 pub mod routines;
 pub(crate) use sources::copy_tree;
 pub mod thread_values;
+pub mod client_values;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub mod markdown;
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
@@ -1328,6 +1329,7 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
         let _ = (fs::remove_file(secrets_file(id)), fs::remove_file(addresses_file(id)));
         pins::remove_plugin(id);
         thread_values::forget(id);
+        client_values::forget(id);
         #[cfg(feature = "js")]
         crate::jshost::folders::forget(id);
     }
