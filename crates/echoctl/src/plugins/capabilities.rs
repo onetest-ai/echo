@@ -168,7 +168,13 @@ pub(super) fn join_words(w: &[&str]) -> String {
 /// before that choice) is still taken and changes nothing. In a folder you gave it, a run works there on that folder's
 /// own setup, its permissions as you set routines too; a session the user opens there from its screens, as they set
 /// Claude in the window.
+/// The sheet's line for `uses.claude.skills: true` (`claude_skills`: each skill only on the user's click).
+pub const CLAUDE_SKILLS_LINE: &str = "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin";
+
 pub(super) fn describe_claude(v: &Value) -> Result<String> {
+    if !v["skills"].is_null() && !v["skills"].is_boolean() {
+        bail!("“skills” is true or false");
+    }
     let mut line = "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)".to_string();
     if v["skip"] == true {
         line.push_str("; a run you mark so may skip every permission check");

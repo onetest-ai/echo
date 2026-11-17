@@ -227,13 +227,13 @@ pub(super) fn append(id: &str, root: &str, rel: &str, text: &str) -> Result<()> 
 /// `ctx.fs.mkdir(root, rel)`: the folder and those above it, inside a folder it may change.
 pub(super) fn mkdir(id: &str, root: &str, rel: &str) -> Result<()> {
     uses_flag(id, "folders", "write")?;
-    let d = crate::grants::writable(id, root, rel)?;
+    let d = crate::grants::writable_folder(id, root, rel)?;
     if std::fs::symlink_metadata(&d).is_ok_and(|m| !m.is_dir()) {
         bail!("“{rel}” is a file");
     }
     std::fs::create_dir_all(&d)?;
     // A folder of it swapped for a link meanwhile: checked again as it is now.
-    crate::grants::writable(id, root, rel)?;
+    crate::grants::writable_folder(id, root, rel)?;
     Ok(())
 }
 
@@ -244,6 +244,10 @@ pub(super) fn move_to(id: &str, root: &str, rel_from: &str, rel_to: &str) -> Res
     let to = crate::grants::writable(id, root, rel_to)?;
     if !from.exists() {
         bail!("“{rel_from}” isn't there");
+    }
+    // A folder goes only where a folder may (no hidden place takes a folder of the plugin's files).
+    if from.is_dir() {
+        crate::grants::writable_folder(id, root, rel_to)?;
     }
     // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
     let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
@@ -258,7 +262,8 @@ pub(super) fn move_to(id: &str, root: &str, rel_from: &str, rel_to: &str) -> Res
 /// `ctx.fs.remove(root, rel)`: a file, or an empty folder, inside a folder it may change.
 pub(super) fn remove(id: &str, root: &str, rel: &str) -> Result<()> {
     uses_flag(id, "folders", "write")?;
-    let f = crate::grants::writable(id, root, rel)?;
+    // A file as a file is written; an empty folder as a folder is made (`.claude/skills/<name>`).
+    let f = crate::grants::writable(id, root, rel).or_else(|e| crate::grants::writable_folder(id, root, rel).ok().filter(|d| d.is_dir()).ok_or(e))?;
     if f.is_dir() {
         std::fs::remove_dir(&f).map_err(|_| anyhow!("“{rel}” is a folder with files in it"))?;
     } else {

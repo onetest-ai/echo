@@ -21,4 +21,7 @@ assert.ok(/copy: \(text\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.ui.copy a
 assert.ok(/set: \(job, settings\) => \{\s*if \(!copyAllowed\(/.test(src), "ctx.echo.jobs.set asks copyAllowed first")
 // Showing a file of a granted folder in Finder / Explorer, too: asked before the request is sent.
 assert.ok(/reveal: async \(root, path\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.system.reveal asks copyAllowed first')
-console.log('ok - a plugin copies, changes Echo\'s jobs and shows a file in Finder only with the user\'s activation; an engine that can\'t tell refuses')
+// A skill added to or removed from the user's own Claude Code, too: asked before the request is sent.
+assert.ok(/installSkill: async \(name, md\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.claude.installSkill asks copyAllowed first')
+assert.ok(/removeSkill: async \(name\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.claude.removeSkill asks copyAllowed first')
+console.log('ok - a plugin copies, changes Echo\'s jobs, shows a file in Finder and adds or removes a Claude Code skill only with the user\'s activation; an engine that can\'t tell refuses')

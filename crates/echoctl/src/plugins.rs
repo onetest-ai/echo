@@ -34,6 +34,9 @@ pub use appfiles::{app_file_real, app_file_rel};
 use appfiles::app_file;
 mod capabilities;
 pub use capabilities::*;
+// Its install and removal on a click come only from the window.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub mod claude_skills;
 pub mod agent;
 pub mod scripts;
 pub mod shared;
@@ -616,6 +619,10 @@ pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
         }
         let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
         lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
+    }
+    // Skills it may add to the user's own Claude Code (`uses.claude.skills`), each on a click.
+    if m.uses.get("claude").is_some_and(|c| c["skills"] == true) {
+        lines.push(CLAUDE_SKILLS_LINE.into());
     }
     // Its routines: each named, with what its run may do and the hash of its definition and prompt.
     lines.extend(routines::sheet_lines(m));
@@ -1322,6 +1329,10 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     forget_read(id);
     crate::grants::remove_plugin(id);
     agent::remove(id);
+    // The skills it added to the user's own Claude Code go, data kept or not.
+    if let Err(e) = claude_skills::remove_plugin(id) {
+        eprintln!("{id}: its skills in your Claude Code weren't all removed: {e:#}");
+    }
     // A sign-in Echo kept for it goes with it, data kept or not: no plugin installed later gets it.
     signin::forget_plugin(id);
     if !keep_data {

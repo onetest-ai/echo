@@ -160,7 +160,7 @@
   },
   {
    "id": "F-PLUG-17",
-   "feature": "With `uses.folders.write` (the sheet: 'Reads and changes the … you pick … it may write, move and delete files in them') a plugin may `ctx.fs.write` (atomic), `ctx.fs.move` (never over another file) and `ctx.fs.remove` (a file or an empty folder) inside the folders the user gave it — never through a link, never outside, never a hidden file or folder; without it, it only reads. No plugin is given a folder that is or holds Echo's own (its settings, the data folder's .echo)",
+   "feature": "With `uses.folders.write` (the sheet: 'Reads and changes the … you pick … it may write, move and delete files in them') a plugin may `ctx.fs.write` (atomic), `ctx.fs.move` (never over another file) and `ctx.fs.remove` (a file or an empty folder) inside the folders the user gave it — never through a link, never outside, never a hidden file or folder but those F-PLUG-118 names; without it, it only reads. No plugin is given a folder that is or holds Echo's own (its settings, the data folder's .echo)",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -544,7 +544,7 @@
   },
   {
    "id": "F-PLUG-47",
-   "feature": "With `uses.folders.write` a plugin writes a file only over the one it read (`ctx.fs.write(root, path, text, {ifSha})`: another sha256 or a file gone → \"changed since you read it\", the file untouched) or only where nothing is (`{createNew: true}` or an explicit `{ifSha: null}`: never over a file, also when writers race; `ifSha` on a file over 64 MB refused before hashing), adds a block to a file's end (`ctx.fs.append`, a newline added, 1 MB at most, under the plugin's lock across processes, never into a link or a FIFO) and makes folders (`ctx.fs.mkdir`) — never through a link out, never a hidden name",
+   "feature": "With `uses.folders.write` a plugin writes a file only over the one it read (`ctx.fs.write(root, path, text, {ifSha})`: another sha256 or a file gone → \"changed since you read it\", the file untouched) or only where nothing is (`{createNew: true}` or an explicit `{ifSha: null}`: never over a file, also when writers race; `ifSha` on a file over 64 MB refused before hashing), adds a block to a file's end (`ctx.fs.append`, a newline added, 1 MB at most, under the plugin's lock across processes, never into a link or a FIFO) and makes folders (`ctx.fs.mkdir`) — never through a link out, never a hidden name but those F-PLUG-118 names",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -819,6 +819,24 @@
    "feature": "The system's folder picker a plugin opens (`ctx.system.pickFolder`) lets the user make a new folder in it (\"New Folder\" on macOS, \"Make New Folder\" on Windows), and the new folder picked is the one the plugin is given (a new vault in a new folder)",
    "priority": "medium",
    "check": "person",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-118",
+   "feature": "With `uses.folders.write` a plugin writes, appends, makes, moves and removes exactly these hidden names in a folder the user gave it, no sheet line of their own: a `.gitignore` in any folder that isn't hidden, Obsidian's `.obsidian/<name>.json`, and Markdown in a skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` a-z, 0-9, -, up to 64; the folders `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>` made or, empty, removed) — by their exact names and as what a link or short name reaches; everything else hidden is refused (\"is hidden\"): `.claude/settings*.json`, hooks, agents, commands, anything not `.md` under `.claude` (`SKILL.md.js`), `.Claude`, `.obsidian/plugins` and themes, `.git`, `.mcp.json`; a folder never moved into a hidden place",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-119",
+   "feature": "With `uses.claude.skills: true` (its own sheet line: \"Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it …\") a plugin's window half adds a skill to the user's own Claude Code (`ctx.claude.installSkill(name, md)` → `<Claude Code folder>/skills/<name>/SKILL.md`, `CLAUDE_CONFIG_DIR` when set) and removes one it added (`ctx.claude.removeSkill(name)`): only on the user's click or key (else refused with \"A skill is added to your Claude Code only on your click\", nothing sent); never from its host half; Markdown only, name a-z, 0-9, - up to 64, 256 KB at most; never over a skill folder there already that it didn't add (the user's, another plugin's); its skills go when it is removed; on test data only into the test's own Claude Code folder",
+   "priority": "high",
+   "check": "agent",
    "axes": [
     "plugin.uses"
    ]

@@ -113,12 +113,58 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     inside(&root, rel)
 }
 
-/// A path plugin `id` may write in one of its granted folders (`uses.folders.write`): the checks of `resolve`, and
+/// A file plugin `id` may write in one of its granted folders (`uses.folders.write`): the checks of `resolve`, and
 /// never a link itself — the deepest folder of it that exists already is, once links are followed, inside the root.
 /// What exists of it by its real names (a link inside the root followed, an 8.3 alias like `OBSIDI~1` as its long
-/// name), the rest as typed — and no part of that hidden. Written by renaming a file into it, which replaces a file,
-/// never follows one.
+/// name), the rest as typed — and nothing of that hidden but the files `hidden_ok` takes. Written by renaming a file
+/// into it, which replaces a file, never follows one.
 pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
+    writable_as(id, root, rel, Shape::File)
+}
+
+/// A folder plugin `id` may make (`ctx.fs.mkdir`) or remove when empty: `writable`'s checks, with the hidden folders
+/// `hidden_ok` takes for a folder.
+pub fn writable_folder(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
+    writable_as(id, root, rel, Shape::Folder)
+}
+
+/// What a hidden path is checked as: a file written, or a folder made.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Shape {
+    File,
+    Folder,
+}
+
+/// A skill's folder name (`.claude/skills/<name>`): 1–64 of `a-z`, `0-9` and `-`.
+pub fn skill_name(name: &str) -> bool {
+    (1..=64).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// The only hidden paths a plugin writes in a folder it may change, by their exact names (`.Claude` is not `.claude`):
+/// a file `.gitignore` in any folder that isn't hidden, Obsidian's `.obsidian/<name>.json` (not its plugins, themes or
+/// snippets: code and styles), and Markdown in a skill of the folder's own Claude Code project,
+/// `.claude/skills/<name>/<file>.md` — never Claude Code's settings, hooks, agents, commands or anything else under
+/// `.claude`, never `.git` or `.mcp.json`. A folder: `.obsidian`, `.claude`, `.claude/skills` and
+/// `.claude/skills/<name>`. Nothing else hidden.
+pub fn hidden_ok(rel: &Path, shape: Shape) -> bool {
+    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    if !parts.iter().any(|s| s.starts_with('.')) {
+        return true;
+    }
+    // A file's own name: not hidden, no data stream (Windows), its extension as written here.
+    let named = |n: &str, ext: &str| n.len() > ext.len() && n.ends_with(ext) && !n.starts_with('.') && !n.contains(':');
+    let p: Vec<&str> = parts.iter().map(String::as_str).collect();
+    match (shape, p.as_slice()) {
+        (Shape::File, [above @ .., ".gitignore"]) => !above.iter().any(|s| s.starts_with('.')),
+        (Shape::File, [".obsidian", n]) => named(n, ".json"),
+        (Shape::File, [".claude", "skills", s, f]) => skill_name(s) && named(f, ".md"),
+        (Shape::Folder, [".obsidian"] | [".claude"] | [".claude", "skills"]) => true,
+        (Shape::Folder, [".claude", "skills", s]) => skill_name(s),
+        _ => false,
+    }
+}
+
+fn writable_as(id: &str, root: &str, rel: &str, shape: Shape) -> Result<PathBuf> {
     let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
     if !folders(id).contains(&root) {
         bail!("{} isn't one of the folders you gave this plugin", root.display());
@@ -128,8 +174,9 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     if full == root {
         bail!("not the folder itself");
     }
-    // Hidden files and folders (`.git`, `.obsidian/plugins`…) hold other programs' code and settings: never written.
-    if Path::new(rel).components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
+    // Hidden files and folders (`.git`, `.obsidian/plugins`, `.claude/settings.json`…) hold other programs' code and
+    // settings: never written, but for the few `hidden_ok` takes.
+    if !hidden_ok(Path::new(rel.trim_start_matches("./")), shape) {
         bail!("“{rel}” is hidden: a plugin changes notes, not other programs' files");
     }
     // Never Echo's own folders (a grant from before they were refused).
@@ -154,7 +201,7 @@ pub fn writable(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
         Ok(f) if f.starts_with(&root) => f,
         _ => real_dir.join(full.strip_prefix(at).unwrap_or(Path::new(""))),
     };
-    if real.strip_prefix(&root).is_ok_and(|r| r.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))) {
+    if real.strip_prefix(&root).is_ok_and(|r| !hidden_ok(r, shape)) {
         bail!("“{rel}” is hidden: a plugin changes notes, not other programs' files");
     }
     Ok(real)

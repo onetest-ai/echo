@@ -31,7 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it); with `{"skills": true}` also its own line: "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" (§ Client half: `ctx.claude.installSkill`; `skills` true or false) |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -483,6 +483,19 @@ Windows), so a plugin that wants a new folder (a new vault) just asks for one; t
 given. In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
 named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `plugins::app_file`
 
+Hidden files and folders (a name starting with `.`) are read, never written — but for these, by their exact names
+(`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
+`append`, `move` (to and from), `remove` and `copyIn` and `ctx.git.commit` take as files, `ctx.fs.mkdir` and an empty
+folder's `remove` as folders. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
+- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`); Markdown in a
+  skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
+  `<file>` not hidden, ending in `.md`);
+- folders: `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
+  place;
+- everything else hidden is refused ("is hidden"): `.claude/settings*.json`, `.claude/hooks`, `agents`, `commands`,
+  anything under `.claude` that isn't such Markdown (`SKILL.md.js` too), `.obsidian/plugins`, `themes`, `snippets`,
+  `.git/**`, `.mcp.json`, `.gitattributes`, `.env`, a hidden note.
+
 Files the user hands a plugin come as **handles** `{file, name, size}`: `file` an opaque id of that plugin's alone (another
 plugin's is refused as one that isn't there), never the path; kept in the process's memory for an hour (1,000 at most).
 No line on the sheet: handing a file over is the user's own act. Evidence: `jshost::files::make`
@@ -495,7 +508,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
-  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
+  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
 - `ctx.fs.read(root, path, max)` → its text, `max` bytes (1 MB by default, 4 MB at most), bytes that aren't UTF-8 as
   U+FFFD; `ctx.fs.read(root, path, {max, strict: true})` throws "not UTF-8: <path>" instead (a character `max` cuts at
@@ -842,6 +855,7 @@ Evidence: `jshost::work::check_rows`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
+  `claude.installSkill(name, md)` / `claude.removeSkill(name)` (a skill in the user's own Claude Code, on the user's click: below),
   `system.reveal(root, path)` (a file of a folder it was given shown in Finder / Explorer, on the user's click: below),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash)`, `render()`, `markdown(md, opts)` and
@@ -935,6 +949,19 @@ Evidence: `jshost::work::check_rows`
   control character, or a `\\?\` path, is refused; a closing `\` left off). On test data
   (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it opens nothing and logs `reveal <path>` to the open log. Evidence:
   `window::plugins::reveal_target`, `app::reveal_command`
+- `ctx.claude.installSkill(name, md)` / `ctx.claude.removeSkill(name)` (manifest `uses.claude.skills: true`, the plugin
+  on; client half only — the host half's `ctx.claude` has neither): a skill in the user's own Claude Code, not Echo's
+  sessions — `<Claude Code folder>/skills/<name>/SKILL.md`, the folder `CLAUDE_CONFIG_DIR` when Echo has it, else
+  `~/.claude`. `async`: each rejects, before anything is sent, unless the page has the user's click or key
+  (`copyAllowed`); then the page asks Echo (`POST /api/plugin/<id>/install-skill` with `{name, md}`,
+  `/remove-skill` with `{name}`; any other method refused), which answers `{value: true}` or `{error}`. `name` 1–64 of
+  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, written whole (replacing the file, never
+  through a link); nothing else of a skill is written. A skill folder that is there already is never changed unless
+  this plugin added it — Echo keeps who added which in `<config dir>/plugins/claude-skills.json` (`{name: plugin id}`),
+  never in the skill; a link in its place, or as its `SKILL.md`, is refused. `removeSkill` takes out only a skill this
+  plugin added: its `SKILL.md`, and its folder when nothing else is in it. Removing the plugin (`echoctl plugin
+  remove`, with `--delete-data` or not) takes out every skill it added. On test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it
+  writes only to the test's own `CLAUDE_CONFIG_DIR`, refused when that isn't set. Evidence: `plugins::claude_skills`
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is

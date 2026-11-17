@@ -3047,6 +3047,8 @@ mod tests {
             export function apply(ctx) {
               const r = () => ctx.fs.folders()[0]
               ctx.command('write', (a) => ctx.fs.write(r(), a.path, a.text))
+              ctx.command('append', (a) => ctx.fs.append(r(), a.path, a.text))
+              ctx.command('mkdir', (a) => ctx.fs.mkdir(r(), a.path))
               ctx.command('move', (a) => ctx.fs.move(r(), a.from, a.to))
               ctx.command('remove', (a) => ctx.fs.remove(r(), a.path))
             }
@@ -3108,18 +3110,106 @@ mod tests {
             assert_eq!(std::fs::read_to_string(outside.join("secret.md")).unwrap(), "no");
             assert!(!outside.join("x.md").exists() && !outside.join("deeper").exists());
         }
-        // Hidden files (other programs' settings and code) and Echo's own folders are never written.
-        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
-        assert!(run("writer", "write", json!({"path": ".obsidian/plugins/x/main.js", "text": "x"})).unwrap_err().contains("is hidden"));
-        assert!(run("writer", "write", json!({"path": "Notes/.git/hooks/pre-commit", "text": "x"})).unwrap_err().contains("is hidden"));
+        // Hidden files (other programs' settings and code) and Echo's own folders are never written — but for a
+        // `.gitignore`, Obsidian's own settings (`.obsidian/<name>.json`) and Markdown in a skill of the vault's own
+        // Claude Code project (`.claude/skills/<name>/<file>.md`).
+        std::fs::create_dir_all(vault.join(".obsidian/plugins/p")).unwrap();
+        std::fs::write(vault.join(".obsidian/plugins/p/main.js"), "mine").unwrap();
+        std::fs::create_dir_all(vault.join(".git")).unwrap();
+        run("writer", "mkdir", json!({"path": ".claude/skills/acme-notes"})).unwrap();
+        run("writer", "write", json!({"path": ".claude/skills/acme-notes/SKILL.md", "text": "---\nname: acme-notes\n---\nNotes."})).unwrap();
+        run("writer", "append", json!({"path": ".claude/skills/acme-notes/reference.md", "text": "More."})).unwrap();
+        run("writer", "write", json!({"path": ".claude/skills/acme-twin/SKILL.md", "text": "Twin."})).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join(".claude/skills/acme-notes/reference.md")).unwrap(), "More.\n");
+        run("writer", "write", json!({"path": ".obsidian/app.json", "text": "{}"})).unwrap();
+        run("writer", "write", json!({"path": ".gitignore", "text": ".trash/\n"})).unwrap();
+        run("writer", "append", json!({"path": "People/.gitignore", "text": "*.tmp"})).unwrap();
+        run("writer", "mkdir", json!({"path": ".obsidian"})).unwrap();
+        // A skill of its own taken out again: its file, then its empty folder.
+        run("writer", "remove", json!({"path": ".claude/skills/acme-twin/SKILL.md"})).unwrap();
+        run("writer", "remove", json!({"path": ".claude/skills/acme-twin"})).unwrap();
+        assert!(!vault.join(".claude/skills/acme-twin").exists());
+        let hidden = |cmd: &str, a: Value| {
+            let e = run("writer", cmd, a.clone()).unwrap_err();
+            assert!(e.contains("is hidden") || e.contains("isn't a path inside"), "{cmd} {a}: {e}");
+        };
+        for path in [
+            ".obsidian/plugins/x/main.js",
+            ".obsidian/plugins/p/main.js",
+            ".obsidian/themes/t/theme.css",
+            ".obsidian/snippets/x.css",
+            ".obsidian/.hidden.json",
+            ".obsidian/app.js",
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".claude/hooks/x.sh",
+            ".claude/hooks/x.md",
+            ".claude/agents/x.md",
+            ".claude/commands/x.md",
+            ".claude/CLAUDE.md",
+            ".claude/skills/x.md",
+            ".claude/skills/acme-notes/run.sh",
+            ".claude/skills/acme-notes/SKILL.md.js",
+            ".claude/skills/acme-notes/SKILL.MD",
+            ".claude/skills/acme-notes/.hidden.md",
+            ".claude/skills/acme-notes/scripts/x.md",
+            ".claude/skills/Acme/SKILL.md",
+            ".claude/skills/acme_notes/SKILL.md",
+            ".claude/skills/acme-notes/../../settings.json",
+            ".claude/skills/x/../settings.json",
+            ".Claude/skills/x/SKILL.md",
+            ".CLAUDE/settings.json",
+            ".claude/Skills/x/SKILL.md",
+            ".Obsidian/app.json",
+            ".git/config",
+            ".git/hooks/pre-commit",
+            ".git/.gitignore",
+            "Notes/.git/hooks/pre-commit",
+            ".obsidian/.gitignore",
+            ".mcp.json",
+            ".env",
+            ".gitattributes",
+            "People/.secret.md",
+        ] {
+            hidden("write", json!({"path": path, "text": "x"}));
+            hidden("append", json!({"path": path, "text": "x"}));
+        }
+        for path in [".claude/hooks", ".claude/agents", ".claude/commands", ".claude/skills/acme-notes/scripts", ".git/hooks", ".obsidian/plugins", ".vscode", ".claude/skills/Acme"] {
+            hidden("mkdir", json!({"path": path}));
+        }
+        // A folder Echo would take only as a folder isn't a file, and the other way round.
+        hidden("write", json!({"path": ".claude/skills", "text": "x"}));
+        hidden("mkdir", json!({"path": ".claude/skills/acme-notes/SKILL.md"}));
+        hidden("remove", json!({"path": ".obsidian/plugins/p/main.js"}));
+        hidden("move", json!({"from": ".obsidian/plugins/p/main.js", "to": "Stolen.js"}));
+        hidden("move", json!({"from": "People/Dana.md", "to": ".claude/settings.json"}));
+        // A folder of the plugin's files never moves into a hidden place, not even under a name a file may take.
+        std::fs::create_dir_all(vault.join("Kit")).unwrap();
+        std::fs::write(vault.join("Kit/run.sh"), "x").unwrap();
+        hidden("move", json!({"from": "Kit", "to": ".claude/skills/acme-notes/kit.md"}));
+        hidden("move", json!({"from": "Kit", "to": ".claude/skills/acme-kit"}));
+        assert!(vault.join("Kit/run.sh").is_file());
         assert!(run("writer", "write", json!({"path": "Notes...", "text": "x"})).is_err(), "a name ending in a dot");
+        for f in [".claude/settings.json", ".claude/hooks", ".claude/agents", ".claude/commands", ".mcp.json", ".git/config", ".claude/skills/Acme", ".claude/skills/acme-notes/run.sh", ".claude/skills/acme-notes/SKILL.md.js"] {
+            assert!(!vault.join(f).exists(), "{f}");
+        }
+        assert_eq!(std::fs::read_to_string(vault.join(".obsidian/plugins/p/main.js")).unwrap(), "mine");
         // A hidden folder by another name is hidden too: a link inside the vault to it, or Windows' short name of it.
-        std::fs::write(vault.join(".obsidian/app.json"), "{}").unwrap();
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(vault.join(".obsidian"), vault.join("settings")).unwrap();
-            assert!(run("writer", "write", json!({"path": "settings/x.json", "text": "x"})).unwrap_err().contains("is hidden"));
-            assert!(run("writer", "remove", json!({"path": "settings/app.json"})).unwrap_err().contains("is hidden"));
+            std::os::unix::fs::symlink(vault.join(".obsidian/plugins"), vault.join("settings")).unwrap();
+            hidden("write", json!({"path": "settings/x.json", "text": "x"}));
+            hidden("remove", json!({"path": "settings/p/main.js"}));
+            // A link to `.claude` lands where Claude Code reads its settings: refused as what it reaches.
+            std::os::unix::fs::symlink(vault.join(".claude"), vault.join("claude")).unwrap();
+            hidden("write", json!({"path": "claude/settings.json", "text": "x"}));
+            hidden("mkdir", json!({"path": "claude/hooks"}));
+            std::os::unix::fs::symlink(vault.join(".claude/skills"), vault.join(".claude/hooks")).unwrap();
+            assert!(run("writer", "write", json!({"path": ".claude/hooks/x/SKILL.md", "text": "x"})).is_err(), "a link named as a refused folder");
+            // A skill folder that is a link (here to `.git`): written as what it reaches, refused.
+            std::os::unix::fs::symlink(vault.join(".git"), vault.join(".claude/skills/linked")).unwrap();
+            hidden("write", json!({"path": ".claude/skills/linked/SKILL.md", "text": "x"}));
+            assert!(!vault.join(".git/SKILL.md").exists());
         }
         #[cfg(windows)]
         {
@@ -3130,10 +3220,11 @@ mod tests {
                 Some(String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty() && !s.starts_with('.'))
             };
             if let Some(s) = short(&vault.join(".obsidian")) {
-                assert!(run("writer", "write", json!({"path": format!("{s}/x.json"), "text": "x"})).unwrap_err().contains("is hidden"), "{s}");
-                assert!(run("writer", "remove", json!({"path": format!("{s}/app.json")})).unwrap_err().contains("is hidden"));
-                assert!(run("writer", "move", json!({"from": format!("{s}/app.json"), "to": "Stolen.json"})).unwrap_err().contains("is hidden"));
-                assert!(run("writer", "remove", json!({"path": s})).unwrap_err().contains("is hidden"), "the folder itself");
+                assert!(run("writer", "write", json!({"path": format!("{s}/plugins/x.json"), "text": "x"})).unwrap_err().contains("is hidden"), "{s}");
+                assert!(run("writer", "remove", json!({"path": format!("{s}/plugins/p/main.js")})).unwrap_err().contains("is hidden"));
+                assert!(run("writer", "move", json!({"from": format!("{s}/plugins/p/main.js"), "to": "Stolen.js"})).unwrap_err().contains("is hidden"));
+                assert!(run("writer", "remove", json!({"path": format!("{s}/plugins")})).unwrap_err().contains("is hidden"), "the folder itself");
+                assert!(run("writer", "remove", json!({"path": s})).is_err(), "the folder itself, with files in it");
             }
             // A file written by its short name keeps its own long name.
             std::fs::write(vault.join("averylongnotename.md"), "long").unwrap();
@@ -3152,6 +3243,8 @@ mod tests {
         // A plugin that only reads can't.
         assert!(run("reader", "write", json!({"path": "Notes/R.md", "text": "x"})).unwrap_err().contains("folders.write"));
         assert!(!vault.join("Notes/R.md").exists());
+        assert!(run("reader", "write", json!({"path": ".claude/skills/acme-r/SKILL.md", "text": "x"})).unwrap_err().contains("folders.write"));
+        assert!(!vault.join(".claude/skills/acme-r").exists());
         for id in ["writer", "reader"] {
             plugins::remove(id, false).unwrap();
         }

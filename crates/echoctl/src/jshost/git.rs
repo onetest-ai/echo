@@ -1024,7 +1024,7 @@ mod tests {
             assert!(run("lit", "commit", json!({"paths": ["Out"], "message": "x"})).unwrap_err().contains("leads outside"));
             assert!(run("lit", "commit", json!({"paths": ["Link.md"], "message": "x"})).unwrap_err().contains("is a link"));
         }
-        for (p, why) in [(".obsidian/app.json", "hidden"), ("../README.md", "isn't a path inside"), ("Missing/none.md", "isn't there and git doesn't know it")] {
+        for (p, why) in [(".obsidian/plugins/x/main.js", "hidden"), (".claude/settings.json", "hidden"), ("../README.md", "isn't a path inside"), ("Missing/none.md", "isn't there and git doesn't know it")] {
             assert!(run("lit", "commit", json!({"paths": [p], "message": "x"})).unwrap_err().contains(why), "{p}");
         }
         assert!(run("lit", "commit", json!({"paths": [], "message": "x"})).unwrap_err().contains("1 to 1000"));
