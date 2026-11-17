@@ -20,6 +20,8 @@ node crates/echoctl/ui/workbench.test.mjs
 node crates/echoctl/ui/clicks.test.mjs
 # A plugin's ctx.ui.copy: only with the user's activation, fails closed (copyAllowed).
 node crates/echoctl/ui/copy-guard.test.mjs
+# A plugin's microphone: only on the user's click in its own view, never while Echo records (micRefusal).
+node crates/echoctl/ui/plugin-mic.test.mjs
 # A plugin's ctx.claude.session: only on the user's click, in a folder it was given, read or edit (pluginSessionAsk).
 node crates/echoctl/ui/plugin-session.test.mjs
 # Echo's menu for the page's selects: rows, arrows, type-ahead, where it opens (select menu block).
@@ -62,6 +64,7 @@ node crates/echoctl/ui/call-url.test.mjs
 node crates/echoctl/ui/human-history.test.mjs
 # When the window loads again for its policy: the plugins' listed addresses changed, nobody typing (netReload).
 node crates/echoctl/ui/net-reload.test.mjs
+node crates/echoctl/ui/replies.test.mjs
 # My notes' timeline with live notes among the user's own (LiveTimeline).
 node crates/echoctl/ui/live-timeline.test.mjs
 # Which transcript turn a moment (a minutes chip, a note's time) opens on (jumpTurn).

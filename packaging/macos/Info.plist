@@ -47,6 +47,8 @@
   <string>Echo records your side of the calls you choose to record, to transcribe them on this Mac.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>Echo records what the other participants say in the calls you choose to record (from the Teams app only), to transcribe them on this Mac.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Echo connects to computers on your network only where you point it: a model or speech server you connected, or an address you listed for a plugin.</string>
   <key>NSHumanReadableCopyright</key>
   <string>onetest.ai</string>
 </dict>

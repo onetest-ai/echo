@@ -25,8 +25,8 @@ tags: [plugins, claude-code, folders, terminal]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | With the helpers, each of: `open acme-ask '"path":"","mode":"edit","profile":""'`; `open acme-ask '"path":"","mode":"copy","profile":""'`; `open acme-ask '"path":"../","mode":"read","profile":""'`; `open acme-ask '"path":"Notes/Acme.md","mode":"read","profile":""'`; `open acme-other '"path":"","mode":"read","profile":""'`; then `ls "$D/run-args"` | Each answer `\"ok\":false` with its error: `acme-ask didn't ask for “folders.write” when it was installed`; `mode “copy”: a session reads (read) or edits (edit) its folder`; `“../” isn't a path inside <$D/vault>`; `“Notes/Acme.md” isn't a folder in <$D/vault>`; `acme-other isn't installed and on`; `ls` fails: nothing started |
-| 2 | `echo '{"apiKeyHelper":"/bin/echo"}' > "$D/vault/.claude/settings.json"`; `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `rm "$D/vault/.claude/settings.json"`; `ls "$D/run-args"` | `\"ok\":false`, `this folder's Claude Code settings (.claude/settings.json) could send the run elsewhere than Claude · acme-work — …`; `ls` fails |
+| 1 | With the helpers, each of: `open acme-ask '"path":"","mode":"edit","profile":""'`; `open acme-ask '"path":"","mode":"copy","profile":""'`; `open acme-ask '"path":"../","mode":"read","profile":""'`; `open acme-ask '"path":"Notes/Acme.md","mode":"read","profile":""'`; `open acme-other '"path":"","mode":"read","profile":""'`; then `ls "$D/run-args"` | Each answer `"ok":false` with its error: `acme-ask didn't ask for “folders.write” when it was installed`; `mode “copy”: a session reads (read) or edits (edit) its folder`; `“../” isn't a path inside <$D/vault>`; `“Notes/Acme.md” isn't a folder in <$D/vault>`; `acme-other isn't installed and on`; `ls` fails: nothing started |
+| 2 | `echo '{"apiKeyHelper":"/bin/echo"}' > "$D/vault/.claude/settings.json"`; `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `rm "$D/vault/.claude/settings.json"`; `ls "$D/run-args"` | `"ok":false`, `this folder's Claude Code settings (.claude/settings.json) could send the run elsewhere than Claude · acme-work — …`; `ls` fails |
 
 ## Expected Final State
 Acme ask installed with `$D/vault` given to it; no session open; `$D/vault/.claude/settings.json` gone.
@@ -36,4 +36,4 @@ Acme ask installed with `$D/vault` given to it; no session open; `$D/vault/.clau
 
 ## Notes
 - Besides `echoctl`, this case runs `ls`, `rm`, `echo`, `curl` and `python3` (the helpers).
-- No `claude` or `folders` on its sheet, a folder not given, and a wrapper profile the plugin names while it isn't the default: the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`.
+- No `claude` or `folders` on its sheet, a folder not given, a wrapper profile the plugin names while it isn't the default, and step 2's refusal from `.claude/settings.local.json` (the same check as `plugins/TC-092` step 4): the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`.

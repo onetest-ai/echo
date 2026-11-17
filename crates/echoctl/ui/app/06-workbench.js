@@ -19,6 +19,9 @@ const ACTIVITIES = [
   { id: 'brain', label: 'Knowledge', layout: 'single', when: () => brainOn() || knowledgeTabs().length > 0, draw: (p) => drawBrain(p), icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, draw: (p) => drawSettings(p), icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
+/** The activity whose layout a view is drawn in: its own, else Calls' — the view no activity draws is the list beside
+ *  the call (`drawCalls`), as a plugin's page is in the moment between its plugin going and the address moving on. */
+const activityOf = (view) => ACTIVITIES.find((a) => a.id === view) || ACTIVITIES.find((a) => a.id === 'calls')
 /** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames}` (counts). One Transcript tab: live
  *  while the call records, the final transcript after — the transcript alone either way (the live notes are in My
  *  notes). No Actions tab: the minutes list the action items, What moved (a right panel view) the user's tasks. */

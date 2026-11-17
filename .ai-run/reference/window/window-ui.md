@@ -20,6 +20,9 @@ rules are in `.ai-run/guides/window/window-ui.md`.
 
 - `window::from_page` accepts IPC only from the top page.
 - The minutes frame's messages are accepted only from its own `contentWindow`, each shape checked.
+- The app's answer to a page command (`window::Handled::answer`: `{fn, args}`, `fn` one of `REPLIES`) runs through the
+  page's `answerReply` (window script): in the window by `window.echo.reply` (`window::reply_script`), served from
+  `/ipc`'s JSON (`send`); nothing is evaluated. Tested by `replies.test.mjs`.
 
 ## Assets
 

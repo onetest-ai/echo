@@ -25,7 +25,7 @@ tags: [plugins, claude-code, terminal, ai-profiles]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; note the id | `\"ok\":true` with `\"profile\":\"acme-work\"` in its `about`; `--session-id` or `--resume` with a `<uuid>` (`--resume` after TC-140) |
+| 1 | `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; note the id | `"ok":true` with `"profile":"acme-work"` in its `about`; `--session-id` or `--resume` with a `<uuid>` (`--resume` after TC-140) |
 | 2 | Reload `{{base_url}}/` (the window reopened: the session found running); open the bottom panel with the status bar's "Claude" if it is closed; click the tab "Claude · Acme ask"; read the panel | `Acme ask · Claude Code in <$D/vault>, as that folder's own project — it reads only; asks each time · <acme-work's name>` above its terminal (`acme fake session in <$D/vault>`) |
 | 3 | `close`; wait until the panel says `The session ended. Resume picks up the conversation where it stopped.`; `rm "$D/run-args"`; click "Resume"; wait 2 s; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"` | `--resume` with step 1's uuid and no `--session-id`: started again on `acme-work`, the same conversation (on the default profile it would be another one) |
 

@@ -39,6 +39,7 @@ async function tick() {
   const before = JSON.stringify(S.state)
   await loadState()
   if (netCheck()) return
+  micFollow()
   const changed = JSON.stringify(S.state) !== before
   // Against the last stamp read (a tick whose read failed has none and changes nothing).
   const plugins = S.state && S.state.plugins
@@ -101,6 +102,8 @@ const selftestTerm = (windows) => windows
 // end of the selftest-terminal block
 
 window.echo = {
+  /** The app's answer to a page command (`answerReply`): how the window hands it over. */
+  reply(r) { return answerReply(window.echo, r) },
   /** Files dropped on the window for a plugin's view: their handles (names, never paths), to its `ctx.onFileDrop`. */
   pluginDrop(id, files) { pluginDropped(id, files) },
   /** Echo's answer to a plugin's `ctx.echo.jobs.set`: the jobs after the change, or why it was refused. */
@@ -111,6 +114,8 @@ window.echo = {
     if (a.error) w.reject(new Error(a.error))
     else w.resolve(a.value)
   },
+  /** Echo took the plugin's microphone (a recording started): it stops here too, and the page says why. */
+  micStopped(why) { if (Mic.id) micClose(Mic.id, String(why || '')) },
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
   templateSaved(id, created, which, gen) {

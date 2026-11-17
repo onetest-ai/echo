@@ -257,9 +257,77 @@ function pluginCtx(id) {
       graph: GraphView,
       newGraph: () => new graphology.Graph(),
     },
+    /** The microphone, when its manifest asks for `uses.microphone`: `open(audio)` → a MediaStream, only on the user's
+     *  click or key in its own view (its activity, its Knowledge tab) and never while Echo records (else it throws why);
+     *  Echo's recording sign shows while it is open. It stops when the view is left, the plugin is switched off,
+     *  updated or removed, or Echo starts recording; `close()` stops it sooner. `audio`: getUserMedia's audio
+     *  constraints (true by default). */
+    microphone: {
+      open: (audio) => micOpen(id, audio),
+      close: () => micClose(id),
+      isOpen: () => !!(Mic.stream && Mic.id === id),
+    },
     render: () => { if (!Plugins.drawing) render() },
   }
 }
+// ── plugin microphone: why a plugin's window half may not open the microphone now, or '' (no DOM:
+// `plugin-mic.test.mjs`) — only on the user's click or key (`copyAllowed`) in its own view (its activity
+// `#<plugin>:<id>…`, its Knowledge tab `#brain/<plugin>:<id>…`), while Echo records nothing and no other plugin has it.
+// Echo checks again (`plugin_mic`): the plugin on, its install sheet, nothing recording.
+function micRefusal(id, { nav, hash, recording, holder }) {
+  if (recording) return 'Echo is recording — a plugin gets the microphone once the recording stops'
+  if (holder && holder !== id) return 'another plugin has the microphone now'
+  if (!copyAllowed(nav)) return 'the microphone opens only on your click'
+  if (micView(hash) !== id) return "the microphone opens only in the plugin's own view"
+  return ''
+}
+/** The plugin whose own view the address shows, or null. */
+function micView(hash) {
+  const parts = String(hash || '').replace(/^#/, '').split('/')
+  const m = (parts[0] === 'brain' ? parts[1] || '' : parts[0]).match(/^([a-z0-9-]+):/)
+  return m ? m[1] : null
+}
+// end of the plugin microphone block
+/** The plugin microphone open in this page (one at a time): its plugin, its name for the sign, its stream. */
+const Mic = { id: null, name: '', stream: null }
+async function micOpen(id, audio) {
+  if (Mic.stream && Mic.id === id) return Mic.stream
+  const why = micRefusal(id, { nav: typeof navigator === 'undefined' ? null : navigator, hash: hashText(), recording: !!(S.state && S.state.recording), holder: Mic.id })
+  if (why) throw new Error(why)
+  // Echo checks and arms the webview's one grant first (its answer: the plugin's name); only then the page asks for it.
+  const name = String(pluginValue(await pluginPost(id, 'microphone', {})) || id)
+  Mic.id = id; Mic.name = name; Mic.stream = null
+  render()
+  let stream
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: audio == null ? true : audio, video: false }) } catch (e) {
+    micClose(id)
+    throw new Error(`The microphone didn't open: ${(e && e.message) || e}`)
+  }
+  // Closed while the system asked (its view left, the plugin gone, a recording started): never handed over.
+  if (Mic.id !== id) { stream.getTracks().forEach((t) => t.stop()); throw new Error('the microphone stopped before it opened') }
+  Mic.stream = stream
+  return stream
+}
+/** The plugin's microphone stopped (any plugin's: no id), Echo told; `why` said on the page. */
+function micClose(id, why) {
+  if (!Mic.id || (id && Mic.id !== id)) return
+  const s = Mic.stream, was = Mic.id
+  Mic.id = null; Mic.name = ''; Mic.stream = null
+  if (s) s.getTracks().forEach((t) => t.stop())
+  send({ cmd: 'plugin_mic', id: was })
+  if (why) S.notice = why
+  render()
+}
+/** On each read of Echo's state: a recording started, or the plugin stopped every track itself — the microphone closes. */
+function micFollow() {
+  if (!Mic.id) return
+  if (S.state && S.state.recording) micClose(Mic.id, "Echo started recording, so the plugin's microphone stopped")
+  else if (Mic.stream && Mic.stream.getTracks().every((t) => t.readyState === 'ended')) micClose(Mic.id)
+}
+// Its view left: it stops.
+window.addEventListener('hashchange', () => { if (Mic.id && micView(hashText()) !== Mic.id) micClose(Mic.id) })
+// A page loaded (again): nothing it had is open any more.
+send({ cmd: 'plugin_mic' })
 /** Load the client halves of the enabled plugins not loaded yet (or at another version). */
 // One load at a time: a later one (a fresher list) waits for the one running, never applying a half twice.
 let pluginLoads = Promise.resolve()
@@ -300,6 +368,7 @@ async function pluginsChanged() {
   render()
 }
 function unloadPlugin(id) {
+  micClose(id)
   for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)
   // Switched off or removed (not an update, which loads it again right away): its page goes.
   setTimeout(() => { if (S.view && S.view.startsWith(id + ':') && !ACTIVITIES.some((a) => a.id === S.view)) { S.view = 'calls'; go('calls') } }, 1500)

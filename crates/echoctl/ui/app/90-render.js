@@ -178,7 +178,7 @@ function renderNow() {
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite" aria-label="Notices">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
-  const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout
+  const layout = activityOf(S.view).layout
   if (primary.dataset.layout !== layout || primary.dataset.view !== S.view) {
     primary.innerHTML = layout === 'list-detail' ? '<div class="list-detail" id="r-ld"><div class="region" id="r-list"></div><main class="main" id="r-main"></main></div>' : ''
     primary._html = undefined
@@ -526,6 +526,7 @@ CLICKS.push(
   { sel: '[data-frame]', area: 'call', when: (t) => t.dataset.frame, run: (t) => { S.lightbox = t.dataset.frame; return render() } },
   { sel: '[data-close]', area: 'call', when: (t) => t.dataset.close, run: (t) => { S.lightbox = null; return render() } },
   { sel: '[data-copy]', area: 'page', when: (t) => t.dataset.copy, run: (t) => { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return } },
+  { sel: '[data-mic-stop]', area: 'shell', when: (t) => t.dataset.micStop !== undefined, run: () => micClose(Mic.id) },
   { sel: '[data-arm]', area: 'calls', when: (t) => t.dataset.arm !== undefined, run: (t) => send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() }) },
   { sel: '[data-join]', area: 'calendar', when: (t) => t.dataset.join !== undefined, run: (t) => send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() }) },
   // The `data-cmd` buttons: recording, the window's own, the open call's. No case: nothing.

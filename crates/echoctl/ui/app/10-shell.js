@@ -137,6 +137,10 @@ function pill() {
     const t0 = since(c && c.started_at)
     return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}"></span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button>${callLangPicker(name, st.recording_language)}<button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
   }
+  // A plugin hears the microphone (`ctx.microphone`): Echo's recording sign, its name, Stop.
+  if (Mic.id) {
+    return `<div class="pill rec" role="group" aria-label="A plugin hears your microphone"><span class="pmic">${MIC(13)}</span><span class="ptitle">${esc(Mic.name || Mic.id)} hears your microphone</span><button class="pbtn stop" data-mic-stop><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
+  }
   if (st.armed) {
     return `<div class="pill armed" role="group" aria-label="Armed"><span class="ring" aria-hidden="true"></span><span class="ptitle">Armed — records the next call</span><button class="pbtn ghost" data-cmd="stop">Cancel</button></div>`
   }

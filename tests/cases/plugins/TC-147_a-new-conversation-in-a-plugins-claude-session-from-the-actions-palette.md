@@ -25,7 +25,7 @@ tags: [plugins, claude-code, terminal, palette]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; note the id | `\"ok\":true`; `--session-id` or `--resume` with a `<uuid>` |
+| 1 | `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; note the id | `"ok":true`; `--session-id` or `--resume` with a `<uuid>` |
 | 2 | Reload `{{base_url}}/`; open Actions (`[data-pal-open]`), type `Claude · Acme ask`; read the list | Under CLAUDE: `Restart Claude · Acme ask` and `New conversation in Claude · Acme ask` |
 | 3 | Run `New conversation in Claude · Acme ask` (Enter on it); read the bottom panel | The tab "Claude · Acme ask" shown, asking `Start a new conversation? This session stops, and whatever it is doing now is lost.` with "Keep it running" and "Start new" |
 | 4 | `rm "$D/run-args"`; click "Start new"; wait 3 s; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; `curl -s "$B/api/ptys"` | `--session-id` with a new `<uuid>`, not step 1's, and no `--resume`; the list has `"key":"claude:plugin:acme-ask"`, `"exited":false` (one session, the old one stopped) |

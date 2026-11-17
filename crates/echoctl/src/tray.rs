@@ -72,8 +72,10 @@ impl Then {
 /// (icon, is_template). Idle is a template icon (follows the macOS menu-bar light/dark look);
 /// armed is green and recording is Claude orange so the state reads at a glance.
 /// (Windows has no templates: idle is black, or white on a dark taskbar.)
-fn icon_for(state: &UiState) -> (Icon, bool) {
+/// A plugin hearing the microphone (`mic`) is drawn as recording.
+fn icon_for(state: &UiState, mic: bool) -> (Icon, bool) {
     match state {
+        UiState::Idle { .. } | UiState::Armed if mic => (logo(ORANGE), false),
         UiState::Idle { .. } if taskbar_dark() => (logo(WHITE), true),
         UiState::Idle { .. } => (logo(BLACK), true),
         UiState::Armed => (logo(GREEN), false),
@@ -117,8 +119,9 @@ fn menu_open() -> bool {
     false
 }
 
-fn status_text(state: &UiState) -> String {
+fn status_text(state: &UiState, mic: Option<&str>) -> String {
     match state {
+        UiState::Idle { .. } | UiState::Armed if mic.is_some() => format!("● {} hears your microphone", mic.unwrap_or_default()),
         UiState::Idle { in_call: Some(true) } => "Call in progress — not recording".into(),
         UiState::Idle { .. } => "Not recording".into(),
         UiState::Armed => "Armed — recording starts with the next call".into(),
@@ -419,6 +422,8 @@ struct Ui {
     state: Option<UiState>,
     /// The taskbar theme the icon was drawn for (Windows: the idle icon follows it).
     dark: bool,
+    /// The plugin that hears the microphone, as the icon was drawn for (`window::plugin_mic`).
+    mic: Option<String>,
     model: Option<Model>,
     health: Vec<(String, String, Option<String>)>,
     last_refresh: Instant,
@@ -795,9 +800,10 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                     let done = crate::window::handle(&msg);
                     #[cfg(windows)] // Settings → Layout → "Echo's own title bar": the window follows at once.
                     win.iter().for_each(|w| w.follow_settings(&msg));
-                    if let (Some(js), Some(w)) = (&done.reply, &win) {
-                        let _ = w.webview.evaluate_script(js);
+                    if let (Some(r), Some(w)) = (&done.reply, &win) {
+                        let _ = w.webview.evaluate_script(&crate::window::reply_script(r));
                     }
+                    win.iter().for_each(|w| w.follow_mic());
                     if done.refresh {
                         // The action changed something: refresh the page and the menu.
                         if let Some(w) = &win {
@@ -833,6 +839,14 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 }
             }
             Event::UserEvent(UiEvent::State(s)) => {
+                // Echo's own recording comes first: a plugin hearing the microphone stops; and the webview hears it
+                // only while a plugin holds it.
+                if let Some(w) = &win {
+                    if matches!(s, UiState::Recording { .. }) {
+                        w.stop_plugin_mic("Echo started recording, so the plugin's microphone stopped");
+                    }
+                    w.follow_mic();
+                }
                 // `echoctl app quit` — also when the tray icon couldn't be made (no window then).
                 if app::take_quit_request() {
                     let _ = proxy.send_event(UiEvent::Leave(Then::QuitAsked));

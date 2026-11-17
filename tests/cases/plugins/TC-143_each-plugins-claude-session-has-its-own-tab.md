@@ -47,4 +47,3 @@ Two sessions open in `$D/vault`, Acme ask's and Acme ask B's, each in its tab.
 
 ## Notes
 - Besides `echoctl`, this case runs `mkdir`, `cp`, `sed`, `echo`, `rm`, `curl` and `python3` (the helpers).
-- A served window doesn't run the app's IPC answers, so before the reload a tab is named by the plugin's id; the app's own window names it at once.

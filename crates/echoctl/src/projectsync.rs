@@ -1618,6 +1618,9 @@ mod tests {
         let p = crate::ai::fake::profile("slow", None, &crate::ai::fake::signed_in("pat@example.com"));
         fs::write(crate::ai::fake::file(&p, "p.hang"), "[claude-code:unrecognized_model] {\"model\":\"qwen3.8:27b\"}\n").unwrap();
         let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+        // The time limit starts once the fake has printed its warning: on a busy machine it can take longer than the
+        // limit to get there (#732).
+        crate::paths::testenv::eventually("the fake printed its warning", || crate::ai::fake::file(&p, "p.hung").exists());
         let mut log = fs::File::create(root.join("log.txt")).unwrap();
         let e = finish_run_result(child, &mut log, Duration::from_secs(1), "sync a thread", "quit").unwrap_err().to_string();
         assert!(e.contains("stopped after 1 s without finishing"), "{e}");

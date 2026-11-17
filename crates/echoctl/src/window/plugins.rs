@@ -133,6 +133,73 @@ pub(super) fn dropped(paths: &[PathBuf]) -> bool {
     true
 }
 
+// ── a plugin's microphone (`uses.microphone`, `ctx.microphone`) ──
+
+/// The plugin whose window half has the microphone: opened on the user's click in its view (`plugin_mic`), until it
+/// closes. `grant`: the webview's one permission for this opening, not taken yet.
+struct Mic {
+    id: String,
+    name: String,
+    grant: bool,
+}
+static MIC: std::sync::Mutex<Option<Mic>> = std::sync::Mutex::new(None);
+/// The webview owes one microphone reset (macOS `setMicrophoneCaptureState(None)`): a grant was given or a holder
+/// released since the last reset, so WebKit may keep that grant though no plugin holds the microphone any more.
+static MIC_RESET_OWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The name of the plugin that has the microphone now (Echo's recording sign shows it).
+pub(super) fn mic_holder() -> Option<String> {
+    MIC.lock().ok().and_then(|m| m.as_ref().map(|m| m.name.clone()))
+}
+
+/// The webview asks for the microphone (a page's `getUserMedia`): granted once for each opening Echo allowed, else
+/// refused — a page's own call, a timer's, a second one.
+pub(super) fn mic_grant() -> bool {
+    let granted = MIC.lock().ok().and_then(|mut m| m.as_mut().map(|m| std::mem::replace(&mut m.grant, false))).unwrap_or(false);
+    if granted {
+        MIC_RESET_OWED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    granted
+}
+
+/// Whether the webview's microphone is to be reset now: a reset is owed and no plugin holds the microphone. Taking it
+/// clears it, so the reset runs once after each release, not on every tick.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn mic_reset_due() -> bool {
+    let held = MIC.lock().map_or(true, |m| m.is_some());
+    !held && MIC_RESET_OWED.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The microphone taken from `id` (from whichever plugin has it: None). Whether one had it.
+pub(super) fn mic_release(id: Option<&str>) -> bool {
+    let Ok(mut m) = MIC.lock() else { return false };
+    if m.as_ref().is_some_and(|m| id.is_none_or(|id| m.id == id)) {
+        *m = None;
+        MIC_RESET_OWED.store(true, std::sync::atomic::Ordering::SeqCst);
+        return true;
+    }
+    false
+}
+
+/// A plugin's window half asks for the microphone (its page checked the user's click in its view): the plugin on and
+/// its install sheet naming `uses.microphone`, nothing recording, no other plugin holding it. Its name.
+fn mic_open(id: &str) -> anyhow::Result<String> {
+    let Some(p) = crate::plugins::enabled().into_iter().find(|p| p.id == id) else { anyhow::bail!("{id} isn't on") };
+    let m = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p))?;
+    anyhow::ensure!(m.uses.contains_key("microphone"), "{} didn't ask for the microphone when it was installed", m.name);
+    // Echo's own recording comes first: one thing hears the microphone at a time.
+    anyhow::ensure!(!crate::watch::running_watcher().is_some_and(|w| w.recording.is_some()), MIC_RECORDING);
+    let mut held = MIC.lock().map_err(|_| anyhow::anyhow!("Echo couldn't open the microphone"))?;
+    if let Some(h) = held.as_ref().filter(|h| h.id != id) {
+        anyhow::bail!("{} has the microphone now", h.name);
+    }
+    *held = Some(Mic { id: id.into(), name: m.name.clone(), grant: true });
+    Ok(m.name)
+}
+
+/// Why a plugin can't have the microphone while Echo records.
+pub(super) const MIC_RECORDING: &str = "Echo is recording — a plugin gets the microphone once the recording stops";
+
 pub(super) fn deliver_op(v: &Value) -> Handled {
     match v["op"].as_str().unwrap_or("") {
         "test" => {
@@ -281,6 +348,14 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     return Some(json_reply(v.map_or_else(|e| json!({"error": format!("{e:#}")}), |v| json!({"value": v}))));
                 }
             }
+            // Its window half asks for the microphone (`ctx.microphone.open`, its page checked the user's click in its
+            // view): a POST, answered with the plugin's name or why not (`mic_open`).
+            if let Some(id) = rest.strip_suffix("/microphone").filter(|id| crate::plugins::valid_id(id)) {
+                if let Err(refused) = call_body(req) {
+                    return Some(*refused);
+                }
+                return Some(json_reply(mic_open(id).map_or_else(|e| json!({"error": format!("{e:#}")}), |name| json!({"value": name}))));
+            }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
                     // `{args, files}` in a POST body; `files`: handles of files the user handed this plugin
@@ -327,7 +402,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 Ok(list) => json!({"req": v["req"], "value": list}),
                 Err(e) => json!({"req": v["req"], "error": format!("{e:#}")}),
             };
-            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.jobsSet({answer})")) }
+            Handled::answer(false, "jobsSet", json!([answer]))
         }
         // The plugin whose view is shown and listens for dropped files (`ctx.onFileDrop`), or none.
         #[cfg(feature = "js")]
@@ -342,9 +417,15 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         // never the paths.
         #[cfg(feature = "js")]
         "plugin_dropped" => match DROPPED.lock().ok().and_then(|mut d| d.take()) {
-            Some((id, files)) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.pluginDrop({}, {})", json!(id), json!(files))) },
+            Some((id, files)) => Handled::answer(false, "pluginDrop", json!([id, files])),
             None => false.into(),
         },
+        // A plugin's microphone stopped (`ctx.microphone`: its view left, the plugin gone, Stop) — or, with no id, the
+        // page loaded again: nothing it had is open. (It opens by `POST /api/plugin/<id>/microphone`.)
+        "plugin_mic" => {
+            mic_release(v["id"].as_str().filter(|id| !id.is_empty()));
+            false.into()
+        }
         "deliver_op" => deliver_op(v),
         // A plugin's command from Echo's own places (an Inbox item's button): in the background.
         #[cfg(feature = "js")]
@@ -603,14 +684,81 @@ mod tests {
         // Its view shown and listening: the files become its handles; the page gets names and handles, never paths.
         page(json!({"cmd": "plugin_drops", "id": "ingest"}));
         assert!(drops_wanted() && dropped(&[f.clone(), root.join("gone.md")]));
-        let js = page(json!({"cmd": "plugin_dropped"})).unwrap();
-        assert!(js.starts_with("window.echo && window.echo.pluginDrop(\"ingest\", [{") && js.contains("\"name\":\"Kickoff notes.md\""), "{js}");
+        let r = page(json!({"cmd": "plugin_dropped"})).unwrap();
+        assert_eq!((&r["fn"], &r["args"][0], &r["args"][1][0]["name"]), (&json!("pluginDrop"), &json!("ingest"), &json!("Kickoff notes.md")), "{r}");
+        let js = r.to_string();
         assert!(!js.contains(root.to_str().unwrap()) && !js.contains("gone.md"), "{js}");
-        let file: Value = serde_json::from_str(js.split_once(", ").unwrap().1.trim_end_matches(')')).unwrap();
+        let file = &r["args"][1];
         assert!(crate::jshost::files::own_list("ingest", file.as_array().unwrap()).is_ok());
         assert!(crate::jshost::files::own_list("other", file.as_array().unwrap()).is_err(), "its own only");
         assert_eq!(page(json!({"cmd": "plugin_dropped"})), None, "taken once");
         page(json!({"cmd": "plugin_drops", "id": null}));
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_plugin_gets_the_microphone_only_as_its_sheet_said_one_grant_an_opening_and_never_while_echo_records() {
+        let (_env, root) = crate::paths::testenv::folders("window-mic");
+        let mk = root.join("market");
+        let mut listed = vec![];
+        for (id, name, uses) in [("voice", "Acme voice", json!({"microphone": {}})), ("talk", "Globex talk", json!({"microphone": {}})), ("plain", "Plain", json!({}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": name, "version": "0.1.0", "uses": uses}).to_string()).unwrap();
+            listed.push(json!({"id": id, "source": format!("./plugins/{id}")}));
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": listed}).to_string()).unwrap();
+        let market = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&market).unwrap();
+        for id in ["voice", "talk", "plain"] {
+            let agreed = crate::plugins::review(id, Some(&market)).unwrap().uses;
+            crate::plugins::install(id, Some(&market), &agreed).unwrap();
+        }
+        let ask = |id: &str| native("POST", &format!("/api/plugin/{id}/microphone"), b"{}".to_vec()).1;
+        let close = |id: Value| handle(&json!({"cmd": "plugin_mic", "id": id})).unwrap();
+        // Only a POST, and the served window only from its own page.
+        assert_eq!(native("GET", "/api/plugin/voice/microphone", vec![]).0, 405);
+        assert_eq!(served("POST", "/api/plugin/voice/microphone", b"{}", false).0, 403);
+        assert!(mic_holder().is_none());
+        // Nothing open: the webview's ask is refused.
+        assert!(!mic_grant() && mic_holder().is_none());
+        // A plugin whose sheet didn't name it, or one not installed: refused, nothing held.
+        assert!(ask("plain")["error"].as_str().unwrap().contains("didn't ask for the microphone"));
+        assert!(ask("nobody")["error"].as_str().unwrap().contains("isn't on"));
+        assert!(mic_holder().is_none() && !mic_grant());
+        // Its sheet named it: its name for the sign; the webview granted once for this opening, then refused.
+        assert_eq!(ask("voice"), json!({"value": "Acme voice"}));
+        assert_eq!(mic_holder().as_deref(), Some("Acme voice"));
+        assert!(mic_grant() && !mic_grant(), "one grant an opening");
+        // The webview's reset is owed from the grant on, but never taken while the plugin holds the microphone.
+        assert!(!mic_reset_due() && !mic_reset_due());
+        // Another plugin while it is held: refused; its close doesn't take the first one's.
+        assert_eq!(ask("talk")["error"], "Acme voice has the microphone now");
+        close(json!("talk"));
+        assert_eq!(mic_holder().as_deref(), Some("Acme voice"));
+        // Closed: nothing held, nothing granted; the reset is due once, whatever the capture state, then not again.
+        close(json!("voice"));
+        assert!(mic_holder().is_none() && !mic_grant());
+        assert!(mic_reset_due() && !mic_reset_due(), "one reset a release");
+        // A page loaded again closes whatever it had (no id): released, so a reset is owed though no grant was taken.
+        ask("talk");
+        close(Value::Null);
+        assert!(mic_holder().is_none());
+        assert!(mic_reset_due() && !mic_reset_due());
+        // A release with nothing held owes nothing.
+        close(Value::Null);
+        assert!(!mic_reset_due());
+        // Echo records a call (or a memo): refused, and why.
+        std::fs::create_dir_all(crate::paths::state_dir()).unwrap();
+        std::fs::write(crate::paths::state_dir().join("watch.json"), json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now().to_rfc3339(), "app": "teams",
+            "in_call": true, "armed": false, "recording": root.join("calls/2026-11-17_100000_acme").display().to_string()}).to_string()).unwrap();
+        assert_eq!(ask("voice")["error"], MIC_RECORDING);
+        assert!(mic_holder().is_none() && !mic_grant());
+        std::fs::remove_file(crate::paths::state_dir().join("watch.json")).unwrap();
+        // Switched off: refused.
+        crate::plugins::set_enabled("voice", false).unwrap();
+        assert!(ask("voice")["error"].as_str().unwrap().contains("isn't on"));
+        assert!(mic_holder().is_none());
     }
 
     #[test]

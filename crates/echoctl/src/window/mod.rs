@@ -61,7 +61,49 @@ pub struct EchoWindow {
     told_maximized: std::cell::Cell<Option<bool>>,
 }
 
+/// The name of the plugin that hears the microphone now (`uses.microphone`): Echo's recording sign shows it.
+pub fn plugin_mic() -> Option<String> {
+    plugins::mic_holder()
+}
+
+impl Drop for EchoWindow {
+    /// The page goes with the window: no plugin hears the microphone any more.
+    fn drop(&mut self) {
+        plugins::mic_release(None);
+    }
+}
+
 impl EchoWindow {
+    /// The plugin's microphone closed by Echo (a recording started): taken from the plugin, and the page told why.
+    pub fn stop_plugin_mic(&self, why: &str) {
+        if plugins::mic_release(None) {
+            let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.micStopped({})", json!(why)));
+        }
+        self.follow_mic();
+    }
+
+    /// macOS: no plugin holds the microphone, yet the webview may hear it or keep its grant (a page's own `getUserMedia`
+    /// WebKit let through on an earlier grant, a plugin that stopped its own tracks): reset — which stops any capture
+    /// and makes WebKit ask Echo again next time. Once whenever a reset is owed (a grant given, the microphone released:
+    /// `mic_reset_due`), whatever the capture state, and whenever a capture runs that no plugin holds. On every state
+    /// tick and after each page command. (Windows asks Echo on every request: `gate_media`.)
+    pub fn follow_mic(&self) {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_web_kit::WKMediaCaptureState;
+            use wry::WebViewExtMacOS;
+            if plugins::mic_holder().is_none() {
+                let wk = self.webview.webview();
+                // SAFETY: on the main thread (the event loop), the webview alive for the call.
+                unsafe {
+                    if plugins::mic_reset_due() || wk.microphoneCaptureState() != WKMediaCaptureState::None {
+                        wk.setMicrophoneCaptureState_completionHandler(WKMediaCaptureState::None, None);
+                    }
+                }
+            }
+        }
+    }
+
     /// Ask the page to reload its data (after an action, or when the files changed).
     pub fn refresh(&self) {
         let _ = self.webview.evaluate_script("window.echo && window.echo.refresh()");
@@ -237,7 +279,22 @@ pub fn open<T: 'static>(
     };
     #[cfg(not(all(target_os = "macos", feature = "js")))]
     drop(to_app);
+    // The microphone only for a plugin's opening Echo allowed (`uses.microphone`, on the user's click in its view), once
+    // for each; the camera never. A display-capture request is refused if one comes, but WKWebView doesn't send a page's
+    // `getDisplayMedia` through this handler, so it doesn't decide screen sharing. Windows: `gate_media` (wry's handler
+    // would let WebView2 keep a grant).
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_permission_handler(|kind| {
+        use wry::{PermissionKind, PermissionResponse};
+        match kind {
+            PermissionKind::Microphone if plugins::mic_grant() => PermissionResponse::Allow,
+            PermissionKind::Microphone | PermissionKind::Camera | PermissionKind::DisplayCapture => PermissionResponse::Deny,
+            _ => PermissionResponse::Default,
+        }
+    });
     let webview = builder.with_url(url).with_devtools(cfg!(debug_assertions)).build(&window)?;
+    #[cfg(windows)]
+    gate_media(&webview)?;
     Ok(EchoWindow {
         window,
         webview,
@@ -246,6 +303,35 @@ pub fn open<T: 'static>(
         #[cfg(windows)]
         told_maximized: std::cell::Cell::new(None),
     })
+}
+
+/// Windows: WebView2's permission requests — the microphone only for a plugin's opening Echo allowed, once for each; the
+/// camera never — each decision for that request only (`SavesInProfile` off), so the next one asks Echo again. Any other
+/// kind keeps WebView2's default (a page's `getDisplayMedia` shows WebView2's own picker).
+#[cfg(windows)]
+fn gate_media(webview: &WebView) -> wry::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    use webview2_com::PermissionRequestedEventHandler;
+    use windows_core::Interface;
+    use wry::WebViewExtWindows;
+    let err = |e: windows_core::Error| wry::Error::Io(std::io::Error::other(e.to_string()));
+    let core = unsafe { webview.controller().CoreWebView2() }.map_err(err)?;
+    let mut token = Default::default();
+    let handler = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+        unsafe { args.PermissionKind(&mut kind)? };
+        let state = match kind {
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE if plugins::mic_grant() => COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE | COREWEBVIEW2_PERMISSION_KIND_CAMERA => COREWEBVIEW2_PERMISSION_STATE_DENY,
+            _ => return Ok(()),
+        };
+        if let Ok(a) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+            unsafe { a.SetSavesInProfile(false)? };
+        }
+        unsafe { args.SetState(state) }
+    }));
+    unsafe { core.add_PermissionRequested(&handler, &mut token) }.map_err(err)
 }
 
 /// A drag over the window: one carrying files while a plugin takes them (`wanted`) is Echo's from its start to its end
@@ -532,12 +618,25 @@ fn profile(v: &Value) -> Option<String> {
     v["profile"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)
 }
 
-/// What running a page's action did: refresh the page (and the menu), and a script to answer
-/// the page with.
+/// What running a page's action did: refresh the page (and the menu), and an answer for the page — `{fn, args}`, one of
+/// the page's own handlers (`window.echo.<fn>(...args)`) run by its `window.echo.reply`, in the window
+/// (`reply_script`) and served (`serve_conn`'s JSON) alike.
 #[derive(Default)]
 pub struct Handled {
     pub refresh: bool,
-    pub reply: Option<String>,
+    pub reply: Option<Value>,
+}
+
+impl Handled {
+    /// Answer the page with its handler `f` called with `args` (a JSON array).
+    pub fn answer(refresh: bool, f: &str, args: Value) -> Self {
+        Handled { refresh, reply: Some(json!({ "fn": f, "args": args })) }
+    }
+}
+
+/// The script that hands a reply to the window's page (served, the page dispatches the same JSON itself: no script).
+pub fn reply_script(reply: &Value) -> String {
+    format!("window.echo && window.echo.reply({reply})")
 }
 
 impl From<bool> for Handled {
@@ -609,7 +708,7 @@ fn call_named(v: &Value) -> Option<PathBuf> {
 
 /// A notice for the page (an action that couldn't be done).
 fn notice(text: &str) -> Handled {
-    Handled { refresh: true, reply: Some(format!("window.echo && window.echo.notice({})", json!(text))) }
+    Handled::answer(true, "notice", json!([text]))
 }
 
 /// Run an action the page posted.
@@ -879,8 +978,8 @@ pub fn selftest() -> anyhow::Result<()> {
             Event::UserEvent(msg) if msg.contains("\"probe\"") => probed = true,
             // The page's terminal check: open a shell, type into it (as the tray runs these).
             Event::UserEvent(msg) if msg.contains("\"cmd\":\"pty_") => {
-                if let (Some(js), Some(w)) = (handle(&msg).reply, &win) {
-                    let _ = w.webview.evaluate_script(&js);
+                if let (Some(r), Some(w)) = (handle(&msg).reply, &win) {
+                    let _ = w.webview.evaluate_script(&reply_script(&r));
                 }
             }
             Event::UserEvent(msg) if msg.contains("\"selftest\"") => {
@@ -1062,7 +1161,41 @@ mod tests {
         // The page's own request outside the self-test: refused before anything starts.
         assert!(!SELFTEST.load(std::sync::atomic::Ordering::SeqCst));
         let reply = handle(r#"{"cmd":"pty_open","kind":"shell","key":"t","cols":80,"rows":24}"#).reply.unwrap();
-        assert!(reply.contains(r#""ok":false"#) && reply.contains("no terminal of kind"), "{reply}");
+        assert_eq!((&reply["fn"], &reply["args"][0]["ok"]), (&json!("ptyOpened"), &json!(false)), "{reply}");
+        assert!(reply["args"][0]["error"].as_str().is_some_and(|e| e.contains("no terminal of kind")), "{reply}");
+    }
+
+    #[test]
+    fn a_reply_reaches_the_page_as_its_handler_and_arguments_the_window_by_one_script_served_as_json() {
+        let r = notice("a bad run id").reply.unwrap();
+        assert_eq!(r, json!({"fn": "notice", "args": ["a bad run id"]}));
+        // The window: one call of the page's dispatcher, the reply as a JSON literal (no script of its own).
+        let js = reply_script(&r);
+        let arg = js.strip_prefix("window.echo && window.echo.reply(").and_then(|s| s.strip_suffix(')')).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(arg).unwrap(), r, "{js}");
+        // Served: the same JSON in /ipc's answer, which the page dispatches without evaluating anything (#725).
+        let body = br#"{"cmd":"pty_open","kind":"shell","key":"t","cols":80,"rows":24}"#;
+        let (status, answer) = served_ipc(body);
+        assert_eq!((status, &answer["reply"]["fn"], &answer["reply"]["args"][0]["ok"]), (200, &json!("ptyOpened"), &json!(false)), "{answer}");
+    }
+
+    /// One POST to the served window's /ipc, from its page (the cookie and the Origin): the status and the JSON answer.
+    fn served_ipc(body: &[u8]) -> (u16, Value) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let server = {
+            let origin = origin.clone();
+            std::thread::spawn(move || serve_conn(&listener.accept().unwrap().0, &origin, "t0k", "echo_serve_test"))
+        };
+        let mut c = std::net::TcpStream::connect(origin.trim_start_matches("http://")).unwrap();
+        write!(c, "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nCookie: echo_serve_test=t0k\r\nOrigin: {origin}\r\n\r\n", body.len()).unwrap();
+        c.write_all(body).unwrap();
+        let mut out = String::new();
+        c.read_to_string(&mut out).unwrap();
+        server.join().unwrap();
+        let status = out.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, serde_json::from_str(out.split_once("\r\n\r\n").unwrap().1).unwrap())
     }
 
     #[test]
