@@ -146,11 +146,12 @@ fn after_quiet(at: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
     day.and_hms_opt(QUIET_TO.0, QUIET_TO.1, 0).and_then(|t| t.and_local_timezone(Local).earliest()).unwrap_or(at)
 }
 
-/// "N mail or chat items wait: read at HH:MM or once 5 wait" (at night: "read at 07:00").
+/// "N mail or chat items wait: read at HH:MM or once 5 wait" (at night, when 5 waiting don't start a read: "read at
+/// HH:MM", 07:00 or later).
 fn waits(n: usize, at: chrono::DateTime<Local>, now: chrono::DateTime<Local>) -> String {
     let (s, verb) = if n == 1 { ("", "s") } else { ("s", "") };
     if quiet(now.time()) {
-        return format!("{n} mail or chat item{s} wait{verb}: read at {}", after_quiet(now).format("%H:%M"));
+        return format!("{n} mail or chat item{s} wait{verb}: read at {}", after_quiet(at).format("%H:%M"));
     }
     format!("{n} mail or chat item{s} wait{verb}: read at {} or once {BATCH_ITEMS} wait", after_quiet(at).format("%H:%M"))
 }
@@ -1024,6 +1025,7 @@ mod tests {
         assert_eq!(waits(2, at(23, 0), at(21, 30)), "2 mail or chat items wait: read at 07:00 or once 5 wait", "due in the night: the morning");
         assert_eq!(waits(1, at(14, 0), at(14, 5)), "1 mail or chat item waits: read at 14:00 or once 5 wait");
         assert_eq!(waits(3, at(23, 0), at(23, 5)), "3 mail or chat items wait: read at 07:00");
+        assert_eq!(waits(1, at(8, 30), at(6, 30)), "1 mail or chat item waits: read at 08:30", "first seen at 06:30: two hours on");
     }
     use super::*;
 
