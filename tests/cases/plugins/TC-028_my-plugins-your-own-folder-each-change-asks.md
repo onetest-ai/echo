@@ -3,7 +3,7 @@ id: TC-028
 title: My plugins — your own plugins in the Echo data folder: listed as a built-in marketplace, installed with the sheet, a change to its files is its update (asking only for what is new), a copy installed and checked against what was agreed, never mixed with another marketplace's; the build skill's commands (plugin mine, plugin guide, widget show, today add on a dashboard)
 priority: high
 type: functional
-requirements: [F-PLUG-26, F-PLUG-27]
+requirements: [F-PLUG-26, F-PLUG-27, F-PLUG-60]
 module: plugins
 run: agent
 platform: any
@@ -33,7 +33,8 @@ tags: [plugins, widgets, self-service, security]
 | 8a | Add `"uses":{"network":{"hosts":["api.example.com"]}}` to its manifest; `$E plugin update team-pulse` | The sheet printed with the new network line ("Talks to api.example.com … (new)"), refused without `--yes` |
 | 8b | Make a folder `Bad_Name` with a manifest in My plugins; `$E plugin mine` | Listed with "its folder name isn't a plugin id…" |
 | 9 | `$E plugin guide` | Echo's plugin authoring rules (Markdown: "# Plugin Authoring", its Rules), then the plugin API reference ("# Echo Plugin API": Package and manifest, Host half, Widgets, Client half, Publishing…) |
-| 10 | `ECHOCTL_HEADLESS=1 $E plugin install team-pulse --from my-plugins --yes` | Refused: "plugins are installed and updated by you, not from inside a run Echo started" |
+| 10 | `ECHOCTL_HEADLESS=1 $E plugin install team-pulse --from my-plugins --yes` | Refused: "plugins are installed, updated and changed by you, not from inside a run Echo started" |
+| 10a | Inside a run Echo started (`ECHOCTL_HEADLESS=1`), then as a routine acting on its own (`ECHOCTL_HEADLESS=1 ECHOCTL_RUN_SESSION=acts`), each of: `$E plugin set team-pulse label Acme`; `$E plugin disable team-pulse`; `$E plugin enable team-pulse`; `$E plugin remove team-pulse`; `$E plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`. Then `ECHOCTL_HEADLESS=1 $E plugin set team-pulse label` | Each change refused with the same words, exit 1; `$E plugin list`: team-pulse still installed and on, no "test-plugins" marketplace; showing a setting still answers (`null`: team-pulse has no such setting) |
 | 11 | `$E today --thread acme-rollout reset`; `$E plugin remove team-pulse` | The folder `team-pulse` still in My plugins (yours to delete) |
 
 ## Teardown

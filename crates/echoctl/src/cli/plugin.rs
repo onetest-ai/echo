@@ -120,10 +120,24 @@ pub enum MarketCmd {
     Update { name: Option<String> },
 }
 
-/// Plugins are installed and updated by the user, never from inside a run Echo started.
-fn refuse_in_run() -> Result<()> {
-    if crate::notes::headless() {
-        anyhow::bail!("plugins are installed and updated by you, not from inside a run Echo started");
+/// Why a run Echo started can't change plugins.
+const REFUSED: &str = "plugins are installed, updated and changed by you, not from inside a run Echo started";
+
+/// Plugins are installed, updated, set up, switched on and off and removed by the user, and so are their marketplaces:
+/// never from inside a run Echo started, a routine acting on its own too (a setting may list addresses a plugin reaches).
+fn refuse_in_run(cmd: &PluginCmd) -> Result<()> {
+    let changes = matches!(
+        cmd,
+        PluginCmd::Install { .. }
+            | PluginCmd::Update { .. }
+            | PluginCmd::Remove { .. }
+            | PluginCmd::Enable { .. }
+            | PluginCmd::Disable { .. }
+            | PluginCmd::Set { value: Some(_), .. }
+            | PluginCmd::Marketplace { cmd: MarketCmd::Add { .. } | MarketCmd::Remove { .. } | MarketCmd::Hide { .. } | MarketCmd::Show { .. } }
+    );
+    if changes && crate::notes::headless() {
+        anyhow::bail!(REFUSED);
     }
     Ok(())
 }
@@ -141,10 +155,10 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         }
         Ok(r.uses.clone())
     };
+    refuse_in_run(&cmd)?;
     match cmd {
         PluginCmd::List => print_json(&snapshot()),
         PluginCmd::Install { id, from, yes } => {
-            refuse_in_run()?;
             let mut from = from.map(|f| market_named(&f)).transpose()?;
             // A folder (a path: `./pulse`, `/…`, `.`): copied into My plugins, installed from there (#589). A bare name is
             // always an id.
@@ -168,7 +182,6 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             println!("Installed {} {}", p.name, p.version);
         }
         PluginCmd::Update { id, yes } => {
-            refuse_in_run()?;
             let ids: Vec<String> = match id {
                 Some(i) => vec![i],
                 None => Registry::load()?.installed.into_keys().collect(),
@@ -346,6 +359,105 @@ mod tests {
         assert!(super::file_handles("acme", &[]).unwrap().is_empty(), "no --file: nothing to refuse");
         // Outside a run: only for a plugin installed and on.
         assert!(super::file_handles("acme", &[f]).unwrap_err().to_string().contains("isn't installed and on"));
+    }
+
+    use super::{plugin_command, MarketCmd, PluginCmd};
+    use serde_json::json;
+
+    /// "acme-feed" installed from marketplace "t": an address setting (`feed`) and a plain one (`label`).
+    fn installed(root: &std::path::Path) -> String {
+        let mk = root.join("market");
+        let d = mk.join("plugins/acme-feed");
+        std::fs::create_dir_all(&d).unwrap();
+        let manifest = json!({"id": "acme-feed", "name": "Acme feed", "version": "0.1.0",
+            "uses": {"network": {"hosts_from": ["feed"]}},
+            "settings": [{"key": "feed", "label": "Feed server", "type": "string"}, {"key": "label", "label": "Label", "type": "string"}]});
+        std::fs::write(d.join("echo-plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "acme-feed", "source": "./plugins/acme-feed"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("acme-feed", Some(&name)).unwrap().uses;
+        crate::plugins::install("acme-feed", Some(&name), &agreed).unwrap();
+        name
+    }
+
+    /// `cmd` run inside a run Echo started: a Yolo-like run (limited), then a routine acting on its own (the CLI's
+    /// limits lifted) — each error, or None where it ran.
+    fn in_runs(cmd: impl Fn() -> PluginCmd) -> [Option<String>; 2] {
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let limited = plugin_command(cmd()).err().map(|e| e.to_string());
+        std::env::set_var(crate::notes::RUN_SESSION, "acts");
+        assert!(!crate::notes::run_limited(), "a routine acting on its own");
+        let acts = plugin_command(cmd()).err().map(|e| e.to_string());
+        std::env::remove_var(crate::notes::RUN_SESSION);
+        std::env::remove_var(crate::notes::HEADLESS);
+        [limited, acts]
+    }
+
+    fn refused(r: [Option<String>; 2]) -> bool {
+        r.iter().all(|e| e.as_deref() == Some(super::REFUSED))
+    }
+
+    fn value(key: &str) -> serde_json::Value {
+        crate::plugins::settings_view("acme-feed").unwrap().into_iter().find(|s| s["key"] == key).unwrap()["value"].clone()
+    }
+
+    fn on() -> bool {
+        crate::plugins::enabled().iter().any(|p| p.id == "acme-feed")
+    }
+
+    #[test]
+    fn plugin_set_is_refused_in_every_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-set-run");
+        installed(&root);
+        fn set(key: &'static str, v: &'static str) -> impl Fn() -> PluginCmd {
+            move || PluginCmd::Set { id: "acme-feed".into(), key: key.into(), value: Some(v.into()) }
+        }
+        // The addresses it may reach, and a plain setting: neither changes from a run.
+        assert!(refused(in_runs(set("feed", "https://feed.acme.example"))));
+        assert!(refused(in_runs(set("label", "Acme"))));
+        assert_eq!((value("feed"), value("label")), (json!(null), json!(null)));
+        // Showing one still works there; outside a run the user sets them.
+        assert_eq!(in_runs(|| PluginCmd::Set { id: "acme-feed".into(), key: "label".into(), value: None }), [None, None]);
+        plugin_command(set("label", "Acme")()).unwrap();
+        assert_eq!(value("label"), json!("Acme"));
+    }
+
+    #[test]
+    fn plugin_disable_is_refused_in_every_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-disable-run");
+        installed(&root);
+        assert!(refused(in_runs(|| PluginCmd::Disable { id: "acme-feed".into() })));
+        assert!(on());
+        plugin_command(PluginCmd::Disable { id: "acme-feed".into() }).unwrap();
+        assert!(!on());
+    }
+
+    #[test]
+    fn plugin_enable_is_refused_in_every_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-enable-run");
+        installed(&root);
+        crate::plugins::set_enabled("acme-feed", false).unwrap();
+        assert!(refused(in_runs(|| PluginCmd::Enable { id: "acme-feed".into() })));
+        assert!(!on());
+        plugin_command(PluginCmd::Enable { id: "acme-feed".into() }).unwrap();
+        assert!(on());
+    }
+
+    #[test]
+    fn plugin_remove_and_marketplace_changes_are_refused_in_every_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-remove-run");
+        let name = installed(&root);
+        let other = root.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("echo-marketplace.json"), json!({"name": "o", "plugins": []}).to_string()).unwrap();
+        assert!(refused(in_runs(|| PluginCmd::Remove { id: "acme-feed".into(), delete_data: true })));
+        assert!(refused(in_runs(|| PluginCmd::Marketplace { cmd: MarketCmd::Add { source: other.display().to_string(), name: Some("o".into()) } })));
+        assert!(refused(in_runs(|| PluginCmd::Marketplace { cmd: MarketCmd::Remove { name: name.clone(), yes: true, delete_data: true } })));
+        assert!(refused(in_runs(|| PluginCmd::Marketplace { cmd: MarketCmd::Hide { name: name.clone() } })));
+        assert!(refused(in_runs(|| PluginCmd::Marketplace { cmd: MarketCmd::Show { name: name.clone() } })));
+        assert!(on(), "still installed and on");
+        assert!(crate::plugins::snapshot()["markets"].as_array().unwrap().iter().all(|m| m["name"] != "o"), "no marketplace added");
     }
 
     #[test]
