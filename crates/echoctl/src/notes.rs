@@ -1688,6 +1688,7 @@ mod tests {
         .is_err());
         assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "none starts after");
         assert!(quitting());
+        children().stopping = false; // a single test thread runs the tests one after another
     }
 
     #[cfg(unix)]
@@ -1714,6 +1715,7 @@ mod tests {
         shutdown();
         go.0.send(()).unwrap();
         assert!(other.join().unwrap(), "another thread's run is neither stopped nor refused");
+        children().stopping = false;
     }
 
     #[test]
