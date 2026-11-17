@@ -46,6 +46,18 @@ pub enum PluginCmd {
     Disable { id: String },
     /// Show (no value) or set a plugin's setting
     Set { id: String, key: String, value: Option<String> },
+    /// The certificates you trust for a plugin's https / wss addresses, and those Echo met there and refused (JSON)
+    Certs { id: String },
+    /// Trust the certificate at an address you listed for a plugin (host:port): the one Echo met there, or the key you
+    /// give (sha256//… of its public key); Echo then reaches it with that key alone and refuses another
+    Trust {
+        id: String,
+        address: String,
+        #[arg(long)]
+        key: Option<String>,
+    },
+    /// No longer trust the certificate you trusted at an address (host:port)
+    Untrust { id: String, address: String },
     /// Run a plugin's command (its host half's `ctx.command`) with JSON arguments; prints its JSON answer
     Call {
         id: String,
@@ -134,6 +146,8 @@ fn refuse_in_run(cmd: &PluginCmd) -> Result<()> {
             | PluginCmd::Enable { .. }
             | PluginCmd::Disable { .. }
             | PluginCmd::Set { value: Some(_), .. }
+            | PluginCmd::Trust { .. }
+            | PluginCmd::Untrust { .. }
             | PluginCmd::Marketplace { cmd: MarketCmd::Add { .. } | MarketCmd::Remove { .. } | MarketCmd::Hide { .. } | MarketCmd::Show { .. } }
     );
     if changes && crate::notes::headless() {
@@ -209,6 +223,15 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             for n in settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()).and_then(|s| s["notes"].as_array().cloned()).unwrap_or_default() {
                 eprintln!("Note: {}", n.as_str().unwrap_or(""));
             }
+        }
+        PluginCmd::Certs { id } => print_json(&serde_json::json!(pins::view(&id))),
+        PluginCmd::Trust { id, address, key } => {
+            let key = pins::trust(&id, &address, key.as_deref())?;
+            println!("Trusted {} for {id}: {key}", pins::host_port(&address)?);
+        }
+        PluginCmd::Untrust { id, address } => {
+            let hp = pins::host_port(&address)?;
+            println!("{}", if pins::forget(&id, &address)? { format!("No longer trusted at {hp} for {id}") } else { format!("Nothing was trusted at {hp} for {id}") });
         }
         #[cfg(feature = "js")]
         PluginCmd::Call { id, command, args, files } => {
@@ -425,6 +448,24 @@ mod tests {
         assert_eq!(in_runs(|| PluginCmd::Set { id: "acme-feed".into(), key: "label".into(), value: None }), [None, None]);
         plugin_command(set("label", "Acme")()).unwrap();
         assert_eq!(value("label"), json!("Acme"));
+    }
+
+    #[test]
+    fn plugin_trust_and_untrust_are_refused_in_every_run_echo_started() {
+        let (_env, root) = crate::paths::testenv::folders("cli-plugin-trust-run");
+        installed(&root);
+        crate::plugins::set_setting("acme-feed", "feed", &json!("https://feed.acme.example")).unwrap();
+        const KEY: &str = "sha256//Xy96ZGBl7ULObmus5R49MQ/GWyx26THhqCJCxNfPFlc=";
+        let trust = || PluginCmd::Trust { id: "acme-feed".into(), address: "feed.acme.example".into(), key: Some(KEY.into()) };
+        assert!(refused(in_runs(trust)));
+        assert!(crate::plugins::pins::view("acme-feed").is_empty());
+        // Listing them still works there; outside a run the user trusts and forgets.
+        assert_eq!(in_runs(|| PluginCmd::Certs { id: "acme-feed".into() }), [None, None]);
+        plugin_command(trust()).unwrap();
+        assert_eq!(crate::plugins::pins::pinned("acme-feed", "feed.acme.example:443").as_deref(), Some(KEY));
+        assert!(refused(in_runs(|| PluginCmd::Untrust { id: "acme-feed".into(), address: "feed.acme.example:443".into() })));
+        plugin_command(PluginCmd::Untrust { id: "acme-feed".into(), address: "https://feed.acme.example".into() }).unwrap();
+        assert!(crate::plugins::pins::view("acme-feed").is_empty());
     }
 
     #[test]

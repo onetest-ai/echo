@@ -55,6 +55,7 @@ pub fn snapshot() -> Value {
                 "market_gone": r.market(&p.market).is_none(),
                 "update": update_for(p).map(|u| review_json(&u)),
                 "settings": settings_view(&p.id).unwrap_or_default(),
+                "certs": pins::view(&p.id),
                 "claude_problem": m_part,
                 "prefix": m_prefix,
             })

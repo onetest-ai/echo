@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""A made-up voice server for plugin cases: `tests/fixtures/ws_echo.py <port> <log>`, on 127.0.0.1 only.
+"""A made-up voice server for plugin cases: `tests/fixtures/ws_echo.py <port> <log> [--tls <cert.pem> <key.pem>]`, on
+127.0.0.1 only; with `--tls` it speaks https / wss with that certificate (`tests/fixtures/certs/voice-a|b.*`, made up,
+self-signed: no system trusts them).
 
 - WebSocket on any path: each text message is JSON-RPC 2.0; it answers `{"jsonrpc": "2.0", "id": <id>, "result":
   {"method": <method>, "params": <params>}}` (an error object for a message that isn't JSON).
 - `GET /ping`: `{"ok": true}` with `Access-Control-Allow-Origin: *` (a page's `fetch` passes CORS).
+- `GET /events`: an event stream, `data: one`, `data: два`, `data: three` 300 ms apart, then its end.
 
 Every connection is a line in <log> (`ws <path>`, `get <path>`, `rpc <method>`), so a case can tell a connection the
 page's policy blocked (no line) from one that failed. Python's standard library only; one thread per connection.
@@ -13,7 +16,9 @@ import hashlib
 import json
 import socketserver
 import struct
+import ssl
 import sys
+import time
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -36,6 +41,16 @@ class Handler(socketserver.StreamRequestHandler):
             k, _, v = line.partition(":")
             headers[k.strip().lower()] = v.strip()
         key = headers.get("sec-websocket-key")
+        if not key and path == "/events":
+            self.note(f"get {path}")
+            self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+            for word in ["one", "два", "three"]:
+                piece = f"data: {word}\n\n".encode()
+                self.wfile.write(f"{len(piece):x}\r\n".encode() + piece + b"\r\n")
+                self.wfile.flush()
+                time.sleep(0.3)
+            self.wfile.write(b"0\r\n\r\n")
+            return
         if not key:
             self.note(f"get {path}")
             body = b'{"ok": true}' if path == "/ping" else b'{"error": "not found"}'
@@ -94,4 +109,8 @@ if __name__ == "__main__":
     port, log = int(sys.argv[1]), sys.argv[2]
     with Server(("127.0.0.1", port), Handler) as s:
         s.log = log
+        if sys.argv[3:4] == ["--tls"]:
+            tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            tls.load_cert_chain(sys.argv[4], sys.argv[5])
+            s.socket = tls.wrap_socket(s.socket, server_side=True, do_handshake_on_connect=False)
         s.serve_forever()

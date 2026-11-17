@@ -475,6 +475,51 @@
    ]
   },
   {
+   "id": "F-PLUG-80",
+   "feature": "A plugin's host half talks to an address the user listed over WebSocket (`ctx.net.websocket(url, {headers, protocols})`, `ws://` and `wss://`, its http / https address and port), with the app's window closed too: it resolves once open, `send` takes text, base64 with `{binary: true}` or a file the user handed it, `onMessage` / `onClose` / `onError` get the server's messages (binary as base64), its close code and reason; to an address not listed (a manifest's `network.hosts` host too) it is refused before anything is sent",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-81",
+   "feature": "A plugin's host half reads an answer as it comes (`ctx.http.stream(url, opts, onChunk)`, SSE or chunked) with the same checks as `ctx.http.fetch`: its status and headers, each piece in order with no letter cut in two, the end with its byte count; `cancel()` ends it and the server sees the client go",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-82",
+   "feature": "https / wss to an address the user listed whose certificate the system doesn't trust (self-signed, an internal CA) fails the first time naming the key met there (`sha256//…`) and how to trust it; the user trusts it under the plugin's Certificates in Settings → Plugins (\"Trust\", then a dialog of the system's) or with `echoctl plugin trust <id> <host:port>` (`certs` lists them, `untrust` / \"Forget\" drops one); from then on that address is reached with that key alone, and a changed key is refused, named, until the user trusts it; a plugin can't trust one, Echo keeps them outside its store, a run Echo started can't change them, and removing the plugin with its data drops them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-83",
+   "feature": "A plugin's `ctx.http.fetch` sends a file the user handed it as the body (`{file}` with POST, PUT or PATCH, never with `body`) and saves an answer over 10 MB into its store with `save` (512 MB, 15 minutes at most each way); without `save` an answer over 10 MB is refused",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-84",
+   "feature": "A plugin keeps at most 8 connections (WebSockets and streams) open at once — the 9th is refused saying so — and a WebSocket message is 16 MB at most; switching the plugin off, updating or removing it closes every connection it has open",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
    "id": "F-PLUG-53",
    "feature": "A plugin renders a vault page as safe HTML with its links working (`ctx.markdown(md, {breaks, links, images})`, both halves): `ctx.markdown.links(md)` gives each destination once as written (wikilink targets `Page`, `Page#heading`, `![[embeds]]`, ordinary links and images; nothing in code), the plugin resolves them and Echo keeps only an `https://` link, an `echo://` link it knows or the plugin's own `#<id>:` / `#brain/<id>:` route, and images only from the plugin's folder route (no `data:`, `http:`, `//host`, another plugin's route, dot segments or whitespace); anything else is text, `null` a missing page (`data-md-missing`, no href, focusable) the plugin catches on a click or Enter; raw HTML shown as text, a mermaid fence as code; `breaks` keeps single newlines; 1 MB of text at most",
    "priority": "high",

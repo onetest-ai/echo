@@ -52,7 +52,7 @@ pub fn make(plugin: &str, path: &Path) -> Result<Value> {
 
 /// The file behind handle `file` (an id, or a handle `{file}`), when it is plugin `plugin`'s and not past its hour.
 /// Another plugin's is refused as one that isn't there: a plugin learns nothing of another's files.
-fn own(plugin: &str, file: &Value) -> Result<(PathBuf, Value)> {
+pub(super) fn own(plugin: &str, file: &Value) -> Result<(PathBuf, Value)> {
     let id = file.as_str().or_else(|| file["file"].as_str()).unwrap_or("");
     match handles().get(id) {
         Some(h) if h.plugin == plugin && h.made.elapsed() < KEEP => Ok((h.path.clone(), json!({"file": id, "name": h.name, "size": h.size}))),

@@ -27,6 +27,9 @@ mod service_async;
 pub mod files;
 pub mod folders;
 mod git;
+mod http;
+pub mod net;
+mod tls;
 mod widgets;
 pub mod work;
 
@@ -37,6 +40,9 @@ use widgets::widget_ask_now_on;
 pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
 use widgets::widget_store;
 
+use http::fetch;
+#[cfg(test)]
+use http::curl_head;
 use service_async::service_async;
 use test_hosts::test_host;
 #[cfg(test)]
@@ -81,6 +87,9 @@ const PRELUDE: &str = r#"
       Promise.resolve().then(t.fn).catch((e) => call('log', ['error', `timer: ${(e && e.message) || e}`]))
     }
   }
+  // A connection's events (`net.rs`): each to its own handler, by id; a handler's error is logged.
+  const conns = {}, fire = (fn, ...a) => Promise.resolve().then(() => fn && fn(...a)).catch((e) => call('log', ['error', `net: ${(e && e.message) || e}`]))
+  globalThis.__net = (id, json) => { const c = conns[id]; if (c) c(JSON.parse(json)) }
   globalThis.__event = (name, payload) => {
     for (const fn of handlers[name] || []) Promise.resolve().then(() => fn(JSON.parse(payload))).catch((e) => call('log', ['error', `${name}: ${(e && e.message) || e}`]))
   }
@@ -134,8 +143,41 @@ const PRELUDE: &str = r#"
     /** Its `cache/` (Echo removes what is there over 7 days): `size()` {bytes, files}. */
     cache: { size: () => call('store.size', 'cache') },
     settings: { get: (key) => call('settings.get', key), set: (key, value) => call('settings.set', [key, value]) },
-    /** HTTPS to the hosts its manifest names (`uses.network.hosts`): {status, body}. */
-    http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
+    /** HTTPS to the hosts its manifest names (`uses.network.hosts`) and the addresses the user listed: {status, body};
+     *  `{file: handle}` sends a file, `{save}` keeps the answer in its store (both up to 512 MB). `stream(url, opts,
+     *  onChunk)` reads an answer as it comes (SSE, chunked): {status, headers, done: Promise<{bytes, cancelled}>, cancel()}. */
+    http: {
+      fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]),
+      stream: (url, opts, onChunk) => {
+        const id = call('http.stream', [String(url), opts || {}])
+        let settle
+        const s = { status: 0, headers: {}, done: new Promise((y, n) => { settle = [y, n] }), cancel: () => call('http.cancel', id) }
+        conns[id] = (ev) => {
+          if (ev.kind === 'head') Object.assign(s, { status: ev.status, headers: ev.headers })
+          else if (ev.kind === 'chunk') fire(onChunk, ev.text, s)
+          else { delete conns[id]; ev.kind === 'end' ? settle[0]({ status: s.status, bytes: ev.bytes, cancelled: ev.cancelled }) : settle[1](new Error(ev.message)) }
+        }
+        return s
+      },
+    },
+    /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
+     *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),
+     *  onError({message})}; events wait for their handler. */
+    net: {
+      websocket: (url, opts) => new Promise((resolve, reject) => {
+        const id = call('net.websocket', [String(url), opts || {}]), h = {}, q = []
+        const ws = { protocol: '', send: (d, o) => call('net.send', [id, d, o || {}]), close: (code, reason) => call('net.close', [id, code || 1000, String(reason || '')]) }
+        const run = (ev) => { const fn = h[{ message: 'onMessage', close: 'onClose', error: 'onError' }[ev.kind]]; if (fn) fire(fn, ...(ev.kind === 'message' ? [ev.data, { binary: !!ev.binary }] : [ev])); return !!fn }
+        for (const k of ['onMessage', 'onClose', 'onError']) Object.defineProperty(ws, k, { get: () => h[k], set: (fn) => { h[k] = fn; while (q.length && run(q[0])) q.shift() } })
+        let open = false
+        conns[id] = (ev) => {
+          if (ev.kind === 'close') delete conns[id]
+          if (ev.kind === 'open') { open = true; ws.protocol = ev.protocol; return resolve(ws) }
+          if (!open) return ev.kind === 'error' && reject(new Error(ev.message))
+          if (q.length || !run(ev)) q.length < 1000 && q.push(ev)
+        }
+      }),
+    },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
     markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md) => call('markdown.links', String(md)) }),
     /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
@@ -306,6 +348,8 @@ enum Msg {
     /// An event whose payload differs per plugin: each one's fields set on the shared part.
     EventEach(String, Value, serde_json::Map<String, Value>),
     Settle(String, u64, String),
+    /// An event of one of a plugin's connections (`net.rs`): plugin, connection, JSON.
+    Net(String, u64, String),
 }
 
 struct Host {
@@ -375,94 +419,6 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
     let p = provider(kind)?;
     let msg = json!({"title": m.title, "markdown": m.markdown, "about": m.about, "ai": m.ai.map(crate::deliver::ai_notice)});
     call_within(&p.plugin, "__deliver", &json!({"kind": kind, "msg": msg}), Duration::from_secs(90)).map(|_| ())
-}
-
-/// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, or to an address the user listed in a setting its
-/// manifest names in `network.hosts_from` (`plugins::addresses`: plain http too, to any listed host), through
-/// curl (its config on stdin, so headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
-/// With `save: <path>` (relative, in the plugin's store) a 2xx answer's bytes go to that file and the answer is {status,
-/// body: "", saved, bytes}: the body is text, so audio and images can't come through it.
-fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    use std::io::Write as _;
-    use crate::app::NoWindow;
-    let m = plugins::read_manifest(&package_dir(id)?)?;
-    let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
-    // What the user listed, each checked again as when it was saved (the file may have been edited since).
-    let listed: Vec<String> = plugins::address_settings(&m.uses).iter().filter_map(|k| plugins::listed_addresses(id, k)).collect();
-    let granted: Vec<plugins::addresses::Address> = listed.iter().filter_map(|v| plugins::addresses::parse_list(v).ok()).flatten().collect();
-    let refuse = || anyhow!("{id} may reach only the hosts its manifest names ({}) and the addresses you list in its settings ({})", hosts.join(", "), listed.join(", "));
-    let rest = url.split_once("://").map_or("", |(_, r)| r);
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if !granted.iter().any(|a| a.matches(url)) {
-        let named = url.strip_prefix("https://").map(|r| r.split(['/', '?', '#']).next().unwrap_or(""));
-        if !named.is_some_and(|h| !h.contains('@') && !h.contains(':') && hosts.iter().any(|x| x == h)) {
-            return Err(refuse());
-        }
-    }
-    // Checked on the real host above; a development build may send it to a fake service instead (or refuse it).
-    let fake = test_host(url, &hosts)?;
-    let url = fake.as_deref().unwrap_or(url);
-    /// The half-written download: its own name per fetch, gone however the fetch ends unless renamed into place.
-    struct Part(PathBuf);
-    impl Drop for Part {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-    let save = match opts["save"].as_str().filter(|s| !s.is_empty()) {
-        Some(rel) => {
-            let to = writable_store_path(id, rel)?;
-            std::fs::create_dir_all(to.parent().unwrap_or(&to))?;
-            let mut part = to.clone().into_os_string();
-            part.push(format!(".{}-{}.part", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-            Some((rel, to, Part(PathBuf::from(part))))
-        }
-        None => None,
-    };
-    let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
-    if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
-        bail!("method {method}");
-    }
-    // A NUL would end curl's config line early; a header name is a plain token (curl reads `@file` as a file).
-    let headers = opts["headers"].as_object().cloned().unwrap_or_default();
-    let body = opts.get("body").filter(|b| !b.is_null()).map(|b| b.as_str().map(str::to_owned).unwrap_or_else(|| b.to_string()));
-    if url.contains('\0') || body.as_deref().is_some_and(|b| b.contains('\0')) || headers.iter().any(|(k, v)| k.is_empty() || !k.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c)) || v.as_str().unwrap_or("").contains(['\0', '\n', '\r'])) {
-        bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
-    }
-    let mut cfg = curl_head(url, &method, fake.is_some());
-    if let Some((_, _, part)) = &save {
-        cfg.push_str(&format!("output = {}\n", curl_quote(&part.0.to_string_lossy())));
-    }
-    for (k, v) in headers {
-        cfg.push_str(&format!("header = {}\n", curl_quote(&format!("{k}: {}", v.as_str().unwrap_or("")))));
-    }
-    // `data-raw`: sent as written; `data-binary` would read a body starting with `@` as a file.
-    if let Some(body) = body {
-        cfg.push_str(&format!("data-raw = {}\n", curl_quote(&body)));
-    }
-    // `-q` first: the user's own ~/.curlrc (a `location` that follows redirects) isn't read.
-    let mut child = std::process::Command::new("curl").no_window().args(["-q", "-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
-    let status = code.trim().parse::<u16>().unwrap_or(0);
-    let Some((rel, to, part)) = save else { return Ok(json!({"status": status, "body": body})) };
-    if (200..300).contains(&status) {
-        // An empty answer may leave curl's file unmade.
-        if !part.0.exists() {
-            std::fs::write(&part.0, b"")?;
-        }
-        let bytes = std::fs::metadata(&part.0).map(|m| m.len()).unwrap_or(0);
-        std::fs::rename(&part.0, &to)?;
-        return Ok(json!({"status": status, "body": "", "saved": rel, "bytes": bytes}));
-    }
-    // Not a success: what the server said (text, cut), not a file.
-    let said = std::fs::read(&part.0).map(|b| String::from_utf8_lossy(&b[..b.len().min(4096)]).into_owned()).unwrap_or_default();
-    Ok(json!({"status": status, "body": said}))
 }
 
 /// Async operations and command calls in flight, numbered.
@@ -669,6 +625,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         match msg {
             Ok(Msg::Load(id, dir)) => {
                 plugins.remove(&id);
+                net::stop_plugin(&id);
                 // A new version registers what it adds again; an old version's additions don't linger.
                 crate::grants::drop_plugin(&id);
                 let outcome = load(&rt, &id, &dir, &current, &tx, &mut slice);
@@ -685,6 +642,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
                 plugins::scripts::stop_plugin(&id);
+                net::stop_plugin(&id);
                 files::forget(&id);
                 hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
@@ -752,6 +710,15 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     set_current(&current, &id);
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__settle").and_then(|f| f.call::<_, ()>((token, out.clone()))))));
+                }
+            }
+            Ok(Msg::Net(id, n, ev)) => {
+                net::delivered(n);
+                if let Some(p) = plugins.get(&id) {
+                    set_current(&current, &id);
+                    current.lock().unwrap().unattended = true;
+                    let ctx = p.ctx.clone();
+                    slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__net").and_then(|f| f.call::<_, ()>((n, ev.clone()))))));
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -889,23 +856,6 @@ fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: b
     token
 }
 
-/// A value in curl's config: quoted, its backslashes, quotes and line breaks escaped.
-fn curl_quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
-}
-
-/// The first lines of curl's config for `ctx.http.fetch`. Only http(s), never a redirect elsewhere: what the plugin may
-/// reach is checked on this URL alone. A request sent to a fake service never goes through a proxy (`http_proxy`,
-/// `all_proxy`): it stays on this computer, its headers with it.
-fn curl_head(url: &str, method: &str, to_fake: bool) -> String {
-    let mut cfg = format!("url = {}\nrequest = \"{method}\"\nproto = \"=http,https\"\ngloboff\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", curl_quote(url));
-    if to_fake {
-        cfg.push_str("noproxy = \"*\"\n");
-    }
-    cfg
-}
-
-
 /// Where the plugin is installed.
 fn package_dir(id: &str) -> Result<PathBuf> {
     plugins::enabled().into_iter().find(|p| p.id == id).map(|p| plugins::plugin_dir(&p)).ok_or_else(|| anyhow!("{id} isn't installed and on"))
@@ -1037,6 +987,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
     Ok(match op {
         "id" => json!(id),
         "terminal" => json!(!TIMERS.load(Ordering::Relaxed)),
+        "net.websocket" | "net.send" | "net.close" | "http.stream" | "http.cancel" => net::service(id, op, arg)?,
         "log" => {
             eprintln!("plugin {id}: [{}] {}", s(&arg[0]), s(&arg[1]));
             Value::Null

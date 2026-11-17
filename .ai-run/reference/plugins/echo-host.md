@@ -33,6 +33,12 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   Evidence: `window::plugins::store_file`
 - The addresses a plugin may reach by `network.hosts_from` are entered only by the user, in the window or the CLI, and
   kept outside the plugin's store. Evidence: `plugins::listed_addresses`
+- So are the certificate keys the user trusts for those addresses, and the keys Echo met there and refused (20 at most
+  a plugin): `<config dir>/plugins/pins/<id>.json`, `{pins: {"host:port": {key, at}}, seen: {…}}`, written under
+  `plugins.lock`; Echo writes a met key only on a connection to a listed https address that failed, a pin only on the
+  user's yes (the window's dialog, `echoctl plugin trust`). Removed with the plugin's data. Evidence: `plugins::pins`
+- A host half's open connections (WebSockets, streams) are the app's process's, each on a thread of its own, closed
+  with the host half (switched off, updated, removed, loaded again). Evidence: `jshost::net::stop_plugin`
 
 ## Files handed to a plugin
 
