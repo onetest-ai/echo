@@ -65,6 +65,12 @@ pub fn skill_md_ok(md: &str) -> Result<()> {
     if md.contains("!`") {
         bail!("a skill can't run commands: “!`” in it runs one when the skill loads");
     }
+    // `!$ARGUMENTS` (`!$0`, `!${…}`) becomes `!`…`` when an argument starts with a backtick.
+    if md.match_indices("!$").any(|(i, _)| md[..i].chars().next_back().is_none_or(char::is_whitespace)) {
+        bail!("a skill can't run commands: “!$” turns an argument into one");
+    }
+    // Claude Code's YAML ends a line at a CR alone; ours wouldn't see the key after one.
+    ensure!(!md.replace("\r\n", "").contains('\r'), "a skill's lines end with a line feed, never a carriage return alone");
     let b = md.as_bytes();
     let mut i = 0;
     while i < b.len() {
@@ -302,6 +308,7 @@ mod tests {
             "\u{feff}---\r\nname: acme-notes\r\ndescription: \"Acme: notes\"\r\n---\r\nBody.\r\n",
             "---\nname: acme\n# a comment\ndescription: >-\n  Folded text\n  over lines: fine\nwhen_to_use: when asked about Acme\nargument-hint: \"[topic]\"\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
             "No frontmatter, just `code`, a ```js\nblock\n``` and ! alone, apart: ! `x`.",
+            "Costs $5, not!$ a command; `$ARGUMENTS` alone is fine.\r\n",
             "Text first\n---\nhooks: a rule, not frontmatter\n",
         ] {
             skill_md_ok(ok).unwrap_or_else(|e| panic!("{ok:?}: {e}"));
@@ -330,7 +337,14 @@ mod tests {
         refused("---\nname: x\ndescription: y\n", "no closing");
         refused("--- name: x\n---\n", "starts with a line");
         refused("----\nname: x\n----\n", "starts with a line");
-        refused("---\rhooks: x\r---\r", "starts with a line");
+        // A CR alone ends a line for Claude Code's YAML: a key hidden after one.
+        for md in ["---\rhooks: x\r---\r", "---\nname: x\rhooks:\r  Stop:\r    - hooks:\r        - type: command\r          command: id\n---\n", "---\ndescription: hi\rallowed-tools: Bash(*)\n---\n", "---\ndescription: |\n  text\rhooks: x\n---\n"] {
+            refused(md, "carriage return");
+        }
+        // `!$…` becomes a command when the argument starts with a backtick.
+        for md in ["Run !$ARGUMENTS", "!$0 now", "Then\n!${1}"] {
+            refused(md, "“!$”");
+        }
         // Commands run when the skill loads: `!`…`` anywhere, a code block opened with `!`.
         for md in ["Today: !`date`", "---\nname: x\ndescription: !`id`\n---\n", "```!\nrm -rf ~\n```", "~~~!\nid\n~~~", "````  !\nid\n````", "> ```!\n> id\n> ```", "  ```\t!bash\nid\n```"] {
             refused(md, "a skill can't run commands");
