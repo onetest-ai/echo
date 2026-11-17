@@ -140,20 +140,11 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         #[cfg(feature = "js")]
         p if p.starts_with("/api/plugin/") => {
             let rest = &p["/api/plugin/".len()..];
-            // Echo's background jobs, for a client half that asked for them (`ctx.echo.jobs`, echo-plugins R25): the
-            // list, and a change the page sends only on the user's own click or key (`jobs::set` checks it as the CLI).
-            if let Some((id, op)) = rest.split_once("/jobs").filter(|(id, _)| crate::plugins::valid_id(id)) {
-                let q = req.uri().query().unwrap_or("");
-                let r = crate::jshost::may_tune_jobs(id).and_then(|()| match op {
-                    "" => Ok(crate::jobs::list()),
-                    "/set" => {
-                        let settings: Vec<String> = query_param(q, "settings").and_then(|a| serde_json::from_str(&a).ok()).unwrap_or_default();
-                        crate::jobs::set(&query_param(q, "job").unwrap_or_default(), &settings)
-                    }
-                    _ => Err(anyhow::anyhow!("no such jobs request")),
-                });
-                return Some(json_reply(match r {
-                    Ok(v) => json!({"value": v}),
+            // Echo's background jobs, read by a client half that asked for them (`ctx.echo.jobs.list`, echo-plugins R25);
+            // a change goes only through the page's IPC (`plugin_jobs_set`), never a GET.
+            if let Some(id) = rest.strip_suffix("/jobs").filter(|id| crate::plugins::valid_id(id)) {
+                return Some(json_reply(match crate::jshost::may_tune_jobs(id) {
+                    Ok(()) => json!({"value": crate::jobs::list()}),
                     Err(e) => json!({"error": format!("{e:#}")}),
                 }));
             }
@@ -184,6 +175,19 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
 /// The page's commands of this area (`handle` asks each area in turn).
 pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
+        // A plugin's change to Echo's background jobs (`ctx.echo.jobs.set`, sent only on the user's click or key):
+        // the plugin on and asking for `uses.echo.jobs`, checked as `echoctl jobs set`; the answer to its request.
+        #[cfg(feature = "js")]
+        "plugin_jobs_set" => {
+            let id = v["id"].as_str().unwrap_or("");
+            let settings: Vec<String> = v["settings"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect();
+            let r = crate::jshost::may_tune_jobs(id).and_then(|()| crate::jobs::set(v["job"].as_str().unwrap_or(""), &settings));
+            let answer = match r {
+                Ok(list) => json!({"req": v["req"], "value": list}),
+                Err(e) => json!({"req": v["req"], "error": format!("{e:#}")}),
+            };
+            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.jobsSet({answer})")) }
+        }
         "deliver_op" => deliver_op(v),
         // A plugin's command from Echo's own places (an Inbox item's button): in the background.
         #[cfg(feature = "js")]

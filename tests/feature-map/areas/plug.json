@@ -385,7 +385,7 @@
   },
   {
    "id": "F-PLUG-42",
-   "feature": "A plugin that asks for `uses.echo.jobs` (its own line on the sheet) shows Echo's background jobs in its screens (`ctx.echo.jobs.list`) and changes one only on the user's click or key (`ctx.echo.jobs.set`, checked as `echoctl jobs set`); a plugin that didn't ask, or is off, gets an error; Echo's jobs keep their settings with or without it",
+   "feature": "A plugin that asks for `uses.echo.jobs` (its own line on the sheet) shows Echo's background jobs in its screens (`ctx.echo.jobs.list`) and changes one only on the user's click or key, through the page's IPC (`ctx.echo.jobs.set`, checked as `echoctl jobs set`; no GET changes a job); a request naming a plugin that didn't ask, or is off, gets an error; Echo's jobs keep their settings with or without it",
    "priority": "high",
    "check": "agent",
    "axes": []

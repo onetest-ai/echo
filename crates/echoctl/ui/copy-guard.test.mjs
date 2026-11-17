@@ -18,5 +18,5 @@ assert.equal(copyAllowed(null), false, 'no navigator: refused')
 // Echo's own copy (Settings, a note's quote) doesn't go through it: only a plugin's ctx.ui.copy does.
 assert.ok(/copy: \(text\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.ui.copy asks copyAllowed first')
 // A plugin's change to Echo's background jobs, too (echo-plugins R25): asked before anything is sent.
-assert.ok(/set: async \(job, settings\) => \{\s*if \(!copyAllowed\(/.test(src), "ctx.echo.jobs.set asks copyAllowed first")
+assert.ok(/set: \(job, settings\) => \{\s*if \(!copyAllowed\(/.test(src), "ctx.echo.jobs.set asks copyAllowed first")
 console.log('ok - a plugin copies, and changes Echo\'s jobs, only with the user\'s activation; an engine that can\'t tell refuses')

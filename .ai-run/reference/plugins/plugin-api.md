@@ -453,10 +453,12 @@ Evidence: `jshost::work::check_rows`
   added when it unloads. Evidence: `pluginCtx`, `loadPluginClients` (window script)
 - `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, its
   fields with value, default and range, last run, runs today, and the night); `set(job, ["key=value", …])` — only on the
-  user's click or key (`copyAllowed`, else it throws before anything is sent), checked as `echoctl jobs set` (`key=`
-  back to its default, `night` with `from` / `to`), resolving to the list after. Echo's routes:
-  `/api/plugin/<id>/jobs` and `/api/plugin/<id>/jobs/set?job=…&settings=[…]` (`window::plugins`). Echo's jobs run on
-  their own settings with or without the plugin. Evidence: `jshost::may_tune_jobs`, `jobs::set`
+  user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
+  `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
+  its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check
+  the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
+  with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
+  `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or

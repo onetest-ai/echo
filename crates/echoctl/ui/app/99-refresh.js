@@ -68,6 +68,14 @@ const selftestTerm = (windows) => windows
 // end of the selftest-terminal block
 
 window.echo = {
+  /** Echo's answer to a plugin's `ctx.echo.jobs.set`: the jobs after the change, or why it was refused. */
+  jobsSet(a) {
+    const w = a && JobsAsked[a.req]
+    if (!w) return
+    delete JobsAsked[a.req]
+    if (a.error) w.reject(new Error(a.error))
+    else w.resolve(a.value)
+  },
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
   templateSaved(id, created, which, gen) {

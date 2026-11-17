@@ -358,10 +358,10 @@ pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("calls", "your calls' minutes and transcripts"),
 ];
 
-/// What `uses.echo.write` may name, with the sheet's line for each.
 /// `uses.echo.jobs` on the sheet (echo-plugins R25).
 const JOBS_LINE: &str = "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens";
 
+/// What `uses.echo.write` may name, with the sheet's line for each.
 pub(super) const ECHO_WRITES: &[(&str, &str)] = &[
     ("dictionary", "Adds names to your Echo dictionary"),
     ("thread_stage", "Changes your threads' stage"),
@@ -378,7 +378,7 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
         Some(_) => bail!("“echo.jobs” is true or false"),
     };
     if read.is_empty() && write.is_empty() && !jobs {
-        bail!("“echo” reads nothing ({})", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
+        bail!("“echo” asks for nothing: read ({}), write ({}) or jobs", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "), ECHO_WRITES.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
     }
     // A kind a newer Echo has means nothing here: named on the sheet, never granted (an older Echo degrades, the
     // plugin still installs).
