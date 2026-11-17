@@ -29,12 +29,14 @@ and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for t
 - Development-build stand-ins (`#[cfg(debug_assertions)]`): `ECHOCTL_PICK_FOLDER` (instead of a native folder dialog),
   `ECHOCTL_PICK_FILES` (instead of a native file dialog, `jshost::files::pick_files_takes_the_stand_in_in_a_debug_build_and_gives_handles`),
   `ECHOCTL_TEST_HOSTS` (a plugin's named host reaching a fake service,
-  `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests`).
+  `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests`), `ECHOCTL_TEST_GRAPH` (a fake Microsoft 365:
+  signed in with no tokens, every Graph request to a local address, `tests/fixtures/fake_graph.py`,
+  `jshost::a_plugin_reads_a_mail_thread_from_the_fake_microsoft_365_set_for_tests`).
 
 ## Opening nothing in tests
 
 With `ECHOCTL_TEST_OPEN_LOG_ONLY` set (the test data's `<dir>/env` sets it), Echo, in any build and on any OS, appends
-what the window's `open_url`, a sign-in, `echoctl join` or a Settings pane would open to `ECHOCTL_TEST_OPEN_LOG`
+what the window's `open_url`, a sign-in, `echoctl join`, a Settings pane or a plugin's `ctx.system.reveal` (`reveal <path>`) would open to `ECHOCTL_TEST_OPEN_LOG`
 (`<dir>/open.log`) and opens nothing (`app::open_log_only`).
 
 ## Served test data

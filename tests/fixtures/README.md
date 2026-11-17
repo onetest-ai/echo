@@ -21,6 +21,10 @@ tests/fixtures/wait.py <seconds> <condition>
 with file-fed calls"); `wait.py` waits for the run's app state, an event or a file, with a timeout, instead of a fixed
 `sleep`.
 
+`fake_graph.py <port> [--log FILE]` is a made-up Microsoft 365 for plugin cases (acme.example mail and one Teams chat):
+a debug build with `ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>` is signed in to it and reads it instead of Microsoft
+Graph (`tests/app_profile.md` → "Plugins against fake services").
+
 Build between 06:00 and 22:50: today's calls lie hours before now and its meetings up to 3 h after. Meeting times
 that would fall after 23:20 are squeezed into 23:20–23:50 (`day_clock`: same order, closer together; built before
 about 20:20 nothing moves). The small set's meetings to come keep their order and the accepted ones their 30 minutes:

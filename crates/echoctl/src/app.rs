@@ -491,6 +491,51 @@ pub fn reveal_file(path: &Path) {
     }
 }
 
+/// What shows `path` (absolute, canonical) selected in the file manager, never through a shell: the program and its
+/// arguments — macOS `open -R <path>`; Windows `explorer.exe` with its one argument `/select,"<path>"`, passed as
+/// written (explorer parses its own command line). Refused: a `"` or a control character, a path that isn't absolute,
+/// and on Windows a `\\?\` path explorer can't take.
+#[cfg_attr(not(all(feature = "tray", feature = "js")), allow(dead_code))]
+pub fn reveal_command(path: &str, windows: bool) -> Result<(&'static str, Vec<String>)> {
+    if path.chars().any(|c| c == '"' || c.is_control()) {
+        bail!("Echo can't show this path in the file manager: it holds a quote or a control character");
+    }
+    if !windows {
+        if !path.starts_with('/') {
+            bail!("{path} isn't an absolute path");
+        }
+        return Ok(("/usr/bin/open", vec!["-R".into(), path.into()]));
+    }
+    let b = path.as_bytes();
+    let drive = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\';
+    let share = path.starts_with(r"\\") && !path.starts_with(r"\\?\") && !path.starts_with(r"\\.\");
+    if !drive && !share {
+        bail!("{path} isn't a path Explorer can show");
+    }
+    // A closing `\"` would read as an escaped quote: a drive's root goes as `C:`.
+    let path = path.trim_end_matches('\\');
+    Ok(("explorer.exe", vec![format!("/select,\"{path}\"")]))
+}
+
+/// Show `path` (absolute, canonical) selected in Finder / Explorer by `reveal_command`.
+#[cfg_attr(not(all(feature = "tray", feature = "js")), allow(dead_code))]
+pub fn reveal_selected(path: &Path) -> Result<()> {
+    let (program, args) = reveal_command(&path.to_string_lossy(), cfg!(windows))?;
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        for a in &args {
+            cmd.raw_arg(a);
+        }
+    }
+    #[cfg(not(windows))]
+    cmd.args(&args);
+    // Explorer exits 1 even when it showed the file: only a program that didn't start is an error.
+    cmd.status().with_context(|| format!("starting {program}"))?;
+    Ok(())
+}
+
 /// Is a process with this pid alive?
 pub fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
@@ -1070,11 +1115,12 @@ pub fn choose_files(prompt: &str, multiple: bool, ext: &[String]) -> Vec<PathBuf
 // Windows' pickers: the text goes in through the environment, never quoted into the script — PowerShell also ends a
 // '…' string at a curly quote (‘ ’ ‚ ‛), so a quote in a plugin's prompt would end it and run what follows.
 
-/// The PowerShell script of Windows' folder picker and the environment it reads its prompt from.
+/// The PowerShell script of Windows' folder picker (with its "Make New Folder" button, as macOS's `choose folder` has
+/// "New Folder") and the environment it reads its prompt from.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn folder_dialog_ps(prompt: &str) -> (String, Vec<(&'static str, String)>) {
     let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
-                  $d.Description = $env:ECHO_PICK_PROMPT; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }";
+                  $d.Description = $env:ECHO_PICK_PROMPT; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }";
     (script.to_string(), vec![("ECHO_PICK_PROMPT", prompt.to_string())])
 }
 
@@ -1390,7 +1436,30 @@ pub mod notifications {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_args, translocated};
+    use super::{reveal_command, run_args, translocated};
+
+    #[test]
+    fn a_file_is_shown_in_finder_or_explorer_as_one_argument_never_through_a_shell() {
+        let args = |p: &str, w: bool| reveal_command(p, w).map(|(prog, a)| (prog.to_string(), a)).map_err(|e| e.to_string());
+        assert_eq!(args("/Users/a/Acme Notes/Plan, v2.md", false), Ok(("/usr/bin/open".into(), vec!["-R".into(), "/Users/a/Acme Notes/Plan, v2.md".into()])));
+        // Explorer's own parsing: the path quoted after the comma, so spaces, commas and `&` stay part of it.
+        assert_eq!(args(r"C:\Users\a\Acme Notes\Plan, v2 & more.md", true), Ok(("explorer.exe".into(), vec![r#"/select,"C:\Users\a\Acme Notes\Plan, v2 & more.md""#.into()])));
+        assert_eq!(args(r"\\server\share\Acme\Plan.md", true).unwrap().1, vec![r#"/select,"\\server\share\Acme\Plan.md""#.to_string()]);
+        // A folder's closing backslash would escape the quote: left off (a drive's root as `C:`).
+        assert_eq!(args(r"C:\Vault\", true).unwrap().1, vec![r#"/select,"C:\Vault""#.to_string()]);
+        assert_eq!(args(r"C:\", true).unwrap().1, vec![r#"/select,"C:""#.to_string()]);
+        // A quote or a control character could end the argument and start another: refused, on both.
+        for w in [false, true] {
+            let base = if w { r"C:\Vault\" } else { "/Vault/" };
+            for bad in ["a\"b.md", "a\nb.md", "a\rb.md", "a\tb.md", "a\u{0}b.md", "a\u{7f}b.md"] {
+                assert!(args(&format!("{base}{bad}"), w).is_err(), "{bad:?} refused");
+            }
+        }
+        // Not absolute, or a form explorer can't take.
+        for (bad, w) in [("Vault/Plan.md", false), (r"Vault\Plan.md", true), (r"\\?\C:\Vault\Plan.md", true), (r"\\.\COM1", true), ("/Vault/Plan.md", true), (r"C:Vault", true)] {
+            assert!(args(bad, w).is_err(), "{bad} refused");
+        }
+    }
 
     #[test]
     fn windows_pickers_take_the_prompt_from_the_environment_never_in_the_script() {
@@ -1403,7 +1472,8 @@ mod tests {
         }
         assert_eq!(fenv, vec![("ECHO_PICK_PROMPT", evil.to_string())]);
         assert_eq!(env, vec![("ECHO_PICK_PROMPT", evil.to_string()), ("ECHO_PICK_FILTER", "Files|*.md;*.pdf".to_string())]);
-        assert!(files.contains("$d.Multiselect = $true") && super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
+        assert!(folder.contains("$d.ShowNewFolderButton = $true"), "a new folder can be made in the picker");
+        assert!(files.contains("$d.Multiselect = $true") &&super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
         assert_eq!(super::files_dialog_ps("p", false, &[]).1[1].1, "", "no filter: every file");
     }
 

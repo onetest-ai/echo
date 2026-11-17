@@ -244,7 +244,8 @@ impl Routing {
 /// `client` theirs (`client_of`), `profile` their AI profile when they share one, `from` who wrote the messages it
 /// holds, `people` the conversation's addresses but the user's (mail), `trust` "trusted": Recall indexes only the
 /// messages of senders the user trusts (a sender waiting for the user's decision, ignored, or unauthenticated stays
-/// out of it); `at` its last message's day.
+/// out of it); `at` its last message's day; a mail's Microsoft 365 ids as Recall keeps them, `m365_id` (its last
+/// message's Graph id, as `ctx.m365.mailThread` takes it) and `conversation_id`, null for a post or what Recall didn't keep.
 #[cfg(feature = "brain")]
 fn mail_item(c: &rusqlite::Connection, src: &str, routing: &Routing) -> Result<Value> {
     let (kind, title, date, refs): (String, Option<String>, Option<String>, Option<String>) = c
@@ -268,6 +269,7 @@ fn mail_item(c: &rusqlite::Connection, src: &str, routing: &Routing) -> Result<V
         "at": date, "client": client_of(&threads), "threads": threads,
         "profile": if profiles.len() == 1 { profiles.into_iter().next() } else { None },
         "from": from, "people": people, "trust": "trusted", "link": format!("echo://mail/{src}"), "url": refs["url"],
+        "m365_id": refs["message"], "conversation_id": refs["conversation"],
     }))
 }
 
@@ -826,7 +828,9 @@ mod tests {
         let (acme, globex_t) = (json!({"client": "acme", "client_name": "Acme", "id": "acme-pilot", "name": "Acme pilot"}), json!({"client": "globex", "client_name": "Globex", "id": "globex-pilot", "name": "Globex pilot"}));
         let item = |src: &str, kind: &str, title: &str, at: &str, client: Value, profile: Value, threads: Value| {
             json!({"at": at, "client": client, "from": ["Jane Doe"], "id": format!("mail:{src}"), "kind": kind, "link": format!("echo://mail/{src}"), "people": ["jane@acme.example"],
-                   "profile": profile, "subject": title, "threads": threads, "title": title, "trust": "trusted", "url": format!("https://outlook.example/{src}")})
+                   "profile": profile, "subject": title, "threads": threads, "title": title, "trust": "trusted", "url": format!("https://outlook.example/{src}"),
+                   // Recall kept no Microsoft 365 ids of these (a post has none; a mail indexed before it kept them).
+                   "m365_id": null, "conversation_id": null})
         };
         let one = item("mail/one", "mail", "Pilot dates", "2026-11-11", json!({"id": "acme", "name": "Acme"}), json!("work"), json!([acme]));
         let two = item("mail/two", "mail", "Both pilots", "2026-11-12", Value::Null, Value::Null, json!([acme, globex_t]));
@@ -852,7 +856,7 @@ mod tests {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-event");
         let pilot = acme_pilot();
         let md = "# Pilot dates\n\n### 2026-11-10 09:12 Jane Doe\n\n- The pilot moves to 24 Nov — “moves to the 24th”\n\n### 2026-11-11 08:00 Kim Ito\n\n- Kim confirms the room\n";
-        let refs = json!({"kind": "mail", "conversation": "c1", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
+        let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-2", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
         let input = crate::brain::store::Input {
             source: "mail/abc".into(), kind: "mail".into(), title: "Pilot dates".into(), event_date: Some("2026-11-11".into()), md: md.into(), refs,
             link: Box::new(|_| "https://outlook.example/1".into()), speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
@@ -867,9 +871,11 @@ mod tests {
         assert_eq!((it["client"].clone(), it["from"].clone()), (json!({"id": "acme", "name": "Acme"}), json!(["Jane Doe", "Kim Ito"])));
         assert_eq!(it["people"], json!(["jane@acme.example", "kim@acme.example"]));
         assert!(it.get("text").is_none() && it.get("messages").is_none(), "no content in the event: {it}");
+        // Its Microsoft 365 ids as Recall kept them: the mail `ctx.m365.mailThread` reads the thread by, its conversation.
+        assert_eq!((it["m365_id"].as_str(), it["conversation_id"].as_str()), (Some("AAMk-c1-2"), Some("c1")));
         // The read: the same routing, with Recall's facts message by message.
         let s = source("mail:mail/abc", &json!({})).unwrap();
-        for k in ["threads", "client", "profile", "from", "people", "trust", "subject", "at"] {
+        for k in ["threads", "client", "profile", "from", "people", "trust", "subject", "at", "m365_id", "conversation_id"] {
             assert_eq!(s[k], it[k], "{k}");
         }
         assert_eq!(s["messages"][0]["from"], "Jane Doe");
@@ -882,6 +888,7 @@ mod tests {
         let row = &rows[0];
         assert_eq!((row["id"].as_str(), row["date"].as_str(), row["threads"].clone(), row["trust"].as_str()), (Some("mail:mail/abc"), Some("2026-11-11"), json!([pilot]), Some("trusted")));
         assert_eq!((row["from"].clone(), row["client"].clone()), (it["from"].clone(), it["client"].clone()));
+        assert_eq!((row["m365_id"].clone(), row["conversation_id"].clone()), (it["m365_id"].clone(), it["conversation_id"].clone()));
         assert!(row.get("text").is_none() && row.get("messages").is_none());
         assert!(sources(&json!({"kind": "mail", "q": "nobody"})).unwrap().as_array().unwrap().is_empty());
         assert!(sources(&json!({"kind": "mail", "client": "globex"})).unwrap().as_array().unwrap().is_empty());

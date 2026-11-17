@@ -780,7 +780,7 @@
   },
   {
    "id": "F-PLUG-106",
-   "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
+   "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, and a mail's Microsoft 365 ids as Recall keeps them (`m365_id`: its last message's Graph id, the one `ctx.m365.mailThread` takes; `conversation_id`; null for a post or what Recall didn't keep), never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -792,6 +792,33 @@
    "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names); the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
    "priority": "medium",
    "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-115",
+   "feature": "A plugin's window half shows a file or folder of a folder the user gave it selected in Finder / Explorer (`ctx.system.reveal(root, path)`, `uses.folders`): only on the user's click or key (else refused with \"Finder or Explorer opens only on your click\", nothing sent); never outside the folder (`..`, an absolute path, a link out of it), a missing file, a folder it wasn't given, a plugin that didn't ask for folders or is off; never from the host half; on test data only written to the open log (`reveal <path>`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-120",
+   "feature": "A plugin's Microsoft 365 reads run against a fake Microsoft 365 on this computer in a development build (`ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>`, `tests/fixtures/fake_graph.py`): Echo counts as signed in with no tokens and sends every Graph request there, so `ctx.m365.search`, `mailThread` and `chat` give the fake's made-up mail and chat; the real sign-in is refused while it is set; a value that isn't a local address leaves Microsoft 365 not connected; a release build never reads it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-121",
+   "feature": "The system's folder picker a plugin opens (`ctx.system.pickFolder`) lets the user make a new folder in it (\"New Folder\" on macOS, \"Make New Folder\" on Windows), and the new folder picked is the one the plugin is given (a new vault in a new folder)",
+   "priority": "medium",
+   "check": "person",
    "axes": [
     "plugin.uses"
    ]
