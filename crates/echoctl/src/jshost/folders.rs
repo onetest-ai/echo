@@ -55,6 +55,28 @@ pub(super) fn sha_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// `ctx.fs.read` / `readMany`: file `f`'s first `max` bytes as text — bytes that aren't UTF-8 replaced, or with `strict`
+/// refused as "not UTF-8: <rel>" (a character cut by `max` at the end is dropped, not refused).
+pub(super) fn read_text(f: &Path, rel: &str, max: u64, strict: bool) -> Result<String> {
+    let mut buf = vec![];
+    std::fs::File::open(f)?.take(max + 1).read_to_end(&mut buf)?;
+    let cut = buf.len() as u64 > max;
+    buf.truncate(max as usize);
+    if !strict {
+        return Ok(String::from_utf8_lossy(&buf).into_owned());
+    }
+    match String::from_utf8(buf) {
+        Ok(t) => Ok(t),
+        Err(e) if cut && e.utf8_error().error_len().is_none() => {
+            let n = e.utf8_error().valid_up_to();
+            let mut b = e.into_bytes();
+            b.truncate(n);
+            Ok(String::from_utf8(b)?)
+        }
+        Err(_) => bail!("not UTF-8: {rel}"),
+    }
+}
+
 /// A file opened to read, never through a link at its last name, never a FIFO waited on: a regular file or an error.
 fn open_no_link(p: &Path) -> Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
@@ -578,7 +600,9 @@ mod tests {
               ctx.command('walk', async (a) => await ctx.fs.walk(r(), a))
               ctx.command('search', async (a) => await ctx.fs.search(r(), a.q, a.opts))
               ctx.command('snapshot', async (a) => await ctx.fs.snapshot(r(), a))
-              ctx.command('storeRead', (a) => ctx.store.read(a.path))
+              ctx.command('storeRead', (a) => ctx.store.read(a.path, a.opts))
+              ctx.command('read', (a) => ctx.fs.read(r(), a.path, a.opts))
+              ctx.command('readMany', async (a) => await ctx.fs.readMany(r(), a.paths, a.opts))
               ctx.command('storeWrite', (a) => ctx.store.write(a.path, a.text, a.opts))
               ctx.command('storeRemove', (a) => ctx.store.remove(a.path))
               ctx.command('bump', (a) => ctx.store.update(a.path, (t) => String(Number(t || 0) + 1)))
@@ -663,6 +687,34 @@ mod tests {
         let parts: Vec<_> = std::fs::read_dir(vault.join("Notes")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with('.')).collect();
         assert!(parts.is_empty(), "no hidden part left: {parts:?}");
         plugins::remove("keeper", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_strict_read_refuses_text_that_isnt_utf8_and_a_lossy_store_read_replaces_it() {
+        let (_env, root) = paths::testenv::folders("jshost-folders-utf8");
+        let (vault, _) = vault(&root, "strict");
+        std::fs::write(vault.join("Notes/Latin.md"), b"caf\xe9\n").unwrap();
+        std::fs::write(vault.join("Notes/Cafe.md"), "café\n").unwrap();
+        // As before: bad bytes replaced; asked strict: refused, naming the file; good text either way.
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Latin.md"})).unwrap(), json!("caf\u{fffd}\n"));
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Latin.md", "opts": 3})).unwrap(), json!("caf"));
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Latin.md", "opts": {"strict": true}})).unwrap_err(), "not UTF-8: Notes/Latin.md");
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Cafe.md", "opts": {"strict": true}})).unwrap(), json!("café\n"));
+        // `max` cutting a character in two: dropped at the end, not refused (lossy: replaced, as before).
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Cafe.md", "opts": {"strict": true, "max": 4}})).unwrap(), json!("caf"));
+        assert_eq!(run("strict", "read", json!({"path": "Notes/Cafe.md", "opts": 4})).unwrap(), json!("caf\u{fffd}"));
+        // Many at once: strict makes the file that isn't UTF-8 null, as one it can't read.
+        let paths = json!(["Notes/Latin.md", "Notes/Cafe.md", "Notes/None.md"]);
+        assert_eq!(run("strict", "readMany", json!({"paths": paths})).unwrap(), json!(["caf\u{fffd}\n", "café\n", null]));
+        assert_eq!(run("strict", "readMany", json!({"paths": paths, "opts": {"strict": true}})).unwrap(), json!([null, "café\n", null]));
+        // The store: throws as before; lossy replaces the bad bytes.
+        std::fs::create_dir_all(plugins::data_dir("strict")).unwrap();
+        std::fs::write(plugins::data_dir("strict").join("latin.txt"), b"caf\xe9").unwrap();
+        assert!(run("strict", "storeRead", json!({"path": "latin.txt"})).unwrap_err().contains("UTF-8"));
+        assert_eq!(run("strict", "storeRead", json!({"path": "latin.txt", "opts": {"lossy": true}})).unwrap(), json!("caf\u{fffd}"));
+        assert_eq!(run("strict", "storeRead", json!({"path": "none.txt", "opts": {"lossy": true}})).unwrap(), Value::Null);
+        plugins::remove("strict", true).unwrap();
         sync();
     }
 

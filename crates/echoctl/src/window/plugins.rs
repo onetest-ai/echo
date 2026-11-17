@@ -344,7 +344,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                         Err(refused) => return Some(*refused),
                     };
                     let md = body["md"].as_str().unwrap_or_default();
-                    let v = if links { crate::plugins::markdown::links(md) } else { crate::plugins::markdown::render(id, md, &body["opts"]).map(Value::from) };
+                    let v = if links { crate::plugins::markdown::links(md, &body["opts"]) } else { crate::plugins::markdown::render(id, md, &body["opts"]).map(Value::from) };
                     return Some(json_reply(v.map_or_else(|e| json!({"error": format!("{e:#}")}), |v| json!({"value": v}))));
                 }
             }
@@ -552,6 +552,13 @@ mod tests {
         let long = format!("[[План]] {}", "п".repeat(300_000));
         let html = ask("/api/plugin/pages/markdown", json!({"md": long, "opts": {"links": {"План": "#pages:main/План"}}}))["value"].as_str().unwrap().to_string();
         assert!(html.starts_with("<p><a href=\"#pages:main/План\">План</a> пппп") && html.matches('п').count() == 300_000, "the whole page");
+        // How each destination was written, when asked; a page of 1.5 MB (2 MB of text at most) renders whole.
+        let both = "[[Plan]] [Plan](Plan) ![[logo.png]]";
+        let v = ask("/api/plugin/pages/markdown/links", json!({"md": both, "opts": {"detail": true}}))["value"].clone();
+        assert_eq!(v["entries"], json!([{"dest": "Plan", "kind": "wiki", "embed": false}, {"dest": "Plan", "kind": "md", "embed": false}, {"dest": "logo.png", "kind": "wiki", "embed": true}]));
+        let big = format!("[[План]] {}", "п".repeat(750_000));
+        let html = ask("/api/plugin/pages/markdown", json!({"md": big, "opts": {}}))["value"].as_str().unwrap_or_default().to_string();
+        assert_eq!(html.matches('п').count(), 750_000, "a 1.5 MB page, whole");
         // Asked with a GET (the page in its address, as before): refused, nothing rendered.
         let req = Request::builder().uri("echo://localhost/api/plugin/pages/markdown?md=x").body(json!({"md": "x"}).to_string().into_bytes()).unwrap();
         let r = route("/api/plugin/pages/markdown", &req).unwrap();

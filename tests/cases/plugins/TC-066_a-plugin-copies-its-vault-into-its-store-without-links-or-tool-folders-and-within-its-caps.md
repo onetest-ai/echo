@@ -45,6 +45,9 @@ export function apply(ctx) {
   ctx.command('drop', (a) => ctx.store.remove(a.path))
   ctx.command('bump', () => ctx.store.update('count.txt', (t) => String(Number(t || 0) + 1)))
   ctx.command('count', () => ctx.store.read('count.txt'))
+  ctx.command('read', (a) => ctx.fs.read(r(), a.path, a.opts))
+  ctx.command('readmany', async (a) => await ctx.fs.readMany(r(), a.paths, a.opts))
+  ctx.command('peek', (a) => ctx.store.read(a.path, a.opts))
 }
 JS
 echoctl plugin marketplace add "$M" --name acme-local

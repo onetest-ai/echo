@@ -7,11 +7,11 @@ use serde_json::{Value, json};
 
 use crate::minutes::PageDest;
 
-/// The most Markdown a plugin renders at once: 1 MB of text.
-const MAX_MD: usize = 1 << 20;
+/// The most Markdown a plugin renders at once: 2 MB of text.
+const MAX_MD: usize = 2 << 20;
 
 fn fits(md: &str) -> Result<()> {
-    ensure!(md.len() <= MAX_MD, "ctx.markdown renders 1 MB of text at most ({} KB given): split the page", md.len() >> 10);
+    ensure!(md.len() <= MAX_MD, "ctx.markdown renders 2 MB of text at most ({} KB given): split the page", md.len() >> 10);
     Ok(())
 }
 
@@ -27,11 +27,17 @@ pub fn render(id: &str, md: &str, opts: &Value) -> Result<String> {
     Ok(crate::minutes::page_html(md, opts["breaks"].as_bool() == Some(true), &dest))
 }
 
-/// The destinations of `md`'s links and images, as written (a wikilink's target), each once: `{links, images}`.
-pub fn links(md: &str) -> Result<Value> {
+/// The destinations of `md`'s links and images, as written (a wikilink's target), each once: `{links, images}`; with
+/// `opts.detail` also `entries`: `[{dest, kind: 'wiki' | 'md', embed}]`, each way a destination was written once.
+pub fn links(md: &str, opts: &Value) -> Result<Value> {
     fits(md)?;
     let (links, images) = crate::minutes::page_dests(md);
-    Ok(json!({"links": links, "images": images}))
+    let mut v = json!({"links": links, "images": images});
+    if opts["detail"].as_bool() == Some(true) {
+        let entries = crate::minutes::page_dest_entries(md).into_iter().map(|(dest, wiki, embed)| json!({"dest": dest, "kind": if wiki { "wiki" } else { "md" }, "embed": embed}));
+        v["entries"] = entries.collect();
+    }
+    Ok(v)
 }
 
 /// Whether plugin `id`'s page may carry `h`: a link to an `https://` page, an `echo://` link Echo knows or the plugin's
@@ -90,7 +96,7 @@ mod tests {
     fn links_lists_each_destination_as_written_and_nothing_inside_code() {
         let md = "[[Page]] [[Page|label]] [[Other#Plan]] ![[assets/logo.png]] [x](https://acme.example/a) ![p](pics/a.png)\n\n`[[Code]]`\n\n```\n[[Fenced]]\n```\n\n[[Page]]";
         assert_eq!(
-            links(md).unwrap(),
+            links(md, &json!({})).unwrap(),
             json!({"links": ["Page", "Other#Plan", "https://acme.example/a"], "images": ["assets/logo.png", "pics/a.png"]})
         );
     }
@@ -219,12 +225,36 @@ mod tests {
     }
 
     #[test]
-    fn a_diagram_on_a_page_is_its_code_and_a_page_over_1_mb_is_refused() {
+    fn a_diagram_on_a_page_is_its_code_and_a_page_over_2_mb_is_refused() {
         let html = page("```mermaid\nflowchart TD\n  A[\"<b>x</b>\"] --> B\n```", json!({}));
         assert_eq!(html, "<pre><code>flowchart TD\n  A[&quot;&lt;b&gt;x&lt;/b&gt;&quot;] --&gt; B\n</code></pre>");
-        let big = "a".repeat((1 << 20) + 1);
-        assert!(render("acme-vault", &big, &json!({})).unwrap_err().to_string().contains("1 MB of text at most"));
-        assert!(links(&big).is_err());
+        let big = "a".repeat((2 << 20) + 1);
+        assert!(render("acme-vault", &big, &json!({})).unwrap_err().to_string().contains("2 MB of text at most"));
+        assert!(links(&big, &json!({})).is_err());
         assert!(render("acme-vault", &big[1..], &json!({})).is_ok());
+        // A page of 1.5 MB renders whole.
+        let page = format!("# Plan\n\n{}", "word ".repeat(320_000));
+        assert!(page.len() > 3 << 19);
+        assert_eq!(render("acme-vault", &page, &json!({})).unwrap().matches("word").count(), 320_000);
+    }
+
+    #[test]
+    fn links_in_detail_say_how_each_destination_was_written_and_the_same_one_both_ways_twice() {
+        let md = "[[Plan]] [Plan](Plan) [[Plan|again]] ![[logo.png]] ![logo](logo.png) [x](https://acme.example/a) `[[Code]]`";
+        let v = links(md, &json!({"detail": true})).unwrap();
+        assert_eq!(v["links"], json!(["Plan", "https://acme.example/a"]));
+        assert_eq!(v["images"], json!(["logo.png"]));
+        assert_eq!(
+            v["entries"],
+            json!([
+                {"dest": "Plan", "kind": "wiki", "embed": false},
+                {"dest": "Plan", "kind": "md", "embed": false},
+                {"dest": "logo.png", "kind": "wiki", "embed": true},
+                {"dest": "logo.png", "kind": "md", "embed": true},
+                {"dest": "https://acme.example/a", "kind": "md", "embed": false},
+            ])
+        );
+        // Not asked: the answer of before, no entries.
+        assert!(links(md, &json!({})).unwrap().get("entries").is_none());
     }
 }

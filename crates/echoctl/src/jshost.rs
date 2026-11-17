@@ -132,7 +132,8 @@ const PRELUDE: &str = r#"
       return Promise.resolve(true)
     },
     store: {
-      read: (path) => call('store.read', path),
+      /** `{lossy: true}`: bytes that aren't UTF-8 become U+FFFD instead of throwing. */
+      read: (path, opts) => call('store.read', opts ? [path, opts] : path),
       /** `opts`: {ifSha} written only while the file is still the one with that sha256 (else "changed since you read
        *  it"), {createNew} never over a file. Every store write takes the plugin's lock across processes. */
       write: (path, text, opts) => call('store.write', [path, String(text), opts || {}]),
@@ -203,7 +204,7 @@ const PRELUDE: &str = r#"
      *  limit}), mailThread(message) → {subject, picked, messages}, chat(chat, {since, until}) → {id, topic, members, url, messages}. */
     m365: { search: (q, o) => later('m365.search', [String(q), o || {}]), mailThread: (m) => later('m365.mail_thread', String(m)), chat: (c, o) => later('m365.chat', [String(c), o || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
-    markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md) => call('markdown.links', String(md)) }),
+    markdown: Object.assign((md, opts) => call('markdown', opts === undefined ? String(md) : [String(md), opts]), { links: (md, opts) => call('markdown.links', opts === undefined ? String(md) : [String(md), opts]) }),
     /** Hashing in Rust: the sha256 of the text's UTF-8 bytes, in hex. */
     crypto: { sha256: (text) => call('crypto.sha256', String(text)) },
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
@@ -308,9 +309,11 @@ const PRELUDE: &str = r#"
       folders: () => call('fs.folders'),
       forget: (root) => call('fs.forget', String(root)),
       list: (root, path) => call('fs.list', [String(root), path || '']),
-      read: (root, path, max) => call('fs.read', [String(root), String(path), max || 0]),
-      /** Many files at once, off the plugin's own time slice (a vault's notes): [text | null] in order. */
-      readMany: (root, paths, max) => later('fs.read_many', [String(root), (paths || []).map(String), max || 0]),
+      /** `max` bytes, or `{max, strict}`: strict throws "not UTF-8: <path>" instead of replacing bad bytes. */
+      read: (root, path, max) => { const o = max && typeof max === 'object' ? max : { max }; return call('fs.read', [String(root), String(path), o.max || 0, !!o.strict]) },
+      /** Many files at once, off the plugin's own time slice (a vault's notes): [text | null] in order (`max` or
+       *  `{max, strict}`; strict: a file that isn't UTF-8 is null). */
+      readMany: (root, paths, max) => { const o = max && typeof max === 'object' ? max : { max }; return later('fs.read_many', [String(root), (paths || []).map(String), o.max || 0, !!o.strict]) },
       /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime, sha?}] up to `max`
        *  (`sha`: each file's sha256, up to 64 MB). */
       walk: (root, opts) => later('fs.walk', [String(root), opts || {}]),
@@ -1038,8 +1041,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             }
             json!(true)
         }
-        "store.read" => match std::fs::read_to_string(store_path(id, &s(arg))?) {
-            Ok(t) => json!(t),
+        // `[path, {lossy}]`, or the path alone: lossy replaces bytes that aren't UTF-8 instead of throwing.
+        "store.read" => match std::fs::read(store_path(id, &s(if arg.is_array() { &arg[0] } else { arg }))?) {
+            Ok(b) if arg[1]["lossy"].as_bool() == Some(true) => json!(String::from_utf8_lossy(&b)),
+            Ok(b) => json!(String::from_utf8(b).map_err(|_| anyhow!("stream did not contain valid UTF-8"))?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
             Err(e) => return Err(e.into()),
         },
@@ -1108,7 +1113,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!(names)
         }
         "markdown" => json!(if arg.is_array() { plugins::markdown::render(id, &s(&arg[0]), &arg[1])? } else { crate::minutes::markdown_html(&s(arg)) }),
-        "markdown.links" => plugins::markdown::links(&s(arg))?,
+        "markdown.links" => if arg.is_array() { plugins::markdown::links(&s(&arg[0]), &arg[1])? } else { plugins::markdown::links(&s(arg), &Value::Null)? },
         "notify" => {
             crate::app::notify(&s(&arg[0]), &s(&arg[1]));
             Value::Null
@@ -1348,11 +1353,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "fs.read" => {
             uses(id, "folders")?;
             let f = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""))?;
-            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20) as usize;
-            let mut buf = vec![];
-            use std::io::Read;
-            std::fs::File::open(&f)?.take(max as u64).read_to_end(&mut buf)?;
-            json!(String::from_utf8_lossy(&buf))
+            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
+            json!(folders::read_text(&f, arg[1].as_str().unwrap_or(""), max, arg[3].as_bool() == Some(true))?)
         }
         "fs.write" => {
             folders::write(id, &s(&arg[0]), &s(&arg[1]), &s(&arg[2]), &arg[3])?;
