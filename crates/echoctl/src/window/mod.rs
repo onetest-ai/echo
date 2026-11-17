@@ -717,7 +717,12 @@ fn serve_conn(conn: &std::net::TcpStream, origin: &str, token: &str, name: &str)
             // (`GET /ipc/reply/<id>`, once), so the policy stays the window's — no eval.
             let reply = h.reply.map(|script| {
                 let id: String = (0..32).map(|_| format!("{:x}", rand_nibble())).collect();
-                SERVED_REPLIES.lock().unwrap_or_else(|e| e.into_inner()).push((id.clone(), script));
+                let mut kept = SERVED_REPLIES.lock().unwrap_or_else(|e| e.into_inner());
+                // One a page never loaded (it went elsewhere first) isn't kept for ever: the last 64 at most.
+                if kept.len() >= 64 {
+                    kept.remove(0);
+                }
+                kept.push((id.clone(), script));
                 id
             });
             json!({"reply": reply, "refresh": h.refresh}).to_string()
@@ -776,7 +781,7 @@ static SERVED_REPLIES: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mute
 fn take_served_reply(id: &str) -> Option<String> {
     let mut r = SERVED_REPLIES.lock().unwrap_or_else(|e| e.into_inner());
     let i = r.iter().position(|(k, _)| k == id)?;
-    Some(r.swap_remove(i).1)
+    Some(r.remove(i).1)
 }
 
 /// A random hex digit (the dev server's token), from the OS's randomness.
