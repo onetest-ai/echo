@@ -3578,7 +3578,7 @@ mod tests {
             }
             "#;
         let sheet = install_made_up(&root, "reader", json!({"echo": {"read": ["calls", "source", "calendar", "me"]}}), main);
-        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
+        assert!(sheet.iter().any(|l| l.contains("the list of your calls (titles, times, who was invited with their addresses, their threads)") && l.contains("the meetings Echo has read from your calendar") && l.contains("your name and email")), "{sheet:?}");
         let read = |kind: &str, arg: Value| call_loaded("reader", "read", &json!({"kind": kind, "arg": arg}));
 
         let list = read("calls", json!({})).unwrap();
