@@ -86,9 +86,31 @@ function pluginCtx(id, caps = []) {
      *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
      *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */
     echo: {
+      /** Echo's jobs as routines — the Scheduler's one shape for every routine (`uses.echo.jobs`): `list()` →
+       *  `{routines, night: {from, to, default}}`; `runs(id, {limit})` → its runs, newest first. Changes: `jobs.set`. */
+      routines: {
+        list: async () => {
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/routines`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+        runs: async (rid, opts) => {
+          opts = opts || {}
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/routines/runs?id=${encodeURIComponent(String(rid))}&limit=${encodeURIComponent(String(opts.limit || 20))}`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+      },
       jobs: {
         list: async () => {
           const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+        /** A job's runs, newest first (at most `limit`, 20 by default, 500 at most): what `echoctl jobs runs` prints. */
+        runs: async (job, opts) => {
+          opts = opts || {}
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs/runs?job=${encodeURIComponent(String(job))}&limit=${encodeURIComponent(String(opts.limit || 20))}`)
           if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
           return r.value
         },

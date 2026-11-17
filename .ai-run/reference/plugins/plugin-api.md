@@ -156,6 +156,29 @@ plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence
 - Existing `#kn`, `echo://page` links and native `/api/kn` routes remain compatibility entry points. The installed
   package does not own or delete the native registry or user vaults. This is a native-backed client extraction.
 
+## Routines
+
+The one shape for every routine, whoever's it is: the user's (the Scheduler's own, mapped by it), Echo's jobs
+(`source: "system"`) and later a plugin's (`"plugin:<id>"`). A plugin that shows routines draws them all from it.
+
+- **Routine:** `{id, source, name, what, enabled, to: ["today" | "thread_work" | "thread_sources" | "minutes" | "prep" |
+  "recall" | "live_notes" | "mail" | "teams" | …], schedule: {text, kind: "time" | "timer" | "event"}, next_run (ISO,
+  or null), next (in words, for one that runs on events, or null), paused_until (ISO while paused at night, or null),
+  running, last (a run, or null), model ({value, default}, or null when it has none to choose), month: {runs, failed,
+  tokens, cached, cost, daily: [{day: "YYYY-MM-DD", runs, failed, cost}] × 30, oldest first, ending today}, settings
+  (what it lets the user change: `{key, label, kind: "number" | "night" | "model", value, default, range, set}`)}`.
+- **Run:** `{started, ended, duration_ms, state: "done" | "empty" | "failed" | "running", ok, summary?, error?, model?,
+  calls?, input?, output?, cache_read?, cache_write?, cost_usd?, sent: [...], trial}` — `summary` or `error` one line;
+  `sent` where its result went; `trial` a "Try it" run. A run with no model has no tokens or cost. An Echo job's
+  `summary` / `error` is Echo's own words and counts, never a call's, thread's or person's name nor a model's text.
+- Echo's jobs: `enabled` is false while what turns a job off elsewhere is off (Recall, live notes, automatic minutes,
+  "Keep threads' work current"; for minutes, off means not automatic: minutes the user asks for still run and show); `running` is true while a run Echo's app started on its own thread is under way
+  (Needs you now, prep, Recall, a live notes summary, a minutes run the app writes) — a thread's sync, the fetch, a
+  live notes session and a minutes run in another process never show running. `ctx.echo.routines.list()` → `{routines, night: {from, to, default: {from, to}}}` and
+  `ctx.echo.routines.runs(id, {limit})` (newest first, 20 by default, 500 at most), for a plugin with `uses.echo.jobs`;
+  changes through `ctx.echo.jobs.set` (§ Client half). Echo keeps a job's runs 31 days; a pass that did nothing leaves
+  none. `echoctl jobs routines [--runs <job>]` prints the same. Evidence: `jobs::routines`, `jobs::routine_runs`
+
 ## Delivery
 
 `ctx.deliver.provide(kind, {label, send(msg)})` for a kind in `uses.deliver_provider.kinds` (never `teams` or `mail`);
@@ -478,8 +501,11 @@ Evidence: `jshost::work::check_rows`
 - `onUnload(fn)` registers cleanup (timers, graph observers); `listenWindow(type, fn, options)` owns a window
   listener like `listen` owns a document listener. `ui.patch(element, html)` uses Echo's focus-preserving patcher.
   `await ui.stylesheet(path)` loads a CSS file inside the package, versioned and removed with that client.
-- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, its
-  fields with value, default and range, last run, runs today, and the night); `set(job, ["key=value", …])` — only on the
+- `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
+- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, where
+  it shows, its fields with value, default and range, its last run, next run or what it waits for, the last 30 days by
+  day with cost, today's counts, and the night with Echo's default); `runs(job, {limit})` — its runs, newest first, as
+  `echoctl jobs runs` (20 by default, 500 at most); `set(job, ["key=value", …])` — only on the
   user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
   `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
   its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check

@@ -269,6 +269,7 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
         return Ok(()); // stopped meanwhile (the profile check can take seconds)
     }
     let mut child = cmd.spawn()?;
+    let session_started = chrono::Local::now();
     let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     let mut first = format!("{}Keep this call's live notes until wait_for_new_lines says it ended.", call_header(dir));
     if let Some(n) = read_notes(dir) {
@@ -296,6 +297,13 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
                 if v["type"] == "result" {
                     super::set_usage(&v, None);
                     super::count_usage(&stamp2);
+                    // The call's live notes session, one run of the live notes job (`jobs`).
+                    let x = &v["usage"];
+                    let n = |k: &str| x[k].as_u64().unwrap_or(0);
+                    let used = serde_json::json!({"calls": v["num_turns"].as_u64().unwrap_or(1), "input": n("input_tokens"), "output": n("output_tokens"),
+                        "cache_read": n("cache_read_input_tokens"), "cache_write": n("cache_creation_input_tokens"), "cost_usd": v["total_cost_usd"].as_f64()});
+                    let outcome = if v["is_error"] == true { Err("the live notes session failed".to_string()) } else { Ok("live notes of a call".to_string()) };
+                    crate::jobs::record("live_notes", session_started, outcome, used);
                     result = Some(v);
                     break;
                 }

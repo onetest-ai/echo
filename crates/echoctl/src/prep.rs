@@ -660,10 +660,12 @@ pub fn start_scheduler() {
         std::thread::sleep(std::time::Duration::from_secs(60));
         loop {
             if !crate::jobs::paused("prep", chrono::Local::now().time()) {
+                // A run when it asked a model (a prep written, meetings typed).
+                let run = crate::jobs::begin("prep");
                 prep_pass();
-                crate::jobs::ran("prep");
+                run.done(None);
             }
-            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::number("prep", "every") * 60));
+            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::after_pass("prep", crate::jobs::number("prep", "every"))));
         }
     });
 }

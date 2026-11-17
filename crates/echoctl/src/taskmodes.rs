@@ -81,8 +81,14 @@ pub fn classify_in_background() {
         *last = Some(std::time::Instant::now());
     }
     std::thread::spawn(|| {
-        if let Err(e) = classify() {
-            eprintln!("task modes: {e:#}");
+        // A run of the prep job of its own (its model calls on this thread), when it guessed any.
+        let run = crate::jobs::begin("prep");
+        match classify() {
+            Ok(n) => run.done((n > 0).then(|| format!("{n} task{} sorted by who can do {}", if n == 1 { "" } else { "s" }, if n == 1 { "it" } else { "them" }))),
+            Err(e) => {
+                eprintln!("task modes: {e:#}");
+                run.failed("tasks couldn't be sorted (Echo's log says why)");
+            }
         }
         RUNNING.store(false, Ordering::SeqCst);
     });

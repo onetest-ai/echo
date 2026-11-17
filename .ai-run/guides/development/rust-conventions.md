@@ -8,7 +8,7 @@
 ## Files, locks and releases
 
 ### Rules
-- R1. A file another thread or process may read is replaced atomically, never written in place. Evidence: `paths::write_atomic` (ref: Writes and locks)
+- R1. A file another thread or process may read is replaced atomically, never written in place — but an append-only log of whole JSON lines, appended under its lock, whose readers skip a line they can't read (a background job's runs). Evidence: `paths::write_atomic`, `jobs::write_run` (ref: Writes and locks)
 - R2. An existing call's `meta.json` changes only through its update helper or under its lock. Evidence: `calls::update_meta` (ref: Writes and locks)
 - R3. A shared JSON state file changes through its `update` helper: lock, re-read inside the lock, write atomically. Evidence: `plugins::Registry.update`
 - R4. Cross-process locks are `app::FileLock`. Evidence: `app::FileLock`
