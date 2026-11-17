@@ -1103,7 +1103,7 @@ fn message_ps(text: &str) -> (String, Vec<(&'static str, String)>) {
 /// The PowerShell script of Windows' text prompt and the environment it reads its message and default answer from.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn ask_text_ps(message: &str, default: &str) -> (String, Vec<(&'static str, String)>) {
-    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox($env:ECHO_ASK_MESSAGE, 'echo', $env:ECHO_ASK_DEFAULT)";
+    let script = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox($env:ECHO_ASK_MESSAGE, 'echo', $env:ECHO_ASK_DEFAULT)";
     (script.to_string(), vec![("ECHO_ASK_MESSAGE", message.to_string()), ("ECHO_ASK_DEFAULT", default.to_string())])
 }
 
@@ -1417,6 +1417,7 @@ mod tests {
         }
         assert!(message.contains("$env:ECHO_MESSAGE"));
         assert!(ask.contains("$env:ECHO_ASK_MESSAGE") && ask.contains("$env:ECHO_ASK_DEFAULT"));
+        assert!(ask.starts_with("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;"), "the answer comes back as UTF-8, with no byte-order mark in front of it");
         assert_eq!(menv, vec![("ECHO_MESSAGE", evil.to_string())], "line breaks stay in the text");
         assert_eq!(aenv, vec![("ECHO_ASK_MESSAGE", evil.to_string()), ("ECHO_ASK_DEFAULT", "d’; calc".to_string())]);
     }
