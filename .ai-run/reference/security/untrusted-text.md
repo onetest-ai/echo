@@ -146,7 +146,8 @@ variables (`ai::PASS`).
     `claudejob::Spec::yolo` says which.
   - Its record (`permissions.json`: `asked` — `auto`, `skip`, `setting` or `none`; `used`) and its log's first line name
     the mode: `acts on its own (auto mode: Claude Code decides each action)`, `acts on its own (edits accepted: this
-    profile's model has no auto mode)` or `acts on its own (every permission check skipped)`. A record of before may
+    profile's model has no auto mode)` or `acts on its own (every permission check skipped)`; `mode`, when Claude Code started in another permission mode
+    than asked, says which. A record of before may
     say `prepares and asks (…)` (Yolo runs shows it as "Prepared and asked").
   - The switch before (`folder_skip_permissions`) is read once by `Config::load`: on becomes `folder_permissions: skip`,
     off stays unset (Auto); it is never written again.

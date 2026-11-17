@@ -1226,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn git_is_reached_only_as_the_sheet_said_and_not_written_while_claude_prepares_and_asks() {
+    fn git_is_reached_only_as_the_sheet_said() {
         let (_env, root) = paths::testenv::folders("jshost-git-uses");
         if program().is_err() {
             return;

@@ -693,5 +693,5 @@ Evidence: `jshost::work::check_rows`
 | adding Today widgets | `jshost::a_plugins_widgets_are_in_the_catalog_and_give_their_data_by_provide_and_set` | exemplar is a test; a plugin with one widget of each kind: `tests/fixtures/plugins` |
 | giving work rows | `jshost::a_plugins_work_rows_come_by_scope_from_its_last_answer_and_go_with_it` | exemplar is a test |
 | keeping values per thread | `jshost::a_plugin_keeps_values_per_thread_and_hears_when_a_thread_goes` | exemplar is a test |
-| using the user's sign-in, or testing against fake services | `jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine` | `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests` |
+| using the user's sign-in, or testing against fake services | `jshost::a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named` | `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests` |
 | publishing an update | `plugins::install_update_and_remove_from_a_local_marketplace` | exemplar is a test |

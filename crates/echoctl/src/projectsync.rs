@@ -923,7 +923,12 @@ impl std::error::Error for RunFailed {}
 /// stopped after `timeout` or when it is too old for the guard (`what` it was for), and its final
 /// answer with Claude Code's result event (its usage, cost, turns) — or why there is none. Shared by the project sync
 /// and routines.
-pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
+pub fn finish_run_result(child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
+    finish_run_watched(child, log, timeout, what, quit, &mut |_, _| {})
+}
+
+/// `finish_run_result`, its start event (`system/init`) also handed to `on_init` with the log, once its line is there.
+pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str, on_init: &mut dyn FnMut(&Value, &mut fs::File)) -> Result<(String, Value)> {
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -959,6 +964,9 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
             }
             for l in crate::run_log::describe(&ev) {
                 let _ = writeln!(log, "{}  {l}", Local::now().format("%H:%M:%S"));
+            }
+            if ev["type"] == "system" && ev["subtype"] == "init" {
+                on_init(&ev, log);
             }
             if ev["type"] == "result" {
                 result = Some(ev);

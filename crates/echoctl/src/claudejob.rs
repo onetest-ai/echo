@@ -8,7 +8,8 @@
 //! with the CLI's limits for runs lifted as in the folder session (`notes::RUN_SESSION=acts`; Yolo keeps its own task
 //! and thread), every change and send noted.
 //!
-//! What it asked for is kept in its record (`permissions.json`); `none` (a plugin's analysis of what it read, Won't
+//! What it asked for is kept in its record (`permissions.json`), with a start in another permission mode than asked
+//! (`finish`); `none` (a plugin's analysis of what it read, Won't
 //! do) keeps no tools at all.
 //!
 //! The plugin writes the prompt; Echo adds what only it knows — the time, and how to reach its data in the
@@ -226,6 +227,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             (None, vec![])
         }
     };
+    // The permission mode it asks Claude Code for: checked against the one it starts in.
+    let asked = acts.map(|_| asked_mode(&a));
     let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
@@ -242,7 +245,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         }
         Ok(c.spawn()?)
     }));
-    let out = child.and_then(|c| crate::projectsync::finish_run_result(c, &mut log, spec.timeout, "run a plugin's job", "Echo quit during the run"));
+    let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked));
     if let Some(f) = settings_file {
         let _ = fs::remove_file(f);
     }
@@ -256,6 +259,44 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let (answer, result) = out?;
     let _ = fs::write(spec.run_dir.join("answer.md"), &answer);
     Ok((answer, model.unwrap_or_default(), usage(&result)))
+}
+
+/// The permission mode Claude Code is asked to start in by `args`: its `--permission-mode`, `bypassPermissions` when
+/// every check is skipped, else its manual mode (`default`).
+fn asked_mode(args: &[String]) -> &'static str {
+    match args.windows(2).find(|w| w[0] == "--permission-mode").map(|w| w[1].as_str()) {
+        Some("auto") => "auto",
+        Some("acceptEdits") => "acceptEdits",
+        Some("dontAsk") => "dontAsk",
+        _ if args.iter().any(|a| a == "--dangerously-skip-permissions") => "bypassPermissions",
+        _ => "default",
+    }
+}
+
+/// Why a run's start event (`system/init`) isn't in the permission mode Echo asked for (`asked`), or None. Claude Code
+/// can start in its manual mode without a word — auto mode not on for this model, provider or account, or turned off
+/// by an admin — where a run on its own has every edit refused.
+fn mode_differs(asked: &str, init: &Value) -> Option<String> {
+    let ran = init["permissionMode"].as_str().filter(|m| !m.is_empty() && *m != asked)?;
+    Some(match (asked, ran) {
+        ("auto", "default") => "Claude Code ran in manual mode, not auto: its edits were refused — choose Skip all permission checks or a model with auto mode".into(),
+        _ => format!("Claude Code ran in permission mode {ran}, not {asked} as Echo asked"),
+    })
+}
+
+/// The run to its end (`projectsync::finish_run_watched`), its start checked against the permission mode Echo asked
+/// for (`asked`; None: a run with no tools): when it started in another, its log and its record (`permissions.json`,
+/// `mode`) say so.
+fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeout: Duration, asked: Option<&str>) -> Result<(String, Value)> {
+    let mut on_init = |init: &Value, log: &mut fs::File| {
+        let Some(why) = asked.and_then(|a| mode_differs(a, init)) else { return };
+        let _ = writeln!(log, "{}  {why}", Local::now().format("%H:%M:%S"));
+        let record = run_dir.join("permissions.json");
+        let mut r: Value = fs::read_to_string(&record).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
+        r["mode"] = Value::String(why);
+        let _ = fs::write(&record, r.to_string());
+    };
+    crate::projectsync::finish_run_watched(child, log, timeout, "run a plugin's job", "Echo quit during the run", &mut on_init)
 }
 
 #[cfg(test)]
@@ -424,6 +465,53 @@ mod tests {
         set_permissions(Permissions::Auto, None, None);
         assert_eq!(routine_asking("skip"), skip);
         assert!(Spec::from_value(&serde_json::json!({"prompt": "x", "tools": "ask"}), &root.join("store")).unwrap_err().to_string().contains("auto, skip or none"));
+    }
+
+    /// Claude Code may start in its manual mode though Echo asked for auto mode: the run's log and record say so.
+    #[test]
+    #[cfg(unix)]
+    fn a_run_that_claude_code_started_in_another_permission_mode_than_asked_says_so_in_its_log_and_record() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-mode");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let n = std::cell::Cell::new(0);
+        // A run asking for `asked`, Claude Code starting in `ran`: its answer, log and record.
+        let run = |asked: Option<&str>, ran: &str| {
+            n.set(n.get() + 1);
+            let dir = root.join(format!("runs/m{}", n.get()));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("permissions.json"), r#"{"asked":"setting","used":"x"}"#).unwrap();
+            let init = serde_json::json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0", "permissionMode": ran});
+            let result = serde_json::json!({"type": "result", "result": "nothing done", "is_error": false});
+            fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
+            let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+            let mut log = fs::File::create(dir.join("log.txt")).unwrap();
+            let (answer, _) = finish(child, &mut log, &dir, Duration::from_secs(30), asked).unwrap();
+            let record: Value = serde_json::from_str(&fs::read_to_string(dir.join("permissions.json")).unwrap()).unwrap();
+            (answer, fs::read_to_string(dir.join("log.txt")).unwrap(), record)
+        };
+        let manual = "Claude Code ran in manual mode, not auto: its edits were refused — choose Skip all permission checks or a model with auto mode";
+        // Auto asked, manual started: said in the log (after the start line) and the record; the run still finishes.
+        let (answer, log, record) = run(Some("auto"), "default");
+        assert_eq!(answer, "nothing done");
+        let lines: Vec<&str> = log.lines().collect();
+        assert!(lines[0].contains("Claude Code started") && lines[1].ends_with(manual), "{log}");
+        assert_eq!((record["mode"].as_str(), record["used"].as_str()), (Some(manual), Some("x")));
+        // Started as asked: nothing said.
+        let (_, log, record) = run(Some("auto"), "auto");
+        assert!(!log.contains("ran in") && record.get("mode").is_none(), "{log}");
+        // Another mode than asked: named.
+        let (_, log, _) = run(Some("bypassPermissions"), "default");
+        assert!(log.contains("Claude Code ran in permission mode default, not bypassPermissions as Echo asked"), "{log}");
+        // A run with no tools: its mode isn't checked.
+        let (_, log, record) = run(None, "default");
+        assert!(!log.contains("ran in") && record.get("mode").is_none(), "{log}");
+        // What each setting asks for.
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(asked_mode(&args(&["-p", "x", "--permission-mode", "auto"])), "auto");
+        assert_eq!(asked_mode(&args(&["--permission-mode", "acceptEdits"])), "acceptEdits");
+        assert_eq!(asked_mode(&args(&["--dangerously-skip-permissions"])), "bypassPermissions");
+        assert_eq!(asked_mode(&args(&["-p", "x"])), "default");
     }
 
     #[test]

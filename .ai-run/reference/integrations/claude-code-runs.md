@@ -17,10 +17,13 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
   from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's
   record): Ask each time none; Skip all permission checks `--dangerously-skip-permissions`; Auto
   `--permission-mode auto` where `folder_args::auto_mode_works` (a `claude` or `system` profile, its model Claude's
-  name, Claude Code's default, or an id of Opus / Sonnet 4.6+, Haiku 5.5+ or Fable — Bedrock / Vertex ids, with
+  name or alias (`opusplan`, `sonnet[1m]`, `opus[1m]`), Claude Code's default, or an id of Opus / Sonnet 4.6+, Haiku 5.5+ or Fable — Bedrock / Vertex ids, with
   `anthropic.` or `@`, Sonnet 5+ or Opus 4.7+; an id it can't read: no), else `--permission-mode acceptEdits` (may
   edit) or `dontAsk` (read-only). Without auto mode Claude Code starts in its manual mode, where a headless run does
-  nothing and a wrapper's start event (`default`) wouldn't match Echo's `auto`. `folder_args::auto_on_profiles` gives
+  nothing and a wrapper's start event (`default`) wouldn't match Echo's `auto`. A routine's or Yolo's run checks its
+  start event's `permissionMode` against the mode it asked for (`claudejob::finish`, through
+  `projectsync::finish_run_watched`): when they differ — auto mode not on for that model, provider or account — its log
+  and its record (`permissions.json`, `mode`) say so ("Claude Code ran in manual mode, not auto: …"). `folder_args::auto_on_profiles` gives
   what Auto gets per profile (Settings' card, `echoctl config`). Measured on Claude Code 2.1.326: `-p` with `--permission-mode auto` runs headless, its `system/init` shows
   `permissionMode: auto`, and a Bash command outside `--allowedTools` ran without a prompt. The fake Claude Code
   (`ai::fake`, the test data's `bin/claude`) takes any flags.

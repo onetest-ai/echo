@@ -137,8 +137,7 @@ pub fn session(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &str,
         args.extend(["--model".into(), m.to_string()]);
     }
     args.extend(build(p.kind.managed(), exe, settings, who)?);
-    // The user's choice (Settings → AI & minutes) as this profile and model can run it. A headless run preparing and
-    // asking sets none: it simply can't do what would ask.
+    // The user's choice (Settings → AI & minutes) as this profile and model can run it.
     args.extend(permission_args(who.permissions(), p, model, true).0);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "tray")]
@@ -173,15 +172,15 @@ pub fn permission_args(p: Permissions, profile: &crate::ai::Profile, model: Opti
 
 /// Claude Code's auto mode works on `profile` running `model`: a Claude account (`claude`) or the user's own Claude
 /// Code (`system`) — never a model server (`local`) or a wrapper — and no model pinned below what auto mode needs:
-/// Claude's names (`sonnet`, `opus`, `haiku`, `fable`) and Claude Code's default are recent; a full id needs Opus or
-/// Sonnet 4.6, Haiku 5.5 or any Fable — on Bedrock or Vertex (`anthropic.` / `@` in the id) Sonnet 5 or Opus 4.7.
-/// An id it can't read: no.
+/// Claude's names (`sonnet`, `opus`, `haiku`, `fable`, `opusplan`, `sonnet[1m]`, `opus[1m]`) and Claude Code's default
+/// are recent; a full id needs Opus or Sonnet 4.6, Haiku 5.5 or any Fable — on Bedrock or Vertex (`anthropic.` / `@` in
+/// the id) Sonnet 5 or Opus 4.7. An id it can't read: no.
 pub fn auto_mode_works(profile: &crate::ai::Profile, model: Option<&str>) -> bool {
     if !matches!(profile.kind, crate::ai::Kind::Claude | crate::ai::Kind::System) {
         return false;
     }
     let Some(m) = model.map(|m| m.trim().to_ascii_lowercase()).filter(|m| !m.is_empty() && m != "default") else { return true };
-    if ["sonnet", "opus", "haiku", "fable"].contains(&m.as_str()) || m.contains("fable") {
+    if ["sonnet", "opus", "haiku", "fable", "opusplan", "sonnet[1m]", "opus[1m]"].contains(&m.as_str()) || m.contains("fable") {
         return true;
     }
     let cloud = m.contains("anthropic.") || m.contains('@');
@@ -332,7 +331,7 @@ mod tests {
         let flags = |kind: &str, model: Option<&str>, may_edit: bool| permission_args(Permissions::Auto, &profile(kind), model, may_edit).0.join(" ");
         // A Claude account or the user's own Claude Code, on Claude's names or Claude Code's default: auto mode.
         for kind in ["claude", "system"] {
-            for model in [None, Some("sonnet"), Some("opus"), Some("haiku"), Some("default"), Some("claude-sonnet-4-6"), Some("claude-opus-4-7[1m]"), Some("claude-haiku-5-5"), Some("claude-fable-1")] {
+            for model in [None, Some("sonnet"), Some("opus"), Some("haiku"), Some("opus[1m]"), Some("sonnet[1m]"), Some("opusplan"), Some("default"), Some("claude-sonnet-4-6"), Some("claude-opus-4-7[1m]"), Some("claude-haiku-5-5"), Some("claude-fable-1")] {
                 assert_eq!(flags(kind, model, true), "--permission-mode auto", "{kind} {model:?}");
             }
             // A model pinned below what auto mode needs, or one it can't read.

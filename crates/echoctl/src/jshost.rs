@@ -1969,7 +1969,7 @@ mod tests {
 
     /// The gates on every system; the answers (and `{fresh: true}`) where made-up programs are shell scripts.
     #[test]
-    fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named_and_never_in_a_read_only_routine() {
+    fn a_plugin_is_handed_a_sign_in_only_for_the_hosts_its_sheet_named() {
         let (_env, root) = paths::testenv::folders("jshost-signin");
         // Made-up `gh` and `git` (Echo's tests never look for the computer's own: `signin::FAKE_PROGRAMS`), each
         // logging that it was asked; on Windows none (no program is asked there).
@@ -2046,7 +2046,7 @@ mod tests {
     }
 
     /// `uses.signin.keep`: Echo keeps a sign-in the plugin made (whatever service, however made), outside its store, and
-    /// hands it back first to that plugin only; refused without `keep`, for a host it didn't name, in a read-only routine.
+    /// hands it back first to that plugin only; refused without `keep` and for a host it didn't name.
     #[test]
     fn echo_keeps_a_sign_in_a_plugin_made_and_hands_it_back_only_to_a_plugin_that_said_keep() {
         let (_env, root) = paths::testenv::folders("jshost-signin-keep");
@@ -2520,7 +2520,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_gives_claude_guides_at_run_time_and_never_from_a_read_only_routine() {
+    fn a_plugin_gives_claude_guides_at_run_time() {
         let (_env, root) = paths::testenv::folders("jshost-agent-set");
         let mk = root.join("market");
         let d = mk.join("plugins/vaults");
@@ -2583,7 +2583,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_preparing_and_asking_runs_no_plugin_command_that_sends_and_one_acting_on_its_own_does() {
+    fn a_plugin_command_that_sends_goes_on_as_its_sheet_named() {
         let (_env, root) = paths::testenv::folders("jshost-run-sends");
         let mk = root.join("market");
         let d = mk.join("plugins/notifier");
@@ -3298,7 +3298,7 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    fn a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says_and_never_while_claude_prepares() {
+    fn a_plugin_sets_a_threads_stage_and_its_own_tasks_only_as_its_sheet_says() {
         let (_env, root) = paths::testenv::folders("jshost-thread-writes");
         let mk = root.join("market");
         for (id, write) in [("tracker", json!(["thread_stage", "tasks"])), ("reader", json!([]))] {

@@ -365,15 +365,14 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     if let ProjectCmd::Work { id, json } = cmd {
         return ledger_command(&id, json.map_or(LedgerCmd::Tree, |json| LedgerCmd::Edit { json }));
     }
-    // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
-    // routine (the user's own prompt) may read them.
-    let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::SyncStats { .. } | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
+    // A run Echo started works on its own call (or project) only; projects are the user's (a routine's run is
+    // not limited: `notes::run_limited`).
     // Yolo reads its own thread: its brief and rules, its people (as they are: no Microsoft 365 refresh).
     let own_thread_read = match &cmd {
         ProjectCmd::Show { id } | ProjectCmd::People { id, refresh: false } => guard::run_thread().is_some_and(|t| &t == id),
         _ => false,
     };
-    if notes::run_limited() && !(reads && routine_reads()) && !own_thread_read {
+    if notes::run_limited() && !own_thread_read {
         anyhow::bail!("projects can't be changed or listed from a run Echo started");
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -596,17 +595,8 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
     Ok(())
 }
 
-/// Inside a read-only routine Echo started (`guard::RUN_MODE=routine`, set by the app, never by the
-/// run), or a routine's run as the folder session (`notes::RUN_SESSION`): the user's own prompt may read projects,
-/// clients and organisations.
-fn routine_reads() -> bool {
-    // Never a Yolo run's: its own task and thread are all it reads, whatever the user's choice.
-    let yolo = std::env::var_os(guard::RUN_TASK).is_some() || std::env::var_os(guard::RUN_THREAD).is_some();
-    !yolo && (std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine") || notes::routine_session())
-}
-
 pub fn org_command(cmd: OrgCmd) -> Result<()> {
-    if notes::run_limited() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
+    if notes::run_limited() {
         anyhow::bail!("organisations can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -664,7 +654,7 @@ pub fn org_command(cmd: OrgCmd) -> Result<()> {
 }
 
 pub fn client_command(cmd: ClientCmd) -> Result<()> {
-    if notes::run_limited() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
+    if notes::run_limited() {
         anyhow::bail!("clients can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -739,8 +729,7 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
 }
 
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
-    // Inside a run Echo started: the agent's steps, on that run's project only (a read-only routine:
-    // the tree).
+    // Inside a run Echo started: the agent's steps, on that run's project only.
     // Yolo's run: an edit of its own task (`guard::RUN_TASK`), nothing else of the ledger's.
     let own_task = match &cmd {
         LedgerCmd::Edit { json } => own_task_edit(id, json, &std::env::var(guard::RUN_TASK).unwrap_or_default()),
@@ -750,7 +739,7 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     let own_thread_read = matches!(cmd, LedgerCmd::Tree | LedgerCmd::Status) && guard::run_thread().is_some_and(|t| t == id);
     // A routine's run (as the folder session) edits a thread's work: Echo's own data, with or without prompts.
     let routine_edit = matches!(cmd, LedgerCmd::Edit { .. }) && notes::routine_session();
-    let allowed = own_task || own_thread_read || routine_edit || (matches!(cmd, LedgerCmd::Tree) && routine_reads());
+    let allowed = own_task || own_thread_read || routine_edit;
     if notes::run_limited() && !allowed {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         // A sync run's steps (`guard::PROJECT_STEPS`): what it reads is in its prompt.
