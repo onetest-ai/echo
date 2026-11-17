@@ -145,6 +145,11 @@ fn include_target(value: &str, origin: &str, git: &Path) -> Option<PathBuf> {
     if let Some(rest) = value.strip_prefix("%(prefix)/") {
         return Some(dunce::canonicalize(git).ok()?.parent()?.parent()?.join(rest));
     }
+    // A drive with no root (`C:tools\git.cfg`): Windows resolves it against that drive's current folder, git's not Echo's.
+    let b = value.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && !matches!(b.get(2), Some(b'/' | b'\\')) {
+        return None;
+    }
     if Path::new(value).is_absolute() {
         return Some(PathBuf::from(value));
     }
@@ -1839,5 +1844,18 @@ mod tests {
         assert!(run("edges", "commit", json!({"paths": ["a.md"], "message": "x"})).unwrap()["rev"].is_string());
         plugins::remove("edges", true).unwrap();
         sync();
+    }
+
+    #[test]
+    fn an_include_with_a_drive_but_no_root_is_one_echo_cant_place() {
+        let git = Path::new("/usr/bin/git");
+        let origin = "file:/data/acme-vault/.git/config";
+        for v in [r"C:tools\git.cfg", "c:git.cfg", "C:"] {
+            assert_eq!(super::include_target(v, origin, git), None, "{v}");
+        }
+        // A drive with its root, or a plain relative path, is placed.
+        for v in [r"C:\tools\git.cfg", "C:/tools/git.cfg", "tools/git.cfg"] {
+            assert!(super::include_target(v, origin, git).is_some(), "{v}");
+        }
     }
 }
