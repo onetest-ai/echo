@@ -355,10 +355,15 @@ struct Children {
     pids: Vec<u32>,
 }
 static CHILDREN: std::sync::Mutex<Children> = std::sync::Mutex::new(Children { stopping: false, pids: Vec::new() });
+thread_local!(static OWN: &'static std::sync::Mutex<Children> = Box::leak(Box::new(std::sync::Mutex::new(Children { stopping: false, pids: Vec::new() })))); // a test's own: it quitting never stops the runs of the tests beside it
+fn children() -> std::sync::MutexGuard<'static, Children> {
+    let m = if cfg!(test) { OWN.with(|m| *m) } else { &CHILDREN };
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Start a minutes run's Claude Code, unless the app is quitting.
 pub(crate) fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -> Result<std::process::Child> {
-    let mut c = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = children();
     if c.stopping {
         bail!("Echo is quitting");
     }
@@ -369,18 +374,18 @@ pub(crate) fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -
 
 /// A child admitted by `admit_child` has ended.
 pub(crate) fn forget_child(pid: u32) {
-    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).pids.retain(|p| *p != pid);
+    children().pids.retain(|p| *p != pid);
 }
 
 pub(crate) fn quitting() -> bool {
-    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).stopping
+    children().stopping
 }
 
 /// The app is quitting: no new minutes run starts Claude Code, and those running are stopped (TERM
 /// to each group, KILL after 3 s), so none goes on writing on its own.
 pub fn shutdown() {
     let pids: Vec<u32> = {
-        let mut c = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut c = children();
         c.stopping = true;
         c.pids.clone()
     };
@@ -1113,7 +1118,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     }
     let status_code = child.wait().ok();
     done.store(true, std::sync::atomic::Ordering::SeqCst);
-    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).pids.retain(|p| *p != pid);
+    children().pids.retain(|p| *p != pid);
     // The call may have been retitled meanwhile (by the user, or an older app's run whose `title`
     // renamed at once): finish in the folder as it is named now.
     let renamed = calls::by_stamp(&call_stamp).filter(|d| d != dir);
@@ -1662,7 +1667,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn quitting_stops_every_child_and_starts_none() {
-        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
         let child = admit_child(|| {
             let mut c = std::process::Command::new("sleep");
             c.arg("30");
@@ -1670,7 +1674,6 @@ mod tests {
             Ok(c.spawn()?)
         })
         .unwrap();
-        let pid = child.id();
         let reaper = std::thread::spawn(move || {
             let mut child = child;
             child.wait().unwrap()
@@ -1685,8 +1688,34 @@ mod tests {
         .is_err());
         assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "none starts after");
         assert!(quitting());
-        CHILDREN.lock().unwrap().stopping = false; // other tests in this process
-        CHILDREN.lock().unwrap().pids.retain(|p| *p != pid);
+        children().stopping = false; // a single test thread runs the tests one after another
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn one_test_quitting_leaves_the_runs_of_another_thread_alone() {
+        let (started, go) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+        let other = std::thread::spawn(move || {
+            let mut child = admit_child(|| {
+                let mut c = std::process::Command::new("sleep");
+                c.arg("30");
+                crate::ai::detach(&mut c);
+                Ok(c.spawn()?)
+            })
+            .unwrap();
+            started.0.send(()).unwrap();
+            go.1.recv().unwrap();
+            let alive = child.try_wait().unwrap().is_none() && !quitting() && admit_child(|| bail!("started")).is_err_and(|e| e.to_string() == "started");
+            let _ = child.kill();
+            let _ = child.wait();
+            forget_child(child.id());
+            alive
+        });
+        started.1.recv().unwrap();
+        shutdown();
+        go.0.send(()).unwrap();
+        assert!(other.join().unwrap(), "another thread's run is neither stopped nor refused");
+        children().stopping = false;
     }
 
     #[test]
@@ -1713,13 +1742,9 @@ mod tests {
         assert_eq!(rule_path(Path::new("/Users/me/Echo")), "/Users/me/Echo");
     }
 
-    /// Tests that set or depend on `quitting()` (process-wide).
-    static QUITTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[cfg(unix)]
     #[test]
     fn notes_wait_for_a_sign_in_going_on() {
-        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = crate::paths::testenv::folders("notes-wait-sign-in");
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("w", None, &crate::ai::fake::signed_in("pat@example.com"));
@@ -1790,7 +1815,6 @@ mod tests {
 
     #[test]
     fn minutes_on_a_local_model_wait_their_turn() {
-        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = crate::paths::testenv::folders("notes-local-turn");
         let d = root.join("home/calls/2026-10-23_220000-x");
         fs::create_dir_all(&d).unwrap();
@@ -1814,7 +1838,6 @@ mod tests {
 
     #[test]
     fn minutes_waiting_for_another_call_name_it_and_may_start_anyway() {
-        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = crate::paths::testenv::folders("notes-other-call");
         let own = root.join("home/calls/2026-11-02_180000-planning");
         let other = root.join("home/calls/2026-11-03_100100-weekly-sync");
