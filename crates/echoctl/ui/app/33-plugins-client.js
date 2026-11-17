@@ -64,6 +64,9 @@ function threadSlotAfter(root, items, thread, log) {
 // end of the thread slot block
 /** The thread a `thread.profile` row is drawn for. */
 const slotThread = (p) => ({ id: p.id, name: p.name, client: p.client || null })
+/** `ctx.echo.jobs.set` requests waiting for Echo's answer (`window.echo.jobsSet`), by request id. */
+const JobsAsked = {}
+
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
@@ -75,6 +78,28 @@ function pluginCtx(id) {
       const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
       if (r && r.error) throw new Error(r.error)
       return r ? r.value : null
+    },
+    /** Echo's background jobs, when its manifest asks for `uses.echo.jobs` (echo-plugins R25): `list()` — every job, its
+     *  settings (value, default, range), last run, runs today, and the night; `set(job, ["key=value", …])` — only on the
+     *  user's own click or key (else it throws), checked as `echoctl jobs set`; resolves to the list after. */
+    echo: {
+      jobs: {
+        list: async () => {
+          const r = await get(`api/plugin/${encodeURIComponent(id)}/jobs`)
+          if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
+          return r.value
+        },
+        set: (job, settings) => {
+          if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) return Promise.reject(new Error("Echo's jobs change only on your click or key"))
+          // Through the page's IPC (never a GET); Echo answers this request by `window.echo.jobsSet`.
+          const req = `${id}:${Date.now()}:${Math.random().toString(36).slice(2)}`
+          return new Promise((resolve, reject) => {
+            JobsAsked[req] = { resolve, reject }
+            setTimeout(() => { if (JobsAsked[req]) { delete JobsAsked[req]; reject(new Error('Echo did not answer')) } }, 15000)
+            send({ cmd: 'plugin_jobs_set', id, req, job: String(job), settings: (settings || []).map(String) })
+          })
+        },
+      },
     },
     slots: {
       list: () => SLOTS.slice(),

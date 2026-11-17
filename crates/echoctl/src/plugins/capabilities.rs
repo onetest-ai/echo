@@ -358,6 +358,9 @@ pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("calls", "your calls' minutes and transcripts"),
 ];
 
+/// `uses.echo.jobs` on the sheet (echo-plugins R25).
+const JOBS_LINE: &str = "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens";
+
 /// What `uses.echo.write` may name, with the sheet's line for each.
 pub(super) const ECHO_WRITES: &[(&str, &str)] = &[
     ("dictionary", "Adds names to your Echo dictionary"),
@@ -368,8 +371,14 @@ pub(super) const ECHO_WRITES: &[(&str, &str)] = &[
 pub(super) fn describe_echo(v: &Value) -> Result<String> {
     let read = strings(v, "read")?;
     let write = strings(v, "write")?;
-    if read.is_empty() && write.is_empty() {
-        bail!("“echo” reads nothing ({})", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
+    // `jobs`: it shows Echo's background jobs and tunes them on the user's own click or key (echo-plugins R25).
+    let jobs = match v.get("jobs") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => bail!("“echo.jobs” is true or false"),
+    };
+    if read.is_empty() && write.is_empty() && !jobs {
+        bail!("“echo” asks for nothing: read ({}), write ({}) or jobs", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "), ECHO_WRITES.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
     }
     // A kind a newer Echo has means nothing here: named on the sheet, never granted (an older Echo degrades, the
     // plugin still installs).
@@ -390,6 +399,9 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
         if write.iter().any(|w| w == k) {
             lines.push(line.to_string());
         }
+    }
+    if jobs {
+        lines.push(JOBS_LINE.to_string());
     }
     if !unknown.is_empty() {
         lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
@@ -432,6 +444,15 @@ mod tests {
         for bad in ["telegram-@claude-plugins-official", "-x@claude-plugins-official", "a--b@claude-plugins-official", "@claude-plugins-official", "x@other"] {
             assert!(describe_channel(&serde_json::json!({"plugin": bad})).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_plugin_asks_for_echos_jobs_as_a_flag_and_the_sheet_says_what_it_can_change() {
+        assert_eq!(describe_echo(&serde_json::json!({"jobs": true})).unwrap(), JOBS_LINE);
+        assert!(describe_echo(&serde_json::json!({"read": ["threads"], "jobs": true})).unwrap().ends_with(JOBS_LINE));
+        assert!(describe_echo(&serde_json::json!({"jobs": false})).is_err(), "nothing asked for");
+        assert!(describe_echo(&serde_json::json!({"jobs": "yes"})).is_err());
+        assert!(!describe_echo(&serde_json::json!({"read": ["threads"]})).unwrap().contains("background jobs"));
     }
 
     #[test]
