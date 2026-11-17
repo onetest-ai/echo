@@ -278,6 +278,10 @@ const PRELUDE: &str = r#"
      *  since, limit) | 'source' (an id: call:<folder> | mail:<source>) | 'calls' (opts: q, since, limit) | 'calendar'
      *  (the meetings Echo last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
+    /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
+     *  template, else {text, name, parts: {identity, people, terms, style, patterns}, hash} — only the kinds asked (all
+     *  but patterns when none are named); `hash` changes when what it gets changes. Name and email alone: echo.read('me'). */
+    me: (opts) => call('me', opts || {}),
     echo: {
       read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
       /** Names for one thing into the user's dictionary (uses.echo.write: dictionary): {name, synonyms, spellings, kind, client}. */
@@ -1271,6 +1275,10 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "me" => crate::share::me()?,
                 o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
             }
+        }
+        "me" => {
+            uses(id, "me")?;
+            crate::share::about_me(arg)?
         }
         "echo.dictionary.add" => {
             if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == "dictionary")) {
@@ -3512,6 +3520,64 @@ mod tests {
         // What it didn't ask for isn't read.
         assert!(read("threads", Value::Null).unwrap_err().to_string().contains("didn't ask to read your threads"));
         plugins::remove("reader", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_reads_about_me_only_with_uses_me_in_the_parts_it_asks_and_never_the_template() {
+        let (_env, root) = paths::testenv::folders("jshost-about-me");
+        let mut cfg = crate::config::Config::load().unwrap_or_default();
+        cfg.me = Some(crate::meeting::Person { name: "Sam Rivera".into(), email: Some("sam@initech.example".into()) });
+        cfg.save().unwrap();
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('me', (a) => ctx.me(a))
+            }
+            "#;
+        let sheet = install_made_up(&root, "coach", json!({"me": {}}), main);
+        assert!(sheet.contains(&plugins::ME_LINE.to_string()), "{sheet:?}");
+        let me = |a: Value| call_loaded("coach", "me", &a);
+
+        // Missing, empty, still the template: nothing to read.
+        assert_eq!(me(json!({})).unwrap(), Value::Null);
+        let path = crate::calls::me_profile_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "  \n").unwrap();
+        assert_eq!(me(json!({})).unwrap(), Value::Null);
+        std::fs::write(&path, crate::calls::ME_TEMPLATE).unwrap();
+        assert_eq!(me(json!({})).unwrap(), Value::Null);
+
+        std::fs::write(&path, "# About me\n\nName: Alex Doe\nRole: Head of Delivery\n\n## People I work with often\n- Jordan — my manager\n\n\
+                               ## How I work — expected patterns\n- I delegate and track.\n\n## How I like notes written\n- Short, in English.\n").unwrap();
+        // By default every part but how the user works (as the Brain's readers).
+        let all = me(json!({})).unwrap();
+        assert_eq!(all["name"], "Alex Doe");
+        let text = all["text"].as_str().unwrap();
+        assert!(text.contains("Role: Head of Delivery") && text.contains("Jordan") && text.contains("Short, in English.") && !text.contains("delegate"), "{text}");
+        assert_eq!(all["parts"].as_object().unwrap().keys().collect::<Vec<_>>(), ["identity", "people", "style"]);
+        assert_eq!(all["hash"].as_str().unwrap().len(), 8);
+        // Only the parts asked; patterns when asked.
+        let style = me(json!({"kinds": ["style"]})).unwrap();
+        assert_eq!((style["text"].as_str(), style["name"].clone()), (Some("## How I like notes written\n- Short, in English."), Value::Null));
+        assert!(me(json!({"kinds": ["patterns"]})).unwrap()["parts"]["patterns"].as_str().unwrap().contains("I delegate and track."));
+        assert!(me(json!({"kinds": ["secrets"]})).unwrap_err().to_string().contains("About me has no part “secrets”"));
+        // An edit changes the hash; without a Name: line the name is Echo's.
+        std::fs::write(&path, "# About me\n\nDelivery lead at Initech.\n").unwrap();
+        let edited = me(json!({})).unwrap();
+        assert_ne!(edited["hash"], all["hash"]);
+        assert_eq!(edited["name"], "Sam Rivera");
+
+        // Without `uses.me`: refused.
+        install_made_up(&root, "nosy", json!({}), main);
+        assert!(call_loaded("nosy", "me", &json!({})).unwrap_err().to_string().contains("didn't ask for “me”"));
+        // An update that adds it asks again.
+        let d = root.join("market-nosy").join("plugins").join("nosy");
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "nosy", "name": "Acme nosy", "version": "0.2.0", "main": "main.js", "uses": {"me": {}}}).to_string()).unwrap();
+        assert!(plugins::update("nosy", &[]).unwrap_err().to_string().contains(&format!("asks for more: {}", plugins::ME_LINE)));
+        assert_eq!(plugins::update("nosy", &[plugins::ME_LINE.to_string()]).unwrap().unwrap().version, "0.2.0");
+        for id in ["coach", "nosy"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 
