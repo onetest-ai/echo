@@ -24,13 +24,13 @@ auto: [tests/auto/specs/S-11.spec.mjs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings` and wait for the heading "General" | The left list shows, in this order: General, Recording, Transcription, AI & minutes, Templates, Calendar & chat, Knowledge, About me, Sends to you, Plugins, Layout, Health; General is the open section and the text "Saved as you change it." is at the foot of the page |
+| 1 | Navigate to `{{base_url}}/#settings` and wait for the heading "General" | The left list shows, in this order: General, Recording, Transcription, AI & minutes, Templates, Calendar & chat, Recall, About me, Sends to you, Plugins, Layout, Health; General is the open section and the text "Saved as you change it." is at the foot of the page |
 | 2 | Click "Recording" in the left list | The page shows the heading "Recording" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 3 | Click "Transcription" in the left list | The page shows the heading "Transcription" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 4 | Click "AI & minutes" in the left list | The page shows the heading "AI & minutes" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 5 | Click "Templates" in the left list | The page shows the heading "Templates" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 6 | Click "Calendar & chat" in the left list | The page shows the heading "Calendar & chat" (the first heading of the section); the text "This section couldn't be shown" is absent |
-| 7 | Click "Knowledge" in the left list | The page shows the heading "Recall" (the first heading of the section); the text "This section couldn't be shown" is absent |
+| 7 | Click "Recall" in the left list | The page shows the heading "Recall" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 8 | Click "About me" in the left list | The page shows the heading "About me" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 9 | Click "Sends to you" in the left list | The page shows the heading "Sends to you" (the first heading of the section); the text "This section couldn't be shown" is absent |
 | 10 | Click "Plugins" in the left list | The page shows the heading "Plugins" (the first heading of the section); the text "This section couldn't be shown" is absent |
@@ -42,4 +42,4 @@ All twelve sections opened one after another, each with its own heading and no e
 
 ## Notes
 - General and Health read the real machine (Claude Code, command line, permissions): this case checks the heading only, never their values, and keeps no screenshot of them.
-- The Knowledge section's page is headed "Recall" (known naming issue in app_profile.md).
+- The Recall section's page is headed "Recall" in a level 3 heading.

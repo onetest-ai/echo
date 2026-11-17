@@ -234,8 +234,8 @@ in calls has no levels. Not covered as a group:
 - **Only the user's act in the window**: merged or split people, a notes conflict kept, skill fit, the theme (kept
   in the browser).
 - **Kept readable on purpose**: a call pinned to a missing or unreadable profile, `projects_error`.
-- **Areas being reworked**: Today's minutes states (the files are there: `minutes-seen.json`), Knowledge (Recall
-  off; `inbox.kind=brain` is compiled off).
+- **Areas being reworked**: Today's minutes states (the files are there: `minutes-seen.json`), Recall
+  (off; `inbox.kind=brain` is compiled off).
 - **No such state**: `call.type_by=none` (every call gets at least a guess); `meeting.action` (derived in the
   window).
 

@@ -218,7 +218,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                         }
                     }));
                     match crate::brain::taxonomy::induce(&layer, &|_| {}) {
-                        Ok(_) => crate::app::notify("Topics rebuilt", "Review them on Knowledge's Topics tab, then accept"),
+                        Ok(_) => crate::app::notify("Topics rebuilt", "Review them on Recall's Topics tab, then accept"),
                         Err(e) => crate::app::notify("Topics not rebuilt", &format!("{e:#}")),
                     }
                 });
@@ -243,7 +243,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                         }
                     }));
                     match crate::brain::taxonomy::split(&layer, &label, &|_| {}) {
-                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on Knowledge's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
+                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on Recall's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
                         Err(e) => crate::app::notify(&format!("“{label}” not split"), &format!("{e:#}")),
                     }
                 });

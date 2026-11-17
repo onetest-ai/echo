@@ -1,20 +1,20 @@
 {
  "prefix": "KNOW",
- "name": "Knowledge",
+ "name": "Recall",
  "order": 300,
  "status": "rework",
  "notes": "Recall (the Brain) and plugin knowledge tabs; top-level features only",
  "features": [
   {
    "id": "F-KNOW-01",
-   "feature": "Knowledge shows in the activity bar only with Recall on or a plugin's tab; otherwise `#brain` opens Calls",
+   "feature": "Recall shows in the activity bar only with its index on or a plugin's tab; otherwise `#brain` opens Calls",
    "priority": "medium",
    "check": "agent",
    "axes": []
   },
   {
    "id": "F-KNOW-02",
-   "feature": "Settings → Knowledge → Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
+   "feature": "Settings → Recall → Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -42,7 +42,7 @@
   },
   {
    "id": "F-KNOW-06",
-   "feature": "Plugins add tabs and settings rows to Knowledge (e.g. Obsidian vaults)",
+   "feature": "Plugins add tabs and settings rows to Recall (e.g. Obsidian vaults)",
    "priority": "low",
    "check": "person",
    "axes": []
