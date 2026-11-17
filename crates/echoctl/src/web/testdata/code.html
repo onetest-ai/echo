@@ -1,0 +1,14 @@
+<html><head><title>Exporting the store list</title></head>
+<body><article>
+<h1>Exporting the store list</h1>
+<p>Run the export from the admin console. The <code>--since</code> flag limits it to stores changed after a date,
+and the output goes to standard output unless you pass a file.</p>
+<pre><code>contoso export stores --since 2026-11-01 &gt; stores.csv
+if [ -s stores.csv ]; then
+    echo "done: $(wc -l &lt; stores.csv) stores"
+fi</code></pre>
+<p>A template uses three backticks itself:</p>
+<pre>```yaml
+region: north
+```</pre>
+</article></body></html>

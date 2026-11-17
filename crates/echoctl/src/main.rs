@@ -89,6 +89,8 @@ mod skills;
 mod share;
 mod signin;
 mod watch;
+#[cfg(feature = "js")]
+mod web;
 #[cfg(feature = "transcribe")]
 mod transcribe;
 #[cfg(feature = "tray")]
