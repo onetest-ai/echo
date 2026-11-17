@@ -1,11 +1,31 @@
+// ── net reload
+/** The page's policy (its CSP) names the addresses the user listed for plugins that are on, and is fixed for the
+ *  page: when Echo's key of them (`net` of /api/state) isn't the one this page was served with (`<meta
+ *  name="echo-net">`), the page loads again — not while the user types (their text would be lost: the next tick), and
+ *  once per key (`tried`: a key whose reload didn't take never reloads in a loop). */
+const netReload = (served, now, typing, tried) => !!served && !!now && served !== now && !typing && tried !== now
+// end of the net-reload block
+
 // ── refresh: cheap local polling (the files change under us during a call) ─────────────────
 let ticks = 0
+/** Loads the page again when its policy is stale (`netReload`); the hash route (the user's place) stays. */
+function netCheck() {
+  const meta = document.querySelector('meta[name="echo-net"]')
+  const now = S.state && S.state.net
+  let tried = null
+  try { tried = sessionStorage.getItem('echo-net-tried') } catch { /* no storage: reload at most as the key changes */ }
+  if (!netReload(meta && meta.content, now, typingNotes() || plTyping(), tried)) return false
+  try { sessionStorage.setItem('echo-net-tried', now) } catch { /* as above */ }
+  location.reload()
+  return true
+}
 async function tick() {
   // A window nobody sees (minimised, hidden, covered by the call app) fetches and draws nothing: it catches up when shown.
   if (document.hidden) return
   ticks++
   const before = JSON.stringify(S.state)
   await loadState()
+  if (netCheck()) return
   const changed = JSON.stringify(S.state) !== before
   // Against the last stamp read (a tick whose read failed has none and changes nothing).
   const plugins = S.state && S.state.plugins

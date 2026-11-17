@@ -21,6 +21,10 @@ rules are in `.ai-run/guides/window/window-ui.md`.
 ## Assets
 
 - Page assets are compiled in from `crates/echoctl/ui/` (`window::reply`).
+- The page (`/`, `assets::index_html`) is served under `window::window_csp` with the addresses the user listed for
+  plugins that are on, and their key in `<meta name="echo-net">`; `tick` (window script) reloads it through `netCheck` /
+  `netReload` when `/api/state`'s `net` differs (not while notes or a plugin setting are typed, once per key), the hash
+  route kept. Tested by `net-reload.test.mjs`.
 - Third-party JS is vendored in `ui/vendor/` with its licence and README entry.
 
 ## Parts

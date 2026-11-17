@@ -1,6 +1,6 @@
 ---
 id: TC-018
-title: A plugin reaches only the addresses the user listed (wildcards allowed) in a setting its sheet named (plain http inside their own network), can't widen that list itself, saves a download in its store as it came, and the window serves that audio or picture and nothing else of the store
+title: A plugin reaches only the addresses the user listed (wildcards allowed) in a setting its sheet named (plain http too), can't widen that list itself, saves a download in its store as it came, and the window serves that audio or picture and nothing else of the store
 priority: high
 type: functional
 requirements: [F-PLUG-11, F-PLUG-12]
@@ -55,9 +55,9 @@ JS
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `echoctl plugin install acme-speaker --yes` | It prints `• Runs its own code in Echo, with your rights (new)` and `• Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network) (new)`; then `Installed Acme speaker 0.1.0` |
+| 1 | `echoctl plugin install acme-speaker --yes` | It prints `• Runs its own code in Echo, with your rights (new)` and `• Talks to the addresses you list in its setting “tts” (wildcards allowed, plain http too; its window part also over WebSocket) (new)`; then `Installed Acme speaker 0.1.0` |
 | 2 | `echoctl plugin call acme-speaker ping` (if it answers `no command “ping”`, wait 2 s and run it again); then `echoctl plugin call acme-speaker get '{"url":"http://127.0.0.1:'$P'/hello.txt"}'` | `pong`; then it fails: the message contains `may reach only the hosts its manifest names` and `the addresses you list in its settings` — no address entered yet, so nothing is reachable |
-| 3 | `echoctl plugin set acme-speaker tts http://example.com`; the same with `http://*.*.*.*:*`, with `http://172.*.*.*` and with `https://*.com` | Each fails, saying `isn't an address the plugin may reach` and why: plain http is only for addresses inside your own network (or use https); a wildcard may not cover the whole internet or a whole top-level domain |
+| 3 | `echoctl plugin set acme-speaker tts ftp://example.com`; the same with `http://*.*.*.*:*`, with `https://*.com` and with `http://0x7f.0.0.1` | Each fails, saying `isn't an address the plugin may reach` and why: an address starts with http:// or https://; a wildcard may not cover the whole internet or a whole top-level domain; an IPv4 address is four plain numbers |
 | 4 | `echoctl plugin set acme-speaker tts` | `value` is `null`: the refused addresses were not kept |
 | 5 | `echoctl plugin set acme-speaker tts "http://192.168.*.*:*, http://127.0.0.*:$P"`; then `echoctl plugin set acme-speaker tts` | It saves; `value` is the list as entered |
 | 6 | `echoctl plugin call acme-speaker get '{"url":"http://127.0.0.1:'$P'/hello.txt"}'` | `{"status": 200, "body": "hello"}`: `127.0.0.1` matches `127.0.0.*` on port P |
@@ -80,4 +80,4 @@ Acme speaker holds the addresses the user listed, reached only what they match, 
 ## Notes
 - Written from the feature's text (F-PLUG-11, F-PLUG-12), not from the code.
 - Steps 12 and 13 read the window's file route over HTTP; if the served window asks for its cookie on a file, load `{{base_url}}/` first and pass its cookie to `curl`.
-- Plain http is allowed only for `localhost`, `*.local` and private IPv4 ranges; the Rust tests in `plugins::addresses` hold the full list of accepted and refused patterns and the URLs each matches.
+- Plain http is allowed to any listed host; outside `localhost`, `*.local` and the private IPv4 ranges its row (and `echoctl plugin set`) warns that anyone on the way can read it. The Rust tests in `plugins::addresses` hold the full list of accepted and refused patterns and the URLs each matches.

@@ -1600,11 +1600,11 @@ mod tests {
         let uses = |v: Value| v.as_object().unwrap().clone();
         assert_eq!(
             describe(&uses(json!({"network": {"hosts_from": ["tts"]}}))).unwrap(),
-            vec!["Talks to the addresses you list in its setting “tts” (wildcards allowed; plain http only inside your own network)"]
+            vec!["Talks to the addresses you list in its setting “tts” (wildcards allowed, plain http too; its window part also over WebSocket)"]
         );
         assert_eq!(
             describe(&uses(json!({"network": {"hosts": ["api.acme.example"], "hosts_from": ["a", "b"]}}))).unwrap(),
-            vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed; plain http only inside your own network)"]
+            vec!["Talks to api.acme.example over HTTPS and to the addresses you list in its settings “a” and “b” (wildcards allowed, plain http too; its window part also over WebSocket)"]
         );
         assert!(describe(&uses(json!({"network": {}}))).is_err(), "neither a host nor a setting");
     }
@@ -1628,7 +1628,7 @@ mod tests {
         install("sneak", Some(&name), &review("sneak", Some(&name)).unwrap().uses).unwrap();
         let ask = |key: &str, v: &str| addresses_to_allow("sneak", key, &json!(v));
         assert_eq!(ask("tts", "http://10.0.0.*:*, https://a.acme.example").unwrap(), Some(("Acme sneak".to_string(), vec!["http://10.0.0.*:*".to_string(), "https://a.acme.example".to_string()])));
-        assert!(ask("tts", "http://example.com").unwrap_err().to_string().contains("“TTS” isn't an address"), "a wrong list is refused at once, no dialog, by its label");
+        assert!(ask("tts", "http://*.*.*.*:*").unwrap_err().to_string().contains("“TTS” isn't an address"), "a wrong list is refused at once, no dialog, by its label");
         assert_eq!(ask("voice", "alto").unwrap(), None, "not an address setting");
         assert_eq!(ask("tts", "  ").unwrap(), None, "emptied: it only narrows");
         set_setting("sneak", "tts", &json!("http://10.0.0.*:*")).unwrap();
@@ -1636,6 +1636,46 @@ mod tests {
         assert!(ask("tts", &format!("http://10.0.0.1,{}", " ".repeat(2001))).is_ok(), "spaces trimmed");
         assert!(ask("tts", &"http://10.0.0.1,".repeat(200)).unwrap_err().to_string().contains("2000"));
         assert!(ask("tts", "http://10.0.*.*:*").unwrap().is_some(), "a wider one asks again");
+    }
+
+    #[test]
+    fn the_window_may_reach_only_what_the_user_listed_for_plugins_that_are_on() {
+        let (_env, root) = paths::testenv::folders("plugins-window-sources");
+        let mk = root.join("market");
+        for id in ["voice", "lamp", "plain"] {
+            let d = mk.join("plugins").join(id);
+            fs::create_dir_all(&d).unwrap();
+            let uses = if id == "plain" { json!({}) } else { json!({"network": {"hosts_from": ["tts"]}}) };
+            fs::write(d.join(MANIFEST), json!({"id": id, "name": id, "version": "0.1.0", "uses": uses, "settings": [{"key": "tts", "label": "TTS", "type": "string"}]}).to_string()).unwrap();
+        }
+        let list = json!({"name": "t", "plugins": (["voice", "lamp", "plain"].map(|id| json!({"id": id, "source": format!("./plugins/{id}")})))});
+        fs::write(mk.join("echo-marketplace.json"), list.to_string()).unwrap();
+        let name = market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        refresh(&name).unwrap();
+        for id in ["voice", "lamp", "plain"] {
+            install(id, Some(&name), &review(id, Some(&name)).unwrap().uses).unwrap();
+        }
+        assert!(window_sources().is_empty(), "nothing listed yet");
+        set_setting("voice", "tts", &json!("http://*.local:*, https://voicecho.local, http://192.168.1.*:*")).unwrap();
+        set_setting("lamp", "tts", &json!("http://10.0.0.7:8808")).unwrap();
+        // A setting that isn't an address list gives the window nothing, whatever it holds.
+        set_setting("plain", "tts", &json!("http://evil.example:80")).unwrap();
+        let all = ["http://*.local:*", "ws://*.local:*", "https://voicecho.local:443", "wss://voicecho.local:443", "http://10.0.0.7:8808", "ws://10.0.0.7:8808"];
+        let mut want: Vec<String> = all.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(window_sources(), want, "the IPv4 wildcard can't be said in CSP: left out");
+        set_enabled("lamp", false).unwrap();
+        assert!(!window_sources().iter().any(|s| s.contains("10.0.0.7")), "a plugin switched off: its addresses go");
+        set_enabled("lamp", true).unwrap();
+        remove("lamp", true).unwrap();
+        assert!(!window_sources().iter().any(|s| s.contains("10.0.0.7")), "removed, data kept: gone too");
+        // The settings row says what the user should know about the list.
+        set_setting("voice", "tts", &json!("http://*.local:*, http://tts.acme.example, http://192.168.1.*:*")).unwrap();
+        let notes = settings_view("voice").unwrap()[0]["notes"].clone();
+        assert_eq!(notes.as_array().unwrap().len(), 2, "{notes}");
+        assert!(notes[0].as_str().unwrap().starts_with("http://tts.acme.example — plain http: anyone on the way can read it"));
+        assert!(notes[1].as_str().unwrap().starts_with("http://192.168.1.*:* — its window part can't reach it"));
+        assert!(settings_view("plain").unwrap()[0].get("notes").is_none(), "not an address list: no notes");
     }
 
     #[test]

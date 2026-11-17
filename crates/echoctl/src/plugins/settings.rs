@@ -28,7 +28,6 @@ pub(super) fn addresses_file(id: &str) -> PathBuf {
 }
 
 /// What the user listed in a `hosts_from` setting, read only from where `set_setting` keeps it.
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn listed_addresses(id: &str, key: &str) -> Option<String> {
     read_map(&addresses_file(id)).remove(key)?.as_str().map(str::to_owned)
 }
@@ -59,9 +58,31 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
             } else {
                 v["value"] = vals.get(&s.key).cloned().or_else(|| s.default.clone()).unwrap_or(Value::Null);
             }
+            // An address list: what the user should know about it (plain http outside their network, what the
+            // window part can't reach).
+            if listed.contains(&s.key) {
+                v["notes"] = addresses::notes(v["value"].as_str().unwrap_or("")).into();
+            }
             v
         })
         .collect())
+}
+
+/// The CSP sources the window's page may reach (`window::window_csp`): every address the user listed for a plugin
+/// that is on, as `Address::csp_sources` writes it, sorted and once each. A list that no longer parses gives nothing.
+pub fn window_sources() -> Vec<String> {
+    let mut out: Vec<String> = enabled()
+        .iter()
+        .filter_map(|p| read_manifest(&plugin_dir(p)).ok().map(|m| (p.id.clone(), m)))
+        .flat_map(|(id, m)| address_settings(&m.uses).into_iter().filter_map(move |k| listed_addresses(&id, &k)))
+        .filter_map(|v| addresses::parse_list(&v).ok())
+        .flatten()
+        .filter_map(|a| a.csp_sources())
+        .flatten()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).

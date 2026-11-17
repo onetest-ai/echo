@@ -117,9 +117,36 @@ Evidence: `plugins::EVENTS`, `plugins::thread_values::take_queued`, `plugins::sh
 
 `ctx.http.fetch(url, {method, headers, body, save?})` resolves `{status, body}` for any HTTP answer, a redirect too
 (never followed). It waits 60 s at most, downloads 10 MB at most, and rejects as below. Plain http is allowed only to
-an address the user listed, inside their own network; only the user enters those addresses (window or CLI), never the
-plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence: `jshost::fetch`, `jshost::curl_head`,
-`plugins::addresses`, `plugins::listed_addresses`
+an address the user listed, any host; one outside the user's own network (private IPv4 ranges, `localhost`, `*.local`)
+gets a note on the setting's row and from `echoctl plugin set` ("plain http: anyone on the way can read it"). Only the
+user enters those addresses (window or CLI), never the plugin (`ctx.settings.set`, its `settings.json`, a manifest
+`default`). The sheet's line: "Talks to the addresses you list in its setting “<key>” (wildcards allowed, plain http
+too; its window part also over WebSocket)". Evidence: `jshost::fetch`, `jshost::curl_head`, `plugins::addresses`,
+`plugins::listed_addresses`, `plugins::addresses::notes`
+
+The list is `scheme://host[:port]` patterns (http or https; no port: the scheme's own; `:*` any), comma- or
+space-separated; `*` for a number of an IPv4 address (not the first), a leading name label (`*.lab.local`: one or more
+labels; `*.local` alone is allowed, any other one-label name isn't) or the port. A name's last label is never a number
+(`0x7f.0.0.1`, `1.2.3` are refused: an IPv4 address is four plain numbers).
+
+**The window half** reaches the same addresses with the page's own Web APIs — `WebSocket`, `fetch` (streams too),
+`EventSource`, `<audio>` / `<video>` — and no other outside address: the window's content security policy lists, in
+`connect-src` and `media-src`, every address the user listed for a plugin that is on, each for its scheme and the
+matching WebSocket one with its port (`http://*.local:*` → `http://*.local:*` and `ws://*.local:*`;
+`https://voicecho.local` → `https://voicecho.local:443` and `wss://voicecho.local:443`). An IPv4 pattern with a `*` number
+can't be said in a policy and isn't added: the setting's row says its window part can't reach it (list each address).
+The policy is fixed for the page: when the list changes (an address added or removed, such a plugin switched on, off or
+removed) the page loads again by itself on the same route, after the user stops typing. The policy's list is every
+enabled plugin's — the window is one page — but each plugin is granted only its own addresses on its sheet.
+- `fetch` and `EventSource` still go through CORS: the server must allow Echo's origin (`echo://localhost` on macOS,
+  `http://echo.localhost` on Windows; `Access-Control-Allow-Origin: *` covers both). WebSocket has no CORS: the
+  server sees the page's `Origin` and decides.
+- `wss://` / `https://` with a self-signed certificate isn't accepted by the webview (no pinning yet); use plain
+  `ws://` / `http://` inside the user's own network, or a certificate the system trusts.
+- The host half has no WebSocket or streaming (`ctx.http.fetch` only), and no microphone.
+
+Evidence: `window::window_csp`, `plugins::window_sources`, `plugins::addresses::Address::csp_sources`, `netReload`
+(window script)
 
 | Rejected | When |
 |---|---|

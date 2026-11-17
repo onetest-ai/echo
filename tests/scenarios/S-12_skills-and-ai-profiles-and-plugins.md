@@ -47,6 +47,7 @@ cases:
   - tests/cases/plugins/TC-065_a-plugin-asks-what-a-path-is-searches-its-text-and-hashes-it.md
   - tests/cases/plugins/TC-066_a-plugin-copies-its-vault-into-its-store-without-links-or-tool-folders-and-within-its-caps.md
   - tests/cases/plugins/TC-067_a-plugins-store-updates-from-two-processes-both-count.md
+  - tests/cases/plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -73,7 +74,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 ## Prelude
 
 1. Load `{{base_url}}/`.
-2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). Stages 22–31 use this folder as written; the later plugin stages (32–43), after stage 31 removed `acme-local`, each write their own `echo-marketplace.json` and plugin into it again (their preconditions) and remove their marketplace in their teardown — stage 40 writes it for Acme vault, which stages 41–43 use.
+2. Write the made-up marketplace once, in Bash: `. <dir>/env; M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`, then the two `echo … >` lines of the Preconditions of `plugins/TC-010_add-a-marketplace-from-a-folder.md` (`echo-marketplace.json` and `plugins/acme-notes/echo-plugin.json`). Stages 22–31 use this folder as written; the later plugin stages (32–44), after stage 31 removed `acme-local`, each write their own `echo-marketplace.json` and plugin into it again (their preconditions) and remove their marketplace in their teardown — stage 40 writes it for Acme vault, which stages 41–43 use.
 
 ## Stages
 
@@ -122,6 +123,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 41 | `plugins/TC-065_a-plugin-asks-what-a-path-is-searches-its-text-and-hashes-it.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Skip its teardown |
 | 42 | `plugins/TC-066_a-plugin-copies-its-vault-into-its-store-without-links-or-tool-folders-and-within-its-caps.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Skip its teardown |
 | 43 | `plugins/TC-067_a-plugins-store-updates-from-two-processes-both-count.md` | 40 | Acme vault is installed with the vault given to it by stage 40: skip the precondition lines and step 1. Its teardown removes Acme vault and `acme-local` |
+| 44 | `plugins/TC-068_a-plugins-window-half-reaches-the-users-listed-address-over-websocket-and-loses-it-when-removed.md` | — | Its marketplace is its own `acme-local` (stage 31 removed the shared one): run its precondition lines as written |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

@@ -104,7 +104,7 @@
   },
   {
    "id": "F-PLUG-11",
-   "feature": "A plugin may reach the addresses the user lists in a setting its manifest names in `network.hosts_from` (comma- or space-separated, `*` wildcards for a number of an IPv4 address, a leading name label or the port), and only what they match: the sheet says so, https works for any host, plain http only inside the user's own network, a list that isn't allowed (one covering the whole internet or a top-level domain) is refused where it is saved, and the plugin can't change that setting itself",
+   "feature": "A plugin may reach the addresses the user lists in a setting its manifest names in `network.hosts_from` (comma- or space-separated, `*` wildcards for a number of an IPv4 address, a leading name label or the port), and only what they match: the sheet says so, https and plain http work for any host (plain http outside the user's own network — private IPv4 ranges, localhost, `*.local` — allowed with a warning on the setting's row and from `echoctl plugin set`: \"plain http: anyone on the way can read it\"), a list that isn't allowed (one covering the whole internet or a top-level domain) is refused where it is saved, and the plugin can't change that setting itself",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -447,6 +447,16 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-51",
+   "feature": "A plugin's window half reaches the addresses the user listed for it (`network.hosts_from`, the plugin on) with the page's own Web APIs — WebSocket, fetch (CORS still applies), EventSource, audio and video — and nothing else outside: the window's policy names each listed address with its port for its scheme and the matching WebSocket one (http → ws, https → wss; `*.local`, `:*` as listed); an IPv4 address with a `*` number isn't added (its setting's row says the window part can't reach it); when the list changes (an address added or removed, such a plugin switched on, off or removed) the page loads again by itself on the same route, not while the user types, and never when nothing changed",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.setting"
+   ]
   }
  ]
 }
