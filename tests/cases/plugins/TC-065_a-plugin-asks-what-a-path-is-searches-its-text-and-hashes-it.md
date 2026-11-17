@@ -1,6 +1,6 @@
 ---
 id: TC-065
-title: A plugin asks what a path of its vault is — a link reported as a link, its place relative to the vault, never a path outside — hashes in Rust and searches the vault's text, not hidden files or through a link; the read-only marker of before changes nothing
+title: A plugin asks what a path of its vault is — a link reported as a link, its place relative to the vault, never a path outside — hashes in Rust, searches the vault's text, not hidden files or through a link, and reads a file that isn't UTF-8 strictly only when asked; the read-only marker of before changes nothing
 priority: high
 type: functional
 requirements: [F-PLUG-48]
@@ -45,6 +45,9 @@ export function apply(ctx) {
   ctx.command('drop', (a) => ctx.store.remove(a.path))
   ctx.command('bump', () => ctx.store.update('count.txt', (t) => String(Number(t || 0) + 1)))
   ctx.command('count', () => ctx.store.read('count.txt'))
+  ctx.command('read', (a) => ctx.fs.read(r(), a.path, a.opts))
+  ctx.command('readmany', async (a) => await ctx.fs.readMany(r(), a.paths, a.opts))
+  ctx.command('peek', (a) => ctx.store.read(a.path, a.opts))
 }
 JS
 echoctl plugin marketplace add "$M" --name acme-local
@@ -62,9 +65,10 @@ echoctl plugin marketplace add "$M" --name acme-local
 | 4 | `echoctl plugin call acme-vault stat '{"path":"Out"}'`; `echoctl plugin call acme-vault stat '{"path":"Out/leak.md"}'` | `{"kind": "link", "real": null, …}` — no `sha`, no path of `$D/outside` anywhere in it; the second fails: `“Out” leads outside …` (the folder it is in is a link out) |
 | 5 | `echoctl plugin call acme-vault find '{"q":"PILOT BUDGET"}'` | Exactly `[{"path": "Research/Globex.md", "line": 2, "text": "Pilot budget agreed."}]` — any case, not `.git/config` or `Archive/.git/HEAD` (hidden), not `Out/leak.md` (through a link) |
 | 6 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault find '{"q":"pilot budget"}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-vault stat '{"path":"Research/Globex.md"}'` | The same one line; the same stat: the read-only marker of before (`ECHOCTL_RUN_MODE=routine`) limits nothing: no run prepares and asks any more |
+| 7 | `printf 'caf\xe9\n' > "$D/vault/Latin.md"` (Latin-1, not UTF-8); `echoctl plugin call acme-vault read '{"path":"Latin.md"}'`; the same with `"opts":{"strict":true}`; `echoctl plugin call acme-vault read '{"path":"Wiki.md","opts":{"strict":true}}'`; `echoctl plugin call acme-vault readmany '{"paths":["Latin.md","Wiki.md","None.md"]}'`; the same with `"opts":{"strict":true}` | `"caf�\n"` (the bad byte replaced, as before); `Error: not UTF-8: Latin.md` (exit 1); Wiki.md's text; `["caf�\n", "# Initech wiki\nMade-up notes for tests.\n", null]`; strict: `[null, "# Initech wiki\n…", null]` — the file that isn't UTF-8 `null`, as one that isn't there |
 
 ## Expected Final State
-`$D/vault/Research/Globex.md` is there; nothing else changed.
+`$D/vault/Research/Globex.md` and `$D/vault/Latin.md` are there; nothing else changed.
 
 ## Teardown
 - `echoctl plugin remove acme-vault --delete-data`; `echoctl plugin marketplace remove acme-local`

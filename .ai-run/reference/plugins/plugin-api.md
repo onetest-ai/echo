@@ -87,10 +87,12 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   `echo://` links only, no images). A page of a vault: `ctx.markdown(md, {breaks, links, images})` (both halves; the
   window half's is `async`). The minutes' writer, raw HTML shown as text, no `[mm:ss]` marks, with `[[Page]]`,
   `[[Page|label]]`, `[[Page#heading]]` and `![[image.png]]`; `breaks: true` makes a single newline a line break; a
-  ```` ```mermaid ```` fence is shown as its code. 1 MB of text at most (more throws "ctx.markdown renders 1 MB of text
+  ```` ```mermaid ```` fence is shown as its code. 2 MB of text at most (more throws "ctx.markdown renders 2 MB of text
   at most"); the window half sends the page in a POST's body, as `ctx.call` does (§ Client half). Echo
   can't call the plugin while it writes, so the plugin resolves first: `ctx.markdown.links(md)` → `{links, images}`, each
-  destination once as written (a wikilink's target: `Page#heading`; nothing in code), then passes `links` / `images`
+  destination once as written (a wikilink's target: `Page#heading`; nothing in code); `ctx.markdown.links(md, {detail:
+  true})` adds `entries: [{dest, kind: 'wiki' | 'md', embed}]` — each way a destination was written, once and in order
+  (`[[Plan]]` and `[Plan](Plan)` on one page: two entries; `embed` for `![[…]]` and `![…](…)`) —, then passes `links` / `images`
   as `{"<dest>": "<href>" | null}`. Echo keeps a link's href only when it is an `https://` URL, an `echo://` link Echo
   knows (`data-echo-link`, the window opens it) or the plugin's own route — `#<id>:…`, or its Knowledge tab's `#brain/<id>:…`; an image's src only from its folder
   route `plugin/<id>/folder/…` (§ Folders and files; no `.` or `..` segment, `%2e` and `%2F` decoded); nothing with
@@ -137,7 +139,9 @@ Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `sha
 ## Store
 
 - `ctx.store.read/write/list/remove/path`, by relative path only; a name at the store's top level is plain ASCII
-  (letters, digits, `-` `_` `.`). Evidence: `plugins::data_dir`, `jshost::not_echos`
+  (letters, digits, `-` `_` `.`). `ctx.store.read(path)` → its text or `null` (none there), and throws on a file that
+  isn't UTF-8; `ctx.store.read(path, {lossy: true})` gives it with those bytes as U+FFFD (no flag: the replacement
+  character shows where). Evidence: `plugins::data_dir`, `jshost::not_echos`
 - Every `ctx.store.write` takes the plugin's lock across processes (the app and `echoctl plugin call`).
   `ctx.store.write(path, text, {ifSha})` writes only while the file's sha256 is still `ifSha` (else "changed since you
   read it"), `{createNew: true}` only where no file is ("is there already"). `ctx.store.update(path, fn)` reads,
@@ -489,6 +493,11 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
+- `ctx.fs.read(root, path, max)` → its text, `max` bytes (1 MB by default, 4 MB at most), bytes that aren't UTF-8 as
+  U+FFFD; `ctx.fs.read(root, path, {max, strict: true})` throws "not UTF-8: <path>" instead (a character `max` cuts at
+  the end is dropped, not refused). `await ctx.fs.readMany(root, paths, max | {max, strict})` → `[text | null]` in
+  order (5,000 paths at most), `null` for a file it can't read — with `strict` also one that isn't UTF-8.
+  Evidence: `jshost::folders::read_text`
 - More of a folder it was given (each needs `uses.folders`; the writes `folders.write`, checked as `ctx.fs.write`). Evidence: `jshost::folders`
   - `ctx.fs.write(root, path, text, {ifSha, createNew})`: `ifSha` writes only while the file's sha256 is still that
     (a file gone or changed: "“path” changed since you read it: read it again", nothing written; a file over 64 MB
@@ -529,7 +538,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   - `await ctx.git.log(root, {path, max})` → `[{rev, author, email, date, subject, echo, path?}]`, newest first: the
     commits touching the folder, or the file at `path` through its renames (each with its `path` then); 50 by default,
     1,000 at most; `date` ISO 8601; `echo` the id of the plugin that committed it through Echo, else null.
-  - `await ctx.git.show(root, rev, path, {max})` → `{text, size, truncated}` or null when the file wasn't there: its
+  - `await ctx.git.show(root, rev, path, {max, strict})` → `{text, size, truncated}` (bytes that aren't UTF-8 replaced, or with `strict: true` refused as "not UTF-8", as `ctx.fs.read`) or null when the file wasn't there: its
     text at that version as the repository holds it (no filter), cut at `max` (1 MB by default, 4 MB at most); `rev`
     `HEAD`, `HEAD~N` or a commit's id (4–64 hex), nothing else (the id of a file or a folder is refused); never a file
     of the repository outside the folder.
@@ -831,7 +840,7 @@ Evidence: `jshost::work::check_rows`
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash)`, `render()`, `markdown(md, opts)` and
-  `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
+  `markdown.links(md, {detail})` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
   4 MB at most, as `call`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll
   stay), `setRow`, `setCard`, `sw`, `ICON`,
