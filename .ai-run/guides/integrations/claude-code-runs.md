@@ -13,7 +13,7 @@
 - R3. When a routing environment-variable family changes, change every place that lists them. Evidence: `ai::UNSET_ROUTING` (ref: Routing variables)
 - R4. Hold the profile's lease for the whole job. Evidence: `ai::ready` (ref: Profiles)
 - R5. Pin a call's AI profile into `meta.json` at recording start. Evidence: `ai::pin`
-- R6. `local` / `claude` jobs read only the user's settings, and are refused when admin policy could route them. Evidence: `ai::policy_conflict` (ref: Starting Claude Code)
+- R6. `local` / `claude` jobs read only the user's settings, and are refused when admin policy could route them; a plugin's run in a folder also reads that folder's project settings, and is refused when they could route it. Evidence: `ai::policy_conflict`, `ai::routes` (ref: Starting Claude Code)
 - R7. Start Claude Code children in their own session, never only a process group; only the sign-in's child stays in the terminal's foreground. Evidence: `ai::detach` (ref: Starting Claude Code)
 - R8. During a sign-in, a job asking for a profile fails at once, never waits, and live jobs are deferred until it ends. Evidence: `ai::SigningIn`, `livenotes::defer` (ref: Profiles)
 - R9. Admit a minutes run only through `notes::admit`, and re-check an automatic run as due right before Claude Code starts. Evidence: `notes::admit`, `notes::auto_due`

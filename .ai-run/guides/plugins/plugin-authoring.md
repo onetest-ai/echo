@@ -39,8 +39,8 @@ The API these rules rely on — the manifest, `uses`, `ctx`, events, widgets, sc
 - R11. Give Claude your plugin through `agent/`: when to turn to it and its commands in `CLAUDE.md`, procedures in
   skills, reference in guides, never in the summary; name skills `<prefix>-<name>` where a prompt names them. API
   § Claude in Echo. Evidence: `plugins::agent::problems`
-- R12. Ship a script with a shebang, name what it needs on the computer, call it in `SKILL.md` by its path alone, and
-  mark it `readonly` only when it changes nothing. API § Scripts. Evidence: `plugins::scripts::declared`,
+- R12. Ship a script with a shebang, name what it needs on the computer, call it in `SKILL.md` by its path alone. API
+  § Scripts. Evidence: `plugins::scripts::declared`,
   `plugins::scripts::wrapper`
 - R13. Test against made-up services, never the real ones: `ECHOCTL_TEST_HOSTS` for the network, made-up `gh` / `git`
   for sign-ins. API § Testing against made-up services. Evidence: `jshost::test_hosts::test_host`
