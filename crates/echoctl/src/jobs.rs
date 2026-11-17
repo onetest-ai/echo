@@ -705,8 +705,8 @@ pub fn set_from_plugin(id: &str, assignments: &[String]) -> Result<Value> {
     set(id, assignments)
 }
 
-/// A plugin updated: those of its routines that are new or changed (`routines`) switched off — the user switches them on
-/// again, knowing what they now do.
+/// A plugin updated: the routines its new version adds (`routines`) switched off — a routine of that id an earlier version
+/// had keeps no switch of before; the user switches it on.
 pub fn switch_off_routines(plugin: &str, routines: &[String]) -> Result<()> {
     if routines.is_empty() {
         return Ok(());

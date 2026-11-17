@@ -1170,8 +1170,8 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
             return Err(e);
         }
     }
-    // A version replaced: its routines this one adds or changes switched off before its files are in place.
-    if let Some(e) = before.as_ref().and_then(|b| routines::switch_off_changed(b, &new).err()) {
+    // A version replaced: the routines this one adds start off, before its files are in place.
+    if let Some(e) = before.as_ref().and_then(|b| routines::switch_off_new(b, &new).err()) {
         return Err(e).inspect_err(|_| { let _ = fs::remove_dir_all(&tmp); });
     }
     // Its scripts running from the version replaced stop with everything they started.

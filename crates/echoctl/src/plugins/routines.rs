@@ -2,9 +2,9 @@
 //! Claude Code on the user's default AI profile as the folder session (`claudejob::run`), acting on its own as the
 //! routine itself says (`tools`, `skip` only with `claude.skip` on its sheet), else as the user set routines.
 //!
-//! Each is a line of the plugin's sheet, with the hash of its definition and prompt (an update that changes either
-//! asks again, and switches it off: `jobs::switch_off_routines`). It is off until the user switches it on — Settings → Plugins, `echoctl jobs set <plugin>.<routine>
-//! on=on` — never by a plugin or a run. Its settings (`on`, `every`, `night`, `model`) are kept with Echo's jobs'
+//! Each is a line of the plugin's sheet, with the hash of its definition and prompt: an update that changes either asks
+//! again, and the user's yes to it keeps the routine as they had it; one the update adds starts off. It is off until the
+//! user switches it on — Settings → Plugins, `echoctl jobs set <plugin>.<routine> on=on` — never by a plugin or a run. Its settings (`on`, `every`, `night`, `model`) are kept with Echo's jobs'
 //! (`jobs.json`) and its runs as theirs (`jobs-runs/<id>.jsonl`, in Echo's words and counts), each run's folder —
 //! prompt, log, answer, the changes and sends it made — in `jobs-runs/<id>/<run>/`, the newest 20 kept. The app runs
 //! one that is on every `every` minutes (`start_scheduler`); `echoctl jobs run` runs one now.
@@ -134,12 +134,13 @@ pub(super) fn sheet_lines(m: &Manifest) -> Vec<String> {
         .collect()
 }
 
-/// A version of `old` about to replace it (an update, an install over it): each routine `new` adds or changes is switched
-/// off (its line said "off until you switch it on"); one it leaves as it was keeps the user's switch.
-pub(super) fn switch_off_changed(old: &Installed, new: &Manifest) -> Result<()> {
+/// A version of `old` about to replace it (an update, an install over it): each routine `new` adds starts off, whatever
+/// an earlier version of it left in the user's settings; one it keeps, changed or not, stays as the user had it (their
+/// yes to the update, whose sheet named the change, is their yes to it).
+pub(super) fn switch_off_new(old: &Installed, new: &Manifest) -> Result<()> {
     let before: Vec<RoutineDef> = read_manifest(&plugin_dir(old)).map(|m| m.routines).unwrap_or_default();
-    let changed: Vec<String> = new.routines.iter().filter(|r| !before.iter().any(|b| b.id == r.id && b.digest == r.digest)).map(|r| r.id.clone()).collect();
-    crate::jobs::switch_off_routines(&old.id, &changed)
+    let added: Vec<String> = new.routines.iter().filter(|r| !before.iter().any(|b| b.id == r.id)).map(|r| r.id.clone()).collect();
+    crate::jobs::switch_off_routines(&old.id, &added)
 }
 
 /// A routine's id among Echo's jobs and routines: `<plugin>.<routine>` (Echo's jobs have no dot).
@@ -292,6 +293,7 @@ pub fn run(id: &str) -> Result<Value> {
         task: None,
         thread: None,
         yolo: false,
+        folder: None,
     };
     let out = crate::claudejob::run(&spec);
     if let Err(e) = &out {
@@ -501,24 +503,25 @@ mod tests {
         crate::jobs::set("acme-routine.mail-notes", &["on=on".into(), "every=30".into()]).unwrap();
         assert!(update("acme-routine", &[]).is_err(), "it waits for the user's yes");
         assert!(crate::jobs::on("acme-routine.mail-notes"));
-        // Taken: the changed routine is off again (its line said so), its tuning kept; a version that leaves it as it was
-        // keeps the user's switch.
+        // Taken: the user's yes to the update, whose sheet named the change, keeps the routine as they had it.
         update("acme-routine", &rv.new_uses).unwrap().unwrap();
-        assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::number("acme-routine.mail-notes", "every")), (false, 30));
-        // Installed over (not through `update`): the same.
-        crate::jobs::set("acme-routine.mail-notes", &["on=on".into()]).unwrap();
-        fs::write(pkg.join("routines/mail-notes.md"), "Read the mail, the chats and the channels.").unwrap();
-        m["version"] = json!("0.2.1");
-        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
-        refresh(&name).unwrap();
-        install("acme-routine", Some(&name), &review("acme-routine", Some(&name)).unwrap().uses).unwrap();
-        assert!(!crate::jobs::on("acme-routine.mail-notes"));
-        crate::jobs::set("acme-routine.mail-notes", &["on=on".into()]).unwrap();
+        assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::number("acme-routine.mail-notes", "every")), (true, 30));
+        // A version without it, then one that adds it again: the added routine starts off, whatever was left of before
+        // (the same through an install over the installed version).
+        let routine = m["routines"].clone();
+        m["routines"] = json!([]);
         m["version"] = json!("0.3.0");
         fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
         refresh(&name).unwrap();
-        update("acme-routine", &[]).unwrap().unwrap();
-        assert!(crate::jobs::on("acme-routine.mail-notes"), "the same routine: still on");
+        install("acme-routine", Some(&name), &review("acme-routine", Some(&name)).unwrap().uses).unwrap();
+        assert!(crate::jobs::on("acme-routine.mail-notes"), "no routine of that id now: its switch of before is left as it was");
+        m["routines"] = routine;
+        m["version"] = json!("0.4.0");
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        update("acme-routine", &rv.new_uses).unwrap().unwrap();
+        assert!(!crate::jobs::on("acme-routine.mail-notes"), "added again: off until the user switches it on");
     }
 
     #[test]

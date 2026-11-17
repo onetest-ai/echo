@@ -54,8 +54,9 @@ Plugins: then every <every> min Echo runs Claude Code on your default AI profile
 own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
 prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
 or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
-asks again, and once taken switches that routine off until the user switches it on again (one the update left as it
-was keeps the user's switch; a new one starts off). Evidence: `plugins::routines::sheet_lines`, `jobs::switch_off_routines`
+asks again, naming the changed routine; the user's yes to the update keeps the routine as they had it (on stays on).
+A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
+id left. Evidence: `plugins::routines::sheet_lines`, `plugins::routines::switch_off_new`
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s; an update that adds a script or changes any

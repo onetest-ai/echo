@@ -499,7 +499,7 @@
   },
   {
    "id": "F-PLUG-75",
-   "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again and, taken, switches it off until the user switches it on again; a routine breaking a rule refuses the install with why",
+   "feature": "A plugin declares its own routines in its manifest (`routines`: id, name, what, a prompt file in its package, every, night, tools, timeout; at most 4, `uses.claude` needed): each is a line of its sheet naming the routine, how often its run comes once the user switches it on, what the run may do (as the routines' setting, its own Auto, skipping every check only with `claude.skip`, or no tools) and its prompt's hash, so an update that changes the routine or its prompt asks again — the user's yes keeping it as they had it, a routine the update adds starting off; a routine breaking a rule refuses the install with why",
    "priority": "high",
    "check": "agent",
    "axes": []
