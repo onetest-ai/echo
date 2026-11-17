@@ -31,7 +31,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 
 | Key | Shape and use |
 |---|---|
-| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines" |
+| `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
 | `schedule` | works on its own on a schedule while Echo runs |
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
@@ -247,6 +247,28 @@ too). A plugin never sets the address: not by its settings, its store or its win
   policy helper; or not JSON) is refused. A call's text reaches the run only as the plugin puts it in the prompt: Echo
   can't see it there, so a plugin that does passes the call's `profile` (`ctx.echo.read('source', …)`). Evidence:
   `claudejob::in_folder`, `jshost::folders::claude_folder`
+- A session the user asks in, from the client half (needs `uses.claude` and `uses.folders`):
+  `ctx.claude.session({folder, path, mode, profile})` opens Claude Code in Echo's terminal, in its own bottom-panel tab
+  "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's
+  own project — as a folder run: the folder's setup (`--setting-sources user,project` on a profile of Echo's own, last),
+  `mode` `read` (the default, `--tools Read,Grep,Glob,Skill`) or `edit` (needs `folders.write`, also `Edit,Write`; no
+  `copy`), no MCP server, never Bash or the web, refused on a folder whose `.claude/settings.json` could route it — but
+  interactive, its conversation kept (`--session-id`, then `--resume` for that plugin and folder on that profile), and
+  its permissions the user's setting for Claude in the window (Settings → AI & minutes → Claude's permissions: Ask each
+  time — Claude Code's own prompts, no flag; Auto — `--permission-mode auto`, or `acceptEdits` / `dontAsk` where the
+  model has no auto mode; Skip all permission checks — `--dangerously-skip-permissions`), never the plugin's. `profile`:
+  one of the user's AI profiles (a wrapper only when it is the default), else the default. It opens only on the user's
+  click or key in the plugin's screens (`copyAllowed`, else it throws before anything is sent); asked again while it
+  runs, it is shown (in another folder it throws: one session per plugin). Each plugin's session has its own tab, so
+  sessions of several plugins run side by side; one found running when the window opens gets its tab back, and its
+  Resume keeps the profile it ran on (Echo checks it again). ⌘K has "Restart" and "New conversation" for each, as for
+  the Claude · Echo folder session. The panel names the plugin, the folder, the mode, the permissions and the profile.
+  Its `ctx` has no way to type into or read the session, and Echo types nothing in — only the user's keys. Switched off
+  or removed, its session runs on as the user's (its tab goes once it has ended) and doesn't start again. Refused
+  before Claude Code starts: no `claude` or `folders` on
+  its sheet, a folder not given, a path outside it or not a folder, `edit` without `folders.write`, another mode, a
+  wrapper profile that isn't the default, the plugin off. Evidence: `terminal::start_plugin`,
+  `jshost::folders::session_folder`, `claudejob::in_folder_session`, `pluginSessionAsk` (window script)
 - `ctx.claude.installPlugin(spec)` installs the channel plugin the manifest names (`uses.channel.plugin`) into the
   default AI profile's Claude Code; `ctx.claude.hasPlugin(spec)` asks whether it is there; both take only that spec.
   Evidence: `capabilities::describe_channel`
@@ -727,6 +749,7 @@ Evidence: `jshost::work::check_rows`
   shown, or on Windows, the drop is Echo's own), `listen`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
+  `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown), `go(hash)`, `render()`, `markdown(md, opts)` and
   `markdown.links(md)` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,

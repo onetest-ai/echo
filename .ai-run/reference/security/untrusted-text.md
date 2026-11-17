@@ -136,7 +136,8 @@ variables (`ai::PASS`).
 - The user's permission settings (Settings → AI & minutes → Claude's permissions; `echoctl config --folder-permissions
   ask|auto|skip`, `--routine-permissions auto|skip`, `--yolo-permissions auto|skip`, refused in every run Echo started:
   `notes::headless`), `config::Permissions`, each Auto when unset:
-  - `Config::folder_permissions` — the folder session: `ask` (Claude Code's prompts, no flag), `auto` or `skip`
+  - `Config::folder_permissions` — the folder session, and a plugin's session in a folder it was given
+    (`terminal::start_plugin`, `ctx.claude.session`): `ask` (Claude Code's prompts, no flag), `auto` or `skip`
     (`--dangerously-skip-permissions`) (`folder_args::folder_permissions`). Each setting becomes flags only through
     `folder_args::permission_args`: `auto` is `--permission-mode auto` where the profile's model has auto mode, else
     `acceptEdits` (`dontAsk` read-only) (claude-code-runs reference, Starting Claude Code).

@@ -227,6 +227,7 @@ window.echo = {
     e.error = r.ok ? null : String(r.error || 'It could not start.')
     if (!r.ok) { e.exited = true; e.term.write(`\r\n\x1b[31m${String(r.error || 'It could not start.').replace(/\n/g, '\r\n')}\x1b[0m\r\n`); return render() }
     e.id = r.id; e.from = 0; e.exited = false; e.cols = 0
+    if (r.about) (S.ptyAbout = S.ptyAbout || {})[r.key] = r.about
     get('api/sessions').then((l) => { S.sessions = new Set(l) }, () => {})
     termPoll(e)
     render()
