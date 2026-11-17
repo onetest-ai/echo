@@ -55,7 +55,6 @@ pub(super) fn sha_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// A file opened to read, never through a link at its last name, never a FIFO waited on: a regular file or an error.
 /// `ctx.fs.read` / `readMany`: file `f`'s first `max` bytes as text — bytes that aren't UTF-8 replaced, or with `strict`
 /// refused as "not UTF-8: <rel>" (a character cut by `max` at the end is dropped, not refused).
 pub(super) fn read_text(f: &Path, rel: &str, max: u64, strict: bool) -> Result<String> {
@@ -78,6 +77,7 @@ pub(super) fn read_text(f: &Path, rel: &str, max: u64, strict: bool) -> Result<S
     }
 }
 
+/// A file opened to read, never through a link at its last name, never a FIFO waited on: a regular file or an error.
 fn open_no_link(p: &Path) -> Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
