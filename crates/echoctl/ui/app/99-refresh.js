@@ -39,6 +39,7 @@ async function tick() {
   const before = JSON.stringify(S.state)
   await loadState()
   if (netCheck()) return
+  micFollow()
   const changed = JSON.stringify(S.state) !== before
   // Against the last stamp read (a tick whose read failed has none and changes nothing).
   const plugins = S.state && S.state.plugins
@@ -111,6 +112,8 @@ window.echo = {
     if (a.error) w.reject(new Error(a.error))
     else w.resolve(a.value)
   },
+  /** Echo took the plugin's microphone (a recording started): it stops here too, and the page says why. */
+  micStopped(why) { if (Mic.id) micClose(Mic.id, String(why || '')) },
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
   templateSaved(id, created, which, gen) {

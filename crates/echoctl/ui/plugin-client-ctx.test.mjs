@@ -33,9 +33,11 @@ const P = {
 }
 const console = { error: (...m) => errors.push(m.map(String).join(' ')) }
 let followed = 0
-const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'document', 'window', 'console', 'followDrops',
-  `${src.slice(f, g + 3)}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, target('document'), target('window'), console, () => followed++)
+const micClosed = []
+const unload = new Function('Plugins', 'ACTIVITIES', 'PANEL_VIEWS', 'S', 'go', 'setTimeout', 'document', 'window', 'console', 'followDrops', 'micClose',
+  `${src.slice(f, g + 3)}\n${src.slice(u, v + 3)}\nreturn unloadPlugin`)(P, [], [], {}, () => {}, () => {}, target('document'), target('window'), console, () => followed++, (id) => micClosed.push(id))
 unload('kn')
+assert.deepEqual(micClosed, ['kn'], 'its microphone stops with it')
 assert.deepEqual(ran, ['timer', 'graph'], 'every cleanup ran, the one after a throw too')
 assert.equal(errors.length, 1); assert.match(errors[0], /plugin kn: its cleanup failed:.*observer gone/)
 assert.deepEqual(listeners.window, [['resize', other]], 'its window listener removed, another kept')

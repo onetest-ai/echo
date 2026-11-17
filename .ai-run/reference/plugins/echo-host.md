@@ -52,6 +52,16 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   makes the handles; the page takes them once (`plugin_dropped` → `window.echo.pluginDrop`) and hands them to the
   plugin's handlers if its view is still shown. Any other drag is the webview's own. Windows has no drop handler: wry's
   would take every external drop from WebView2. Evidence: `window::plugins::dropped`, `dropTarget` (window script)
+- A plugin's microphone (`uses.microphone`): the app keeps which plugin holds it (`window::plugins::MIC`: id, name, and
+  one webview grant for each opening). The webview's permission requests: the microphone is granted only while a
+  plugin holds it, once for each opening; the camera and the screen are refused; anything else keeps the engine's
+  default (macOS: wry's `with_permission_handler`; Windows: Echo's own `PermissionRequested` handler with
+  `SavesInProfile` off, so WebView2 asks again on every request, `window::gate_media`). WebKit keeps a page's grant and
+  doesn't ask again, so on every watcher tick and after every page command the app stops the webview's microphone
+  capture while no plugin holds it (`setMicrophoneCaptureState(None)`, which also makes WebKit ask again next time:
+  `EchoWindow::follow_mic`). A recording starting takes the microphone from the plugin and tells the page
+  (`window.echo.micStopped`); the window closing releases it. Without a handler (before this) wry granted every
+  request on macOS. Evidence: `window::plugins::mic_grant`, `EchoWindow::follow_mic`
 - The window serves a granted folder's images as `/plugin/<id>/folder/<root>/<path>` (§ Store's media rule, by folder).
   Evidence: `window::plugins::folder_image`
 

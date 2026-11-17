@@ -61,7 +61,47 @@ pub struct EchoWindow {
     told_maximized: std::cell::Cell<Option<bool>>,
 }
 
+/// The name of the plugin that hears the microphone now (`uses.microphone`): Echo's recording sign shows it.
+pub fn plugin_mic() -> Option<String> {
+    plugins::mic_holder()
+}
+
+impl Drop for EchoWindow {
+    /// The page goes with the window: no plugin hears the microphone any more.
+    fn drop(&mut self) {
+        plugins::mic_release(None);
+    }
+}
+
 impl EchoWindow {
+    /// The plugin's microphone closed by Echo (a recording started): taken from the plugin, and the page told why.
+    pub fn stop_plugin_mic(&self, why: &str) {
+        if plugins::mic_release(None) {
+            let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.micStopped({})", json!(why)));
+        }
+        self.follow_mic();
+    }
+
+    /// macOS: no plugin holds the microphone, yet the webview hears it (a page's own `getUserMedia` WebKit let through
+    /// on an earlier grant): stopped — which also makes WebKit ask Echo again next time. On every state tick and after
+    /// each page command. (Windows asks Echo on every request: `gate_media`.)
+    pub fn follow_mic(&self) {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_web_kit::WKMediaCaptureState;
+            use wry::WebViewExtMacOS;
+            if plugins::mic_holder().is_none() {
+                let wk = self.webview.webview();
+                // SAFETY: on the main thread (the event loop), the webview alive for the call.
+                unsafe {
+                    if wk.microphoneCaptureState() != WKMediaCaptureState::None {
+                        wk.setMicrophoneCaptureState_completionHandler(WKMediaCaptureState::None, None);
+                    }
+                }
+            }
+        }
+    }
+
     /// Ask the page to reload its data (after an action, or when the files changed).
     pub fn refresh(&self) {
         let _ = self.webview.evaluate_script("window.echo && window.echo.refresh()");
@@ -237,7 +277,20 @@ pub fn open<T: 'static>(
     };
     #[cfg(not(all(target_os = "macos", feature = "js")))]
     drop(to_app);
+    // The microphone only for a plugin's opening Echo allowed (`uses.microphone`, on the user's click in its view), once
+    // for each; the camera and the screen never. Windows: `gate_media` (wry's handler would let WebView2 keep a grant).
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_permission_handler(|kind| {
+        use wry::{PermissionKind, PermissionResponse};
+        match kind {
+            PermissionKind::Microphone if plugins::mic_grant() => PermissionResponse::Allow,
+            PermissionKind::Microphone | PermissionKind::Camera | PermissionKind::DisplayCapture => PermissionResponse::Deny,
+            _ => PermissionResponse::Default,
+        }
+    });
     let webview = builder.with_url(url).with_devtools(cfg!(debug_assertions)).build(&window)?;
+    #[cfg(windows)]
+    gate_media(&webview)?;
     Ok(EchoWindow {
         window,
         webview,
@@ -246,6 +299,34 @@ pub fn open<T: 'static>(
         #[cfg(windows)]
         told_maximized: std::cell::Cell::new(None),
     })
+}
+
+/// Windows: WebView2's permission requests — the microphone only for a plugin's opening Echo allowed, once for each; the
+/// camera never — each decision for that request only (`SavesInProfile` off), so the next one asks Echo again.
+#[cfg(windows)]
+fn gate_media(webview: &WebView) -> wry::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    use webview2_com::PermissionRequestedEventHandler;
+    use windows_core::Interface;
+    use wry::WebViewExtWindows;
+    let err = |e: windows_core::Error| wry::Error::Io(std::io::Error::other(e.to_string()));
+    let core = unsafe { webview.controller().CoreWebView2() }.map_err(err)?;
+    let mut token = Default::default();
+    let handler = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+        unsafe { args.PermissionKind(&mut kind)? };
+        let state = match kind {
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE if plugins::mic_grant() => COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE | COREWEBVIEW2_PERMISSION_KIND_CAMERA => COREWEBVIEW2_PERMISSION_STATE_DENY,
+            _ => return Ok(()),
+        };
+        if let Ok(a) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+            unsafe { a.SetSavesInProfile(false)? };
+        }
+        unsafe { args.SetState(state) }
+    }));
+    unsafe { core.add_PermissionRequested(&handler, &mut token) }.map_err(err)
 }
 
 /// A drag over the window: one carrying files while a plugin takes them (`wanted`) is Echo's from its start to its end

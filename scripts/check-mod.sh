@@ -20,6 +20,8 @@ node crates/echoctl/ui/workbench.test.mjs
 node crates/echoctl/ui/clicks.test.mjs
 # A plugin's ctx.ui.copy: only with the user's activation, fails closed (copyAllowed).
 node crates/echoctl/ui/copy-guard.test.mjs
+# A plugin's microphone: only on the user's click in its own view, never while Echo records (micRefusal).
+node crates/echoctl/ui/plugin-mic.test.mjs
 # Echo's menu for the page's selects: rows, arrows, type-ahead, where it opens (select menu block).
 node crates/echoctl/ui/select-menu.test.mjs
 # Echo's suggestions for a text box: the rows for what is typed (suggest block).
