@@ -157,12 +157,24 @@ pub fn hidden_ok(rel: &Path, shape: Shape) -> bool {
     match (shape, p.as_slice()) {
         (Shape::File, [above @ .., ".gitignore"]) => !above.iter().any(|s| s.starts_with('.')),
         // Not the lists of Obsidian plugins switched on: switching one on runs its code.
-        (Shape::File, [".obsidian", n]) => named(n, ".json") && !matches!(*n, "community-plugins.json" | "core-plugins.json"),
+        // Compared ignoring case, as APFS and NTFS find them.
+        (Shape::File, [".obsidian", n]) => named(n, ".json") && !["community-plugins.json", "core-plugins.json"].iter().any(|r| n.eq_ignore_ascii_case(r)),
         (Shape::File, [".claude", "skills", s, f]) => skill_name(s) && named(f, ".md"),
         (Shape::Folder, [".obsidian"] | [".claude"] | [".claude", "skills"]) => true,
         (Shape::Folder, [".claude", "skills", s]) => skill_name(s),
         _ => false,
     }
+}
+
+/// Is `rel` as typed, or `real` (the path `writable` gave for it) inside `root`, in the folder's own Claude Code skills,
+/// `.claude/skills` or under it? Compared ignoring case, as APFS and NTFS find it. What goes there is a skill's
+/// Markdown, checked by `plugins::claude_skills::skill_md_ok`.
+pub fn in_skills(root: &str, rel: &str, real: &Path) -> bool {
+    let under = |p: &Path| {
+        let mut c = p.components().filter(|c| matches!(c, Component::Normal(_))).map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase());
+        c.next().as_deref() == Some(".claude") && c.next().as_deref() == Some("skills")
+    };
+    under(Path::new(rel)) || dunce::canonicalize(root).ok().and_then(|r| real.strip_prefix(r).ok().map(under)).unwrap_or(false)
 }
 
 fn writable_as(id: &str, root: &str, rel: &str, shape: Shape) -> Result<PathBuf> {

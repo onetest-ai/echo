@@ -170,7 +170,7 @@ pub(super) fn join_words(w: &[&str]) -> String {
 /// own setup, its permissions as you set routines too; a session the user opens there from its screens, as they set
 /// Claude in the window.
 /// The sheet's line for `uses.skills: true` (`claude_skills`: each skill only on the user's click).
-pub const SKILLS_LINE: &str = "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin";
+pub const SKILLS_LINE: &str = "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin";
 
 /// `uses.skills: true`: its window half adds skills to the user's own Claude Code, each on a click.
 pub(super) fn describe_skills(v: &Value) -> Result<String> {

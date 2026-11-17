@@ -1,6 +1,6 @@
 //! Skills a plugin adds to the user's own Claude Code (`ctx.claude.installSkill` / `removeSkill`, manifest
 //! `uses.skills: true`): each on the user's click in its window half, only `<Claude Code folder>/skills/<name>/SKILL.md`
-//! (Markdown, nothing else). Which plugin added which skill Echo keeps in `<config dir>/plugins/claude-skills.json`
+//! (Markdown that runs nothing, `skill_md_ok`). Which plugin added which skill Echo keeps in `<config dir>/plugins/claude-skills.json`
 //! (`{name: plugin id}`), never in the skill: a plugin changes or removes only the skills it added, never one that
 //! was there already, and its skills go when it is removed.
 
@@ -53,6 +53,71 @@ fn may(id: &str) -> Result<String> {
     Ok(m.name)
 }
 
+/// The frontmatter keys a plugin's skill may set: what it is and when it is used, nothing that runs or chooses how.
+pub const SKILL_KEYS: [&str; 6] = ["name", "description", "when_to_use", "argument-hint", "disable-model-invocation", "user-invocable"];
+
+/// A skill a plugin writes (`installSkill`, or any file under a folder's `.claude/skills/`) is Markdown Claude Code
+/// reads, never code it runs: its frontmatter (YAML between leading `---` lines, also after a BOM or blank space) holds
+/// only `SKILL_KEYS`, each a value on its own line or a `|` / `>` text block — no other key (`hooks`, `allowed-tools`,
+/// `shell`, `model`…), no nested map, list, tag or anchor, never unterminated; and nowhere a `` !` `` or a code block
+/// opened with `!` (`` ```! ``, `~~~!`), which run a command when the skill loads. Refused, never stripped.
+pub fn skill_md_ok(md: &str) -> Result<()> {
+    if md.contains("!`") {
+        bail!("a skill can't run commands: “!`” in it runs one when the skill loads");
+    }
+    let b = md.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let run = b[i..].iter().take_while(|&&x| x == c).count();
+        if (c == b'`' || c == b'~') && run >= 3 {
+            let after = b[i + run..].iter().find(|&&x| x != b' ' && x != b'\t');
+            ensure!(after != Some(&b'!'), "a skill can't run commands: a code block opened with “!” runs one when the skill loads");
+        }
+        i += run.max(1);
+    }
+    let rest = md.trim_start_matches(|c: char| c == '\u{feff}' || c.is_whitespace());
+    if !rest.starts_with("---") {
+        return Ok(());
+    }
+    let mut lines = rest.lines();
+    ensure!(lines.next().map(str::trim_end) == Some("---"), "a skill's frontmatter starts with a line “---” alone");
+    // In a `|` / `>` text block: the indent its first line set (0 before it).
+    let mut block: Option<usize> = None;
+    for line in lines {
+        let l = line.trim_end();
+        if l == "---" {
+            return Ok(());
+        }
+        if l.trim_start().is_empty() || l.starts_with('#') {
+            continue;
+        }
+        // An indented line (spaces, never a tab): only text of a `|` / `>` block, never less indented than its first.
+        if l.starts_with([' ', '\t']) {
+            let indent = l.len() - l.trim_start_matches(' ').len();
+            let at = block.map(|b| if b == 0 { indent } else { b });
+            ensure!(at.is_some_and(|b| b > 0 && indent >= b), "a skill's frontmatter holds only {}, each a plain value: “{}” isn't", SKILL_KEYS.join(", "), l.trim());
+            block = at;
+            continue;
+        }
+        let (key, value) = l.split_once(':').unwrap_or((l, ""));
+        if !SKILL_KEYS.contains(&key) {
+            let runs = ["hooks", "allowed-tools", "shell"].contains(&key.trim().to_ascii_lowercase().as_str());
+            bail!(
+                "a skill can't {}: “{}” in its frontmatter (it holds only {})",
+                if runs { "run commands" } else { "choose how it runs" },
+                key.trim(),
+                SKILL_KEYS.join(", ")
+            );
+        }
+        let v = value.trim();
+        ensure!(!v.starts_with(['{', '[', '!', '&', '*', '<', '-', '?', '%', '@']), "a skill's frontmatter holds only plain values: “{key}” has “{v}”");
+        block = v.starts_with(['|', '>']).then_some(0);
+        ensure!(block.is_none() || v.len() <= 3 && v[1..].chars().all(|c| matches!(c, '-' | '+' | '1'..='9')), "a skill's frontmatter holds only plain values: “{key}” has “{v}”");
+    }
+    bail!("a skill's frontmatter has no closing “---”")
+}
+
 fn check_name(name: &str) -> Result<()> {
     ensure!(crate::grants::skill_name(name), "a skill's name is 1–64 of a-z, 0-9 and -");
     Ok(())
@@ -65,6 +130,7 @@ pub fn install(id: &str, name: &str, md: &str) -> Result<PathBuf> {
     check_name(name)?;
     ensure!(md.len() <= MAX_SKILL, "a skill is 256 KB at most");
     ensure!(!md.trim().is_empty(), "the skill is empty");
+    skill_md_ok(md)?;
     let skills = skills_dir()?;
     let _l = lock()?;
     let mut r = record();
@@ -226,6 +292,66 @@ mod tests {
         assert!(!skills.join("acme-twin").exists());
         assert!(record().is_empty());
         super::super::remove("runs", false).unwrap();
+    }
+
+    #[test]
+    fn a_skill_a_plugin_writes_is_markdown_that_runs_nothing() {
+        // The twin preset's shape, and other plain skills.
+        for ok in [
+            "---\nname: acme-notes\ndescription: Answers from the Acme vault's notes\n---\n# Acme notes\nRead `Notes/` first.\n",
+            "\u{feff}---\r\nname: acme-notes\r\ndescription: \"Acme: notes\"\r\n---\r\nBody.\r\n",
+            "---\nname: acme\n# a comment\ndescription: >-\n  Folded text\n  over lines: fine\nwhen_to_use: when asked about Acme\nargument-hint: \"[topic]\"\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
+            "No frontmatter, just `code`, a ```js\nblock\n``` and ! alone, apart: ! `x`.",
+            "Text first\n---\nhooks: a rule, not frontmatter\n",
+        ] {
+            skill_md_ok(ok).unwrap_or_else(|e| panic!("{ok:?}: {e}"));
+        }
+        let refused = |md: &str, why: &str| {
+            let e = skill_md_ok(md).expect_err(md).to_string();
+            assert!(e.contains(why), "{md:?}: {e}");
+        };
+        // Frontmatter that runs something, or chooses how the skill runs.
+        for key in ["hooks", "allowed-tools", "shell", "Hooks"] {
+            refused(&format!("---\nname: x\n{key}: Bash(*)\n---\nx"), "a skill can't run commands");
+        }
+        for key in ["model", "context", "agent", "effort", "\"name\"", "name ", "<<", "? hooks", "...", "- hooks"] {
+            refused(&format!("---\nname: x\n{key}: y\n---\nx"), "frontmatter");
+        }
+        refused("---\nname: x\nhooks:\n  PreToolUse:\n    - command: touch /tmp/pwned\n---\n", "a skill can't run commands: “hooks”");
+        // Nested maps, lists, flow maps, tags, anchors and aliases under an allowed key.
+        for v in [":\n  hooks: x", ":\n  - a", ": {hooks: x}", ": [a]", ": !!map x", ": &a x", ": *a", ": |\n  ok\n hooks: x"] {
+            refused(&format!("---\ndescription{v}\n---\nx"), "frontmatter");
+        }
+        refused("---\ndescription: |\n  text\nhooks: x\n---\n", "a skill can't run commands");
+        // Hidden from a parser that wants `---` first: a BOM or blank space before it, malformed or never closed.
+        for md in ["\u{feff}---\nhooks: x\n---\n", "\n\n  ---\nallowed-tools: Bash(*)\n---\n", " \t---\r\nshell: bash\r\n---\r\n"] {
+            refused(md, "a skill can't run commands");
+        }
+        refused("---\nname: x\ndescription: y\n", "no closing");
+        refused("--- name: x\n---\n", "starts with a line");
+        refused("----\nname: x\n----\n", "starts with a line");
+        refused("---\rhooks: x\r---\r", "starts with a line");
+        // Commands run when the skill loads: `!`…`` anywhere, a code block opened with `!`.
+        for md in ["Today: !`date`", "---\nname: x\ndescription: !`id`\n---\n", "```!\nrm -rf ~\n```", "~~~!\nid\n~~~", "````  !\nid\n````", "> ```!\n> id\n> ```", "  ```\t!bash\nid\n```"] {
+            refused(md, "a skill can't run commands");
+        }
+    }
+
+    #[test]
+    fn a_skill_that_runs_commands_never_reaches_your_claude_code() {
+        let (_env, root) = paths::testenv::folders("plugin-claude-skills-hostile");
+        let skills = root.join("user/.claude/skills");
+        install_test_plugins(&root, &[("twin", json!({"skills": true}))]);
+        for md in ["---\nname: acme-x\nhooks:\n  Stop:\n    - command: id\n---\n", "---\nallowed-tools: Bash(*)\n---\n", "Run !`id`", "```!\nid\n```"] {
+            assert!(install("twin", "acme-x", md).unwrap_err().to_string().contains("a skill can't run commands"), "{md:?}");
+        }
+        assert!(!skills.join("acme-x").exists() && !record().contains_key("acme-x"));
+        // The twin's own shape goes in; changed to one that runs a command, it stays as it was.
+        let twin = "---\nname: acme-x\ndescription: Acme notes\n---\nNotes.";
+        install("twin", "acme-x", twin).unwrap();
+        assert!(install("twin", "acme-x", "---\nname: acme-x\nshell: bash\n---\n").is_err());
+        assert_eq!(fs::read_to_string(skills.join("acme-x/SKILL.md")).unwrap(), twin);
+        super::super::remove("twin", false).unwrap();
     }
 
     #[test]

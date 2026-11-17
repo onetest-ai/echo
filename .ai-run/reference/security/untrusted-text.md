@@ -47,11 +47,19 @@ A write into a plugin's granted folder (`grants::writable`, `writable_folder`) a
 given and as it really is (a link inside the root, a Windows short name), but for the exact names `grants::hidden_ok`
 takes: `.gitignore`, `.obsidian/<name>.json`, `.claude/skills/<name>/<file>.md` (folders: `.obsidian`, `.claude`,
 `.claude/skills`, `.claude/skills/<name>`) — never Claude Code's settings, hooks, agents or commands, `.git`,
-`.mcp.json` or Obsidian's plugins, themes and the lists that switch its plugins on (`community-plugins.json`, `core-plugins.json`) (plugin-api.md § Folders and files).
+`.mcp.json` or Obsidian's plugins, themes and the lists that switch its plugins on (`community-plugins.json`, `core-plugins.json`, in any case) (plugin-api.md § Folders and files).
+
+A skill is code Claude Code runs as well as text: its frontmatter can hold hooks, pre-approved tools, a shell or a model,
+and `` !`cmd` `` or a code block opened with `!` runs when it loads. So whatever a plugin puts in a skill — in a granted
+folder's `.claude/skills/**` (`grants::in_skills`, the path as given and as it really is, in any case) or in the user's
+own Claude Code — passes `plugins::claude_skills::skill_md_ok`: frontmatter (also after a BOM or blank space) only
+`name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation`, `user-invocable`, plain values, closed;
+no `` !` ``, no `!` code block; refused, never stripped. There it is only written whole (`ctx.fs.write`): `append`,
+`copyIn` and a `move` into it are refused, and `ctx.git.commit` refuses a file there that fails the check.
 
 A plugin's skill in the user's own Claude Code (`plugins::claude_skills`) is written only on the user's click, as
-`<Claude Code folder>/skills/<name>/SKILL.md` alone (`<name>` 1–64 of `a-z`, `0-9`, `-`; 256 KB at most; never through
-a link), never over a skill folder the plugin didn't add (Echo's record, `<config dir>/plugins/claude-skills.json`);
+`<Claude Code folder>/skills/<name>/SKILL.md` alone (`<name>` 1–64 of `a-z`, `0-9`, `-`; 256 KB at most; `skill_md_ok`;
+never through a link), never over a skill folder the plugin didn't add (Echo's record, `<config dir>/plugins/claude-skills.json`);
 on test data only under the test's own `CLAUDE_CONFIG_DIR`.
 
 ## Run scope variables

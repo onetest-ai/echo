@@ -3118,9 +3118,45 @@ mod tests {
         std::fs::create_dir_all(vault.join(".git")).unwrap();
         run("writer", "mkdir", json!({"path": ".claude/skills/acme-notes"})).unwrap();
         run("writer", "write", json!({"path": ".claude/skills/acme-notes/SKILL.md", "text": "---\nname: acme-notes\n---\nNotes."})).unwrap();
-        run("writer", "append", json!({"path": ".claude/skills/acme-notes/reference.md", "text": "More."})).unwrap();
-        run("writer", "write", json!({"path": ".claude/skills/acme-twin/SKILL.md", "text": "Twin."})).unwrap();
-        assert_eq!(std::fs::read_to_string(vault.join(".claude/skills/acme-notes/reference.md")).unwrap(), "More.\n");
+        run("writer", "write", json!({"path": ".claude/skills/acme-notes/reference.md", "text": "More."})).unwrap();
+        run("writer", "write", json!({"path": ".claude/skills/acme-twin/SKILL.md", "text": "---\nname: acme-twin\ndescription: The Acme twin\n---\nTwin."})).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join(".claude/skills/acme-notes/reference.md")).unwrap(), "More.");
+        // A skill runs nothing: frontmatter beyond what it is and when it's used, `!`…`` or a `!` code block are
+        // refused, in its SKILL.md and in any other file of it; never added to, nor moved in (the check skipped).
+        let runs = |cmd: &str, a: Value, why: &str| {
+            let e = run("writer", cmd, a.clone()).unwrap_err();
+            assert!(e.contains(why), "{cmd} {a}: {e}");
+        };
+        for (path, text) in [
+            (".claude/skills/acme-notes/SKILL.md", "---\nname: acme-notes\nhooks:\n  Stop:\n    - command: id\n---\n"),
+            (".claude/skills/acme-notes/SKILL.md", "\u{feff}---\nallowed-tools: Bash(*)\n---\nx"),
+            (".claude/skills/acme-notes/reference.md", "Today: !`date`"),
+            (".claude/skills/acme-evil/SKILL.md", "```!\nid\n```"),
+        ] {
+            runs("write", json!({"path": path, "text": text}), "a skill can't run commands");
+        }
+        runs("write", json!({"path": ".claude/skills/acme-notes/SKILL.md", "text": "---\nmodel: opus\n---\n"}), "frontmatter");
+        assert_eq!(std::fs::read_to_string(vault.join(".claude/skills/acme-notes/SKILL.md")).unwrap(), "---\nname: acme-notes\n---\nNotes.");
+        assert!(!vault.join(".claude/skills/acme-evil").exists());
+        runs("append", json!({"path": ".claude/skills/acme-notes/SKILL.md", "text": "!`id`"}), "written whole");
+        runs("append", json!({"path": ".claude/skills/acme-notes/more.md", "text": "Plain."}), "written whole");
+        std::fs::write(vault.join("People/Kit.md"), "```!\nid\n```").unwrap();
+        std::fs::write(vault.join("People/Plain.md"), "Plain.").unwrap();
+        runs("move", json!({"from": "People/Kit.md", "to": ".claude/skills/acme-notes/kit.md"}), "nothing is moved into a skill");
+        runs("move", json!({"from": "People/Plain.md", "to": ".claude/skills/acme-notes/plain.md"}), "nothing is moved into a skill");
+        runs("move", json!({"from": ".claude/skills/acme-notes/reference.md", "to": ".claude/skills/acme-notes/ref.md"}), "nothing is moved into a skill");
+        assert!(vault.join("People/Kit.md").is_file() && !vault.join(".claude/skills/acme-notes/kit.md").exists());
+        #[cfg(unix)]
+        {
+            // Through a link inside the vault to a skill: checked as what it reaches.
+            std::os::unix::fs::symlink(vault.join(".claude/skills/acme-notes"), vault.join("Notes-skill")).unwrap();
+            runs("write", json!({"path": "Notes-skill/x.md", "text": "!`id`"}), "a skill can't run commands");
+            runs("move", json!({"from": "People/Plain.md", "to": "Notes-skill/plain.md"}), "nothing is moved into a skill");
+            assert!(!vault.join(".claude/skills/acme-notes/x.md").exists());
+            std::fs::remove_file(vault.join("Notes-skill")).unwrap();
+        }
+        std::fs::remove_file(vault.join("People/Kit.md")).unwrap();
+        std::fs::remove_file(vault.join("People/Plain.md")).unwrap();
         run("writer", "write", json!({"path": ".obsidian/app.json", "text": "{}"})).unwrap();
         run("writer", "write", json!({"path": ".gitignore", "text": ".trash/\n"})).unwrap();
         run("writer", "append", json!({"path": "People/.gitignore", "text": "*.tmp"})).unwrap();
@@ -3142,6 +3178,9 @@ mod tests {
             ".obsidian/app.js",
             ".obsidian/community-plugins.json",
             ".obsidian/core-plugins.json",
+            // The same files on a disk that doesn't tell case apart (APFS, NTFS).
+            ".obsidian/Community-Plugins.json",
+            ".obsidian/CORE-PLUGINS.JSON",
             ".claude/settings.json",
             ".claude/settings.local.json",
             ".claude/hooks/x.sh",

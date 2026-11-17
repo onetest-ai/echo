@@ -46,7 +46,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
-| `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds Claude Code skills to your own Claude Code (~/.claude/skills), each only when you click to add it: Markdown only, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
+| `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -487,10 +487,13 @@ named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::c
 Hidden files and folders (a name starting with `.`) are read, never written — but for these, by their exact names
 (`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
 `append`, `move` (to and from), `remove` and `copyIn` and `ctx.git.commit` take as files, `ctx.fs.mkdir` and an empty
-folder's `remove` as folders. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
+folder's `remove` as folders. A name refused (`community-plugins.json`, `core-plugins.json`) is refused in any case, as
+APFS and NTFS find it. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
 - files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`; not `community-plugins.json` or `core-plugins.json`, which switch Obsidian plugins on); Markdown in a
   skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
-  `<file>` not hidden, ending in `.md`);
+  `<file>` not hidden, ending in `.md`), each Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"); only written whole by `ctx.fs.write` — `append`,
+  `copyIn` and a `move` into `.claude/skills/**` are refused, and `ctx.git.commit` refuses a file there that fails the
+  check;
 - folders: `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
   place;
 - everything else hidden is refused ("is hidden"): `.claude/settings*.json`, `.claude/hooks`, `agents`, `commands`,
@@ -956,7 +959,7 @@ Evidence: `jshost::work::check_rows`
   `~/.claude`. `async`: each rejects, before anything is sent, unless the page has the user's click or key
   (`copyAllowed`); then the page asks Echo (`POST /api/plugin/<id>/install-skill` with `{name, md}`,
   `/remove-skill` with `{name}`; any other method refused), which answers `{value: true}` or `{error}`. `name` 1–64 of
-  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, written whole (replacing the file, never
+  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"), written whole (replacing the file, never
   through a link); nothing else of a skill is written. A skill folder that is there already is never changed unless
   this plugin added it — Echo keeps who added which in `<config dir>/plugins/claude-skills.json` (`{name: plugin id}`),
   never in the skill; a link in its place, or as its `SKILL.md`, is refused. `removeSkill` takes out only a skill this

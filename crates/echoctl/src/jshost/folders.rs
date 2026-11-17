@@ -177,6 +177,10 @@ pub(super) fn write(id: &str, root: &str, rel: &str, text: &str, opts: &Value) -
     if f.is_dir() {
         bail!("“{rel}” is a folder");
     }
+    // A skill of the folder's own Claude Code: Markdown that runs nothing.
+    if crate::grants::in_skills(root, rel, &f) {
+        crate::plugins::claude_skills::skill_md_ok(text).map_err(|e| anyhow!("“{rel}”: {e}"))?;
+    }
     std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
     let _l = lock(id)?;
     put(&f, rel, text, opts)
@@ -200,6 +204,9 @@ pub(super) fn append(id: &str, root: &str, rel: &str, text: &str) -> Result<()> 
     let f = crate::grants::writable(id, root, rel)?;
     if f.is_dir() {
         bail!("“{rel}” is a folder");
+    }
+    if crate::grants::in_skills(root, rel, &f) {
+        bail!("“{rel}”: a skill is written whole (ctx.fs.write), never added to");
     }
     std::fs::create_dir_all(f.parent().unwrap_or(&f))?;
     let mut o = std::fs::OpenOptions::new();
@@ -248,6 +255,10 @@ pub(super) fn move_to(id: &str, root: &str, rel_from: &str, rel_to: &str) -> Res
     // A folder goes only where a folder may (no hidden place takes a folder of the plugin's files).
     if from.is_dir() {
         crate::grants::writable_folder(id, root, rel_to)?;
+    }
+    // Moved in, a file would skip the check of what a skill holds.
+    if crate::grants::in_skills(root, rel_to, &to) {
+        bail!("“{rel_to}”: nothing is moved into a skill; a skill is written whole (ctx.fs.write)");
     }
     // There already — unless it is the same file under another case (a rename on a case-insensitive disk).
     let same = dunce::canonicalize(&to).ok().is_some_and(|t| dunce::canonicalize(&from).ok() == Some(t));
