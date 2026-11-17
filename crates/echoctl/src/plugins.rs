@@ -1479,25 +1479,6 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
     });
 }
 
-// ── CLI ──
-
-pub fn print_review(r: &Review) {
-    println!("{} {} — from {} ({})", r.name, r.version, r.market, &r.commit[..r.commit.len().min(12)]);
-    if r.uses.is_empty() {
-        println!("  uses nothing of Echo's yet");
-    }
-    if let Some(b) = &r.blocked {
-        println!("  ⚠ {b}");
-    }
-    for u in &r.uses {
-        let new = if r.new_uses.contains(u) { " (new)" } else { "" };
-        println!("  • {u}{new}");
-    }
-    if let Some(o) = &r.offers {
-        println!("  {o}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
 

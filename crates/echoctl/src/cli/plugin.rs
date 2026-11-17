@@ -378,6 +378,24 @@ fn file_handles(id: &str, files: &[std::path::PathBuf]) -> anyhow::Result<Vec<se
     files.iter().map(|f| jshost::files::make(id, f)).collect()
 }
 
+/// A plugin's review in the terminal: what it is, where from, and what it uses.
+fn print_review(r: &plugins::Review) {
+    println!("{} {} — from {} ({})", r.name, r.version, r.market, &r.commit[..r.commit.len().min(12)]);
+    if r.uses.is_empty() {
+        println!("  uses nothing of Echo's yet");
+    }
+    if let Some(b) = &r.blocked {
+        println!("  ⚠ {b}");
+    }
+    for u in &r.uses {
+        let new = if r.new_uses.contains(u) { " (new)" } else { "" };
+        println!("  • {u}{new}");
+    }
+    if let Some(o) = &r.offers {
+        println!("  {o}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "js")]
