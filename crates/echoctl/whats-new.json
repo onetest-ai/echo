@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.9.14",
+    "items": [
+      { "icon": "layout", "title": "Echo's jobs, tracked like routines", "text": "Each job Echo runs by itself keeps its runs, cost and next run, shown in the Scheduler's System tab beside your routines.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.9.13",
     "items": [
       { "icon": "sparkle", "title": "Quiet nights, fewer calls", "text": "Needs you now asks the model only about what's new, on Haiku, and Echo's own jobs pause at night, so far fewer model calls run while you sleep.", "open": "today" },
