@@ -200,6 +200,35 @@ fn mic_open(id: &str) -> anyhow::Result<String> {
 /// Why a plugin can't have the microphone while Echo records.
 pub(super) const MIC_RECORDING: &str = "Echo is recording — a plugin gets the microphone once the recording stops";
 
+// ── showing a file in Finder / Explorer (`ctx.system.reveal`) ──
+
+/// What a plugin's window half may show in the file manager (its page checked the user's click or key): a file or
+/// folder that exists in one of the folders the user gave it — the plugin on and its sheet naming `uses.folders`,
+/// resolved by `grants::resolve` (inside the folder once links are followed). Its real path.
+#[cfg(feature = "js")]
+fn reveal_target(id: &str, root: &str, rel: &str) -> anyhow::Result<PathBuf> {
+    let Some(p) = crate::plugins::enabled().into_iter().find(|p| p.id == id) else { anyhow::bail!("{id} isn't installed and on") };
+    let m = crate::plugins::read_manifest(&crate::plugins::plugin_dir(&p))?;
+    anyhow::ensure!(m.uses.contains_key("folders"), "{} didn't ask for folders when it was installed", m.name);
+    let path = crate::grants::resolve(id, root, rel)?;
+    // `resolve` gives a path that isn't there as written: nothing to show (a link to nowhere included).
+    anyhow::ensure!(path.exists(), "“{rel}” isn't there");
+    Ok(path)
+}
+
+/// `ctx.system.reveal(root, path)`: the item shown selected in Finder / Explorer — on test data only logged
+/// (`reveal <path>`), nothing opened.
+#[cfg(feature = "js")]
+fn reveal(id: &str, root: &str, rel: &str) -> anyhow::Result<()> {
+    let path = reveal_target(id, root, rel)?;
+    // Checked as it would run, on test data too.
+    crate::app::reveal_command(&path.to_string_lossy(), cfg!(windows))?;
+    if crate::app::open_log_only(&format!("reveal {}", path.display())) {
+        return Ok(());
+    }
+    crate::app::reveal_selected(&path)
+}
+
 pub(super) fn deliver_op(v: &Value) -> Handled {
     match v["op"].as_str().unwrap_or("") {
         "test" => {
@@ -355,6 +384,16 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     return Some(*refused);
                 }
                 return Some(json_reply(mic_open(id).map_or_else(|e| json!({"error": format!("{e:#}")}), |name| json!({"value": name}))));
+            }
+            // A file or folder of a granted folder shown in Finder / Explorer (`ctx.system.reveal`, its page checked
+            // the user's click or key): `{root, path}` in a POST body.
+            if let Some(id) = rest.strip_suffix("/reveal").filter(|id| crate::plugins::valid_id(id)) {
+                let body = match call_body(req) {
+                    Ok(b) => b,
+                    Err(refused) => return Some(*refused),
+                };
+                let r = reveal(id, body["root"].as_str().unwrap_or_default(), body["path"].as_str().unwrap_or_default());
+                return Some(json_reply(r.map_or_else(|e| json!({"error": format!("{e:#}")}), |()| json!({"value": true}))));
             }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
@@ -766,6 +805,82 @@ mod tests {
         crate::plugins::set_enabled("voice", false).unwrap();
         assert!(ask("voice")["error"].as_str().unwrap().contains("isn't on"));
         assert!(mic_holder().is_none());
+    }
+
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_plugin_shows_in_the_file_manager_only_what_is_in_a_folder_the_user_gave_it_and_test_data_only_logs_it() {
+        let (_env, root) = crate::paths::testenv::folders("window-plugin-reveal");
+        let log = root.join("open.log");
+        // Only ever set here, never unset: a test process opens nothing either way.
+        std::env::set_var("ECHOCTL_TEST_OPEN_LOG_ONLY", "1");
+        std::env::set_var("ECHOCTL_TEST_OPEN_LOG", &log);
+        let vault = root.join("Acme Vault");
+        std::fs::create_dir_all(vault.join("Projects/Q3")).unwrap();
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::write(vault.join("Projects/Q3/Plan, v2.md"), "# Plan").unwrap();
+        std::fs::write(vault.join(".obsidian/app.json"), "{}").unwrap();
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.md"), "x").unwrap();
+        let mk = root.join("market");
+        for (id, uses) in [("notes", json!({"folders": {"what": "vaults"}})), ("plain", json!({})), ("other", json!({"folders": {"what": "vaults"}}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "uses": uses}).to_string()).unwrap();
+        }
+        let list: Vec<Value> = ["notes", "plain", "other"].iter().map(|id| json!({"id": id, "source": format!("./plugins/{id}")})).collect();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": list}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        for id in ["notes", "plain", "other"] {
+            let agreed = crate::plugins::review(id, Some(&name)).unwrap().uses;
+            crate::plugins::install(id, Some(&name), &agreed).unwrap();
+        }
+        // `other` was given another folder, not the vault; `plain` the vault, though it never asked for folders.
+        crate::grants::grant("notes", &vault).unwrap();
+        crate::grants::grant("plain", &vault).unwrap();
+        crate::grants::grant("other", &outside).unwrap();
+        let real = dunce::canonicalize(&vault).unwrap();
+        let ask = |id: &str, root: &Path, path: &str| native("POST", &format!("/api/plugin/{id}/reveal"), json!({"root": root.display().to_string(), "path": path}).to_string().into_bytes()).1;
+        let logged = || std::fs::read_to_string(&log).unwrap_or_default();
+
+        // A file, a folder, the granted folder itself and a hidden file in it (shown, as it may be read): each logged as
+        // it would open, by its real path — nothing opened.
+        for (path, shown) in [("Projects/Q3/Plan, v2.md", real.join("Projects/Q3/Plan, v2.md")), ("Projects", real.join("Projects")), ("", real.clone()), (".obsidian/app.json", real.join(".obsidian/app.json"))] {
+            assert_eq!(ask("notes", &vault, path), json!({"value": true}), "{path}");
+            assert!(logged().ends_with(&format!("reveal {}\n", shown.display())), "{path}: {}", logged());
+            assert_eq!(crate::app::reveal_command(&shown.display().to_string(), false).unwrap().1, vec!["-R".to_string(), shown.display().to_string()]);
+        }
+        let before = logged();
+        // Out of the folder, absolute, not there; a link out of it; a folder it wasn't given; a plugin that didn't ask
+        // for folders; one switched off; one not installed: refused, nothing logged.
+        let refused = |id: &str, root: &Path, path: &str, why: &str| {
+            let v = ask(id, root, path);
+            assert!(v["error"].as_str().is_some_and(|e| e.contains(why)), "{id} {path}: {v}");
+        };
+        refused("notes", &vault, "../outside/secret.md", "isn't a path inside");
+        refused("notes", &vault, &outside.join("secret.md").display().to_string(), "isn't a path inside");
+        refused("notes", &vault, "Projects/none.md", "isn't there");
+        refused("notes", &outside, "secret.md", "isn't one of the folders you gave");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("Projects/link.md")).unwrap();
+            refused("notes", &vault, "Projects/link.md", "leads outside");
+            std::os::unix::fs::symlink(&outside, vault.join("Projects/out")).unwrap();
+            refused("notes", &vault, "Projects/out", "leads outside");
+            std::os::unix::fs::symlink(vault.join("gone.md"), vault.join("Projects/dangling.md")).unwrap();
+            refused("notes", &vault, "Projects/dangling.md", "isn't there");
+        }
+        refused("other", &vault, "Projects", "isn't one of the folders you gave");
+        refused("plain", &vault, "Projects", "didn't ask for folders");
+        refused("nobody", &vault, "Projects", "isn't installed and on");
+        crate::plugins::set_enabled("notes", false).unwrap();
+        refused("notes", &vault, "Projects", "isn't installed and on");
+        assert_eq!(logged(), before, "nothing refused was logged");
+        // Only by POST, a JSON object.
+        assert_eq!(native("GET", "/api/plugin/notes/reveal", vec![]).0, 405);
+        assert_eq!(native("POST", "/api/plugin/notes/reveal", b"[1]".to_vec()).0, 400);
     }
 
     #[test]

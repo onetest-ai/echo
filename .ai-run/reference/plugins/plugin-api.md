@@ -840,6 +840,7 @@ Evidence: `jshost::work::check_rows`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
+  `system.reveal(root, path)` (a file of a folder it was given shown in Finder / Explorer, on the user's click: below),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash)`, `render()`, `markdown(md, opts)` and
   `markdown.links(md, {detail})` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
@@ -920,6 +921,18 @@ Evidence: `jshost::work::check_rows`
   (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
+- `ctx.system.reveal(root, path)` (manifest `uses.folders`, the plugin on; client half only — the host half's
+  `ctx.system` has no `reveal`): shows a file or folder of a folder the user gave the plugin selected in the file manager — `root` as
+  `ctx.fs.folders()` names it, `path` relative inside it (`''` the folder itself; hidden files and folders too, as
+  they may be read). `async`: it rejects, before anything is sent, unless the page has the user's click or key
+  (`copyAllowed`); then the page asks Echo (`POST /api/plugin/<id>/reveal` with `{root, path}`, any other method
+  refused), which checks the plugin (installed and on, its sheet naming `uses.folders`), resolves the path by
+  `grants::resolve` (a folder it was given; relative, plain names; inside it once links are followed — a link out
+  refused) and that it is there, and answers `{value: true}` or `{error}`. Echo runs, never through a shell, macOS
+  `/usr/bin/open -R <path>`, Windows `explorer.exe` with its one argument `/select,"<path>"` (a path holding `"` or a
+  control character, or a `\\?\` path, is refused; a closing `\` left off). On test data
+  (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it opens nothing and logs `reveal <path>` to the open log. Evidence:
+  `window::plugins::reveal_target`, `app::reveal_command`
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is

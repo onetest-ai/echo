@@ -235,6 +235,15 @@ function pluginCtx(id) {
         if (a.start) termStart('claude-plugin', key, a.extra)
       },
     },
+    /** The computer's own apps. `reveal(root, path)`: a file or folder in a folder the user gave it (`uses.folders`;
+     *  `root` as `ctx.fs.folders()` names it, `path` inside it, '' the folder itself) shown selected in Finder /
+     *  Explorer — only on the user's click or key (else it rejects before anything is sent); Echo checks the rest. */
+    system: {
+      reveal: async (root, path) => {
+        if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('Finder or Explorer opens only on your click')
+        return pluginValue(await pluginPost(id, 'reveal', { root: String(root == null ? '' : root), path: path == null ? '' : String(path) }))
+      },
+    },
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */

@@ -19,4 +19,6 @@ assert.equal(copyAllowed(null), false, 'no navigator: refused')
 assert.ok(/copy: \(text\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.ui.copy asks copyAllowed first')
 // A plugin's change to Echo's background jobs, too (echo-plugins R25): asked before anything is sent.
 assert.ok(/set: \(job, settings\) => \{\s*if \(!copyAllowed\(/.test(src), "ctx.echo.jobs.set asks copyAllowed first")
-console.log('ok - a plugin copies, and changes Echo\'s jobs, only with the user\'s activation; an engine that can\'t tell refuses')
+// Showing a file of a granted folder in Finder / Explorer, too: asked before the request is sent.
+assert.ok(/reveal: async \(root, path\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.system.reveal asks copyAllowed first')
+console.log('ok - a plugin copies, changes Echo\'s jobs and shows a file in Finder only with the user\'s activation; an engine that can\'t tell refuses')
