@@ -20,6 +20,10 @@ const IMAGE_MAX: u64 = 10 << 20;
 const IMAGES_TOTAL: u64 = 50 << 20;
 const IMAGES_SECS: u64 = 120;
 const IMAGE_SECS: u64 = 30;
+/// A picture host's name looked up for 10 s at most (and never past the pictures' 2 minutes).
+const LOOKUP_SECS: u64 = 10;
+/// The ports a picture is fetched from on a host the plugin wasn't granted (besides the page's own, on its own host).
+const WEB_PORTS: [u16; 2] = [80, 443];
 /// A file (`ctx.web.fetch`): 10 MB unless `max` says more, up to what `ctx.fs.copyIn` copies; 2 minutes.
 const FILE_MAX: u64 = 10 << 20;
 const FILE_SECS: u64 = 120;
@@ -189,7 +193,22 @@ fn public(ip: IpAddr) -> bool {
             if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
                 return public(IpAddr::V4(std::net::Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8)));
             }
-            !(a.is_loopback() || a.is_unspecified() || a.is_multicast() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80 || (s[0] == 0x2001 && s[1] == 0xdb8))
+            // Refused whole: IPv4-compatible (::/96) and IPv4-translated (::ffff:0:0/96) forms, 6to4 (2002::/16), Teredo
+            // (2001::/32), local-use NAT64 (64:ff9b:1::/48), discard-only (100::/64), site-local (fec0::/10), besides
+            // loopback, unspecified, multicast, unique-local, link-local and documentation.
+            !(a.is_loopback()
+                || a.is_unspecified()
+                || a.is_multicast()
+                || s[..6] == [0; 6]
+                || s[..6] == [0, 0, 0, 0, 0xffff, 0]
+                || s[0] == 0x2002
+                || (s[0] == 0x2001 && s[1] == 0)
+                || s[..3] == [0x64, 0xff9b, 1]
+                || s[..4] == [0x100, 0, 0, 0]
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] & 0xffc0) == 0xfec0
+                || (s[0] == 0x2001 && s[1] == 0xdb8))
         }
     }
 }
@@ -219,10 +238,19 @@ fn host_port(url: &str) -> Option<(String, u16, &'static str)> {
     Some((host.to_ascii_lowercase(), port, scheme))
 }
 
+/// `f()` on a thread of its own, given up on after `wait` (the thread ends whenever `f` does).
+fn within<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(wait).ok()
+}
+
 /// The one public address a picture's host is reached at: every address its name has must be public (a name that also
-/// points into the user's network is refused). A host written as a number other than a plain IPv4 or IPv6 address
-/// (`2130706433`, `0x7f.1`) is refused, as curl would read it.
-fn public_address(host: &str, port: u16) -> Result<IpAddr> {
+/// points into the user's network is refused), looked up by `until` (`LOOKUP_SECS` at most). A host written as a
+/// number other than a plain IPv4 or IPv6 address (`2130706433`, `0x7f.1`) is refused, as curl would read it.
+fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return if public(ip) { Ok(ip) } else { bail!("{host} is on this computer or your own network") };
     }
@@ -230,7 +258,10 @@ fn public_address(host: &str, port: u16) -> Result<IpAddr> {
     if last.is_empty() || last.bytes().all(|b| b.is_ascii_digit()) || last.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
         bail!("“{host}” isn't a host name Echo reaches for a picture");
     }
-    let ips: Vec<IpAddr> = (host, port).to_socket_addrs().map_err(|_| anyhow!("Echo couldn't find {host}"))?.map(|a| a.ip()).collect();
+    let wait = until.saturating_duration_since(Instant::now()).min(Duration::from_secs(LOOKUP_SECS));
+    let name = host.to_string();
+    let found = if wait.is_zero() { None } else { within(wait, move || (name.as_str(), port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect::<Vec<_>>())) };
+    let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.map_err(|_| anyhow!("Echo couldn't find {host}"))?;
     match ips.first() {
         Some(ip) if ips.iter().all(|i| public(*i)) => Ok(*ip),
         Some(_) => bail!("{host} points to this computer or your own network"),
@@ -239,20 +270,27 @@ fn public_address(host: &str, port: u16) -> Result<IpAddr> {
 }
 
 /// How a picture of a page is reached: as the plugin may reach anything (`http::reach`: its grants, the fake service of a
-/// development build), or — only for a page on the public internet — from its own host when that is public, as a browser
-/// shows it: https (http only on an http page), at the address Echo checked (`resolve`). A page on the user's own network
-/// shows only pictures the plugin may reach.
-fn picture_reach(id: &str, src: &str, page_public: bool, page_scheme: &str) -> Result<(Reach, Option<String>)> {
+/// development build), or — only for a page on the public internet (`page`: its host and port) — from its own host when
+/// that is public, as a browser shows it: https (http only on an http page), port 80 or 443 (or the page's own, on the
+/// page's own host), a name (or an IPv4 address), at the address Echo checked (`resolve`), all by `until`. A page on the
+/// user's own network shows only pictures the plugin may reach.
+fn picture_reach(id: &str, src: &str, page: Option<&(String, u16)>, page_scheme: &str, until: Instant) -> Result<(Reach, Option<String>)> {
     if let Ok(r) = reach(id, src) {
         return Ok((r, None));
     }
-    if !page_public {
+    let Some((page_host, page_port)) = page else {
         bail!("not an address this plugin may reach, and a page on your own network or this computer gets only those");
-    }
+    };
     let (host, port, scheme) = host_port(src).ok_or_else(|| anyhow!("not an http(s) address"))?;
-    // An address written as one: checked first, as it is.
-    if host.parse::<IpAddr>().is_ok() {
-        public_address(&host, port)?;
+    // An address written as one: checked first, as it is; an IPv6 one isn't reached (only a name or an IPv4 address).
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        public_address(&host, port, until)?;
+        if ip.is_ipv6() {
+            bail!("a picture at an IPv6 address written as one: Echo reaches a picture's host by its name");
+        }
+    }
+    if !WEB_PORTS.contains(&port) && !(host == *page_host && port == *page_port) {
+        bail!("a picture on port {port}: Echo fetches a page's pictures only from ports 80 and 443 (or the page's own)");
     }
     if scheme == "http" && page_scheme == "https" {
         bail!("a plain http picture on an https page");
@@ -261,7 +299,7 @@ fn picture_reach(id: &str, src: &str, page_public: bool, page_scheme: &str) -> R
     if let Some(fake) = test_host(&format!("https://{host}{}", src.split_once("://").and_then(|(_, r)| r.find('/').map(|i| &r[i..])).unwrap_or("")), std::slice::from_ref(&host))? {
         return Ok((Reach { listed: false, fake: Some(fake) }, None));
     }
-    let ip = public_address(&host, port)?;
+    let ip = public_address(&host, port, until)?;
     let ip = if ip.is_ipv6() { format!("[{ip}]") } else { ip.to_string() };
     Ok((Reach { listed: false, fake: None }, Some(format!("{host}:{port}:{ip}"))))
 }
@@ -270,10 +308,10 @@ fn picture_reach(id: &str, src: &str, page_public: bool, page_scheme: &str) -> R
 /// size, type} (in the store's `cache/web/<page>/`, swept with the cache) or `error`, why not. Within the caps above;
 /// GET only, picture types only, every one reached by `picture_reach`.
 fn save_pictures(id: &str, page_url: &str, page_reach: &Reach, images: &[Image]) -> Vec<Value> {
-    let page_public = page_reach.fake.is_some() || host_port(page_url).is_some_and(|(h, p, _)| public_address(&h, p).is_ok());
+    let until = Instant::now() + Duration::from_secs(IMAGES_SECS);
+    let page = host_port(page_url).filter(|(h, p, _)| page_reach.fake.is_some() || public_address(h, *p, until).is_ok()).map(|(h, p, _)| (h, p));
     let page_scheme = if page_url.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) { "https" } else { "http" };
     let dir = format!("cache/web/{}", &folders::sha_hex(page_url.as_bytes())[..16]);
-    let until = Instant::now() + Duration::from_secs(IMAGES_SECS);
     let mut total = 0u64;
     images
         .iter()
@@ -287,9 +325,11 @@ fn save_pictures(id: &str, page_url: &str, page_reach: &Reach, images: &[Image])
             } else if Instant::now() > until {
                 Err(anyhow!("past the {IMAGES_SECS} s Echo takes for a page's pictures"))
             } else {
-                picture_reach(id, &img.src, page_public, page_scheme).and_then(|(r, resolve)| {
+                picture_reach(id, &img.src, page.as_ref(), page_scheme, until).and_then(|(r, resolve)| {
                     let max = IMAGE_MAX.min(IMAGES_TOTAL - total);
-                    let (path, kind, size) = save(id, &dir, &format!("{:02}", n + 1), |sink| get_capped(id, &img.src, &r, max, IMAGE_SECS, "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml", resolve.as_deref(), &picture_only, sink))?;
+                    // Each picture within what is left of the pictures' time, not only checked between them.
+                    let secs = until.saturating_duration_since(Instant::now()).as_secs().clamp(1, IMAGE_SECS);
+                    let (path, kind, size) = save(id, &dir, &format!("{:02}", n + 1), |sink| get_capped(id, &img.src, &r, max, secs, "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml", resolve.as_deref(), &picture_only, sink))?;
                     total += size;
                     let ext = PICTURES.iter().find(|(k, _)| *k == kind).map_or("img", |(_, e)| e);
                     let named = path.with_extension(ext);
@@ -405,6 +445,8 @@ mod tests {
         }
     }
 
+    // A public page's pictures below come from a development build's fake hosts: a release build would reach for the real ones.
+    #[cfg(debug_assertions)]
     #[test]
     fn a_plugin_reads_a_page_it_may_reach_within_its_caps_and_saves_its_pictures() {
         let (_env, root) = paths::testenv::folders("jshost-web");
@@ -509,7 +551,7 @@ mod tests {
 
         // A public page's pictures from their own public hosts (a development build's fake stands for them); never from this
         // computer or the user's network.
-        let _map = EnvHosts::set(&format!("docs.acme.example=http://127.0.0.1:{port},cdn.acme.example=http://127.0.0.1:{port}"));
+        let _map = EnvHosts::set(&_env, &format!("docs.acme.example=http://127.0.0.1:{port},cdn.acme.example=http://127.0.0.1:{port}"));
         let p = read("https://docs.acme.example/public", json!({"images": "save"})).unwrap();
         let imgs = p["images"].as_array().unwrap();
         assert_eq!(imgs[0]["saved"], Value::Null, "{imgs:?}");
@@ -528,15 +570,19 @@ mod tests {
         plugins::remove("reader", false).unwrap();
     }
 
-    /// `ECHOCTL_TEST_HOSTS` until dropped.
-    struct EnvHosts;
-    impl EnvHosts {
-        fn set(v: &str) -> Self {
+    /// `ECHOCTL_TEST_HOSTS` until dropped, set only while the test holds the test environment (its lock: the variable is
+    /// process-wide).
+    #[cfg(debug_assertions)]
+    struct EnvHosts<'a>(std::marker::PhantomData<&'a paths::testenv::Env>);
+    #[cfg(debug_assertions)]
+    impl<'a> EnvHosts<'a> {
+        fn set(_env: &'a paths::testenv::Env, v: &str) -> Self {
             std::env::set_var("ECHOCTL_TEST_HOSTS", v);
-            EnvHosts
+            EnvHosts(std::marker::PhantomData)
         }
     }
-    impl Drop for EnvHosts {
+    #[cfg(debug_assertions)]
+    impl Drop for EnvHosts<'_> {
         fn drop(&mut self) {
             std::env::remove_var("ECHOCTL_TEST_HOSTS");
         }
@@ -550,11 +596,47 @@ mod tests {
         for ip in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.68.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "255.255.255.255", "224.0.0.1", "192.0.2.1", "198.18.0.1", "::1", "::", "fc00::1", "fd12::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:192.168.1.1", "64:ff9b::7f00:1", "2001:db8::1"] {
             assert!(!public(ip.parse().unwrap()), "{ip}");
         }
-        for host in ["2130706433", "0x7f.1", "127.1", "evil.example\\x", "a b"] {
-            assert!(public_address(host, 80).is_err(), "{host}");
+        // IPv6 forms that carry or tunnel to an IPv4 address, and the old site-local range.
+        for ip in ["::127.0.0.1", "::8.8.8.8", "::ffff:0:127.0.0.1", "::ffff:0:8.8.8.8", "2002:7f00:1::1", "2002:808:808::1", "2001::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "64:ff9b:1::7f00:1", "64:ff9b:1::808:808", "fec0::1", "feff::1", "100::1"] {
+            assert!(!public(ip.parse().unwrap()), "{ip}");
         }
-        assert!(public_address("127.0.0.1", 80).unwrap_err().to_string().contains("your own network"));
-        assert!(public_address("localhost", 80).unwrap_err().to_string().contains("your own network"));
+        let soon = || Instant::now() + Duration::from_secs(10);
+        for host in ["2130706433", "0x7f.1", "127.1", "evil.example\\x", "a b"] {
+            assert!(public_address(host, 80, soon()).is_err(), "{host}");
+        }
+        assert!(public_address("127.0.0.1", 80, soon()).unwrap_err().to_string().contains("your own network"));
+        assert!(public_address("localhost", 80, soon()).unwrap_err().to_string().contains("your own network"));
+        // A name looked up only within the time left.
+        assert!(public_address("acme.example", 443, Instant::now()).unwrap_err().to_string().contains("took too long"));
+    }
+
+    #[test]
+    fn a_name_that_takes_too_long_to_look_up_is_given_up_on() {
+        let at = Instant::now();
+        let slow = within(Duration::from_millis(100), || {
+            std::thread::sleep(Duration::from_secs(3));
+            1
+        });
+        assert!(slow.is_none() && at.elapsed() < Duration::from_secs(1), "{:?}", at.elapsed());
+        assert_eq!(within(Duration::from_secs(5), || 2), Some(2));
+    }
+
+    #[test]
+    fn a_public_pages_pictures_come_only_from_web_ports_and_never_an_ipv6_literal() {
+        let (_env, _root) = paths::testenv::folders("jshost-web-ports");
+        let until = Instant::now() + Duration::from_secs(10);
+        let page = ("1.1.1.1".to_string(), 8443);
+        let pic = |src: &str| picture_reach("nobody", src, Some(&page), "https", until);
+        let refused = |src: &str| pic(src).err().expect("refused").to_string();
+        assert!(refused("https://8.8.8.8:22/a.png").contains("port 22"));
+        assert!(refused("https://8.8.8.8:8443/a.png").contains("port 8443"), "the page's port is its own host's only");
+        assert!(refused("https://cdn.acme.example:6379/a.png").contains("port 6379"), "refused before any lookup");
+        assert!(refused("https://[2606:4700:4700::1111]/a.png").contains("IPv6"));
+        assert!(refused("https://[::1]/a.png").contains("your own network"));
+        assert!(refused("http://8.8.8.8/a.png").contains("plain http"));
+        assert_eq!(pic("https://8.8.8.8/a.png").unwrap().1.as_deref(), Some("8.8.8.8:443:8.8.8.8"));
+        assert_eq!(pic("https://1.1.1.1:8443/a.png").unwrap().1.as_deref(), Some("1.1.1.1:8443:1.1.1.1"), "the page's own host and port");
+        assert!(picture_reach("nobody", "https://8.8.8.8/a.png", None, "https", until).err().expect("refused").to_string().contains("your own network"), "a page that isn't public");
     }
 
     #[test]

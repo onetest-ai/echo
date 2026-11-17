@@ -300,11 +300,14 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
   - Pictures: in place as `![alt](src)`, a figure's caption under it as text; `images` lists each once (500 at most),
     from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
     `data:` and a picture whose page-given width or height is under 32 left out.
-  - The page's words are never markup: `\`, `<`, `[`, `]`, `!` escaped, a line starting `#` or `>` escaped, control
+  - The page's words are never markup: `\`, `<`, `[`, `]`, `!`, `` ` `` escaped, a line starting `#` or `>` escaped, an
+    inline code span fenced one backtick longer than the longest run in it, control
     characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064,
     U+2066–U+2069, U+FEFF) dropped from the text, title, links and pictures. Its work is bounded: 256 levels of nesting
     (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest left out), 2 MB of each
-    embedded JSON. Evidence: `web::read::read`
+    embedded JSON. Its output is bounded too: the Markdown is at most ten times the HTML and 20 MB, a table keeps 64
+    columns, list items indent for 8 levels (deeper ones sit at the 8th), a numbered list starts at 1,000,000 at most
+    (`truncated` when something was left out). Evidence: `web::read::read`
   - `images: 'save'` also downloads its pictures: each entry gets `saved` — a file handle `{file, name, size, type}`
     (§ Folders and files: `ctx.files.read`, `ctx.fs.copyIn`) — or `error`, why not. 50 pictures, 10 MB each, 50 MB and
     2 minutes for a page; PNG, JPEG, GIF, WebP, AVIF and SVG only (by the answer's type; Echo never shows an SVG: the
@@ -312,10 +315,13 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
     the Markdown keeps each picture's `src`, and the plugin maps `src` → `saved.name` when it writes them elsewhere.
     A picture is fetched as anything the plugin may reach — or, **the one widening**, as a browser shows a page: a page
     on the public internet may have Echo fetch its pictures from their own hosts though the plugin wasn't granted them,
-    only these pictures, GET only, https (http only for an http page), and only from a public address: Echo looks the
-    host up, refuses it when any of its addresses is this computer or a private, link-local, shared or unique-local
-    range (an address written as a number other than plain IPv4 or IPv6 refused too), and connects to the address it
-    checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
+    only these pictures, GET only, https (http only for an http page), port 80 or 443 (or the page's own port on the
+    page's own host), a host name or an IPv4 address (an IPv6 address written as one refused), and only from a public
+    address: Echo looks the host up (10 s at most, within the 2 minutes), refuses it when any of its addresses is this
+    computer or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
+    or tunnels to an IPv4 address (IPv4-compatible and -translated, 6to4, Teredo, local-use NAT64; v4-mapped and NAT64
+    only to a public IPv4), an address written as a number other than plain IPv4 or IPv6 refused too, and connects to
+    the address it checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
     may reach. Evidence: `jshost::web::picture_reach`
 - `await ctx.web.fetch(url, {max})` → a file handle `{file, name, size, type}` for one file the plugin may reach (the
   same rules; any type), 10 MB (`max` up to 50 MB, what `ctx.fs.copyIn` copies), 2 minutes; `name` the address's last
