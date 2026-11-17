@@ -177,15 +177,22 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     let started = Local::now();
     let first = ledger::Ledger::of(id)?.events()?.iter().all(|e| e["type"] != "processed");
     let mut written = ledger::sync(id, first.then_some(BACKFILL))?;
-    // Its meeting chats between calls (a chat that can't be read keeps its error; the calls go on).
-    match ledger::chat_sync(id) {
-        Ok(w) => written.extend(w),
-        Err(e) => eprintln!("project sync {id}: the meeting chat: {e:#}"),
-    }
-    // Its ✉ Mail sources, trusted senders only (a source that can't be read keeps its error).
-    match ledger::mail_sync(id) {
-        Ok(w) => written.extend(w),
-        Err(e) => eprintln!("project sync {id}: mail: {e:#}"),
+    // Mail and chat are fetched unless a scheduled sync falls in the night the fetch job pauses in (Sync now always).
+    if !(batch && crate::jobs::paused("fetch", started.time())) {
+        let fetching = ledger::chat_due(&p) || ledger::mail_due(&p);
+        // Its meeting chats between calls (a chat that can't be read keeps its error; the calls go on).
+        match ledger::chat_sync(id) {
+            Ok(w) => written.extend(w),
+            Err(e) => eprintln!("project sync {id}: the meeting chat: {e:#}"),
+        }
+        // Its ✉ Mail sources, trusted senders only (a source that can't be read keeps its error).
+        match ledger::mail_sync(id) {
+            Ok(w) => written.extend(w),
+            Err(e) => eprintln!("project sync {id}: mail: {e:#}"),
+        }
+        if fetching {
+            crate::jobs::ran("fetch");
+        }
     }
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
@@ -251,7 +258,7 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
         let profile_id = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
         let ready = crate::ai::ready(&profile_id)?;
         let profile = ready.profile();
-        let model = p.model.clone().or_else(|| crate::jobs::model("thread_sync")).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
+        let model = p.model.clone().or_else(|| crate::jobs::model_for("thread_sync", profile)).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
         let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
         let cwd = if !profile.kind.managed() { crate::ai::system_folder()? } else { paths::home() };
         crate::ai::hooks_conflict(profile, &cwd).map_err(|w| anyhow!(w))?;

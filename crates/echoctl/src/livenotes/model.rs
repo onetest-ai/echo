@@ -45,7 +45,7 @@ pub(crate) fn complete_on(p: &Profile, model: &str, system: &str, user: &str, ma
 
 /// The model background job `job` asks `p` for: its job settings' (`jobs::model`), else `text_model(p)`.
 pub(crate) fn job_model(p: &Profile, job: &str) -> String {
-    crate::jobs::model(job).unwrap_or_else(|| text_model(p))
+    crate::jobs::model_for(job, p).unwrap_or_else(|| text_model(p))
 }
 
 /// The model a one-shot job runs on — what it records (#294). A local profile: its live model, the one already loaded

@@ -189,7 +189,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
         "dashboard" if matches!(second, "list" | "presets" | "export") => None,
-        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
+        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
         _ => Some("change"),
     }
 }
@@ -928,7 +928,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         }
     };
     let profile = ready.profile();
-    let model = crate::jobs::model("minutes").or_else(|| profile.notes_model()).map(|m| profile.model(&m));
+    let model = crate::jobs::model_for("minutes", profile).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
     crate::jobs::ran("minutes");
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.

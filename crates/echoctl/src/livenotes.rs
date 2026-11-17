@@ -192,7 +192,7 @@ fn summary_every() -> Duration {
 
 /// The model live notes ask `p` for: the live notes job's, else the profile's live model.
 pub(crate) fn live_model_of(p: &Profile) -> String {
-    crate::jobs::model("live_notes").unwrap_or_else(|| p.live_model())
+    crate::jobs::model_for("live_notes", p).unwrap_or_else(|| p.live_model())
 }
 /// Characters (not bytes: a Cyrillic letter counts once) of new transcript before a summary.
 const MIN_NEW_CHARS: usize = 400;
@@ -967,7 +967,11 @@ fn worker() {
         // One job's panic must not end live notes for good.
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &job {
             Job::Ask { stamp, generation, ask } => run_ask(stamp, *generation, ask.clone()),
-            Job::Summary { stamp, generation } => run_summary(stamp, *generation),
+            Job::Summary { stamp, generation } => {
+                // Outside the live notes' lock: the run is recorded in a file of its own (`jobs::ran`).
+                crate::jobs::ran("live_notes");
+                run_summary(stamp, *generation)
+            }
         }));
         if ran.is_err() {
             let stamp = match &job {
@@ -1005,9 +1009,6 @@ fn next_job(s: &mut Shared, now: Instant) -> Option<Job> {
                 break;
             }
         }
-    }
-    if matches!(pick, Some(Job::Summary { .. })) {
-        crate::jobs::ran("live_notes");
     }
     let (stamp, kind) = match &pick {
         Some(Job::Ask { stamp, .. }) => (stamp.clone(), JobKind::Ask),
@@ -1577,6 +1578,7 @@ mod tests {
 
     #[test]
     fn a_local_profiles_one_shot_jobs_run_on_the_model_they_record() {
+        let (_env, _) = crate::paths::testenv::folders("live-a_local_profiles_one");
         // #294: a prep records text_model; that is the one asked — on a local profile its live model, already loaded.
         let p = Profile { live_model: Some("small".into()), notes_model: Some("big".into()), ..local("") };
         let ok = http("200 OK", "", r#"{"content":[{"type":"text","text":"ok"}]}"#);
@@ -1591,6 +1593,7 @@ mod tests {
 
     #[test]
     fn a_local_model_answers_through_curl() {
+        let (_env, _) = crate::paths::testenv::folders("live-a_local_model_answer");
         let url = serve(Some(http("200 OK", "", r#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"hello"}]}"#)));
         assert_eq!(complete_local(&local(&url), "sys", "hi", 10, true, &|| false).unwrap(), "hello");
         let url = serve(Some(http("404 Not Found", "", r#"{"error":{"message":"model not found"}}"#)));
@@ -1632,6 +1635,7 @@ mod tests {
 
     #[test]
     fn a_stopped_request_ends_at_once() {
+        let (_env, _) = crate::paths::testenv::folders("live-a_stopped_request_en");
         let url = serve(None); // never answers
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = stop.clone();
@@ -1661,6 +1665,7 @@ mod tests {
 
     #[test]
     fn questions_go_first_and_paused_calls_get_no_summaries() {
+        let (_env, _) = crate::paths::testenv::folders("live-questions_go_first_a");
         let now = Instant::now();
         let mut s = Shared::default();
         let due = |s: &mut Shared, stamp: &str, recording: bool, paused: bool| {
@@ -1861,6 +1866,7 @@ mod tests {
 
     #[test]
     fn a_question_waiting_for_its_model_lets_other_jobs_go_first() {
+        let (_env, _) = crate::paths::testenv::folders("live-a_question_waiting_f");
         let mut s = Shared::default();
         let now = Instant::now();
         let waiting = Ask { kind: AskKind::Missed, text: String::new(), asked_at: Local::now(), not_before: Some((now + Duration::from_secs(5), Wait::Model)) };

@@ -24,7 +24,8 @@ pub enum FieldKind {
     Number { min: u64, max: u64, default: u64 },
     /// Paused at night (`NIGHT`): on or off.
     Night { default: bool },
-    /// A model name (one of Claude's names, mapped by the profile, or the provider's own); empty: the job's default.
+    /// One of Claude's names (haiku, sonnet, opus), which each profile maps to its provider's model; empty: the job's
+    /// default.
     Model { default: &'static str },
 }
 
@@ -77,13 +78,13 @@ pub const JOBS: &[Job] = &[
         id: "prep",
         name: "Meeting prep",
         what: "Prepares today's meetings of threads, types meetings by their invites, and sorts your tasks by who can do them",
-        fields: &[num("every", "Every (minutes)", 1, 240, 5), night(true), model_field("the profile's minutes model")],
+        fields: &[num("every", "Every (minutes)", 1, 240, 5), night(false), model_field("the profile's minutes model")],
     },
     Job {
         id: "brain_reader",
-        name: "Recall reader",
-        what: "Reads new mail and channel posts into plain facts for Recall",
-        fields: &[num("every", "Every (minutes)", 1, 1440, 5), num("per_pass", "Documents a pass", 1, 200, 30), night(true), model_field("the profile's minutes model")],
+        name: "Recall",
+        what: "Indexes new calls, mail, channel posts and folders for Recall, reading mail and posts into plain facts",
+        fields: &[num("every", "Every (minutes)", 1, 1440, 5), num("per_pass", "Documents a pass", 1, 200, 30), night(false), model_field("the profile's minutes model")],
     },
     Job {
         id: "live_notes",
@@ -109,9 +110,10 @@ pub fn settings() -> Value {
     Value::Object(load_from(FILE))
 }
 
-/// A number setting of a job: the user's when it is in range, else its default.
+/// A number setting of a job: the user's when it is in range, else its default (1 for a key no job has: never a
+/// loop without a pause).
 pub fn number(id: &str, key: &str) -> u64 {
-    let Some(Field { kind: FieldKind::Number { min, max, default }, .. }) = JOBS.iter().find(|j| j.id == id).and_then(|j| j.fields.iter().find(|f| f.key == key)) else { return 0 };
+    let Some(Field { kind: FieldKind::Number { min, max, default }, .. }) = JOBS.iter().find(|j| j.id == id).and_then(|j| j.fields.iter().find(|f| f.key == key)) else { return 1 };
     settings()[id][key].as_u64().filter(|n| (*min..=*max).contains(n)).unwrap_or(*default)
 }
 
@@ -148,10 +150,16 @@ pub fn after_night(at: DateTime<Local>) -> DateTime<Local> {
     day.and_time(to).and_local_timezone(Local).earliest().unwrap_or(at)
 }
 
-/// The model the user set for a job, if any (else the job asks for its own default). Not yet mapped: the profile maps
-/// it (`Profile::model`) where it reaches the provider.
+/// The model the user set for a job, if any (else the job asks for its own default): one of Claude's names, mapped by
+/// the profile where it reaches the provider (`Profile::model`).
 pub fn model(id: &str) -> Option<String> {
-    settings()[id]["model"].as_str().map(str::trim).filter(|m| !m.is_empty()).map(str::to_owned)
+    settings()[id]["model"].as_str().map(|m| m.trim().to_ascii_lowercase()).filter(|m| matches!(m.as_str(), "haiku" | "sonnet" | "opus"))
+}
+
+/// The model job `id` asks `p` for: the user's setting when `p` can run it — any profile but a local one that has no
+/// model of its own for that name (its server knows none of Claude's) — else None (the job's own default).
+pub fn model_for(id: &str, p: &crate::ai::Profile) -> Option<String> {
+    model(id).filter(|m| p.kind != crate::ai::Kind::Local || p.model(m) != *m)
 }
 
 /// Record that `id` did its work now (the list's last run and runs today).
@@ -244,8 +252,10 @@ fn set_in(id: &str, assignments: &[String], in_run: bool) -> Result<Value> {
                     _ => bail!("{id} night: on or off, not “{v}”"),
                 },
                 FieldKind::Model { .. } => {
-                    if !(v.len() <= 200 && !v.starts_with('-') && !v.chars().any(|c| c.is_control() || c.is_whitespace())) {
-                        bail!("{id} model: “{v}” isn't a model name (one word, not starting with “-”)");
+                    // One of Claude's names, never a provider's own: the job runs on every profile, and each maps it.
+                    let v = v.to_ascii_lowercase();
+                    if !matches!(v.as_str(), "haiku" | "sonnet" | "opus") {
+                        bail!("{id} model: haiku, sonnet or opus (each profile runs its own model for them), not “{v}”");
                     }
                     json!(v)
                 }
@@ -295,8 +305,10 @@ mod tests {
         assert_eq!((number("needs", "every"), number("thread_sync", "batch_wait"), number("live_notes", "every_s")), (5, 120, 90));
         assert_eq!(model("needs"), None);
         assert!(paused("needs", t(23, 0)) && !paused("needs", t(12, 0)) && !paused("minutes", t(23, 0)), "night on by default; a job with no night never pauses");
+        assert!(!paused("prep", t(23, 0)) && !paused("brain_reader", t(23, 0)), "prep and Recall run at night until the user pauses them");
+        assert_eq!(number("needs", "nope"), 1, "a key no job has: never 0");
         let set = |id: &str, a: &[&str]| set_in(id, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), false);
-        set("needs", &["every=15", "night=off", "model=sonnet"]).unwrap();
+        set("needs", &["every=15", "night=off", "model=Sonnet"]).unwrap();
         assert_eq!((number("needs", "every"), paused("needs", t(23, 0)), model("needs")), (15, false, Some("sonnet".into())));
         let l = list();
         let needs = l["jobs"].as_array().unwrap().iter().find(|j| j["id"] == "needs").unwrap();
@@ -312,7 +324,7 @@ mod tests {
     fn bad_settings_are_refused_all_or_nothing_and_never_inside_a_run() {
         let (_env, _) = paths::testenv::folders("jobs-refused");
         let set = |id: &str, a: &[&str], run: bool| set_in(id, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), run);
-        for (id, a) in [("needs", "every=0"), ("needs", "every=x"), ("needs", "night=maybe"), ("needs", "model=two words"), ("needs", "model=--x"), ("needs", "batch_wait=5"), ("nope", "every=5"), ("night", "from=25:00"), ("night", "at=22:00")] {
+        for (id, a) in [("needs", "every=0"), ("needs", "every=x"), ("needs", "night=maybe"), ("needs", "model=two words"), ("needs", "model=--x"), ("needs", "model=qwen3.8:27b"), ("needs", "batch_wait=5"), ("nope", "every=5"), ("night", "from=25:00"), ("night", "at=22:00")] {
             assert!(set(id, &["every=10", a], false).is_err() || set(id, &[a], false).is_err(), "{id} {a}");
         }
         assert!(set("needs", &["every=10", "every=0"], false).is_err());
@@ -332,6 +344,18 @@ mod tests {
         set_in("night", &["from=01:00".into(), "to=05:00".into()], false).unwrap();
         assert!(in_night(t(1, 0)) && in_night(t(4, 59)) && !in_night(t(23, 0)) && !in_night(t(5, 0)));
         assert_eq!(after_night(at(2, 0)), at(5, 0));
+    }
+
+    #[test]
+    fn a_jobs_model_reaches_a_local_profile_only_where_it_maps_that_name() {
+        let (_env, _) = paths::testenv::folders("jobs-model-for");
+        set_in("prep", &["model=opus".into()], false).unwrap();
+        let mut local = crate::ai::Profile { id: "q".into(), name: "Q".into(), kind: crate::ai::Kind::Local, base_url: None, token: None, live_model: Some("m".into()), notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
+        assert_eq!(model_for("prep", &local), None, "its server knows no opus: the job's own default");
+        local.models.opus = Some("big-m".into());
+        assert_eq!(model_for("prep", &local), Some("opus".into()));
+        let claude = crate::ai::Profile { kind: crate::ai::Kind::Claude, ..local.clone() };
+        assert_eq!(model_for("prep", &crate::ai::Profile { models: Default::default(), ..claude }), Some("opus".into()));
     }
 
     #[test]

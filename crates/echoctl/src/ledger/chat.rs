@@ -180,7 +180,6 @@ pub fn chat_sync(project: &str) -> Result<Vec<String>> {
             since = since.max(t.with_timezone(&chrono::Utc));
         }
         state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-        crate::jobs::ran("fetch");
         let msgs = match crate::graph::chat_history(&s.id, since, now, CHAT_MAX) {
             Ok(m) => m,
             Err(e) => {

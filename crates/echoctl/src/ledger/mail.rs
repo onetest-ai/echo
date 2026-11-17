@@ -189,7 +189,6 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
         let client = p.client.clone().unwrap_or_else(|| "-".into());
         for s in &rules {
             state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
-            crate::jobs::ran("fetch");
             let Some(rule) = MailRule::parse(&s.id) else {
                 state[&s.id]["error"] = json!(format!("not a mail rule: {}", s.id));
                 continue;

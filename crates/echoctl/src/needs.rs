@@ -461,7 +461,7 @@ fn id_of(e: Value) -> Result<String> {
 
 /// The model Needs you now asks: the one its job settings name, else the profile's live model (haiku by default).
 fn needs_model(p: &crate::ai::Profile) -> String {
-    crate::jobs::model("needs").unwrap_or_else(|| p.live_model())
+    crate::jobs::model_for("needs", p).unwrap_or_else(|| p.live_model())
 }
 
 /// The app: Needs you now read again as often as its job settings say (5 minutes by default), not at night unless
@@ -579,10 +579,10 @@ mod tests {
         let args: Vec<String> = std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap_or_default().split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == p.live_model()), "{args:?}");
         // Its job settings' model, when the user set one.
-        crate::jobs::set("needs", &["model=opus-test".into()]).unwrap();
+        crate::jobs::set("needs", &["model=opus".into()]).unwrap();
         let _ = crate::livenotes::complete_on(&p, &needs_model(&p), HOT_SYSTEM, "Dana: the site is down", 300);
         let args: Vec<String> = std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap_or_default().split('\0').map(str::to_owned).collect();
-        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "opus-test"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "opus"), "{args:?}");
     }
 
     #[test]
