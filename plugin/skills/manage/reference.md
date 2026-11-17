@@ -29,6 +29,7 @@ echoctl project list                                  # every thread: client, st
 echoctl project show <id>                             # its calls and why each belongs, rules, sources, people
 echoctl project create "Acme rollout" --client <client id> [--stage kickoff]
 echoctl project set <id> --stage done --reason "Signed off 4 Nov"   # closes it; reopen: --stage active
+echoctl project set <id> --stage-back-to <plugin id>   # an Echo plugin moves its stage again after the user changed it
 echoctl project set <id> --name … --client <id> --since 2026-09-01 --notes "What Claude should know"
 echoctl project set <id> --brief brief.md             # the Brief tab, from a file ("-": stdin)
 echoctl project delete <id>                           # to the trash; its calls stay — ask first
@@ -77,6 +78,7 @@ Stories (with acceptance criteria) › tasks, plus decisions, risks and question
 echoctl project ledger <id> tree                     # the whole tree (JSON): find nodes here
 echoctl project ledger <id> status                   # the last sync
 echoctl project ledger <id> run                      # sync now: its new calls, then Claude reads them
+echoctl project ledger <id> run --scheduled          # as the app's scheduler: mail and chat wait for their batch (2 h or 5)
 echoctl project tasks                                # open tasks across threads: I owe / owed to me / waiting / nobody named
 echoctl project people <id> [--refresh]              # its people: calls, talk share, tasks, roles
 ```

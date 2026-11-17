@@ -873,3 +873,20 @@ fn a_transcript_that_cant_be_read_is_said_in_the_conversation() {
     let id = send(&v.id, None, "Hello", Mode::Ask, &[]).unwrap();
     assert!(turn_events(&v.id, &id).iter().all(|e| e["type"] != "notice"));
 }
+
+#[test]
+fn main_refresh_resolves_local_models_and_keeps_wrapper_names_private() {
+    let (_env, root) = crate::paths::testenv::folders("chat-main-refresh");
+    let v = vault(&root, "system");
+    let local: ai::Profile = serde_json::from_value(json!({"id": "local", "name": "Acme local", "kind": "local", "notes_model": "sonnet", "models": {"sonnet": "acme-chat-v2"}})).unwrap();
+    let wrapper = profile("wrapper", "wrapper");
+    let session = Session::New { id: ID.into(), first: "Private Acme pricing question".into() };
+    for mode in [Mode::Ask, Mode::Curate, Mode::Research] {
+        let a = args(&v, &local, mode, &session, &root.join("settings.json")).unwrap();
+        assert_eq!(value_of(&a, "--model"), Some("acme-chat-v2"));
+        let a = args(&v, &wrapper, mode, &session, &root.join("settings.json")).unwrap();
+        assert_eq!(value_of(&a, "--name"), None, "wrapper argv must contain no vault name or user message");
+        assert!(!a.iter().any(|x| x.contains("Private Acme") || x.contains("Twin:")));
+        assert_eq!(value_of(&a, "--session-id"), Some(ID));
+    }
+}

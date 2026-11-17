@@ -14,3 +14,10 @@
 .dash .dash-h.bdh { margin: 0; }
 /* The Brief's and Overview's text kept to a readable line in the pane's full width. */
 .pj-pane.wide .me-doc, .pj-pane.wide .me-edit textarea { max-width: 100ch; }
+/* The "+": what the plugins offer ready-made, under the name field. */
+.bd-new.pj-add-wrap { position: relative; }
+.bd-presets { left: 6px; right: auto; top: calc(100% + 4px); min-width: 220px; }
+.bd-presets .menu-h { padding: 4px 10px 2px; font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+/* A plugin's dashboard: a quiet line when its plugin changed it, is off or went. */
+.bd-note { order: 3; flex-basis: 100%; display: flex; align-items: center; gap: 8px; }
+.bd-note .set-sub { flex: 0 1 auto; }

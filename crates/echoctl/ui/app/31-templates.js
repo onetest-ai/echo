@@ -16,18 +16,38 @@ async function readTemplates() {
   const list = (TPL.data && TPL.data.templates) || []
   if (TPL.sel && !TPL.draft) { const t = list.find((x) => x.id === TPL.sel); TPL.draft = t ? tplDraft(t) : null; if (!t) TPL.sel = null }
 }
-const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, header: t.header || '', match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
+const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, fixed: !!t.fixed, header: t.header || '', match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
 /** A word typed in the words box and not yet added (no Enter): it counts once anything is saved. */
 function tplWord() {
   const d = TPL.draft, w = (TPL.word || '').trim().toLowerCase().replace(/,/g, '')
   if (d && w && !d.match.includes(w)) d.match.push(w)
   TPL.word = ''
 }
+// ── template save: what a save of the open template sends (no DOM: `templates-save.test.mjs`) ──
+const TplSave = {
+  /** The last number given to a change of the switch. */
+  gen: 0,
+  /** The switch set here: pending, with a number of its own, so only the answer to a save that sent it ends it. */
+  toggle: (on) => ({ fixed: on, fixedPending: true, fixedGen: ++TplSave.gen }),
+  /** A save of the open template: the switch, with its number, only while it is pending. */
+  message: (d) => ({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections, ...(d.fixedPending ? { fixed: !!d.fixed, fixedGen: d.fixedGen } : {}) }),
+  /** A new template's Create, with the switch as set in its form. */
+  create: (d, name) => ({ ...TplSave.message({ ...d, fixedPending: true }), name }),
+  /** The app saved template `id` (`gen`: the switch's number that save sent, or null): pending until the answer to a
+   *  save of this template that sent its latest number; with none pending the file's (`row`) is shown. Another
+   *  template's answer: nothing. */
+  saved: (d, id, row, gen) => {
+    if (id !== d.id) return {}
+    const pending = !!d.fixedPending && gen !== d.fixedGen
+    return { fixed: pending ? !!d.fixed : !!(row && row.fixed), fixedPending: pending }
+  },
+}
+// end of the template save block
 function tplSave() {
   const d = TPL.draft
   if (!d || !d.id) return
   tplWord()
-  send({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections })
+  send(TplSave.message(d))
 }
 function templatesSettings() {
   if (!TPL.data) { loadTemplates().then(render); return `<h2>Templates</h2><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(4)}</div>` }
@@ -37,7 +57,7 @@ function templatesSettings() {
   const rows = list.map((t) => {
     const [tag, cls] = TAG[t.kind] || TAG.builtin
     const used = t.memo ? 'Memos only — a part per thread' : t.id === 'default' ? 'Any call no other template matches' : (t.match || []).join(', ') || 'Only when you choose it for a call'
-    return `<button class="tp-row${TPL.sel === t.id ? ' on' : ''}" data-tpl-pick="${esc(t.id)}"${TPL.sel === t.id ? ' aria-current="true"' : ''}><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(used)} · ${(t.sections || []).length} section${(t.sections || []).length === 1 ? '' : 's'}</span></button>`
+    return `<button class="tp-row${TPL.sel === t.id ? ' on' : ''}" data-tpl-pick="${esc(t.id)}"${TPL.sel === t.id ? ' aria-current="true"' : ''}><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(used)} · ${(t.sections || []).length} section${(t.sections || []).length === 1 ? '' : 's'}${t.fixed ? ', all kept' : ''}</span></button>`
   }).join('')
   const mts = TPL.data.meeting_types || []
   const tab = (id, label, n) => `<button class="tp-kind${TPL.tab === id ? ' on' : ''}" role="tab" aria-selected="${TPL.tab === id}" data-tpl-tab="${id}">${label} <span class="set-sub">${n}</span></button>`
@@ -128,6 +148,7 @@ function templateEditor() {
     : '<span class="grow set-sub">Saved as you change it · the next minutes follow it</span>'
   return `<div class="tp-ed" role="region" aria-label="${esc(isNew ? 'New template' : tplName(d.id))}"><div class="tp-eh"><b>${esc(isNew ? 'New template' : tplName(d.id))}</b>${tag}<span class="grow"></span>${act}<button class="icon-btn" data-tpl-close aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
     <div class="tp-eb">${name}${words}<div class="tp-f"><div class="tp-lrow tp-hl"><label class="tp-l" for="tp-hd">Header — how the minutes start</label><button class="icon-btn tp-info${TPL.info ? ' on' : ''}" data-tpl-info aria-expanded="${TPL.info ? 'true' : 'false'}" title="Values and how a header is read" aria-label="Values and how a header is read">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>')}</button></div><div class="tp-s tp-hd"><textarea id="tp-hd" rows="${Math.min(10, Math.max(2, (d.header || '').split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 90)), 0) + 1))}" placeholder="# {title}">${esc(d.header || '')}</textarea></div>${TPL.info ? `<div class="tp-pop" role="note"><div class="tp-vals">${((TPL.data && TPL.data.values) || []).map((v) => `<button class="tp-val" data-tpl-val="${esc(v.name)}" title="${esc(v.means)}">{${esc(v.name)}}</button>`).join('')}</div><ul class="set-sub"><li>The header shows when the minutes are opened in a browser or sent as a file; Echo's window shows the call's own header instead.</li><li>A value is filled in from the call — click one to put it where the cursor is; one with nothing to fill goes, with what is around it.</li><li>Anything else in {…} is an instruction in your words: “{one line on why we met}”.</li><li>A line that says when it applies (“only when…”) is left out otherwise; the rest is kept as written.</li><li>Easier still: ask Claude to write the template for you.</li></ul></div>` : ''}</div><div class="tp-lrow"><span class="tp-l">Sections — in this order</span><span class="set-sub grow">Claude writes each, following its words</span><button class="link-btn" data-tpl-add>+ Add a section</button></div>${secs}
+    ${d.memo ? '' : `<label class="tp-keep"><input type="checkbox" data-tpl-fixed${d.fixed ? ' checked' : ''}><span><b>Keep every section</b> — each one stays, in this order; one with nothing to say gets "_None recorded._", and one that says "only when…" appears only then. Your note headings go inside these sections, not before them.</span></label>`}
     <button class="tp-add" data-tpl-add>${ICON('<path d="M12 5v14M5 12h14"/>')}Add a section</button></div><div class="tp-ef">${foot}</div></div>`
 }
 
@@ -268,7 +289,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.tplPick) { TPL.scrollTo = true; TPL.caret = null; const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
   if (t.dataset.tplNew !== undefined) {
     const def = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === 'default')
-    TPL.sel = null; TPL.word = ''; TPL.draft = { id: null, kind: 'yours', name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
+    TPL.sel = null; TPL.word = ''; TPL.draft = { id: null, kind: 'yours', fixed: false, name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
     render(); const n = $('#tp-name'); if (n) n.focus(); return
   }
   if (t.dataset.tplClose !== undefined || t.dataset.tplCancel !== undefined) { TPL.sel = null; TPL.draft = null; return render() }
@@ -278,7 +299,7 @@ document.addEventListener('click', (e) => {
     d.name = name
     tplWord()
     // The app answers `templateSaved(id, true)` and the window selects it; a refusal leaves the draft, with the notice.
-    send({ cmd: 'template_save', name, header: d.header, match: d.match, sections: d.sections })
+    send(TplSave.create(d, name))
     return
   }
   if (t.dataset.tplReset !== undefined || t.dataset.tplDel !== undefined) {
@@ -321,6 +342,7 @@ document.addEventListener('change', (e) => {
   else if (el.id === 'tp-word') { tplSave(); render() }
   else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
+  else if (el.matches('[data-tpl-fixed]')) { Object.assign(d, TplSave.toggle(el.checked)); tplSave(); render() }
 })
 document.addEventListener('input', (e) => {
   if (TPL.skNew && e.target.id === 'sk-name') TPL.skNew.name = e.target.value

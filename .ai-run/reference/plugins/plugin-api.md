@@ -9,7 +9,7 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 
 - A plugin is one folder with `echo-plugin.json` at its root: required `id` (1–40 chars, a–z 0–9 `-`, no leading `-`),
   `name` (≤ 60) and `version` (`X.Y.Z[-pre]`); optional `echo` (`>=X.Y.Z`, the Echo it needs), `summary` (≤ 240),
-  `uses`, `settings`, `main`, `client`, `widgets`, `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
+  `uses`, `settings`, `main`, `client`, `widgets`, `dashboards` (§ Dashboards it offers), `skills`, `agent` and `icon` (an `.svg` in the plugin folder, named
   with a–z 0–9 `.` `_` `-` `/` only, ≤ 16 KB, shown only as an image beside its work rows and ⌘K entries).
   Evidence: `plugins::read_manifest`, `plugins::valid_id`
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
@@ -18,8 +18,9 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
   `folder` or `secret`; read with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
-- `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, skills, scripts,
-  `agent/`): exit 0, or each problem named by file; `--json`. Needs no data folder, nothing installed, no network.
+- `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
+  scripts, `agent/`), and its dashboards' widgets of the plugins beside it in the folder's parent (a marketplace's
+  `plugins/`) when they are there: exit 0, or each problem named by file; `--json`. Needs no data folder, nothing installed, no network.
   Evidence: `plugins::agent::check_folder`
 
 ## `uses` and the permission sheet
@@ -42,10 +43,12 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
 | `files.read` | other apps' files, each named in full, read with `ctx.system.readFile(entry)` |
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
-| `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); `["dictionary"]` to add to the dictionary |
+| `echo.read`, `echo.write` | Echo's data it reads (§ Echo's data); what it writes: `dictionary` (adds to the dictionary), `thread_stage` (a thread's stage), `tasks` (its own tasks in a thread) — each its own line on the sheet |
+| `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
+| `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s, and that Echo can't check a `readonly` one only reads; an update that adds a script or changes any
@@ -161,8 +164,44 @@ plugin (`ctx.settings.set`, its `settings.json`, a manifest `default`). Evidence
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source` (`calls` is named on the sheet but not served yet). `ctx.echo.dictionary.add(...)` under
+`source` (`calls` is named on the sheet but not served yet); a `threads` row is `{id, name, client, stage, group}` of
+an open thread (`group`: `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under
 `uses.echo.write: ["dictionary"]`. Evidence: `plugins::ECHO_READS`, `share::dictionary_add`
+
+What `uses.echo.write` may name, and the sheet's line for each (`plugins::ECHO_WRITES`):
+
+| Write | Sheet | Calls |
+|---|---|---|
+| `dictionary` | Adds names to your Echo dictionary | `ctx.echo.dictionary.add` |
+| `thread_stage` | Changes your threads' stage | `ctx.threads.setStage` |
+| `tasks` | Adds and updates tasks in your threads | `ctx.tasks.upsert`, `ctx.tasks.close` |
+
+Each is refused while Claude prepares and asks, and in a Yolo run on another thread than its own.
+
+- `ctx.threads.setStage(thread, stage, reason)` → `{applied, why?}`. `stage` one of `lead`, `proposal`, `negotiation`,
+  `kickoff`, `active`, `on_hold`, `wrap_up`, `done`, `lost`, `cancelled`; the stage history keeps the plugin's id,
+  name and reason (≤ 300 chars). Once the user changes the stage away from what this plugin set last (a stage set before
+  its first write doesn't count), `{applied: false, why: "the user set this thread's stage themselves"}` until the user
+  lets it set the stage again (`echoctl project set <id> --stage-back-to <plugin>`, the Profile's button). The same
+  stage again: `{applied: true}`, nothing written. A closed thread's stage is refused (it isn't among the threads it
+  reads). Evidence: `projects::plugin_set_stage`, `projects::stage_held_from`
+- `ctx.tasks.upsert(thread, {key, title, due?, owner?, state?, url?, reason?, propose?})` →
+  `{task, applied, proposed, ignored, why?}`: the plugin's task of that `key` (≤ 120 chars, its own id), created in a
+  story named after the plugin in the thread's first workstream (where the user merged that story, if they did; a new
+  one if they deleted it), or updated. `title` ≤ 200 chars; `due` `YYYY-MM-DD` or
+  null; `owner` a name ≤ 80 chars; `state` `open`, `in_progress`, `blocked`, `done`, `cancelled`; `url` https, shown as
+  the task's link titled with the plugin's name. A field left out stays as it is. The same values again write nothing;
+  `ignored` lists the fields the user set (kept as they are), and a task the user deleted or merged takes no write
+  (`why`). Closing a key never added: `{task: null, applied: false, why: "no open task of that key"}`.
+- `ctx.tasks.close(thread, key, reason, {propose})` — the task done, with why.
+- `propose: true`: the write waits in the thread's Work → To review and the Inbox for the user's Yes (`task: null`
+  until then for a new one); a newer proposal of the key replaces the pending one; after No the same write answers
+  `{proposed: false, why: "the user said no to this"}` (a change proposes again); closing a key never added withdraws
+  its proposal.
+
+Each write is in the task's History as the plugin's, with its reason; the user can't undo a plugin's write (they
+change or delete the task), and decides only the proposal still waiting. Evidence: `ledger::plugin_upsert`,
+`ledger::plugin_close`
 
 ## Folders and files
 
@@ -287,8 +326,10 @@ takes. Evidence: `plugins::check_params`
 
 ### Giving data
 
-- `ctx.widgets.provide(id, ({size, params}) => data)` — Echo asks it in the background, answered within 5 s, again
-  after `refresh`; or `ctx.widgets.set(id, data)` pushes it, and `ctx.widgets.clear(id)` takes the widget off Today and
+- `ctx.widgets.provide(id, ({size, height, fits, params}) => data)` — Echo asks it in the background, answered within
+  5 s, again after `refresh` and when its size or height changes; `height` is the rows of the grid it takes there (1,
+  2) and `fits` what Echo draws of it at that size and height, `{rows, items, bars}` (§ Data by kind): send that many
+  — the most important first for a table or list, the last for bars — and count the rest yourself; or `ctx.widgets.set(id, data)` pushes it, and `ctx.widgets.clear(id)` takes the widget off Today and
   every dashboard; only ids the manifest declares, 64 KB of data at most. Evidence: `jshost::widget_ask`
 - A widget with `params` gets its data only by `provide`: each copy — on Today or a dashboard — is asked with its own
   settings; a `set` replaces them all with one (`set` and `clear` reach every copy).
@@ -307,6 +348,11 @@ takes. Evidence: `plugins::check_params`
 
 ### Data by kind
 
+No widget scrolls inside the page: the wheel over it always scrolls Today or the dashboard. A table or list draws what
+its size and height hold (below), then "+N more" — a click shows all of it in place, "Show less" folds it back; a
+`fill` widget is at least its line's height and grows past it with what it shows; a wide table scrolls only sideways
+(hide columns at M with `hide`). At height 2 every count doubles.
+
 Text is plain (Echo escapes it); a text field given as anything but a string or a number is refused, text past its
 limit cut. `tone` is `good`, `warn` or `bad` (a table's cell and a chart's series also `muted`). A list's or card's
 `link` goes only to `echo://`; a table row's and a `stats` item's `link` also to `https://`.
@@ -317,11 +363,28 @@ Evidence: `pluginWidgetHtml`, `pluginTableHtml` (window script)
 | `stat` | `{value, unit?, label?, tone?, note?, progress?: {used, of}}` | `note` hidden at S | value 24, unit 12, label 80, note 200 | no `value`; `used` or `of` not a number |
 | `stats` | `{items: [{label, value, tone?, trend?, link?}]}`; `trend`: numbers, the last 30 drawn as a sparkline under the value (none with fewer than 2) | first 2 / 4 / 6 items | value 24, label 60 | `items` not a list; a `trend` not a list of numbers |
 | `chart` | § Charts | § Charts | § Charts | § Charts |
-| `list` | `{items: [{title, sub?, link?}], empty?}` | first 3 / 5 / 10 items | title 200, sub 200 | `items` not a list |
+| `list` | `{items: [{title, sub?, link?}], empty?}` | the first 3 / 5 / 10 items a row of height (`fits.items`), then "+N more" (100 at most) | title 200, sub 200 | `items` not a list |
 | `status` | `{state, title, text?}`, `state` `ok`, `warn` or `bad` | the same | title 80, text 300 | another `state` |
 | `card` | `{title?, text?, link?}` | the same | title 120, text 2000 | neither `title` nor `text` |
-| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill` or `date`; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns; a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
+| `table` | `{columns: [{key, label, kind?, hide?}], rows: [{id, cells: {<key>: text, number or {text, tone?}}, link?, group?, detail?: [{text, sub?}]}], groups?: [{id, label}], note?, empty?}`; column `kind` `text` (default), `number`, `pill`, `date`, `spark`, `heat` or `mix` (§ Scorecard tables), `group?` a band over a run of its heads; `total?: {label?, cells}` a bold row under them; rows under their group's header in `groups`' order, the rest last; a row's `link` lands on its first text column | M and L only; a column with `hide: "M"` left out at M; the first 8 rows a row of height (`fits.rows`; in the order drawn, a group's header and count kept whole), then "+N more" | cell 200, column label 40, group label 120, detail line 200, `note` 120 (beside the label) | 0 or over 10 columns (and over 12 `heat` columns besides); a column key not `[A-Za-z0-9_-]{1,40}`, or twice; over 200 rows; a row `id` missing, over 80 chars or twice; a `group` not in `groups`; over 50 groups; over 6 detail lines; a `number` cell not a number; a `date` cell not `YYYY-MM-DD` |
 | `page` | the plugin's, drawn by its client half (§ Client half) | the draw gets `size` | the plugin's | — |
+
+### Scorecard tables
+
+A `table`'s columns may also be:
+
+- `spark`: a cell `{values: [2–30 numbers], text?}` — a small trend, its last point dotted, `text` (24) beside it.
+- `heat`: a number, shaded by its share of the column's largest (of all its rows, shown or behind "+N more"); 0 or
+  none a muted "·"; below 0 refused. Up to 12
+  `heat` columns besides the 10 (a heat map's weeks); give them one `group` for a band over their heads.
+- `mix`: a cell `{parts: [1–6 {key?, value ≥ 0, tone?}], text?}` — a thin 100% bar of its parts (a zero not drawn),
+  `text` beside it, its parts in its hover; colours from the column's `series: [≤ 6 {key, label, tone?}]` (Echo's
+  palette in order, or the tone; keys `[A-Za-z0-9_-]{1,40}`, unique), named in a legend under the table; a part's own
+  `tone` wins, and with `series` given a part names one of them (or has a `tone`).
+- Numbers in all three: finite, at most 10^15 either way.
+
+`total: {label?, cells}`: one bold row under the rows, never folded away ("Total" in its first column unless that
+cell is given); its `heat` cells plain numbers. Evidence: `pluginTableHtml` (window script)
 
 ### Charts
 
@@ -334,10 +397,10 @@ refused). All series share one y-axis and the `unit`. Evidence: `pluginChartHtml
 | `area` | a filled line | the last 60 | 1–6 | refused |
 | `bar` | upright bars | the last 24 | 1–6 | below zero |
 | `stacked` | upright stacked bars | the last 24 | 1–6 | refused |
-| `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
-| `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L | 1–6 | refused |
+| `bars` | horizontal bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
+| `stacked-bars` | horizontal stacked bars | the last 4 / 6 / 12 at S / M / L a row of height (`fits.bars`) | 1–6 | refused |
 | `pie`, `donut` | slices | all read; up to 6 drawn in the given order, those under 3% and past the 6th folded into one Other after them (all zero: "Nothing to show yet") | one | refused |
-| `funnel` | stages | the first 8 in the given order, each with its share of the one before | one | refused |
+| `funnel` | stages, drawn as a funnel: each centred, as wide as its share of the widest, narrowing to the next (at S plain centred bars) | the first 8 in the given order, each with its share of the one before | one | refused |
 
 | Field | Shape |
 |---|---|
@@ -356,6 +419,30 @@ Any widget but a `page` (which draws its own) may have `open` (an `echo://` plac
 on the user's click, then Today reads the widgets again. A plugin's `https://` link — a widget's `open`, a table row's
 or a `stats` item's `link`, a work row's `url`, its ⌘K entry — opens in the browser on the user's first click, nothing
 asked; its host shows in the link's tooltip. Evidence: `pluginWidgetHtml`, `workRowOpen` (window script)
+
+### Dashboards it offers
+
+`dashboards: [{id, kind, name, about?, for?, items: [{widget, size?, height?, row?, params?}]}]` — at most 6, each
+offered in the "+" beside a thread's (`kind: "thread"`) or a client's (`"client"`) dashboards ("From plugins", "<name> —
+<plugin>") and in `echoctl dashboard presets`; the user adds one (`echoctl dashboard add-preset <plugin> <id>`), once.
+Echo never adds one itself, and the install sheet only says so ("Offers dashboards: Staffing (clients)"): not a
+permission, an update adding one doesn't ask again.
+
+- `id` a–z 0–9 `-`, unique across the plugin's dashboards; `name` 1–40 chars (the dashboard's; when the user has one of
+  that name, the next free "<name> 2", "<name> 3"…); `about` ≤ 160 (the row's tooltip).
+- `for` (a thread's only): the stage groups it shows on — `pursuit`, `delivery`, `closed`; none: every thread.
+- `items`: 1–24, each widget once — the plugin's own by its id, or `plugin:<id>:<widget>` of a plugin of its
+  marketplace. A widget has a setting of the page's kind (`thread` / `client`), which the page sets: never in `params`.
+  `size`, `height` and `params` are ones the widget takes (unset: its first size, 1 row, its defaults); `row`: it starts
+  a row. Its own widgets are checked at install; others' by `plugin check` beside them, and on a page a widget of a
+  plugin not installed draws nothing.
+- Updated: a dashboard added from a preset whose widgets or `for` the plugin's new version changed says "<plugin> updated this dashboard —
+  Update / Keep mine" ("— Update replaces your changes" when the user changed it); Update takes the new layout (and
+  `for`), Keep mine keeps theirs and that version isn't offered again (`echoctl dashboard preset-update <id> [--keep]`).
+- Its plugin off or removed: the dashboard stays the user's, saying so, with Remove.
+- `echoctl dashboard export <id> --thread|--client` prints a dashboard as such a block (widgets in full, their thread /
+  client settings left out) — a preset for a manifest, or a file for `echoctl dashboard import <file>` (the user's own
+  then; its widgets named in full: `plugin:<id>:<widget>` or Echo's `core:…`). Evidence: `plugins::presets::check`, `boards::add_preset`, `boards::status`
 
 ## Work rows
 
@@ -391,11 +478,19 @@ Evidence: `jshost::work::check_rows`
 - `onUnload(fn)` registers cleanup (timers, graph observers); `listenWindow(type, fn, options)` owns a window
   listener like `listen` owns a document listener. `ui.patch(element, html)` uses Echo's focus-preserving patcher.
   `await ui.stylesheet(path)` loads a CSS file inside the package, versioned and removed with that client.
+- `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, its
+  fields with value, default and range, last run, runs today, and the night); `set(job, ["key=value", …])` — only on the
+  user's click or key (`copyAllowed`, else it rejects before anything is sent), sent as the page's IPC command
+  `plugin_jobs_set` (never a GET; Echo answers by `window.echo.jobsSet`), checked as `echoctl jobs set` (`key=` back to
+  its default, `night` with `from` / `to`), resolving to the list after. The list is `/api/plugin/<id>/jobs`. Both check
+  the plugin the request names (on, `uses.echo.jobs`); the click is checked in the page, which every client half shares
+  with the user's rights. Echo's jobs run on their own settings with or without the plugin. Evidence:
+  `jshost::may_tune_jobs`, `window::plugins::handle`, `jobs::set`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `knowledge.tab` and `knowledge.settings` (the
   last two change with Knowledge's rework). Evidence: `SLOTS` (window script)
 - `ctx.ui.copy(text)` puts text on the clipboard on the user's click or key (without the page's user activation, or
   where the engine can't tell, it throws), 10,000 characters at most (the rest cut).
-- `ctx.widgets.draw(widget, ({data, size, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
+- `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is
   `{id, name, client}`, drawn under the thread's Sources; `render` is synchronous (a `ctx.render()` inside it is

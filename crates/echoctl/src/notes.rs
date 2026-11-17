@@ -112,14 +112,12 @@ pub enum Intent {
     Auto,
 }
 
-/// How long after the call (or after the user's last note) the app writes the minutes.
-pub const AUTO_DELAY: Duration = Duration::from_secs(15 * 60);
-
-/// The env variable a debug build reads to shorten `AUTO_DELAY` for functional tests (seconds).
+/// The env variable a debug build reads to shorten the minutes delay for functional tests (seconds).
 #[cfg(debug_assertions)]
 const TEST_AUTO_DELAY: &str = "ECHOCTL_TEST_AUTO_MINUTES_DELAY_S";
 
-/// `AUTO_DELAY`, or — functional tests only, in a debug build — the seconds `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`
+/// How long after the call (or after the user's last note) the app writes the minutes: the minutes job's `delay` (15
+/// minutes by default, `jobs`), or — functional tests only, in a debug build — the seconds `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`
 /// gives (`tests/fixtures/make_data.py --clock fast`), so a case waits seconds instead of 15 minutes. A release
 /// build never reads it.
 pub fn auto_delay() -> Duration {
@@ -127,7 +125,7 @@ pub fn auto_delay() -> Duration {
     if let Some(d) = test_delay(std::env::var(TEST_AUTO_DELAY).ok().as_deref()) {
         return d;
     }
-    AUTO_DELAY
+    Duration::from_secs(crate::jobs::number("minutes", "delay") * 60)
 }
 
 /// The test delay a value of `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` gives: whole seconds, else none.
@@ -174,7 +172,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
     let w: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.starts_with('-')).collect();
     let first = *w.first()?;
     // Echo's own hooks and servers, and what only reads.
-    const QUIET: [&str; 14] = ["view-hook", "onedrive-hook", "plugins-hook", "run-guard", "core", "mcp", "live-mcp", "context", "attention", "previous", "status", "read", "templates", "me"];
+    const QUIET: [&str; 16] = ["view-hook", "onedrive-hook", "plugins-hook", "run-guard", "wrapper-run", "proof", "core", "mcp", "live-mcp", "context", "attention", "previous", "status", "read", "templates", "me"];
     if QUIET.contains(&first) {
         return None;
     }
@@ -190,7 +188,8 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "project" if second == "work" && w.len() < 4 => None,
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
-        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" if matches!(second, "" | "list" | "show") => None,
+        "dashboard" if matches!(second, "list" | "presets" | "export") => None,
+        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
         _ => Some("change"),
     }
 }
@@ -917,7 +916,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                 // (Where that profile's Claude Code runs: the built-in one's own folder.)
                 r.policy = p
                     .and_then(|p| {
-                        let cwd = if p.kind == crate::ai::Kind::System { crate::ai::system_folder().unwrap_or_else(|_| home.clone()) } else { home.clone() };
+                        let cwd = if !p.kind.managed() { crate::ai::system_folder().unwrap_or_else(|_| home.clone()) } else { home.clone() };
                         crate::ai::without_policy(&let_go, || crate::ai::unreadable(&p, &cwd))
                     })
                     .map(|(file, choice)| json!({"file": file, "choice": choice}));
@@ -928,7 +927,8 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         }
     };
     let profile = ready.profile();
-    let model = profile.notes_model();
+    let model = crate::jobs::model_for("minutes", profile).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
+    crate::jobs::ran("minutes");
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     // The template this run follows, named on the minutes it writes.
     let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
@@ -936,7 +936,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     r.model = Some(label.clone());
     save(dir, &r);
     let _local_turn = if profile.kind.gated() {
-        match wait_for_local_model(&call_stamp, dir, &mut r, &profile.name, profile.kind == crate::ai::Kind::System && !system_runs_locally()) {
+        match wait_for_local_model(&call_stamp, dir, &mut r, &profile.name, !profile.kind.managed() && !system_runs_locally()) {
             Ok(lock) => Some(lock),
             Err(_) if r.auto && quitting() => {
                 withdraw(&calls::by_stamp(&call_stamp).unwrap_or_else(|| dir.to_path_buf()));
@@ -973,7 +973,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     };
     // `system` runs where it is set up (that folder's `.claude/settings.json` may route it), never
     // elsewhere; the others load no project settings.
-    let cwd = if profile.kind == crate::ai::Kind::System {
+    let cwd = if !profile.kind.managed() {
         match crate::ai::system_folder() {
             Ok(d) => d,
             Err(e) => return fail(&mut r, format!("{e:#}")),
@@ -1509,7 +1509,9 @@ mod tests {
         assert_eq!(k("project create Another"), Some("change"));
         assert_eq!(k("deliver send --title x"), Some("send"));
         assert_eq!(k("plugin script kit staffing scripts/read.sh -- ACME-1"), Some("change"));
-        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events"] {
+        assert_eq!(k("dashboard add-preset acme-crm staffing"), Some("change"));
+        assert_eq!(k("dashboard import staffing.json --client"), Some("change"));
+        for read in ["project ledger pilot tree", "project work pilot", "project show pilot", "status", "read echo://task/pilot/T001", "client list", "core --hook", "calendar events", "dashboard list --client", "dashboard presets --thread", "dashboard export staffing --client"] {
             assert_eq!(k(read), None, "{read}");
         }
         let (_env, root) = crate::paths::testenv::folders("notes-run-actions");
@@ -1854,7 +1856,7 @@ mod tests {
     fn a_run_is_judged_by_how_it_ended() {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
-        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, answered: false, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
@@ -1891,7 +1893,7 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-answered");
         let warn = "[claude-code:unrecognized_model] {\"model\":\"test-model:8b\"}";
-        let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let judge = |answered, result_text| {
             let e = Ended { wrote_notes: false, wrote_actions: false, is_error: true, answered, result_text, err_text: warn, seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
             let mut r = Run::default();
@@ -1954,6 +1956,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn a_debug_build_takes_the_test_delay_in_seconds_and_nothing_else() {
+        let (_env, _) = crate::paths::testenv::folders("notes-auto-delay");
         assert_eq!(test_delay(Some("90")), Some(Duration::from_secs(90)));
         assert_eq!(test_delay(Some(" 5 ")), Some(Duration::from_secs(5)));
         // Unset or not whole seconds: the real 15 minutes.
@@ -1963,7 +1966,10 @@ mod tests {
         assert_eq!(test_delay(Some("-3")), None);
         // The tests never set the variable: auto_due here runs on the real delay.
         if std::env::var_os(TEST_AUTO_DELAY).is_none() {
-            assert_eq!(auto_delay(), AUTO_DELAY);
+            assert_eq!(auto_delay(), Duration::from_secs(15 * 60));
+            // The minutes job's delay, when the user set one.
+            crate::jobs::set("minutes", &["delay=3".into()]).unwrap();
+            assert_eq!(auto_delay(), Duration::from_secs(180));
         }
     }
 
@@ -2271,7 +2277,7 @@ mod tests {
             stopped: Some("Claude Code 2.1.200 is too old for minutes runs"),
         };
         let mut r = Run::default();
-        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         conclude(&mut r, &p, &e, "C · sonnet", "sonnet");
         assert_eq!(r.state, "failed");
         assert!(r.message.unwrap().contains("too old"));

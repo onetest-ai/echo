@@ -16,6 +16,7 @@ mod calls_week;
 mod announce;
 mod call_language;
 mod config;
+mod jobs;
 mod deliver;
 mod m365;
 mod memo;
@@ -114,6 +115,14 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum JobsCmd {
+    /// Every job, its settings (value and default), last run and runs today, and the night (JSON)
+    List,
+    /// Tune a job (`echoctl jobs` lists their keys): key=value …, key= for its default; `night from=HH:MM to=HH:MM`
+    Set { job: String, settings: Vec<String> },
+}
+
+#[derive(Subcommand)]
 enum Cmd {
     /// What waits for your decision (the window's Needs you), and what was done this week (JSON)
     Attention,
@@ -203,6 +212,12 @@ enum Cmd {
     Ai {
         #[command(subcommand)]
         cmd: Option<cli::app::AiCmd>,
+    },
+    /// Echo's own background jobs: list them (JSON), or tune one — how often it runs, its night pause, its model:
+    /// `echoctl jobs set needs every=10 night=off model=haiku` (`key=` its default), `echoctl jobs set night from=22:30 to=07:00`
+    Jobs {
+        #[command(subcommand)]
+        cmd: Option<JobsCmd>,
     },
     /// Live notes during a call: ask a question, pause or resume them, show them (JSON)
     Live {
@@ -472,6 +487,19 @@ enum Cmd {
     /// Echo started (`guard.rs`); exit 2 refuses the call
     #[command(hide = true)]
     RunGuard,
+    /// (internal) A run on a wrapper profile: Echo's own checks between the run and the wrapper (`ai::wrapper`)
+    #[command(hide = true, name = "wrapper-run")]
+    WrapperRun {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// (internal) The proof's hooks of a run on a wrapper profile (`ai::wrapper`): hello at its start, the gate before
+    /// each tool call
+    #[command(hide = true)]
+    Proof {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
     #[command(hide = true)]
     ViewHook,
@@ -712,6 +740,8 @@ fn main() -> Result<()> {
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
         Cmd::RunGuard => std::process::exit(guard::command()),
+        Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
+        Cmd::Proof { args } => std::process::exit(ai::wrapper::proof_command(&args)),
         Cmd::ViewHook => std::process::exit(view::hook()),
         Cmd::OnedriveHook => std::process::exit(onedrive::hook()),
         #[cfg(feature = "transcribe")]
@@ -821,6 +851,14 @@ fn main() -> Result<()> {
         Cmd::Calendar { cmd } => cli::calendar::calendar(cmd),
         Cmd::Notes { call, wait, auto, session: _, profile, without_policy } => cli::calls::notes(call, wait, auto, profile, without_policy),
         Cmd::Ai { cmd } => cli::app::ai(cmd),
+        Cmd::Jobs { cmd } => {
+            let v = match cmd {
+                None | Some(JobsCmd::List) => jobs::list(),
+                Some(JobsCmd::Set { job, settings }) => jobs::set(&job, &settings)?,
+            };
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            Ok(())
+        }
         Cmd::Live { cmd } => cli::capture::live(cmd),
         Cmd::Prep { call, upcoming, show, write } => cli::calendar::prep(call, upcoming, show, write),
         Cmd::Pending { session } => calls::pending(session.as_deref()),

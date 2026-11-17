@@ -10,7 +10,6 @@
 //! The user decides: I'll do it (a task of theirs in a thread) or Won't do (gone, with the user's comment; Claude notes
 //! who it's for in the background — `today::wont_do`). `<home>/.echo/needs.json`.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -201,7 +200,7 @@ fn mail_tagged(since: DateTime<Utc>) -> Result<Vec<Value>> {
 
 /// Hot in the meeting chats of open threads: a burst or words of urgency since the user's last word, confirmed by a
 /// model (cached by its last message: asked once).
-fn hot(me: &str, since: DateTime<Utc>, asked: &mut serde_json::Map<String, Value>) -> Vec<Value> {
+fn hot(me: &str, since: DateTime<Utc>, asked: &mut Asked) -> Vec<Value> {
     let mut out = vec![];
     for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed()) {
         for s in p.sources.iter().filter(|s| s.kind == "teams_chat") {
@@ -224,7 +223,7 @@ fn hot(me: &str, since: DateTime<Utc>, asked: &mut serde_json::Map<String, Value
             let last_id = after.last().and_then(|m| m["id"].as_str()).unwrap_or("").to_string();
             let key = format!("{}:{last_id}", s.id);
             let verdict = match asked.get(&key) {
-                Some(v) => v.clone(),
+                Some(v) => v,
                 None => {
                     let v = confirm(&p, &texts).unwrap_or_else(|e| json!({"hot": false, "error": format!("{e:#}")}));
                     asked.insert(key.clone(), v.clone());
@@ -252,12 +251,12 @@ only: {\"keep\": [numbers of those that wait on them]}";
 
 /// Of the tagged items, those that wait on the user (one model call for all, no tools, the default profile; cached by
 /// item and its words). Unreadable or failed: all kept — better one too many than a question missed.
-fn waiting_on_me(items: Vec<Value>, asked: &mut serde_json::Map<String, Value>) -> Vec<Value> {
+fn waiting_on_me(items: Vec<Value>, asked: &mut Asked) -> Vec<Value> {
     let key = |x: &Value| format!("ask:{}:{}", x["id"].as_str().unwrap_or(""), x["line"].as_str().unwrap_or("").chars().take(60).collect::<String>());
-    let fresh: Vec<&Value> = items.iter().filter(|x| !asked.contains_key(&key(x))).collect();
+    let fresh: Vec<&Value> = items.iter().filter(|x| asked.get(&key(x)).is_none()).collect();
     if !fresh.is_empty() {
         let list: String = fresh.iter().enumerate().map(|(i, x)| format!("{}. from {} ({}): {}\n", i + 1, x["from"].as_str().unwrap_or("someone"), x["where"].as_str().unwrap_or(""), x["line"].as_str().unwrap_or(""))).collect();
-        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), ASKS_SYSTEM, &list, 200));
+        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_on(r.profile(), &needs_model(r.profile()), ASKS_SYSTEM, &list, 200));
         let keep: Option<Vec<u64>> = answer.ok().and_then(|t| {
             let v = crate::livenotes::json_answer(&t)?;
             Some(v["keep"].as_array()?.iter().filter_map(Value::as_u64).collect())
@@ -268,7 +267,7 @@ fn waiting_on_me(items: Vec<Value>, asked: &mut serde_json::Map<String, Value>) 
             }
         }
     }
-    items.into_iter().filter(|x| asked.get(&key(x)).and_then(Value::as_bool).unwrap_or(true)).collect()
+    items.into_iter().filter(|x| asked.get(&key(x)).and_then(|v| v.as_bool()).unwrap_or(true)).collect()
 }
 
 const HOT_SYSTEM: &str = "You look at the latest messages of a work chat for a busy person and say whether something \
@@ -282,7 +281,7 @@ fn confirm(p: &crate::projects::Project, texts: &[(String, String)]) -> Result<V
     let profile = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
     let ready = crate::ai::ready(&profile)?;
     let body: String = texts.iter().rev().take(15).rev().map(|(a, t)| format!("{a}: {}\n", t.chars().take(400).collect::<String>())).collect();
-    let answer = crate::livenotes::complete_text(ready.profile(), HOT_SYSTEM, &body, 300)?;
+    let answer = crate::livenotes::complete_on(ready.profile(), &needs_model(ready.profile()), HOT_SYSTEM, &body, 300)?;
     let v = crate::livenotes::json_answer(&answer).ok_or_else(|| anyhow!("the answer couldn't be read"))?;
     let quote = v["quote"].as_str().unwrap_or("").trim().to_string();
     let quoted = !quote.is_empty() && texts.iter().any(|(_, t)| t.contains(&quote));
@@ -316,19 +315,49 @@ pub fn refresh() -> Result<()> {
     r
 }
 
-/// A read: what was asked of the model so far in, `read` (slow: Teams, mail, the model) out, then only what it found
-/// kept (`keep_read`, under the lock) — never a copy of the file from before the read.
-fn read_and_keep(read: impl FnOnce(&mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>)) -> Result<()> {
-    let mut asked = load()["asked"].as_object().cloned().unwrap_or_default();
-    let (items, errors) = read(&mut asked);
-    if asked.len() > 200 {
-        let keep: BTreeMap<String, Value> = asked.into_iter().rev().take(200).collect();
-        asked = keep.into_iter().collect();
-    }
-    keep_read(items, asked, errors)
+/// The model's answers a read may reuse: those kept from the reads before (`old`), and those this read used or got
+/// (`now`) — the only ones kept after it, so an answer still needed is never dropped and asked again.
+#[derive(Default)]
+struct Asked {
+    old: serde_json::Map<String, Value>,
+    now: serde_json::Map<String, Value>,
 }
 
-fn read_graph(me: &str, since: DateTime<Utc>, asked: &mut serde_json::Map<String, Value>) -> (Vec<Value>, Vec<String>) {
+impl Asked {
+    fn get(&mut self, key: &str) -> Option<Value> {
+        if let Some(v) = self.now.get(key) {
+            return Some(v.clone());
+        }
+        let v = self.old.get(key)?.clone();
+        self.now.insert(key.to_string(), v.clone());
+        Some(v)
+    }
+
+    fn insert(&mut self, key: String, v: Value) {
+        self.now.insert(key, v);
+    }
+}
+
+/// A read: what was asked of the model so far in, `read` (slow: Teams, mail, the model) out, then only what it found
+/// kept (`keep_read`, under the lock) — never a copy of the file from before the read. The answers kept: every one this
+/// read used, then earlier ones (a chat it couldn't read this time may be back) while fewer than `ASKED_MAX` are kept.
+fn read_and_keep(read: impl FnOnce(&mut Asked) -> (Vec<Value>, Vec<String>)) -> Result<()> {
+    let mut asked = Asked { old: load()["asked"].as_object().cloned().unwrap_or_default(), now: serde_json::Map::new() };
+    let (items, errors) = read(&mut asked);
+    let Asked { old, mut now } = asked;
+    for (k, v) in old {
+        if now.len() >= ASKED_MAX {
+            break;
+        }
+        now.entry(k).or_insert(v);
+    }
+    keep_read(items, now, errors)
+}
+
+/// How many of the model's answers `needs.json` keeps at most, beyond those the last read used.
+const ASKED_MAX: usize = 500;
+
+fn read_graph(me: &str, since: DateTime<Utc>, asked: &mut Asked) -> (Vec<Value>, Vec<String>) {
     let mut tagged = vec![];
     let mut errors = vec![];
     match teams_tagged(me, since) {
@@ -430,16 +459,25 @@ fn id_of(e: Value) -> Result<String> {
     e["id"].as_str().map(str::to_owned).ok_or_else(|| anyhow!("the ledger didn't give an id"))
 }
 
-/// The app: every 5 minutes, Needs you now read again.
+/// The model Needs you now asks: the one its job settings name, else the profile's live model (haiku by default).
+fn needs_model(p: &crate::ai::Profile) -> String {
+    crate::jobs::model_for("needs", p).unwrap_or_else(|| p.live_model())
+}
+
+/// The app: Needs you now read again as often as its job settings say (5 minutes by default), not at night unless
+/// they say so.
 pub fn start_scheduler() {
-    std::thread::spawn(|| loop {
+    std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(45));
-        if !crate::notes::quitting() {
-            if let Err(e) = refresh() {
-                eprintln!("needs you now: {e:#}");
+        loop {
+            if !crate::notes::quitting() && !crate::jobs::paused("needs", chrono::Local::now().time()) {
+                match refresh() {
+                    Ok(()) => crate::jobs::ran("needs"),
+                    Err(e) => eprintln!("needs you now: {e:#}"),
+                }
             }
+            std::thread::sleep(std::time::Duration::from_secs(crate::jobs::number("needs", "every") * 60));
         }
-        std::thread::sleep(std::time::Duration::from_secs(255));
     });
 }
 
@@ -494,6 +532,57 @@ mod tests {
         assert_eq!(load()["decided"]["mail:c1"]["how"], "ignore", "the read keeps the decision made meanwhile");
         assert!(view()["items"].as_array().unwrap().is_empty(), "ignored: off Needs you now, though the read found it again");
         assert!(load()["decided"]["mail:c1"].get("note").is_none(), "nothing else kept: no comment, no task");
+    }
+
+    #[test]
+    fn an_answer_still_needed_is_kept_and_never_asked_again() {
+        let (_env, _) = paths::testenv::folders("needs-asked");
+        // More answers kept than the cap, the ones still needed sorting first.
+        let mut old: serde_json::Map<String, Value> = (0..ASKED_MAX + 100).map(|i| (format!("ask:mail:z{i:03}:Old"), json!(false))).collect();
+        old.insert("19:chat:m1".into(), json!({"hot": false}));
+        old.insert("ask:mail:a1:Budget".into(), json!(true));
+        save(&json!({"asked": old})).unwrap();
+        read_and_keep(|asked| {
+            assert_eq!(asked.get("ask:mail:a1:Budget"), Some(json!(true)));
+            assert_eq!(asked.get("19:chat:m1"), Some(json!({"hot": false})));
+            asked.insert("ask:mail:b2:New".into(), json!(false));
+            (vec![], vec![])
+        })
+        .unwrap();
+        let kept = load()["asked"].as_object().unwrap().clone();
+        assert_eq!(kept.len(), ASKED_MAX, "earlier answers only fill up to the cap");
+        for k in ["19:chat:m1", "ask:mail:a1:Budget", "ask:mail:b2:New"] {
+            assert!(kept.contains_key(k), "{k}: used by the read, kept whatever its key");
+        }
+        // More used than the cap: all of them kept, no earlier ones.
+        read_and_keep(|asked| {
+            for i in 0..ASKED_MAX + 10 {
+                asked.insert(format!("ask:teams:{i}"), json!(true));
+            }
+            (vec![], vec![])
+        })
+        .unwrap();
+        let kept = load()["asked"].as_object().unwrap().clone();
+        assert_eq!(kept.len(), ASKED_MAX + 10);
+        assert!(kept.keys().all(|k| k.starts_with("ask:teams:")));
+    }
+
+    /// Needs you now asks the model all day: on the profile's live model (haiku by default), never its minutes model.
+    #[cfg(unix)]
+    #[test]
+    fn the_checks_run_on_the_profiles_live_model() {
+        let (_env, root) = paths::testenv::folders("needs-model");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        assert_ne!(p.live_model(), p.notes_model().unwrap_or_default(), "the fake's two models differ");
+        let _ = crate::livenotes::complete_on(&p, &needs_model(&p), HOT_SYSTEM, "Dana: the site is down", 300);
+        let args: Vec<String> = std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap_or_default().split('\0').map(str::to_owned).collect();
+        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == p.live_model()), "{args:?}");
+        // Its job settings' model, when the user set one.
+        crate::jobs::set("needs", &["model=opus".into()]).unwrap();
+        let _ = crate::livenotes::complete_on(&p, &needs_model(&p), HOT_SYSTEM, "Dana: the site is down", 300);
+        let args: Vec<String> = std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap_or_default().split('\0').map(str::to_owned).collect();
+        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "opus"), "{args:?}");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 ---
-id: TC-054
+id: TC-060
 title: Knowledge's installed client preserves native permissions, state and lifecycle
 priority: critical
 type: functional
@@ -20,6 +20,7 @@ Build this Echo checkout. In the echo-plugins checkout run `ECHO_REPO=<this Echo
 | Inspect the install sheet and open `#kn/acme-knowledge/home`. | The sheet names native vault edits/imports/guarded runs; all seven tabs load from `/plugin/knowledge/`. |
 | Read/edit/search a page, inspect a graph, send to fake Claude and prepare/review synthetic ingest changes. | Existing native behavior and profile/approval boundaries hold; no page script errors. The plugin cases TC-001 and TC-002 provide the detailed journey. |
 | Use the installed agent command to read a vault page and try direct/encoded mail, calls, preview, jobs and resume views. | Vault reads work; UI-only routes are refused before dispatch. Native human UI pickers remain usable. |
+| Configure a synthetic local profile with a model alias, then inspect fake Ask, Ingest/Health and vault-terminal arguments. | The selected provider model name is used; wrapper Ask arguments contain no user message or vault name, and wrapper terminals carry Echo's session proof. |
 | Inspect the thread/client choices and hand a synthetic prompt to a vault terminal. | Only label fields reach the client; vault-keyed input reaches its current live terminal and raw terminal IDs are refused. |
 | Make a draft, keep a fake conversation live, then disable Knowledge through the test CLI. | The view offers installing/enabling Knowledge, its stylesheet/listeners are removed, and native vault jobs/terminals stop in the running process. |
 | Request `/api/kn-plugin/knowledge/read?path=api%2Fkn` while disabled. | The service returns an error saying the plugin is not enabled. A plugin without `uses.knowledge` is also refused. |

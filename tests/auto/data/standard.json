@@ -214,13 +214,14 @@
       "Memo"
     ],
     "read": "Acme security review",
-    "message": "Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner.\nVerify (virtual model): 3 supports.\nPeople (virtual model): proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.",
+    "message": "Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\nVerify: 3 supports.",
     "runFiles": [
       "log.txt",
       "{evid}.json",
       "packets.json",
       "verdicts.json",
-      "{evid}_people.json"
+      "{evid}_people.json",
+      "people-applied.txt"
     ],
     "created": [
       {
@@ -252,37 +253,31 @@
       "to": "Priya"
     },
     "turns": [
-      8,
-      5,
-      4
+      4,
+      1
     ],
     "tools": [
-      "Bash",
-      "Edit",
-      "Glob",
-      "Grep",
-      "Read",
-      "Skill",
-      "Write"
+      [
+        "Bash",
+        "Write"
+      ],
+      []
     ],
     "prompts": [
       [
-        "/echo:project-sync",
-        "Mode: extract. Evidence ids, strictly in this order:",
-        "nobody is watching it",
-        "/ledger/runs/"
+        "Items to read for the work and people, strictly in this order:",
+        "/ledger/runs/",
+        "## The thread's work (`context`)",
+        "## The thread's people (`people-context`)",
+        "the budget for the second phase is not approved yet"
       ],
       [
-        "Mode: verify."
-      ],
-      [
-        "Mode: people. Evidence ids:"
+        "Judge these 3 packets."
       ]
     ],
     "notToVerifier": "Nominate two help desk observers",
     "extractResults": [
-      false,
-      false,
+      true,
       true,
       false,
       false,
@@ -292,11 +287,18 @@
     "log": {
       "first": "Echo syncs Acme rollout (acme-rollout) on Virtual model, model virtual",
       "started": "Claude Code started · model virtual",
-      "runs": 3,
+      "runs": 2,
       "own": "echoctl project ledger acme-rollout ",
       "other": "echoctl project ledger globex-pilot context",
-      "refusal": "Echo's project sync: only `echoctl project ledger acme-rollout <pending|context|apply|done|verify-prep|verify-apply|people-context|people-apply>` runs here",
-      "notAllowed": "globex-pilot context"
+      "refusal": "Echo's project sync: only `echoctl project ledger acme-rollout <apply|done|people-apply>` runs here",
+      "notAllowed": [
+        "globex-pilot context",
+        "acme-rollout context"
+      ],
+      "refusals": [
+        "echoctl project ledger globex-pilot context",
+        "echoctl project ledger acme-rollout context"
+      ]
     },
     "person": {
       "name": "Priya Nair",
@@ -314,7 +316,26 @@
       "risk": "R",
       "task": "T"
     },
-    "state": "done"
+    "state": "done",
+    "systems": [
+      [
+        "# Echo: a thread's sync — extract",
+        "nobody is watching it",
+        "Pass 1 — the tree moves",
+        "## What to propose (`field`)"
+      ],
+      [
+        "# Echo: a thread's sync — verify",
+        "One thread at a time"
+      ]
+    ],
+    "systemHasNot": [
+      "Acme"
+    ],
+    "passes": [
+      "extract",
+      "verify"
+    ]
   },
   "s25": {
     "counts": [
@@ -4090,6 +4111,7 @@
       "last": "help",
       "project": [
         "list",
+        "sync-stats",
         "show",
         "create",
         "set",
@@ -4324,7 +4346,8 @@
         "Summary",
         "Decisions",
         "Action items",
-        "Open questions"
+        "Open questions",
+        "Appendix: On screen"
       ],
       "thread": {
         "link": "echo://thread/acme-rollout",
@@ -4663,6 +4686,7 @@
         "notes",
         "pending",
         "processed",
+        "proposals",
         "roots"
       ],
       "merge": {
@@ -4876,7 +4900,8 @@
         "Summary",
         "Decisions",
         "Action items",
-        "Open questions"
+        "Open questions",
+        "Appendix: On screen"
       ]
     },
     "kickoff": {

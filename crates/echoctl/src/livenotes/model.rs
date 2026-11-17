@@ -10,7 +10,7 @@ use super::*;
 pub(super) fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     match p.kind {
         Kind::Local => complete_local(p, system, user, max_tokens, whole, cancelled),
-        Kind::System | Kind::Claude => complete_claude(p, &p.live_model(), system, user, whole, CLAUDE_DEADLINE, cancelled),
+        Kind::System | Kind::Claude | Kind::Wrapper => complete_claude(p, &live_model_of(p), system, user, whole, CLAUDE_DEADLINE, cancelled),
     }
 }
 
@@ -29,8 +29,23 @@ pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u
     let model = text_model(p);
     match p.kind {
         Kind::Local => complete_local_body(p, &model, system, json!(user), max_tokens, true, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting()),
+        Kind::System | Kind::Claude | Kind::Wrapper => complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting()),
     }
+}
+
+/// One prompt, one answer, no tools, on `model` (one of Claude's names the profile maps, or its provider's own): a
+/// background job's, on the model its settings chose (`jobs::model`) or its own default.
+pub(crate) fn complete_on(p: &Profile, model: &str, system: &str, user: &str, max_tokens: u32) -> Result<String> {
+    let model = model.to_string();
+    match p.kind {
+        Kind::Local => complete_local_body(p, &model, system, json!(user), max_tokens, true, &|| crate::notes::quitting()),
+        Kind::System | Kind::Claude | Kind::Wrapper => complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting()),
+    }
+}
+
+/// The model background job `job` asks `p` for: its job settings' (`jobs::model`), else `text_model(p)`.
+pub(crate) fn job_model(p: &Profile, job: &str) -> String {
+    crate::jobs::model_for(job, p).unwrap_or_else(|| text_model(p))
 }
 
 /// The model a one-shot job runs on — what it records (#294). A local profile: its live model, the one already loaded
@@ -39,7 +54,7 @@ pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u
 pub(crate) fn text_model(p: &Profile) -> String {
     match p.kind {
         Kind::Local => p.live_model(),
-        Kind::System | Kind::Claude => p.notes_model().unwrap_or_else(|| "sonnet".into()),
+        Kind::System | Kind::Claude | Kind::Wrapper => p.notes_model().unwrap_or_else(|| "sonnet".into()),
     }
 }
 
@@ -56,7 +71,7 @@ pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], tex
     let blocks = Value::Array(blocks);
     match p.kind {
         Kind::Local => complete_local_body(p, &p.live_model(), system, blocks, max_tokens, true, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude => {
+        Kind::System | Kind::Claude | Kind::Wrapper => {
             let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
             crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
         }
@@ -99,12 +114,12 @@ pub(crate) fn last_line(s: &str) -> String {
 /// `.curlrc` isn't read (it could turn on following redirects); no `-L`: redirects aren't followed.
 /// Live notes on a local profile: its live model.
 pub(super) fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_local_body(p, &p.live_model(), system, json!(user), max_tokens, whole, cancelled)
+    complete_local_body(p, &live_model_of(p), system, json!(user), max_tokens, whole, cancelled)
 }
 
 pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let body = json!({
-        "model": model,
+        "model": p.model(model),
         "max_tokens": max_tokens,
         "thinking": {"type": "disabled"},
         "system": system,

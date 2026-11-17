@@ -107,6 +107,9 @@ impl Spec {
         }
         let minutes = v["timeout"].as_u64().unwrap_or(20).clamp(1, 60);
         let tools = Tools::parse(&s("tools"))?;
+        if !s("profile").is_empty() {
+            crate::ai::plugin_may_name(&crate::ai::Settings::load()?, &s("profile"), None)?;
+        }
         Ok(Spec {
             title: Some(s("title")).filter(|t| !t.is_empty()).unwrap_or_else(|| "a plugin's run".into()),
             prompt,
@@ -167,11 +170,11 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let profile_id = if spec.profile.is_empty() { crate::ai::default_id() } else { spec.profile.clone() };
     let ready = crate::ai::ready(&profile_id)?;
     let profile = ready.profile();
-    let model = Some(spec.model.clone()).filter(|m| !m.is_empty()).or_else(|| profile.notes_model());
+    let model = Some(spec.model.clone()).filter(|m| !m.is_empty()).or_else(|| profile.notes_model()).map(|m| profile.model(&m));
     let plugin = notes::plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
     let home = dunce::canonicalize(paths::home())?;
     // A session-like run starts in the data folder, as the folder session does: `.plugins/<id>/` loads from there.
-    let cwd = if spec.session || profile.kind != crate::ai::Kind::System { home.clone() } else { crate::ai::system_folder()? };
+    let cwd = if spec.session || profile.kind.managed() { home.clone() } else { crate::ai::system_folder()? };
     let clis = notes::run_clis(&plugin);
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.
@@ -309,6 +312,13 @@ mod tests {
         assert_eq!(file("p.cwd").trim(), home.display().to_string());
         assert!(routine.windows(2).any(|w| w[0] == "--model" && w[1] == "opus-test"), "{routine:?}");
         assert!(fs::read_to_string(root.join("store/runs/r1/log.txt")).unwrap().contains(", model opus-test (asked: read permissions"));
+        // The profile's own model for a Claude name: what the run asks for, and what its log says.
+        crate::ai::set_model_names("work", &["opus=acme-gw/opus-large".into()]).unwrap();
+        let spec = Spec::from_value(&serde_json::json!({"prompt": "List what changed", "tools": "read", "profile": "work", "model": "opus", "dir": "runs/r1b"}), &root.join("store")).unwrap();
+        let _ = run(&spec);
+        assert!(lines("p.args").windows(2).any(|w| w[0] == "--model" && w[1] == "acme-gw/opus-large"), "{:?}", lines("p.args"));
+        assert!(fs::read_to_string(root.join("store/runs/r1b/log.txt")).unwrap().contains(", model acme-gw/opus-large"));
+        crate::ai::set_model_names("work", &["opus=".into()]).unwrap();
         let _ = model;
         assert!(!routine.contains(&"--tools".to_string()) && !routine.contains(&"--dangerously-skip-permissions".to_string()), "{routine:?}");
         // Echo's reads and its own data's edits without a prompt; never a send.
@@ -367,5 +377,16 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
         assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions" || a == "--settings" || a == "--plugin-dir"), "{args:?}");
         set_acts(false);
+    }
+
+    #[test]
+    fn a_plugins_run_cant_choose_a_wrapper_profile_that_isnt_the_users_default() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-wrapper");
+        std::fs::create_dir_all(crate::paths::config_dir()).unwrap();
+        std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
+        let e = Spec::from_value(&serde_json::json!({"prompt": "x", "profile": "acme"}), &root.join("store")).unwrap_err();
+        assert!(e.to_string().contains("can't choose the wrapper profile"), "{e}");
+        std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"default":"acme","profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
+        assert!(Spec::from_value(&serde_json::json!({"prompt": "x", "profile": "acme"}), &root.join("store")).is_ok(), "the user's default");
     }
 }

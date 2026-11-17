@@ -35,7 +35,7 @@ auto: [tests/auto/specs/S-28.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `target/debug/echoctl read "echo://call/$A?t=40"` | Exit code 0; Markdown starting "# Call: Acme weekly sync — <today> <HH:MM>"; a section "## Said around 00:40 (±90 s)" whose lines start `[00:05] Me:`, `[00:17] Dana Lee:`, `[00:29] Omar Haddad:`, `[00:43] Dana Lee:` … up to `[02:03] Omar Haddad:`; then "## Minutes" with "# Acme weekly sync" and the sections Summary, Decisions, Action items, Open questions |
+| 1 | Run `target/debug/echoctl read "echo://call/$A?t=40"` | Exit code 0; Markdown starting "# Call: Acme weekly sync — <today> <HH:MM>"; a section "## Said around 00:40 (±90 s)" whose lines start `[00:05] Me:`, `[00:17] Dana Lee:`, `[00:29] Omar Haddad:`, `[00:43] Dana Lee:` … up to `[02:03] Omar Haddad:`; then "## Minutes" with "# Acme weekly sync" and the sections Summary, Decisions, Action items, Open questions, Appendix: On screen |
 | 2 | Run `target/debug/echoctl read "echo://call/$A"` (no moment) | No "Said around" section; "## Minutes" follows the title line |
 | 3 | Run `target/debug/echoctl read echo://thread/acme-rollout` | Starts "# Thread Acme rollout — client Acme (echo://client/acme), stage Active"; sections "## What it is" (the brief: "Rolling out **single sign-on** and the data migration for Acme, Berlin first."), "## People" (first line "- [Dana Lee](echo://person/dana@acme.example) (Acme): delivery lead") and "## Calls" with 6 lines, each an `echo://call/…` link |
 | 4 | Run `target/debug/echoctl read echo://client/acme` | Starts "# Acme — client, acme.example"; "## Threads" lists Acme hackathon — Cancelled, Acme renewal — Negotiation, Acme rollout — Active, each with its `echo://thread/…` link; then "## About" |

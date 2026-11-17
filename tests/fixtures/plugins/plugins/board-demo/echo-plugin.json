@@ -1,0 +1,127 @@
+{
+  "id": "board-demo",
+  "name": "Board Demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: dashboards it offers ready-made, a client's and a pursuit thread's and a team table longer than its card (tests/cases/plugins/TC-056, TC-057, TC-058; today/TC-052).",
+  "main": "main.js",
+  "widgets": [
+    {
+      "id": "glance",
+      "label": "Team glance",
+      "about": "how many people work for the client",
+      "kind": "stat",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "params": [
+        {
+          "key": "client",
+          "label": "Client",
+          "type": "client"
+        }
+      ]
+    },
+    {
+      "id": "people",
+      "label": "People",
+      "about": "who works for the client",
+      "kind": "list",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "params": [
+        {
+          "key": "client",
+          "label": "Client",
+          "type": "client"
+        },
+        {
+          "key": "order",
+          "label": "Order",
+          "type": "choice",
+          "options": [
+            "name",
+            "role"
+          ],
+          "default": "name"
+        }
+      ]
+    },
+    {
+      "id": "pipe",
+      "label": "Pursuit steps",
+      "about": "the thread's next steps",
+      "kind": "list",
+      "sizes": [
+        "M"
+      ],
+      "params": [
+        {
+          "key": "thread",
+          "label": "Thread",
+          "type": "thread"
+        }
+      ]
+    },
+    {
+      "id": "team",
+      "label": "Team",
+      "about": "everyone working for the client",
+      "kind": "table",
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "heights": [
+        1,
+        2
+      ],
+      "params": [
+        {
+          "key": "client",
+          "label": "Client",
+          "type": "client"
+        }
+      ]
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "staffing",
+      "kind": "client",
+      "name": "Staffing",
+      "about": "Who works for the client, at a glance",
+      "items": [
+        {
+          "widget": "glance",
+          "size": "L"
+        },
+        {
+          "widget": "people",
+          "size": "M",
+          "row": true,
+          "params": {
+            "order": "role"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pursuit",
+      "kind": "thread",
+      "name": "Pursuit",
+      "about": "A pursuit's next steps",
+      "for": [
+        "pursuit"
+      ],
+      "items": [
+        {
+          "widget": "pipe",
+          "size": "M"
+        }
+      ]
+    }
+  ]
+}

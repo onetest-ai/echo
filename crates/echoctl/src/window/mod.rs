@@ -34,7 +34,7 @@ mod settings;
 mod threads;
 mod today;
 mod plugins;
-mod terminals;
+pub(crate) mod terminals;
 #[cfg(feature = "brain")]
 mod brain;
 

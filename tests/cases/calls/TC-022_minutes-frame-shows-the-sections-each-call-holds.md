@@ -24,7 +24,7 @@ auto: [tests/auto/specs/S-23.spec.mjs]
 
 | Call | Sections in the frame (headings) |
 |---|---|
-| Acme weekly sync (Today) | Summary, Decisions, Action items, Open questions |
+| Acme weekly sync (Today) | Summary, Decisions, Action items, Open questions, Appendix: On screen |
 | Globex steering (imported) | Summary, Decisions |
 | Memo | Summary |
 | Globex pilot kickoff | Summary, Action items |
@@ -33,7 +33,7 @@ auto: [tests/auto/specs/S-23.spec.mjs]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Acme weekly sync, then the tab "Minutes" | `iframe#minutes-frame` is shown; its content (accessibility snapshot) has the headings Summary, Decisions, Action items, Open questions; no bar above it |
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Acme weekly sync, then the tab "Minutes" | `iframe#minutes-frame` is shown; its content (accessibility snapshot) has the headings Summary, Decisions, Action items, Open questions, Appendix: On screen; no bar above it |
 | 2 | Click the row Globex steering | The frame has Summary and Decisions; no Action items, no Open questions |
 | 3 | Click the row Memo | The frame has Summary only |
 | 4 | Click the row Globex pilot kickoff | The frame has Summary and Action items |

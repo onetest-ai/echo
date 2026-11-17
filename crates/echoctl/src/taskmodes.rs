@@ -162,7 +162,7 @@ pub fn classify() -> Result<usize> {
                 ));
             }
             // No answer (no AI ready, the network, an answer that can't be read): tried today, asked again tomorrow.
-            let answer = crate::livenotes::complete_text(ready.profile(), SYSTEM, &format!("Thread: {}\nSkills:\n{skill_list}\nTasks:\n{list}", thread.name), 3000);
+            let answer = crate::livenotes::complete_on(ready.profile(), &crate::livenotes::job_model(ready.profile(), "prep"), SYSTEM, &format!("Thread: {}\nSkills:\n{skill_list}\nTasks:\n{list}", thread.name), 3000);
             let got: Vec<Value> = answer.ok().and_then(|a| crate::livenotes::json_answer(&a)).and_then(|v| v["tasks"].as_array().cloned()).unwrap_or_default();
             n += crate::calls::update_state(&file(), |all: &mut Map<String, Value>| {
                 let mut n = 0;

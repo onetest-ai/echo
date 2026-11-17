@@ -343,6 +343,52 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-37",
+   "feature": "A plugin moves a thread's stage (`ctx.threads.setStage(thread, stage, reason)`, `uses.echo.write: thread_stage`; the sheet: 'Changes your threads' stage') — the stage history keeps its name and reason, the thread's Profile says 'set by <plugin>: <reason>'; `ctx.echo.read('threads')` gives each open thread's stage and group (the sheet: 'your threads' names and stages'). Once the user changes the stage away from what that plugin last set (a stage set before its first write doesn't count) its later writes answer `{applied: false, why}` and change nothing, until the user lets it set the stage again (the Profile's 'Let <plugin> set it again', `echoctl project set <id> --stage-back-to <plugin>`); another plugin is not held. Refused without the sheet's line, while Claude prepares and asks, and in a Yolo run on another thread; an update adding it asks again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-38",
+   "feature": "A plugin keeps its own tasks in a thread by its key (`ctx.tasks.upsert(thread, {key, title, due?, owner?, state?, url?, reason?, propose?})`, `ctx.tasks.close(thread, key, reason, {propose})`, `uses.echo.write: tasks`; the sheet: 'Adds and updates tasks in your threads'): in a story named after the plugin in the thread's first workstream, its link 'From ↗ <plugin>', each write in the task's History as the plugin's ('<plugin> created it — <reason>', '<plugin>: done — <reason>'); the same values again write nothing; a field the user set, or a task they closed, deleted or merged, stays theirs (`ignored`, 'kept yours'); it never touches the user's tasks or another plugin's. `propose`: the write waits in the Work tab's To review ('<plugin> suggests a task: …', Yes / No) and Inbox ('<n> to review in <thread>'s work', 'plugin suggestion'), even before the thread has work; after No the same write stays quiet (a change proposes again); a newer proposal of a key replaces the pending one; closing a key never added withdraws its proposal. Refused without the sheet's line, while Claude prepares and asks, and in a Yolo run on another thread",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-39",
+   "feature": "A plugin offers dashboards ready-made (its manifest's `dashboards`: a thread's or a client's, its name, `about`, `for` stage groups, its widgets — its own or `plugin:<id>:<widget>` of its marketplace — with size, height, row and settings): the install sheet says 'Offers dashboards: <name> (clients)…' (not a permission: an update adding one doesn't ask again); the dashboards' '+' shows them under 'From plugins' ('<name> — <plugin>', about as its tooltip; `echoctl dashboard presets --thread|--client`), a click (`echoctl dashboard add-preset <plugin> <id>`) adds it once, opened (on a thread only when it shows there), with its layout — named '<name> 2' when the user has one of that name; the menu is reached by Tab from the name field; one added isn't offered again; Echo never adds one itself; a thread's with `for` shows only on threads of those stage groups. `read_manifest` refuses a preset whose own widget lacks the page's thread / client setting, takes no such size or height, or sets a setting it hasn't (or the page's thread / client); `plugin check` checks its marketplace siblings' widgets when beside it",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-40",
+   "feature": "A dashboard added from a plugin's preset says, quietly under its name, when its plugin's new version changed the preset's widgets or `for` ('<plugin> updated this dashboard', '— Update replaces your changes' only when the user changed it, not when the plugin's widget sizes changed): Update takes the new layout and `for`; Keep mine keeps the user's, that version not offered again (`echoctl dashboard preset-update <id> [--keep]`); its plugin off ('Its plugin, <name>, is off: its widgets show nothing') or removed ('Its plugin was removed: …') — the dashboard stays the user's, with Remove… (asked first); never deleted by Echo",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-41",
+   "feature": "`echoctl dashboard export <id> --thread|--client` prints a dashboard as a preset block (its name, `for`, widgets in full with size, height, row and settings, the page's thread / client settings left out); `echoctl dashboard import <file|-> --thread|--client` adds it as the user's own (Echo's own `core:` widgets kept; refused: a name taken, the other kind, a widget not named in full)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-42",
+   "feature": "A plugin that asks for `uses.echo.jobs` (its own line on the sheet) shows Echo's background jobs in its screens (`ctx.echo.jobs.list`) and changes one only on the user's click or key, through the page's IPC (`ctx.echo.jobs.set`, checked as `echoctl jobs set`; no GET changes a job); a request naming a plugin that didn't ask, or is off, gets an error; Echo's jobs keep their settings with or without it",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

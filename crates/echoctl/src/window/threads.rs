@@ -108,6 +108,10 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
         "stage" => {
             pj::set_stage(&id, Stage::parse(v["stage"].as_str().unwrap_or(""))?, v["reason"].as_str())?;
         }
+        // Let a plugin set the stage again after the user changed it themselves.
+        "stage_back" => {
+            pj::hand_stage_back(&id, v["plugin"].as_str().unwrap_or(""))?;
+        }
         // The Work board's columns, card fields and grouping (null: back to the defaults).
         "board" => {
             let b: Option<pj::Board> = if v["board"].is_null() { None } else { Some(serde_json::from_value(v["board"].clone()).map_err(|e| anyhow::anyhow!("not a board: {e}"))?) };

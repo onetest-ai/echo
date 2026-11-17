@@ -1346,3 +1346,14 @@ fn items_that_leave_for_another_reason_than_an_answer_leave_quietly() {
     let c = crate::attention::collect();
     assert!(c.quiet.contains(&run_key) && c.quiet.contains(&ingest_key));
 }
+
+#[test]
+fn main_refresh_resolves_local_models_for_ingest_and_health() {
+    let (_env, root) = paths::testenv::folders("kn-model-alias");
+    let p: ai::Profile = serde_json::from_value(json!({"id": "local", "name": "Acme local", "kind": "local", "notes_model": "sonnet", "models": {"sonnet": "acme-chat-v2"}})).unwrap();
+    for tools in [TOOLS, "Read,Grep,Glob,Write"] {
+        let a = headless_args(&p, tools, &root.join("settings.json"));
+        let at = a.iter().position(|x| x == "--model").unwrap();
+        assert_eq!(a[at + 1], "acme-chat-v2");
+    }
+}

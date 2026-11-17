@@ -17,7 +17,7 @@ use anyhow::{anyhow, Result};
 use chrono::Local;
 use serde_json::{json, Value};
 
-use super::{call_header, format_lines, lines, newest_within, notes_for_prompt, parse_notes, read_notes, Notes, BACKLOG_CHARS, MIN_NEW_CHARS, NOTES, SUMMARY_EVERY};
+use super::{call_header, format_lines, lines, newest_within, notes_for_prompt, parse_notes, read_notes, Notes, BACKLOG_CHARS, MIN_NEW_CHARS, NOTES, summary_every};
 use crate::ai::{self, Profile};
 use crate::paths;
 
@@ -82,7 +82,7 @@ fn wait(dir: &Path, s: &mut Served, max: Duration) -> Value {
         let new: Vec<_> = all.iter().skip(s.cursor).collect();
         let chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
         let done = ended(dir);
-        let due = s.at.is_none_or(|at| at.elapsed() >= SUMMARY_EVERY);
+        let due = s.at.is_none_or(|at| at.elapsed() >= summary_every());
         if (chars >= MIN_NEW_CHARS && due) || (done && chars > 0) || (chars > 0 && t0.elapsed() >= max) {
             let (kept, gap) = newest_within(&new, BACKLOG_CHARS);
             s.cursor = all.len();
@@ -221,7 +221,7 @@ fn args(p: &Profile, config: &Path) -> Result<Vec<String>> {
         "--allowedTools".into(), format!("{},{}", tool("wait_for_new_lines"), tool("update_live_notes")),
         "--permission-mode".into(), "dontAsk".into(),
         "--no-session-persistence".into(),
-        "--model".into(), p.live_model(),
+        "--model".into(), p.model(&super::live_model_of(p)),
         "--settings".into(), crate::claude_session::lean_settings()?.display().to_string(),
     ])
 }
@@ -233,7 +233,7 @@ fn config(stamp: &str, dir: &Path, p: &Profile) -> Result<PathBuf> {
     let folder = paths::config_dir().join("minutes-run");
     fs::create_dir_all(&folder)?;
     let f = folder.join(format!("live-{stamp}.json"));
-    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.live_model(), "--app", std::process::id().to_string()]});
+    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.model(&super::live_model_of(p)), "--app", std::process::id().to_string()]});
     paths::write_atomic(&f, &serde_json::to_vec_pretty(&json!({"mcpServers": {SERVER: server}}))?)?;
     Ok(f)
 }
@@ -257,7 +257,7 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
                 ai::auth_failed(&p); // a check since then doesn't make it signed in: Claude Code said it isn't
                 return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(&p)));
             }
-            if n >= RETRIES || at.elapsed() < SUMMARY_EVERY {
+            if n >= RETRIES || at.elapsed() < summary_every() {
                 return Err(anyhow!("{}", f.why));
             }
         }

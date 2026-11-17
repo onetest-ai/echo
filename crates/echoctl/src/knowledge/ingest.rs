@@ -463,7 +463,7 @@ pub(super) fn headless_args(p: &ai::Profile, tools: &str, settings: &Path) -> Ve
         a.extend(["--setting-sources".into(), "user".into()]);
     }
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
-        a.extend(["--model".into(), m]);
+        a.extend(["--model".into(), p.model(&m)]);
     }
     a
 }

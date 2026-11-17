@@ -6,9 +6,12 @@ pub(super) fn parse_template(text: &str, stem: &str, path: String) -> Option<Tem
     let (front, body) = text.strip_prefix("---\n")?.split_once("\n---\n")?;
     let mut name = stem.to_string();
     let mut keywords = vec![];
+    let mut fixed = false;
     for line in front.lines() {
         if let Some(v) = line.strip_prefix("name:") {
             name = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("fixed:") {
+            fixed = v.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true");
         } else if let Some(v) = line.strip_prefix("match:") {
             keywords = v
                 .trim()
@@ -29,15 +32,17 @@ pub(super) fn parse_template(text: &str, stem: &str, path: String) -> Option<Tem
             sections.push(json!({ "heading": heading.trim(), "instruction": instruction.trim() }));
         }
     }
-    Some(Template { name, path, text: body.trim().to_string(), header: header.trim().to_string(), sections, keywords })
+    Some(Template { name, path, text: body.trim().to_string(), header: header.trim().to_string(), sections, fixed, keywords })
 }
 
-/// A memo's template: the user's own `memo.md` if they wrote one, else the built-in.
+/// A memo's template: the user's own `memo.md` if they wrote one, else the built-in. Never fixed.
 pub(super) fn memo_template() -> Option<Template> {
     let own = paths::state_dir().join("templates").join("memo.md");
-    fs::read_to_string(&own).ok().and_then(|t| parse_template(&t, "memo", own.display().to_string())).or_else(|| {
-        BUILTIN_TEMPLATES.iter().find(|(stem, _)| *stem == "memo").and_then(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")))
-    })
+    fs::read_to_string(&own)
+        .ok()
+        .and_then(|t| parse_template(&t, "memo", own.display().to_string()))
+        .or_else(|| BUILTIN_TEMPLATES.iter().find(|(stem, _)| *stem == "memo").and_then(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}"))))
+        .map(|t| Template { fixed: false, ..t })
 }
 
 /// The template for a meeting title among these, and why: the first with a word of the title (the user's first), with
@@ -83,7 +88,8 @@ pub(super) fn all_templates() -> Vec<Template> {
         let stem = f.file_stem()?.to_string_lossy().to_string();
         let t = parse_template(&text, &stem, f.display().to_string())?;
         let id = if builtin_ids.contains(&t.name.as_str()) { t.name.clone() } else { stem };
-        Some(Template { name: id, ..t })
+        let fixed = t.fixed && id != "memo";
+        Some(Template { name: id, fixed, ..t })
     });
     let builtin = BUILTIN_TEMPLATES.iter().filter_map(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")));
     let mut all = vec![];
@@ -104,6 +110,7 @@ pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
     ("title", "the meeting's title (its invite's subject, else the call's title)"),
     ("date", "the day of the call, as 2026-11-04 (`started_at`)"),
     ("time", "when it started, as 14:00 (`started_at`, local time)"),
+    ("end", "when it ended, as 14:43 (`ended_at`, local time)"),
     ("duration", "how long it was, as 43 min (`duration_min`)"),
     ("participants", "who took part: colleagues, then external, each linked from `links.people`"),
     ("colleagues", "the colleagues on the call, linked"),
@@ -129,7 +136,7 @@ pub fn templates_view() -> Value {
         .into_iter()
         .map(|t| {
             let kind = if t.path.starts_with("builtin:") { "builtin" } else if builtin.contains(&t.name.as_str()) { "edited" } else { "yours" };
-            json!({"id": t.name, "kind": kind, "match": t.keywords, "header": t.header, "sections": t.sections, "memo": t.name == "memo"})
+            json!({"id": t.name, "kind": kind, "match": t.keywords, "header": t.header, "sections": t.sections, "fixed": t.fixed, "memo": t.name == "memo"})
         })
         .collect();
     out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
@@ -138,7 +145,12 @@ pub fn templates_view() -> Value {
 
 /// The user's file a template comes from (none: it is Echo's own).
 pub(super) fn file_of(id: &str) -> Option<PathBuf> {
-    all_templates().into_iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(t.path))
+    file_in(&all_templates(), id)
+}
+
+/// `file_of` among these templates (read once).
+fn file_in(all: &[Template], id: &str) -> Option<PathBuf> {
+    all.iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(&t.path))
 }
 
 /// A new template's id from its name: the call folders' slug (`Client kickoff` → `client-kickoff`), never a name
@@ -156,9 +168,12 @@ pub(super) fn template_id(name: &str) -> String {
 
 /// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
 /// edited, and Reset brings Echo's back); a new one takes its id from `name` and may not take an existing one.
+/// `fixed`: keep every section; `None` keeps what the template has (off for a new one and a built-in's first edit).
+/// Never written for the memo.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &str, sections: &[Value]) -> Result<String> {
-    let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
+pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &str, sections: &[Value], fixed: Option<bool>) -> Result<String> {
+    let all = all_templates();
+    let known: Vec<String> = all.iter().map(|t| t.name.clone()).collect();
     let id = match id.filter(|i| !i.is_empty()) {
         Some(i) => {
             anyhow::ensure!(known.iter().any(|k| k == i), "there is no template {i}");
@@ -174,7 +189,8 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     };
     let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let words: Vec<String> = words.iter().map(|w| one_line(w).to_lowercase().replace([',', '[', ']', '"'], "")).filter(|w| !w.is_empty()).collect();
-    let mut body = format!("---\nname: {id}\nmatch: [{}]\n---\n", words.join(", "));
+    let fixed = id != "memo" && fixed.unwrap_or_else(|| all.iter().any(|t| t.name == id && t.fixed));
+    let mut body = format!("---\nname: {id}\nmatch: [{}]\n{}---\n", words.join(", "), if fixed { "fixed: true\n" } else { "" });
     // Its header as written, but a line starting a section stays one level down (it is the header's).
     let header: Vec<String> = header.trim().lines().map(|l| if l.starts_with("## ") { format!("#{l}") } else { l.to_string() }).collect();
     if !header.is_empty() {
@@ -193,7 +209,7 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     }
     anyhow::ensure!(n > 0, "a template needs at least one section");
     // Its own file; a built-in changed for the first time: `<id>.md` (its id is Echo's, no path in it).
-    let file = file_of(&id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
+    let file = file_in(&all, &id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
     fs::create_dir_all(templates_dir())?;
     paths::write_atomic(&file, body.trim_end().as_bytes())?;
     TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

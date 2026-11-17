@@ -19,7 +19,8 @@ at each app start), `echoctl` on `PATH`, then the default install places (`/Appl
 
 - A skill calls the CLI as `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` with plain words (no `$`, backticks, pipes or
   redirects); the guard holds a minutes run's Bash calls to `notes::RUN_COMMANDS`, as plain commands.
-- An app-only skill (such as project-sync) starts its description with "Use only when…".
+- An app-only skill starts its description with "Use only when…". project-sync is run by hand: the app's sync gives
+  its runs the skill's instruction files in their prompt (`projectsync::extract_rules`).
 - `process-call` is one `SKILL.md` (`guard::own_call`).
 - Exemplar for a skill Echo runs headless: `plugin/skills/process-call/SKILL.md::description` (no covering test).
 

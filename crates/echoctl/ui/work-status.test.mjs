@@ -13,11 +13,26 @@ const end = src.indexOf('// end of the work-status block', start)
 assert.ok(start >= 0 && end > start, 'the work-status block not found in app.js')
 const ymd = src.match(/^const ymd = .*$/m)
 assert.ok(ymd, '`const ymd` not found in app.js')
-const { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone } =
-  new Function(`${ymd[0]}\n${src.slice(start, end)}\nreturn { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone }`)()
+const { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone, workToReview, proposalText, pluginHistory } =
+  new Function(`${ymd[0]}\n${src.slice(start, end)}\nreturn { workStatus, cardCategory, workOwners, workFilter, cardLate, cardWaits, relDay, dueFrom, looksDone, workToReview, proposalText, pluginHistory }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
+
+test("a plugin's proposed task and change wait in To review, said as the plugin's", () => {
+  const add = { mid: 'm1', op: 'create', plugin: 'tracker', plugin_name: 'Acme Tracker', key: 'P-7', set: { title: 'Send the quote', due: '2026-11-21', state: 'open' } }
+  const close = { mid: 'm2', op: 'set', plugin: 'tracker', plugin_name: 'Acme Tracker', key: 'P-8', node: 'T004', title: 'Book the demo', set: { state: 'done' } }
+  assert.deepEqual(workToReview({ nodes: {}, proposals: [add, close] }).map((r) => r.p.mid), ['m1', 'm2'], 'even with no work yet')
+  assert.equal(proposalText(add), 'Acme Tracker suggests a task: Send the quote · due 2026-11-21')
+  assert.equal(proposalText(close), 'Acme Tracker suggests for Book the demo: done')
+  assert.equal(proposalText({ ...close, set: { due: null } }), 'Acme Tracker suggests for Book the demo: no due date')
+})
+
+test("a plugin's write in a task's history names the plugin, what it changed, what stayed the user's and why", () => {
+  assert.equal(pluginHistory({ op: 'create', plugin_name: 'Acme Tracker', reason: 'next step' }), 'Acme Tracker created it — next step')
+  assert.equal(pluginHistory({ op: 'set', plugin_name: 'Acme Tracker', set: { state: 'done', due: '2026-11-28' }, ignored: ['due'], reason: 'won' }), 'Acme Tracker: done · kept yours: due — won')
+  assert.equal(pluginHistory({ op: 'set', plugin: 'tracker', set: { internal_owner: 'Dana Lee' }, ignored: ['internal_owner'] }), 'tracker: nothing changed · kept yours: owner')
+})
 
 test('a blocked task that also waits for someone is blocked in the tree and on the board (#125)', () => {
   const n = { kind: 'task', type: 'action', state: 'blocked', waiting_for: { who: 'Dana Lee', what: 'test accounts' } }

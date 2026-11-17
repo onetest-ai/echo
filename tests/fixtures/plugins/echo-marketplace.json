@@ -56,6 +56,22 @@
     {
       "id": "event-demo",
       "source": "./plugins/event-demo"
+    },
+    {
+      "id": "tracker-demo",
+      "source": "./plugins/tracker-demo"
+    },
+    {
+      "id": "board-demo",
+      "source": "./plugins/board-demo"
+    },
+    {
+      "id": "wrapper-demo",
+      "source": "./plugins/wrapper-demo"
+    },
+    {
+      "id": "jobs-demo",
+      "source": "./plugins/jobs-demo"
     }
   ]
 }

@@ -91,7 +91,17 @@ pub fn arm(title: Option<String>, languages: Option<Vec<String>>, meeting: Optio
         ai::Settings::load()?.get(id)?;
     }
     let ctx = meeting.as_deref().map(meeting::MeetingContext::read_file).transpose()?;
+    // A run Echo started never pins the next recording to a wrapper profile, by name or through a meeting file's.
+    wrapper_pin_in_run(ai_profile.as_deref().or(ctx.as_ref().and_then(|m| m.ai_profile.as_deref())), crate::notes::headless())?;
     watch::arm(title, ctx, languages, ai_profile)
+}
+
+/// `arm` / `memo start` inside a run Echo started: never onto a wrapper profile (claude-code-runs R13).
+fn wrapper_pin_in_run(id: Option<&str>, in_run: bool) -> Result<()> {
+    match id.filter(|i| !i.is_empty()) {
+        Some(i) if in_run => ai::wrapper_in_run(&ai::Settings::load()?, i, true),
+        _ => Ok(()),
+    }
 }
 
 pub fn capture(app: apps::TargetApp, seconds: Option<u64>, title: Option<String>, meeting: Option<std::path::PathBuf>, languages: Option<Vec<String>>) -> Result<()> {
@@ -105,6 +115,7 @@ pub fn memo(cmd: MemoCmd) -> Result<()> {
             if crate::notes::run_limited() {
                 anyhow::bail!("refused inside a run Echo started");
             }
+            wrapper_pin_in_run(ai.as_deref(), crate::notes::headless())?;
             watch::memo_start(languages.map(|l| l.split(',').map(str::to_owned).collect()), ai)
         }
         MemoCmd::Stop => watch::stop(),
@@ -222,4 +233,24 @@ fn live_request(call: &str, cmd: &str, kind: Option<livenotes::AskKind>, text: &
     crate::paths::write_atomic(&path, req.to_string().as_bytes())?;
     println!("sent to Echo");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_never_pins_the_next_recording_to_a_wrapper_by_name_or_meeting_file() {
+        let (_env, root) = crate::paths::testenv::folders("capture-wrapper-pin");
+        std::fs::create_dir_all(crate::paths::config_dir()).unwrap();
+        std::fs::write(crate::paths::config_dir().join("ai.json"), r#"{"profiles":[{"id":"acme","name":"Acme","kind":"wrapper","wrapper":{"command":"/opt/acme/acme-claude"}}]}"#).unwrap();
+        assert!(wrapper_pin_in_run(Some("acme"), true).unwrap_err().to_string().contains("refused inside a run"));
+        assert!(wrapper_pin_in_run(Some("acme"), false).is_ok(), "the user may");
+        assert!(wrapper_pin_in_run(Some("system"), true).is_ok() && wrapper_pin_in_run(None, true).is_ok());
+        // A meeting file carries the same choice: read as `arm --meeting` reads it.
+        let f = root.join("meeting.json");
+        std::fs::write(&f, r#"{"subject": "Acme weekly", "ai_profile": "acme"}"#).unwrap();
+        let m = meeting::MeetingContext::read_file(&f).unwrap();
+        assert!(wrapper_pin_in_run(m.ai_profile.as_deref(), true).is_err());
+    }
 }

@@ -178,6 +178,41 @@ pub enum DashboardCmd {
         #[arg(long)]
         client: bool,
     },
+    /// What the plugins offer ready-made for the "+" (JSON): their dashboards, each added already or not
+    Presets {
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Add a plugin's dashboard: `echoctl dashboard add-preset <plugin> <preset>` (once; its kind is the preset's)
+    AddPreset { plugin: String, preset: String },
+    /// A dashboard its plugin changed: take its new layout (yours goes), or --keep yours (this version not offered again)
+    PresetUpdate {
+        id: String,
+        #[arg(long)]
+        keep: bool,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Print a dashboard as a preset block (JSON) — a plugin's `dashboards` entry, or a file for `import`
+    Export {
+        id: String,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
+    /// Add a dashboard from a preset block (a file; "-": stdin) as your own
+    Import {
+        file: std::path::PathBuf,
+        #[arg(long, conflicts_with = "client", required_unless_present = "client")]
+        thread: bool,
+        #[arg(long)]
+        client: bool,
+    },
     /// Put one at a place: 1 is first after the Brief (the Overview)
     Move {
         id: String,
@@ -205,6 +240,15 @@ pub fn dashboard(cmd: DashboardCmd) -> Result<()> {
         DashboardCmd::Add { name, client, .. } => print_json(&serde_json::to_value(boards::add(kind(client), &name)?)?),
         DashboardCmd::Rename { id, name, client, .. } => print_json(&serde_json::to_value(boards::rename(kind(client), &id, &name)?)?),
         DashboardCmd::Move { id, to, client, .. } => print_json(&serde_json::to_value(boards::move_to(kind(client), &id, to.saturating_sub(1))?)?),
+        DashboardCmd::Presets { client, .. } => print_json(&serde_json::to_value(boards::presets(kind(client)))?),
+        DashboardCmd::AddPreset { plugin, preset } => print_json(&serde_json::to_value(boards::add_preset(&plugin, &preset)?)?),
+        DashboardCmd::PresetUpdate { id, keep, client, .. } => print_json(&serde_json::to_value(boards::take_update(kind(client), &id, keep)?)?),
+        DashboardCmd::Export { id, client, .. } => print_json(&boards::export(kind(client), &id)?),
+        DashboardCmd::Import { file, client, .. } => {
+            let text = if file.as_os_str() == "-" { std::io::read_to_string(std::io::stdin())? } else { std::fs::read_to_string(&file)? };
+            let block: serde_json::Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+            print_json(&serde_json::to_value(boards::import(kind(client), &block)?)?)
+        }
         DashboardCmd::Remove { id, client, .. } => {
             boards::remove(kind(client), &id)?;
             print_json(&serde_json::to_value(boards::list(kind(client)))?)

@@ -1,5 +1,37 @@
 [
   {
+    "version": "0.9.13",
+    "items": [
+      { "icon": "sparkle", "title": "Quiet nights, fewer calls", "text": "Needs you now asks the model only about what's new, on Haiku, and Echo's own jobs pause at night, so far fewer model calls run while you sleep.", "open": "today" },
+      { "icon": "layout", "title": "Tune Echo's own jobs", "text": "See every job Echo runs by itself and set how often each runs, when it pauses and which model it uses, in the Scheduler plugin or with echoctl jobs.", "open": "settings/plugins" },
+      { "icon": "thread", "title": "Your provider's model names", "text": "If your company's gateway names Claude's models its own way, tell each AI profile which model it runs for Haiku, Sonnet and Opus.", "open": "settings/ai" }
+    ]
+  },
+  {
+    "version": "0.9.12",
+    "items": [
+      { "icon": "sparkle", "title": "More company Claude tools", "text": "A company's Claude Code program that answers its version with just the number can now be added in Settings.", "open": "settings/ai" }
+    ]
+  },
+  {
+    "version": "0.9.11",
+    "items": [
+      { "icon": "sparkle", "title": "Claude through your company's tool", "text": "If your company gives you its own Claude Code program, add it in Settings and Echo runs Claude through it.", "open": "settings/ai" },
+      { "icon": "thread", "title": "Thread updates cost less", "text": "Threads now read new mail and chat together and send Claude far less each time, so keeping them current uses fewer tokens.", "open": "projects" },
+      { "icon": "layout", "title": "Templates keep every section", "text": "Tick Keep every section and minutes follow your template exactly, with the end time and screenshots where you put them.", "open": "settings/templates" }
+    ]
+  },
+  {
+    "version": "0.9.10",
+    "items": [
+      { "icon": "plugin", "title": "Plugins keep threads up to date", "text": "A plugin you allow can move a thread's stage and add its own tasks, and your own edits always win over it.", "open": "projects" },
+      { "icon": "layout", "title": "Dashboards from your plugins", "text": "Plugins can offer ready-made dashboards: add one from the + beside a thread's or client's tabs, only if you want it.", "open": "projects" },
+      { "icon": "layout", "title": "Scroll past busy widgets", "text": "Long tables and lists show what fits and a +N more line, so the page always scrolls under your mouse.", "open": "today" },
+      { "icon": "sparkle", "title": "Scorecards and real funnels", "text": "Plugin tables can show trends, heat maps, stage mixes and a total, and funnel charts now look like funnels.", "open": "today" },
+      { "icon": "fix", "title": "Smaller fixes", "text": "A plugin marketplace that can't be read now says why and how to sign in to it." }
+    ]
+  },
+  {
     "version": "0.9.9",
     "items": [
       { "icon": "plugin", "title": "Claude knows your plugins", "text": "Claude in Echo now sees which plugins you have and reads each one's guide only when it works with it.", "open": "settings/plugins" },

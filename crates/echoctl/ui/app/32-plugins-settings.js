@@ -149,7 +149,7 @@ function plSheet(sh) {
   const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
   return box(`<div class="pl-dhead">${plTile({ id: r.id, name: r.name })}<div style="flex:1"><div class="pl-dn">${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</div>
       <div class="set-sub">from <b>${esc(r.market)}</b> · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div></div></div>
-    ${who}<div class="pl-h4">It will be able to</div>${plUses(lines)}
+    ${who}<div class="pl-h4">It will be able to</div>${plUses(lines)}${r.offers ? `<div class="set-sub pl-offers">${esc(r.offers)} — you add one, or not, from a dashboard's +</div>` : ''}
     ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
     <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div>`, sh.update ? `${r.name} ${r.version} asks for more` : `Install ${r.name} ${r.version}?`)
 }

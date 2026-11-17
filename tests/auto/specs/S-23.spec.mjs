@@ -3,6 +3,7 @@
 // run over minutes and without, a run waiting for a sign-in, the calls Echo leaves alone, one due now, one failed or
 // audio only, a memo's and an import's header, the tabs and a call being transcribed, What moved, chat, screens and
 // kept live notes; then a memo's threads, Try again against the fake Claude Code, a deleted and a restored call.
+// Not automated yet: stage 31 (calls/TC-043, screenshots under Appendix: On screen), new.
 // Each test has its own browser: a stage that continues an earlier one's view opens its call again (its rows are
 // clicked, the list is never left), so what the scenario keeps in the browser is set again where a stage reads it.
 import fs from 'node:fs'

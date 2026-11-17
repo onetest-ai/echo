@@ -10,6 +10,9 @@
 //! <home>/projects/<id>/brief.md         the user's brief
 //! ```
 
+mod stage;
+pub use stage::*;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,73 +38,6 @@ const SUGGEST_SHARE: f64 = 0.5;
 /// `<home>/projects`.
 pub fn dir() -> PathBuf {
     paths::home().join("projects")
-}
-
-/// Where a project stands. The group (`pursuit`, `delivery`, `closed`) decides what Echo does with
-/// it; the stage is for the user and for the sync.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Stage {
-    Lead,
-    Proposal,
-    Negotiation,
-    Kickoff,
-    Active,
-    OnHold,
-    WrapUp,
-    Done,
-    Lost,
-    Cancelled,
-}
-
-impl Stage {
-    pub const ALL: [Stage; 10] = [
-        Stage::Lead,
-        Stage::Proposal,
-        Stage::Negotiation,
-        Stage::Kickoff,
-        Stage::Active,
-        Stage::OnHold,
-        Stage::WrapUp,
-        Stage::Done,
-        Stage::Lost,
-        Stage::Cancelled,
-    ];
-
-    pub fn group(self) -> &'static str {
-        match self {
-            Stage::Lead | Stage::Proposal | Stage::Negotiation => "pursuit",
-            Stage::Kickoff | Stage::Active | Stage::OnHold | Stage::WrapUp => "delivery",
-            Stage::Done | Stage::Lost | Stage::Cancelled => "closed",
-        }
-    }
-
-    pub fn closed(self) -> bool {
-        self.group() == "closed"
-    }
-
-    pub fn id(self) -> &'static str {
-        match self {
-            Stage::Lead => "lead",
-            Stage::Proposal => "proposal",
-            Stage::Negotiation => "negotiation",
-            Stage::Kickoff => "kickoff",
-            Stage::Active => "active",
-            Stage::OnHold => "on_hold",
-            Stage::WrapUp => "wrap_up",
-            Stage::Done => "done",
-            Stage::Lost => "lost",
-            Stage::Cancelled => "cancelled",
-        }
-    }
-
-    /// "on hold", "On-Hold", "on_hold" → OnHold.
-    pub fn parse(s: &str) -> Result<Stage> {
-        let k: String = s.trim().to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-        Stage::ALL.into_iter().find(|st| st.id() == k).ok_or_else(|| {
-            anyhow!("unknown stage {s:?} (one of: {})", Stage::ALL.map(|s| s.id()).join(", "))
-        })
-    }
 }
 
 /// An organisation the user works for or with. Its domains say whose mail and calls are its, and whose
@@ -182,14 +118,6 @@ impl Rule {
             Rule::Subject { .. } => "subject",
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StageChange {
-    pub stage: Stage,
-    pub at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
 }
 
 /// Something a project watches besides its calls: a Teams chat (its calls join), a Teams channel,
@@ -391,6 +319,9 @@ pub struct Project {
     /// Every stage it was in, oldest first (the first is where it started).
     #[serde(default)]
     pub stages: Vec<StageChange>,
+    /// When the user let a plugin set the stage again after changing it themselves, by plugin id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_handed: BTreeMap<String, String>,
     /// `YYYY-MM-DD`: calls before it don't belong.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
@@ -782,7 +713,8 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         color: COLORS[n % COLORS.len()].to_string(),
         icon: None,
         stage,
-        stages: vec![StageChange { stage, at: now.clone(), reason: None }],
+        stages: vec![StageChange { stage, at: now.clone(), reason: None, by: None, by_name: None }],
+        stage_handed: BTreeMap::new(),
         since: None,
         history_before: None,
         rules: vec![],
@@ -815,7 +747,7 @@ pub fn update(id: &str, f: impl FnOnce(&mut Project) -> Result<()>) -> Result<Pr
     f(&mut p)?;
     p.id = id.to_string();
     if p.stage != stage {
-        p.stages.push(StageChange { stage: p.stage, at: Utc::now().to_rfc3339(), reason: None });
+        p.stages.push(StageChange { stage: p.stage, at: Utc::now().to_rfc3339(), reason: None, by: None, by_name: None });
     }
     check(&p, &clients()?)?;
     write_json(&profile_path(id)?, &p)?;
@@ -910,18 +842,6 @@ pub fn set_client_logo(id: &str, bytes: Option<&[u8]>) -> Result<()> {
         bail!("no client {id:?}");
     }
     write_logo(&client_logo_stem(id)?, bytes)
-}
-
-/// Move a project to a stage (a dated event, with why).
-pub fn set_stage(id: &str, stage: Stage, reason: Option<&str>) -> Result<Project> {
-    let _l = lock()?;
-    let mut p = load(id)?;
-    if p.stage != stage {
-        p.stage = stage;
-        p.stages.push(StageChange { stage, at: Utc::now().to_rfc3339(), reason: reason.map(str::to_owned).filter(|r| !r.trim().is_empty()) });
-        write_json(&profile_path(id)?, &p)?;
-    }
-    Ok(p)
 }
 
 /// Remove a project's folder (its brief and profile; later its ledger) into the trash.
@@ -1621,6 +1541,7 @@ mod tests {
             icon: None,
             stage: Stage::Active,
             stages: vec![],
+            stage_handed: BTreeMap::new(),
             since: None,
         history_before: None,
             rules: vec![Rule::People { domains: vec![] }],

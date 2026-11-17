@@ -36,6 +36,10 @@ node crates/echoctl/ui/notes-scroll.test.mjs
 node crates/echoctl/ui/palette.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).
 node crates/echoctl/ui/projects.test.mjs
+# A thread's and a client's dashboards: which a thread shows, the plugins' presets in the "+", a preset's line.
+node crates/echoctl/ui/board-presets.test.mjs
+# AI & minutes' wrapper profiles: plugins' offers, an update from a profile's plugin, the form's steps.
+node crates/echoctl/ui/wrapper-profiles.test.mjs
 # The org chart's layout: governance band, workstream columns, their leads (OrgLayout).
 node crates/echoctl/ui/org-chart.test.mjs
 # Knowledge in the window: routes, the switcher, a call's chip, the tree, the graph's filters, unsaved edits.
@@ -44,6 +48,8 @@ node crates/echoctl/ui/knowledge.test.mjs
 node crates/echoctl/ui/skill-fit.test.mjs
 # Send to Claude's Escape: the skill list folds, then the dialog closes (ScKeys).
 node crates/echoctl/ui/send-claude.test.mjs
+# A template's save: Keep every section is sent until the file has it, never with other edits (TplSave).
+node crates/echoctl/ui/templates-save.test.mjs
 # A client page's tabs: a count only when there is something to count (clientTabs).
 node crates/echoctl/ui/client-tabs.test.mjs
 # Where a Work board column's menu goes, over the board (colMenuSpot).

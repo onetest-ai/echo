@@ -145,13 +145,16 @@ fn args(v: &Vault, p: &ai::Profile, mode: Mode, session: &Session, settings: &Pa
     match session {
         Session::New { id, first } => {
             let first: String = first.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect();
-            a.extend(["--session-id".into(), id.clone(), "--name".into(), format!("{}: {}", v.name, first.trim_end())]);
+            a.extend(["--session-id".into(), id.clone()]);
+            if p.kind != ai::Kind::Wrapper {
+                a.extend(["--name".into(), format!("{}: {}", v.name, first.trim_end())]);
+            }
         }
         Session::Resume(id) => a.extend(["--resume".into(), id.clone()]),
     }
     // A local model by its own name, as in the panel's session.
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
-        a.extend(["--model".into(), m]);
+        a.extend(["--model".into(), p.model(&m)]);
     }
     a.extend(terminal::vault_args(v, p)?);
     let names = serde_json::to_string(&skills.names())?;

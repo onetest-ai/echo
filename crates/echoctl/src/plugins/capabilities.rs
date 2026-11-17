@@ -31,6 +31,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "work", ready: true, describe: describe_work },
     Capability { id: "signin", ready: true, describe: describe_signin },
     Capability { id: "scripts", ready: true, describe: super::scripts::describe_scripts },
+    Capability { id: "ai", ready: true, describe: describe_ai },
 ];
 
 /// `uses.work: {}`: its items (a review asked of you, an issue assigned to you) beside Echo's tasks, never in a ledger.
@@ -210,6 +211,26 @@ pub(super) fn describe_channel(v: &Value) -> Result<String> {
     Ok(format!("Lets you reach your Claude · Echo folder session through {shown} while it is open in Echo, and installs Claude Code's {p} plugin for it"))
 }
 
+/// `uses.ai.wrapper` `{name, command}`: a wrapper profile it offers (echo-plugins R24) — one program name, no
+/// arguments, found on the user's PATH when they add it (never a file of the plugin: `ai::wrapper::admit`).
+pub(super) fn describe_ai(v: &Value) -> Result<String> {
+    let w = &v["wrapper"];
+    if !w.is_object() || v.as_object().is_some_and(|o| o.keys().any(|k| k != "wrapper")) {
+        bail!("“ai” offers only a wrapper: {{\"wrapper\": {{\"name\": …, \"command\": …}}}}");
+    }
+    if w.as_object().is_some_and(|o| o.keys().any(|k| k != "name" && k != "command")) {
+        bail!("“ai.wrapper” holds only its name and command");
+    }
+    let command = w["command"].as_str().filter(|c| crate::ai::wrapper::program_name(c)).ok_or_else(|| anyhow!("“ai.wrapper.command” is one program name (letters, digits, “.”, “_”, “-”) with no arguments, never a path"))?;
+    wrapper_name(w).ok_or_else(|| anyhow!("“ai.wrapper.name” is a name of up to 40 characters"))?;
+    Ok(format!("Offers an AI profile that starts {command} — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it"))
+}
+
+/// A wrapper offer's name: up to 40 characters, one line.
+pub(crate) fn wrapper_name(w: &Value) -> Option<String> {
+    w["name"].as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 40 && !n.chars().any(char::is_control)).map(str::to_owned)
+}
+
 pub(super) fn describe_brain_source(v: &Value) -> Result<String> {
     match v["kind"].as_str() {
         Some("vault") => Ok("Adds a folder you pick (an Obsidian vault) to Recall: read and indexed on this computer".into()),
@@ -330,7 +351,7 @@ pub(super) fn describe_folders(v: &Value) -> Result<String> {
 /// What `uses.echo.read` may name, with how the sheet says it.
 pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("clients", "the names of your clients"),
-    ("threads", "the names of your threads"),
+    ("threads", "your threads' names and stages"),
     ("people", "who the people in your threads are"),
     ("dictionary", "your dictionary"),
     ("sources", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
@@ -338,11 +359,27 @@ pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("calls", "your calls' minutes and transcripts"),
 ];
 
+/// `uses.echo.jobs` on the sheet (echo-plugins R25).
+const JOBS_LINE: &str = "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens";
+
+/// What `uses.echo.write` may name, with the sheet's line for each.
+pub(super) const ECHO_WRITES: &[(&str, &str)] = &[
+    ("dictionary", "Adds names to your Echo dictionary"),
+    ("thread_stage", "Changes your threads' stage"),
+    ("tasks", "Adds and updates tasks in your threads"),
+];
+
 pub(super) fn describe_echo(v: &Value) -> Result<String> {
     let read = strings(v, "read")?;
     let write = strings(v, "write")?;
-    if read.is_empty() && write.is_empty() {
-        bail!("“echo” reads nothing ({})", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
+    // `jobs`: it shows Echo's background jobs and tunes them on the user's own click or key (echo-plugins R25).
+    let jobs = match v.get("jobs") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => bail!("“echo.jobs” is true or false"),
+    };
+    if read.is_empty() && write.is_empty() && !jobs {
+        bail!("“echo” asks for nothing: read ({}), write ({}) or jobs", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "), ECHO_WRITES.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
     }
     // A kind a newer Echo has means nothing here: named on the sheet, never granted (an older Echo degrades, the
     // plugin still installs).
@@ -354,13 +391,18 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
             }
         }
     }
-    let unknown: Vec<&str> = read.iter().chain(&write).map(String::as_str).filter(|k| !ECHO_READS.iter().any(|(x, _)| x == k) && *k != "dictionary").collect();
+    let unknown: Vec<&str> = read.iter().filter(|k| !ECHO_READS.iter().any(|(x, _)| *x == k.as_str())).chain(write.iter().filter(|k| !ECHO_WRITES.iter().any(|(x, _)| *x == k.as_str()))).map(String::as_str).collect();
     let mut lines = vec![];
     if !said.is_empty() {
         lines.push(format!("Reads {} in Echo", join_words(&said)));
     }
-    if write.iter().any(|w| w == "dictionary") {
-        lines.push("Adds names to your Echo dictionary".to_string());
+    for (k, line) in ECHO_WRITES {
+        if write.iter().any(|w| w == k) {
+            lines.push(line.to_string());
+        }
+    }
+    if jobs {
+        lines.push(JOBS_LINE.to_string());
     }
     if !unknown.is_empty() {
         lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
@@ -389,10 +431,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_sheet_says_each_write_to_echos_data_and_names_one_it_doesnt_know() {
+        let line = describe_echo(&serde_json::json!({"read": ["threads"], "write": ["thread_stage", "tasks"]})).unwrap();
+        assert_eq!(line, "Reads your threads' names and stages in Echo. Changes your threads' stage. Adds and updates tasks in your threads");
+        let only = describe_echo(&serde_json::json!({"write": ["tasks"]})).unwrap();
+        assert_eq!(only, "Adds and updates tasks in your threads", "a sheet that adds one asks again: its line differs");
+        assert!(describe_echo(&serde_json::json!({"write": ["calendar"]})).unwrap().contains("Asks for things this Echo doesn't have yet: calendar"));
+    }
+
+    #[test]
     fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {
         assert!(describe_channel(&serde_json::json!({"plugin": "telegram@claude-plugins-official"})).unwrap().contains("Telegram"));
         for bad in ["telegram-@claude-plugins-official", "-x@claude-plugins-official", "a--b@claude-plugins-official", "@claude-plugins-official", "x@other"] {
             assert!(describe_channel(&serde_json::json!({"plugin": bad})).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_plugin_asks_for_echos_jobs_as_a_flag_and_the_sheet_says_what_it_can_change() {
+        assert_eq!(describe_echo(&serde_json::json!({"jobs": true})).unwrap(), JOBS_LINE);
+        assert!(describe_echo(&serde_json::json!({"read": ["threads"], "jobs": true})).unwrap().ends_with(JOBS_LINE));
+        assert!(describe_echo(&serde_json::json!({"jobs": false})).is_err(), "nothing asked for");
+        assert!(describe_echo(&serde_json::json!({"jobs": "yes"})).is_err());
+        assert!(!describe_echo(&serde_json::json!({"read": ["threads"]})).unwrap().contains("background jobs"));
+    }
+
+    #[test]
+    fn a_plugin_offers_a_wrapper_as_one_program_name_and_the_sheet_says_what_it_sees() {
+        let line = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude"}})).unwrap();
+        assert_eq!(line, "Offers an AI profile that starts acme-claude — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it");
+        let other = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude2"}})).unwrap();
+        assert_ne!(line, other, "an update that changes the program asks again: its line differs");
+        for bad in [
+            serde_json::json!({"wrapper": {"name": "A", "command": "acme-claude --x"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "./bin/acme-claude"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "/usr/local/bin/acme-claude"}}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "node"}, "key": "x"}),
+            serde_json::json!({"wrapper": {"name": "A", "command": "acme", "args": ["-x"]}}),
+            serde_json::json!({"wrapper": {"name": "", "command": "acme"}}),
+            serde_json::json!({"wrapper": {"name": "x".repeat(41), "command": "acme"}}),
+            serde_json::json!({"wrapper": {"name": "A\nB", "command": "acme"}}),
+            serde_json::json!({"gateway": "https://x"}),
+        ] {
+            assert!(describe_ai(&bad).is_err(), "{bad}");
         }
     }
 }

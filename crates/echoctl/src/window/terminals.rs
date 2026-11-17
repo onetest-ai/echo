@@ -66,7 +66,7 @@ pub(super) fn clipboard_text() -> String {
 /// bracketed-paste marks when the program asked for them (so Claude Code takes several lines as
 /// one message). No text — an image on the clipboard — sends Ctrl+V: Claude Code reads the
 /// clipboard itself then.
-pub(super) fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
+pub(crate) fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
     if text.is_empty() {
         return vec![0x16];
     }
