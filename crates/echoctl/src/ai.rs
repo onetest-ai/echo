@@ -136,23 +136,6 @@ impl Models {
         self.haiku.is_none() && self.sonnet.is_none() && self.opus.is_none()
     }
 
-    /// A plugin's `uses.ai.wrapper.models` (`{"haiku": …, "sonnet": …, "opus": …}`, each optional): only those three
-    /// keys, each a model name (`model_name`).
-    pub fn from_offer(v: &Value) -> Result<Models> {
-        let Some(o) = v.as_object() else { bail!("“models” maps haiku, sonnet and opus to model names") };
-        let mut m = Models::default();
-        for (k, name) in o {
-            let name = name.as_str().filter(|n| model_name(n)).ok_or_else(|| anyhow!("“models.{k}” is a model name (no spaces, up to 200 characters)"))?;
-            *m.slot(k).filter(|_| k == &k.to_ascii_lowercase()).ok_or_else(|| anyhow!("“models” maps only haiku, sonnet and opus, not “{k}”"))? = Some(name.to_string());
-        }
-        Ok(m)
-    }
-
-    /// "haiku → x · sonnet → y" for those set.
-    pub fn describe(&self) -> String {
-        [("haiku", &self.haiku), ("sonnet", &self.sonnet), ("opus", &self.opus)].iter().filter_map(|(k, v)| v.as_ref().map(|v| format!("{k} → {v}"))).collect::<Vec<_>>().join(" · ")
-    }
-
     /// The slot for one of Claude's three names (any case), or None for any other model name.
     pub fn slot(&mut self, name: &str) -> Option<&mut Option<String>> {
         match name.trim().to_ascii_lowercase().as_str() {
@@ -308,9 +291,10 @@ pub fn system_folder() -> Result<PathBuf> {
     }
 }
 
-/// A model name a profile may run: one line of at most 200 characters, no spaces or control characters.
+/// A model name a profile may run for one of Claude's names: one word of at most 200 characters, not starting with
+/// "-", and not itself one of Claude's names (mapped once, never again).
 pub fn model_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 200 && !s.chars().any(|c| c.is_control() || c.is_whitespace())
+    !s.is_empty() && s.len() <= 200 && !s.starts_with('-') && !s.chars().any(|c| c.is_control() || c.is_whitespace()) && Models::default().slot(s).is_none()
 }
 
 impl Profile {

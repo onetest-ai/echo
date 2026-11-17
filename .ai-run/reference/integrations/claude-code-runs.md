@@ -27,10 +27,12 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
   where a model reaches the provider: `claude_session::complete_claude_with`, `livenotes::complete_local_body`, the
   live-notes agent's `--model`, minutes (`notes`), thread sync (`projectsync`), routine and Yolo runs (`claudejob`), the
   local terminal session's `--model`, and for a `local` profile its `ANTHROPIC_DEFAULT_*_MODEL` /
-  `ANTHROPIC_SMALL_FAST_MODEL` (each name its own model when set, else the profile's minutes model). Set by the user:
-  `echoctl ai set <id> --model <name>=<model>` (empty clears), Settings → AI & minutes → Models… (`profile_models`),
-  or seeded from a plugin's wrapper offer when the user adds it (`uses.ai.wrapper.models`). Not on `system` (the user's
-  own Claude Code setup).
+  `ANTHROPIC_SMALL_FAST_MODEL` (each name its own model when set, else the profile's minutes model). On a `claude` or
+  `wrapper` profile only what Echo asks for is mapped: Claude Code's own background requests and the folder and call
+  sessions' (no `--model` there) keep Claude's names. Set only by the user, all names checked then written at once
+  (`ai::set_model_names`; a model is one word, not starting with "-", not itself one of the three): `echoctl ai set
+  <id> --model <name>=<model>` (empty clears), Settings → AI & minutes → Models… (`profile_models`); never on `system`
+  (the user's own Claude Code setup), never inside a run Echo started (nor `--notes-model`).
 
 ## Routing variables
 

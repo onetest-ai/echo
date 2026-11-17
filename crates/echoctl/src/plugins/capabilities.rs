@@ -217,14 +217,12 @@ pub(super) fn describe_ai(v: &Value) -> Result<String> {
     if !w.is_object() || v.as_object().is_some_and(|o| o.keys().any(|k| k != "wrapper")) {
         bail!("“ai” offers only a wrapper: {{\"wrapper\": {{\"name\": …, \"command\": …}}}}");
     }
-    if w.as_object().is_some_and(|o| o.keys().any(|k| k != "name" && k != "command" && k != "models")) {
-        bail!("“ai.wrapper” holds only its name, command and models");
+    if w.as_object().is_some_and(|o| o.keys().any(|k| k != "name" && k != "command")) {
+        bail!("“ai.wrapper” holds only its name and command");
     }
-    let models = if w.get("models").is_some() { crate::ai::Models::from_offer(&w["models"]).map_err(|e| anyhow!("“ai.wrapper.{e:#}"))? } else { crate::ai::Models::default() };
     let command = w["command"].as_str().filter(|c| crate::ai::wrapper::program_name(c)).ok_or_else(|| anyhow!("“ai.wrapper.command” is one program name (letters, digits, “.”, “_”, “-”) with no arguments, never a path"))?;
     wrapper_name(w).ok_or_else(|| anyhow!("“ai.wrapper.name” is a name of up to 40 characters"))?;
-    let runs = if models.is_empty() { String::new() } else { format!(" (its models: {})", models.describe()) };
-    Ok(format!("Offers an AI profile that starts {command}{runs} — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it"))
+    Ok(format!("Offers an AI profile that starts {command} — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it"))
 }
 
 /// A wrapper offer's name: up to 40 characters, one line.
@@ -442,13 +440,6 @@ mod tests {
         assert_eq!(line, "Offers an AI profile that starts acme-claude — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it");
         let other = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude2"}})).unwrap();
         assert_ne!(line, other, "an update that changes the program asks again: its line differs");
-        // Its models for Claude's names: on the sheet (changing them asks again), each a model name.
-        let mapped = describe_ai(&serde_json::json!({"wrapper": {"name": "Acme Claude", "command": "acme-claude", "models": {"haiku": "acme-small", "opus": "acme-large-2"}}})).unwrap();
-        assert!(mapped.starts_with("Offers an AI profile that starts acme-claude (its models: haiku → acme-small · opus → acme-large-2) —"), "{mapped}");
-        use serde_json::json;
-        for bad in [json!({"gpt": "x"}), json!({"haiku": "two words"}), json!({"haiku": 3}), json!({"Haiku": "x"}), json!(["haiku"]), json!({"sonnet": ""})] {
-            assert!(describe_ai(&serde_json::json!({"wrapper": {"name": "A", "command": "acme", "models": bad}})).is_err(), "{bad}");
-        }
         for bad in [
             serde_json::json!({"wrapper": {"name": "A", "command": "acme-claude --x"}}),
             serde_json::json!({"wrapper": {"name": "A", "command": "./bin/acme-claude"}}),

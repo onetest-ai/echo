@@ -29,9 +29,10 @@ tags: [ai, profiles, models]
 | 1 | Navigate to `{{base_url}}/#settings/ai`; read the profile rows | "Claude Code (as configured)" has no "Models…"; every other row has "Models: Claude's names as they are" and "Models…" |
 | 2 | Run `$E ai set ollama --model sonnet=virtual-sonnet` | `Virtual model: sonnet runs virtual-sonnet`; `$E ai set ollama --model gpt=x` and `$E ai set system --model haiku=x` are refused ("haiku, sonnet or opus"; "your own Claude Code setup") |
 | 3 | Reload `{{base_url}}/#settings/ai` | The Virtual model row: "Models: sonnet → virtual-sonnet" |
-| 4 | Run `$E project set acme-rollout --model sonnet`; `: > <dir>/model/model-log.jsonl`; `$E project ledger acme-rollout run` | `state` "done" with a `run` id; every line of `<dir>/model/model-log.jsonl` has `"model": "virtual-sonnet"` (none `sonnet`); the run's `log.txt` says "on Virtual model, model virtual-sonnet" |
+| 4 | Run `$E project set acme-rollout --model sonnet`; `: > <dir>/model/model-log.jsonl`; `$E project ledger acme-rollout run` | `state` "done" with a `run` id; `<dir>/model/model-log.jsonl` has requests with `"model": "virtual-sonnet"` and none with `"model": "sonnet"`; the run's `log.txt` says "on Virtual model, model virtual-sonnet" |
 | 5 | Click "Models…" on the Virtual model row | Three fields Haiku → (empty, placeholder "haiku"), Sonnet → `virtual-sonnet`, Opus → (empty); Save, Cancel |
-| 6 | Clear Sonnet, type `virtual-opus` in Opus; click Save; wait 2 s | The row: "Models: opus → virtual-opus"; `$E ai status` shows the profile `ollama` with `"models": {"opus": "virtual-opus"}` |
+| 6 | Type `two words` in Haiku; click Save; wait 2 s | A notice that “two words” isn't a model name; the three fields stay open with what was typed; `$E ai status`: the profile `ollama`'s `models` still `{"sonnet": "virtual-sonnet"}` |
+| 7 | Clear Haiku and Sonnet, type `virtual-opus` in Opus; click Save; wait 2 s | The fields close; the row: "Models: opus → virtual-opus"; `$E ai status` shows the profile `ollama` with `"models": {"opus": "virtual-opus"}` |
 
 ## Expected Final State
 The Virtual model profile runs `virtual-opus` for opus; the thread acme-rollout's model is sonnet.
@@ -40,4 +41,4 @@ The Virtual model profile runs `virtual-opus` for opus; the thread acme-rollout'
 - `tests/fixtures/serve.sh down <dir>`
 
 ## Notes
-- A wrapper a plugin offers with `models` (`uses.ai.wrapper.models`): its sheet line and the profile's mapping when added are the Rust tests `plugins::capabilities::…a_plugin_offers_a_wrapper…` and `ai::command::…an_offer_carries_its_models…`; a routine asking for `opus` running the mapped model is `claudejob::…a_routine_and_a_yolo_task_run_as_the_folder_session_does`.
+- A routine asking for `opus` running the mapped model is `claudejob::…a_routine_and_a_yolo_task_run_as_the_folder_session_does`; refusals inside a run and the all-or-nothing save are `ai::command::…a_profile_maps_claudes_names_all_checked_first_never_on_system_or_in_a_run`.

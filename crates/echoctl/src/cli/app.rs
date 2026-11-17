@@ -454,9 +454,11 @@ pub fn ai(cmd: Option<AiCmd>) -> Result<()> {
         AiCmd::UpdateWrapper { id } => ai::update_wrapper(&id).map(drop),
         AiCmd::Set { id, email, no_email, sso, notes_model, models } => {
             anyhow::ensure!(notes_model.is_some() || email.is_some() || no_email || sso.is_some() || !models.is_empty(), "nothing to set: --notes-model, --model, --email, --no-email or --sso");
-            for m in &models {
-                let (name, alias, now) = ai::set_model_name(&id, m)?;
-                println!("{name}: {alias} runs {now}");
+            if !models.is_empty() {
+                let (name, now) = ai::set_model_names(&id, &models)?;
+                for (alias, model) in now {
+                    println!("{name}: {alias} runs {model}");
+                }
             }
             if let Some(m) = notes_model {
                 let (name, now) = ai::set_notes_model(&id, &m)?;

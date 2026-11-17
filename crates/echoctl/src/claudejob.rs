@@ -313,12 +313,12 @@ mod tests {
         assert!(routine.windows(2).any(|w| w[0] == "--model" && w[1] == "opus-test"), "{routine:?}");
         assert!(fs::read_to_string(root.join("store/runs/r1/log.txt")).unwrap().contains(", model opus-test (asked: read permissions"));
         // The profile's own model for a Claude name: what the run asks for, and what its log says.
-        crate::ai::set_model_name("work", "opus=acme-gw/opus-large").unwrap();
+        crate::ai::set_model_names("work", &["opus=acme-gw/opus-large".into()]).unwrap();
         let spec = Spec::from_value(&serde_json::json!({"prompt": "List what changed", "tools": "read", "profile": "work", "model": "opus", "dir": "runs/r1b"}), &root.join("store")).unwrap();
         let _ = run(&spec);
         assert!(lines("p.args").windows(2).any(|w| w[0] == "--model" && w[1] == "acme-gw/opus-large"), "{:?}", lines("p.args"));
         assert!(fs::read_to_string(root.join("store/runs/r1b/log.txt")).unwrap().contains(", model acme-gw/opus-large"));
-        crate::ai::set_model_name("work", "opus=").unwrap();
+        crate::ai::set_model_names("work", &["opus=".into()]).unwrap();
         let _ = model;
         assert!(!routine.contains(&"--tools".to_string()) && !routine.contains(&"--dangerously-skip-permissions".to_string()), "{routine:?}");
         // Echo's reads and its own data's edits without a prompt; never a send.

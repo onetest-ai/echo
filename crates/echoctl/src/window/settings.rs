@@ -158,10 +158,8 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         // A profile's own models for Claude's three names (`ai::set_model_name`; empty: the name as it is).
         "profile_models" => {
             let id = value["id"].as_str().unwrap_or("");
-            for name in ["haiku", "sonnet", "opus"] {
-                crate::ai::set_model_name(id, &format!("{name}={}", value[name].as_str().unwrap_or("")))?;
-            }
-            return Ok(());
+            let all: Vec<String> = ["haiku", "sonnet", "opus"].iter().map(|n| format!("{n}={}", value[n].as_str().unwrap_or(""))).collect();
+            return crate::ai::set_model_names(id, &all).map(drop);
         }
         "autostart" => return crate::app::set_autostart(value.as_bool().unwrap_or(false)),
         // Settings → Brain: the embedding server, in <config dir>/brain.json.

@@ -90,8 +90,6 @@ pub struct Offer {
     pub market: String,
     pub plugin_name: String,
     pub command: String,
-    /// What it says the wrapper runs for haiku, sonnet and opus (`uses.ai.wrapper.models`)
-    pub models: Models,
 }
 
 const IN_RUN: &str = "refused inside a run Echo started: which program Echo starts as Claude Code is the user's to choose";
@@ -124,7 +122,7 @@ fn add_wrapper_in(id: &str, command: &str, name: Option<String>, offer: Option<O
         account: None,
         email: None,
         sso: false,
-        models: offer.as_ref().map(|o| o.models.clone()).unwrap_or_default(),
+        models: Default::default(),
         wrapper: Some(match offer {
             Some(o) => wrapper::Wrapper { command: path.display().to_string(), offered_by: Some(o.plugin), offered_market: Some(o.market), offered_name: Some(o.plugin_name), offered_command: Some(o.command) },
             None => wrapper::Wrapper { command: path.display().to_string(), offered_by: None, offered_market: None, offered_name: None, offered_command: None },
@@ -179,8 +177,7 @@ pub(super) fn offered_in(plugins: &[(String, String, String, Value)], s: &Settin
                 return None;
             }
             let update = taken.and_then(|p| p.wrapper.as_ref()).filter(|w| w.offered_command.as_deref() != Some(command)).map(|w| w.command.clone());
-            let models = Models::from_offer(&w["models"]).unwrap_or_default();
-            Some(json!({"plugin": id, "market": market, "plugin_name": plugin_name, "name": name, "command": command, "models": models, "profile": taken.map(|p| &p.id), "update": update}))
+            Some(json!({"plugin": id, "market": market, "plugin_name": plugin_name, "name": name, "command": command, "profile": taken.map(|p| &p.id), "update": update}))
         })
         .collect()
 }
@@ -213,7 +210,7 @@ fn add_offered_in(offers: &[Value], s: &Settings, plugin: &str, id: Option<&str>
             (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") }).find(|c| !s.profiles.iter().any(|p| p.id == *c)).unwrap_or(base)
         }
     };
-    let o = Offer { plugin: plugin.into(), market: offer["market"].as_str().unwrap_or("").into(), plugin_name: offer["plugin_name"].as_str().unwrap_or(plugin).into(), command: command.clone(), models: serde_json::from_value(offer["models"].clone()).unwrap_or_default() };
+    let o = Offer { plugin: plugin.into(), market: offer["market"].as_str().unwrap_or("").into(), plugin_name: offer["plugin_name"].as_str().unwrap_or(plugin).into(), command: command.clone() };
     add_wrapper_in(&id, &command, offer["name"].as_str().map(str::to_owned), Some(o), checked, false)
 }
 
@@ -282,6 +279,9 @@ pub fn set_sign_in(id: &str, email: Option<String>, no_email: bool, sso: Option<
 /// sonnet = unset); `claude` / `local` → its `notes_model` (empty = back to sonnet / its live
 /// model). Returns the profile's name and its minutes model now, in words.
 pub fn set_notes_model(id: &str, model: &str) -> Result<(String, String)> {
+    if crate::notes::headless() {
+        bail!("refused inside a run Echo started: which model writes a profile's minutes is the user's to choose");
+    }
     let m = model.trim().to_string();
     if id == SYSTEM {
         let mut cfg = Config::load()?;
@@ -297,22 +297,41 @@ pub fn set_notes_model(id: &str, model: &str) -> Result<(String, String)> {
     })
 }
 
-/// `echoctl ai set <id> --model haiku=<name>`: what the profile runs for one of Claude's three names (empty: the name as
-/// it is). Not `system`, which is the user's own Claude Code setup. Returns the profile's name and what it runs now.
-pub fn set_model_name(id: &str, assignment: &str) -> Result<(String, String, String)> {
-    let (name, value) = assignment.split_once('=').ok_or_else(|| anyhow!("--model takes haiku=<model>, sonnet=<model> or opus=<model>"))?;
-    let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
+/// `echoctl ai set <id> --model haiku=<model> …`, the window's Models…: what the profile runs for Claude's names
+/// (`name=` clears one: the name as it is). All checked, then written at once. Not `system` (the user's own Claude Code
+/// setup), and never inside a run Echo started: where a profile's text goes is the user's to choose. Returns the
+/// profile's name and, for each name given, what it runs now.
+pub fn set_model_names(id: &str, assignments: &[String]) -> Result<(String, Vec<(String, String)>)> {
+    set_model_names_in(id, assignments, crate::notes::headless())
+}
+
+fn set_model_names_in(id: &str, assignments: &[String], in_run: bool) -> Result<(String, Vec<(String, String)>)> {
+    if in_run {
+        bail!("refused inside a run Echo started: which models a profile runs is the user's to choose");
+    }
     if id == SYSTEM {
         bail!("{SYSTEM} runs your own Claude Code setup: set its models there");
     }
-    if !value.is_empty() && !model_name(&value) {
-        bail!("“{value}” isn't a model name");
+    let mut want = vec![];
+    for a in assignments {
+        let (name, value) = a.split_once('=').ok_or_else(|| anyhow!("--model takes haiku=<model>, sonnet=<model> or opus=<model>"))?;
+        let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
+        if Models::default().slot(&name).is_none() {
+            bail!("--model names haiku, sonnet or opus, not “{name}”");
+        }
+        if !value.is_empty() && !model_name(&value) {
+            bail!("“{value}” isn't a model name: one word, not haiku, sonnet or opus, not starting with “-”");
+        }
+        want.push((name, value));
     }
     Settings::update(|s| {
         let p = s.profiles.iter_mut().find(|p| p.id == id).ok_or_else(|| anyhow!("no profile \"{id}\""))?;
-        let slot = p.models.slot(&name).ok_or_else(|| anyhow!("--model names haiku, sonnet or opus, not “{name}”"))?;
-        *slot = Some(value).filter(|v| !v.is_empty());
-        Ok((p.name.clone(), name.clone(), p.model(&name)))
+        for (name, value) in &want {
+            if let Some(slot) = p.models.slot(name) {
+                *slot = Some(value.clone()).filter(|v| !v.is_empty());
+            }
+        }
+        Ok((p.name.clone(), want.iter().map(|(n, _)| (n.clone(), p.model(n))).collect()))
     })
 }
 
@@ -426,28 +445,23 @@ mod tests {
     }
 
     #[test]
-    fn an_offer_carries_its_models_and_a_bad_mapping_none() {
-        let mut p = plugin("acme-tools", "m", "acme-claude");
-        p.3["ai"]["wrapper"]["models"] = json!({"sonnet": "acme-gw/sonnet-large"});
-        assert_eq!(offered_in(std::slice::from_ref(&p), &settings(vec![], None))[0]["models"], json!({"sonnet": "acme-gw/sonnet-large"}));
-        p.3["ai"]["wrapper"]["models"] = json!({"sonnet": "two words"});
-        assert_eq!(offered_in(&[p], &settings(vec![], None))[0]["models"], json!({}), "not a model name: nothing mapped");
-    }
-
-    #[test]
-    fn a_profile_maps_claudes_names_set_one_by_one_and_never_on_system() {
+    fn a_profile_maps_claudes_names_all_checked_first_never_on_system_or_in_a_run() {
         let (_env, _) = crate::paths::testenv::folders("ai-model-names");
         add(wrapper("acme", "/opt/acme/acme-claude", None, None)).unwrap();
-        assert_eq!(set_model_name("acme", "Sonnet = acme-gw/sonnet-large").unwrap(), ("acme".into(), "sonnet".into(), "acme-gw/sonnet-large".into()));
-        set_model_name("acme", "haiku=acme-small").unwrap();
-        let p = Settings::load().unwrap().profiles.into_iter().find(|p| p.id == "acme").unwrap();
-        assert_eq!((p.model("sonnet"), p.model("HAIKU"), p.model("opus"), p.model("claude-opus-4-1")), ("acme-gw/sonnet-large".into(), "acme-small".into(), "opus".into(), "claude-opus-4-1".into()));
-        assert_eq!(set_model_name("acme", "haiku=").unwrap().2, "haiku", "cleared: the name as it is");
-        for bad in ["haiku", "gpt=x", "haiku=two words"] {
-            assert!(set_model_name("acme", bad).is_err(), "{bad}");
+        let set = |a: &[&str]| set_model_names_in("acme", &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), false);
+        assert_eq!(set(&["Sonnet = acme-gw/sonnet-large", "haiku=acme-small"]).unwrap(), ("acme".into(), vec![("sonnet".into(), "acme-gw/sonnet-large".into()), ("haiku".into(), "acme-small".into())]));
+        let p = || Settings::load().unwrap().profiles.into_iter().find(|p| p.id == "acme").unwrap();
+        assert_eq!((p().model("sonnet"), p().model("HAIKU"), p().model("opus"), p().model("claude-opus-4-1")), ("acme-gw/sonnet-large".into(), "acme-small".into(), "opus".into(), "claude-opus-4-1".into()));
+        // One bad name: nothing written, the good one beside it neither.
+        for bad in ["haiku", "gpt=x", "haiku=two words", "haiku=--x", "haiku=sonnet"] {
+            assert!(set(&["opus=acme-large", bad]).is_err(), "{bad}");
+            assert_eq!(p().model("opus"), "opus", "{bad}: nothing written");
         }
-        assert!(set_model_name(SYSTEM, "haiku=x").unwrap_err().to_string().contains("your own Claude Code setup"));
-        assert!(set_model_name("nobody", "haiku=x").is_err());
+        assert_eq!(set(&["haiku="]).unwrap().1, [("haiku".to_string(), "haiku".to_string())], "cleared: the name as it is");
+        assert!(set_model_names_in(SYSTEM, &["haiku=x".into()], false).unwrap_err().to_string().contains("your own Claude Code setup"));
+        assert!(set_model_names_in("nobody", &["haiku=x".into()], false).is_err());
+        assert!(set_model_names_in("acme", &["haiku=x".into()], true).unwrap_err().to_string().contains("inside a run"));
+        assert_eq!(p().model("haiku"), "haiku");
     }
 
     #[test]

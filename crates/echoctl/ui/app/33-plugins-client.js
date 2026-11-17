@@ -287,15 +287,21 @@ document.addEventListener('click', (e) => {
   if (at('[data-wrap-cancel]')) { S.wrapForm = null; return render() }
   // A profile's own models for haiku, sonnet and opus: edited in its row, saved together.
   const medit = at('[data-models-edit]')
-  if (medit) { S.modelsForm = medit.dataset.modelsEdit; return render() }
+  if (medit) { S.modelsForm = { id: medit.dataset.modelsEdit }; return render() }
   if (at('[data-models-cancel]')) { S.modelsForm = null; return render() }
   const msave = at('[data-models-save]')
   if (msave) {
     const v = { id: msave.dataset.modelsSave }
     for (const k of ['haiku', 'sonnet', 'opus']) v[k] = (($(`#mdl-${k}`) || {}).value || '').trim()
-    S.modelsForm = null
+    // Kept open with what was typed until the profile shows it saved (a name refused leaves it, with Echo's notice).
+    S.modelsForm = { id: v.id, v }
     send({ cmd: 'settings_set', key: 'profile_models', value: v })
-    return setTimeout(() => loadState().then(render), 400)
+    return setTimeout(() => loadState().then(() => {
+      const p = ai().profiles.find((x) => x.id === v.id)
+      const m = (p && p.models) || {}
+      if (['haiku', 'sonnet', 'opus'].every((k) => (m[k] || '') === v[k])) S.modelsForm = null
+      render()
+    }), 400)
   }
   const offer = at('[data-wrap-offer]')
   if (offer) {
@@ -430,8 +436,9 @@ const SETTINGS_BODY = {
       const isDef = p.id === a.default
       const m = p.models || {}
       const mapped = ['haiku', 'sonnet', 'opus'].filter((k) => m[k]).map((k) => `${k} → ${esc(m[k])}`).join(' · ')
-      const modelsLine = p.kind === 'system' ? '' : S.modelsForm === p.id
-        ? `<div class="stt-form">${['haiku', 'sonnet', 'opus'].map((k) => `<label class="set-sub">${k[0].toUpperCase() + k.slice(1)} → <input class="set-in" id="mdl-${k}" value="${esc(m[k] || '')}" placeholder="${k}" aria-label="${k[0].toUpperCase() + k.slice(1)} runs" spellcheck="false"></label>`).join('')}<button class="btn primary" data-models-save="${esc(p.id)}">Save</button><button class="btn ghost" data-models-cancel>Cancel</button></div>`
+      const draft = S.modelsForm && S.modelsForm.id === p.id ? S.modelsForm.v || m : null
+      const modelsLine = p.kind === 'system' ? '' : draft
+        ? `<div class="stt-form">${['haiku', 'sonnet', 'opus'].map((k) => `<label class="set-sub">${k[0].toUpperCase() + k.slice(1)} → <input class="set-in" id="mdl-${k}" value="${esc(draft[k] || '')}" placeholder="${k}" aria-label="${k[0].toUpperCase() + k.slice(1)} runs" spellcheck="false"></label>`).join('')}<button class="btn primary" data-models-save="${esc(p.id)}">Save</button><button class="btn ghost" data-models-cancel>Cancel</button></div>`
         : `<div class="set-sub">${mapped ? `Models: ${mapped}` : 'Models: Claude\'s names as they are'} <button class="btn ghost" data-models-edit="${esc(p.id)}">Models…</button></div>`
       const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (up ? `<button class="btn primary" data-wrap-update="${esc(p.id)}"${busy ? ' disabled' : ''}>Use it</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
       return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}${upLine}${modelsLine}`, ctl, '', p.name)
