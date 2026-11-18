@@ -906,6 +906,11 @@ mod tests {
         String::from_utf8_lossy(&o.stdout).into_owned()
     }
 
+    /// A setup's commit leaves no `git maintenance run --auto --detach` behind it: started now and slowed by load, it
+    /// would read the trap's settings written right after (gc.auto=1) and its gc read the index — running the
+    /// repository's fsmonitor as if Echo had.
+    const NO_MAINTENANCE: &[&str] = &["-c", "maintenance.auto=false"];
+
     /// The test's home holds the user's git identity (`HOME` is the test's own `user/`).
     fn user_identity(root: &Path) {
         std::fs::write(root.join("user/.gitconfig"), "[user]\n\tname = Sam Rivera\n\temail = sam@initech.example\n[commit]\n\tgpgsign = false\n").unwrap();
@@ -1063,7 +1068,7 @@ mod tests {
         std::fs::write(dir.join("d.inc"), "D\n").unwrap();
         std::fs::write(dir.join(".gitattributes"), "*.md filter=evil diff=evil\n*.inc filter=inc\n").unwrap();
         user_git(dir, &["add", "-A"]);
-        user_git(dir, &["-c", "core.hooksPath=/nonexistent", "commit", "-q", "-m", "start"]);
+        user_git(dir, &[&["-c", "core.hooksPath=/nonexistent"], NO_MAINTENANCE, &["commit", "-q", "-m", "start"]].concat());
         for hook in ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "reference-transaction", "post-index-change"] {
             let s = script(hook, true);
             for d in [".git/hooks", "hooks-here"] {
@@ -1150,6 +1155,54 @@ mod tests {
         let out = std::process::Command::new("git").arg("--version").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
         let v: Vec<u32> = out.split_whitespace().nth(2).unwrap_or("").split('.').take(2).filter_map(|n| n.parse().ok()).collect();
         v.len() == 2 && (v[0], v[1]) >= (major, minor)
+    }
+
+    /// The setups' own git starts nothing that outlives it (git's trace of the programs it starts, from the home's
+    /// settings): what runs in a trapped repository afterwards is only what the test runs.
+    #[cfg(unix)]
+    #[test]
+    fn a_setup_leaves_no_git_running_behind_it() {
+        let (_env, root) = paths::testenv::folders("jshost-git-setup");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let trace = root.join("trace.json");
+        let mut home = std::fs::read_to_string(root.join("user/.gitconfig")).unwrap();
+        home.push_str(&format!("[trace2]\n\teventTarget = {}\n", trace.display()));
+        std::fs::write(root.join("user/.gitconfig"), home).unwrap();
+        trap(&root.join("trapped"), &root.join("marks"));
+        one_commit(&root.join("plain"));
+        let started: Vec<String> = std::fs::read_to_string(&trace).unwrap().lines().filter(|l| l.contains("\"event\":\"child_start\"")).map(String::from).collect();
+        assert!(!started.iter().any(|l| l.contains("maintenance") || l.contains("\"gc\"")), "{started:?}");
+    }
+
+    /// Echo's own commit in a repository asking for gc at every chance starts no maintenance or gc behind it (git's
+    /// trace from the home's settings): nothing outlives Echo's run to read the repository's settings without its
+    /// overrides.
+    #[cfg(unix)]
+    #[test]
+    fn echos_commit_leaves_no_git_running_behind_it() {
+        let (_env, root) = paths::testenv::folders("jshost-git-behind");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let trace = root.join("trace.json");
+        let mut home = std::fs::read_to_string(root.join("user/.gitconfig")).unwrap();
+        home.push_str(&format!("[trace2]\n\teventTarget = {}\n", trace.display()));
+        std::fs::write(root.join("user/.gitconfig"), home).unwrap();
+        let vault = root.join("vault");
+        trap(&vault, &root.join("marks"));
+        install(&root, "keeper", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        std::fs::write(&trace, "").unwrap();
+        run("keeper", "commit", json!({"paths": ["a.md", "b.md"], "message": "Echo: notes"})).unwrap();
+        let events = std::fs::read_to_string(&trace).unwrap();
+        assert!(events.lines().any(|l| l.contains("\"event\":\"start\"") && l.contains("\"commit\"")), "the trace holds Echo's commit: {events}");
+        let started: Vec<&str> = events.lines().filter(|l| l.contains("\"event\":\"child_start\"")).collect();
+        assert!(!started.iter().any(|l| l.contains("maintenance") || l.contains("\"gc\"")), "{started:?}");
+        plugins::remove("keeper", true).unwrap();
+        sync();
     }
 
     #[test]
@@ -1558,7 +1611,7 @@ mod tests {
         user_git(dir, &["init", "-q", "-b", "main"]);
         std::fs::write(dir.join("a.md"), "# A\n").unwrap();
         user_git(dir, &["add", "a.md"]);
-        user_git(dir, &["commit", "-q", "-m", "start"]);
+        user_git(dir, &[NO_MAINTENANCE, &["commit", "-q", "-m", "start"]].concat());
         std::fs::write(dir.join("a.md"), "# A, changed\n").unwrap();
     }
 

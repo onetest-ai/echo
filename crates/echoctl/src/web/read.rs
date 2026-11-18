@@ -1675,10 +1675,11 @@ mod tests {
     #[test]
     fn a_huge_page_is_read_in_bounded_work() {
         let html = format!("<html><body><main>{}</main></body></html>", "<i>x</i>".repeat(MAX_NODES));
-        let at = std::time::Instant::now();
+        let at = cpu_time();
         let p = read(&html, "https://contoso.example/");
         assert!(p.truncated);
-        assert!(at.elapsed() < std::time::Duration::from_secs(20), "{:?}", at.elapsed());
+        let took = cpu_time() - at;
+        assert!(took < std::time::Duration::from_secs(20), "{took:?}");
         // JSON nested past serde's limit, or over the size cap, is nothing — never a crash.
         let deep = format!("<script type=\"application/ld+json\">{}{}</script><p>Hi</p>", "[".repeat(100_000), "]".repeat(100_000));
         assert_eq!(read(&deep, "").markdown, "Hi");
@@ -1734,15 +1735,32 @@ mod tests {
         assert!(text.contains("1000000. First\n1000001. Second"), "a list's start is capped: {text}");
     }
 
-    /// `read` of `html` on a worker's stack: the page, how long it took, the HTML's size.
+    /// The processor time this thread has used: what `read`'s own work costs, not how long a loaded machine took to
+    /// give it that time (a wall clock fails under a parallel build). Elsewhere than macOS, the wall clock.
+    fn cpu_time() -> std::time::Duration {
+        #[cfg(target_os = "macos")]
+        {
+            let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+            // SAFETY: clock_gettime only fills the timespec it is given.
+            assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) }, 0);
+            std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            START.get_or_init(std::time::Instant::now).elapsed()
+        }
+    }
+
+    /// `read` of `html` on a worker's stack: the page, the processor time it took, the HTML's size.
     fn timed(html: String) -> (Page, std::time::Duration, usize) {
         let n = html.len();
         std::thread::Builder::new()
             .stack_size(2 << 20)
             .spawn(move || {
-                let at = std::time::Instant::now();
+                let at = cpu_time();
                 let p = read(&html, "https://contoso.example/");
-                (p, at.elapsed(), n)
+                (p, cpu_time() - at, n)
             })
             .unwrap()
             .join()
@@ -1836,15 +1854,15 @@ mod tests {
         assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     }
 
-    /// `read` of `html` at `base` on a worker's stack: the page, how long it took, its JSON's size.
+    /// `read` of `html` at `base` on a worker's stack: the page, the processor time it took, its JSON's size.
     fn timed_at(html: String, base: &str) -> (Page, std::time::Duration, usize) {
         let base = base.to_string();
         std::thread::Builder::new()
             .stack_size(2 << 20)
             .spawn(move || {
-                let at = std::time::Instant::now();
+                let at = cpu_time();
                 let p = read(&html, &base);
-                let took = at.elapsed();
+                let took = cpu_time() - at;
                 let size = serde_json::to_string(&p.to_json()).unwrap().len();
                 (p, took, size)
             })

@@ -820,6 +820,11 @@ fn serve_conn(conn: &std::net::TcpStream, origin: &str, token: &str, name: &str)
         return;
     }
     let mut body = Vec::new();
+    if method != "POST" && length > 0 {
+        // No body taken, but what was declared is read (up to 64 MB) before answering: closing on unread bytes would
+        // reset the connection and lose the answer.
+        let _ = std::io::copy(&mut (&mut reader).take(length.min(64 << 20) as u64), &mut std::io::sink());
+    }
     if method == "POST" {
         if length > plugins::BODY_MAX {
             // Read (up to 64 MB) before answering, so the browser sees the answer, not a reset connection.
