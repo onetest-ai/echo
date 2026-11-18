@@ -1028,7 +1028,9 @@ Evidence: `jshost::work::check_rows`
   permission gate doesn't decide it (Echo's side: `echo-host.md`, a plugin's microphone). Evidence: `micRefusal`, `micOpen`, `micClose`
   (window script), `window::plugins::mic_open`
 - Slots: `call.menu`, `calendar.event`, `task.actions`, `thread.profile`, `client.profile`, `call.row`, `call.header`,
-  `call.minutes`, `knowledge.tab` and `knowledge.settings` (the last two change with Knowledge's rework). Evidence:
+  `call.minutes`, `knowledge.tab` and `knowledge.settings` (the last two change with Knowledge's rework). A
+  `knowledge.tab` is all the Recall activity shows: the activity is there only while a plugin adds one, and an address
+  `#brain…` loaded before the tab came is routed again when it comes; its last tab gone and none back within 1.5 s (a plugin updating), Recall opens Calls. Evidence:
   `SLOTS` (window script)
 - A slot draws only the HTML its plugin gives (its look ships in the plugin: its own CSS by `ctx.ui.style` /
   `stylesheet`, or Echo's generic classes such as `btn`, `menu`, `menu-item`); every text in it through `ctx.ui.esc`.

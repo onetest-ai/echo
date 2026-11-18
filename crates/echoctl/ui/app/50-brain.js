@@ -1,83 +1,61 @@
-// ── the Brain (`brain/`): what Echo knows across calls, by client and thread ──────────────
-// Its dictionary (terms to review, in two layers: your practice, and each client's), the sources it
-// holds, and its people. Asking is Claude's job (the
-// window's Claude sessions have the Brain); this shows and edits what it is made of.
-/** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
+// ── Recall (`#brain`): the plugins' Knowledge tabs; the dictionary (Settings → Vocabulary); who may speak ──────────
+// The activity is there only while a plugin adds a tab (`knowledge.tab`). Asking what was said is Claude's job (the
+// window's Claude sessions have Echo's search); the dictionary's terms are edited here.
+/** The plugins' tabs of Knowledge (its notes, its graph). */
 const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
-const BRAIN_TABS = [['sources', 'Sources'], ['people', 'People']]
-/** The Recall view's scope as a query; Settings → Vocabulary's dictionary is never scoped. */
-const brainQuery = () => { if (S.view !== 'brain') return ''; const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
-/** The dictionary's own data for Settings → Vocabulary (`/api/brain/dictionary`: unscoped, with Intake on or off);
- *  the Recall view keeps its overview. */
-const dictData = () => S.view === 'brain' ? S.br.data : S.br.dictData
+const nf = (n) => Number(n || 0).toLocaleString()
+/** Query parameters as Echo reads them (`%20`, never `+`, for a space). */
+const qs = (p) => p.toString().replace(/\+/g, '%20')
+/** The dictionary's own data for Settings → Vocabulary (`/api/brain/dictionary`: unscoped, with Intake on or off). */
+const dictData = () => S.br.dictData
 async function loadDict() {
   const before = S.br.dictData ? (S.br.dictData.taxonomy || {}).version : null
   try { const d = await get('api/brain/dictionary'); S.br.dictData = d; noteEditErrors(d) } catch { /* app restarting */ }
   if (S.br.dictData && before !== (S.br.dictData.taxonomy || {}).version && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
   if (S.br.node) await loadBrainNode()
 }
-async function loadBrain() {
-  const q = brainQuery()
-  const before = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
-  try { const d = await get('api/brain' + q); d.q = q; S.br.data = d; noteEditErrors(d) } catch { /* app restarting */ }
-  const now = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
-  // Sources and the dictionary read their pages again only when a sync or an edit changed them (else they keep
-  // the pages shown and the letter picked).
-  if (before !== now && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
-  if (before !== now && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
-  if (S.br.tab === 'people') await loadBrainPeople()
-  if (S.br.node) await loadBrainNode()
-}
 async function loadBrainNode() {
   const id = S.br.node
-  try { const d = await get(`api/brain/node?id=${encodeURIComponent(id)}${brainQuery().replace('?', '&')}`); if (S.br.node === id) S.br.nodeData = d } catch { /* app restarting */ }
+  try { const d = await get(`api/brain/node?id=${encodeURIComponent(id)}`); if (S.br.node === id) S.br.nodeData = d } catch { /* app restarting */ }
 }
-const clientName = (id) => id === '-' ? 'No client' : ((projClient(id) || {}).name || id)
 const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
 /** Draws the Knowledge view in the primary area (`renderNow`). */
+// ── recall leave: Recall with no Knowledge tab goes to Calls, after the grace a plugin's update needs
+/** Recall without a Knowledge tab (its plugin switched off or removed): Calls, once `RECALL_GRACE` ms passed and it is
+ *  still on Recall with none — a plugin updating is unloaded and applied again in between (as `unloadPlugin` gives
+ *  its activities). One wait at a time. */
+const RECALL_GRACE = 1500
+let recallLeave = null
+function leaveRecallLater(later = setTimeout) {
+  if (recallLeave) return
+  recallLeave = later(() => { recallLeave = null; if (S.view === 'brain' && !knowledgeTabs().length) go('calls', { replace: true }) }, RECALL_GRACE)
+}
+// end of the recall leave block
 function drawBrain(primary) {
+  if (!knowledgeTabs().length) return leaveRecallLater()
   patch(primary, `<main class="main">${brainView()}</main>`)
   // A plugin's Knowledge tab draws after the page is in (its graph).
   const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
   const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
   try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
-  drawPeople()
 }
+/** The plugins' Knowledge tabs; a tab Echo no longer has (`#brain/sources`, `#brain/people`) opens the first of them. */
 function brainView() {
   const ktabs = knowledgeTabs()
-  const kt = ktabs.find((x) => x.tab === S.br.tab)
+  const t = ktabs.find((x) => x.tab === S.br.tab) || ktabs[0]
+  if (!t) return ''
+  S.br.tab = t.tab
   const ktabsHtml = ktabs.map((x) => `<button class="tab" role="tab" data-br-tab="${esc(x.tab)}" aria-selected="${S.br.tab === x.tab}">${esc(x.label)}</button>`).join('')
-  // Recall off: only the plugins' tabs.
-  if (kt || !brainOn()) {
-    const t = kt || ktabs[0]
-    if (!t) return ''
-    S.br.tab = t.tab
-    let html = ''
-    try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
-    const recallTabs = brainOn() ? BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="false">${l}</button>`).join('') : ''
-    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
-  }
-  const d = S.br.data
-  if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
-  if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
-  const st = d.status || {}, tx = d.taxonomy || {}, sc = d.scopes || { clients: [], threads: [] }
-  const scopeSel = `<label class="fchip${S.br.scope ? ' on' : ''}">${esc(S.br.scope ? (S.br.scope.startsWith('client:') ? clientName(S.br.scope.slice(7)) : ((projById(S.br.scope.slice(7)) || {}).name || 'In no thread')) : 'Everything')} ▾<select data-br-scope aria-label="Scope"><option value="">Everything</option><optgroup label="Clients">${sc.clients.map((c) => `<option value="client:${esc(c.id)}"${S.br.scope === `client:${c.id}` ? ' selected' : ''}>${esc(c.name)} · ${c.documents}</option>`).join('')}</optgroup><optgroup label="Threads">${sc.threads.map((t) => `<option value="thread:${esc(t.id)}"${S.br.scope === `thread:${t.id}` ? ' selected' : ''}>${esc(t.name)} · ${t.documents}</option>`).join('')}</optgroup></select></label>`
-  const [sk, sv] = (S.br.scope || '').split(':')
-  const inScope = sk ? ((sc[sk === 'client' ? 'clients' : 'threads'] || []).find((x) => x.id === sv) || {}).documents : null
-  const n = { terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
-  const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
-  const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
-  if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Intake">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
-  const body = S.br.tab === 'people' ? brainPeople() : brainSources()
-  return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
+  let html = ''
+  try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
+  return `<div class="br"><header class="pj-head br-head"><div class="br-title"><h2>Recall</h2></div><div class="tabs" role="tablist">${ktabsHtml}</div></header><div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
  *  group, each group closed until opened, then A–Z 50 at a time (a letter jumps); a search over its name,
  *  other names and spellings lists the matches across groups. A click opens it to edit. Tens of thousands of
  *  terms: the app sends a page at a time (`browse::terms`). */
 function termsState() {
-  const key = brainQuery() + '|' + ((dictData() || {}).taxonomy || {}).version
+  const key = '|' + ((dictData() || {}).taxonomy || {}).version
   if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, letters: S.br.dict ? S.br.dict.letters : {}, q: S.br.dict ? S.br.dict.q : '' } }
   return S.br.dict
 }
@@ -86,7 +64,7 @@ async function loadTermsHead() {
   const s = termsState(), key = s.key
   if (s.loadingHead || s.head) return
   s.loadingHead = true
-  try { const h = await get('api/brain/browse/terms?limit=1' + brainQuery().replace('?', '&')); if (termsState().key === key) s.head = h } catch { /* app restarting */ }
+  try { const h = await get('api/brain/browse/terms?limit=1'); if (termsState().key === key) s.head = h } catch { /* app restarting */ }
   s.loadingHead = false
   render()
 }
@@ -108,7 +86,7 @@ async function loadDictTerms(k, more, letter) {
   render()
   const asked = s.q
   try {
-    const r = await get(`api/brain/browse/terms?${qs(p)}${brainQuery().replace('?', '&')}`)
+    const r = await get(`api/brain/browse/terms?${qs(p)}`)
     if (termsState() !== s || (k === 'q' && s.q !== asked)) return
     for (const x of r.items || []) termById.set(x.id, x)
     s.lists[k] = { items: (more && cur ? cur.items : []).concat(r.items || []), letters: r.letters || {}, more: r.more || 0, matches: r.matches || 0, letter: from, loading: false }
@@ -185,7 +163,7 @@ document.addEventListener('input', (e) => {
   dictTimer = setTimeout(render, 300)
 })
 /** A topic or a term by id: as the panel last read it (`/api/brain/node`, current after every edit), else the
- *  overview's topics or the dictionary's pages until that comes. */
+ *  dictionary's pages until that comes. */
 function brItem(id) {
   const nd = S.br.nodeData
   if (nd && nd.id === id && nd.item) return nd.item

@@ -1,16 +1,13 @@
-//! Thread folders in the Brain (phase 5): Brain's document lane (`parse_corpus`, `visual-parse`,
-//! `source_registry`, `scribe_marker`) ported. Each file is read deterministically; each page or slide
-//! is routed — indexed from its text, or (when its text misses the meaning: a diagram, a timeline, a
-//! title-only slide) read from its image by the page reader. Only the index is kept; every section
-//! links back to its file and page.
+//! Thread folders in the Brain (phase 5): Brain's document lane (`parse_corpus`, `source_registry`,
+//! `scribe_marker`) ported. Each file is read deterministically and indexed from its text (a page or slide
+//! its text misses — a scan, a diagram — is the Knowledge plugin's to read). Only the index is kept; every
+//! section links back to its file and page.
 
 pub mod folder;
 pub mod office;
 pub mod pdf;
-pub mod render;
 pub mod sheet;
 pub mod text;
-pub mod vision;
 pub mod xml;
 
 use anyhow::Result;
@@ -19,7 +16,7 @@ use std::path::Path;
 /// A page (PDF) or a visible slide (PowerPoint), as read from the file.
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Page {
-    /// 1-based, in order (slides: visible ones only — the same numbers as LibreOffice's PDF).
+    /// 1-based, in order (slides: visible ones only).
     pub n: usize,
     pub title: Option<String>,
     /// The text layer.
@@ -80,26 +77,6 @@ pub fn read(path: &Path) -> Result<Parsed> {
         p.fidelity = "full";
     }
     Ok(p)
-}
-
-/// Brain's `render_pages` rule: should this page go to the page reader, and why — thin text with no
-/// table (`thin-text`: a title, a picture, a pure diagram), ≥ 60 vector paths (`dense-draw`: a timeline
-/// or diagram, whatever its labels), or ≥ 28 with modest text (< 1000: `diagram`). Measured on PDF
-/// pages: slides and Word pages with figures are measured on LibreOffice's PDF of them (on a sample of
-/// real-world decks the slides' own XML misjudged half of them: free text boxes and divider lines
-/// everywhere). A page that is a table we have the cells of is never sent for being thin.
-pub fn route(p: &Page) -> Option<&'static str> {
-    let tl = p.text.trim().chars().count();
-    if tl < 220 && p.tables.is_empty() {
-        return Some("thin-text");
-    }
-    if p.drawings >= 60 {
-        return Some("dense-draw");
-    }
-    if p.drawings >= 28 && tl < 1000 {
-        return Some("diagram");
-    }
-    None
 }
 
 /// Why a file in a folder isn't read, before reading it (Brain's `scribe_marker.skip_reason`):
@@ -293,17 +270,6 @@ pub fn exact_date(text: &str, path: &Path, today: &str) -> (Option<String>, &'st
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn routing_follows_brain() {
-        let page = |text: usize, drawings: usize| Page { text: "x".repeat(text), drawings, ..Default::default() };
-        assert_eq!(route(&page(100, 0)), Some("thin-text"));
-        assert_eq!(route(&Page { text: "x".into(), tables: vec!["| a |".into()], ..Default::default() }), None);
-        assert_eq!(route(&page(3000, 70)), Some("dense-draw"));
-        assert_eq!(route(&page(800, 30)), Some("diagram"));
-        assert_eq!(route(&page(1500, 30)), None);
-        assert_eq!(route(&page(1200, 4)), None);
-    }
 
     #[test]
     fn skips_and_globs() {

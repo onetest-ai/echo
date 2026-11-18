@@ -217,14 +217,14 @@ function loadSourceState(force) {
   get('api/brain/sources').then((d) => { m365.state = d; render() }).catch(() => {})
   get('api/brain/files').then((d) => { m365.files = d && !d.error ? d : {}; render() }).catch(() => {})
 }
-/** A folder's files in a few words: read, waiting for the page reader, not read. */
+/** A folder's files in a few words: read, not read. */
 function folderSummary(root) {
   const fs = ((m365.files || {})[root]) || { n: 0 }
   if (!fs.n) return { line: 'Not read yet', n: 0 }
   const by = (st) => (fs.by_status || {})[st] || 0
-  const read = by('indexed') + by('pending'), pending = fs.pending_pages || 0
+  const read = by('indexed') + by('pending')
   const not = fs.n - read, err = by('error')
-  return { line: [`${read} file${read === 1 ? '' : 's'} read`, pending ? `${pending} page${pending === 1 ? '' : 's'} to read from their images` : '', not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.n, err }
+  return { line: [`${read} file${read === 1 ? '' : 's'} read`, not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.n, err }
 }
 function sourceLabel(x) {
   if (x.kind === 'mail') {
@@ -285,7 +285,7 @@ function threadSources(p, cl) {
   }
   const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain, an address or * — acme.example, jane@acme.example" aria-label="Mail with" autofocus><input id="pj-add-mail-subject" data-add="mail" placeholder="Only subjects with — Acme Platform, APX (needed with *)" aria-label="Only subjects with"></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
   return chatSources(p) + others.map(chip).join('') + suggest + channel + mail + folderBtn
-    + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into Recall, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses, and by its subject when the source names words; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
+    + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into Recall, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses, and by its subject when the source names words; a folder's documents are read from their text.</div>`
 }
 document.addEventListener('change', (e) => {
   const t = e.target

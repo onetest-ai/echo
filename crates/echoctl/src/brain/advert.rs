@@ -13,10 +13,10 @@ use super::store;
 
 /// When to go to the Brain first, and how (fixed; the model sees it with what the Brain holds).
 pub const WHEN: &str = "When to use it — before Microsoft 365, files or guessing:\n\
-- What was said, decided, promised or asked — by whom, when — across calls, mail, Teams channels and documents: search_sources first; cite the source, its time and its echo:// link (read_link opens one). Go to Microsoft 365 or files only for what Echo doesn't hold (not indexed yet, live state like today's calendar).\n\
-- Who someone is, their role, what was said about them: find_people / get_person.\n\
+- What was said, decided, promised or asked — by whom, when — across calls, mail, Teams channels and documents: search_sources first; cite the source, its time and its echo:// link (read_link opens one, read_source reads a whole source). Go to Microsoft 365 or files only for what Echo doesn't hold (not indexed yet, live state like today's calendar).\n\
 - Before a brief, a meeting prep, a follow-up or a summary of a client or thread: search it, scoped to that client or thread.\n\
-- Scope every search by client or thread when the question is about one (ids from list_scopes); say what no source supports.\n\
+- Scope every search by client or thread when the question is about one (ids from list_scopes: every client and thread, where the lines above name a few); say what no source supports.\n\
+- Who someone is, why and how things relate, long-term facts: the Knowledge plugin's vault, when the user has one.\n\
 Its tools are Echo's MCP server's (mcp__echo__…); load them by name if they are deferred.";
 
 /// A document's source, kind, date and refs.
@@ -34,7 +34,7 @@ fn kind_word(kind: &str, n: usize) -> String {
 }
 
 /// What this reader's Brain holds, in a few lines (≤ ~900 characters): kinds with counts and dates, the
-/// clients and threads it covers, whether people, numbers and insights are there, the last sync.
+/// clients and threads it covers, the last sync.
 pub fn summary(c: &Connection, access: &Access) -> Result<String> {
     let ok = access.sources(c)?;
     let docs: Vec<DocRow> = c
@@ -112,13 +112,6 @@ pub fn summary(c: &Connection, access: &Access) -> Result<String> {
         let more = old.len().saturating_sub(8);
         out.push(format!("Archive: {} closed thread{} — {}{}. Their sections are still searchable (marked `closed`, ranked under current ones); search them when asked about the past.",
             old.len(), if old.len() == 1 { "" } else { "s" }, shown.join(", "), if more > 0 { format!(" and {more} more") } else { String::new() }));
-    }
-    let mut also = vec![];
-    if !access.people_threads().is_empty() {
-        also.push("people (roles, facts, who works with whom)".to_string());
-    }
-    if !also.is_empty() {
-        out.push(format!("Also: {}.", also.join("; ")));
     }
     if let Some(at) = store::meta(c, "built_at") {
         out.push(format!("Last updated {}.", at.chars().take(16).collect::<String>().replace('T', " ")));
@@ -218,10 +211,11 @@ mod tests {
         let threads_line = s.lines().find(|l| l.starts_with("Threads")).unwrap_or("");
         assert!(threads_line.contains("Acme pilot") && !threads_line.contains("Acme workshop"), "{s}");
         assert!(s.contains("Archive: 1 closed thread — Acme workshop (acme-workshop, lost "), "{s}");
-        count("folder", "search_knowledge");
-        count("folder", "search_knowledge");
-        count("window", "also");
+        assert!(!s.contains("people"), "people are Knowledge's, never offered here: {s}");
+        count("folder", "search_sources");
+        count("folder", "search_sources");
+        count("window", "search");
         let u = usage(7);
-        assert_eq!((u["by"]["folder"]["search_knowledge"].as_u64(), u["claude"].as_u64()), (Some(2), Some(2)), "{u}");
+        assert_eq!((u["by"]["folder"]["search_sources"].as_u64(), u["claude"].as_u64()), (Some(2), Some(2)), "{u}");
     }
 }

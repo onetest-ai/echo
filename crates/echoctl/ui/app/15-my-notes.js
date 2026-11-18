@@ -249,29 +249,6 @@ function commitPendingEdit() {
 }
 PANEL_VIEWS.push({ id: 'notes', label: 'My notes', icon: ICON('<path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4M8 12h8M8 16h6"/>'), area: 'right', when: () => S.view === 'calls', render: notesPanel })
 
-/** Also discussed (the Brain): for each moment of the open call, the nearest moments elsewhere — the
- *  same client's first (another client's only when very close) — each opening at its second. */
-const also = { name: null, data: null, at: 0 }
-async function loadAlso(name) {
-  if (also.name === name && Date.now() - also.at < 60000) return
-  also.name = name; also.at = Date.now()
-  try { also.data = await get('api/brain/also/' + encodeURIComponent(name)) } catch { also.data = { error: 'Recall isn\'t available' } }
-  render()
-}
-function alsoPanel() {
-  if (!S.selected) return '<p class="panel-empty">Open a call.</p>'
-  if (also.name !== S.selected) { loadAlso(S.selected); return '<div class="skeleton" style="padding:12px"><i></i><i></i></div>' }
-  const d = also.data
-  if (!d || d.error) return `<p class="panel-empty">${esc((d && d.error) || '')}</p>`
-  const chips = (d.topics || []).map((t) => `<span class="chipt">${esc(t)}</span>`).join('')
-  const groups = (d.groups || []).map((g) => `<div class="al-g"><div class="al-a">for ${esc(g.anchor)}</div>${g.related.map((r) => {
-    const call = r.link && r.link.startsWith('echo://call/') ? r.link.slice(12).split('?')[0] : ''
-    const t = r.link && r.link.includes('?t=') ? Number(r.link.split('?t=')[1]) : null
-    return `<div class="al-r"><button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(r.link)}>${kindMark(r)} ${esc(r.doc || r.source)}${r.date ? ` · ${esc(relDay(r.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button><div class="qt">${esc(r.text)}</div></div>`
-  }).join('')}</div>`).join('')
-  return `<div class="al">${chips ? `<div class="al-chips">${chips}</div>` : ''}${groups || '<p class="set-sub">Nothing close elsewhere yet — it fills as more calls (and, later, channels, mail and files) come into Recall.</p>'}</div>`
-}
-PANEL_VIEWS.push({ id: 'also', label: 'Also discussed', icon: ICON('<circle cx="7" cy="12" r="3"/><circle cx="17" cy="6" r="3"/><circle cx="17" cy="18" r="3"/><path d="M9.6 10.7 14.4 7.4M9.6 13.3l4.8 3.3"/>'), area: 'right', when: () => brainOn() && S.view === 'calls' && !!S.selected, render: alsoPanel })
 // A button that sends one IPC command as it is (`data-cmd-ipc`), then reads the settings again.
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('[data-cmd-ipc]')

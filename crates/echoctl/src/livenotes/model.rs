@@ -58,26 +58,6 @@ pub(crate) fn text_model(p: &Profile) -> String {
     }
 }
 
-/// One request with images (PNG bytes) and a text, on `text_model(p)`'s model: the Brain's page
-/// reader. Claude Code gets the images as content blocks (no tools); a `local` profile its Messages API.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], text: &str, max_tokens: u32) -> Result<String> {
-    use base64::Engine as _;
-    let mut blocks: Vec<Value> = images
-        .iter()
-        .map(|png| json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}))
-        .collect();
-    blocks.push(json!({"type": "text", "text": text}));
-    let blocks = Value::Array(blocks);
-    match p.kind {
-        Kind::Local => complete_local_body(p, &p.live_model(), system, blocks, max_tokens, true, &|| crate::notes::quitting()),
-        Kind::System | Kind::Claude | Kind::Wrapper => {
-            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
-        }
-    }
-}
-
 pub(super) fn curl_quote(s: &str) -> String {
     // A newline would end the option and start another (curl reads its config line by line).
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))

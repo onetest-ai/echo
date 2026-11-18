@@ -16,6 +16,7 @@ cases:
   - tests/cases/cli/TC-011_call-commands-context-actions-type-title-html.md
   - tests/cases/cli/TC-012_delete-restore-and-note-from-the-cli.md
   - tests/cases/cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md
+  - tests/cases/cli/TC-022_echos-mcp-server-offers-only-the-search-tools.md
 auto: [tests/auto/specs/S-28.spec.mjs]
 ---
 
@@ -60,6 +61,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 10 | `cli/TC-011_call-commands-context-actions-type-title-html.md` | — | Batches: steps 1–7; step 9 alone (before the window reads the new name); steps 11–13 |
 | 11 | `cli/TC-012_delete-restore-and-note-from-the-cli.md` | — | Batches: steps 2–3; steps 5–6; steps 8–9 |
 | 12 | `cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md` | — | Steps 1–6 in one call (read only; the calls it reads, Globex pilot scoping and the older Acme weekly sync, are ones stages 6–11 leave as built) |
+| 13 | `cli/TC-022_echos-mcp-server-offers-only-the-search-tools.md` | — | Last: it turns Intake on and indexes the calls (step 10 turns it off). Batches: steps 1–3; steps 5–9 after step 4 gave the hit |
 
 ## Notes
 - The read stages (1–5) come before the ones that change data; each changing stage restores what it changed, except stage 9 (the work of Acme rollout: a criterion met, a move accepted, a merge rejected, a task made and deleted).

@@ -92,9 +92,6 @@ pub(super) fn settings_snapshot() -> Value {
         // How often Claude asks it, and the window's views of it (#34): counts only.
         b["usage"] = crate::brain::advert::usage(7);
         b["last"] = BRAIN_LAST.lock().map(|l| l.clone()).unwrap_or(Value::Null);
-        // Documents: what lays them out and reads their pages here.
-        b["documents"] = json!({ "pdfium": crate::brain::files::pdf::library().is_some(), "libreoffice": crate::brain::files::render::soffice().is_some(),
-                                 "pending": crate::brain::files::folder::pending() });
         v["brain"] = b;
     }
     home_as_tilde(&mut v, &paths::user_home());
@@ -178,14 +175,6 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
                 "brain_key" => s.key = (!text.is_empty()).then_some(text),
                 "brain_auto" => s.auto = Some(value.as_bool().unwrap_or(true)),
                 "brain_enabled" => s.enabled = Some(value.as_bool().unwrap_or(true)),
-                "brain_pages" => {
-                    anyhow::ensure!(["claude", "endpoint", "off"].contains(&text.as_str()), "the page reader is claude, endpoint or off");
-                    s.pages = Some(text);
-                }
-                "brain_vision_endpoint" => s.vision_endpoint = text,
-                "brain_vision_api" => s.vision_api = text,
-                "brain_vision_model" => s.vision_model = text,
-                "brain_vision_key" => s.vision_key = (!text.is_empty()).then_some(text),
                 _ => anyhow::bail!("no setting {k}"),
             }
             return crate::brain::save_settings(&s);

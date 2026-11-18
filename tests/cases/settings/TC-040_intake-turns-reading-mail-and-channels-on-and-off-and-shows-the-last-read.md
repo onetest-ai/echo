@@ -1,6 +1,6 @@
 ---
 id: TC-040
-title: Settings → Intake turns reading mail and channels on and off and shows the last read, Sync now and Keep it current
+title: Settings → Intake turns reading mail and channels on and off and shows the last read, Sync now, Keep it current and the search's own cards
 priority: high
 type: functional
 requirements: [F-KNOW-02, F-SET-03]
@@ -10,7 +10,7 @@ platform: any
 tags: [settings, intake]
 ---
 
-# TC-040: Settings → Intake turns reading mail and channels on and off and shows the last read, Sync now and Keep it current
+# TC-040: Settings → Intake turns reading mail and channels on and off and shows the last read, Sync now, Keep it current and the search's own cards
 
 **Module:** Settings | **Priority:** High | **Type:** Functional
 
@@ -28,14 +28,15 @@ tags: [settings, intake]
 | 1 | Navigate to `{{base_url}}/#settings/brain` and wait for the heading "Intake" | The left list has "Intake" selected; the page's first heading is "Intake" (level 2); a card "Intake" has the row "Use Intake" with its switch off; there is no "Sync now" button and no row "Keep it current" |
 | 2 | Click the switch "Use Intake" | Within 2 s the switch is on; the card shows a row "Last read" saying "Not read yet · sign in to Microsoft 365 (Calendar & chat) to read mail and channels" with a button "Sync now", and a row "Keep it current" with its own switch |
 | 3 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/brain.json"` | It holds `"enabled": true` |
-| 4 | Click the switch "Use Intake" again | Within 2 s the switch is off; "Sync now" and "Keep it current" are gone |
-| 5 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/brain.json"` | It holds `"enabled": false` |
+| 4 | Read the cards below "Intake" (card titles are drawn in capitals: "SEARCH") | A card "Search" with the rows "How much it is used" (it says how often Claude asked it, and nothing about "Also discussed" or "Mentioned also in") and "What it holds"; a card "Meaning (embeddings)" with the rows "Server", "Model" and "Key"; no card "Documents (thread folders)" and no row "Page reader", "Vision server" or "Laying out" anywhere on the page |
+| 5 | Click the switch "Use Intake" again | Within 2 s the switch is off; "Sync now" and "Keep it current" are gone |
+| 6 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/brain.json"` | It holds `"enabled": false` |
 
 ## Expected Final State
 Intake is off, as it started.
 
 ## Teardown
-- None (step 4 turned it off again). Do not press "Sync now": it would index the test data's calls.
+- None (step 5 turned it off again). Do not press "Sync now": it would index the test data's calls.
 
 ## Notes
 - Who may speak, in the same section: `settings/TC-041`.

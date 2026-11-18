@@ -427,26 +427,6 @@ function vocabularySettings() {
 
 /** Settings → Brain: the embedding server Echo asks (no model runs in Echo), what the Brain holds,
  *  and whether the app keeps it current. */
-/** Settings → Brain → Documents: who reads the pages of thread folders that their text misses
- *  (diagrams, timelines, title-only slides), and what lays documents out here. */
-function documentsSettings(b, s, field) {
-  const d = b.documents || {}
-  const pages = s.pages || 'claude'
-  const who = `<select class="set-in" data-brain-set="brain_pages" aria-label="Page reader"><option value="claude"${pages === 'claude' ? ' selected' : ''}>Claude (the default AI profile)</option><option value="endpoint"${pages === 'endpoint' ? ' selected' : ''}>A vision endpoint</option><option value="off"${pages === 'off' ? ' selected' : ''}>Off — their text only</option></select>`
-  const vapi = `<select class="set-in" data-brain-set="brain_vision_api" aria-label="Vision API"><option value="ollama"${s.vision_api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.vision_api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
-  const tools = [d.pdfium ? 'PDF pages: ready' : 'PDF pages: <span class="error">PDFium missing</span>', d.libreoffice ? 'decks and Word layouts: LibreOffice' : 'decks and Word layouts: <span class="error">no LibreOffice</span> — slides are indexed from their text'].join(' · ')
-  const rows = [
-    setRow('Page reader', `Each page is read from its text unless its text misses the meaning — a diagram, a timeline, a title-only slide. Those pages are read from their image, once (cached), while Echo isn't recording.${d.pending ? ` ${d.pending} page${d.pending === 1 ? '' : 's'} waiting.` : ''}`, who),
-  ]
-  if (pages === 'endpoint') {
-    rows.push(setRow('Vision server', 'A vision model on Ollama or an OpenAI-compatible server.', `${vapi}${field('brain_vision_endpoint', s.vision_endpoint, 'http://localhost:11434', 'Vision server address')}`))
-    rows.push(setRow('Vision model', 'One that reads images (e.g. qwen2.5vl, llama3.2-vision).', field('brain_vision_model', s.vision_model, 'qwen2.5vl', 'Vision model')))
-    rows.push(setRow('Key', 'Only for a server that wants one.', field('brain_vision_key', '', s.vision_key ? '•••• set — type to replace' : 'none', 'Vision key', 'password')))
-  }
-  rows.push(setRow('Laying out', tools, ''))
-  return setCard('Documents (thread folders)', rows)
-}
-
 /** The plugins' rows of Settings → Knowledge (the Knowledge plugin's switch and reading state), each its own card. */
 function knowledgeSettings() {
   return (Plugins.slots['knowledge.settings'] || []).map((x) => {
@@ -482,8 +462,7 @@ function brainSettings(st) {
   const u = b.usage || {}, by = u.by || {}
   const sum = (o) => Object.values(o || {}).reduce((n, k) => n + k, 0)
   const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'Claude in the window'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
-  const seen = by.window ? ` · in the window: Also discussed ${by.window.also_discussed || 0}, Mentioned also in ${by.window.mentioned_also_in || 0}` : ''
-  const usageRow = setRow('How much it is used', `Claude asked it ${asked}${seen}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
+  const usageRow = setRow('How much it is used', `Claude asked it ${asked}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
   return head + knowledgeSettings() + setCard('Intake', [
     onRow,
     setRow('Last read', `${lastRead}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
@@ -495,7 +474,7 @@ function brainSettings(st) {
     setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, search goes by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
     setRow('Model', 'An embedding model that knows your languages (e.g. qwen3-embedding, bge-m3). Another model embeds everything again.', field('brain_model', s.model, 'qwen3-embedding', 'Model')),
     setRow('Key', 'Only for a server that wants one (sent as a bearer token; kept on this computer).', field('brain_key', '', s.key ? '•••• set — type to replace' : 'none', 'Key', 'password')),
-  ]) + documentsSettings(b, s, field) + `<p class="set-foot">Sources come from your threads — their calls, Teams channels, mail and folders, set on each thread's Profile. Stored in <code>${esc(b.path || 'brain/')}</code>.</p>`
+  ]) + `<p class="set-foot">Sources come from your threads — their calls, Teams channels, mail and folders, set on each thread's Profile. Stored in <code>${esc(b.path || 'brain/')}</code>.</p>`
 }
 document.addEventListener('change', (e) => {
   const t = e.target

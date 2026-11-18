@@ -885,14 +885,8 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     write("/api/tasks", get("/api/tasks"))?;
     #[cfg(feature = "brain")]
     {
-        write("/api/brain/index.html", get("/api/brain"))?;
-        for x in ["groups", "terms"] {
-            write(&format!("/api/brain/browse/{x}"), get(&format!("/api/brain/browse/{x}")))?;
-        }
-        write("/api/brain/people", get("/api/brain/people"))?;
-        for p in crate::projects::list() {
-            write(&format!("/api/brain/thread-{}", p.id), get(&format!("/api/brain?thread={}", p.id)))?;
-        }
+        write("/api/brain/dictionary", get("/api/brain/dictionary"))?;
+        write("/api/brain/browse/terms", get("/api/brain/browse/terms"))?;
         write("/api/brain/sources", get("/api/brain/sources"))?;
         write("/api/brain/files", get("/api/brain/files"))?;
     }
@@ -915,8 +909,6 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     for d in calls::all_calls() {
         let name = d.file_name().unwrap().to_string_lossy().into_owned();
         write(&format!("/api/call/{name}"), get(&format!("/api/call/{}", urlencode(&name))))?;
-        #[cfg(feature = "brain")]
-        write(&format!("/api/brain/also/{name}"), get(&format!("/api/brain/also/{}", urlencode(&name))))?;
         // The Minutes tab's frame (`minutes/<call>?v=…`): a folder's index.html, which a static
         // server answers as a page (it redirects to the folder, query kept).
         // One that can't be rendered is written as what the frame would show.

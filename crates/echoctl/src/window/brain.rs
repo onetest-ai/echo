@@ -45,21 +45,9 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // How each thread source was last read (`brain/sources.json`).
         "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "intake": crate::brain::facts::status(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
-        // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
-        "/api/brain" => {
-            let q = req.uri().query().unwrap_or("");
-            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
-            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            let mut v = crate::brain::views::overview(scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
-            // A taxonomy edit running now (`brain_taxonomy`), and the last one's error with its number.
-            v["topic_jobs"] = json!(if BRAIN_EDITS.load(std::sync::atomic::Ordering::SeqCst) > 0 { vec!["edit:taxonomy"] } else { vec![] });
-            if let Ok(e) = BRAIN_EDIT_ERROR.lock() {
-                v["edit_error"] = json!({"n": e.0, "text": e.1});
-            }
-            json_reply(v)
-        }
         // Settings → Vocabulary's dictionary: the whole of it, never a scope, with Intake on or off (its terms a page at
-        // a time, `browse/terms`).
+        // a time, `browse/terms`). A taxonomy edit running now (`brain_taxonomy`), and the last one's error with its
+        // number.
         "/api/brain/dictionary" => {
             let mut tx = crate::brain::browse::view(None).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             let n = tx.get_mut("terms").map(Value::take).and_then(|t| t.as_array().map(Vec::len)).unwrap_or(0);
@@ -71,56 +59,22 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             }
             json_reply(v)
         }
-        // The Brain a piece at a time (`brain::browse`): sources grouped and paged, a folder's files, the
-        // dictionary by group and letter.
-        p if p.starts_with("/api/brain/browse/") => {
-            use crate::brain::browse;
+        // The dictionary a page at a time (`brain::browse::terms`), by group and letter, whether Intake is on or off.
+        "/api/brain/browse/terms" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            // The dictionary is Settings → Vocabulary's, whether Intake is on or off; the sources only with it on.
-            let what = &p["/api/brain/browse/".len()..];
-            let r = if !crate::brain::enabled() && what != "terms" { Err(anyhow::anyhow!("Intake is off")) } else { match what {
-                "groups" => browse::source_groups(scope),
-                "sources" => browse::source_list(scope, &browse::ListQuery {
-                    client: query_param(q, "of"), kind: query_param(q, "kind"), root: query_param(q, "root"), channel: query_param(q, "channel"),
-                    q: query_param(q, "q"), before: query_param(q, "before"), limit: num("limit", 50),
-                }),
-                "folder" => browse::folder_files(&query_param(q, "root").unwrap_or_default(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50)),
-                "terms" => browse::terms(scope, query_param(q, "group").as_deref(), query_param(q, "letter").as_deref(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50)),
-                _ => Err(anyhow::anyhow!("not found")),
-            } };
+            let r = crate::brain::browse::terms(scope, query_param(q, "group").as_deref(), query_param(q, "letter").as_deref(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50));
             json_reply(r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
-        // A work item's mentions elsewhere in its thread: POST-less, the item rides in the query.
-        "/api/brain/mentions" => {
-            crate::brain::advert::count("window", "mentioned_also_in");
-            let q = req.uri().query().unwrap_or("");
-            let thread = query_param(q, "thread").unwrap_or_default();
-            let title = query_param(q, "title").unwrap_or_default();
-            let quotes: Vec<(String, String)> = query_param(q, "quotes")
-                .and_then(|s| serde_json::from_str::<Vec<(String, String)>>(&s).ok())
-                .unwrap_or_default();
-            json_reply(crate::brain::views::mentions(&thread, &title, &quotes).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
-        }
+        // A term of the dictionary with its latest sections (Settings → Vocabulary's panel).
         "/api/brain/node" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             json_reply(crate::brain::views::node(&query_param(q, "id").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
-        // One source for the graph's details panel.
-        "/api/brain/doc" => {
-            let q = req.uri().query().unwrap_or("");
-            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
-            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            json_reply(crate::brain::views::doc(&query_param(q, "source").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
-        }
-        p if p.starts_with("/api/brain/also/") => json_reply({
-            crate::brain::advert::count("window", "also_discussed");
-            crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
-        }),
         _ => return None,
     })
 }

@@ -73,7 +73,7 @@ function viewState() {
   }
   if (S.view === 'tasks') { const k = tkPicks(); v.filter = `Tasks across threads${k.project ? ` · only ${(projById(k.project) || {}).name || k.project}` : k.client ? ` · only ${(((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === k.client) || {}).name || k.client}'s` : ''}` }
   if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
-  if (S.view === 'brain') v.filter = `Recall · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
+  if (S.view === 'brain') v.filter = `Recall · ${S.br.tab}`
   if (S.view === 'calendar') {
     v.filter = `Calendar · ${S.cal.mode}`
     const e = S.cal.selected && S.cal.data && (S.cal.data.events || []).find((x) => x.id === S.cal.selected)
@@ -331,7 +331,6 @@ CLICKS.push(
   { sel: '[data-layout-reset]', area: 'settings', when: (t) => t.dataset.layoutReset !== undefined, run: (t) => { Layout.load({}); return layoutChanged() } },
   { sel: '[data-term-output]', area: 'terminals', when: (t) => t.dataset.termOutput, run: (t) => { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() } },
   // A Claude panel's restart / new conversation (#44): asked first while it runs.
-  { sel: '[data-br-pclosed]', area: 'brain', when: (t) => t.dataset.brPclosed !== undefined, run: (t) => { S.br.pClosed = !S.br.pClosed; return render() } },
   { sel: '[data-conv-keep]', area: 'terminals', when: (t) => t.dataset.convKeep !== undefined, run: (t) => { S.convAsk = null; return render() } },
   { sel: '[data-conv],[data-conv-go]', area: 'terminals', when: (t) => t.dataset.conv || t.dataset.convGo !== undefined, run: (t) => {
     const key = t.dataset.termKey

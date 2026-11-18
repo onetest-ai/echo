@@ -287,11 +287,11 @@ function orgPanel(d, id) {
     <div class="wp-h">Groups</div><div class="pp-in">${(o.groups || []).map((g) => `<span class="tok">${esc(g)}</span>`).join('') || '<span class="set-sub">none yet — set a person\'s group and it appears here</span>'}</div>
   </div>`
 }
-PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'), area: 'right', when: () => !!S.pj.person && ((S.view === 'brain' && S.br.tab === 'people') || (S.view === 'projects' && ((S.pj.client && S.pj.ctab === 'people') || (!S.pj.client && S.pj.sel && S.pj.tab === 'people')))), render: personPanel })
+PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'), area: 'right', when: () => !!S.pj.person && S.view === 'projects' && ((S.pj.client && S.pj.ctab === 'people') || (!S.pj.client && S.pj.sel && S.pj.tab === 'people')), render: personPanel })
 
 function peopleSend(op, extra) {
   send({ cmd: 'project', op, id: S.pj.sel, ...extra })
-  setTimeout(() => (S.view === 'brain' ? loadBrainPeople() : loadPeople()).then(render), 250)
+  setTimeout(() => loadPeople().then(render), 250)
 }
 function aboutSave() {
   const i = $('#pp-about')

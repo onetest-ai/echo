@@ -471,7 +471,6 @@ function workPanel() {
     ${criteria}
     ${['task', 'story', 'question'].includes(n.kind) ? xLinkBlock(n) : ''}
     ${(() => { const b = slotItems('task.actions', { kind: n.kind, node: n, project: S.pj.sel }); return b ? `<div class="acts plug-acts">${b}</div>` : '' })()}
-    ${mentionsBlock(n)}
     <div class="wp-h">History</div><div class="wp-hist" role="list" aria-label="History">${hist}</div>
   </div>`
 }

@@ -16,8 +16,8 @@ async function arrive(cached) {
   const loadCalendar = async () => { S.cal.data = { events: [{ id: 'ev-m01', import: { error: 'not signed in to Microsoft 365' } }] } }
   const render = () => drawn.push(S.cal.data)
   const { hashChanged } = new Function('S', 'route', 'render', 'loadCalendar', 'loadSettings', 'loadProjects', 'loadProject',
-    'loadTasks', 'loadToday', 'loadBrain', 'loadCall',
-    `${src.slice(start, end)}\nreturn { hashChanged }`)(S, () => {}, render, loadCalendar, noop, noop, noop, noop, noop, noop, noop)
+    'loadTasks', 'loadToday', 'loadCall',
+    `${src.slice(start, end)}\nreturn { hashChanged }`)(S, () => {}, render, loadCalendar, noop, noop, noop, noop, noop, noop)
   await hashChanged()
   return { S, drawn }
 }

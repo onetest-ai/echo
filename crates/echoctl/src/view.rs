@@ -167,13 +167,13 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
             _ => String::new(),
         };
         let hint = if v["item"]["title"].is_string() {
-            Some(format!("where this work item was raised and what was said about it since — search_knowledge on its title{scope}"))
+            Some(format!("where this work item was raised and what was said about it since — search_sources on its title{scope}"))
         } else if v["event"]["subject"].is_string() {
-            Some("a prep for this meeting — what was said with these people before: search_knowledge on its subject and their names, find_people for who they are".to_string())
+            Some("a prep for this meeting — what was said with these people before: search_sources on its subject and their names; who they are is the Knowledge plugin's".to_string())
         } else if v["call"]["title"].is_string() {
-            Some(format!("what else was said about this call's subjects in other calls, mail and chats — search_knowledge{scope}"))
+            Some(format!("what else was said about this call's subjects in other calls, mail and chats — search_sources{scope}"))
         } else if !scope.is_empty() {
-            Some(format!("what was said, decided and promised here across calls, mail and documents — search_knowledge{scope}"))
+            Some(format!("what was said, decided and promised here across calls, mail and documents — search_sources{scope}"))
         } else {
             None
         };
@@ -504,5 +504,24 @@ mod tests {
         // Sessions not seen for two weeks are forgotten.
         assert!(decide(&mut sent, "s3", "UserPromptSubmit", Some(&a), now + chrono::Duration::days(15)).1);
         assert_eq!(sent.as_object().unwrap().len(), 1);
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn with_intake_on_the_hint_names_search_sources_and_leaves_people_to_knowledge() {
+        let (_env, root) = crate::paths::testenv::folders("view-hints");
+        let now = chrono::Utc::now();
+        let v = json!({"at": now.to_rfc3339(), "event": {"subject": "Acme weekly", "when": "Thu 10:00"}});
+        // Off: no hint at all.
+        assert!(!context(&v, now, &root).unwrap().contains("search_"));
+        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        for v in [v.clone(), json!({"at": now.to_rfc3339(), "item": {"id": "T1", "title": "Send the forecast"}}), json!({"at": now.to_rfc3339(), "call": {"title": "Acme sync"}})] {
+            let b = context(&v, now, &root).unwrap();
+            assert!(b.contains("search_sources"), "{b}");
+            for gone in ["search_knowledge", "find_people", "get_person", "find_related"] {
+                assert!(!b.contains(gone), "{gone}: {b}");
+            }
+        }
+        assert!(context(&v, now, &root).unwrap().contains("Knowledge plugin"));
     }
 }

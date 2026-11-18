@@ -414,7 +414,6 @@
       "heading": "Layout",
       "views": [
         "My notes",
-        "Also discussed",
         "Inbox",
         "Claude",
         "What moved",
@@ -422,7 +421,6 @@
         "Details",
         "Asks",
         "Person",
-        "Source",
         "Topic",
         "Add a widget"
       ],
