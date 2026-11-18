@@ -44,7 +44,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         // The thread folders' files: what was read, how, and why the others weren't.
         "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // How each thread source was last read (`brain/sources.json`).
-        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
+        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "intake": crate::brain::facts::status(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
         "/api/brain" => {
             let q = req.uri().query().unwrap_or("");

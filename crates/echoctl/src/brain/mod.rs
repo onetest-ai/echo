@@ -135,8 +135,10 @@ pub fn sync() -> Result<store::Report> {
     anyhow::ensure!(enabled(), "Intake is off (Settings → Intake)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
     // Intake's facts out of the index into their files, once, before a sync writes any.
+    // Failed, it says so in Settings → Intake; mail and channels wait for it (`sources::sync`).
     if let Err(e) = facts::migrate_locked() {
         eprintln!("intake: {e:#}");
+        facts::set_status(Some(&format!("moving the facts out of the index failed: {e:#}")), &[]);
     }
     let emb = embedder();
     let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;
@@ -287,7 +289,10 @@ pub fn start_scheduler() {
     std::thread::spawn(|| match facts::migrate() {
         Ok(Some(r)) => eprintln!("intake: {} mail and posts moved into fact files", r["written"]),
         Ok(None) => {}
-        Err(e) => eprintln!("intake: {e:#}"),
+        Err(e) => {
+            eprintln!("intake: {e:#}");
+            facts::set_status(Some(&format!("moving the facts out of the index failed: {e:#}")), &[]);
+        }
     });
     // The old learned vocabulary moves into the taxonomy once (transcription reads both meanwhile).
     std::thread::spawn(|| {

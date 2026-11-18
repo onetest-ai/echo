@@ -38,9 +38,12 @@ pub struct Section {
     pub sender: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub unverified: bool,
-    /// The message's Graph id: what says two sections are the same message (`merge`).
+    /// The message's Graph id (it changes when a mail moves to another folder) and a mail's `internetMessageId` (it
+    /// doesn't): what says two sections are the same message (`merge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internet_id: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub raw: bool,
 }
@@ -156,13 +159,14 @@ impl Facts {
     }
 }
 
-/// A source read again, merged into what was kept of it: every section kept, one read again (the same message: its
-/// Graph id; a section from before ids were kept, its heading and link) replaced, new ones added, in time order — a
+/// A source read again, merged into what was kept of it: every section kept, one read again (the same message: a
+/// mail's `internetMessageId`, else its Graph id; a section from before ids were kept, its heading and link) replaced, new ones added, in time order — a
 /// message the new read lacks (deleted, or past what Microsoft 365 keeps) never goes, and two sections of one read
 /// never become one. Its title, refs and date are the new read's, its people and subjects both reads'.
 pub fn merge(old: Facts, mut new: Facts) -> Facts {
-    let same = |a: &Section, b: &Section| match (&a.id, &b.id) {
-        (Some(x), Some(y)) => x == y,
+    let same = |a: &Section, b: &Section| match (&a.internet_id, &b.internet_id, &a.id, &b.id) {
+        (Some(x), Some(y), _, _) => x == y,
+        (_, _, Some(x), Some(y)) => x == y,
         _ => a.head == b.head && a.link == b.link,
     };
     let mut sections = old.sections;
@@ -213,6 +217,24 @@ pub fn intake_dir() -> PathBuf {
 /// `<home>/recall/intake/facts`.
 pub fn dir() -> PathBuf {
     intake_dir().join("facts")
+}
+
+/// Where fact files that couldn't be read are kept (`Writer::write`).
+pub fn broken_dir() -> PathBuf {
+    intake_dir().join("facts.broken")
+}
+
+/// Why Intake isn't reading now, or what it couldn't write (`intake/status.json`), for Settings → Intake.
+pub fn status() -> Value {
+    std::fs::read(intake_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}))
+}
+
+/// Say why Intake is paused (`None`: it isn't) and what it couldn't write in its last sync.
+pub fn set_status(paused: Option<&str>, problems: &[String]) {
+    let v = json!({"paused": paused, "problems": problems, "at": chrono::Utc::now().to_rfc3339()});
+    if std::fs::create_dir_all(intake_dir()).is_ok() {
+        let _ = paths::write_atomic(&intake_dir().join("status.json"), v.to_string().as_bytes());
+    }
 }
 
 /// Where the generations of the facts are kept (`backup`).
@@ -316,6 +338,13 @@ pub fn backup() -> Result<()> {
     }
     let root = backup_dir();
     std::fs::create_dir_all(&root)?;
+    // What a backup stopped half way left (a copy, or a generation set aside): only one runs at a time (a sync's).
+    for e in std::fs::read_dir(&root)?.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with('.') && n.ends_with(".tmp") {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
     let tmp = root.join(format!(".copy.{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
     let _ = std::fs::remove_dir_all(&tmp);
     if let Err(e) = copy_dir(&from, &tmp) {
@@ -328,10 +357,22 @@ pub fn backup() -> Result<()> {
     // Fewer files than today's copy: kept beside it as the day's one shrunk copy (replacing an earlier one), so no
     // shrinking within a day ever wears today's copy down.
     let to = if day.exists() && n < count_files(&day) { root.join(format!("{}-shrunk", now.format("%Y-%m-%d"))) } else { day };
-    if to.exists() {
-        std::fs::remove_dir_all(&to)?;
+    // The one it replaces is set aside first, the new one put in, and only then the old one deleted: at no moment is
+    // there no copy of the day.
+    let aside = root.join(format!(".old.{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let had = to.exists();
+    if had {
+        std::fs::rename(&to, &aside)?;
     }
-    std::fs::rename(&tmp, &to)?;
+    if let Err(e) = std::fs::rename(&tmp, &to) {
+        if had {
+            let _ = std::fs::rename(&aside, &to);
+        }
+        return Err(e.into());
+    }
+    if had {
+        let _ = std::fs::remove_dir_all(&aside);
+    }
     // Prune: generations of days past the newest GENERATIONS go, but never the fullest one.
     let gens = generations();
     let mut days: Vec<&str> = gens.iter().map(|g| &g[..10]).collect();
@@ -361,8 +402,8 @@ impl Writer {
         Ok(())
     }
 
-    /// Write a source's facts (nothing when the file holds them already). A file there that can't be read is kept as
-    /// `<name>.broken-<time>.json`, never written over.
+    /// Write a source's facts (nothing when the file holds them already). A file there that can't be read is moved to
+    /// `intake/facts.broken/<source>.<time>.json` (outside the facts and their backups), never written over.
     pub fn write(&mut self, f: &Facts) -> Result<()> {
         let Some(p) = path_of(&f.source) else { bail!("not a mail's or a post's id: {}", f.source) };
         let had = read(&f.source);
@@ -371,8 +412,8 @@ impl Writer {
         }
         self.before_change()?;
         if had.is_none() && p.exists() {
-            let stem = p.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            let to = p.with_file_name(format!("{stem}.broken-{}.json", chrono::Utc::now().format("%Y%m%dT%H%M%S%3f")));
+            let to = broken_dir().join(format!("{}.{}.json", f.source, chrono::Utc::now().format("%Y%m%dT%H%M%S%3f")));
+            std::fs::create_dir_all(to.parent().expect("a folder"))?;
             std::fs::rename(&p, &to)?;
             eprintln!("intake: {} couldn't be read: kept as {}", p.display(), to.display());
         }
@@ -824,9 +865,10 @@ mod tests {
         std::fs::write(&p, "{ half a file").unwrap();
         Writer::default().write(&f).unwrap();
         assert_eq!(read("mail/m").as_ref(), Some(&f));
-        let aside: Vec<String> = std::fs::read_dir(p.parent().unwrap()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("m.broken-")).collect();
+        let aside: Vec<PathBuf> = std::fs::read_dir(broken_dir().join("mail")).unwrap().flatten().map(|e| e.path()).collect();
         assert_eq!(aside.len(), 1);
-        assert_eq!(std::fs::read_to_string(p.parent().unwrap().join(&aside[0])).unwrap(), "{ half a file");
+        assert_eq!(std::fs::read_to_string(&aside[0]).unwrap(), "{ half a file");
+        assert_eq!(std::fs::read_dir(p.parent().unwrap()).unwrap().count(), 1, "out of facts/ (and so of its backups)");
         assert_eq!(all(), vec![f], "the broken one isn't read as facts");
     }
 
@@ -842,5 +884,37 @@ mod tests {
         std::fs::remove_file(dir()).unwrap();
         assert_eq!(migrate().unwrap().unwrap()["written"], 3);
         assert!(migrated());
+    }
+
+    #[test]
+    fn a_mail_moved_to_another_folder_is_the_same_message() {
+        let mail = |id: &str, link: &str, fact: &str| Section { id: Some(id.into()), internet_id: Some("<a1@acme.example>".into()), ..sec("2026-11-11 09:00 Jane Doe", link, fact, "jane@acme.example") };
+        let one = |s: Section| Facts::new("mail/m".into(), "mail", "Pilot".into(), Some("2026-11-11".into()), json!({}), vec![s]);
+        // Moved to an archive folder: a new Graph id and link, the same internetMessageId — one section, read again.
+        let m = merge(one(mail("AAMk-inbox", "https://outlook.example/inbox/1", "Jane sets the pilot")), one(mail("AAMk-archive", "https://outlook.example/archive/1", "Jane sets the pilot for May")));
+        assert_eq!(m.sections.len(), 1);
+        assert_eq!((m.sections[0].id.as_deref(), m.sections[0].facts[0].text.as_str()), (Some("AAMk-archive"), "Jane sets the pilot for May"));
+        // Two mails of the same minute and link are two by their internetMessageId.
+        let mut other = mail("AAMk-2", "https://outlook.example/archive/1", "Jane adds a room");
+        other.internet_id = Some("<a2@acme.example>".into());
+        let mut two = one(mail("AAMk-archive", "https://outlook.example/archive/1", "Jane sets the pilot for May"));
+        two.sections.push(other);
+        assert_eq!(merge(m, two).sections.len(), 2);
+    }
+
+    #[test]
+    fn a_backup_stopped_half_way_leaves_nothing_behind_and_the_day_always_has_a_copy() {
+        let (_env, _root) = crate::paths::testenv::folders("intake-facts-backup-leftovers");
+        let mut w = Writer::default();
+        w.write(&sample("mail/a", json!([]))).unwrap();
+        let mut w = Writer::default();
+        w.write(&sample("mail/b", json!([]))).unwrap();
+        std::fs::create_dir_all(backup_dir().join(".copy.1.1.tmp/mail")).unwrap();
+        std::fs::create_dir_all(backup_dir().join(".old.1.2.tmp/mail")).unwrap();
+        let mut w = Writer::default();
+        w.write(&sample("mail/c", json!([]))).unwrap();
+        let names: Vec<String> = std::fs::read_dir(backup_dir()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec![chrono::Local::now().format("%Y-%m-%d").to_string()], "today's copy alone: {names:?}");
+        assert_eq!(count_files(&backup_dir().join(&names[0])), 2, "replaced by the fuller copy");
     }
 }

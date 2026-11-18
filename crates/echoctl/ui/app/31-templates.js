@@ -469,7 +469,10 @@ function brainSettings(st) {
   const onRow = setRow('Use Intake', 'Reads your threads\' mail and channel posts into facts and indexes them, with your calls and folders, for search — for you and for Claude. Off: nothing is read or indexed — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use Intake'))
   if (b.enabled === false) return head + knowledgeSettings() + setCard('Intake', [onRow]) + whoCard + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
   const reads = Object.values(src.state || {}).map((x) => x && x.read_at).filter(Boolean).sort()
-  const lastRead = (reads.length ? `Last read ${esc(relDay(reads[reads.length - 1]))}` : 'Not read yet') + (src.signed_in === false ? ' · sign in to Microsoft 365 (Calendar & chat) to read mail and channels' : '')
+  // Paused (the facts not moved out of the index yet), or files it couldn't write: said here, never silently.
+  const ist = src.intake || {}
+  const trouble = (ist.paused ? `<br><span class="error">Intake is paused: ${esc(ist.paused)}</span>` : '') + ((ist.problems || []).length ? `<br><span class="error">${esc(ist.problems.length === 1 ? ist.problems[0] : `${ist.problems.length} files couldn't be written: ${ist.problems[0]} …`)}</span>` : '')
+  const lastRead = (reads.length ? `Last read ${esc(relDay(reads[reads.length - 1]))}` : 'Not read yet') + (src.signed_in === false ? ' · sign in to Microsoft 365 (Calendar & chat) to read mail and channels' : '') + trouble
   const s = b.settings || {}
   const field = (key, val, ph, label, type = 'text') => `<input class="set-in" type="${type}" data-brain-set="${key}" value="${esc(val || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}" spellcheck="false">`
   const api = `<select class="set-in" data-brain-set="brain_api" aria-label="API"><option value="ollama"${s.api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
