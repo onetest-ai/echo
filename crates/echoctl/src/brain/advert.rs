@@ -15,7 +15,7 @@ use super::store;
 pub const WHEN: &str = "When to use it — before Microsoft 365, files or guessing:\n\
 - What was said, decided, promised or asked — by whom, when — across calls, mail, Teams channels and documents: search_sources first; cite the source, its time and its echo:// link (read_link opens one, read_source reads a whole source). Go to Microsoft 365 or files only for what Echo doesn't hold (not indexed yet, live state like today's calendar).\n\
 - Before a brief, a meeting prep, a follow-up or a summary of a client or thread: search it, scoped to that client or thread.\n\
-- Scope every search by client or thread when the question is about one (the ids above); say what no source supports.\n\
+- Scope every search by client or thread when the question is about one (ids from list_scopes: every client and thread, where the lines above name a few); say what no source supports.\n\
 - Who someone is, why and how things relate, long-term facts: the Knowledge plugin's vault, when the user has one.\n\
 Its tools are Echo's MCP server's (mcp__echo__…); load them by name if they are deferred.";
 
@@ -43,7 +43,7 @@ pub fn summary(c: &Connection, access: &Access) -> Result<String> {
         .collect::<Result<_, _>>()?;
     let mut kinds: BTreeMap<String, (usize, String, String)> = BTreeMap::new();
     let (mut clients, mut threads): (BTreeSet<String>, BTreeSet<String>) = (BTreeSet::new(), BTreeSet::new());
-    // Only the clients and threads this reader may name: a document shared with a thread on
+    // Only the clients and threads this reader may name (as `list_scopes`): a document shared with a thread on
     // another profile, or of another client in a narrowed session, doesn't name that one here.
     let projects = crate::projects::list();
     let on_profile = access.threads_on_profile();

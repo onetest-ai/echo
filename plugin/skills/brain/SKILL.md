@@ -18,8 +18,8 @@ never guess them from search hits.
 ## Answering a question
 
 ```
-- [ ] 1. Scope: which client or thread is it about? Its id: the ids in the MCP server's instructions, or
-         `echoctl project list`
+- [ ] 1. Scope: which client or thread is it about? Its id: list_scopes (CLI: `brain scopes`, or
+         `echoctl project list`)
 - [ ] 2. Search: search_sources {"query": "<the question's words>", "client" | "thread": "<id>"}
          (CLI: brain search "<words>" --client <id> | --thread <id> [--limit 12])
 - [ ] 3. Search again in other words — the other language (calls mix English, Ukrainian, Russian), a person's name,

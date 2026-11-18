@@ -121,7 +121,7 @@ impl Access {
             .collect()
     }
 
-    /// The threads it may name (the Brain's own summary): on its profile and within its
+    /// The threads it may name (`list_scopes`, the Brain's own summary): on its profile and within its
     /// narrowing. `on_profile`: `threads_on_profile()`.
     pub fn thread_ok(&self, id: &str, client: Option<&str>, on_profile: &[String]) -> bool {
         (id == "-" || on_profile.iter().any(|x| x == id)) && (self.threads.is_empty() || self.threads.iter().any(|x| x == id)) && self.client.as_deref().is_none_or(|c| client == Some(c))

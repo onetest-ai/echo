@@ -20,9 +20,19 @@ async function loadBrainNode() {
 }
 const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
 /** Draws the Knowledge view in the primary area (`renderNow`). */
+// ── recall leave: Recall with no Knowledge tab goes to Calls, after the grace a plugin's update needs
+/** Recall without a Knowledge tab (its plugin switched off or removed): Calls, once `RECALL_GRACE` ms passed and it is
+ *  still on Recall with none — a plugin updating is unloaded and applied again in between (as `unloadPlugin` gives
+ *  its activities). One wait at a time. */
+const RECALL_GRACE = 1500
+let recallLeave = null
+function leaveRecallLater(later = setTimeout) {
+  if (recallLeave) return
+  recallLeave = later(() => { recallLeave = null; if (S.view === 'brain' && !knowledgeTabs().length) go('calls', { replace: true }) }, RECALL_GRACE)
+}
+// end of the recall leave block
 function drawBrain(primary) {
-  // Its last tab gone (the plugin switched off or removed): Calls, as for an address without one.
-  if (!knowledgeTabs().length) return setTimeout(() => { if (S.view === 'brain' && !knowledgeTabs().length) go('calls', { replace: true }) })
+  if (!knowledgeTabs().length) return leaveRecallLater()
   patch(primary, `<main class="main">${brainView()}</main>`)
   // A plugin's Knowledge tab draws after the page is in (its graph).
   const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)

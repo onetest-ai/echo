@@ -28,7 +28,7 @@
   },
   {
    "id": "F-KNOW-05",
-   "feature": "Claude sessions get Echo's search as a read-only MCP server scoped to their AI profile: search_sources, list_sources, read_source and read_link only; who people are and how things relate are left to the Knowledge plugin",
+   "feature": "Claude sessions get Echo's search as a read-only MCP server scoped to their AI profile: search_sources, list_sources, read_source, read_link and list_scopes only; who people are and how things relate are left to the Knowledge plugin",
    "priority": "high",
    "check": "agent",
    "axes": []

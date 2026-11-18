@@ -14,7 +14,8 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   another profile answers "not found".
 - The on/off switch: `brain::enabled`.
 - The MCP server's tools are `mcp__echo__…`, listed in `guard::BRAIN_TOOLS`: `search_sources`, `list_sources`,
-  `read_source` and `read_link` (`brain::mcp::tools`; the old names `search_knowledge` and `read_document` still
+  `read_source`, `read_link` and `list_scopes` (every client and thread the reader may see, with its id; the session
+  block names at most 8 of each) (`brain::mcp::tools`; the old names `search_knowledge` and `read_document` still
   answer). Who people are and how things relate are the Knowledge plugin's: no people or relations tools.
 - What a session is told Echo holds (`brain::advert::summary`, the MCP server's instructions and `<echo_recall>`) and
   the window's per-view hint (`view::view_lines`) name `search_sources` and point to the Knowledge plugin for people.

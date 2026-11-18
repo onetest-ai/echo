@@ -518,7 +518,7 @@ mod tests {
         for v in [v.clone(), json!({"at": now.to_rfc3339(), "item": {"id": "T1", "title": "Send the forecast"}}), json!({"at": now.to_rfc3339(), "call": {"title": "Acme sync"}})] {
             let b = context(&v, now, &root).unwrap();
             assert!(b.contains("search_sources"), "{b}");
-            for gone in ["search_knowledge", "find_people", "get_person", "find_related", "list_scopes"] {
+            for gone in ["search_knowledge", "find_people", "get_person", "find_related"] {
                 assert!(!b.contains(gone), "{gone}: {b}");
             }
         }
