@@ -42,6 +42,8 @@ never guess them from search hits.
     list's `filters.dates_from_query` says so. Examples: "12 November", "2026-11-12", "last week", "12 листопада",
     "на прошлой неделе".
   - `--person Dana`: what that person said or wrote. Minutes and documents have no speaker, so leave it off for them.
+  - A query that is only a day ("what happened yesterday") lists that day's sources, newest first, and its `note`
+    says so. For English months, write them capitalised ("3 May"), or as `2026-05-03`.
 - The index is working memory, not an archive:
   - Transcripts and chats are kept 45 days.
   - Minutes, mail facts and channel facts are kept 90 days.

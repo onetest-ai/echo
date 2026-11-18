@@ -31,21 +31,34 @@ pub fn horizon(section: &str) -> Option<i64> {
     }
 }
 
-/// A section's day: a mail or channel fact's own (its heading starts "YYYY-MM-DD HH:MM"), else its document's.
-fn day_of(section: &str, title: &str, event_date: Option<&str>) -> Option<NaiveDate> {
-    let own = matches!(section, "mail" | "channel").then(|| title.get(..10)).flatten();
-    own.or_else(|| event_date.and_then(|d| d.get(..10))).and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+/// Whether a section of `section` kind dated `day` (YYYY-MM-DD; none: never guessed) is within its horizon on `today`.
+pub fn kept(section: &str, day: Option<&str>, today: NaiveDate) -> bool {
+    let d = day.and_then(|d| d.get(..10)).and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+    match (horizon(section), d) {
+        (Some(days), Some(d)) => (today - d).num_days() <= days,
+        _ => true,
+    }
 }
 
 /// A document's mark while its sections are out for its closed threads: those threads.
-fn closed_mark(refs: &Value, closed: &BTreeMap<String, Value>) -> String {
+pub(super) fn closed_mark(refs: &Value, closed: &BTreeMap<String, Value>) -> String {
     let ids: BTreeSet<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).filter(|t| closed.contains_key(*t)).collect();
     format!("closed:{}", ids.into_iter().collect::<Vec<_>>().join(","))
 }
 
+/// What the last sweep was for: its day and the closed threads (`meta.retained_for`). The same again: no sweep.
+fn sweep_key(today: NaiveDate, closed: &BTreeMap<String, Value>) -> String {
+    format!("{today}|{}", closed.keys().cloned().collect::<Vec<_>>().join(","))
+}
+
+/// Whether a sweep is due: once a day, and when a thread closed or opened again since the last.
+pub fn due(path: &Path, today: NaiveDate, closed: &BTreeMap<String, Value>) -> Result<bool> {
+    Ok(store::meta(&store::open(path)?, "retained_for").as_deref() != Some(sweep_key(today, closed).as_str()))
+}
+
 /// Before a sync: a document whose sections went for threads that are no longer all closed (one opened again) leaves
 /// the index whole, so the sync reads it again — a call from its folder, a document from its file, mail and posts from
-/// their Intake facts at the next read. Returns how many.
+/// their Intake facts (`sources::feed_missing`). Returns how many.
 pub fn restore(path: &Path, closed: &BTreeMap<String, Value>) -> Result<usize> {
     let c = store::open(path)?;
     let docs: Vec<(String, Option<String>, String)> = c
@@ -72,70 +85,78 @@ pub fn restore(path: &Path, closed: &BTreeMap<String, Value>) -> Result<usize> {
     Ok(n)
 }
 
-/// After a sync: every section past its horizon on `today`, and every section only in closed threads, leaves the index
-/// (cards stay; a closed thread's document gets its card first). Returns how many sections left.
+/// A section as the sweep reads it: id, source, kind, title, day.
+type Row = (i64, String, String, String, Option<String>);
+
+/// The sweep, when `due`: every section past its horizon on `today`, and every section only in closed threads, leaves
+/// the index (cards stay; a closed thread's document gets its card first). Every section and its threads are read in
+/// one pass each. Returns how many sections left.
 pub fn apply(path: &Path, today: NaiveDate, closed: &BTreeMap<String, Value>) -> Result<usize> {
     let c = store::open(path)?;
-    let docs: Vec<(String, String, Option<String>, Option<String>)> = c
+    let docs: BTreeMap<String, (String, Option<String>, Option<String>)> = c
         .prepare("SELECT source, coalesce(title, ''), refs, event_date FROM documents")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?
         .collect::<Result<_, _>>()?;
+    let mut threads: BTreeMap<i64, Vec<String>> = BTreeMap::new();
+    for row in c.prepare("SELECT chunk_id, id FROM scopes WHERE kind = 'thread' AND id != '-'")?.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+        let (id, t) = row?;
+        threads.entry(id).or_default().push(t);
+    }
+    let mut by_doc: BTreeMap<String, Vec<Row>> = BTreeMap::new();
+    for row in c
+        .prepare("SELECT id, source, coalesce(section, ''), coalesce(title, ''), event_date FROM chunks ORDER BY source, ord")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+    {
+        let row: Row = row?;
+        by_doc.entry(row.1.clone()).or_default().push(row);
+    }
+    let only_closed = |id: &i64| threads.get(id).is_some_and(|ts| ts.iter().all(|t| closed.contains_key(t)));
     let tx = c.unchecked_transaction()?;
     let mut gone = 0;
-    for (src, title, refs, date) in docs {
+    for (src, rows) in &by_doc {
+        let Some((title, refs, date)) = docs.get(src) else { continue };
+        let (mut out, mut for_closed) = (vec![], false);
+        for (id, _, section, _, day) in rows.iter().filter(|r| r.2 != "card") {
+            if only_closed(id) {
+                out.push(*id);
+                for_closed = true;
+            } else if !kept(section, day.as_deref(), today) {
+                out.push(*id);
+            }
+        }
+        if out.is_empty() {
+            continue;
+        }
         let refs: Value = refs.as_deref().and_then(|r| serde_json::from_str(r).ok()).unwrap_or(Value::Null);
-        gone += trim(&tx, &src, &title, &refs, date.as_deref(), today, closed)?;
+        if for_closed && src.starts_with("file/") {
+            card(&tx, src, title, &refs, date.as_deref(), rows)?;
+        }
+        store::delete_chunks(&tx, &out)?;
+        if for_closed {
+            tx.execute("UPDATE documents SET retained = ?2 WHERE source = ?1", params![src, closed_mark(&refs, closed)])?;
+        }
+        store::doc_facts(&tx, src)?;
+        gone += out.len();
     }
+    store::set_meta(&tx, "retained_for", &sweep_key(today, closed))?;
     tx.commit()?;
     Ok(gone)
 }
 
-/// One document's sections past their horizon or only in closed threads out (see `apply`).
-fn trim(tx: &Connection, src: &str, title: &str, refs: &Value, date: Option<&str>, today: NaiveDate, closed: &BTreeMap<String, Value>) -> Result<usize> {
-    let rows: Vec<(i64, String, String, Option<String>)> = tx
-        .prepare("SELECT id, coalesce(section, ''), coalesce(title, ''), event_date FROM chunks WHERE source = ?1 ORDER BY ord")?
-        .query_map([src], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
-        .collect::<Result<_, _>>()?;
-    let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
-    let archived = store::archived_of(tx, &ids, closed)?;
-    let (mut out, mut for_closed) = (vec![], false);
-    for (id, section, head, day) in &rows {
-        if section == "card" {
-            continue;
-        }
-        if archived.contains_key(id) {
-            out.push(*id);
-            for_closed = true;
-        } else if let (Some(days), Some(d)) = (horizon(section), day_of(section, head, day.as_deref())) {
-            if (today - d).num_days() > days {
-                out.push(*id);
-            }
+/// A closed thread's document's card (title, path, threads, headings), before its text goes.
+fn card(tx: &Connection, src: &str, title: &str, refs: &Value, date: Option<&str>, rows: &[Row]) -> Result<()> {
+    let mut heads: Vec<String> = vec![];
+    for (_, _, _, h, _) in rows {
+        let h = h.split(" (part ").next().unwrap_or(h).trim().to_string();
+        if !h.is_empty() && !heads.contains(&h) && heads.len() < CARD_HEADINGS {
+            heads.push(h);
         }
     }
-    if out.is_empty() {
-        return Ok(0);
-    }
-    // A closed thread's document: its card (title, path, threads, headings) before its text goes.
-    if for_closed && src.starts_with("file/") {
-        let mut heads: Vec<String> = vec![];
-        for (_, _, h, _) in &rows {
-            let h = h.split(" (part ").next().unwrap_or(h).trim().to_string();
-            if !h.is_empty() && !heads.contains(&h) && heads.len() < CARD_HEADINGS {
-                heads.push(h);
-            }
-        }
-        let threads: Vec<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str().or(t["id"].as_str())).collect();
-        let path = refs["path"].as_str().or(refs["rel"].as_str()).unwrap_or("");
-        let text = format!("Document: {title}\nPath: {path}\nThreads: {}\nHeadings: {}", threads.join(", "), heads.join(" · "));
-        let link = format!("echo://file/{}", refs["file"].as_str().unwrap_or(""));
-        store::put_card(tx, src, title, &text, date, &link, refs)?;
-    }
-    store::delete_chunks(tx, &out)?;
-    if for_closed {
-        tx.execute("UPDATE documents SET retained = ?2 WHERE source = ?1", params![src, closed_mark(refs, closed)])?;
-    }
-    store::doc_facts(tx, src)?;
-    Ok(out.len())
+    let threads: Vec<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str().or(t["id"].as_str())).collect();
+    let path = refs["path"].as_str().or(refs["rel"].as_str()).unwrap_or("");
+    let text = format!("Document: {title}\nPath: {path}\nThreads: {}\nHeadings: {}", threads.join(", "), heads.join(" · "));
+    let link = format!("echo://file/{}", refs["file"].as_str().unwrap_or(""));
+    store::put_card(tx, src, title, &text, date, &link, refs)
 }
 
 /// The most headings a document's card lists.
@@ -177,13 +198,14 @@ mod tests {
         sections(src).into_iter().map(|s| s.1).collect()
     }
 
-    /// Every file under `dir` but the index's own, with its bytes.
+    /// Every file under `dir` but the index's own and the facts move's done mark, with its bytes.
     fn files(dir: &std::path::Path) -> BTreeMap<std::path::PathBuf, Vec<u8>> {
         let mut out = BTreeMap::new();
         for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
             if e.path().is_dir() {
                 out.extend(files(&e.path()));
-            } else if !e.file_name().to_string_lossy().starts_with("knowledge.sqlite") {
+            } else if !name.starts_with("knowledge.sqlite") && name != "migrated.json" {
                 out.insert(e.path(), std::fs::read(e.path()).unwrap());
             }
         }
@@ -194,39 +216,66 @@ mod tests {
         brain::save_settings(&brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
     }
 
+    /// A mail conversation's fact file under `thread`: one message `days` ago per entry.
+    fn mail(source: &str, thread: &str, days: &[i64]) -> facts::Facts {
+        let at = |n: i64| (chrono::Utc::now() - chrono::Duration::days(n)).format("%Y-%m-%d %H:%M").to_string();
+        let sections = days
+            .iter()
+            .map(|n| facts::Section { head: format!("{} Jane Doe", at(*n)), from: Some("Jane Doe".into()), facts: vec![brain::digest::Fact { text: format!("The gateway plan, {n} days ago."), quote: None }], ..Default::default() })
+            .collect();
+        let f = facts::Facts::new(source.into(), "mail", "Gateway".into(), Some(at(0)[..10].to_string()), json!({"kind": "mail", "threads": [{"id": thread, "client": null}]}), sections);
+        facts::Writer::default().write(&f).unwrap();
+        f
+    }
+
     #[test]
-    fn past_their_horizons_only_index_records_go_and_every_call_keeps_its_card() {
-        let (_env, _root) = crate::paths::testenv::folders("recall-retain-ages");
+    fn past_their_horizons_sections_are_never_written_and_leave_later_and_every_call_keeps_its_card() {
+        let (_env, root) = crate::paths::testenv::folders("recall-retain-ages");
         on();
         let acme = projects::create("Acme rollout", None, None).unwrap().id;
         let old = call("old", 100, Some(&acme));
         let mid = call("mid", 60, Some(&acme));
         let new = call("new", 2, Some(&acme));
-        brain::sync().unwrap();
-        // Mail: one message 100 days old, one 10 days old.
-        let day = |n: i64| (chrono::Local::now() - chrono::Duration::days(n)).format("%Y-%m-%d").to_string();
-        let section = |n: i64, what: &str| facts::Section { head: format!("{} 09:00 Jane Doe", day(n)), from: Some("Jane Doe".into()), facts: vec![brain::digest::Fact { text: what.into(), quote: None }], ..Default::default() };
-        let mail = facts::Facts::new("mail/acme-gateway".into(), "mail", "Gateway".into(), Some(day(10)), json!({"kind": "mail", "threads": [{"id": acme, "client": null}]}),
-                                     vec![section(100, "The old gateway plan."), section(10, "The new gateway plan.")]);
-        facts::Writer::default().write(&mail).unwrap();
-        store::sync_kinds(&brain::store_path(), vec![mail.input()], None, &[]).unwrap();
-        let before = files(&crate::paths::home());
+        mail("mail/acme-gateway", &acme, &[100, 10]);
+        // A dictionary entry and a thread folder outside the data folder: checked byte for byte too.
+        brain::taxonomy::dictionary_add("Hooli", &[], &[], Some("org"), None, "test").unwrap();
+        let outside = root.join("outside-docs");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("plan.md"), "# Plan\n\n## Gateway rollout\nThe gateway goes in first.\n").unwrap();
+        projects::update(&acme, |p| {
+            p.sources.push(projects::Source { kind: "folder".into(), id: outside.to_string_lossy().into(), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        let (home_before, outside_before) = (files(&crate::paths::home()), files(&outside));
+        assert!(home_before.keys().any(|p| p.to_string_lossy().contains("taxonomy")), "{:?}", home_before.keys());
         let r = brain::sync().unwrap();
-        assert!(r.retired >= 1, "{r:?}");
-        assert_eq!(kinds(&source_of(&old)), ["card"], "past 90 days: only its card");
+        assert_eq!(kinds(&source_of(&old)), ["card"], "past 90 days: only its card is written");
         assert_eq!(kinds(&source_of(&mid)), ["summary", "decisions", "card"], "past 45 days: its minutes and card");
         assert_eq!(kinds(&source_of(&new)), ["summary", "decisions", "transcript", "card"]);
-        assert_eq!(sections("mail/acme-gateway").len(), 1, "only the newer message's facts");
-        // Nothing on disk changed: the call folders and Intake's facts are as they were.
-        assert_eq!(files(&crate::paths::home()), before);
-        assert!(old.join("segments.json").is_file() && facts::path_of("mail/acme-gateway").unwrap().is_file());
+        assert_eq!(sections("mail/acme-gateway").len(), 1, "only the newer message's facts, from the file with no sign-in");
+        assert_eq!(r.retired, 0, "nothing past a horizon was written, so nothing leaves: {r:?}");
+        // The call folders, Intake's facts, the dictionary and the outside folder are as they were.
+        assert_eq!(files(&crate::paths::home()), home_before);
+        assert_eq!(files(&outside), outside_before);
         // The card says what the call was.
         let c = store::open(&brain::store_path()).unwrap();
         let card: String = c.query_row("SELECT text FROM chunks WHERE source = ?1 AND section = 'card'", [source_of(&old)], |r| r.get(0)).unwrap();
         assert!(card.contains("Call: old weekly") && card.contains("Threads: Acme rollout") && card.contains("People: Dana Ruiz") && card.contains("Summary: The old gateway goes first."), "{card}");
-        // Again: nothing more leaves, nothing is read again.
+        // Again the same day: nothing is read again and no sweep runs.
+        let today = chrono::Local::now().date_naive();
+        assert!(!due(&brain::store_path(), today, &projects::closed_threads()).unwrap());
         let r = brain::sync().unwrap();
-        assert_eq!((r.retired, r.added, r.changed), (0, 0, 0), "{r:?}");
+        assert_eq!((r.retired, r.added, r.changed, r.embedded), (0, 0, 0, 0), "{r:?}");
+        // 85 days on, the next day's sweep takes what aged since; the cards stay.
+        let later = today + chrono::Duration::days(85);
+        assert!(due(&brain::store_path(), later, &projects::closed_threads()).unwrap());
+        assert!(apply(&brain::store_path(), later, &projects::closed_threads()).unwrap() >= 2);
+        assert_eq!(kinds(&source_of(&new)), ["summary", "decisions", "card"]);
+        assert_eq!(kinds(&source_of(&mid)), ["card"]);
+        assert!(sections("mail/acme-gateway").is_empty());
+        assert_eq!(files(&crate::paths::home()), home_before);
+        assert_eq!(files(&outside), outside_before);
     }
 
     #[test]
@@ -237,6 +286,7 @@ mod tests {
         let open_t = projects::create("Acme rollout", None, None).unwrap().id;
         let shut = call("hooli", 2, Some(&hooli));
         let kept = call("acme", 3, Some(&open_t));
+        mail("mail/hooli-plan", &hooli, &[1]);
         // A folder of the closed thread: its document.
         let folder = root.join("hooli-docs");
         std::fs::create_dir_all(&folder).unwrap();
@@ -248,26 +298,30 @@ mod tests {
         .unwrap();
         brain::sync().unwrap();
         let doc: String = store::open(&brain::store_path()).unwrap().query_row("SELECT source FROM documents WHERE source LIKE 'file/%'", [], |r| r.get(0)).unwrap();
-        let (call_ids, doc_ids) = (sections(&source_of(&shut)), sections(&doc));
+        let (call_ids, doc_ids, mail_ids) = (sections(&source_of(&shut)), sections(&doc), sections("mail/hooli-plan"));
         assert!(!doc_ids.is_empty() && doc_ids.iter().all(|s| s.1 == "document"), "{doc_ids:?}");
+        assert_eq!(mail_ids.len(), 1);
 
         projects::set_stage(&hooli, Stage::Done, Some("wrapped up")).unwrap();
         brain::sync().unwrap();
         assert_eq!(kinds(&source_of(&shut)), ["card"], "a closed thread's call: its card only");
         assert_eq!(sections(&source_of(&shut))[0], *call_ids.last().unwrap(), "the card keeps its id");
         assert_eq!(kinds(&source_of(&kept)).len(), 4, "an open thread's call is whole");
+        assert!(sections("mail/hooli-plan").is_empty(), "a closed thread's mail leaves");
         assert_eq!(sections(&doc), [(crate::brain::chunk::chunk_id(&doc, store::CARD_ORD), "card".to_string())], "a closed thread's document: its card");
         let h = store::search_in(&brain::store_path(), "gateway rollout budget", 5, None, None, None).unwrap();
         let card = h["hits"].as_array().unwrap().iter().find(|x| x["source"] == doc.as_str()).expect("the card is found").clone();
         let text = card["text"].as_str().unwrap();
         assert!(text.contains("Headings: Gateway rollout · Budget") && text.contains("plan.md") && text.contains("Hooli workshop") && card["closed"].is_array(), "{card}");
-        assert!(folder.join("plan.md").is_file(), "the file stays");
+        assert!(folder.join("plan.md").is_file() && facts::path_of("mail/hooli-plan").unwrap().is_file(), "the file and the facts stay");
 
-        // Opened again: everything back, with the ids it had (R10).
+        // Opened again, with no Microsoft 365 sign-in: everything back, with the ids it had (R10).
+        assert!(crate::graph::account().is_none());
         projects::set_stage(&hooli, Stage::Active, Some("back")).unwrap();
         brain::sync().unwrap();
         assert_eq!(sections(&source_of(&shut)), call_ids);
         assert_eq!(sections(&doc), doc_ids);
+        assert_eq!(sections("mail/hooli-plan"), mail_ids, "the mail from its fact file");
         let r = brain::sync().unwrap();
         assert_eq!((r.retired, r.added, r.changed), (0, 0, 0), "{r:?}");
     }

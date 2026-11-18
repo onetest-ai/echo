@@ -790,10 +790,8 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     let mut written = keep(&mut fw, kept, &closed, &mut out.errors)?;
     let read: BTreeSet<String> = written.iter().map(|w| w.source.clone()).collect();
     written.extend(dropped.into_iter().filter(|d| !read.contains(&d.source)));
-    // A source whose facts the index lacks (it was deleted or rebuilt): fed from its file (the index is derived).
-    let read: BTreeSet<String> = written.iter().map(|w| w.source.clone()).collect();
-    written.extend(missing_from_index(&path)?.into_iter().filter(|f| !read.contains(&f.source)));
-    let mut report = store::sync_kinds(&path, written.iter().map(Facts::input).collect(), emb, &[])?;
+    // A source whose facts the index lacks is fed from its file before this read (`feed_missing`).
+    let mut report = store::sync_kept(&path, written.iter().map(Facts::input).collect(), emb, &[], Some(&store::Keep::now()))?;
     report.gone.extend(dropped_gone);
     // Under the threads that match them now — only with every thread read: a list read short would take facts away.
     match removals_allowed() {
@@ -814,6 +812,17 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     let problems: Vec<String> = out.errors.iter().filter(|e| e.contains("couldn't")).cloned().collect();
     facts::set_status(None, &problems);
     Ok((out, report))
+}
+
+/// Feed the index every fact file it has no document of (it was deleted or rebuilt, or its thread opened again): from
+/// the files alone, at every sync — no Microsoft 365 sign-in, finished move or readable thread list needed.
+pub fn feed_missing(emb: Option<&dyn super::embed::Embedder>, keep: &store::Keep) -> Result<store::Report> {
+    let path = super::store_path();
+    let missing = missing_from_index(&path)?;
+    if missing.is_empty() {
+        return Ok(store::Report::default());
+    }
+    store::sync_kept(&path, missing.iter().map(Facts::input).collect(), emb, &[], Some(keep))
 }
 
 /// The fact files whose source the index has no document of.

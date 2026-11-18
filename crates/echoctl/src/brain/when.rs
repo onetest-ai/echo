@@ -82,25 +82,29 @@ fn latest(m: u32, d: u32, today: NaiveDate) -> Option<NaiveDate> {
     }
 }
 
-/// An explicit date at the start of `words`: how many words it takes and the day.
-fn explicit(words: &[&str], today: NaiveDate) -> Option<(usize, NaiveDate)> {
+/// An explicit date at the start of `words` (lowercase; `orig`: as written; `comma`: a comma right after the word):
+/// how many words it takes and the day. An English month word ("may", "march") is a month only capitalised or in a
+/// form only a date has: with a year ("3 may 2026") or a day and a comma ("may 3, …").
+fn explicit(words: &[&str], orig: &[&str], comma: &[bool], today: NaiveDate) -> Option<(usize, NaiveDate)> {
     let w0 = *words.first()?;
     if let Ok(d) = NaiveDate::parse_from_str(w0, "%Y-%m-%d") {
         return Some((1, d));
     }
+    let has_year = |n: usize| words.get(n).and_then(|w| year(w));
+    let english_ok = |at: usize, dated: bool| !words[at].is_ascii() || orig[at].starts_with(|c: char| c.is_uppercase()) || dated;
     let with_year = |n: usize, m: u32, d: u32| -> Option<(usize, NaiveDate)> {
-        match words.get(n).and_then(|w| year(w)) {
+        match has_year(n) {
             Some(y) => NaiveDate::from_ymd_opt(y, m, d).map(|x| (n + 1, x)),
             None => latest(m, d, today).map(|x| (n, x)),
         }
     };
     // "12 November [2026]", "12 листопада", "12-го ноября"
     if let (Some(d), Some(m)) = (day(w0), words.get(1).and_then(|w| month(w))) {
-        return with_year(2, m, d);
+        return english_ok(1, has_year(2).is_some()).then(|| with_year(2, m, d)).flatten();
     }
     // "November 12[, 2026]"
     if let (Some(m), Some(d)) = (month(w0), words.get(1).and_then(|w| day(w))) {
-        return with_year(2, m, d);
+        return english_ok(0, has_year(2).is_some() || comma[1]).then(|| with_year(2, m, d)).flatten();
     }
     None
 }
@@ -122,13 +126,15 @@ pub fn in_query(q: &str, today: NaiveDate) -> Option<(Said, String)> {
         }
     }
     let words: Vec<&str> = toks.iter().map(|t| t.2.as_str()).collect();
+    let orig: Vec<&str> = toks.iter().map(|t| q[t.0..t.1].trim_matches('-')).collect();
+    let comma: Vec<bool> = toks.iter().map(|t| q[t.1..].starts_with(',')).collect();
     let mut found: Vec<(usize, usize, NaiveDate, NaiveDate)> = vec![];
     let mut i = 0;
     while i < words.len() {
         if let Some((n, a, b)) = relative(&words[i..], today) {
             found.push((i, i + n, a, b));
             i += n;
-        } else if let Some((n, d)) = explicit(&words[i..], today) {
+        } else if let Some((n, d)) = explicit(&words[i..], &orig[i..], &comma[i..], today) {
             found.push((i, i + n, d, d));
             i += n;
         } else {
@@ -149,7 +155,7 @@ pub fn in_query(q: &str, today: NaiveDate) -> Option<(Said, String)> {
         at = toks[f.1 - 1].1;
     }
     rest.push_str(&q[at..]);
-    Some((Said { since: since.to_string(), until: until.to_string(), words: said.join(", ") }, rest.split_whitespace().collect::<Vec<_>>().join(" ")))
+    Some((Said { since: since.to_string(), until: until.to_string(), words: said.join(", ") }, rest.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).collect::<Vec<_>>().join(" ")))
 }
 
 #[cfg(test)]
@@ -190,8 +196,18 @@ mod tests {
 
     #[test]
     fn a_month_or_a_number_alone_is_not_a_date() {
-        for q in ["the November release", "may we ship 12 stores", "Q4 2026 plan", "sprint 12", "31 February", "march on"] {
+        for q in ["the November release", "may we ship 12 stores", "Q4 2026 plan", "sprint 12", "31 February", "march on", "step 3 may fail", "march 5 teams", "the build 7 may break", "jan 12 rows"] {
             assert_eq!(span(q), None, "{q}");
         }
+    }
+
+    #[test]
+    fn a_lowercase_english_month_is_a_date_only_in_a_dates_form() {
+        let day = |x: &str, rest: &str| Some((x.to_string(), x.to_string(), rest.to_string()));
+        assert_eq!(span("step 3 May fail"), day("2026-05-03", "step fail"), "capitalised: a date");
+        assert_eq!(span("review 3 may 2026"), day("2026-05-03", "review"), "with a year");
+        assert_eq!(span("may 3, the review"), day("2026-05-03", "the review"), "a day and a comma");
+        assert_eq!(span("review 2026-05-03"), day("2026-05-03", "review"));
+        assert_eq!(span("3 травня"), day("2026-05-03", ""), "Ukrainian and Russian month words are never other words");
     }
 }

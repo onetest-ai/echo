@@ -131,8 +131,15 @@ fn call_inputs() -> Vec<store::Input> {
         .collect()
 }
 
-/// Bring the Brain up to date with the sources (one sync at a time on this computer).
+/// Bring the Brain up to date with the sources (one sync at a time on this computer), as the user asked for it (the
+/// CLI, Sync now): the retention sweep runs when due, whatever Echo is doing.
 pub fn sync() -> Result<store::Report> {
+    sync_as(true)
+}
+
+/// A sync; `asked`: the user's, else the app's own, whose retention sweep waits while Echo records or transcribes
+/// (`quiet`).
+fn sync_as(asked: bool) -> Result<store::Report> {
     let lock = paths::config_dir().join("brain.lock");
     anyhow::ensure!(enabled(), "Intake is off (Settings → Intake)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
@@ -150,7 +157,19 @@ pub fn sync() -> Result<store::Report> {
         Ok(_) => {}
         Err(e) => eprintln!("recall: retention: {e:#}"),
     }
-    let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;
+    let keep = store::Keep::now();
+    let mut r = store::sync_kept(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder), &["call"], Some(&keep))?;
+    // Mail and posts whose facts the index lacks (a thread opened again, an index rebuilt): from their files, with or
+    // without a Microsoft 365 sign-in.
+    match sources::feed_missing(emb.as_ref().map(|e| e as &dyn embed::Embedder), &keep) {
+        Ok(s) => {
+            r.touched.extend(s.touched);
+            r.added += s.added;
+            r.chunks += s.chunks;
+            r.embedded += s.embedded;
+        }
+        Err(e) => eprintln!("intake: feeding the index from the fact files: {e:#}"),
+    }
     // Thread sources (Teams channels, mail): only with a Microsoft 365 sign-in; their failures are
     // kept per source (`brain/sources.json`) and never stop the calls' sync.
     if crate::graph::account().is_some() {
@@ -209,7 +228,10 @@ pub fn sync() -> Result<store::Report> {
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
     // Retention: sections past their horizon, and closed threads' (their cards stay), leave the index.
-    r.retired = retain::apply(&store_path(), chrono::Local::now().date_naive(), &closed)?;
+    // Once a day and when a thread closed or opened again; the app's own sync not while Echo records or transcribes.
+    if retain::due(&store_path(), keep.today, &closed)? && (asked || quiet()) {
+        r.retired = retain::apply(&store_path(), keep.today, &closed)?;
+    }
     // Which sections mention which terms: no model; the sections written or moved to other threads since they
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
@@ -320,7 +342,8 @@ pub fn start_scheduler() {
             // As often as Recall's job settings say (5 minutes by default; a minute after start), never in
             // the night they pause it in.
             std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::after_pass("brain_reader", crate::jobs::number("brain_reader", "every")) }));
-            if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) {
+            // Not while Echo records or transcribes (`quiet`): the sync and its sweep wait for the next pass.
+            if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) || !quiet() {
                 continue;
             }
             let fp = fingerprint();
@@ -329,7 +352,7 @@ pub fn start_scheduler() {
                 continue;
             }
             let run = crate::jobs::begin("brain_reader");
-            match sync() {
+            match sync_as(false) {
                 Ok(r) => {
                     // A run when it indexed something or read mail into facts (its model calls).
                     run.done((r.chunks > 0).then(|| format!("{} new section{} indexed", r.chunks, if r.chunks == 1 { "" } else { "s" })));

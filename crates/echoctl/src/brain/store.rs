@@ -93,13 +93,16 @@ pub fn open(path: &Path) -> Result<Connection> {
                 return Ok(());
             }
             c.execute_batch("ALTER TABLE chunks ADD COLUMN section TEXT")?;
-            let rows: Vec<(i64, String, i64, String, String)> = c
-                .prepare("SELECT c.id, c.source, c.ord, coalesce(d.title, ''), coalesce(c.breadcrumb_path, '') FROM chunks c LEFT JOIN documents d ON d.source = c.source")?
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+            // A mail or channel fact's day becomes its own message's (`section_day`), once with its kind.
+            // id, source, ord, the document's title, breadcrumb, heading, day.
+            type Row = (i64, String, i64, String, String, String, Option<String>);
+            let rows: Vec<Row> = c
+                .prepare("SELECT c.id, c.source, c.ord, coalesce(d.title, ''), coalesce(c.breadcrumb_path, ''), coalesce(c.title, ''), c.event_date FROM chunks c LEFT JOIN documents d ON d.source = c.source")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
                 .collect::<Result<_, _>>()?;
-            let mut up = c.prepare("UPDATE chunks SET section = ?2 WHERE id = ?1")?;
-            for (id, src, ord, title, crumb) in rows {
-                up.execute(params![id, section_kind(&src, &title, &crumb, ord as usize)])?;
+            let mut up = c.prepare("UPDATE chunks SET section = ?2, event_date = ?3 WHERE id = ?1")?;
+            for (id, src, ord, title, crumb, head, day) in rows {
+                up.execute(params![id, section_kind(&src, &title, &crumb, ord as usize), section_day(&src, &head, day.as_deref())])?;
             }
             Ok(())
         })();
@@ -451,6 +454,37 @@ fn scopes_of(refs: &Value) -> Vec<(&'static str, String)> {
     out
 }
 
+/// The threads a section is in (a memo's section: its part's), none when it is in none.
+fn section_threads(refs: &Value, title: &str) -> Vec<String> {
+    let narrowed = refs["memo_parts"].as_array().is_some_and(|p| !p.is_empty()).then(|| memo_section_refs(refs, title)).flatten();
+    scopes_of(narrowed.as_ref().unwrap_or(refs)).into_iter().filter(|(k, v)| *k == "thread" && v != "-").map(|(_, v)| v).collect()
+}
+
+/// A mail or channel fact's day: its heading's time ("YYYY-MM-DD HH:MM", the message's own, in UTC as Microsoft 365
+/// gives it) as a day in `tz` — the local one for the index, as calls' days and "today" are.
+pub fn fact_day<Tz: chrono::TimeZone>(head: &str, tz: &Tz) -> Option<String> {
+    let t = chrono::NaiveDateTime::parse_from_str(head.get(..16)?, "%Y-%m-%d %H:%M").ok()?;
+    Some(t.and_utc().with_timezone(tz).date_naive().to_string())
+}
+
+/// A section's day: a mail or channel fact's own (`fact_day`), else its document's.
+fn section_day(source: &str, title: &str, doc_day: Option<&str>) -> Option<String> {
+    let own = (source.starts_with("mail/") || source.starts_with("channel/")).then(|| fact_day(title, &chrono::Local)).flatten();
+    own.or_else(|| doc_day.map(str::to_owned))
+}
+
+/// What the index keeps as it writes (`retain`): the day, and the closed threads.
+pub struct Keep {
+    pub today: chrono::NaiveDate,
+    pub closed: BTreeMap<String, Value>,
+}
+
+impl Keep {
+    pub fn now() -> Keep {
+        Keep { today: chrono::Local::now().date_naive(), closed: crate::projects::closed_threads() }
+    }
+}
+
 fn write_scopes(tx: &Connection, id: i64, refs: &Value) -> Result<()> {
     tx.execute("DELETE FROM scopes WHERE chunk_id = ?1", [id])?;
     // Its clients decide whose terms it may mention, and a write may have dropped its tags: read for terms again
@@ -599,13 +633,22 @@ pub(super) fn put_card(tx: &Connection, source: &str, title: &str, text: &str, e
 /// missing from them is removed). Embeddings are asked for chunks whose text changed and chunks
 /// without a vector yet; without an embedder (none configured) or when the server fails, the text
 /// is indexed anyway and the vectors come at a later sync.
+#[cfg(test)]
 pub fn sync(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>) -> Result<Report> {
     sync_kinds(path, inputs, emb, &["call"])
 }
 
 /// As `sync`, removing only documents of `kinds` that aren't among the inputs (`&[]`: none — channels
 /// and mail add and update their documents; a source taken off a thread is removed with `remove`).
+#[cfg(test)]
 pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, kinds: &[&str]) -> Result<Report> {
+    sync_kept(path, inputs, emb, kinds, None)
+}
+
+/// As `sync_kinds`, writing only the sections `keep` keeps (`retain::kept`): a section past its horizon, or (but a
+/// document's) only in closed threads, is never written nor embedded; a call's card always is. The document's hash is
+/// its text's, so a section reaching its horizon later never makes it read again.
+pub fn sync_kept(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, kinds: &[&str], keep: Option<&Keep>) -> Result<Report> {
     let mut c = open(path)?;
     let model = emb.map(|e| e.model()).unwrap_or_default();
     let mut rep = Report::default();
@@ -618,7 +661,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
     let present: BTreeSet<String> = inputs.iter().map(|i| i.source.clone()).collect();
     let gone: Vec<String> = known_kinds.iter().filter(|(s, (_, k))| !present.contains(*s) && kinds.contains(&k.as_str())).map(|(s, _)| s.clone()).collect();
     // Which documents changed (their text, the chunker, or the references a chunk carries).
-    let mut todo: Vec<(Input, String, Vec<chunk::Chunk>)> = vec![];
+    let mut todo: Vec<(Input, String, Vec<chunk::Chunk>, Option<String>)> = vec![];
     for i in inputs {
         let h = sha(&format!("{CHUNKER_VERSION}\0{MAX_CHARS}\0{}\0{}", i.md, i.refs));
         if known.get(&i.source) == Some(&h) {
@@ -631,8 +674,23 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
             rep.added += 1;
         }
         rep.touched.push(i.source.clone());
-        let cs = chunk::chunk(&i.md, MAX_CHARS);
-        todo.push((i, h, cs));
+        let mut cs = chunk::chunk(&i.md, MAX_CHARS);
+        let mut mark = None;
+        if let Some(k) = keep {
+            cs.retain(|x| {
+                let section = section_kind(&i.source, &i.title, &x.breadcrumb, x.ord);
+                if section == "card" {
+                    return true;
+                }
+                let threads = section_threads(&i.refs, &x.title);
+                if !i.source.starts_with("file/") && !threads.is_empty() && threads.iter().all(|t| k.closed.contains_key(t)) {
+                    mark = Some(super::retain::closed_mark(&i.refs, &k.closed));
+                    return false;
+                }
+                super::retain::kept(section, section_day(&i.source, &x.title, i.event_date.as_deref()).as_deref(), k.today)
+            });
+        }
+        todo.push((i, h, cs, mark));
     }
     let model_changed = !model.is_empty() && meta(&c, "embed_model").is_some_and(|m| m != model);
     if todo.is_empty() && gone.is_empty() && !model_changed && emb.is_none() {
@@ -652,7 +710,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
         rep.gone.push(s.clone());
     }
     let now = chrono::Utc::now().to_rfc3339();
-    for (i, h, cs) in &todo {
+    for (i, h, cs, mark) in &todo {
         let old: Vec<i64> = tx.prepare("SELECT id FROM chunks WHERE source = ?1")?.query_map([&i.source], |r| r.get(0))?.collect::<Result<_, _>>()?;
         let new: BTreeSet<i64> = cs.iter().map(|x| chunk::chunk_id(&i.source, x.ord)).collect();
         delete_chunks(&tx, &old.iter().copied().filter(|id| !new.contains(id)).collect::<Vec<_>>())?;
@@ -680,7 +738,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                    event_date=excluded.event_date, parent_heading=excluded.parent_heading, breadcrumb_path=excluded.breadcrumb_path, speaker=excluded.speaker,
                    link=excluded.link, refs=excluded.refs, section=excluded.section, embedding_content_hash=CASE WHEN ?15 THEN chunks.embedding_content_hash ELSE NULL END",
                 // `sha` = the text the vector is made from; `embedding_content_hash` = the one it was made from.
-                params![id, i.source, x.ord as i64, x.title, x.body, ehash, now, i.event_date, x.parent_heading, x.breadcrumb, speaker, (i.link)(x), i.refs.to_string(), Option::<String>::None, keep_vec,
+                params![id, i.source, x.ord as i64, x.title, x.body, ehash, now, section_day(&i.source, &x.title, i.event_date.as_deref()), x.parent_heading, x.breadcrumb, speaker, (i.link)(x), i.refs.to_string(), Option::<String>::None, keep_vec,
                         section_kind(&i.source, &i.title, &x.breadcrumb, x.ord)],
             )?;
             write_scopes(&tx, id, &i.refs)?;
@@ -689,10 +747,10 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
             rep.chunks += 1;
         }
         tx.execute(
-            "INSERT INTO documents(source, content_hash, indexed_at, title, kind, event_date, refs) VALUES (?1,?2,?3,?4,?5,?6,?7)
+            "INSERT INTO documents(source, content_hash, indexed_at, title, kind, event_date, refs, retained) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
              ON CONFLICT(source) DO UPDATE SET content_hash=excluded.content_hash, indexed_at=excluded.indexed_at, title=excluded.title,
-               kind=excluded.kind, event_date=excluded.event_date, refs=excluded.refs",
-            params![i.source, h, now, i.title, i.kind, i.event_date, i.refs.to_string()],
+               kind=excluded.kind, event_date=excluded.event_date, refs=excluded.refs, retained=excluded.retained",
+            params![i.source, h, now, i.title, i.kind, i.event_date, i.refs.to_string(), mark],
         )?;
         doc_facts(&tx, &i.source)?;
     }
@@ -883,6 +941,10 @@ pub fn search_in(path: &Path, q: &str, limit: usize, source_contains: Option<&st
     search_at(path, q, limit, source_contains, scope, emb, History::Latest, None, &Filters::default())
 }
 
+/// What a search that lists days' sources says (no words to search; none of its words in those days).
+const LISTED: &str = "no words to search: the sources of those days, newest first";
+const LISTED_NO_MATCH: &str = "no section of those days has the words: the sources of those days, newest first";
+
 /// A search: `only` — the sections a reader may see (its AI profile's, `access.rs`), filtered
 /// before the cut so others never crowd them out, as `filters` are. Without a date in `filters`, a date said in the
 /// query (`when::in_query`) is its filter and leaves the words searched.
@@ -906,37 +968,57 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
     let like = source_contains.map(|s| format!("%{s}%")).unwrap_or_else(|| "%".into());
     let list = |v: &[String]| (!v.is_empty()).then(|| json!(v).to_string());
     let prefixes: Vec<String> = f.kinds.iter().filter_map(|k| SOURCE_KINDS.iter().find(|x| x.0 == k).map(|x| x.1.to_string())).collect();
-    let person = f.person.as_deref().map(str::trim).filter(|p| !p.is_empty()).map(|p| format!("%{p}%"));
+    // Who said it: a part of the speaker's name, compared in lowercase here (SQLite's LIKE folds only ASCII).
+    let person = f.person.as_deref().map(str::trim).filter(|p| !p.is_empty()).map(str::to_lowercase);
+    let said_by = |speaker: Option<String>| person.as_ref().is_none_or(|p| speaker.is_some_and(|s| s.to_lowercase().contains(p.as_str())));
+    // The filters every candidate passes, in SQL (?2 on: the source's part, the scope, kinds, sections, days).
+    const FILTERS: &str = "c.source LIKE ?2
+                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?3 AND s.id = ?4))
+                 AND (?5 IS NULL OR substr(c.source, 1, instr(c.source, '/')) IN (SELECT value FROM json_each(?5)))
+                 AND (?6 IS NULL OR c.section IN (SELECT value FROM json_each(?6)))
+                 AND (?7 IS NULL OR substr(c.event_date, 1, 10) >= ?7) AND (?8 IS NULL OR substr(c.event_date, 1, 10) <= ?8)";
     // The candidates, in keyword order: matches read best first until enough of them may be seen (history, the
     // reader's profile and the filters are checked here, so sections it can't see never crowd out the ones it can).
     let want = CANDIDATES.max(limit);
     let mut cands: Vec<i64> = vec![];
     let mut note = None;
-    match fts_query(&words) {
-        Some(fq) => {
-            let mut st = c.prepare(
-                "SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND c.source LIKE ?2
-                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?3 AND s.id = ?4))
-                 AND (?5 IS NULL OR substr(c.source, 1, instr(c.source, '/')) IN (SELECT value FROM json_each(?5)))
-                 AND (?6 IS NULL OR c.section IN (SELECT value FROM json_each(?6)))
-                 AND (?7 IS NULL OR substr(c.event_date, 1, 10) >= ?7) AND (?8 IS NULL OR substr(c.event_date, 1, 10) <= ?8)
-                 AND (?9 IS NULL OR c.speaker LIKE ?9)
-                 ORDER BY bm25(chunks_fts)",
-            )?;
-            let mut rows = st.query(params![fq, like, scope.map(|s| s.0), scope.map(|s| s.1), list(&prefixes), list(&f.sections), f.since, f.until, person])?;
-            while cands.len() < want {
-                let Some(r) = rows.next()? else { break };
-                let id: i64 = r.get(0)?;
-                if ok(&id) {
-                    cands.push(id);
-                }
+    let fq = fts_query(&words);
+    let dated = f.since.is_some() || f.until.is_some();
+    if let Some(fq) = &fq {
+        let mut st = c.prepare(&format!("SELECT f.rowid, c.speaker FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND {FILTERS} ORDER BY bm25(chunks_fts)"))?;
+        let mut rows = st.query(params![fq, like, scope.map(|s| s.0), scope.map(|s| s.1), list(&prefixes), list(&f.sections), f.since, f.until])?;
+        while cands.len() < want {
+            let Some(r) = rows.next()? else { break };
+            let id: i64 = r.get(0)?;
+            if ok(&id) && said_by(r.get(1)?) {
+                cands.push(id);
             }
         }
-        None => note = Some("only common words; nothing to search".to_string()),
+    }
+    // Days asked for and no section of them has the words (or there are none: "what happened yesterday"): those days'
+    // sources, newest first, each once (a call by its card).
+    let listed = cands.is_empty() && dated;
+    if listed {
+        let mut st = c.prepare(&format!(
+            "SELECT c.id, c.speaker, c.source FROM chunks c WHERE ?1 IS NULL AND {FILTERS}
+             ORDER BY substr(c.event_date, 1, 10) DESC, c.source DESC, c.section = 'card' DESC, c.ord"
+        ))?;
+        let mut rows = st.query(params![Option::<String>::None, like, scope.map(|s| s.0), scope.map(|s| s.1), list(&prefixes), list(&f.sections), f.since, f.until])?;
+        let mut seen = BTreeSet::new();
+        while cands.len() < limit {
+            let Some(r) = rows.next()? else { break };
+            let id: i64 = r.get(0)?;
+            if ok(&id) && said_by(r.get(1)?) && seen.insert(r.get::<_, String>(2)?) {
+                cands.push(id);
+            }
+        }
+        note = Some(if fq.is_some() { LISTED_NO_MATCH } else { LISTED } .to_string());
+    } else if fq.is_none() {
+        note = Some("only common words; nothing to search".to_string());
     }
     let mut ranked: Vec<(i64, f32)> = cands.iter().enumerate().map(|(rank, id)| (*id, W_FTS / (RRF_K + rank as f32 + 1.0))).collect();
     match emb {
-        Some(e) if !ranked.is_empty() => match e.embed(&[words.clone()]) {
+        Some(e) if !ranked.is_empty() && !listed => match e.embed(&[words.clone()]) {
             Ok(v) => rerank(&c, &mut ranked, &v[0])?,
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         },
@@ -1530,5 +1612,144 @@ mod tests {
         let c = open(&db).unwrap();
         let again: Vec<(i64, String)> = c.prepare("SELECT id, section FROM chunks ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
         assert_eq!(again, ids, "the same kinds as when written");
+    }
+
+    /// The ids of a source's sections.
+    fn ids_of(db: &Path, src: &str) -> BTreeSet<i64> {
+        open(db).unwrap().prepare("SELECT id FROM chunks WHERE source = ?1").unwrap().query_map([src], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect()
+    }
+
+    #[test]
+    fn a_readers_profile_bounds_every_filter_and_a_document_card() {
+        let (_env, root) = crate::paths::testenv::folders("brain-filters-access");
+        let db = crowded(&root);
+        let c = open(&db).unwrap();
+        put_card(&c, "file/card", "deck.md", "Document: deck.md\nHeadings: Gateway rollout", Some("2026-09-01"), "echo://file/card", &json!({"threads": [{"id": "aurora"}]})).unwrap();
+        drop(c);
+        let mine = ids_of(&db, "call/target");
+        let with_card: BTreeSet<i64> = mine.iter().copied().chain(ids_of(&db, "file/card")).collect();
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let filters = [
+            Filters { kinds: v(&["channel"]), ..Default::default() },
+            Filters { kinds: v(&["document"]), ..Default::default() },
+            Filters { sections: v(&["transcript"]), ..Default::default() },
+            Filters { sections: v(&["card"]), ..Default::default() },
+            Filters { since: Some("2026-08-01".into()), until: Some("2026-10-02".into()), ..Default::default() },
+            Filters { person: Some("lee".into()), ..Default::default() },
+        ];
+        for f in &filters {
+            for only in [&mine, &with_card] {
+                let h = search_at(&db, "gateway", 50, None, None, None, History::Latest, Some(only), f).unwrap();
+                let ids: BTreeSet<i64> = h["hits"].as_array().unwrap().iter().map(|x| x["chunk_id"].as_str().unwrap().parse().unwrap()).collect();
+                assert!(ids.is_subset(only), "{f:?}: only what the reader may see: {h}");
+            }
+        }
+        let first = |only: &BTreeSet<i64>, f: &Filters| search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(only), f).unwrap()["hits"][0]["source"].as_str().map(str::to_owned);
+        assert_eq!(first(&mine, &filters[0]), None, "another reader's channel post never shows");
+        assert_eq!(first(&mine, &filters[2]).as_deref(), Some("call/target"));
+        assert_eq!(first(&mine, &filters[3]), None, "a document card the reader may not see never shows");
+        assert_eq!(first(&with_card, &filters[3]).as_deref(), Some("file/card"));
+        assert_eq!(first(&with_card, &filters[1]).as_deref(), Some("file/card"), "a card is its document's kind");
+    }
+
+    #[test]
+    fn a_query_of_only_a_date_lists_that_days_sources_newest_first() {
+        let (_env, root) = crate::paths::testenv::folders("brain-date-only");
+        let db = crowded(&root);
+        let h = search_at(&db, "what happened on 2026-10-02", 5, None, None, None, History::Latest, None, &Filters::default()).unwrap();
+        assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("channel/target/1")), "{h}");
+        assert!(h["note"].as_str().unwrap().starts_with(LISTED_NO_MATCH), "{h}");
+        let f = Filters { since: Some("2026-09-01".into()), until: Some("2026-10-02".into()), ..Default::default() };
+        let h = search_at(&db, "when?", 10, None, None, None, History::Latest, None, &f).unwrap();
+        let srcs: Vec<&str> = h["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap()).collect();
+        assert_eq!(srcs, ["channel/target/1", "call/target", "file/target"], "newest first, each once: {h}");
+        assert!(h["note"].as_str().unwrap().starts_with(LISTED), "{h}");
+        assert_eq!(search_at(&db, "when?", 10, None, None, None, History::Latest, None, &Filters::default()).unwrap()["count"], 0, "no days: nothing to list");
+    }
+
+    #[test]
+    fn the_person_filter_folds_any_case_and_takes_wildcards_as_letters() {
+        let (_env, root) = crate::paths::testenv::folders("brain-person");
+        let db = root.join("knowledge.sqlite");
+        let mut a = input("call/a", "# A\n## Transcript\n### [00:05] Дана Руїз\n\n[00:05] Дана Руїз: бюджет погоджено.\n");
+        a.speaker = Box::new(|c| c.title.starts_with('[').then(|| "Дана Руїз".to_string()));
+        let mut b = input("call/b", "# B\n## Transcript\n### [00:05] Lee_Park 100%\n\n[00:05] Lee_Park 100%: бюджет ще ні.\n");
+        b.speaker = Box::new(|c| c.title.starts_with('[').then(|| "Lee_Park 100%".to_string()));
+        sync(&db, vec![a, b], None).unwrap();
+        let who = |p: &str| -> Vec<String> {
+            let f = Filters { person: Some(p.into()), ..Default::default() };
+            search_at(&db, "бюджет", 5, None, None, None, History::Latest, None, &f).unwrap()["hits"].as_array().unwrap().iter().map(|h| h["source"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(who("дана"), ["call/a"], "Cyrillic in any case");
+        assert_eq!(who("ДАНА РУЇЗ"), ["call/a"]);
+        assert_eq!(who("lee_park"), ["call/b"]);
+        assert!(who("lee%park").is_empty() && who("_ee").is_empty(), "% and _ are letters, not wildcards");
+        assert_eq!(who("100%"), ["call/b"]);
+    }
+
+    #[test]
+    fn a_messages_own_day_is_its_sections_and_a_local_one() {
+        // Near midnight: 23:30 UTC is the next day east of Greenwich and the same day west of it.
+        let east = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        assert_eq!(fact_day("2026-11-10 23:30 Jane Doe", &east).as_deref(), Some("2026-11-11"));
+        assert_eq!(fact_day("2026-11-10 23:30 Jane Doe", &west).as_deref(), Some("2026-11-10"));
+        assert_eq!(fact_day("2026-11-11 00:30 Jane Doe", &west).as_deref(), Some("2026-11-10"));
+        assert_eq!(fact_day("Jane Doe", &east), None);
+        let (_env, root) = crate::paths::testenv::folders("brain-fact-days");
+        let db = root.join("knowledge.sqlite");
+        let mut m = input("mail/x", "# Pilot\n\n## 2026-11-01 09:00 Jane Doe\nThe pilot budget is approved.\n\n## 2026-11-12 23:30 Jane Doe\nThe pilot slips a week.\n");
+        m.event_date = Some("2026-11-12".into());
+        sync(&db, vec![m], None).unwrap();
+        let first = fact_day("2026-11-01 09:00", &chrono::Local).unwrap();
+        let last = fact_day("2026-11-12 23:30", &chrono::Local).unwrap();
+        let days: Vec<Option<String>> = open(&db).unwrap().prepare("SELECT event_date FROM chunks WHERE source = 'mail/x' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(days, [Some(first.clone()), Some(last.clone())], "each message's own local day, not the conversation's");
+        let on = |d: &str| {
+            let f = Filters { since: Some(d.into()), until: Some(d.into()), ..Default::default() };
+            search_at(&db, "pilot", 5, None, None, None, History::Latest, None, &f).unwrap()["hits"].as_array().unwrap().iter().map(|h| h["text"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(on(&first), ["The pilot budget is approved."]);
+        assert_eq!(on(&last), ["The pilot slips a week."]);
+    }
+
+    #[test]
+    fn the_first_sync_after_the_update_embeds_only_the_card_and_never_an_old_transcript() {
+        let (_env, root) = crate::paths::testenv::folders("brain-no-reembed");
+        let db = root.join("knowledge.sqlite");
+        let today = chrono::Local::now().date_naive();
+        let day = (today - chrono::Duration::days(60)).to_string();
+        let body = "# Old call\n\n## Minutes\n\n### Summary\nThe gateway goes first.\n\n## Transcript\n\n### [00:05] Dana\n\n[00:05] Dana: the gateway is ready.\n";
+        let call = |md: &str| {
+            let mut i = input("call/old", md);
+            i.title = "Old call".into();
+            i.event_date = Some(day.clone());
+            i
+        };
+        // Before the update: every section embedded, no card.
+        assert_eq!(sync(&db, vec![call(body)], Some(&Words)).unwrap().embedded, 2);
+        let summary = chunk::chunk_id("call/old", 0);
+        let vec_before: Vec<u8> = open(&db).unwrap().query_row("SELECT embedding FROM chunks_vec WHERE rowid = ?1", [summary], |r| r.get(0)).unwrap();
+        // The update's first sync: the card is new, the 60-day-old transcript is past its horizon.
+        let keep = Keep { today, closed: BTreeMap::new() };
+        let with_card = format!("{body}\n## {CALL_CARD}\n\nCall: Old call · {day}\n");
+        let r = sync_kept(&db, vec![call(&with_card)], Some(&Words), &["call"], Some(&keep)).unwrap();
+        assert_eq!(r.embedded, 1, "only the card: {r:?}");
+        let c = open(&db).unwrap();
+        let kinds: Vec<String> = c.prepare("SELECT section FROM chunks WHERE source = 'call/old' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(kinds, ["summary", "card"], "the old transcript is gone, not written again");
+        let vec_after: Vec<u8> = c.query_row("SELECT embedding FROM chunks_vec WHERE rowid = ?1", [summary], |r| r.get(0)).unwrap();
+        assert_eq!(vec_after, vec_before, "the summary keeps its vector");
+        assert_eq!(c.query_row("SELECT count(*) FROM chunks_vec", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        // And a call of a closed thread is written as its card alone.
+        let closed: BTreeMap<String, Value> = [("hooli".to_string(), json!({"id": "hooli"}))].into();
+        let mut shut = call(&with_card);
+        shut.source = "call/shut".into();
+        shut.event_date = Some(today.to_string());
+        shut.refs = json!({"threads": [{"id": "hooli"}]});
+        let r = sync_kept(&db, vec![shut], Some(&Words), &[], Some(&Keep { today, closed })).unwrap();
+        assert_eq!(r.embedded, 1);
+        let mark: Option<String> = c.query_row("SELECT retained FROM documents WHERE source = 'call/shut'", [], |r| r.get(0)).unwrap();
+        assert_eq!(mark.as_deref(), Some("closed:hooli"));
     }
 }
