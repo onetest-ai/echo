@@ -232,10 +232,12 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('resize', () => render())
 
 /** The window follows the address: routed, drawn, and its view's data loaded (on a hashchange, and after `go(hash, {replace: true})`). */
+// ── hash changed: what a view loads on arrival (no DOM: `hash-changed.test.mjs`) ─────────
 const hashChanged = async () => {
   route()
   render()
-  if (S.view === 'calendar' && !S.cal.data) { await loadCalendar(); render() }
+  // The last visit's copy is drawn above; read it again, an import started elsewhere may have changed a card.
+  if (S.view === 'calendar') { await loadCalendar(); render() }
   if (S.view === 'settings') { await loadSettings(); render() }
   if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
   if (S.view === 'tasks') { await loadTasks(); render() }
@@ -243,5 +245,6 @@ const hashChanged = async () => {
   if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 }
+// end of the hash changed block
 window.addEventListener('hashchange', hashChanged)
 
