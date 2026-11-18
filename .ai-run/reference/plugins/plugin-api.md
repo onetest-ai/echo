@@ -111,7 +111,7 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
 `call_started`, `call_ended`, `recording_started`, `recording_stopped`, `transcribed`, `minutes_written`,
 `thread_synced`, `sources_changed`, `threads_changed`, `shared_changed`.
 
-A call is named by its folder (`call`, as `call:<folder>` is its source id), never its path, and also by its `stamp`: the `YYYY-MM-DD_HHMMSS` its folder name starts with, which a retitle keeps (the folder's name changes, the stamp doesn't). A plugin that reads
+A call is named by its folder (`call`, as `call:<folder>` is its source id), never its path, and also by its `stamp`: the `YYYY-MM-DD_HHMMSS` its folder name starts with, which a retitle keeps (the folder's name changes, the stamp doesn't); a folder without one is its own stamp (its whole name). Two calls started in the same second share a stamp, and `call:<stamp>` reads neither of them (their folder names do). A plugin that reads
 sources (`uses.echo.read` names `source` or `sources`) hears `minutes_written` and `sources_changed` whole; any other
 plugin that hears them gets them without the keys marked *readers* below (`plugins::as_heard`).
 
@@ -842,7 +842,7 @@ Evidence: `jshost::work::check_rows`
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
   `system.reveal(root, path)` (a file of a folder it was given shown in Finder / Explorer, on the user's click: below),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
-  `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash, {replace}?)` (`replace: true`: the address changes without a history step, so Back skips it, and the window shows the page as on a hashchange; without it a new history step; the hash it is already at only redraws), `render()`, `markdown(md, opts)` and
+  `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash, {replace}?)` (`replace: true`: the address changes without a history step, so Back skips it, and a hashchange fires, so the window shows the page as on a real one; without it a new history step; the hash it is already at only redraws), `render()`, `markdown(md, opts)` and
   `markdown.links(md, {detail})` (§ Host half; `async`, by `POST /api/plugin/<id>/markdown` and `/markdown/links` with `{md, opts}`,
   4 MB at most, as `call`) and `ui` (`esc`, `patch(el, html)`
   (replaces a box's HTML unless it is what `patch` last wrote there: redrawn the same, its focus, typed text and scroll

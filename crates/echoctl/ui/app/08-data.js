@@ -293,10 +293,11 @@ function route() {
 }
 // ── go: ──
 /** Go to a hash: a new history step, or with `{replace: true}` (a plugin's `ctx.go`) the address changed in place and
- *  the page routed as on a hashchange (`hashChanged`). The same hash only redraws. */
+ *  a hashchange fired, so every listener runs as on a real one (routing, sheets, a plugin's mic, drops). The same hash
+ *  only redraws. */
 const go = (hash, opts) => {
   if (location.hash.slice(1) === hash) return render()
-  if (opts && opts.replace === true) { replaceUrl('#' + hash); return hashChanged() }
+  if (opts && opts.replace === true) { replaceUrl('#' + hash); return dispatchEvent(new HashChangeEvent('hashchange')) }
   location.hash = hash
 }
 // end of the go block

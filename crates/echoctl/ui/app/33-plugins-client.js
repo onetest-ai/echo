@@ -59,7 +59,7 @@ function callRowChips(items, call, log) {
   return out
 }
 /** The call a `call.row` chip is drawn for: the row's own facts. */
-const slotCall = (c) => ({ name: c.name, stamp: callStamp(c.name), title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
+const slotCall = (c) => ({ name: c.name, stamp: callStamp(c.name) || c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
 // end of the call row slot block
 // ── thread slot: the plugins' rows of a thread's or a client's Profile (`thread.profile`, `client.profile`), each
 // drawn on its own — one that throws is left out (and logged), the Profile draws without it; a second row with the same
