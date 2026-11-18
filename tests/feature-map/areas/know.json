@@ -14,23 +14,23 @@
   },
   {
    "id": "F-KNOW-02",
-   "feature": "Settings → Recall → Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
+   "feature": "Settings → Intake → Use Intake turns reading the threads' mail and channels on or off; its card shows when they were last read, Sync now and Keep it current; the search index's server, model, key and page reader stay below it",
    "priority": "medium",
    "check": "agent",
    "axes": []
   },
   {
    "id": "F-KNOW-03",
-   "feature": "Recall's Sources, Dictionary and People tabs browse what was indexed, by client or thread",
+   "feature": "Recall's Sources and People tabs browse what was indexed, by client or thread",
    "priority": "medium",
    "check": "person",
    "axes": []
   },
   {
    "id": "F-KNOW-04",
-   "feature": "Who may speak into Recall through mail and channels is decided per client (Trust, Ignore, Read anyway, Keep out)",
+   "feature": "Settings → Intake → Who may speak: which senders' mail and channel posts are read is decided per client (Trust, Ignore, Read anyway, Keep out, Forget), whether Intake is on or off",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
@@ -44,6 +44,13 @@
    "id": "F-KNOW-06",
    "feature": "Plugins add tabs and settings rows to Recall (e.g. Obsidian vaults)",
    "priority": "low",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-07",
+   "feature": "Intake keeps the facts read from mail and channel posts as one file per source, apart from the index, backed up before a sync changes them, and moved there once from the old index; a fact file goes only when its source leaves its thread",
+   "priority": "high",
    "check": "person",
    "axes": []
   }

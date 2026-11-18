@@ -287,7 +287,7 @@ scenario(test, 'S-13', 'Find your way around', () => {
     await expect(palette.dialog).toBeHidden()
   })
 
-  test('17 · Vocabulary opens in the right panel from the palette and from the old Settings link', covers('vocabulary/TC-002', 'F-VOC-01', 'F-WS-03'), async ({ page }) => {
+  test('17 · Vocabulary opens in the right panel from the palette, and its Settings link opens Settings → Vocabulary', covers('vocabulary/TC-002', 'F-VOC-01', 'F-WS-03'), async ({ page }) => {
     const { shell: sh, palette: p } = data.text
     const palette = new PalettePage(page, data)
     await palette.goto(sh.routes.calls)
@@ -301,7 +301,8 @@ scenario(test, 'S-13', 'Find your way around', () => {
     await palette.closePanel(palette.rightPanel).click()
     await expect(palette.closePanel(palette.rightPanel)).toHaveCount(0)
     await palette.goto(sh.routes.vocabulary)
-    await expect(palette.panelTab(palette.rightPanel, sh.vocabulary)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('main').getByRole('heading', { name: sh.vocabulary, exact: true, level: 2 })).toBeVisible()
+    await expect(palette.closePanel(palette.rightPanel)).toHaveCount(0)
   })
 
   test('18 · The top bar holds the sidebar button, Record, the account and Inbox on one line at every width', covers('shell/TC-017', 'F-WS-09'), async ({ page }) => {

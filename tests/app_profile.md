@@ -113,9 +113,9 @@ Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be ope
 | `#projects` · `#projects/<id>` · `#project/<id>/<tab>` | Threads (UI name; `projects` in the CLI). The app itself writes `#project/<id>/<tab>` (singular), tabs `brief`, `work`, `calls`, `people`, `profile`; the plural form is also accepted. `#projects` (Threads button) opens the last thread on its `work` tab |
 | `#client/<id>` · `#client/<id>/<tab>` | A client, tabs `overview`, `calls`, `tasks`, `people`, `profile` (opened from a thread's "Thread actions" → "Open Acme") |
 | `#tasks` | Tasks: piles I owe, owed to me, waiting, nobody, plus a folded "Others" pile |
-| `#settings` · `#settings/<section>` · `#settings/plugins/<id>` | Settings; `#settings` lands on `general`. Sections: `general`, `recording`, `transcription`, `ai`, `templates`, `calendar`, `brain` (labelled "Recall"), `me`, `deliver` ("Sends to you"), `plugins`, `layout`, `health`. `plugins/<id>` needs an installed plugin (none on test data) |
+| `#settings` · `#settings/<section>` · `#settings/plugins/<id>` | Settings; `#settings` lands on `general`. Sections: `general`, `recording`, `transcription`, `vocabulary` (the every-call and learned terms and the dictionary), `ai`, `templates`, `calendar`, `brain` (labelled "Intake"), `me`, `deliver` ("Sends to you"), `plugins`, `layout`, `health`. `plugins/<id>` needs an installed plugin (none on test data) |
 
-Not routes: the Details drawer, My notes, Vocabulary, Asks and Inbox are panels on the right (or bottom); the
+Not routes: the Details drawer, My notes, the Vocabulary panel, Asks and Inbox are panels on the right (or bottom); the
 actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Recall" activity (`#brain`) exists only while
 Recall is on; it is off on test data.
 

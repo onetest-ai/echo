@@ -1,6 +1,6 @@
 ---
 id: TC-002
-title: The Vocabulary panel opens from the actions palette and from #settings/vocabulary
+title: The Vocabulary panel opens from the actions palette, and #settings/vocabulary opens Settings → Vocabulary
 priority: low
 type: functional
 requirements: [F-VOC-01, F-WS-03]
@@ -11,7 +11,7 @@ tags: [vocabulary, panel]
 auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
-# TC-002: The Vocabulary panel opens from the actions palette and from #settings/vocabulary
+# TC-002: The Vocabulary panel opens from the actions palette, and #settings/vocabulary opens Settings → Vocabulary
 
 **Module:** Vocabulary | **Priority:** Low | **Type:** Functional
 
@@ -26,10 +26,10 @@ auto: [tests/auto/specs/S-13.spec.mjs]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calls`, press `ControlOrMeta+k`, type `Vocabulary` | The palette lists "Vocabulary" in the group ECHO as the first item |
 | 2 | Press Enter | The palette closes; the right panel opens with the tab "Vocabulary" selected |
-| 3 | Click "Close the panel", then navigate to `{{base_url}}/#settings/vocabulary` | The right panel opens again with the tab "Vocabulary" selected (the old Settings link opens the panel, not a section) |
+| 3 | Click "Close the panel", then navigate to `{{base_url}}/#settings/vocabulary` | Settings shows with "Vocabulary" selected in the left list and the heading "Vocabulary"; the right panel stays closed |
 
 ## Expected Final State
-Both ways open the Vocabulary panel.
+The palette opens the panel; the link opens the Settings section.
 
 ## Notes
-- app_profile.md lists Vocabulary as not a route; `#settings/vocabulary` is kept as an old link that opens the panel.
+- The Vocabulary panel is not a route; `#settings/vocabulary` is the Settings section (with the dictionary, `vocabulary/TC-010`).

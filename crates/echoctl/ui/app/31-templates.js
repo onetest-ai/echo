@@ -371,7 +371,7 @@ document.addEventListener('keydown', (e) => {
 function meProfileCard(mp) {
   const head = (ctl) => `<div class="set-row"><div><b>Your profile</b><div class="set-sub">Who you are, the people and terms around you, how you work and like notes written. Sections by heading: “People…”, “Terms…”, “How I work…”, “How I like notes…”.</div></div><div class="set-ctl">${ctl}</div></div>`
   // Who reads which part (`calls::me_parts`): the readers of other people's words get the least.
-  const readers = `<div class="set-sub me-readers"><b>Who reads it</b> · minutes, the threads' sync (work and people) and Claude in the window: all of it — your patterns are their defaults, what was said wins · live notes and questions: who you are, people and terms · Recall's mail and channel reader: people and terms only, for spelling</div>`
+  const readers = `<div class="set-sub me-readers"><b>Who reads it</b> · minutes, the threads' sync (work and people) and Claude in the window: all of it — your patterns are their defaults, what was said wins · live notes and questions: who you are, people and terms · Intake's mail and channel reader: people and terms only, for spelling</div>`
   if (S.meEdit != null) {
     return `<section class="set-sec"><div class="set-card">${head('<button class="btn ghost" data-me-cancel>Cancel</button><button class="btn primary" data-me-save>Save</button>')}${readers}
       <div class="me-edit"><textarea id="me-profile" spellcheck="true" aria-label="Your profile (Markdown)">${esc(S.meEdit)}</textarea><div class="set-sub">Markdown: # for headings, - for lists. ⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
@@ -412,6 +412,18 @@ function vocabularyPanel() {
 }
 const BOOK = ICON('<path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v13H7.5A2.5 2.5 0 0 1 5 17.5z"/><path d="M5 17.5A2.5 2.5 0 0 1 7.5 15H17M19 7v13"/>')
 PANEL_VIEWS.push({ id: 'vocabulary', label: 'Vocabulary', icon: BOOK, area: 'right', render: vocabularyPanel })
+/** Settings → Vocabulary: the terms the panel shows, and the dictionary (`brainTerms`; a term opens to edit in the
+ *  panel) — whether Intake is on or off: the dictionary hints transcription either way. */
+function vocabularySettings() {
+  const d = S.br.data
+  let dict
+  if (!d) {
+    // Read once, again at most every 5 s while it doesn't come (the app restarting).
+    if (!S.br.dictAt || Date.now() - S.br.dictAt > 5000) { S.br.dictAt = Date.now(); loadBrain().then(render) }
+    dict = `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(3)}</div>`
+  } else dict = d.error ? `<p class="error">${esc(d.error)}</p>` : brainTerms(d.taxonomy || {})
+  return `<h2>Vocabulary</h2>${setCard('', [vocabularyPanel()])}<section class="set-sec"><h3>Dictionary</h3>${dict}</section>`
+}
 
 /** Settings → Brain: the embedding server Echo asks (no model runs in Echo), what the Brain holds,
  *  and whether the app keeps it current. */
@@ -444,11 +456,20 @@ function knowledgeSettings() {
   }).join('')
 }
 
+/** Settings → Intake: what Echo reads from the threads' mail and Teams channels (on or off, when it last read them,
+ *  Sync now, Keep it current), who may speak through them per client, and below it the search index's own settings. */
 function brainSettings(st) {
   const b = st.brain
-  if (!b) return '<p class="set-sub">This build of Echo has no Recall.</p>'
-  const onRow = setRow('Use Recall', 'What was said, findable: your calls, and your threads\' channels, mail and folders, indexed for search — by words and by meaning — with a link back to the moment, for you and for Claude. Off: nothing is read or indexed and it leaves the window — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use Recall'))
-  if (b.enabled === false) return setCard('Recall', [onRow]) + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
+  const head = '<h2>Intake</h2><p class="set-lead">What Echo reads from your threads\' mail and Teams channels: only you, colleagues and the senders you trust, kept as facts checked word for word against each message — never the message itself.</p>'
+  if (!b) return head + '<p class="set-sub">This build of Echo has no Intake.</p>'
+  loadSourceState()
+  const src = m365.state || {}
+  const who = brainSenders()
+  const whoCard = who ? `<section class="set-sec"><h3>Who may speak</h3>${who}</section>` : ''
+  const onRow = setRow('Use Intake', 'Reads your threads\' mail and channel posts into facts and indexes them, with your calls and folders, for search — for you and for Claude. Off: nothing is read or indexed — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use Intake'))
+  if (b.enabled === false) return head + knowledgeSettings() + setCard('Intake', [onRow]) + whoCard + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
+  const reads = Object.values(src.state || {}).map((x) => x && x.read_at).filter(Boolean).sort()
+  const lastRead = (reads.length ? `Last read ${esc(relDay(reads[reads.length - 1]))}` : 'Not read yet') + (src.signed_in === false ? ' · sign in to Microsoft 365 (Calendar & chat) to read mail and channels' : '')
   const s = b.settings || {}
   const field = (key, val, ph, label, type = 'text') => `<input class="set-in" type="${type}" data-brain-set="${key}" value="${esc(val || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}" spellcheck="false">`
   const api = `<select class="set-in" data-brain-set="brain_api" aria-label="API"><option value="ollama"${s.api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
@@ -460,11 +481,13 @@ function brainSettings(st) {
   const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'Claude in the window'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
   const seen = by.window ? ` · in the window: Also discussed ${by.window.also_discussed || 0}, Mentioned also in ${by.window.mentioned_also_in || 0}` : ''
   const usageRow = setRow('How much it is used', `Claude asked it ${asked}${seen}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
-  return setCard('Recall', [
+  return head + knowledgeSettings() + setCard('Intake', [
     onRow,
+    setRow('Last read', `${lastRead}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
+    setRow('Keep it current', 'Echo reads new mail and channel posts, and adds new and changed calls and folder files to the index, by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep Intake current')),
+  ]) + whoCard + setCard('Search', [
     usageRow,
-    setRow('What it holds', `${held}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
-    setRow('Keep it current', 'Echo adds new and changed calls, channel posts, mail and folder files by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep Recall current')),
+    setRow('What it holds', held, ''),
   ]) + setCard('Meaning (embeddings)', [
     setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, Recall searches by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
     setRow('Model', 'An embedding model that knows your languages (e.g. qwen3-embedding, bge-m3). Another model embeds everything again.', field('brain_model', s.model, 'qwen3-embedding', 'Model')),

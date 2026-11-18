@@ -11,6 +11,7 @@ pub mod calls;
 pub mod chunk;
 pub mod digest;
 pub mod embed;
+pub mod facts;
 pub mod files;
 pub mod mcp;
 pub mod senders;
@@ -131,8 +132,12 @@ fn call_inputs() -> Vec<store::Input> {
 /// Bring the Brain up to date with the sources (one sync at a time on this computer).
 pub fn sync() -> Result<store::Report> {
     let lock = paths::config_dir().join("brain.lock");
-    anyhow::ensure!(enabled(), "Recall is off (Settings → Recall)");
+    anyhow::ensure!(enabled(), "Intake is off (Settings → Intake)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
+    // Intake's facts out of the index into their files, once, before a sync writes any.
+    if let Err(e) = facts::migrate() {
+        eprintln!("intake: {e:#}");
+    }
     let emb = embedder();
     let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;
     // Thread sources (Teams channels, mail): only with a Microsoft 365 sign-in; their failures are
@@ -278,6 +283,12 @@ fn tell_recall() {
 
 pub fn start_scheduler() {
     tell_recall();
+    // Intake's facts out of the index into their files, once after the update (Intake on or off).
+    std::thread::spawn(|| match facts::migrate() {
+        Ok(Some(r)) => eprintln!("intake: {} mail and posts moved into fact files", r["written"]),
+        Ok(None) => {}
+        Err(e) => eprintln!("intake: {e:#}"),
+    });
     // The old learned vocabulary moves into the taxonomy once (transcription reads both meanwhile).
     std::thread::spawn(|| {
         if let Ok(mut cfg) = crate::config::Config::load() {

@@ -2,8 +2,8 @@
 // (`settings_set`, the value shown, never a toggle of a stale one); flows with a dialog, a sign-in or
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
-  ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'], ['templates', 'Templates'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Recall'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
+  ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['vocabulary', 'Vocabulary'], ['ai', 'AI & minutes'], ['templates', 'Templates'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Intake'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 // ── settings search: which sections a search keeps, by their names and by their settings' own labels (#103) —
 // the rows' titles (`<b>` of setRow) and the cards' heads (`<h3>`) of a section as drawn; not descriptions or badges.
@@ -91,9 +91,9 @@ function settingsView() {
   let sec = own ? own.id : SETTINGS_SECTIONS.some(([id]) => id === S.setSection) ? S.setSection : 'general'
   const q = (S.setQuery || '').trim().toLowerCase()
   // Searched: each section by its name and its settings' labels, as drawn now. By name only: Templates, Plugins and
-  // Sends to you (drawing loads their lists), Knowledge (it draws plugins' panels) and Health (it re-checks Claude Code).
+  // Sends to you and Vocabulary (drawing loads their lists), Intake (it draws plugins' panels) and Health (it re-checks Claude Code).
   const drawn = (id) => {
-    if (!q || !st || st.config_error || ['templates', 'plugins', 'deliver', 'brain', 'health'].includes(id)) return ''
+    if (!q || !st || st.config_error || ['templates', 'plugins', 'deliver', 'vocabulary', 'brain', 'health'].includes(id)) return ''
     try { return SETTINGS_BODY[id](st) } catch { return '' }
   }
   const found = SettingsSearch.match(SETTINGS_SECTIONS.map(([id, label]) => ({ id, label, html: drawn(id) })), q)

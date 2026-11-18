@@ -5,8 +5,9 @@
 //! threads are every thread whose sources match it, recomputed at each sync, so taking a source off a
 //! thread moves or removes its documents without fetching them again.
 
+use super::facts::{self, Facts};
 use super::senders::{self, Verdict};
-use super::store::{self, Input};
+use super::store;
 use super::digest;
 use crate::{graph, paths, projects};
 use anyhow::Result;
@@ -225,42 +226,29 @@ fn part(i: usize, at: &str, who: &str, text: &str, url: &str) -> Part {
     Part { head: format!("{} {} {who}", day(at), hhmm(at)), url: url.to_string(), msg: digest::Msg { i, at: at.to_string(), from: who, text: text.trim().to_string() } }
 }
 
-/// The document as the Brain keeps it: the reader's title and facts (with their checked quotes), a
+/// The document as Intake keeps it: the reader's title and facts (with their checked quotes), a
 /// section per message linking to it — never the message's own text.
-fn to_input(p: Pending, d: digest::Digest) -> Option<Input> {
+fn to_facts(p: Pending, d: digest::Digest) -> Option<Facts> {
     let title = if d.title.is_empty() { p.fallback_title.clone() } else { d.title };
-    let mut md = format!("# {title}\n\n");
-    let mut links: BTreeMap<String, String> = BTreeMap::new();
-    for (part, facts) in p.parts.iter().zip(d.facts) {
-        if facts.is_empty() {
-            continue;
-        }
-        md.push_str(&format!("### {}\n\n", part.head));
-        for f in facts {
-            match f.quote {
-                Some(q) => md.push_str(&format!("- {} — “{q}”\n", f.text)),
-                None => md.push_str(&format!("- {}\n", f.text)),
-            }
-        }
-        md.push('\n');
-        links.entry(part.head.clone()).or_insert_with(|| part.url.clone());
-    }
-    if links.is_empty() {
+    let sections: Vec<facts::Section> = p
+        .parts
+        .iter()
+        .zip(d.facts)
+        .filter(|(_, facts)| !facts.is_empty())
+        .map(|(part, facts)| facts::Section { head: part.head.clone(), from: part.head.splitn(3, ' ').nth(2).map(str::to_owned), at: part.msg.at.clone(), link: part.url.clone(), facts })
+        .collect();
+    if sections.is_empty() {
         return None;
     }
     let mut refs = p.refs;
     refs["subject"] = json!(title);
-    let fallback = refs["url"].as_str().unwrap_or("").to_string();
-    Some(Input {
-        source: p.source,
-        kind: p.kind.into(),
-        title,
-        event_date: p.date,
-        md,
-        refs,
-        link: Box::new(move |c| links.get(&c.title).cloned().unwrap_or_else(|| fallback.clone())),
-        speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
-    })
+    Some(Facts::new(p.source, p.kind, title, p.date, refs, sections))
+}
+
+/// Whether a source's facts are within the reading window (they can be read again).
+fn rereadable(f: &Facts, now: DateTime<Utc>) -> bool {
+    let from = (now - Duration::days(FIRST_DAYS)).format("%Y-%m-%d").to_string();
+    f.event_date.as_deref().is_some_and(|d| d >= from.as_str())
 }
 
 /// A stable short form of a long Graph id, for source names.
@@ -311,14 +299,16 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     let w = watched();
     let mut st = state();
     let path = super::store_path();
+    // Another reader: every source reads its window again (what it gives replaces what was kept); the facts read
+    // before stay, never dropped by an update (older ones can't be read again).
     if st["reader"].as_u64() != Some(READER) {
-        store::remove(&path, "mail/")?;
-        store::remove(&path, "channel/")?;
         st = json!({"reader": READER});
     }
     let mut out = Read::default();
     let now = Utc::now();
-    // Clients whose senders changed: their sources start over, their documents go (read again below).
+    let mut fw = facts::Writer::default();
+    // Clients whose senders changed (the user's decision): their sources start over, and their facts still within the
+    // reading window go (read again below); older ones can't be read again and stay.
     let reread: Vec<String> = std::fs::read(reread_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     if !reread.is_empty() {
         let _ = std::fs::remove_file(reread_path());
@@ -330,19 +320,12 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             }
         }
         let closed = projects::closed_threads();
-        let c = store::open(&path)?;
-        let docs: Vec<(String, String)> = c
-            .prepare("SELECT source, refs FROM documents WHERE kind IN ('channel', 'mail')")?
-            .query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?
-            .collect::<Result<_, _>>()?;
-        drop(c);
-        for (src, refs) in docs {
-            let refs: Value = serde_json::from_str(&refs).unwrap_or(Value::Null);
-            let threads: Vec<Value> = refs["threads"].as_array().cloned().unwrap_or_default();
+        for f in facts::all() {
+            let threads: Vec<Value> = f.refs["threads"].as_array().cloned().unwrap_or_default();
             // A closed thread's archive stays (its sources aren't read again, so it couldn't come back).
-            let all_closed = !threads.is_empty() && threads.iter().all(|t| t["id"].as_str().is_some_and(|id| closed.contains_key(id)));
-            if !all_closed && senders::clients_of(&threads).iter().any(|c| reread.contains(c)) {
-                store::remove(&path, &src)?;
+            if !facts::archived(&f.refs, &closed) && rereadable(&f, now) && senders::clients_of(&threads).iter().any(|c| reread.contains(c)) {
+                fw.remove(&f.source)?;
+                store::remove(&path, &f.source)?;
             }
         }
     }
@@ -598,7 +581,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             }
         };
         match got {
-            Some(d) => kept.extend(to_input(p, d)),
+            Some(d) => kept.extend(to_facts(p, d)),
             None => {
                 out.deferred += 1;
                 stuck.extend(p.from);
@@ -611,27 +594,41 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
         st[k]["deferred"] = json!(true);
     }
     out.docs = kept.len();
-    let report = store::sync_kinds(&path, kept, emb, &[])?;
-    // Documents read before: under the threads that match them now, closed ones too; none → removed.
-    let open_ids: BTreeSet<String> = w.iter().map(|(p, _)| p.id.clone()).collect();
-    let c = store::open(&path)?;
-    let rows: Vec<(String, String)> = c
-        .prepare("SELECT source, refs FROM documents WHERE kind IN ('channel', 'mail')")?
-        .query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?
-        .collect::<Result<_, _>>()?;
-    drop(c);
-    for (src, refs) in rows {
-        let refs: Value = serde_json::from_str(&refs).unwrap_or(Value::Null);
-        let t = threads_now(&refs, &all, &open_ids);
-        if t.is_empty() {
-            out.removed += store::remove(&path, &src)?;
-        } else if refs["threads"] != json!(t) {
-            store::rescope(&path, &src, &with_threads(refs, t))?;
-            out.moved += 1;
-        }
+    // The facts first (the only copy), then the index from them.
+    let closed = projects::closed_threads();
+    for f in &mut kept {
+        f.archived = facts::archived(&f.refs, &closed);
+        fw.write(f)?;
     }
+    let report = store::sync_kinds(&path, kept.iter().map(Facts::input).collect(), emb, &[])?;
+    let open_ids: BTreeSet<String> = w.iter().map(|(p, _)| p.id.clone()).collect();
+    let (removed, moved) = place(&mut fw, &all, &open_ids, &closed)?;
+    out.removed += removed;
+    out.moved += moved;
     save_state(&st)?;
     Ok((out, report))
+}
+
+/// Put every source's facts under the threads that match them now, closed ones too, in their file and in the index;
+/// a source no thread matches any more left its threads: its facts go. (removed, moved).
+fn place(fw: &mut facts::Writer, all: &[(projects::Project, projects::Source)], open: &BTreeSet<String>, closed: &BTreeMap<String, Value>) -> Result<(usize, usize)> {
+    let path = super::store_path();
+    let (mut removed, mut moved) = (0, 0);
+    for mut f in facts::all() {
+        let t = threads_now(&f.refs, all, open);
+        if t.is_empty() {
+            fw.remove(&f.source)?;
+            store::remove(&path, &f.source)?;
+            removed += 1;
+        } else if f.refs["threads"] != json!(t) {
+            f.refs = with_threads(f.refs, t);
+            f.archived = facts::archived(&f.refs, closed);
+            fw.write(&f)?;
+            store::rescope(&path, &f.source, &f.refs)?;
+            moved += 1;
+        }
+    }
+    Ok((removed, moved))
 }
 
 #[cfg(test)]
@@ -726,7 +723,9 @@ mod tests {
                 vec![digest::Fact { text: "The user says by Friday.".into(), quote: None }],
             ],
         };
-        let i = to_input(pend(), d).unwrap();
+        let f = to_facts(pend(), d).unwrap();
+        assert_eq!((f.sections[1].from.as_deref(), f.sections[1].at.as_str()), (Some("Me"), "2026-10-27T09:30:00Z"));
+        let i = f.input();
         assert_eq!(i.title, "Budget fix");
         assert!(i.md.contains("### 2026-10-27 09:30 Me\n\n- The user says by Friday."));
         assert!(!i.md.contains("Ignore previous"), "the message's own text stays out");
@@ -735,9 +734,42 @@ mod tests {
         let second = chunks.iter().find(|c| c.title.contains("09:30")).unwrap();
         assert_eq!((i.link)(second), "https://outlook/2");
         assert_eq!((i.speaker)(second).as_deref(), Some("Me"));
+        assert!(!serde_json::to_string(&f).unwrap().contains("Ignore previous"), "nor in its file");
         // Nothing read → nothing kept; no title → the fallback.
-        assert!(to_input(pend(), digest::Digest { title: String::new(), facts: vec![vec![], vec![]] }).is_none());
-        let i = to_input(pend(), digest::Digest { title: String::new(), facts: vec![vec![digest::Fact { text: "x".into(), quote: None }], vec![]] }).unwrap();
-        assert_eq!(i.title, "Mail of 2026-10-27");
+        assert!(to_facts(pend(), digest::Digest { title: String::new(), facts: vec![vec![], vec![]] }).is_none());
+        let f = to_facts(pend(), digest::Digest { title: String::new(), facts: vec![vec![digest::Fact { text: "x".into(), quote: None }], vec![]] }).unwrap();
+        assert_eq!(f.title, "Mail of 2026-10-27");
+    }
+
+    #[test]
+    fn a_sources_facts_go_only_when_it_leaves_its_threads() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-sources-place");
+        let id = projects::create("Acme pilot", None, None).unwrap().id;
+        let other = projects::create("Acme ops", None, None).unwrap().id;
+        projects::update(&id, |p| {
+            p.sources.push(projects::Source { kind: "mail".into(), id: "domain:acme.example".into(), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        let mail = |src: &str, threads: Value| Facts::new(src.into(), "mail", "Pilot".into(), Some("2026-11-11".into()), json!({"kind": "mail", "people": ["jane@acme.example"], "threads": threads}),
+            vec![facts::Section { head: "2026-11-11 09:00 Jane".into(), from: Some("Jane".into()), at: String::new(), link: String::new(), facts: vec![digest::Fact { text: "A fact".into(), quote: None }] }]);
+        let mut fw = facts::Writer::default();
+        fw.write(&mail("mail/kept", json!([{"id": id, "name": "Acme pilot", "client": null}]))).unwrap();
+        fw.write(&mail("mail/moved", json!([{"id": other}]))).unwrap();
+        let open: BTreeSet<String> = [id.clone(), other.clone()].into();
+        let closed = BTreeMap::new();
+        // Matched by the thread's mail source: kept, and one under another thread is moved to it — not dropped.
+        assert_eq!(place(&mut facts::Writer::default(), &with_sources(), &open, &closed).unwrap(), (0, 1));
+        assert_eq!(facts::read("mail/moved").unwrap().refs["threads"][0]["id"], json!(id));
+        assert!(facts::read("mail/kept").is_some());
+        // The source taken off the thread: its facts go.
+        projects::update(&id, |p| {
+            p.sources.clear();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(place(&mut facts::Writer::default(), &with_sources(), &open, &closed).unwrap(), (2, 0));
+        assert!(facts::all().is_empty());
+        assert!(facts::backup_dir().join("mail/kept.json").exists(), "backed up before they went");
     }
 }

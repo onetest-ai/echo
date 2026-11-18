@@ -66,7 +66,9 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            let r = if !crate::brain::enabled() { Err(anyhow::anyhow!("Recall is off")) } else { match &p["/api/brain/browse/".len()..] {
+            // The dictionary is Settings → Vocabulary's, whether Intake is on or off; the sources only with it on.
+            let what = &p["/api/brain/browse/".len()..];
+            let r = if !crate::brain::enabled() && what != "terms" { Err(anyhow::anyhow!("Intake is off")) } else { match what {
                 "groups" => browse::source_groups(scope),
                 "sources" => browse::source_list(scope, &browse::ListQuery {
                     client: query_param(q, "of"), kind: query_param(q, "kind"), root: query_param(q, "root"), channel: query_param(q, "channel"),

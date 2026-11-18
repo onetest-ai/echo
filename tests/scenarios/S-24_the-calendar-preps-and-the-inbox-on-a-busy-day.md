@@ -57,6 +57,7 @@ cases:
   - tests/cases/today/TC-029_a-plugins-widgets-on-today.md
   - tests/cases/today/TC-030_each-routines-card-is-a-widget-of-its-own.md
   - tests/cases/today/TC-031_a-plugin-widgets-chart-link-and-actions.md
+  - tests/cases/settings/TC-041_who-may-speak-is-decided-per-client-in-settings-intake.md
   - tests/cases/today/TC-032_a-widgets-settings.md
   - tests/cases/today/TC-033_a-plugins-own-page-widget.md
   - tests/cases/today/TC-034_a-plugin-widget-not-answered-yet-holds-its-place.md
@@ -138,6 +139,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 51 | `today/TC-029_a-plugins-widgets-on-today.md` | — | — |
 | 52 | `today/TC-030_each-routines-card-is-a-widget-of-its-own.md` | — | — |
 | 53 | `today/TC-031_a-plugin-widgets-chart-link-and-actions.md` | — | — |
+| 54 | `settings/TC-041_who-may-speak-is-decided-per-client-in-settings-intake.md` | — | Stage 34 ignored Dana Lee: in step 2 she is listed "ignored" with "Forget" (no waiting row, the head without "waiting"); skip step 5. In step 1 click "Inbox" only if the panel is not open on Inbox |
 | 54 | `today/TC-032_a-widgets-settings.md` | — | — |
 | 55 | `today/TC-033_a-plugins-own-page-widget.md` | — | — |
 | 56 | `today/TC-034_a-plugin-widget-not-answered-yet-holds-its-place.md` | — | Run it before stage 55 asks the plugin for Sprint board (or remove and install widget-demo again first): its widgets must never have been answered |

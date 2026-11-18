@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-VOC-01",
-   "feature": "The Vocabulary panel opens from the book beside Calls, ⌘K or `#settings/vocabulary`",
+   "feature": "The Vocabulary panel opens from the book beside Calls or ⌘K; `#settings/vocabulary` opens Settings → Vocabulary",
    "priority": "medium",
    "check": "agent",
    "axes": []
@@ -38,6 +38,13 @@
    "axes": [
     "vocab.scope"
    ]
+  },
+  {
+   "id": "F-VOC-05",
+   "feature": "Settings → Vocabulary holds the every-call and learned terms and the dictionary (terms by group, A–Z, a search, a term opened to edit), whether Intake is on or off; the dictionary's terms hint transcription either way",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

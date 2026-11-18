@@ -253,8 +253,8 @@ pub fn collect() -> Collected {
     }
     #[cfg(feature = "brain")]
     if senders_asked {
-        // Senders whose mail or posts wait to be read (with the Brain off: decided right here).
-        let go = brain_on.then(|| "brain/sources".to_string());
+        // Senders whose mail or posts wait to be read: decided right here, or in Settings → Intake's Who may speak.
+        let go = Some("settings/brain".to_string());
         for (client, l) in crate::brain::senders::load().clients {
             for w in &l.unverified {
                 out.push(item(
