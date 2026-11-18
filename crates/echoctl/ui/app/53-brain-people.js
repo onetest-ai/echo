@@ -100,20 +100,13 @@ document.addEventListener('input', (e) => {
     }, 200)
     return
   }
-  if (e.target.id === 'br-gq') {
-    const q = e.target.value
-    clearTimeout(S.br.gqT)
-    S.br.gqT = setTimeout(() => { graphSearch(q, false); const r = $('.br-gq-res'); if (r) r.textContent = S.br.gqRes; else if (S.br.gqRes) { const at = e.target.selectionStart; render(); const i = $('#br-gq'); if (i) { i.focus(); i.setSelectionRange(at, at) } } }, 150)
-    return
-  }
   if (e.target.id !== 'br-pq') return
   S.br.pq = e.target.value
   clearTimeout(S.br.pqT)
   S.br.pqT = setTimeout(() => { drawPeople(); const r = $('.br-pq-res'); if (r) r.textContent = S.br.pqRes; else { const at = e.target.selectionStart; render(); const i = $('#br-pq'); if (i) { i.focus(); i.setSelectionRange(at, at) } } }, 150)
 })
 document.addEventListener('keydown', (e) => {
-  if (e.target.id === 'br-gq' && e.key === 'Enter') { e.preventDefault(); graphSearch(e.target.value, true) }
-  if ((e.target.id === 'br-gq' || e.target.id === 'br-pq') && e.key === 'Escape') { e.target.value = ''; e.target.dispatchEvent(new Event('input', { bubbles: true })) }
+  if (e.target.id === 'br-pq' && e.key === 'Escape') { e.target.value = ''; e.target.dispatchEvent(new Event('input', { bubbles: true })) }
 })
 
 /** A topic or term in the right panel: its description, where it comes up, the user's review
@@ -236,7 +229,7 @@ function brainEdit(body, reload = loadBrain, data = () => S.br.data) {
   setTimeout(again, 250)
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-split],[data-br-retag],[data-br-move],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-merge-into],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-edit],[data-br-do],[data-br-op],[data-br-merge-into],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
   if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
@@ -248,14 +241,6 @@ document.addEventListener('click', (e) => {
     layoutChanged()
     return loadBrainNode().then(render)
   }
-  if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
-  // Folded = it was open: one click opens a closed one (it took two — a closed topic had no `fold` entry yet).
-  if (d.brFold) { S.br.fold = { ...(S.br.fold || {}), [d.brFold]: t.getAttribute('aria-expanded') === 'true' }; return render() }
-  if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
-  if (d.brSplit) { const [layer, label, asker] = JSON.parse(d.brSplit); send({ cmd: 'brain_split_topic', layer, label, for: asker || layer }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`split:${asker || layer}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
-  if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
-  if (d.brRetag) { send({ cmd: 'brain_retag_topics', layer: d.brRetag }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`retag:${d.brRetag}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
-  if (d.brSnooze) { send({ cmd: 'brain_topics_snooze', layer: d.brSnooze }); return setTimeout(() => loadBrain().then(render), 300) }
   if (d.brEdit) { S.br.edit = d.brEdit; S.br.mergeHits = []; S.br.mergeQ = ''; render(); { const i = $('#br-rename') || $('#br-into-q'); if (i) { i.focus(); if (i.select) i.select() } } return }
   if (d.brOp) return brainEdit(JSON.parse(d.brOp))
   if (d.brMergeInto) {
@@ -299,48 +284,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   GraphView.retheme()
   for (const e of Terms.values()) if (e.term) e.term.options.theme = termTheme()
   render()
-})
-
-/** Insights of a client or a thread (`brain/insights.rs`): what no single call shows, each citing two
- *  sources or more; to re-check when a cited source changed; Refresh runs one now (otherwise the app
- *  redoes a scope at most daily, after its calls changed). */
-const insights = { key: null, data: null, at: 0 }
-async function loadInsights(kind, id, force) {
-  const k = `${kind}:${id}`
-  if (!force && insights.key === k && Date.now() - insights.at < 20000) return
-  insights.key = k; insights.at = Date.now()
-  try { insights.data = await get(`api/brain/insights?${kind}=${encodeURIComponent(id)}`) } catch { insights.data = null }
-  render()
-}
-const INSIGHT_KIND = { moved: ['Position moved', 'warn'], slipping: ['Keeps slipping', 'danger'], recurs: ['Comes back', 'info'], contradiction: ['Contradiction', 'accent'], open: ['Still open', 'mute'] }
-function insightsBlock(kind, id, name) {
-  if (!brainOn() || !RECALL_EXTRAS) return ''
-  const k = `${kind}:${id}`
-  if (insights.key !== k) { loadInsights(kind, id); return '' }
-  const d = insights.data
-  if (!d || d.error) return ''
-  const list = d.insights || []
-  const when = d.at ? `checked ${esc(relDay(d.at))}` : 'not run yet'
-  const btn = d.running ? '<span class="set-sub">Reading…</span>' : `<button class="link-btn" data-insights-run="${esc(kind)}" data-id="${esc(id)}">${list.length ? 'Refresh' : 'Find insights'}</button>`
-  const card = (x) => {
-    const [label, cls] = INSIGHT_KIND[x.kind] || [x.kind, 'mute']
-    const cites = x.citations.map((c) => {
-      const call = c.link && c.link.startsWith('echo://call/') ? c.link.slice(12).split('?')[0] : ''
-      const t = c.link && c.link.includes('?t=') ? Number(c.link.split('?t=')[1]) : null
-      return `<button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(c.link)} title="“${esc(c.quote)}”">${kindMark(c)} ${esc(c.doc)}${c.date ? ` · ${esc(relDay(c.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button>`
-    }).join('')
-    return `<div class="ins${x.stale ? ' stale' : ''}"><span class="ins-k ${cls}">${esc(label)}${x.stale ? ' · to re-check' : ''}</span><div class="ins-t">${esc(x.text)}</div><div class="ins-c">${cites}</div></div>`
-  }
-  const empty = d.at ? '<p class="set-sub">Nothing across calls stands out yet.</p>' : `<p class="set-sub">Insights find what no single call shows — positions that moved, what keeps slipping or coming back, contradictions — each citing two sources. ${d.due ? 'Echo will look after its next quiet moment, or now:' : ''}</p>`
-  return `<section class="set-sec ins-sec"><div class="ins-h"><h3>Insights</h3><span class="set-sub">across ${esc(name)}'s calls · each cites two sources or more · ${when}</span><span class="grow"></span>${btn}</div>${list.length ? `<div class="ins-grid">${list.map(card).join('')}</div>` : empty}</section>`
-}
-document.addEventListener('click', (e) => {
-  const b = e.target.closest && e.target.closest('[data-insights-run]')
-  if (!b) return
-  send({ cmd: 'brain_insights', kind: b.dataset.insightsRun, id: b.dataset.id })
-  b.textContent = 'Reading…'; b.disabled = true
-  const poll = (n) => setTimeout(() => loadInsights(b.dataset.insightsRun, b.dataset.id, true).then(() => { if (insights.data && insights.data.running && n < 60) poll(n + 1) }), 4000)
-  poll(0)
 })
 
 /** "Mentioned also in" (the Brain): where else in the thread a work item comes up — near the words it

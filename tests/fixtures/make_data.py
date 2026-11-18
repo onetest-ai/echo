@@ -2252,7 +2252,6 @@ def build_inbox(d, H):
                  "found.org=none": "Design guild"}.items():
         d.axis(k, v)
     d.skip("inbox.kind=minutes (waiting)", "a waiting run needs its owner process alive")
-    d.skip("inbox.kind=brain", "compiled off (brain::EXTRAS)")
     d.skip("inbox.kind=health (permission)", "the real macOS privacy state")
     d.skip("inbox.kind=update", "set only by the app's check of GitHub releases")
     d.skip("inbox.busy=working / failed", "only while an Inbox action's job runs")

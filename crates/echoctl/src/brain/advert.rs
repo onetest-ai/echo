@@ -117,14 +117,6 @@ pub fn summary(c: &Connection, access: &Access) -> Result<String> {
     if !access.people_threads().is_empty() {
         also.push("people (roles, facts, who works with whom)".to_string());
     }
-    let numbers = if super::EXTRAS { access.numbers_clients() } else { vec![] };
-    if !numbers.is_empty() {
-        also.push(format!("reported figures for {}", numbers.join(", ")));
-    }
-    let insights = if super::EXTRAS { super::insights::count_for(&clients, &threads) } else { 0 };
-    if insights > 0 {
-        also.push(format!("{insights} insights (what moved, slipped, recurs, contradicts)"));
-    }
     if !also.is_empty() {
         out.push(format!("Also: {}.", also.join("; ")));
     }

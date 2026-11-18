@@ -1,31 +1,20 @@
 // ── the Brain (`brain/`): what Echo knows across calls, by client and thread ──────────────
-// Its topics and terms to review (two layers: your practice, and each client's), the sources it
-// holds, its coverage, and a graph of documents around their topics. Asking is Claude's job (the
+// Its dictionary (terms to review, in two layers: your practice, and each client's), the sources it
+// holds, and its people. Asking is Claude's job (the
 // window's Claude sessions have the Brain); this shows and edits what it is made of.
-/** Recall's tabs. Topics, numbers, coverage and the graph were the Brain's and didn't survive our tests (0.8.0, `brain::EXTRAS`):
- *  their views stay in the code until removed, never shown. */
-const RECALL_EXTRAS = false
 /** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
 const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
-const BRAIN_TABS = RECALL_EXTRAS
-  ? [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
-  : [['sources', 'Sources'], ['terms', 'Dictionary'], ['people', 'People']]
+const BRAIN_TABS = [['sources', 'Sources'], ['terms', 'Dictionary'], ['people', 'People']]
 const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
 async function loadBrain() {
   const q = brainQuery()
   const before = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
   try { const d = await get('api/brain' + q); d.q = q; S.br.data = d; noteEditErrors(d) } catch { /* app restarting */ }
   const now = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
-  // The topics graph again when the scope, the taxonomy or the store changed (a sync, a rename); the sets opened stay.
-  const gv = `${((S.br.data || {}).taxonomy || {}).version}|${((S.br.data || {}).status || {}).chunks}`
-  if (S.br.tab === 'graph' && (!S.br.graph || S.br.graph.q !== q || S.br.graph.v !== gv)) {
-    try { const g = await get('api/brain/browse/graph' + q); g.q = q; g.v = gv; if (!S.br.graph || S.br.graph.q !== q) S.br.gsets = []; S.br.graph = g } catch { /* app restarting */ }
-  }
   // Sources and the dictionary read their pages again only when a sync or an edit changed them (else they keep
   // the pages shown and the letter picked).
   if (before !== now && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
   if (before !== now && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
-  if (S.br.tab === 'numbers') { try { S.br.numbers = await get('api/brain/numbers') } catch { /* app restarting */ } }
   if (S.br.tab === 'people') await loadBrainPeople()
   if (S.br.node) await loadBrainNode()
 }
@@ -42,7 +31,6 @@ function drawBrain(primary) {
   const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
   const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
   try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
-  drawGraph()
   drawPeople()
 }
 function brainView() {
@@ -66,82 +54,13 @@ function brainView() {
   const scopeSel = `<label class="fchip${S.br.scope ? ' on' : ''}">${esc(S.br.scope ? (S.br.scope.startsWith('client:') ? clientName(S.br.scope.slice(7)) : ((projById(S.br.scope.slice(7)) || {}).name || 'In no thread')) : 'Everything')} ▾<select data-br-scope aria-label="Scope"><option value="">Everything</option><optgroup label="Clients">${sc.clients.map((c) => `<option value="client:${esc(c.id)}"${S.br.scope === `client:${c.id}` ? ' selected' : ''}>${esc(c.name)} · ${c.documents}</option>`).join('')}</optgroup><optgroup label="Threads">${sc.threads.map((t) => `<option value="thread:${esc(t.id)}"${S.br.scope === `thread:${t.id}` ? ' selected' : ''}>${esc(t.name)} · ${t.documents}</option>`).join('')}</optgroup></select></label>`
   const [sk, sv] = (S.br.scope || '').split(':')
   const inScope = sk ? ((sc[sk === 'client' ? 'clients' : 'threads'] || []).find((x) => x.id === sv) || {}).documents : null
-  const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
+  const n = { terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
   const head = `<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
-  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
+  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'people' ? brainPeople() : brainTerms(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
-}
-function brainTopics(tx) {
-  if (!tx.exists) return `<div class="wk-empty"><b>No topics yet</b><p>Claude builds them from your calls — your practice, and each client's own — and you review them here. <code>echoctl brain taxonomy build</code></p></div>`
-  // One tree for the whole Brain: the practice's topics, each with its subtopics and the clients' topics
-  // placed under it (a chip names the client); then what only one client has. Builds stay per layer
-  // (the practice, each client): their state and actions above the tree; suggested moves (up to the
-  // practice, down to a client) next to it.
-  const layers = tx.layers || []
-  const topics = tx.topics || []
-  const lname = (id) => id === 'shared' ? 'Your practice' : ((layers.find((l) => l.id === id) || {}).name || id)
-  const lcolor = (id) => { const i = layers.filter((l) => l.id !== 'shared').findIndex((l) => l.id === id); return i < 0 ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length] }
-  const open = (id, dflt) => (S.br.fold || {})[id] == null ? dflt : !(S.br.fold || {})[id]
-  const jobs = new Set([...((S.br.data || {}).topic_jobs || []), ...Object.keys(S.br.rebuilding || {})])
-  const catchAll = new Map(layers.filter((l) => l.drift && (l.drift.reasons || []).some((r) => r.rule === 'catch_all') && l.drift.top).map((l) => [`${l.id}|${l.drift.top.label}`, Math.round(l.drift.top.pct)]))
-  // A topic only closed threads' sections have is the archive (#55): its own folded group at the end.
-  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id && !k.archived).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
-  const roots = topics.filter((x) => (x.level === 1 || !x.parent_id) && !x.archived)
-  const oldTopics = topics.filter((x) => x.archived)
-  const max = Math.max(1, ...roots.map((t) => t.sections || 0))
-  const total = roots.reduce((n, t) => n + (t.sections || 0), 0)
-  const row = (x, top) => {
-    const sub = kidsOf(x)
-    const isOpen = open(x.id, false)
-    const pct = total ? Math.round(100 * (x.sections || 0) / total) : 0
-    const ca = catchAll.get(`${x.layer}|${x.label}`)
-    const flag = ca ? `<span class="br-flag" title="Took ${ca}% of ${esc(lname(x.layer))}'s new sections: a catch-all — split it, or rebuild">took ${ca}% of new</span>` : ''
-    const chip = x.layer !== 'shared' ? `<span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span>` : ''
-    const syn = (x.synonyms || []).length ? ` · also ${esc(x.synonyms.slice(0, 3).join(', '))}` : ''
-    const fold = sub.length ? `<button class="br-fold" data-br-fold="${esc(x.id)}" aria-expanded="${isOpen}" title="${isOpen ? 'Fold' : 'Show'} ${sub.length} subtopic${sub.length === 1 ? '' : 's'}">${CHEV(isOpen)}</button>` : '<span class="br-fold"></span>'
-    const subs = sub.length && !isOpen ? ` <span class="set-sub">· ${sub.length} sub${sub.some((k) => k.layer !== 'shared') ? `, ${[...new Set(sub.filter((k) => k.layer !== 'shared').map((k) => lname(k.layer)))].map(esc).join(', ')}` : ''}</span>` : ''
-    return `<div class="br-tr${top ? '' : ' l2'}${S.br.node === x.id ? ' on' : ''}">${fold}<button class="br-tm" data-br-node="${esc(x.id)}"><span class="br-tn">${top ? `<b>${esc(x.label)}</b>` : esc(x.label)} ${chip}${subs}${flag}</span>${x.description || syn ? `<span class="br-td">${esc(x.description || '')}${syn}</span>` : ''}</button>
-      <span class="br-bar" title="${x.sections || 0} sections · ${pct}%"><i style="width:${Math.round(100 * (x.sections || 0) / max)}%"></i></span><span class="br-n">${x.sections || 0}<small> · ${pct}%</small></span><span class="br-th">${threadChips(x.threads)}</span></div>${isOpen ? sub.map((k) => row(k, false)).join('') : ''}`
-  }
-  const practice = roots.filter((x) => x.layer === 'shared').sort((a, b) => (b.sections || 0) - (a.sections || 0))
-  const own = layers.filter((l) => l.id !== 'shared').map((l) => [l, roots.filter((x) => x.layer === l.id).sort((a, b) => (b.sections || 0) - (a.sections || 0))]).filter(([, xs]) => xs.length)
-  // Builds: one line per layer — in plain words what is wrong, if anything, and the one thing to do
-  // about it (the button that does it); Tag again stays as a quiet extra.
-  const why = (d) => (d.reasons || []).map((r) => r.text.charAt(0).toUpperCase() + r.text.slice(1) + '.').join(' ')
-  const build = (l) => {
-    const d = l.drift || {}
-    const running = jobs.has(`taxonomy:${l.id}`) ? 'Rebuilding its topics from its calls…' : jobs.has(`split:${l.id}`) ? 'Splitting a topic into subtopics…' : jobs.has(`retag:${l.id}`) ? 'Tagging its sections again…' : ''
-    // One topic took most of the new sections (#31): splitting that topic fixes it; a rebuild alone doesn't.
-    const broad = ((d.reasons || []).find((r) => r.rule === 'catch_all' && r.topic) || {}).topic
-    const splitBtn = broad ? `<button class="btn primary" data-br-split="${esc(JSON.stringify([broad.layer, broad.label, l.id]))}" title="Make 2–6 subtopics of it from its own sections (Claude), then tag only those again">Split “${esc(broad.label)}”</button>` : ''
-    const retag = `<button class="link-btn" data-br-retag="${esc(l.id)}" title="Tag its sections again with the topics as they are now (no new topics)">Tag again</button>`
-    const rebuild = `<button class="link-btn" data-br-rebuild="${esc(l.id)}" title="Build its topics again from its calls (Claude): existing topics keep their place, a provisional version to review">Rebuild</button>`
-    const accept = `<button class="btn${d.stale ? '' : ' primary'}" data-br-accept="${esc(l.id)}">Accept</button>`
-    const calls = `Built from ${l.built_from || 0} call${l.built_from === 1 ? '' : 's'}.`
-    let head, text, acts
-    if (running) [head, text, acts] = [running, 'You can keep working; a notification says when it is done.', '']
-    else if (d.stale) [head, text, acts] = ['Needs a rebuild', `${why(d)} ${broad ? `Split makes subtopics of “${broad.label}” from its own sections and tags only those again; Rebuild makes a new version of every topic.` : 'Rebuild makes a new version from its calls for you to review; its topics keep their place.'}${l.provisional ? ' Or accept this version as it is.' : ''}`,
-      `${splitBtn}<button class="btn${broad ? '' : ' primary'}" data-br-rebuild="${esc(l.id)}">Rebuild</button>${l.provisional ? accept : ''}<button class="link-btn" data-br-snooze="${esc(l.id)}" title="Ask again once it has half as many new sections or calls again">Not now</button>${retag}`]
-    else if (l.provisional) [head, text, acts] = ['Waiting for your review', 'Claude built these topics and nobody accepted them yet. Look through its topics below; rename, merge or remove what is wrong, then Accept.', `${accept}${retag}${rebuild}`]
-    else if (d.snoozed) [head, text, acts] = ['Rebuild put off', `${why(d)} You chose Not now; Echo asks again once it has half as many new sections or calls again.`, `${retag}${rebuild}`]
-    else if (!l.built_from) [head, text, acts] = ['Not built from calls yet', 'Rebuild makes its topics from its calls.', `${retag}${rebuild}`]
-    else [head, text, acts] = ['Nothing to do', `${d.untagged ? `${d.untagged} new section${d.untagged === 1 ? ' fits' : 's fit'} no topic, too few to matter yet. ` : ''}${calls}`, `${retag}${rebuild}`]
-    const kind = running ? 'run' : d.stale ? 'warn' : l.provisional ? 'todo' : 'ok'
-    return `<div class="br-bld ${kind}"><span class="br-cl" style="--c:${l.id === 'shared' ? '#8a8a95' : lcolor(l.id)}">${esc(lname(l.id))}</span><div class="br-bld-t"><b>${running ? '<i class="spin"></i>' : ''}${esc(head)}</b><span class="set-sub">${esc(text)}</span></div><div class="br-bld-a">${acts}</div></div>`
-  }
-  const ordered = [...layers.filter((l) => l.id === 'shared'), ...layers.filter((l) => l.id !== 'shared')]
-  const nStale = ordered.filter((l) => l.drift && l.drift.stale).length, nReview = ordered.filter((l) => l.provisional).length
-  const todo = [nStale ? `${nStale} need${nStale === 1 ? 's' : ''} a rebuild` : '', nReview ? `${nReview} waiting for your review` : ''].filter(Boolean).join(' · ') || 'nothing to do'
-  const builds = `<details class="br-blds"${nStale || nReview || jobs.size ? ' open' : ''}><summary>Topic builds · ${ordered.length} layer${ordered.length === 1 ? '' : 's'} · ${todo}</summary>${ordered.map(build).join('')}</details>`
-  const mv = (tx.moves || []).map((m) => `<div class="br-mv"><span class="grow">${m.dir === 'up' ? `↑ <b>${esc(m.label)}</b> belongs to your practice? <span class="set-sub">${esc(m.why)}</span>` : `↓ <b>${esc(m.label)}</b> is only ${esc(m.to_name)}'s? <span class="set-sub">${esc(m.why)}</span>`}</span><button class="btn ghost" data-br-move="${esc(m.key)}" data-do="dismiss">Keep it</button><button class="btn primary" data-br-move="${esc(m.key)}" data-do="apply">${m.dir === 'up' ? 'Move up' : 'Move down'}</button></div>`).join('')
-  const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into Recall now; their new sections are tagged after it">Sync now</button></div>`
-  const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
-  const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
-  const arch = archiveGroup('Closed threads', oldTopics.map((x) => `<div class="br-card">${row(x, true)}</div>`), 'topics only closed threads talked about · still searchable')
-  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}${arch}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
  *  group, each group closed until opened, then A–Z 50 at a time (a letter jumps); a search over its name,

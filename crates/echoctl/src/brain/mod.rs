@@ -12,9 +12,7 @@ pub mod chunk;
 pub mod digest;
 pub mod embed;
 pub mod files;
-pub mod insights;
 pub mod mcp;
-pub mod numbers;
 pub mod senders;
 pub mod sources;
 pub mod store;
@@ -43,10 +41,22 @@ pub fn dir() -> PathBuf {
     new
 }
 
-/// Topics, their tags, drift and moves, insights and the numbers lane: switched off in 0.8.0 — they didn't survive
-/// our tests (Recall keeps the sources, search and the dictionary; lasting facts are the Knowledge plugin's). Their
-/// code stays until it is removed; nothing runs it and the window shows none of it.
-pub const EXTRAS: bool = false;
+/// Echo is quiet enough for background reading: nothing records; on a Mac, on power.
+pub(crate) fn quiet() -> bool {
+    if crate::watch::running_watcher().and_then(|w| w.recording).is_some() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("pmset").args(["-g", "batt"]).output();
+        if let Ok(o) = out {
+            if !String::from_utf8_lossy(&o.stdout).contains("AC Power") {
+                return false;
+            }
+        }
+    }
+    true
+}
 
 /// `<home>/recall/knowledge.sqlite`: the user's one index of what was said, beside their calls.
 pub fn store_path() -> PathBuf {
@@ -147,7 +157,7 @@ pub fn sync() -> Result<store::Report> {
     }
     // Thread folders: read what changed; pages flagged visual go to the page reader only while
     // nothing records (and, on a Mac, on power), within a budget per run.
-    match files::folder::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder), insights::quiet()) {
+    match files::folder::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder), quiet()) {
         Ok(reps) => {
             for f in reps {
                 r.removed += f.removed;
@@ -180,13 +190,6 @@ pub fn sync() -> Result<store::Report> {
         let cs: Vec<String> = ts.iter().map(|t| cutoffs.get(*t).cloned().flatten()).collect::<Option<Vec<_>>>()?;
         cs.into_iter().min()
     };
-    // The numbers lane: clients with accepted families, built again when their workbooks changed.
-    for (client, r) in if EXTRAS { numbers::refresh() } else { vec![] } {
-        match r {
-            Ok(v) => eprintln!("brain: numbers {client}: {} facts", v["summary"]["facts"]),
-            Err(e) => eprintln!("brain: numbers {client}: {e:#}"),
-        }
-    }
     match store::supersede(&store_path(), &cutoff) {
         Ok((m, rs)) if m + rs > 0 => eprintln!("brain: history: {m} sections marked superseded, {rs} brought back"),
         Ok(_) => {}
@@ -263,7 +266,7 @@ fn fingerprint() -> u64 {
 /// Once, after the update that turned the Brain into Recall: say what went and why (only to someone who had topics).
 fn tell_recall() {
     let mark = dir().join("recall-notice");
-    if EXTRAS || mark.exists() || taxonomy::current().is_none_or(|t| t.topics.is_empty()) {
+    if mark.exists() || taxonomy::current().is_none_or(|t| t.topics.is_empty()) {
         return;
     }
     crate::app::notify(
@@ -291,7 +294,6 @@ pub fn start_scheduler() {
         std::thread::sleep(std::time::Duration::from_secs(20));
         if enabled() {
             let _ = views::overview(None);
-            let _ = browse::graph_topics(None);
         }
     });
     std::thread::spawn(|| {
@@ -314,16 +316,6 @@ pub fn start_scheduler() {
                 Ok(r) => {
                     // A run when it indexed something or read mail into facts (its model calls).
                     run.done((r.chunks > 0).then(|| format!("{} new section{} indexed", r.chunks, if r.chunks == 1 { "" } else { "s" })));
-                    // New sections get their topics once a taxonomy exists (Claude, on the default profile).
-                    if EXTRAS && r.chunks > 0 && taxonomy::current().is_some() {
-                        if let Err(e) = taxonomy::classify(None, false, &|_| {}) {
-                            eprintln!("brain: tagging: {e:#}");
-                        }
-                    }
-                    // Insights for scopes whose sections changed (at most daily each, a daily cap, only when quiet).
-                    if let Err(e) = if EXTRAS { insights::tick().map(|_| ()) } else { Ok(()) } {
-                        eprintln!("brain: insights: {e:#}");
-                    }
                     failed_at = r.embed_error.as_ref().map(|_| std::time::Instant::now());
                     if let Some(e) = &r.embed_error {
                         eprintln!("brain: embeddings: {e}");

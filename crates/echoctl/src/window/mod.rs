@@ -886,19 +886,15 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     #[cfg(feature = "brain")]
     {
         write("/api/brain/index.html", get("/api/brain"))?;
-        for x in ["groups", "terms", "graph"] {
+        for x in ["groups", "terms"] {
             write(&format!("/api/brain/browse/{x}"), get(&format!("/api/brain/browse/{x}")))?;
         }
         write("/api/brain/people", get("/api/brain/people"))?;
-        for c in crate::projects::clients().unwrap_or_default() {
-            write(&format!("/api/brain/insights-client-{}", c.id), get(&format!("/api/brain/insights?client={}", c.id)))?;
-        }
         for p in crate::projects::list() {
             write(&format!("/api/brain/thread-{}", p.id), get(&format!("/api/brain?thread={}", p.id)))?;
         }
         write("/api/brain/sources", get("/api/brain/sources"))?;
         write("/api/brain/files", get("/api/brain/files"))?;
-        write("/api/brain/numbers", get("/api/brain/numbers"))?;
     }
     for p in crate::projects::list() {
         // A folder (its work and logo live under it): the project itself as its index.

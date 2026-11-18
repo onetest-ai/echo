@@ -13,7 +13,7 @@ tray = ["dep:tray-icon", "dep:tao", "dep:wry", "dep:portable-pty", "dep:objc2-we
 transcribe = ["dep:whisper-rs", "dep:ureq", "dep:libloading"]
 # The Brain: cross-call intelligence over a SQLite store (FTS5). SQLite is C, so cross-checks from macOS to
 # Windows run without it (--no-default-features), as without whisper.cpp.
-brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render", "dep:regex"]
+brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render"]
 # Plugins' host halves in JavaScript (QuickJS), with their WebSocket and pinned TLS to the addresses the user listed.
 js = ["dep:rquickjs", "dep:tungstenite", "dep:rustls", "dep:rustls-platform-verifier", "dep:webpki", "dep:encoding_rs"]
 # Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
@@ -74,8 +74,6 @@ tungstenite = { version = "0.27", default-features = false, features = ["handsha
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 rustls-platform-verifier = { version = "0.7", optional = true }
 webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["alloc", "ring", "std"], optional = true }
-# The numbers lane's `entity_regex` (Brain's config: cleaning an entity's encoding, "SE1: Sam Hale" → "SE1").
-regex = { version = "1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

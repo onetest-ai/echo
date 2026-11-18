@@ -17,25 +17,51 @@ use std::path::PathBuf;
 
 use super::store;
 
-mod drift;
-mod induce;
 mod mentions;
 mod view;
-pub use drift::*;
-pub use induce::*;
 pub use mentions::*;
 pub use view::*;
 
-/// Sections per classification request, and the characters of each shown.
-const CLASSIFY_BATCH: usize = 40;
-const PREVIEW: usize = 400;
-/// Calls per map request in a build.
-const MAP_BATCH: usize = 4;
-/// Names this alike are one candidate (Brain's `consolidate`: SequenceMatcher ratio ≥ 0.86).
-const SAME: f64 = 0.86;
-pub const NO_TOPIC: &str = "__no_topic__";
 /// The layer of the user's own practice (calls with no client).
 pub const SHARED: &str = "shared";
+
+/// Brain's SequenceMatcher-like ratio on normalised names: 2·matches / total, matches from the
+/// longest common subsequence of characters.
+fn ratio(a: &str, b: &str) -> f64 {
+    let (a, b): (Vec<char>, Vec<char>) = (nid(a).chars().collect(), nid(b).chars().collect());
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let mut dp = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            dp[i][j] = if a[i - 1] == b[j - 1] { dp[i - 1][j - 1] + 1 } else { dp[i - 1][j].max(dp[i][j - 1]) };
+        }
+    }
+    2.0 * dp[a.len()][b.len()] as f64 / (a.len() + b.len()) as f64
+}
+
+/// The shared layer's goal: the user's own practice (their threads with no client).
+pub(super) fn goal() -> String {
+    "What one person discusses across their own practice: methods, tools, offerings, internal work — not any one client's matters.".to_string()
+}
+
+/// A layer's name, goal and audience: the shared one's, or a client's from its name, description and threads.
+pub(super) fn layer_facts(layer: &str) -> (String, String, String) {
+    if layer == SHARED {
+        return ("Your practice".into(), goal(), "the user".into());
+    }
+    let c = crate::projects::clients().unwrap_or_default().into_iter().find(|c| c.id == layer);
+    let name = c.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| layer.to_string());
+    let brief = crate::projects::client_brief(layer).unwrap_or_default();
+    let threads: Vec<String> = crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(layer)).map(|p| p.name).collect();
+    let goal = format!(
+        "What is said with and about {name}{}{}: their goals, decisions, commitments, risks, systems and people.",
+        if threads.is_empty() { String::new() } else { format!(" in the engagements {}", threads.join(", ")) },
+        if brief.trim().is_empty() { String::new() } else { format!(". About them: {}", brief.trim().chars().take(600).collect::<String>()) }
+    );
+    (name.clone(), goal, format!("the user's team working with {name}"))
+}
 
 fn shared() -> String {
     SHARED.into()
@@ -70,12 +96,6 @@ pub fn parent_of<'a>(t: &'a Taxonomy, x: &Topic) -> Option<&'a Topic> {
     let p = nid(x.parent.as_deref()?);
     t.topics.iter().find(|y| y.layer == x.layer && y.level == 1 && nid(&y.label) == p)
         .or_else(|| t.topics.iter().find(|y| y.layer == SHARED && y.level == 1 && nid(&y.label) == p))
-}
-
-/// Does this name one topic: its label or one of its synonyms.
-fn names(x: &Topic, name: &str) -> bool {
-    let k = nid(name);
-    nid(&x.label) == k || x.synonyms.iter().any(|s| nid(s) == k)
 }
 
 fn add_synonym(x: &mut Topic, name: &str) {
@@ -191,47 +211,6 @@ fn push_new<T: PartialEq + Clone>(v: &mut Vec<T>, xs: &[T]) {
     for x in xs {
         if !v.contains(x) {
             v.push(x.clone());
-        }
-    }
-}
-
-/// One term's learned scope added to another's.
-fn merge_learned(into: &mut Term, from: &Term) {
-    let Some(l) = &from.learned else { return };
-    let x = into.learned.get_or_insert_with(LearnedScope::default);
-    push_new(&mut x.subjects, &l.subjects);
-    push_new(&mut x.people, &l.people);
-    push_new(&mut x.calls, &l.calls);
-}
-
-/// A layer rebuilt: what the user and the minutes put on its terms carries over to the new ones of the
-/// same name or spelling — pinned threads, always, the learned scope, other spellings, a description —
-/// and a term the model didn't name again is kept when it carries any of that (learned vocabulary, a
-/// pin, always). A rebuild never loses them.
-fn carry_over(old_terms: &[Term], lterms: &mut Vec<Term>) {
-    let same_term = |a: &Term, b: &Term| a.is(&b.name) || b.is(&a.name);
-    for x in lterms.iter_mut() {
-        let matches: Vec<&Term> = old_terms.iter().filter(|o| same_term(o, x)).collect();
-        for old in matches {
-            push_new(&mut x.threads, &old.threads);
-            x.always |= old.always;
-            if x.learned.is_none() {
-                x.learned = old.learned.clone();
-            }
-            push_new(&mut x.variants, &old.variants);
-            push_new(&mut x.synonyms, &old.synonyms);
-            if x.group.is_empty() {
-                x.group = old.group.clone();
-            }
-            if x.description.is_empty() {
-                x.description = old.description.clone();
-            }
-        }
-    }
-    for old in old_terms {
-        let signals = old.learned.is_some() || old.always || !old.threads.is_empty() || old.kind == "learned";
-        if signals && !lterms.iter().any(|x| same_term(x, old)) {
-            lterms.push(old.clone());
         }
     }
 }
@@ -537,15 +516,6 @@ fn review_flags(t: &Taxonomy) -> Value {
     json!({"near_duplicate_topics": topics, "near_duplicate_terms": terms})
 }
 
-/// Build every layer that has calls: the shared one and each client's.
-pub fn induce_all(progress: &dyn Fn(&str)) -> Result<Value> {
-    let mut out = vec![];
-    for l in buildable()? {
-        out.push(induce(&l, progress).unwrap_or_else(|e| json!({"layer": l, "error": format!("{e:#}")})));
-    }
-    Ok(json!({"layers": out}))
-}
-
 /// Record that `old` is now `new` (a rename, merge, fold, move): what pointed at `old` points at `new` too,
 /// and `new` itself is no alias any more — so aliases never chain or loop (a fold, then a move back down,
 /// would otherwise send tags in a circle and lose them).
@@ -560,308 +530,6 @@ fn set_alias(aliases: &mut BTreeMap<String, String>, old: String, new: String) {
         }
     }
     aliases.insert(old, new);
-}
-
-/// A client layer never repeats the practice (#32, #33): a client topic that names a practice topic (its
-/// label or a synonym, or nearly: ratio ≥ 0.86) isn't made — its subtopics go under the practice's topic,
-/// its own tags move there (an alias) — and a client term that is a practice term by any of its names
-/// isn't made either (its thread pins move to the practice's term). Returns what was folded, for the log.
-fn fold_into_practice(t: &mut Taxonomy, layer: &str) -> Vec<String> {
-    if layer == SHARED {
-        return vec![];
-    }
-    let practice: Vec<Topic> = t.topics.iter().filter(|x| x.layer == SHARED).cloned().collect();
-    let same_topic = |p: &Topic, x: &Topic| names(p, &x.label) || x.synonyms.iter().any(|s| names(p, s)) || ratio(&p.label, &x.label) >= SAME;
-    let mut folded = vec![];
-    let mut gone: Vec<(String, Topic)> = vec![];
-    for x in t.topics.iter().filter(|x| x.layer == layer) {
-        if let Some(p) = practice.iter().find(|p| same_topic(p, x)) {
-            gone.push((x.label.clone(), p.clone()));
-        }
-    }
-    for (label, p) in &gone {
-        // Its subtopics sit under the practice's level-1 topic (the matched one, or the one it sits under).
-        let home = if p.level == 1 { p.label.clone() } else { p.parent.clone().unwrap_or_else(|| p.label.clone()) };
-        for k in t.topics.iter_mut().filter(|k| k.layer == layer && k.level == 2 && k.parent.as_deref().is_some_and(|q| nid(q) == nid(label))) {
-            k.parent = Some(home.clone());
-        }
-        t.topics.retain(|x| !(x.layer == layer && nid(&x.label) == nid(label)));
-        set_alias(&mut t.aliases, topic_id(layer, label), topic_id(SHARED, &p.label));
-        folded.push(format!("topic “{label}” → the practice's “{}”", p.label));
-    }
-    let practice_terms: Vec<Term> = t.terms.iter().filter(|x| x.layer == SHARED).cloned().collect();
-    let mut moved: Vec<(Term, String)> = vec![];
-    t.terms.retain(|m| {
-        if m.layer != layer {
-            return true;
-        }
-        match practice_terms.iter().find(|pt| m.names().any(|n| pt.is(n))) {
-            Some(pt) => {
-                moved.push((m.clone(), pt.name.clone()));
-                false
-            }
-            None => true,
-        }
-    });
-    for (m, into) in moved {
-        // Merged as `edit` merge does: its names become the practice term's other names, its spellings
-        // (transcription hints) its spellings; pins, always, what was learned and a description carry over.
-        if let Some(pt) = t.terms.iter_mut().find(|x| x.layer == SHARED && x.name == into) {
-            for n in std::iter::once(m.name.clone()).chain(m.synonyms.clone()) {
-                if !pt.is(&n) {
-                    pt.synonyms.push(n);
-                }
-            }
-            for v in &m.variants {
-                if !pt.is(v) {
-                    pt.variants.push(v.clone());
-                }
-            }
-            for th in &m.threads {
-                if !pt.threads.contains(th) {
-                    pt.threads.push(th.clone());
-                }
-            }
-            pt.always |= m.always;
-            if pt.description.trim().is_empty() {
-                pt.description = m.description.clone();
-            }
-            merge_learned(pt, &m);
-        }
-        set_alias(&mut t.aliases, term_id(layer, &m.name), term_id(SHARED, &into));
-        folded.push(format!("term “{}” → the practice's “{into}”", m.name));
-    }
-    folded
-}
-
-/// A rebuild keeps what it still has: a new topic that an old one's label or synonym names (or nearly:
-/// the names' ratio ≥ 0.86) takes the old label — so its id, tags, insights and history go on —, the
-/// new wording kept as a synonym, the old synonyms (and its description, when the new one has none) kept.
-fn keep_identity(old: &[Topic], new: &mut [Topic]) {
-    let mut taken = BTreeSet::new();
-    let label_of = |n: &Topic| -> Option<usize> {
-        old.iter().position(|o| names(o, &n.label) || n.synonyms.iter().any(|s| names(o, s))).or_else(|| old.iter().position(|o| ratio(&o.label, &n.label) >= SAME))
-    };
-    let mut renamed: Vec<(String, String)> = vec![];
-    for n in new.iter_mut() {
-        let Some(i) = label_of(n).filter(|i| taken.insert(*i)) else { continue };
-        let o = &old[i];
-        if nid(&o.label) != nid(&n.label) {
-            renamed.push((n.label.clone(), o.label.clone()));
-            let wording = std::mem::replace(&mut n.label, o.label.clone());
-            add_synonym(n, &wording);
-        }
-        for s in &o.synonyms {
-            add_synonym(n, s);
-        }
-        if n.description.trim().is_empty() {
-            n.description = o.description.clone();
-        }
-    }
-    // Their children follow the label their parent kept.
-    for n in new.iter_mut() {
-        if let Some((_, to)) = n.parent.as_deref().and_then(|p| renamed.iter().find(|(from, _)| nid(from) == nid(p))) {
-            n.parent = Some(to.clone());
-        }
-    }
-}
-
-#[cfg(test)]
-fn parse_layer(v: &Value, layer: &str) -> Result<(Vec<Topic>, Vec<Term>)> {
-    parse_layer_under(v, layer, &BTreeSet::new())
-}
-
-/// As `parse_layer`; a client layer's level-2 topics may sit under one of the practice's level-1
-/// topics (`practice`: their labels' ids).
-fn parse_layer_under(v: &Value, layer: &str, practice: &BTreeSet<String>) -> Result<(Vec<Topic>, Vec<Term>)> {
-    let mut topics: Vec<Topic> = vec![];
-    let mut seen = BTreeSet::new();
-    for tp in v["topics"].as_array().into_iter().flatten() {
-        let label = tp["label"].as_str().unwrap_or("").trim().to_string();
-        if label.is_empty() || !seen.insert(nid(&label)) {
-            continue;
-        }
-        let level = if tp["level"].as_u64() == Some(2) { 2 } else { 1 };
-        let synonyms = tp["synonyms"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&label)).collect();
-        topics.push(Topic { layer: layer.into(), label, level, parent: tp["parent"].as_str().map(|s| s.trim().to_string()).filter(|_| level == 2), description: tp["description"].as_str().unwrap_or("").to_string(), synonyms });
-    }
-    // A level-2 topic whose parent isn't a level-1 one becomes level 1.
-    let mut l1: BTreeSet<String> = topics.iter().filter(|x| x.level == 1).map(|x| nid(&x.label)).collect();
-    if layer != SHARED {
-        l1.extend(practice.iter().cloned());
-    }
-    for x in topics.iter_mut().filter(|x| x.level == 2) {
-        if !x.parent.as_deref().is_some_and(|p| l1.contains(&nid(p))) {
-            x.level = 1;
-            x.parent = None;
-        }
-    }
-    let mut terms = vec![];
-    let mut tn = BTreeSet::new();
-    for tm in v["terms"].as_array().into_iter().flatten() {
-        let name = tm["name"].as_str().unwrap_or("").trim().to_string();
-        if name.is_empty() || !tn.insert(nid(&name)) {
-            continue;
-        }
-        let kind = tm["kind"].as_str().map(|k| k.trim().to_lowercase()).filter(|k| !k.is_empty() && k.len() <= 24).unwrap_or_else(|| "other".into());
-        let variants = tm["variants"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&name)).collect();
-        let synonyms = tm["synonyms"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&name)).collect();
-        let group = tm["group"].as_str().map(|g| g.trim().to_lowercase()).filter(|g| GROUPS.iter().any(|(k, _)| k == g)).unwrap_or_default();
-        terms.push(Term { layer: layer.into(), name, kind, variants, synonyms, group, description: tm["description"].as_str().unwrap_or("").to_string(), ..Default::default() });
-    }
-    if topics.is_empty() {
-        bail!("the model proposed no topics");
-    }
-    Ok((topics, terms))
-}
-
-/// The vocabulary a section is tagged from: the shared layer and its clients' layers, as text for the
-/// model, labels qualified by their layer when two layers share one.
-fn vocab_text(t: &Taxonomy, layers: &[String]) -> String {
-    let mut out = String::new();
-    let name = |l: &str| t.layers.get(l).map(|x| x.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| l.to_string());
-    let line = |x: &Topic, indent: &str| {
-        let who = if x.layer == SHARED { String::new() } else { format!(" ({})", name(&x.layer)) };
-        let also = if x.synonyms.is_empty() { String::new() } else { format!(" [also: {}]", x.synonyms.join(", ")) };
-        format!("{indent}- {}{who}: {}{also}\n", x.label, x.description)
-    };
-    let shown = |x: &Topic| layers.contains(&x.layer);
-    // One tree: the practice's topics, each with its own subtopics and the clients' topics placed under it;
-    // then each client's topics of its own.
-    for l1 in t.topics.iter().filter(|x| x.level == 1 && x.layer == SHARED && shown(x)) {
-        out.push_str(&line(l1, ""));
-        for k in t.topics.iter().filter(|x| x.level == 2 && shown(x) && parent_of(t, x).is_some_and(|p| std::ptr::eq(p, l1))) {
-            out.push_str(&line(k, "  "));
-        }
-    }
-    for l in layers.iter().filter(|l| l.as_str() != SHARED) {
-        let own: Vec<&Topic> = t.topics.iter().filter(|x| &x.layer == l && x.level == 1).collect();
-        if own.is_empty() {
-            continue;
-        }
-        out.push_str(&format!("[{} only]\n", name(l)));
-        for l1 in own {
-            out.push_str(&line(l1, ""));
-            for k in t.topics.iter().filter(|x| x.level == 2 && &x.layer == l && parent_of(t, x).is_some_and(|p| std::ptr::eq(p, l1))) {
-                out.push_str(&line(k, "  "));
-            }
-        }
-    }
-    out
-}
-
-/// A label the model gave, among these layers: a client's topic first (it is the more specific).
-fn resolve<'a>(t: &'a Taxonomy, layers: &[String], label: &str) -> Option<&'a Topic> {
-    // The vocabulary marks a client's topic "(Client)": the label is what precedes it.
-    let label = label.rsplit_once(" (").filter(|(_, r)| r.ends_with(')')).map(|(l, _)| l).unwrap_or(label);
-    layers.iter().rev().find_map(|l| {
-        let id = topic_id(l, label);
-        let id = t.aliases.get(&id).cloned().unwrap_or(id);
-        t.topics.iter().find(|x| &x.layer == l && (names(x, label) || topic_id(&x.layer, &x.label) == id))
-    })
-}
-
-/// Tag sections with topics (0–3 each, from the shared layer and their client's; an L2 brings its L1):
-/// those not judged yet — or, with `again`, every section of `layer` (all with no layer).
-pub fn classify(layer: Option<&str>, again: bool, progress: &dyn Fn(&str)) -> Result<usize> {
-    classify_in(layer, again, None, progress)
-}
-
-/// As `classify`, limited to the sections in `only` when given (a split's).
-fn classify_in(layer: Option<&str>, again: bool, only: Option<&BTreeSet<i64>>, progress: &dyn Fn(&str)) -> Result<usize> {
-    let t = current().ok_or_else(|| anyhow!("there is no taxonomy yet: build it first"))?;
-    let c = store::open(&super::store_path())?;
-    let clients = chunk_clients(&c)?;
-    let in_layer = |id: &i64| -> bool {
-        if only.is_some_and(|o| !o.contains(id)) {
-            return false;
-        }
-        match layer {
-            None => true,
-            Some(SHARED) => clients.get(id).is_none_or(|s| s.contains("-")),
-            Some(l) => clients.get(id).is_some_and(|s| s.contains(l)),
-        }
-    };
-    if again {
-        let ids: Vec<i64> = c.prepare("SELECT id FROM chunks")?.query_map([], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?.into_iter().filter(|i| in_layer(i)).collect();
-        let tx = c.unchecked_transaction()?;
-        for id in &ids {
-            tx.execute("DELETE FROM chunk_topics WHERE chunk_id = ?1 AND kind IN ('intent_l1', 'intent_l2')", [id])?;
-            tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
-            tx.execute("DELETE FROM graph_edges WHERE source = ?1 AND rel = 'about'", [format!("chunk:{id}")])?;
-        }
-        tx.commit()?;
-    }
-    let todo: Vec<(i64, String, String)> = c
-        .prepare("SELECT c.id, coalesce(c.breadcrumb_path, c.title), c.text FROM chunks c WHERE c.status = 'ACTIVE'
-                  AND NOT EXISTS (SELECT 1 FROM chunk_verdicts v WHERE v.chunk_id = c.id)
-                  AND NOT EXISTS (SELECT 1 FROM chunk_topics k WHERE k.chunk_id = c.id AND k.kind IN ('intent_l1', 'intent_l2'))")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|x| in_layer(&x.0))
-        .collect();
-    // Tagging runs on the default profile: only its sources' sections (strict routing).
-    let ok = super::access::Access::default_profile().chunks(&c)?;
-    let todo: Vec<(i64, String, String)> = todo.into_iter().filter(|x| ok.contains(&x.0)).collect();
-    // One vocabulary per set of layers: sections grouped by the layers they may be tagged from.
-    let mut groups: BTreeMap<Vec<String>, Vec<&(i64, String, String)>> = BTreeMap::new();
-    for x in &todo {
-        groups.entry(layers_for(&t, clients.get(&x.0))).or_default().push(x);
-    }
-    let mut done = 0;
-    for (layers, items) in groups {
-        let vocab = vocab_text(&t, &layers);
-        for batch in items.chunks(CLASSIFY_BATCH) {
-            progress(&format!("tagging sections {}–{} of {}", done + 1, done + batch.len(), todo.len()));
-            let list: Vec<Value> = batch.iter().map(|(id, title, text)| json!({"id": id.to_string(), "where": title, "text": text.chars().take(PREVIEW).collect::<String>()})).collect();
-            let user = format!(
-                "Vocabulary (by layer; level 1, with level 2 under it):\n{vocab}\nFor each section give 0–3 labels exactly as written above (prefer the most specific; a client's topic over a general one when both fit). [\"{NO_TOPIC}\"] for small talk or filler; [] when it is on topic but nothing fits.\nAnswer {{\"<id>\": [labels], …}} for every id.\n\n{}",
-                serde_json::to_string(&list)?
-            );
-            let v = ask(CLASSIFY_SYSTEM, &user)?;
-            let tx = c.unchecked_transaction()?;
-            for (id, ..) in batch.iter() {
-                let labels: Vec<String> = v[id.to_string()].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect();
-                tx.execute("DELETE FROM chunk_topics WHERE chunk_id = ?1 AND kind IN ('intent_l1', 'intent_l2')", [id])?;
-                tx.execute("DELETE FROM graph_edges WHERE source = ?1 AND rel = 'about'", [format!("chunk:{id}")])?;
-                if labels.iter().any(|l| l == NO_TOPIC) {
-                    tx.execute("INSERT OR REPLACE INTO chunk_verdicts(chunk_id, verdict, taxonomy_version) VALUES (?1, 'no_topic', ?2)", params![id, t.version.to_string()])?;
-                    done += 1;
-                    continue;
-                }
-                let mut tags: BTreeMap<String, &Topic> = BTreeMap::new();
-                for l in labels.iter().take(3) {
-                    if let Some(tp) = resolve(&t, &layers, l) {
-                        tags.insert(topic_id(&tp.layer, &tp.label), tp);
-                        if let Some(p) = parent_of(&t, tp) {
-                            tags.insert(topic_id(&p.layer, &p.label), p);
-                        }
-                    }
-                }
-                for (k, tp) in &tags {
-                    tx.execute("INSERT INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, ?4)", params![id, k, tp.label, if tp.level == 1 { "intent_l1" } else { "intent_l2" }])?;
-                    tx.execute("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'about')", params![format!("chunk:{id}"), k])?;
-                }
-                tx.execute("INSERT OR REPLACE INTO chunk_verdicts(chunk_id, verdict, taxonomy_version) VALUES (?1, ?2, ?3)", params![id, if tags.is_empty() { "untagged" } else { "tagged" }, t.version.to_string()])?;
-                done += 1;
-            }
-            tx.commit()?;
-        }
-    }
-    Ok(done)
-}
-
-/// Brain's coverage: sections tagged, judged filler, judged with nothing fitting, not judged yet.
-pub fn coverage(c: &Connection) -> Result<Value> {
-    let n = |sql: &str| -> i64 { c.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
-    Ok(json!({
-        "total": n("SELECT count(*) FROM chunks WHERE status = 'ACTIVE'"),
-        "tagged": n("SELECT count(DISTINCT chunk_id) FROM chunk_topics WHERE kind IN ('intent_l1', 'intent_l2')"),
-        "no_topic": n("SELECT count(*) FROM chunk_verdicts WHERE verdict = 'no_topic'"),
-        "nothing_fits": n("SELECT count(*) FROM chunk_verdicts WHERE verdict = 'untagged'"),
-        "not_judged": n("SELECT count(*) FROM chunks c WHERE status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM chunk_verdicts v WHERE v.chunk_id = c.id)"),
-    }))
 }
 
 /// What the tags add up to, per topic or term (in a scope): its sections, threads, clients (with sections each) and
@@ -880,22 +548,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_rebuild_keeps_learned_and_pinned_terms() {
-        let t = |name: &str| Term { layer: "acme".into(), name: name.into(), kind: "system".into(), ..Default::default() };
-        let old = vec![
-            Term { learned: Some(LearnedScope { subjects: vec!["weekly".into()], ..Default::default() }), variants: vec!["Dial 9".into()], ..t("Dial9") },
-            Term { kind: "learned".into(), learned: Some(LearnedScope::default()), ..t("Flow Studio") },
-            Term { threads: vec!["p1".into()], ..t("Stargate") },
-            t("Something the model said once"),
-        ];
-        let mut new = vec![Term { description: "contact centre platform".into(), ..t("dial9") }];
-        carry_over(&old, &mut new);
-        let names: Vec<&str> = new.iter().map(|x| x.name.as_str()).collect();
-        assert_eq!(names, ["dial9", "Flow Studio", "Stargate"]);
-        assert!(new[0].learned.is_some() && new[0].variants == ["Dial 9"] && new[0].description == "contact centre platform");
-    }
-
-    #[test]
     fn ids_names_and_clusters() {
         assert_eq!(nid("AI Agent Hub — MVP"), "ai_agent_hub_mvp");
         assert_eq!(nid("Москва Сити"), "москва_сити");
@@ -903,68 +555,7 @@ mod tests {
         assert_eq!(topic_id("globex", "Budget"), "globex__budget", "the same name in a client is another node");
         assert_eq!(term_id("acme", "Dial9"), "term__acme__dial9");
         assert!(ratio("Agent Hub", "agent-hub") > 0.99);
-        assert!(ratio("Data Studio", "Data Stuido") >= SAME);
-        assert!(ratio("Budget", "Security") < SAME);
-        let c = cluster(&[("Agent Hub".into(), 3), ("agent hub".into(), 1), ("Budget".into(), 2)]);
-        assert_eq!(c[0], ("Agent Hub".to_string(), 4, vec!["Agent Hub".to_string(), "agent hub".to_string()]));
         assert!(word_in("we use SSO here", "SSO") && !word_in("ssoft", "sso") && word_in("Пилот в Берлине", "берлине"));
-        assert_eq!(json_in("Sure:\n```json\n{\"a\": 1}\n```").unwrap()["a"], 1);
-    }
-
-    #[test]
-    fn layers_keep_clients_apart() {
-        let (_env, _root) = crate::paths::testenv::folders("brain-layers");
-        let db = super::super::store_path();
-        let input = |src: &str, client: &str, md: &str| store::Input {
-            source: src.into(), kind: "call".into(), title: src.into(), event_date: None, md: md.into(),
-            refs: json!({"threads": [{"id": format!("{client}-thread"), "client": client}]}), link: Box::new(|_| String::new()), speaker: Box::new(|_| None),
-        };
-        store::sync(&db, vec![
-            input("call/a", "northwind", "# A\n## SSO\nSingle sign-on through Okta for the pilot.\n"),
-            input("call/b", "contoso", "# B\n## Tenants\nOkta tenants and the budget.\n"),
-        ], None).unwrap();
-        let (mut ta, mut ma) = parse_layer(&json!({"topics": [{"label": "Identity", "level": 1}, {"label": "Pilot", "level": 2, "parent": "Identity"}, {"label": "Orphan", "level": 2, "parent": "Nowhere"}],
-                                                   "terms": [{"name": "Okta", "kind": "Product", "variants": ["octa"]}, {"name": "okta"}]}), "northwind").unwrap();
-        assert_eq!(ta.iter().find(|x| x.label == "Orphan").unwrap().level, 1, "no such parent: level 1");
-        assert_eq!((ma.len(), ma[0].kind.as_str()), (1, "product"), "one term once; kinds are the layer's own words, lower case");
-        let (mut tb, mut mb) = parse_layer(&json!({"topics": [{"label": "Identity", "level": 1}], "terms": [{"name": "Okta", "kind": "system"}]}), "contoso").unwrap();
-        let mut t = Taxonomy::default();
-        t.topics.append(&mut ta);
-        t.topics.append(&mut tb);
-        t.terms.append(&mut ma);
-        t.terms.append(&mut mb);
-        t.topics.push(Topic { layer: SHARED.into(), label: "Budget".into(), level: 1, ..Default::default() });
-        for l in ["northwind", "contoso", SHARED] {
-            t.layers.insert(l.into(), Layer { name: l.into(), provisional: true, ..Default::default() });
-        }
-        let t = save(t, json!({"op": "test"})).unwrap();
-        let c = store::open(&db).unwrap();
-        // A section's vocabulary: the shared layer and its own client's — never another client's.
-        let clients = chunk_clients(&c).unwrap();
-        let a: i64 = c.query_row("SELECT id FROM chunks WHERE source = 'call/a'", [], |r| r.get(0)).unwrap();
-        let ls = layers_for(&t, clients.get(&a));
-        assert_eq!(ls, vec![SHARED.to_string(), "northwind".to_string()]);
-        assert!(vocab_text(&t, &ls).contains("Pilot") && !vocab_text(&t, &ls).contains("[contoso]"));
-        assert_eq!(resolve(&t, &ls, "Identity").unwrap().layer, "northwind", "the client's own Identity, not contoso's");
-        assert!(resolve(&t, &ls, "Budget").is_some_and(|x| x.layer == SHARED));
-        // Terms are found only in their client's sections.
-        let n = |id: &str| -> i64 { c.query_row("SELECT count(*) FROM chunk_topics WHERE category_id = ?1", [id], |r| r.get(0)).unwrap() };
-        assert_eq!((n("term__northwind__okta"), n("term__contoso__okta")), (1, 1));
-        // A client's view: the shared layer and its own.
-        let v = view_in(Some(("client", "northwind"))).unwrap();
-        let layers: BTreeSet<&str> = v["topics"].as_array().unwrap().iter().map(|x| x["layer"].as_str().unwrap()).collect();
-        assert_eq!(layers, [SHARED, "northwind"].into());
-        // Edits name their layer when a name is in two.
-        assert!(edit(&json!({"op": "rename", "label": "Identity", "to": "Access"})).unwrap_err().to_string().contains("more than one layer"));
-        c.execute("INSERT INTO chunk_topics VALUES (?1, 'northwind__identity', 'Identity', 'intent_l1')", [a]).unwrap();
-        edit(&json!({"op": "rename", "label": "Identity", "to": "Access", "layer": "northwind"})).unwrap();
-        assert_eq!(n("northwind__access"), 1, "the tag moved with the rename");
-        assert!(view().unwrap()["topics"].as_array().unwrap().iter().any(|x| x["layer"] == "contoso" && x["label"] == "Identity"), "the other client's untouched");
-        let t2 = edit(&json!({"op": "accept", "layer": "northwind"})).unwrap();
-        assert!(!t2.layers["northwind"].provisional && t2.layers["contoso"].provisional);
-        edit(&json!({"op": "add", "term": true, "name": "Foundry", "layer": "northwind", "threads": ["northwind-thread"]})).unwrap();
-        let mut _p = crate::projects::create("NW thread", None, None).unwrap();
-        assert!(terms_for_threads(&["northwind-thread".into()]).contains(&"Foundry".to_string()), "pinned");
     }
 
     fn t_echo_spellings(t: &Taxonomy) -> Vec<String> {
@@ -999,16 +590,8 @@ mod tests {
         assert_eq!(v["terms"].as_array().unwrap().len(), 6);
         assert_eq!(t_echo_spellings(&current().unwrap()), vec!["Эко".to_string()], "a transcription's other script is a spelling");
         assert!(v["terms"].as_array().unwrap().iter().any(|x| x["name"] == "Signal Grid" && x["synonyms"][0] == "SG" && x["group"] == "product"));
-        // The same product in two clients: one thing of the practice; done, it is one term.
-        let m = moves().unwrap();
-        let up = m.iter().find(|x| x["what"] == "term").unwrap();
-        assert_eq!(up["label"], "Databricks");
-        apply_move(up["key"].as_str().unwrap()).unwrap();
-        let t = current().unwrap();
-        let dbx: Vec<&Term> = t.terms.iter().filter(|x| x.name == "Databricks").collect();
-        assert_eq!((dbx.len(), dbx[0].layer.as_str()), (1, SHARED));
-        assert!(dbx[0].variants.contains(&"Data bricks".to_string()));
         // Its first save keeps the split: written as synonyms now, not again on the next load.
+        save(current().unwrap(), json!({"op": "test"})).unwrap();
         let raw: Value = serde_json::from_slice(&std::fs::read(dir().join("current.json")).unwrap()).unwrap();
         assert!(raw["terms"].as_array().unwrap().iter().any(|x| x["name"] == "Signal Grid" && x["synonyms"][0] == "SG"));
         // Split a name off, rename (the old name kept), regroup.
@@ -1022,57 +605,24 @@ mod tests {
     }
 
     #[test]
-    fn one_tree_with_topics_that_move_up_and_down() {
+    fn a_clients_topic_never_tags_another_clients_section() {
         let (_env, _root) = crate::paths::testenv::folders("brain-one-tree");
-        let tp = |layer: &str, label: &str, level: u8, parent: Option<&str>| Topic { layer: layer.into(), label: label.into(), level, parent: parent.map(str::to_owned), ..Default::default() };
-        // A rebuild keeps what it has: a new wording of an old topic (or one of its synonyms) is the old one.
-        let old = vec![Topic { synonyms: vec!["Roadmap".into()], description: "Plans and dates.".into(), ..tp("globex", "Plan", 1, None) }, tp("globex", "Milestones", 2, Some("Plan"))];
-        let mut new = vec![tp("globex", "Roadmap", 1, None), tp("globex", "Delivery plan", 2, Some("Roadmap"))];
-        keep_identity(&old, &mut new);
-        assert_eq!((new[0].label.as_str(), new[0].description.as_str()), ("Plan", "Plans and dates."));
-        assert_eq!(new[1].parent.as_deref(), Some("Plan"), "children follow the label their parent kept");
-        // A client's topic may sit under one of the practice's level-1 topics.
-        let practice: BTreeSet<String> = [nid("Commercials")].into();
-        let (ts, _) = parse_layer_under(&json!({"topics": [{"label": "Pricing", "level": 2, "parent": "Commercials", "synonyms": ["Rate card"]}]}), "globex", &practice).unwrap();
-        assert_eq!((ts[0].level, ts[0].parent.as_deref(), ts[0].synonyms.len()), (2, Some("Commercials"), 1));
-        let mut t = Taxonomy { topics: vec![tp(SHARED, "Commercials", 1, None), ts[0].clone(), tp("globex", "Plan", 1, None), tp("acme", "Plan", 1, None), tp(SHARED, "Data", 1, None)], ..Default::default() };
+        let tp = |layer: &str, label: &str| Topic { layer: layer.into(), label: label.into(), level: 1, ..Default::default() };
+        let mut t = Taxonomy { topics: vec![tp(SHARED, "Commercials"), tp("globex", "Data")], ..Default::default() };
         for l in [SHARED, "globex", "acme"] {
             t.layers.insert(l.into(), Layer { name: l.to_uppercase(), ..Default::default() });
         }
-        assert_eq!(parent_of(&t, &t.topics[1]).map(|p| p.layer.as_str()), Some(SHARED));
-        // One vocabulary: the practice's tree with the client's topics placed in it, then the client's own.
-        let v = vocab_text(&t, &[SHARED.into(), "globex".into()]);
-        assert!(v.contains("- Commercials: \n  - Pricing (GLOBEX): ") && v.contains("[also: Rate card]") && v.contains("[GLOBEX only]\n- Plan (GLOBEX)") && !v.contains("ACME"), "{v}");
-        assert_eq!(resolve(&t, &[SHARED.into(), "globex".into()], "Pricing (GLOBEX)").map(|x| x.label.as_str()), Some("Pricing"));
-        assert_eq!(resolve(&t, &[SHARED.into(), "globex".into()], "rate card").map(|x| x.label.as_str()), Some("Pricing"), "a synonym names it");
-        // Moves: two clients' "Plan" → up; the practice's "Data" only Globex tags → down.
-        let c = store::open(&super::super::store_path()).unwrap();
-        for i in 1..=12 {
-            c.execute("INSERT INTO chunks(id, source, ord, status, title, text) VALUES (?1, 'call/g', ?1, 'ACTIVE', '', '')", [i]).unwrap();
-            c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', 'globex')", [i]).unwrap();
-            c.execute("INSERT INTO chunk_topics VALUES (?1, 'data', 'Data', 'intent_l1')", [i]).unwrap();
-        }
-        let m = moves_in(&stats_of(&c, None).unwrap(), &t, &BTreeSet::new());
-        let up = m.iter().find(|x| x["dir"] == "up").unwrap();
-        assert_eq!(up["topics"].as_array().unwrap().len(), 2);
-        let down = m.iter().find(|x| x["dir"] == "down").unwrap();
-        assert_eq!((down["label"].as_str(), down["to"].as_str()), (Some("Data"), Some("globex")));
-        assert!(moves_in(&stats_of(&c, None).unwrap(), &t, &[down["key"].as_str().unwrap().to_string()].into()).iter().all(|x| x["dir"] != "down"), "kept where it is");
-        // Done: up — one practice topic, the other merged in as a synonym of it; down — Globex's, its tags kept.
         save(t, json!({"op": "test"})).unwrap();
-        apply_move(up["key"].as_str().unwrap()).unwrap();
-        apply_move(down["key"].as_str().unwrap()).unwrap();
         let t = current().unwrap();
-        assert!(t.topics.iter().any(|x| x.layer == SHARED && x.label == "Plan") && !t.topics.iter().any(|x| x.layer != SHARED && x.label == "Plan"));
-        assert!(t.topics.iter().any(|x| x.layer == "globex" && x.label == "Data"));
+        let c = store::open(&super::super::store_path()).unwrap();
         let n = |id: &str| -> i64 { c.query_row("SELECT count(*) FROM chunk_topics WHERE category_id = ?1", [id], |r| r.get(0)).unwrap() };
-        assert_eq!(n("globex__data"), 12, "the tags followed it down");
-        // A client's topic never tags another client's section.
-        c.execute("INSERT INTO chunks(id, source, ord, status, title, text) VALUES (99, 'call/a', 99, 'ACTIVE', '', '')", []).unwrap();
-        c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (99, 'client', 'acme')", []).unwrap();
-        c.execute("INSERT INTO chunk_topics VALUES (99, 'globex__data', 'Data', 'intent_l1')", []).unwrap();
+        for (i, client) in [(1, "globex"), (99, "acme")] {
+            c.execute("INSERT INTO chunks(id, source, ord, status, title, text) VALUES (?1, 'call/x', ?1, 'ACTIVE', '', '')", [i]).unwrap();
+            c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', ?2)", params![i, client]).unwrap();
+            c.execute("INSERT INTO chunk_topics VALUES (?1, 'globex__data', 'Data', 'intent_l1')", [i]).unwrap();
+        }
         build_graph(&c, &t, None).unwrap();
-        assert_eq!(n("globex__data"), 12);
+        assert_eq!(n("globex__data"), 1, "acme's section lost the tag");
         // Renamed: the old label stays a synonym.
         let t = edit(&json!({"op": "rename", "label": "Commercials", "layer": SHARED, "to": "Commercial terms"})).unwrap();
         assert!(t.topics.iter().any(|x| x.label == "Commercial terms" && x.synonyms == ["Commercials"]));
@@ -1159,183 +709,6 @@ mod tests {
     }
 
     #[test]
-    fn a_layer_drifts_when_its_topics_stop_fitting() {
-        let (_env, _root) = crate::paths::testenv::folders("brain-drift");
-        let c = store::open(&super::super::store_path()).unwrap();
-        let mut id = 0;
-        // A section of a client, judged in a taxonomy version, with its level-1 topic when tagged.
-        let mut add = |client: &str, source: &str, verdict: &str, version: u32, topic: Option<&str>| {
-            id += 1;
-            c.execute("INSERT INTO chunks(id, source, ord, status) VALUES (?1, ?2, ?1, 'ACTIVE')", params![id, source]).unwrap();
-            c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', ?2)", params![id, client]).unwrap();
-            c.execute("INSERT INTO chunk_verdicts(chunk_id, verdict, taxonomy_version) VALUES (?1, ?2, ?3)", params![id, verdict, version.to_string()]).unwrap();
-            if let Some(t) = topic {
-                c.execute("INSERT INTO chunk_topics VALUES (?1, ?2, 'x', 'intent_l1')", params![id, t]).unwrap();
-            }
-        };
-        // Globex: built in version 3 from 2 calls. Before it, 50 sections fitting nothing (not counted);
-        // since, 40: 6 fit nothing (15%), 20 of the 34 tagged went to one topic (59%), over 7 calls.
-        for i in 0..50 {
-            add("globex", &format!("call/old{}", i % 2), "untagged", 1, None);
-        }
-        for i in 0..40 {
-            let (v, t) = if i < 6 { ("untagged", None) } else if i < 26 { ("tagged", Some("globex__plan")) } else { ("tagged", Some("globex__data")) };
-            add("globex", &format!("call/new{}", i % 7), v, 3, t);
-        }
-        // Acme: 20 sections fitting nothing — too few to judge — from the 2 calls it was built from.
-        for i in 0..20 {
-            add("acme", &format!("call/acme{}", i % 2), "untagged", 4, None);
-        }
-        let mut t = Taxonomy::default();
-        t.layers.insert("globex".into(), Layer { name: "Globex".into(), built_from: 2, ..Default::default() });
-        t.layers.insert("acme".into(), Layer { name: "Acme".into(), built_from: 2, ..Default::default() });
-        t.topics.push(Topic { layer: "globex".into(), label: "Plan".into(), level: 1, ..Default::default() });
-        t.history = vec![json!({"op": "build", "layer": "globex", "version": 3}), json!({"op": "build", "layer": "acme", "version": 4})];
-        let d = drift_in(&c, &t, &json!({})).unwrap();
-        let of = |l: &str| d.iter().find(|x| x["layer"] == l).unwrap().clone();
-        let g = of("globex");
-        assert_eq!((g["sections"].as_i64(), g["untagged"].as_i64(), g["calls"].as_i64()), (Some(40), Some(6), Some(9)), "{g}");
-        let rules: Vec<&str> = g["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
-        // Built from 2 calls: how its sections fit isn't judged (#18), only that it outgrew them.
-        assert_eq!(rules, ["outgrown"], "{g}");
-        let mut t6 = t.clone();
-        t6.layers.get_mut("globex").unwrap().built_from = 0; // unknown: judged
-        let g0 = drift_in(&c, &t6, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "globex").unwrap();
-        let rules: Vec<&str> = g0["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
-        assert_eq!(rules, ["nothing_fits", "catch_all"], "{g0}");
-        assert_eq!((g["stale"].as_bool(), g["top"]["label"].as_str()), (Some(true), Some("Plan")));
-        let a = of("acme");
-        assert_eq!((a["stale"].as_bool(), a["reasons"].as_array().unwrap().len()), (Some(false), 0), "under 30 sections: not judged; 2 calls of 2");
-        // Not now: held until its sections (or calls) grow by half.
-        let snoozed = json!({"globex": {"sections": 40, "calls": 9}});
-        let g = drift_in(&c, &t, &snoozed).unwrap().into_iter().find(|x| x["layer"] == "globex").unwrap();
-        assert_eq!((g["stale"].as_bool(), g["snoozed"].as_bool()), (Some(false), Some(true)));
-        for i in 0..20 {
-            add("globex", &format!("call/new{}", i % 7), "untagged", 3, None);
-        }
-        assert_eq!(drift_in(&c, &t, &snoozed).unwrap().into_iter().find(|x| x["layer"] == "globex").unwrap()["stale"], true, "60 sections: half again");
-    }
-
-    #[test]
-    fn a_rebuild_isnt_judged_on_its_own_sections() {
-        let (_env, _root) = crate::paths::testenv::folders("brain-drift-rebuild");
-        let c = store::open(&super::super::store_path()).unwrap();
-        let mut id = 0;
-        // A section of a client ("-": the practice), indexed at `created`, tagged in version 5 with a
-        // topic (and its level-1 parent, as `classify` does), or fitting nothing.
-        let mut add = |client: &str, source: &str, created: &str, l1: Option<&str>, l2: Option<&str>| {
-            id += 1;
-            c.execute("INSERT INTO chunks(id, source, ord, status, created_at) VALUES (?1, ?2, ?1, 'ACTIVE', ?3)", params![id, source, created]).unwrap();
-            c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', ?2)", params![id, client]).unwrap();
-            c.execute("INSERT INTO chunk_verdicts(chunk_id, verdict, taxonomy_version) VALUES (?1, ?2, '5')", params![id, if l1.is_some() { "tagged" } else { "untagged" }]).unwrap();
-            for (t, kind) in [(l1, "intent_l1"), (l2, "intent_l2")] {
-                if let Some(t) = t {
-                    c.execute("INSERT INTO chunk_topics VALUES (?1, ?2, 'x', ?3)", params![id, t, kind]).unwrap();
-                }
-            }
-        };
-        let (before, after) = ("2026-10-20T10:00:00+00:00", "2026-11-02T10:00:00+00:00");
-        let topic = |layer: &str, label: &str, parent: Option<&str>| Topic { layer: layer.into(), label: label.into(), level: if parent.is_some() { 2 } else { 1 }, parent: parent.map(str::to_owned), ..Default::default() };
-        let mut t = Taxonomy::default();
-        t.layers.insert(SHARED.into(), Layer { name: "Your practice".into(), built_from: 3, ..Default::default() });
-        t.topics = vec![topic(SHARED, "A", None), topic(SHARED, "A1", Some("A")), topic(SHARED, "A2", Some("A")), topic(SHARED, "A3", Some("A")), topic(SHARED, "B", None), topic(SHARED, "C", None)];
-        t.history = vec![json!({"op": "build", "layer": SHARED, "version": 5, "at": "2026-11-01T10:00:00+00:00"}), json!({"op": "accept", "version": 6})];
-        let (a, b, cc) = (topic_id(SHARED, "A"), topic_id(SHARED, "B"), topic_id(SHARED, "C"));
-        let sub = |i: usize| topic_id(SHARED, &format!("A{}", i % 3 + 1));
-        // Built from 3 calls with 66 sections, re-tagged by the rebuild: 38 (58%) under A.
-        for i in 0..66 {
-            let (l1, l2) = if i < 38 { (Some(a.as_str()), Some(sub(i))) } else if i < 52 { (Some(b.as_str()), None) } else { (Some(cc.as_str()), None) };
-            add("-", &format!("call/p{}", i % 3), before, l1, l2.as_deref());
-        }
-        let shared = |t: &Taxonomy| drift_in(&c, t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == SHARED).unwrap();
-        let s = shared(&t);
-        assert_eq!((s["stale"].as_bool(), s["sections"].as_i64()), (Some(false), Some(0)), "the build's own sections: {s}");
-        // 40 sections from 4 new calls, 70% under A, split between its subtopics.
-        for i in 0..40 {
-            let (l1, l2) = if i < 28 { (Some(a.as_str()), Some(sub(i))) } else { (Some(b.as_str()), None) };
-            add("-", &format!("call/n{}", i % 4), after, l1, l2.as_deref());
-        }
-        let s = shared(&t);
-        assert_eq!((s["stale"].as_bool(), s["sections"].as_i64(), s["calls"].as_i64()), (Some(false), Some(40), Some(7)), "{s}");
-        assert_eq!(s["top"]["label"], "A");
-        // Built from 6 calls, so judged: A's subtopics split it (none over 40%)…
-        let mut t6 = t.clone();
-        t6.layers.get_mut(SHARED).unwrap().built_from = 6;
-        assert_eq!(shared(&t6)["stale"], false, "{}", shared(&t6));
-        // …until one subtopic takes most of them.
-        for i in 0..30 {
-            add("-", &format!("call/n{}", i % 4), after, Some(&a), Some(&topic_id(SHARED, "A1")));
-        }
-        let s = shared(&t6);
-        assert_eq!(s["stale"], true, "{s}");
-        assert!(s["reasons"][0]["text"].as_str().unwrap().contains("“A1”"), "{s}");
-        // It names the topic to split (#31).
-        assert_eq!(s["reasons"][0]["topic"], json!({"layer": SHARED, "label": "A1"}), "{s}");
-        // Sections tagged with a level-1 topic alone, none of its subtopics, are a catch-all too.
-        t.layers.insert("beta".into(), Layer { name: "Beta".into(), built_from: 6, ..Default::default() });
-        t.topics.extend([topic("beta", "P", None), topic("beta", "P1", Some("P")), topic("beta", "P2", Some("P")), topic("beta", "Q", None)]);
-        t.history.push(json!({"op": "build", "layer": "beta", "version": 5, "at": "2026-11-01T10:00:00+00:00"}));
-        let (pp, q) = (topic_id("beta", "P"), topic_id("beta", "Q"));
-        for i in 0..40 {
-            let (l1, l2) = if i < 28 { (&pp, None) } else if i < 32 { (&pp, Some(topic_id("beta", "P1"))) } else { (&q, None) };
-            add("beta", &format!("call/b{}", i % 6), after, Some(l1), l2.as_deref());
-        }
-        let d = drift_in(&c, &t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "beta").unwrap();
-        assert_eq!(d["stale"], true, "{d}");
-        assert!(d["reasons"][0]["text"].as_str().unwrap().contains("P (in none of its subtopics)"), "{d}");
-        // A client built from 10 calls: half its new sections under one topic with no subtopics.
-        t.layers.insert("acme".into(), Layer { name: "Acme".into(), built_from: 10, ..Default::default() });
-        t.topics.extend([topic("acme", "X", None), topic("acme", "Y", None), topic("acme", "Z", None)]);
-        t.history.push(json!({"op": "build", "layer": "acme", "version": 5, "at": "2026-11-01T10:00:00+00:00"}));
-        let (x, y, z) = (topic_id("acme", "X"), topic_id("acme", "Y"), topic_id("acme", "Z"));
-        for i in 0..40 {
-            let l1 = if i < 20 { &x } else if i < 30 { &y } else { &z };
-            add("acme", &format!("call/a{}", i % 10), after, Some(l1), None);
-        }
-        let d = drift_in(&c, &t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "acme").unwrap();
-        let rules: Vec<&str> = d["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
-        assert_eq!((d["stale"].as_bool(), rules), (Some(true), vec!["catch_all"]), "{d}");
-    }
-
-    #[test]
-    fn a_client_build_never_repeats_the_practice() {
-        let (_env, _root) = crate::paths::testenv::folders("taxonomy-fold");
-        let topic = |layer: &str, label: &str, parent: Option<&str>| Topic { layer: layer.into(), label: label.into(), level: if parent.is_some() { 2 } else { 1 }, parent: parent.map(str::to_owned), ..Default::default() };
-        let mut t = Taxonomy {
-            topics: vec![
-            Topic { synonyms: vec!["Proposals".into()], ..topic(SHARED, "Offerings and proposals", None) },
-            topic(SHARED, "Agentic delivery", None),
-            topic(SHARED, "Evaluations", Some("Agentic delivery")),
-            // What a client build came back with: a practice level-1 label again (#33), one by a synonym,
-            // one as a level-2 topic of the practice, and one of its own.
-            topic("acme", "Offerings and proposals", None),
-            topic("acme", "Acme RFP answers", Some("Offerings and proposals")),
-            topic("acme", "Proposals", None),
-            topic("acme", "Evaluation", None),
-            topic("acme", "Rollout waves", None),
-        ],
-            terms: vec![
-            Term { layer: SHARED.into(), name: "Widgetfactory".into(), synonyms: vec!["WF".into()], ..Default::default() },
-            Term { layer: "acme".into(), name: "WF".into(), threads: vec!["pilot".into()], variants: vec!["Double-U Eff".into()], ..Default::default() },
-            Term { layer: "acme".into(), name: "Acme portal".into(), ..Default::default() },
-        ],
-            ..Default::default()
-        };
-        let folded = fold_into_practice(&mut t, "acme");
-        let acme: Vec<(&str, u8, Option<&str>)> = t.topics.iter().filter(|x| x.layer == "acme").map(|x| (x.label.as_str(), x.level, x.parent.as_deref())).collect();
-        assert_eq!(acme, vec![("Acme RFP answers", 2, Some("Offerings and proposals")), ("Rollout waves", 1, None)], "{folded:?}");
-        assert_eq!(t.aliases[&topic_id("acme", "Evaluation")], topic_id(SHARED, "Evaluations"));
-        assert_eq!(t.aliases[&topic_id("acme", "Proposals")], topic_id(SHARED, "Offerings and proposals"));
-        // A term moved up earlier (#32): the client's copy goes, its pins go to the practice's term.
-        assert_eq!(t.terms.iter().filter(|x| x.layer == "acme").map(|x| x.name.as_str()).collect::<Vec<_>>(), vec!["Acme portal"]);
-        assert_eq!(t.terms[0].threads, vec!["pilot".to_string()]);
-        assert!(t.terms[0].variants.contains(&"Double-U Eff".to_string()), "its spellings stay transcription hints");
-        assert_eq!(t.aliases[&term_id("acme", "WF")], term_id(SHARED, "Widgetfactory"));
-        // The shared layer never folds into itself.
-        assert!(fold_into_practice(&mut t, SHARED).is_empty());
-    }
-
-    #[test]
     fn aliases_never_chain_or_loop() {
         let mut a = BTreeMap::new();
         // Folded into the practice's x, then y merged into x too.
@@ -1346,33 +719,6 @@ mod tests {
         set_alias(&mut a, "x".into(), "acme__x".into());
         assert!(!a.contains_key("acme__x"), "{a:?}");
         assert_eq!((a["x"].as_str(), a["y"].as_str()), ("acme__x", "acme__x"));
-    }
-
-    #[test]
-    fn a_split_makes_subtopics_under_the_topic_or_its_parent() {
-        let topic = |label: &str, parent: Option<&str>| Topic { layer: "acme".into(), label: label.into(), level: if parent.is_some() { 2 } else { 1 }, parent: parent.map(str::to_owned), ..Default::default() };
-        let t = Taxonomy { topics: vec![topic("Presales staffing", None), topic("Rollout", None), topic("Wave planning", Some("Rollout"))], ..Default::default() };
-        let v = json!({"subtopics": [{"label": "Expert requests", "description": "who is asked for"}, {"label": "Presales staffing"}, {"label": "Rollout"},
-                                     {"label": "Bench availability", "synonyms": ["bench", "Bench availability"]}, {"label": "expert requests"}]});
-        let subs = subtopics_of(&t, &t.topics[0].clone(), &v).unwrap();
-        assert_eq!(subs.iter().map(|x| (x.label.as_str(), x.parent.as_deref())).collect::<Vec<_>>(), vec![("Expert requests", Some("Presales staffing")), ("Bench availability", Some("Presales staffing"))]);
-        assert_eq!(subs[1].synonyms, vec!["bench".to_string()]);
-        // A level-2 topic's subtopics sit beside it, under its parent.
-        let subs = subtopics_of(&t, &t.topics[2].clone(), &json!({"subtopics": [{"label": "Wave 1"}, {"label": "Wave 2"}]})).unwrap();
-        assert!(subs.iter().all(|x| x.parent.as_deref() == Some("Rollout") && x.level == 2));
-        assert!(subtopics_of(&t, &t.topics[0].clone(), &json!({"subtopics": [{"label": "Only one"}]})).is_err(), "one isn't a split");
-    }
-
-    #[test]
-    fn a_client_topic_the_practice_already_has_is_offered_up() {
-        let (_env, _root) = crate::paths::testenv::folders("taxonomy-fold-moves");
-        let c = store::open(&super::super::store_path()).unwrap();
-        let mut t = Taxonomy::default();
-        t.layers.insert("acme".into(), Layer { name: "Acme".into(), ..Default::default() });
-        t.topics = vec![Topic { layer: SHARED.into(), label: "Agentic delivery".into(), level: 1, ..Default::default() }, Topic { layer: "acme".into(), label: "Agentic delivery".into(), level: 1, ..Default::default() }];
-        let m = moves_in(&stats_of(&c, None).unwrap(), &t, &BTreeSet::new());
-        let up = m.iter().find(|x| x["dir"] == "up").expect("offered");
-        assert!(up["why"].as_str().unwrap().starts_with("your practice has it already"), "{up}");
     }
 
     #[test]
