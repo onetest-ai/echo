@@ -118,7 +118,8 @@ pub fn stamp_of(dir: &Path) -> String {
 }
 
 /// The call folder with this stamp now (it may have been renamed since it was last seen). None
-/// when no folder, or more than one, has it (two calls started in the same second: `-2`).
+/// when no folder, or more than one, has it (two calls started in the same second before `recorder::call_dir` gave
+/// each new call a stamp of its own).
 pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     if stamp.is_empty() {
         return None;

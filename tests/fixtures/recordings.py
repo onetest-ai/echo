@@ -183,11 +183,11 @@ def prepare(force):
                 entry["pin"] = r["pin"]
                 echoctl("config", out=os.path.join(out, "config.after.json"), env_=renv)
         elif r["how"] == "build":
-            call = os.path.join(home, "calls", datetime.now().strftime("%Y-%m-%d_%H%M%S") + "-" + name)
+            call = os.path.join(home, "calls", free_folder(os.path.join(home, "calls"), datetime.now(), name))
             subprocess.run([sys.executable, MAKE_AUDIO, "build", r["conv"], call], check=True, capture_output=True)
         else:  # retranscribe: the same tracks, the call's own pin left out
             src = os.path.join(c, r["from"])
-            call = os.path.join(home, "calls", datetime.now().strftime("%Y-%m-%d_%H%M%S") + "-" + name)
+            call = os.path.join(home, "calls", free_folder(os.path.join(home, "calls"), datetime.now(), name))
             os.makedirs(call)
             for f in ("mic.wav", "remote.wav"):
                 shutil.copy(os.path.join(src, "tracks", f), call)
@@ -286,6 +286,15 @@ def slug(title):
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
 
 
+def free_folder(calls, stamp, title):
+    """A call folder name with a stamp no folder in `calls` has, as Echo picks one (`recorder::call_dir`): the
+    first second at or after `stamp` that is free."""
+    taken = {d[:17] for d in os.listdir(calls)} if os.path.isdir(calls) else set()
+    while stamp.strftime("%Y-%m-%d_%H%M%S") in taken:
+        stamp += timedelta(seconds=1)
+    return f"{stamp.strftime('%Y-%m-%d_%H%M%S')}-{slug(title)}"
+
+
 def cached_call(name):
     c = ready() or die("nothing prepared for this build: run `tests/fixtures/recordings.py prepare` first")
     m = load_manifest(c)["recordings"].get(name) or die(f"no recording {name!r} (list: {', '.join(r['name'] for r in RECORDINGS)})")
@@ -320,13 +329,7 @@ def copy(name, title, untranscribed, keep_time):
     meta.pop("ai_profile", None)
     calls = os.path.join(home, "calls")
     os.makedirs(calls, exist_ok=True)
-    stamp = start or now
-    while True:  # a stamp of its own (two copies in one second)
-        folder = f"{stamp.strftime('%Y-%m-%d_%H%M%S')}-{slug(title)}"
-        if not any(d.startswith(folder[:17]) for d in os.listdir(calls)):
-            break
-        stamp += timedelta(seconds=1)
-    dst = os.path.join(calls, folder)
+    dst = os.path.join(calls, free_folder(calls, start or now, title))
     os.makedirs(dst)
     json.dump(meta, open(os.path.join(dst, "meta.json"), "w"), indent=2, ensure_ascii=False)
     shutil.copy(os.path.join(src, "expected.json"), dst)

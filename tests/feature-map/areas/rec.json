@@ -172,6 +172,15 @@
    "axes": [
     "app.record"
    ]
+  },
+  {
+   "id": "F-REC-22",
+   "feature": "Every new call (a recording, a memo, a Teams transcript import) gets a stamp of its own: one that starts in a second another call's folder (or one in the trash) already has takes the next free second, so its folder's time may be a second or two after its real start, which `meta.json`'s `started_at` keeps; two started at the same instant get two stamps. The stamp never changes (a retitle keeps it), so `echo://call/<stamp>` and a plugin's `call:<stamp>` find that one call. Older calls that share a stamp stay found by neither",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
   }
  ]
 }

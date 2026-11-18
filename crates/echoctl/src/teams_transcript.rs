@@ -221,8 +221,7 @@ pub fn import(ev: &Value) -> Result<PathBuf> {
     let spoken = t0 + Duration::milliseconds((segs.iter().filter_map(|s| s["end"].as_f64()).fold(0.0, f64::max) * 1000.0) as i64);
     let end = end_of(&meeting).map_or(spoken, |e| e.max(spoken));
     let started = t0.with_timezone(&Local);
-    let dir = crate::recorder::call_dir(&started, Some(&title));
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let dir = crate::recorder::call_dir(&started, Some(&title))?;
     let profile = crate::ai::pin(None, Some(&meeting));
     meeting.source = Some(SOURCE.into());
     meeting.save(&dir)?;
