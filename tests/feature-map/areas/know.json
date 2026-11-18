@@ -48,6 +48,20 @@
    "axes": []
   },
   {
+   "id": "F-KNOW-10",
+   "feature": "Recall search (`echoctl brain search`, MCP search_sources) narrows by source kind (call, mail, channel, document), section kind (summary, decisions, action items, open questions, other minutes, transcript, chat, mail, channel, document, card), days (since / until; without them a date said in the query, in English, Ukrainian or Russian, such as \"12 November\" or \"last week\") and who said it, before the hits are cut; unknown kinds and malformed days are refused",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-11",
+   "feature": "Recall's index is working memory: transcripts and chats leave it after 45 days, minutes, mail and channel facts after 90, and a closed thread's sections when it closes; every call keeps a card (title, day, threads, people, the summary's first line) and a closed thread's document a card (title, path, headings); a search reaching past that says \"older than the index keeps\"; the call folders, files and Intake's facts are never touched, and a thread opened again gets its sections back",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
    "id": "F-KNOW-08",
    "feature": "Intake keeps the facts read from mail and channel posts as one file per source, apart from the index; a source read again is merged into its file (nothing older dropped); dated backups (7 days) before a sync changes them; moved there once from the old index; a fact file goes only when its source leaves its thread (never on a short thread list or a mass removal), and an ignored sender's sections only on the user's Ignore or Keep out",
    "priority": "high",

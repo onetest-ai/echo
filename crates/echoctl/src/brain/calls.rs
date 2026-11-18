@@ -31,6 +31,18 @@ fn clock(t: f64) -> String {
     }
 }
 
+/// The most people a call's card names.
+const CARD_PEOPLE: usize = 12;
+
+/// The first line of a call's minutes' summary (at most 300 characters).
+fn summary_line(dir: &Path) -> Option<String> {
+    let notes = std::fs::read_to_string(dir.join("notes.md")).ok()?;
+    let summary = |l: &str| l.starts_with("## ") && calls::SUMMARY_WORDS.iter().any(|w| l[3..].to_lowercase().contains(w));
+    let mut lines = notes.lines().skip_while(|l| !summary(l)).skip(1);
+    let line = lines.find(|l| !l.trim().is_empty()).filter(|l| !l.starts_with('#'))?;
+    Some(line.trim().trim_start_matches(['-', '*']).trim().chars().take(300).collect())
+}
+
 /// `[12:05]` or `[1:02:05]` at the start of a title → seconds.
 pub fn title_time(title: &str) -> Option<f64> {
     let t = title.trim().strip_prefix('[')?;
@@ -145,6 +157,22 @@ pub fn document(dir: &Path) -> Option<Doc> {
     }
     let threads: Vec<Value> = crate::projects::of_call(dir).unwrap_or_default().into_iter().map(|(p, _)| json!({"id": p.id, "name": p.name, "client": p.client})).collect();
     let client = threads.iter().find_map(|t| t["client"].as_str().map(str::to_owned));
+    // The call's card, its last section: what the index keeps of it past its other sections' horizons (`retain`).
+    let unnamed = |w: &str| w == "Remote" || w.strip_prefix("Speaker ").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()));
+    let mut people: Vec<String> = turns.iter().map(|t| t.1.clone()).filter(|w| !unnamed(w)).collect();
+    if let Some(m) = &meeting {
+        people.extend(m.organizer.iter().chain(&m.attendees).map(|p| crate::people::display(&p.name)).filter(|n| !n.is_empty()));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    people.retain(|p| seen.insert(p.to_lowercase()));
+    people.truncate(CARD_PEOPLE);
+    let names: Vec<&str> = threads.iter().filter_map(|t| t["name"].as_str()).collect();
+    md.push_str(&format!("\n## {}\n\nCall: {title}{}\n", super::store::CALL_CARD, date.as_deref().map(|d| format!(" · {d}")).unwrap_or_default()));
+    for (label, v) in [("Threads", names.join(", ")), ("People", people.join(", ")), ("Summary", summary_line(dir).unwrap_or_default())] {
+        if !v.is_empty() {
+            md.push_str(&format!("{label}: {v}\n"));
+        }
+    }
     Some(Doc {
         source: format!("call/{stamp}"),
         title,
@@ -180,7 +208,8 @@ mod tests {
         assert_eq!(doc.source, format!("call/{}", calls::stamp_of(&d)));
         let c = super::super::chunk::chunk(&doc.md, 1200);
         let titles: Vec<&str> = c.iter().map(|x| x.title.as_str()).collect();
-        assert_eq!(titles, ["Summary", "Decisions", "[12:05] Lena Varga, Me", "Chat"], "{}", doc.md);
+        assert_eq!(titles, ["Summary", "Decisions", "[12:05] Lena Varga, Me", "Chat", "Call card"], "{}", doc.md);
+        assert_eq!(c[4].body, "Call: Aurora weekly · 2026-10-28\nPeople: Lena Varga, Me\nSummary: SSO lands first.", "the card: no threads, so no Threads line");
         assert_eq!(c[2].breadcrumb, "Aurora weekly > Transcript > [12:05] Lena Varga, Me");
         assert!(c[2].body.contains("[12:05] Lena Varga: Then SSO has to land first. Let's say the 24th."), "one turn: {}", c[2].body);
         assert_eq!(title_time(&c[2].title), Some(725.0));

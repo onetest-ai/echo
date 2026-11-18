@@ -22,6 +22,8 @@ const W_VEC: f32 = 0.6;
 const CANDIDATES: usize = 30;
 /// What `chunks_fts` holds of a section (`fts_text`); another version writes it again from `chunks` at `open`.
 const FTS_TEXT_VERSION: &str = "2";
+/// How mail and channel facts are dated (`section_day`); another version dates them again at `open`.
+const FACT_DAYS_VERSION: &str = "1";
 
 pub fn open(path: &Path) -> Result<Connection> {
     if let Some(d) = path.parent() {
@@ -60,7 +62,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     // leave it whole.
     let missing = |c: &Connection| -> Result<Vec<&'static str>> {
         let mut out = vec![];
-        for col in ["sections", "client", "root"] {
+        for col in ["sections", "client", "root", "retained"] {
             if c.query_row("SELECT count(*) FROM pragma_table_info('documents') WHERE name = ?1", [col], |r| r.get::<_, i64>(0))? == 0 {
                 out.push(col);
             }
@@ -83,6 +85,51 @@ pub fn open(path: &Path) -> Result<Connection> {
         done?;
     }
     c.execute_batch("CREATE INDEX IF NOT EXISTS documents_list ON documents(client, kind, event_date); CREATE INDEX IF NOT EXISTS documents_root ON documents(root, event_date);")?;
+    // Each section's kind (`section_kind`, what search filters and retention read): written with it, filled once for
+    // an older store, by one writer.
+    let no_section = |c: &Connection| -> Result<bool> { Ok(c.query_row("SELECT count(*) FROM pragma_table_info('chunks') WHERE name = 'section'", [], |r| r.get::<_, i64>(0))? == 0) };
+    if no_section(&c)? {
+        c.execute_batch("BEGIN IMMEDIATE")?;
+        let done = (|| -> Result<()> {
+            if !no_section(&c)? {
+                return Ok(());
+            }
+            c.execute_batch("ALTER TABLE chunks ADD COLUMN section TEXT")?;
+            let rows: Vec<(i64, String, i64, String, String)> = c
+                .prepare("SELECT c.id, c.source, c.ord, coalesce(d.title, ''), coalesce(c.breadcrumb_path, '') FROM chunks c LEFT JOIN documents d ON d.source = c.source")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+                .collect::<Result<_, _>>()?;
+            let mut up = c.prepare("UPDATE chunks SET section = ?2 WHERE id = ?1")?;
+            for (id, src, ord, title, crumb) in rows {
+                up.execute(params![id, section_kind(&src, &title, &crumb, ord as usize)])?;
+            }
+            Ok(())
+        })();
+        c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+        done?;
+    }
+    // Each mail and channel fact dated by its own message (`section_day`), once per `FACT_DAYS_VERSION`
+    // (`meta.fact_days`), by one writer; a section already so dated stays as it is.
+    if meta(&c, "fact_days").as_deref() != Some(FACT_DAYS_VERSION) {
+        c.execute_batch("BEGIN IMMEDIATE")?;
+        let done = (|| -> Result<()> {
+            if meta(&c, "fact_days").as_deref() == Some(FACT_DAYS_VERSION) {
+                return Ok(());
+            }
+            let rows: Vec<(i64, String, String, Option<String>)> = c
+                .prepare("SELECT id, source, coalesce(title, ''), event_date FROM chunks WHERE source LIKE 'mail/%' OR source LIKE 'channel/%'")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect::<Result<_, _>>()?;
+            let mut up = c.prepare("UPDATE chunks SET event_date = ?2 WHERE id = ?1")?;
+            for (id, src, head, day) in rows {
+                up.execute(params![id, section_day(&src, &head, day.as_deref())])?;
+            }
+            set_meta(&c, "fact_days", FACT_DAYS_VERSION)
+        })();
+        c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+        done?;
+    }
+
     // A store from before scopes: fill them from each section's references, once.
     let empty: bool = c.query_row("SELECT NOT EXISTS (SELECT 1 FROM scopes) AND EXISTS (SELECT 1 FROM chunks)", [], |r| r.get(0))?;
     if empty {
@@ -306,9 +353,102 @@ const DOC_FACTS: &str = "sections = (SELECT count(*) FROM chunks c WHERE c.sourc
     root = json_extract(documents.refs, '$.root')";
 
 /// Keep one document's list facts current after its sections or references changed.
-fn doc_facts(tx: &Connection, source: &str) -> Result<()> {
+pub(super) fn doc_facts(tx: &Connection, source: &str) -> Result<()> {
     tx.execute(&format!("UPDATE documents SET {DOC_FACTS} WHERE source = ?1"), [source])?;
     Ok(())
+}
+
+/// A call's card (title, date, threads, people, the summary's first line): the last section of a call's document,
+/// under this heading; it outlives the call's other sections (`retain`).
+pub const CALL_CARD: &str = "Call card";
+/// A document card's position (title, path, headings): the one section a closed thread's document keeps (`retain`).
+pub const CARD_ORD: usize = 1_000_000;
+
+/// Sources by kind (search's `kinds` filter): each kind's id prefix.
+pub const SOURCE_KINDS: [(&str, &str); 4] = [("call", "call/"), ("mail", "mail/"), ("channel", "channel/"), ("document", "file/")];
+/// Section kinds (search's `sections` filter; `minutes`: a minutes section other than the four named ones).
+pub const SECTION_KINDS: [&str; 11] = ["summary", "decisions", "action_items", "open_questions", "minutes", "transcript", "chat", "mail", "channel", "document", "card"];
+
+/// What kind of section a chunk is, from its source, its document's title, its breadcrumb and position: a call's
+/// minutes section by its heading under Minutes, its transcript, chat or card; a mail or channel post's fact; a
+/// document's page, or its card.
+pub fn section_kind(source: &str, doc_title: &str, breadcrumb: &str, ord: usize) -> &'static str {
+    match source.split('/').next().unwrap_or("") {
+        "mail" => return "mail",
+        "channel" => return "channel",
+        "file" => return if ord == CARD_ORD { "card" } else { "document" },
+        _ => {}
+    }
+    let rest = breadcrumb
+        .strip_prefix(doc_title)
+        .and_then(|r| r.strip_prefix(" > "))
+        .unwrap_or_else(|| breadcrumb.split_once(" > ").map_or("", |x| x.1));
+    let mut parts = rest.split(" > ");
+    match parts.next().unwrap_or("") {
+        "Transcript" => "transcript",
+        "Chat" => "chat",
+        CALL_CARD => "card",
+        "Minutes" => {
+            let head = parts.next().unwrap_or("").to_lowercase();
+            let has = |words: &[&str]| words.iter().any(|w| head.contains(w));
+            if has(crate::calls::SUMMARY_WORDS) {
+                "summary"
+            } else if has(crate::calls::DECISION_WORDS) {
+                "decisions"
+            } else if has(&["action item", "дії", "действи"]) {
+                "action_items"
+            } else if has(crate::calls::QUESTION_WORDS) {
+                "open_questions"
+            } else {
+                "minutes"
+            }
+        }
+        _ => "minutes",
+    }
+}
+
+/// What a search is narrowed to besides its scope, applied before the candidates are cut: source kinds and section
+/// kinds (any of each, none: all), a first and last day (YYYY-MM-DD, of the section's date) and who said or wrote it
+/// (a part of the section's speaker or author, which minutes and documents don't have).
+#[derive(Debug, Clone, Default)]
+pub struct Filters {
+    pub kinds: Vec<String>,
+    pub sections: Vec<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub person: Option<String>,
+}
+
+impl Filters {
+    /// Every value known, every date a day.
+    pub fn check(&self) -> Result<()> {
+        for k in &self.kinds {
+            anyhow::ensure!(SOURCE_KINDS.iter().any(|x| x.0 == k), "no source kind {k:?} (one of: call, mail, channel, document)");
+        }
+        for s in &self.sections {
+            anyhow::ensure!(SECTION_KINDS.contains(&s.as_str()), "no section kind {s:?} (one of: {})", SECTION_KINDS.join(", "));
+        }
+        for d in self.since.iter().chain(&self.until) {
+            anyhow::ensure!(chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok(), "{d:?} isn't a day (YYYY-MM-DD)");
+        }
+        Ok(())
+    }
+
+    /// The shortest horizon among the sections it may find (`retain::horizon`), if any of them has one.
+    fn horizon(&self) -> Option<i64> {
+        let of_kind = |s: &str| match s {
+            "mail" => "mail",
+            "channel" => "channel",
+            "document" => "document",
+            _ => "call",
+        };
+        SECTION_KINDS
+            .iter()
+            .filter(|s| self.sections.is_empty() || self.sections.iter().any(|x| x == *s))
+            .filter(|s| self.kinds.is_empty() || self.kinds.iter().any(|k| k == of_kind(s)))
+            .filter_map(|s| super::retain::horizon(s))
+            .min()
+    }
 }
 
 /// A scope: `client` or `thread` and its id (`-`: in none).
@@ -333,6 +473,37 @@ fn scopes_of(refs: &Value) -> Vec<(&'static str, String)> {
     }
     out.extend(clients.into_iter().map(|c| ("client", c)));
     out
+}
+
+/// The threads a section is in (a memo's section: its part's), none when it is in none.
+fn section_threads(refs: &Value, title: &str) -> Vec<String> {
+    let narrowed = refs["memo_parts"].as_array().is_some_and(|p| !p.is_empty()).then(|| memo_section_refs(refs, title)).flatten();
+    scopes_of(narrowed.as_ref().unwrap_or(refs)).into_iter().filter(|(k, v)| *k == "thread" && v != "-").map(|(_, v)| v).collect()
+}
+
+/// A mail or channel fact's day: its heading's time ("YYYY-MM-DD HH:MM", the message's own, in UTC as Microsoft 365
+/// gives it) as a day in `tz` — the local one for the index, as calls' days and "today" are.
+pub fn fact_day<Tz: chrono::TimeZone>(head: &str, tz: &Tz) -> Option<String> {
+    let t = chrono::NaiveDateTime::parse_from_str(head.get(..16)?, "%Y-%m-%d %H:%M").ok()?;
+    Some(t.and_utc().with_timezone(tz).date_naive().to_string())
+}
+
+/// A section's day: a mail or channel fact's own (`fact_day`), else its document's.
+fn section_day(source: &str, title: &str, doc_day: Option<&str>) -> Option<String> {
+    let own = (source.starts_with("mail/") || source.starts_with("channel/")).then(|| fact_day(title, &chrono::Local)).flatten();
+    own.or_else(|| doc_day.map(str::to_owned))
+}
+
+/// What the index keeps as it writes (`retain`): the day, and the closed threads.
+pub struct Keep {
+    pub today: chrono::NaiveDate,
+    pub closed: BTreeMap<String, Value>,
+}
+
+impl Keep {
+    pub fn now() -> Keep {
+        Keep { today: chrono::Local::now().date_naive(), closed: crate::projects::closed_threads() }
+    }
 }
 
 fn write_scopes(tx: &Connection, id: i64, refs: &Value) -> Result<()> {
@@ -442,13 +613,18 @@ pub struct Report {
     /// Thread folders: files read.
     #[serde(skip_serializing_if = "is_zero")]
     pub files_read: usize,
+    /// Sections that left the index past their horizon or with their closed thread (`retain`).
+    pub retired: usize,
+    /// The retention sweep was due and waits while Echo records or transcribes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sweep_waits: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
+pub(super) fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
     for id in ids {
         tx.execute("DELETE FROM chunks WHERE id = ?1", [id])?;
         tx.execute("DELETE FROM chunks_fts WHERE rowid = ?1", [id])?;
@@ -462,17 +638,41 @@ fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
+/// A document's card in place of its sections (`retain`): one section at `CARD_ORD`, under its document's scopes.
+pub(super) fn put_card(tx: &Connection, source: &str, title: &str, text: &str, event_date: Option<&str>, link: &str, refs: &Value) -> Result<()> {
+    let id = chunk::chunk_id(source, CARD_ORD);
+    let crumb = format!("{title} > Document card");
+    tx.execute(
+        "INSERT OR REPLACE INTO chunks(id, source, ord, title, text, sha, created_at, event_date, status, parent_heading, breadcrumb_path, link, refs, section)
+         VALUES (?1, ?2, ?3, 'Document card', ?4, ?5, ?6, ?7, 'ACTIVE', ?8, ?9, ?10, ?11, 'card')",
+        params![id, source, CARD_ORD as i64, text, sha(text), chrono::Utc::now().to_rfc3339(), event_date, title, crumb, link, refs.to_string()],
+    )?;
+    write_scopes(tx, id, refs)?;
+    tx.execute("DELETE FROM chunks_fts WHERE rowid = ?1", [id])?;
+    tx.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?1, ?2)", params![id, fts_text(&crumb, "", "Document card", text)])?;
+    Ok(())
+}
+
 /// Bring the store up to date with `inputs` (every document of the sources it covers; a document
 /// missing from them is removed). Embeddings are asked for chunks whose text changed and chunks
 /// without a vector yet; without an embedder (none configured) or when the server fails, the text
 /// is indexed anyway and the vectors come at a later sync.
+#[cfg(test)]
 pub fn sync(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>) -> Result<Report> {
     sync_kinds(path, inputs, emb, &["call"])
 }
 
 /// As `sync`, removing only documents of `kinds` that aren't among the inputs (`&[]`: none — channels
 /// and mail add and update their documents; a source taken off a thread is removed with `remove`).
+#[cfg(test)]
 pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, kinds: &[&str]) -> Result<Report> {
+    sync_kept(path, inputs, emb, kinds, None)
+}
+
+/// As `sync_kinds`, writing only the sections `keep` keeps (`retain::kept`): a section past its horizon, or (but a
+/// document's) only in closed threads, is never written nor embedded; a call's card always is. The document's hash is
+/// its text's, so a section reaching its horizon later never makes it read again.
+pub fn sync_kept(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, kinds: &[&str], keep: Option<&Keep>) -> Result<Report> {
     let mut c = open(path)?;
     let model = emb.map(|e| e.model()).unwrap_or_default();
     let mut rep = Report::default();
@@ -485,7 +685,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
     let present: BTreeSet<String> = inputs.iter().map(|i| i.source.clone()).collect();
     let gone: Vec<String> = known_kinds.iter().filter(|(s, (_, k))| !present.contains(*s) && kinds.contains(&k.as_str())).map(|(s, _)| s.clone()).collect();
     // Which documents changed (their text, the chunker, or the references a chunk carries).
-    let mut todo: Vec<(Input, String, Vec<chunk::Chunk>)> = vec![];
+    let mut todo: Vec<(Input, String, Vec<chunk::Chunk>, Option<String>)> = vec![];
     for i in inputs {
         let h = sha(&format!("{CHUNKER_VERSION}\0{MAX_CHARS}\0{}\0{}", i.md, i.refs));
         if known.get(&i.source) == Some(&h) {
@@ -498,8 +698,23 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
             rep.added += 1;
         }
         rep.touched.push(i.source.clone());
-        let cs = chunk::chunk(&i.md, MAX_CHARS);
-        todo.push((i, h, cs));
+        let mut cs = chunk::chunk(&i.md, MAX_CHARS);
+        let mut mark = None;
+        if let Some(k) = keep {
+            cs.retain(|x| {
+                let section = section_kind(&i.source, &i.title, &x.breadcrumb, x.ord);
+                if section == "card" {
+                    return true;
+                }
+                let threads = section_threads(&i.refs, &x.title);
+                if !i.source.starts_with("file/") && !threads.is_empty() && threads.iter().all(|t| k.closed.contains_key(t)) {
+                    mark = Some(super::retain::closed_mark(&i.refs, &k.closed));
+                    return false;
+                }
+                super::retain::kept(section, section_day(&i.source, &x.title, i.event_date.as_deref()).as_deref(), k.today)
+            });
+        }
+        todo.push((i, h, cs, mark));
     }
     let model_changed = !model.is_empty() && meta(&c, "embed_model").is_some_and(|m| m != model);
     if todo.is_empty() && gone.is_empty() && !model_changed && emb.is_none() {
@@ -519,7 +734,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
         rep.gone.push(s.clone());
     }
     let now = chrono::Utc::now().to_rfc3339();
-    for (i, h, cs) in &todo {
+    for (i, h, cs, mark) in &todo {
         let old: Vec<i64> = tx.prepare("SELECT id FROM chunks WHERE source = ?1")?.query_map([&i.source], |r| r.get(0))?.collect::<Result<_, _>>()?;
         let new: BTreeSet<i64> = cs.iter().map(|x| chunk::chunk_id(&i.source, x.ord)).collect();
         delete_chunks(&tx, &old.iter().copied().filter(|id| !new.contains(id)).collect::<Vec<_>>())?;
@@ -541,13 +756,14 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                 }
             }
             tx.execute(
-                "INSERT INTO chunks(id, source, ord, title, text, sha, created_at, event_date, status, parent_heading, breadcrumb_path, speaker, link, refs, embedding_content_hash)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'ACTIVE',?9,?10,?11,?12,?13,?14)
+                "INSERT INTO chunks(id, source, ord, title, text, sha, created_at, event_date, status, parent_heading, breadcrumb_path, speaker, link, refs, embedding_content_hash, section)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'ACTIVE',?9,?10,?11,?12,?13,?14,?16)
                  ON CONFLICT(id) DO UPDATE SET source=excluded.source, ord=excluded.ord, title=excluded.title, text=excluded.text, sha=excluded.sha,
                    event_date=excluded.event_date, parent_heading=excluded.parent_heading, breadcrumb_path=excluded.breadcrumb_path, speaker=excluded.speaker,
-                   link=excluded.link, refs=excluded.refs, embedding_content_hash=CASE WHEN ?15 THEN chunks.embedding_content_hash ELSE NULL END",
+                   link=excluded.link, refs=excluded.refs, section=excluded.section, embedding_content_hash=CASE WHEN ?15 THEN chunks.embedding_content_hash ELSE NULL END",
                 // `sha` = the text the vector is made from; `embedding_content_hash` = the one it was made from.
-                params![id, i.source, x.ord as i64, x.title, x.body, ehash, now, i.event_date, x.parent_heading, x.breadcrumb, speaker, (i.link)(x), i.refs.to_string(), Option::<String>::None, keep_vec],
+                params![id, i.source, x.ord as i64, x.title, x.body, ehash, now, section_day(&i.source, &x.title, i.event_date.as_deref()), x.parent_heading, x.breadcrumb, speaker, (i.link)(x), i.refs.to_string(), Option::<String>::None, keep_vec,
+                        section_kind(&i.source, &i.title, &x.breadcrumb, x.ord)],
             )?;
             write_scopes(&tx, id, &i.refs)?;
             tx.execute("DELETE FROM chunks_fts WHERE rowid = ?1", [id])?;
@@ -555,10 +771,10 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
             rep.chunks += 1;
         }
         tx.execute(
-            "INSERT INTO documents(source, content_hash, indexed_at, title, kind, event_date, refs) VALUES (?1,?2,?3,?4,?5,?6,?7)
+            "INSERT INTO documents(source, content_hash, indexed_at, title, kind, event_date, refs, retained) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
              ON CONFLICT(source) DO UPDATE SET content_hash=excluded.content_hash, indexed_at=excluded.indexed_at, title=excluded.title,
-               kind=excluded.kind, event_date=excluded.event_date, refs=excluded.refs",
-            params![i.source, h, now, i.title, i.kind, i.event_date, i.refs.to_string()],
+               kind=excluded.kind, event_date=excluded.event_date, refs=excluded.refs, retained=excluded.retained",
+            params![i.source, h, now, i.title, i.kind, i.event_date, i.refs.to_string(), mark],
         )?;
         doc_facts(&tx, &i.source)?;
     }
@@ -662,14 +878,14 @@ fn fts_query(q: &str) -> Option<String> {
 
 fn hit(c: &Connection, id: i64, score: f32) -> Result<Value> {
     c.query_row(
-        "SELECT source, title, breadcrumb_path, text, event_date, speaker, link, refs, status FROM chunks WHERE id = ?1",
+        "SELECT source, title, breadcrumb_path, text, event_date, speaker, link, refs, status, section FROM chunks WHERE id = ?1",
         [id],
         |r| {
             Ok(json!({"chunk_id": id.to_string(), "source": r.get::<_, String>(0)?, "section": r.get::<_, Option<String>>(1)?,
                       "breadcrumb_path": r.get::<_, Option<String>>(2)?, "text": r.get::<_, Option<String>>(3)?, "event_date": r.get::<_, Option<String>>(4)?,
                       "speaker": r.get::<_, Option<String>>(5)?, "link": r.get::<_, Option<String>>(6)?,
                       "refs": r.get::<_, Option<String>>(7)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()), "status": r.get::<_, Option<String>>(8)?,
-                      "score": (score * 10000.0).round() / 10000.0}))
+                      "section_kind": r.get::<_, Option<String>>(9)?, "score": (score * 10000.0).round() / 10000.0}))
         },
     )
     .map_err(Into::into)
@@ -744,50 +960,105 @@ pub fn supersede(path: &Path, cutoff: &dyn Fn(&str, &Value) -> Option<String>) -
     Ok((marked, restored))
 }
 
+#[cfg(test)]
 pub fn search_in(path: &Path, q: &str, limit: usize, source_contains: Option<&str>, scope: Scope, emb: Option<&dyn Embedder>) -> Result<Value> {
-    search_at(path, q, limit, source_contains, scope, emb, History::Latest, None)
+    search_at(path, q, limit, source_contains, scope, emb, History::Latest, None, &Filters::default())
 }
 
+/// What a search that lists days' sources says (no words to search; none of its words in those days).
+const LISTED: &str = "no words to search: the sources of those days, newest first";
+const LISTED_NO_MATCH: &str = "no section of those days has the words: the sources of those days, newest first";
+
 /// A search: `only` — the sections a reader may see (its AI profile's, `access.rs`), filtered
-/// before the cut so others never crowd them out.
+/// before the cut so others never crowd them out, as `filters` are. Without a date in `filters`, a date said in the
+/// query (`when::in_query`) is its filter and leaves the words searched.
 #[allow(clippy::too_many_arguments)]
-pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&str>, scope: Scope, emb: Option<&dyn Embedder>, history: History, only: Option<&BTreeSet<i64>>) -> Result<Value> {
+pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&str>, scope: Scope, emb: Option<&dyn Embedder>, history: History, only: Option<&BTreeSet<i64>>, filters: &Filters) -> Result<Value> {
+    filters.check()?;
+    let today = chrono::Local::now().date_naive();
+    let mut f = filters.clone();
+    let mut words = q.to_string();
+    let mut said = None;
+    if f.since.is_none() && f.until.is_none() {
+        if let Some((s, rest)) = super::when::in_query(q, today) {
+            (f.since, f.until, words) = (Some(s.since), Some(s.until), rest);
+            said = Some(s.words);
+        }
+    }
     let c = open(path)?;
     let allowed = in_scope(&c, scope)?;
     let hide = hidden(&c, history)?;
     let ok = |id: &i64| allowed.as_ref().is_none_or(|a| a.contains(id)) && !hide.contains(id) && only.is_none_or(|o| o.contains(id));
     let like = source_contains.map(|s| format!("%{s}%")).unwrap_or_else(|| "%".into());
-    // The candidates, in keyword order: matches read best first until enough of them may be seen (history and the
-    // reader's profile are checked here, so sections it can't see never crowd out the ones it can).
+    let list = |v: &[String]| (!v.is_empty()).then(|| json!(v).to_string());
+    let prefixes: Vec<String> = f.kinds.iter().filter_map(|k| SOURCE_KINDS.iter().find(|x| x.0 == k).map(|x| x.1.to_string())).collect();
+    // Who said it: a part of the speaker's name, compared in lowercase here (SQLite's LIKE folds only ASCII).
+    let person = f.person.as_deref().map(str::trim).filter(|p| !p.is_empty()).map(str::to_lowercase);
+    let said_by = |speaker: Option<String>| person.as_ref().is_none_or(|p| speaker.is_some_and(|s| s.to_lowercase().contains(p.as_str())));
+    // The filters every candidate passes, in SQL (?2 on: the source's part, the scope, kinds, sections, days).
+    const FILTERS: &str = "c.source LIKE ?2
+                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?3 AND s.id = ?4))
+                 AND (?5 IS NULL OR substr(c.source, 1, instr(c.source, '/')) IN (SELECT value FROM json_each(?5)))
+                 AND (?6 IS NULL OR c.section IN (SELECT value FROM json_each(?6)))
+                 AND (?7 IS NULL OR substr(c.event_date, 1, 10) >= ?7) AND (?8 IS NULL OR substr(c.event_date, 1, 10) <= ?8)";
+    // The candidates, in keyword order: matches read best first until enough of them may be seen (history, the
+    // reader's profile and the filters are checked here, so sections it can't see never crowd out the ones it can).
     let want = CANDIDATES.max(limit);
     let mut cands: Vec<i64> = vec![];
     let mut note = None;
-    match fts_query(q) {
-        Some(fq) => {
-            let mut st = c.prepare(
-                "SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND c.source LIKE ?2
-                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?3 AND s.id = ?4)) ORDER BY bm25(chunks_fts)",
-            )?;
-            let mut rows = st.query(params![fq, like, scope.map(|s| s.0), scope.map(|s| s.1)])?;
-            while cands.len() < want {
-                let Some(r) = rows.next()? else { break };
-                let id: i64 = r.get(0)?;
-                if ok(&id) {
-                    cands.push(id);
-                }
+    let fq = fts_query(&words);
+    let dated = f.since.is_some() || f.until.is_some();
+    if let Some(fq) = &fq {
+        let mut st = c.prepare(&format!("SELECT f.rowid, c.speaker FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND {FILTERS} ORDER BY bm25(chunks_fts)"))?;
+        let mut rows = st.query(params![fq, like, scope.map(|s| s.0), scope.map(|s| s.1), list(&prefixes), list(&f.sections), f.since, f.until])?;
+        while cands.len() < want {
+            let Some(r) = rows.next()? else { break };
+            let id: i64 = r.get(0)?;
+            if ok(&id) && said_by(r.get(1)?) {
+                cands.push(id);
             }
         }
-        None => note = Some("only common words; nothing to search".to_string()),
+    }
+    // Days asked for and no section of them has the words (or there are none: "what happened yesterday"): those days'
+    // sources, newest first, each once (a call by its card).
+    let listed = cands.is_empty() && dated;
+    if listed {
+        let mut st = c.prepare(&format!(
+            "SELECT c.id, c.speaker, c.source FROM chunks c WHERE ?1 IS NULL AND {FILTERS}
+             ORDER BY substr(c.event_date, 1, 10) DESC, c.source DESC, c.section = 'card' DESC, c.ord"
+        ))?;
+        let mut rows = st.query(params![Option::<String>::None, like, scope.map(|s| s.0), scope.map(|s| s.1), list(&prefixes), list(&f.sections), f.since, f.until])?;
+        let mut seen = BTreeSet::new();
+        while cands.len() < limit {
+            let Some(r) = rows.next()? else { break };
+            let id: i64 = r.get(0)?;
+            if ok(&id) && said_by(r.get(1)?) && seen.insert(r.get::<_, String>(2)?) {
+                cands.push(id);
+            }
+        }
+        note = Some(if fq.is_some() { LISTED_NO_MATCH } else { LISTED } .to_string());
+    } else if fq.is_none() {
+        note = Some("only common words; nothing to search".to_string());
     }
     let mut ranked: Vec<(i64, f32)> = cands.iter().enumerate().map(|(rank, id)| (*id, W_FTS / (RRF_K + rank as f32 + 1.0))).collect();
     match emb {
-        Some(e) if !ranked.is_empty() => match e.embed(&[q.to_string()]) {
+        Some(e) if !ranked.is_empty() && !listed => match e.embed(&[words.clone()]) {
             Ok(v) => rerank(&c, &mut ranked, &v[0])?,
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         },
         Some(_) => {}
         None if note.is_none() => note = Some("keywords only: no embedding server is set (Settings → Intake)".into()),
         None => {}
+    }
+    // Days asked for past what the index keeps of some of the sections it may find (`retain`): said.
+    let reach = f.since.as_deref().or(f.until.as_deref()).and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+    if let (Some(d), Some(days)) = (reach, f.horizon()) {
+        if (today - d).num_days() > days {
+            note = Some(match note {
+                Some(n) => format!("{n}; {}", super::retain::OLDER),
+                None => super::retain::OLDER.to_string(),
+            });
+        }
     }
     // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
     // is within that thread.
@@ -817,7 +1088,8 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
         History::All => json!("all"),
         History::AsOf(d) => json!({"as_of": d}),
     };
-    Ok(json!({"query": q, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "history": history, "hits": hits, "count": hits.len(), "note": note}))
+    let filters = json!({"kinds": f.kinds, "sections": f.sections, "since": f.since, "until": f.until, "person": f.person, "dates_from_query": said});
+    Ok(json!({"query": q, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "history": history, "filters": filters, "hits": hits, "count": hits.len(), "note": note}))
 }
 
 /// Re-rank the keyword candidates (`ranked`: id and keyword score, in keyword order) by their vectors' nearness to the
@@ -1060,7 +1332,7 @@ mod tests {
         let old = |src: &str, _: &Value| (src == "call/a").then(|| "2026-12-31".to_string());
         let (m, _) = supersede(&db, &old).unwrap();
         assert!(m > 0);
-        let srcs = |h| search_at(&db, "budget", 10, None, None, None, h, None).unwrap()["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let srcs = |h| search_at(&db, "budget", 10, None, None, None, h, None, &Filters::default()).unwrap()["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert!(!srcs(History::Latest).contains(&"call/a".to_string()));
         assert!(srcs(History::All).contains(&"call/a".to_string()));
         let (_, back) = supersede(&db, &|_, _| None).unwrap();
@@ -1183,7 +1455,7 @@ mod tests {
         sync(&db, vec![input("call/other", &md), input("call/mine", "# Mine\n## Notes\nThe gateway goes in after the long security review of the pilot.\n")], None).unwrap();
         let c = open(&db).unwrap();
         let mine: BTreeSet<i64> = c.prepare("SELECT id FROM chunks WHERE source = 'call/mine'").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
-        let h = search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine)).unwrap();
+        let h = search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine), &Filters::default()).unwrap();
         assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("call/mine")), "{h}");
         // Asked for more than 30: as many as asked.
         assert_eq!(search_in(&db, "gateway", 50, None, None, None).unwrap()["count"], 50);
@@ -1201,7 +1473,7 @@ mod tests {
         }
         assert_eq!((opens, meta(&c, "fts_text_next")), (3, None), "1,301 sections in batches of 500");
         assert_eq!(c.query_row("SELECT count(*) FROM chunks_fts", [], |r| r.get::<_, i64>(0)).unwrap(), 1301, "the gone section's row dropped");
-        assert_eq!(search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine)).unwrap()["count"], 1);
+        assert_eq!(search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine), &Filters::default()).unwrap()["count"], 1);
     }
 
     /// The made-up regression set (intake-and-search R11): a small store of acme.example calls and mail, each query with
@@ -1258,5 +1530,284 @@ mod tests {
                 assert_eq!(h["hits"][0]["source"], want, "{q} (embeddings: {}): {h}", emb.is_some());
             }
         }
+    }
+
+    #[test]
+    fn sections_know_their_kind() {
+        let k = |src: &str, crumb: &str| section_kind(src, "Acme > weekly", crumb, 0);
+        assert_eq!(k("call/a", "Acme > weekly > Minutes > Summary"), "summary", "a title with ' > ' in it");
+        assert_eq!(k("call/a", "Acme > weekly > Minutes > Action items > Dana"), "action_items");
+        assert_eq!(k("call/a", "Acme > weekly > Minutes > Open questions"), "open_questions");
+        assert_eq!(k("call/a", "Acme > weekly > Minutes > On screen"), "minutes");
+        assert_eq!((k("call/a", "Acme > weekly > Minutes > Підсумок"), k("call/a", "Acme > weekly > Minutes > Решения")), ("summary", "decisions"), "headings in Ukrainian or Russian");
+        assert_eq!(k("call/a", "Acme > weekly > Transcript > [12:05] Dana"), "transcript");
+        assert_eq!(k("call/a", "Acme > weekly > Chat"), "chat");
+        assert_eq!(k("call/a", "Acme > weekly > Call card"), "card");
+        assert_eq!(k("call/a", "Acme > weekly > Minutes > Call card"), "minutes", "only the call's own card");
+        assert_eq!((k("mail/x", "T > 2026-11-10 09:00 Jane"), k("channel/x/1", "T"), k("file/x", "plan.md > Budget")), ("mail", "channel", "document"));
+        assert_eq!(section_kind("file/x", "plan.md", "plan.md > Document card", CARD_ORD), "card");
+    }
+
+    /// A store where 40 mail sections and 40 minutes sections say "gateway" louder than the few that are asked for.
+    fn crowded(root: &Path) -> std::path::PathBuf {
+        let db = root.join("knowledge.sqlite");
+        let mut noise_mail = String::from("# Noise\n");
+        let mut noise_call = String::from("# Noise call\n\n## Minutes\n");
+        for i in 0..40 {
+            noise_mail.push_str(&format!("\n## 2026-11-10 09:{i:02} Bot\nGateway gateway gateway.\n"));
+            noise_call.push_str(&format!("\n### S{i}\nGateway gateway gateway.\n"));
+        }
+        let mut inputs = vec![input("mail/noise", &noise_mail), input("call/noise", &noise_call)];
+        inputs[0].event_date = Some("2026-11-10".into());
+        inputs[1].event_date = Some("2026-11-10".into());
+        let mut call = input(
+            "call/target",
+            "# Target call\n\n## Minutes\n\n### Decisions\n- The gateway waits for the long security review of the pilot.\n\n## Transcript\n\n### [00:05] Lee Park\n\n[00:05] Lee Park: the gateway is late, after the long security review of the pilot.\n",
+        );
+        call.event_date = Some("2026-10-01".into());
+        call.speaker = Box::new(|c| c.title.starts_with('[').then(|| "Lee Park".to_string()));
+        let mut post = input("channel/target/1", "# Posts\n\n## 2026-10-02 10:00 Kim\nThe gateway post, after the long security review of the pilot.\n");
+        post.event_date = Some("2026-10-02".into());
+        let mut doc = input("file/target", "# plan.md\n\n## Gateway\nThe gateway plan, after the long security review of the pilot.\n");
+        doc.event_date = Some("2026-09-01".into());
+        inputs.extend([call, post, doc]);
+        sync(&db, inputs, None).unwrap();
+        db
+    }
+
+    #[test]
+    fn each_filter_is_applied_before_the_candidates_are_cut() {
+        let (_env, root) = crate::paths::testenv::folders("brain-filters");
+        let db = crowded(&root);
+        let first = |f: Filters| -> (String, String) {
+            let h = search_at(&db, "gateway", 1, None, None, None, History::Latest, None, &f).unwrap();
+            assert_eq!(h["count"], 1, "{h}");
+            (h["hits"][0]["source"].as_str().unwrap().to_string(), h["hits"][0]["section_kind"].as_str().unwrap().to_string())
+        };
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let unfiltered = search_at(&db, "gateway", 30, None, None, None, History::Latest, None, &Filters::default()).unwrap();
+        assert!(unfiltered["hits"].as_array().unwrap().iter().all(|h| h["source"].as_str().unwrap().ends_with("noise")), "the targets are crowded out without a filter");
+        assert_eq!(first(Filters { kinds: v(&["channel"]), ..Default::default() }), ("channel/target/1".into(), "channel".into()));
+        assert_eq!(first(Filters { kinds: v(&["document"]), ..Default::default() }), ("file/target".into(), "document".into()));
+        assert_eq!(first(Filters { sections: v(&["transcript"]), ..Default::default() }), ("call/target".into(), "transcript".into()));
+        assert_eq!(first(Filters { sections: v(&["decisions"]), ..Default::default() }), ("call/target".into(), "decisions".into()));
+        assert_eq!(first(Filters { since: Some("2026-09-30".into()), until: Some("2026-10-01".into()), ..Default::default() }).0, "call/target");
+        assert_eq!(first(Filters { since: Some("2026-08-01".into()), until: Some("2026-09-15".into()), ..Default::default() }).0, "file/target");
+        assert_eq!(first(Filters { person: Some("lee".into()), ..Default::default() }), ("call/target".into(), "transcript".into()));
+        // Kinds and sections together: any of each.
+        let h = search_at(&db, "gateway", 10, None, None, None, History::Latest, None, &Filters { kinds: v(&["call", "channel"]), sections: v(&["transcript", "channel"]), ..Default::default() }).unwrap();
+        let got: BTreeSet<&str> = h["hits"].as_array().unwrap().iter().map(|x| x["section_kind"].as_str().unwrap()).collect();
+        assert_eq!(got, BTreeSet::from(["transcript", "channel"]), "{h}");
+        // Unknown values and days that aren't days are refused.
+        assert!(search_at(&db, "gateway", 1, None, None, None, History::Latest, None, &Filters { kinds: v(&["fax"]), ..Default::default() }).is_err());
+        assert!(search_at(&db, "gateway", 1, None, None, None, History::Latest, None, &Filters { sections: v(&["recap"]), ..Default::default() }).is_err());
+        assert!(search_at(&db, "gateway", 1, None, None, None, History::Latest, None, &Filters { since: Some("12 Nov".into()), ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn a_date_in_the_query_is_its_filter_and_a_reach_past_the_horizon_is_said() {
+        let (_env, root) = crate::paths::testenv::folders("brain-dates");
+        let db = crowded(&root);
+        let h = search_at(&db, "gateway on 2026-10-02", 5, None, None, None, History::Latest, None, &Filters::default()).unwrap();
+        assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("channel/target/1")), "{h}");
+        assert_eq!((h["filters"]["since"].as_str(), h["filters"]["until"].as_str(), h["filters"]["dates_from_query"].as_str()), (Some("2026-10-02"), Some("2026-10-02"), Some("2026-10-02")));
+        // A date asked for outright wins over the query's.
+        let f = Filters { since: Some("2026-11-10".into()), ..Default::default() };
+        let h = search_at(&db, "gateway on 2026-10-02", 50, None, None, None, History::Latest, None, &f).unwrap();
+        assert!(h["hits"].as_array().unwrap().iter().all(|x| x["source"].as_str().unwrap().ends_with("noise")) && h["filters"]["dates_from_query"].is_null(), "{h}");
+        // Past the shortest horizon of what it may find: said; documents have none.
+        let today = chrono::Local::now().date_naive();
+        let old = (today - chrono::Duration::days(super::super::retain::TALK_DAYS + 5)).to_string();
+        let note = |f: Filters| search_at(&db, "gateway", 5, None, None, None, History::Latest, None, &f).unwrap()["note"].as_str().unwrap_or("").to_string();
+        assert!(note(Filters { since: Some(old.clone()), ..Default::default() }).ends_with(super::super::retain::OLDER));
+        assert!(!note(Filters { since: Some(old.clone()), sections: vec!["summary".into()], ..Default::default() }).contains("older"), "minutes are kept 90 days");
+        assert!(!note(Filters { since: Some(old), kinds: vec!["document".into()], ..Default::default() }).contains("older"));
+        assert!(!note(Filters::default()).contains("older"));
+    }
+
+    #[test]
+    fn an_older_store_gets_its_sections_kinds_once() {
+        let (_env, root) = crate::paths::testenv::folders("brain-section-column");
+        let db = crowded(&root);
+        let c = open(&db).unwrap();
+        let ids: Vec<(i64, String)> = c.prepare("SELECT id, section FROM chunks ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+        c.execute_batch("ALTER TABLE chunks DROP COLUMN section").unwrap();
+        drop(c);
+        let c = open(&db).unwrap();
+        let again: Vec<(i64, String)> = c.prepare("SELECT id, section FROM chunks ORDER BY id").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(again, ids, "the same kinds as when written");
+    }
+
+    /// The ids of a source's sections.
+    fn ids_of(db: &Path, src: &str) -> BTreeSet<i64> {
+        open(db).unwrap().prepare("SELECT id FROM chunks WHERE source = ?1").unwrap().query_map([src], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect()
+    }
+
+    #[test]
+    fn a_readers_profile_bounds_every_filter_and_a_document_card() {
+        let (_env, root) = crate::paths::testenv::folders("brain-filters-access");
+        let db = crowded(&root);
+        let c = open(&db).unwrap();
+        put_card(&c, "file/card", "deck.md", "Document: deck.md\nHeadings: Gateway rollout", Some("2026-09-01"), "echo://file/card", &json!({"threads": [{"id": "aurora"}]})).unwrap();
+        drop(c);
+        let mine = ids_of(&db, "call/target");
+        let with_card: BTreeSet<i64> = mine.iter().copied().chain(ids_of(&db, "file/card")).collect();
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let filters = [
+            Filters { kinds: v(&["channel"]), ..Default::default() },
+            Filters { kinds: v(&["document"]), ..Default::default() },
+            Filters { sections: v(&["transcript"]), ..Default::default() },
+            Filters { sections: v(&["card"]), ..Default::default() },
+            Filters { since: Some("2026-08-01".into()), until: Some("2026-10-02".into()), ..Default::default() },
+            Filters { person: Some("lee".into()), ..Default::default() },
+        ];
+        for f in &filters {
+            for only in [&mine, &with_card] {
+                let h = search_at(&db, "gateway", 50, None, None, None, History::Latest, Some(only), f).unwrap();
+                let ids: BTreeSet<i64> = h["hits"].as_array().unwrap().iter().map(|x| x["chunk_id"].as_str().unwrap().parse().unwrap()).collect();
+                assert!(ids.is_subset(only), "{f:?}: only what the reader may see: {h}");
+            }
+        }
+        let first = |only: &BTreeSet<i64>, f: &Filters| search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(only), f).unwrap()["hits"][0]["source"].as_str().map(str::to_owned);
+        assert_eq!(first(&mine, &filters[0]), None, "another reader's channel post never shows");
+        assert_eq!(first(&mine, &filters[2]).as_deref(), Some("call/target"));
+        assert_eq!(first(&mine, &filters[3]), None, "a document card the reader may not see never shows");
+        assert_eq!(first(&with_card, &filters[3]).as_deref(), Some("file/card"));
+        assert_eq!(first(&with_card, &filters[1]).as_deref(), Some("file/card"), "a card is its document's kind");
+    }
+
+    #[test]
+    fn a_query_of_only_a_date_lists_that_days_sources_newest_first() {
+        let (_env, root) = crate::paths::testenv::folders("brain-date-only");
+        let db = crowded(&root);
+        let h = search_at(&db, "what happened on 2026-10-02", 5, None, None, None, History::Latest, None, &Filters::default()).unwrap();
+        assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("channel/target/1")), "{h}");
+        assert!(h["note"].as_str().unwrap().starts_with(LISTED_NO_MATCH), "{h}");
+        let f = Filters { since: Some("2026-09-01".into()), until: Some("2026-10-02".into()), ..Default::default() };
+        let h = search_at(&db, "when?", 10, None, None, None, History::Latest, None, &f).unwrap();
+        let srcs: Vec<&str> = h["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap()).collect();
+        assert_eq!(srcs, ["channel/target/1", "call/target", "file/target"], "newest first, each once: {h}");
+        assert!(h["note"].as_str().unwrap().starts_with(LISTED), "{h}");
+        assert_eq!(search_at(&db, "when?", 10, None, None, None, History::Latest, None, &Filters::default()).unwrap()["count"], 0, "no days: nothing to list");
+    }
+
+    #[test]
+    fn the_person_filter_folds_any_case_and_takes_wildcards_as_letters() {
+        let (_env, root) = crate::paths::testenv::folders("brain-person");
+        let db = root.join("knowledge.sqlite");
+        let mut a = input("call/a", "# A\n## Transcript\n### [00:05] Дана Руїз\n\n[00:05] Дана Руїз: бюджет погоджено.\n");
+        a.speaker = Box::new(|c| c.title.starts_with('[').then(|| "Дана Руїз".to_string()));
+        let mut b = input("call/b", "# B\n## Transcript\n### [00:05] Lee_Park 100%\n\n[00:05] Lee_Park 100%: бюджет ще ні.\n");
+        b.speaker = Box::new(|c| c.title.starts_with('[').then(|| "Lee_Park 100%".to_string()));
+        sync(&db, vec![a, b], None).unwrap();
+        let who = |p: &str| -> Vec<String> {
+            let f = Filters { person: Some(p.into()), ..Default::default() };
+            search_at(&db, "бюджет", 5, None, None, None, History::Latest, None, &f).unwrap()["hits"].as_array().unwrap().iter().map(|h| h["source"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(who("дана"), ["call/a"], "Cyrillic in any case");
+        assert_eq!(who("ДАНА РУЇЗ"), ["call/a"]);
+        assert_eq!(who("lee_park"), ["call/b"]);
+        assert!(who("lee%park").is_empty() && who("_ee").is_empty(), "% and _ are letters, not wildcards");
+        assert_eq!(who("100%"), ["call/b"]);
+    }
+
+    #[test]
+    fn a_messages_own_day_is_its_sections_and_a_local_one() {
+        // Near midnight: 23:30 UTC is the next day east of Greenwich and the same day west of it.
+        let east = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        assert_eq!(fact_day("2026-11-10 23:30 Jane Doe", &east).as_deref(), Some("2026-11-11"));
+        assert_eq!(fact_day("2026-11-10 23:30 Jane Doe", &west).as_deref(), Some("2026-11-10"));
+        assert_eq!(fact_day("2026-11-11 00:30 Jane Doe", &west).as_deref(), Some("2026-11-10"));
+        assert_eq!(fact_day("Jane Doe", &east), None);
+        let (_env, root) = crate::paths::testenv::folders("brain-fact-days");
+        let db = root.join("knowledge.sqlite");
+        let mut m = input("mail/x", "# Pilot\n\n## 2026-11-01 09:00 Jane Doe\nThe pilot budget is approved.\n\n## 2026-11-12 23:30 Jane Doe\nThe pilot slips a week.\n");
+        m.event_date = Some("2026-11-12".into());
+        sync(&db, vec![m], None).unwrap();
+        let first = fact_day("2026-11-01 09:00", &chrono::Local).unwrap();
+        let last = fact_day("2026-11-12 23:30", &chrono::Local).unwrap();
+        let days: Vec<Option<String>> = open(&db).unwrap().prepare("SELECT event_date FROM chunks WHERE source = 'mail/x' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(days, [Some(first.clone()), Some(last.clone())], "each message's own local day, not the conversation's");
+        let on = |d: &str| {
+            let f = Filters { since: Some(d.into()), until: Some(d.into()), ..Default::default() };
+            search_at(&db, "pilot", 5, None, None, None, History::Latest, None, &f).unwrap()["hits"].as_array().unwrap().iter().map(|h| h["text"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(on(&first), ["The pilot budget is approved."]);
+        assert_eq!(on(&last), ["The pilot slips a week."]);
+    }
+
+    #[test]
+    fn the_first_sync_after_the_update_embeds_only_the_card_and_never_an_old_transcript() {
+        let (_env, root) = crate::paths::testenv::folders("brain-no-reembed");
+        let db = root.join("knowledge.sqlite");
+        let today = chrono::Local::now().date_naive();
+        let day = (today - chrono::Duration::days(60)).to_string();
+        let body = "# Old call\n\n## Minutes\n\n### Summary\nThe gateway goes first.\n\n## Transcript\n\n### [00:05] Dana\n\n[00:05] Dana: the gateway is ready.\n";
+        let call = |md: &str| {
+            let mut i = input("call/old", md);
+            i.title = "Old call".into();
+            i.event_date = Some(day.clone());
+            i
+        };
+        // Before the update: every section embedded, no card.
+        assert_eq!(sync(&db, vec![call(body)], Some(&Words)).unwrap().embedded, 2);
+        let summary = chunk::chunk_id("call/old", 0);
+        let vec_before: Vec<u8> = open(&db).unwrap().query_row("SELECT embedding FROM chunks_vec WHERE rowid = ?1", [summary], |r| r.get(0)).unwrap();
+        // The update's first sync: the card is new, the 60-day-old transcript is past its horizon.
+        let keep = Keep { today, closed: BTreeMap::new() };
+        let with_card = format!("{body}\n## {CALL_CARD}\n\nCall: Old call · {day}\n");
+        let r = sync_kept(&db, vec![call(&with_card)], Some(&Words), &["call"], Some(&keep)).unwrap();
+        assert_eq!(r.embedded, 1, "only the card: {r:?}");
+        let c = open(&db).unwrap();
+        let kinds: Vec<String> = c.prepare("SELECT section FROM chunks WHERE source = 'call/old' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(kinds, ["summary", "card"], "the old transcript is gone, not written again");
+        let vec_after: Vec<u8> = c.query_row("SELECT embedding FROM chunks_vec WHERE rowid = ?1", [summary], |r| r.get(0)).unwrap();
+        assert_eq!(vec_after, vec_before, "the summary keeps its vector");
+        assert_eq!(c.query_row("SELECT count(*) FROM chunks_vec", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        // And a call of a closed thread is written as its card alone.
+        let closed: BTreeMap<String, Value> = [("hooli".to_string(), json!({"id": "hooli"}))].into();
+        let mut shut = call(&with_card);
+        shut.source = "call/shut".into();
+        shut.event_date = Some(today.to_string());
+        shut.refs = json!({"threads": [{"id": "hooli"}]});
+        let r = sync_kept(&db, vec![shut], Some(&Words), &[], Some(&Keep { today, closed })).unwrap();
+        assert_eq!(r.embedded, 1);
+        let mark: Option<String> = c.query_row("SELECT retained FROM documents WHERE source = 'call/shut'", [], |r| r.get(0)).unwrap();
+        assert_eq!(mark.as_deref(), Some("closed:hooli"));
+    }
+
+    #[test]
+    fn a_date_only_listing_shows_only_what_the_reader_may_see() {
+        let (_env, root) = crate::paths::testenv::folders("brain-date-only-access");
+        let db = crowded(&root);
+        let mine = ids_of(&db, "call/target");
+        let f = Filters { since: Some("2026-09-01".into()), until: Some("2026-10-02".into()), ..Default::default() };
+        let h = search_at(&db, "when?", 10, None, None, None, History::Latest, Some(&mine), &f).unwrap();
+        let srcs: Vec<&str> = h["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap()).collect();
+        assert_eq!(srcs, ["call/target"], "the other sources of those days are another reader's: {h}");
+        let h = search_at(&db, "what happened on 2026-10-02", 10, None, None, None, History::Latest, Some(&mine), &Filters::default()).unwrap();
+        assert_eq!(h["count"], 0, "that day holds only another reader's post: {h}");
+    }
+
+    #[test]
+    fn a_store_that_has_section_kinds_still_dates_its_facts_by_message_once() {
+        let (_env, root) = crate::paths::testenv::folders("brain-fact-days-again");
+        let db = root.join("knowledge.sqlite");
+        let mut m = input("mail/x", "# Pilot\n\n## 2026-11-01 09:00 Jane Doe\nThe pilot budget is approved.\n\n## 2026-11-12 09:00 Jane Doe\nThe pilot slips.\n");
+        m.event_date = Some("2026-11-12".into());
+        sync(&db, vec![m], None).unwrap();
+        let days = || -> Vec<Option<String>> { open(&db).unwrap().prepare("SELECT event_date FROM chunks WHERE source = 'mail/x' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect() };
+        let want = days();
+        // A store from before the pass: the column is there, the facts carry the conversation's day.
+        let c = open(&db).unwrap();
+        c.execute("UPDATE chunks SET event_date = '2026-11-12' WHERE source = 'mail/x'", []).unwrap();
+        c.execute("DELETE FROM meta WHERE key = 'fact_days'", []).unwrap();
+        drop(c);
+        assert_eq!(days(), want, "dated by each message at the next open");
+        assert_eq!(meta(&open(&db).unwrap(), "fact_days").as_deref(), Some(FACT_DAYS_VERSION));
+        // Done once: a later change isn't undone by another open.
+        open(&db).unwrap().execute("UPDATE chunks SET event_date = '2026-11-12' WHERE source = 'mail/x'", []).unwrap();
+        assert!(days().iter().all(|d| d.as_deref() == Some("2026-11-12")));
     }
 }

@@ -319,7 +319,7 @@ fn sync_root(c: &Connection, path: &Path, root: &Path, excludes: &[String], thre
         }
     }
     if !inputs.is_empty() {
-        rep.store = Some(store::sync_kinds(path, inputs, emb, &[])?);
+        rep.store = Some(store::sync_kept(path, inputs, emb, &[], Some(&store::Keep::now()))?);
     }
     // Every document of this folder under the threads that read it now (a thread added or taken off).
     let want = json!(threads);

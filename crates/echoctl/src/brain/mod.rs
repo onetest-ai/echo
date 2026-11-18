@@ -14,11 +14,13 @@ pub mod embed;
 pub mod facts;
 pub mod files;
 pub mod mcp;
+pub mod retain;
 pub mod senders;
 pub mod sources;
 pub mod store;
 pub mod taxonomy;
 pub mod views;
+pub mod when;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -129,6 +131,15 @@ fn call_inputs() -> Vec<store::Input> {
         .collect()
 }
 
+/// Whether Echo records or transcribes a call now (the retention sweep waits for it): the recorder's state, or a call's
+/// `.transcribing` marker whose process is alive. On battery or not.
+fn recording_or_transcribing() -> bool {
+    crate::watch::running_watcher().and_then(|w| w.recording).is_some()
+        || crate::calls::all_calls().iter().any(|d| {
+            std::fs::read_to_string(d.join(crate::transcribe_marker())).ok().and_then(|p| p.trim().parse::<u32>().ok()).is_some_and(crate::app::process_alive)
+        })
+}
+
 /// Bring the Brain up to date with the sources (one sync at a time on this computer).
 pub fn sync() -> Result<store::Report> {
     let lock = paths::config_dir().join("brain.lock");
@@ -141,7 +152,26 @@ pub fn sync() -> Result<store::Report> {
         facts::set_status(Some(&format!("moving the facts out of the index failed: {e:#}")), &[]);
     }
     let emb = embedder();
-    let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;
+    // A thread opened again: its documents leave the index whole first, so this sync reads them back (`retain`).
+    let closed = crate::projects::closed_threads();
+    match retain::restore(&store_path(), &closed) {
+        Ok(n) if n > 0 => eprintln!("recall: {n} sources of threads opened again read back"),
+        Ok(_) => {}
+        Err(e) => eprintln!("recall: retention: {e:#}"),
+    }
+    let keep = store::Keep::now();
+    let mut r = store::sync_kept(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder), &["call"], Some(&keep))?;
+    // Mail and posts whose facts the index lacks (a thread opened again, an index rebuilt): from their files, with or
+    // without a Microsoft 365 sign-in.
+    match sources::feed_missing(emb.as_ref().map(|e| e as &dyn embed::Embedder), &keep) {
+        Ok(s) => {
+            r.touched.extend(s.touched);
+            r.added += s.added;
+            r.chunks += s.chunks;
+            r.embedded += s.embedded;
+        }
+        Err(e) => eprintln!("intake: feeding the index from the fact files: {e:#}"),
+    }
     // Thread sources (Teams channels, mail): only with a Microsoft 365 sign-in; their failures are
     // kept per source (`brain/sources.json`) and never stop the calls' sync.
     if crate::graph::account().is_some() {
@@ -199,6 +229,16 @@ pub fn sync() -> Result<store::Report> {
         Ok(_) => {}
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
+    // Retention: sections past their horizon, and closed threads' (their cards stay), leave the index.
+    // Once a day and when a thread closed or opened again; never while Echo records or transcribes (it waits, and the
+    // app's next pass tries again).
+    if retain::due(&store_path(), keep.today, &closed)? {
+        if recording_or_transcribing() {
+            r.sweep_waits = true;
+        } else {
+            r.retired = retain::apply(&store_path(), keep.today, &closed)?;
+        }
+    }
     // Which sections mention which terms: no model; the sections written or moved to other threads since they
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
@@ -241,10 +281,11 @@ fn fingerprint() -> u64 {
             }
         }
     }
-    // Each thread's history date (supersession).
+    // Each thread's history date (supersession) and whether it is closed (retention), and the day (horizons).
     for p in crate::projects::list() {
-        (p.id, p.history_before).hash(&mut h);
+        (p.id, p.history_before, p.stage.closed()).hash(&mut h);
     }
+    chrono::Local::now().date_naive().hash(&mut h);
     for d in crate::calls::all_calls() {
         d.hash(&mut h);
         for f in ["meta.json", "segments.json", "notes.md", "chat.json", "meeting.json"] {
@@ -325,7 +366,8 @@ pub fn start_scheduler() {
                     if let Some(e) = &r.embed_error {
                         eprintln!("brain: embeddings: {e}");
                     }
-                    last = Some(fp);
+                    // A sweep held back by a recording or transcription: the next pass (a minute on) runs it.
+                    last = (!r.sweep_waits).then_some(fp);
                 }
                 Err(e) => {
                     eprintln!("brain: {e:#}");
@@ -352,9 +394,9 @@ fn drop_old_folders() {
     }
 }
 
-pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope) -> Result<Value> {
+pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope, filters: &store::Filters) -> Result<Value> {
     let emb = embedder();
-    store::search_in(&store_path(), q, limit, within, scope, emb.as_ref().map(|e| e as &dyn embed::Embedder))
+    store::search_at(&store_path(), q, limit, within, scope, emb.as_ref().map(|e| e as &dyn embed::Embedder), store::History::Latest, None, filters)
 }
 
 pub fn status() -> Result<Value> {

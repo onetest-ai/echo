@@ -26,6 +26,22 @@ pub enum BrainCmd {
         /// Only one thread's sections (its id; "-": calls in no thread)
         #[arg(long)]
         thread: Option<String>,
+        /// Only these kinds of source: call, mail, channel, document (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        kind: Vec<String>,
+        /// Only these kinds of section: summary, decisions, action_items, open_questions, minutes (any other minutes
+        /// section), transcript, chat, mail, channel, document, card (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        section: Vec<String>,
+        /// Only sections dated on or after this day (YYYY-MM-DD); without --since/--until a date in the query is used
+        #[arg(long)]
+        since: Option<String>,
+        /// Only sections dated on or before this day (YYYY-MM-DD)
+        #[arg(long)]
+        until: Option<String>,
+        /// Only what this person said or wrote (a part of the speaker's or author's name; minutes and documents have none)
+        #[arg(long)]
+        person: Option<String>,
     },
     /// The clients and threads it covers, with their documents and sections
     Scopes,
@@ -130,9 +146,10 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
         }
         BrainCmd::Status => print_json(&brain::status()?),
         BrainCmd::Sync => print_json(&serde_json::to_value(brain::sync()?)?),
-        BrainCmd::Search { query, limit, within, client, thread } => {
+        BrainCmd::Search { query, limit, within, client, thread, kind, section, since, until, person } => {
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            print_json(&brain::search(&query, limit, within.as_deref(), scope)?)
+            let filters = brain::store::Filters { kinds: kind, sections: section, since, until, person };
+            print_json(&brain::search(&query, limit, within.as_deref(), scope, &filters)?)
         }
         BrainCmd::Scopes => print_json(&brain::store::scopes(&brain::store_path())?),
         BrainCmd::Senders { client, trust, ignore, forget } => {

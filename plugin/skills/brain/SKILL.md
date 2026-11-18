@@ -34,6 +34,24 @@ never guess them from search hits.
   orders those hits by meaning: phrase the query with the words the content would use, not as a question.
 - `--within call/2026-10` (MCP: `source_contains`) narrows to sources whose id contains it (one month of calls, one
   mailbox thread).
+- Filters (MCP: the same names; several values comma-separated, or a list):
+  - `--kind call,mail,channel,document`: kinds of source.
+  - `--section decisions,action_items`: kinds of section. The kinds are summary, decisions, action_items,
+    open_questions, minutes (any other minutes section), transcript, chat, mail, channel, document and card.
+  - `--since 2026-11-01 --until 2026-11-12`: days. Without them, a date in the query becomes the filter, and the hit
+    list's `filters.dates_from_query` says so. Examples: "12 November", "2026-11-12", "last week", "12 листопада",
+    "на прошлой неделе".
+  - `--person Dana`: what that person said or wrote. Minutes and documents have no speaker, so leave it off for them.
+  - A query that is only a day ("what happened yesterday") lists that day's sources, newest first, and its `note`
+    says so. For English months, write them capitalised ("3 May"), or as `2026-05-03`.
+- The index is working memory, not an archive:
+  - Transcripts and chats are kept 45 days.
+  - Minutes, mail facts and channel facts are kept 90 days.
+  - A closed thread's sections leave it.
+  - Every call keeps a **card**: its title, date, threads, people and the summary's first line.
+  - A closed thread's document keeps a card: its title, path and headings.
+  - When a hit is a card, or the note says "older than the index keeps", read the call itself through its link
+    (read_link reads the call's folder, not the index), or look in Knowledge.
 - Hits marked `closed` come from closed threads (the archive); `history` ones are older than the thread's history
   date. Say so when you use them.
 - Mail and channel content is stored as facts with short quotes, not the messages themselves: for the full text, the
