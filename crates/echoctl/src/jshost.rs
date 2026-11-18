@@ -293,7 +293,7 @@ const PRELUDE: &str = r#"
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
      *  client, q, since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves
      *  it out) | 'calls' (opts: q, since, until, thread, client, limit) | 'calendar' (opts: from, to; the meetings Echo
-     *  last read) | 'me' ({name, email}) | 'recording' ({state, call, stamp}: hearing a recording's events). Its events (`ctx.on`, uses.events.on —
+     *  last read) | 'me' ({name, email}) | 'recording' ({state, call, stamp}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
      *  template, else {text, name, parts: {identity, people, terms, style, patterns}, hash} — only the kinds asked (all
@@ -1263,11 +1263,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 Value::Array(a) => (a.first().and_then(|k| k.as_str()).unwrap_or("").to_string(), a.get(1).cloned().unwrap_or(Value::Null), a.get(2).cloned().unwrap_or(Value::Null)),
                 _ => (s(arg), Value::Null, Value::Null),
             };
-            // What Echo records now: for a plugin that hears its recordings, with no line of its own on the sheet.
-            if kind == "recording" {
-                plugins::may_read_recording(id, &plugins::read_manifest(&package_dir(id)?)?.uses)?;
-                return Ok(crate::share::recording());
-            }
             // `source` is read under `sources`'s grant too, and the other way round: both are the same data.
             let asked = |k: &str| uses(id, "echo").is_ok_and(|u| u["read"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(k))));
             let granted = asked(&kind) || (matches!(kind.as_str(), "source" | "sources") && (asked("source") || asked("sources")));
@@ -1284,7 +1279,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "calls" => crate::share::calls(&opt)?,
                 "calendar" => crate::share::calendar(&opt)?,
                 "me" => crate::share::me()?,
-                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
+                "recording" => crate::share::recording(),
+                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me, recording)"),
             }
         }
         "me" => {
@@ -3581,7 +3577,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_that_hears_recordings_reads_what_echo_records_now_and_no_other_plugin_does() {
+    fn a_plugin_that_asked_reads_what_echo_records_now_and_no_other_plugin_does() {
         let (_env, root) = paths::testenv::folders("jshost-recording-read");
         let call = paths::calls_dir().join("2026-11-18_100000-acme-sync");
         std::fs::create_dir_all(&call).unwrap();
@@ -3591,9 +3587,10 @@ mod tests {
               ctx.command('rec', () => ctx.echo.read('recording'))
             }
             "#;
-        let sheet = install_made_up(&root, "listener", json!({"events": {"on": ["transcribed"]}}), main);
-        assert!(sheet.iter().all(|l| !l.contains("record") || l.starts_with("Knows when")), "no line of its own: {sheet:?}");
-        install_made_up(&root, "lister", json!({"echo": {"read": ["calls"]}}), main);
+        let sheet = install_made_up(&root, "listener", json!({"echo": {"read": ["recording"]}}), main);
+        assert!(sheet.iter().any(|l| l.contains("whether Echo is recording or transcribing a call now")), "its line on the sheet: {sheet:?}");
+        // Hearing the events alone isn't asking to read it.
+        install_made_up(&root, "lister", json!({"echo": {"read": ["calls"]}, "events": {"on": ["transcribed"]}}), main);
         let rec = |id: &str| call_loaded(id, "rec", &Value::Null);
         assert_eq!(rec("listener").unwrap(), json!({"state": "idle", "call": null, "stamp": null}));
         // A transcription whose process is gone (a crash) isn't one.
@@ -3610,7 +3607,7 @@ mod tests {
         std::fs::write(paths::state_dir().join("watch.json"), watch.to_string()).unwrap();
         assert_eq!(rec("listener").unwrap(), json!({"state": "recording", "call": "2026-11-18_110000-globex-pilot", "stamp": "2026-11-18_110000"}));
         // A plugin that doesn't hear recordings can't read it.
-        assert!(rec("lister").unwrap_err().to_string().contains("didn't ask to hear about your recordings"));
+        assert!(rec("lister").unwrap_err().to_string().contains("didn't ask to read your recording"));
         for id in ["listener", "lister"] {
             plugins::remove(id, false).unwrap();
         }

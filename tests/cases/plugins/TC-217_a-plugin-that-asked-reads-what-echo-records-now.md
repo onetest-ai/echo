@@ -1,6 +1,6 @@
 ---
 id: TC-217
-title: A plugin that hears recordings reads what Echo records now — idle, a call transcribing, a memo recording — with the call's folder and stamp
+title: A plugin that asked reads what Echo records now — idle, a call transcribing, a memo recording — with the call's folder and stamp
 priority: medium
 type: functional
 requirements: [F-PLUG-128]
@@ -11,13 +11,13 @@ data: small
 tags: [plugins, host-half, recording, second-instance, file-fed]
 ---
 
-# TC-217: A plugin that hears recordings reads what Echo records now
+# TC-217: A plugin that asked reads what Echo records now
 
 **Module:** Plugins | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
 - Small data set built right before the run, nothing served: `tests/fixtures/make_data.py <dir> --ai fake`; every Bash call starts with the prelude `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D` and aborts unless `$ECHOCTL_HOME` is inside `<dir>`; `echoctl` is `target/debug/echoctl`, built right before the run
-- Run demo installed (it hears `transcribed`, nothing more about recordings): `echoctl plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `echoctl plugin install run-demo --yes`
+- Run demo installed (it asks `uses.echo.read: recording`): `echoctl plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `echoctl plugin install run-demo --yes`
 - **Needs a second app instance** for step 4 (the watcher records the memo), as in `recording/TC-029`; if `$D/app.out` says "already running" the case is BLOCKED, not failed. The memo's mic is the debug build's file feed (no device opened)
 
 **Changes:** `<config dir>/plugins/`; a memo folder in `$ECHOCTL_HOME/calls/`
@@ -46,4 +46,4 @@ Nothing records; the app quit in the teardown.
 - Run the prelude, then `$C end`; `echoctl app quit` (if it doesn't stop within 30 s, `kill $(cat "$D/app.pid")`); `echoctl plugin remove run-demo --delete-data`; `echoctl plugin marketplace remove test-plugins`; remove `<dir>`
 
 ## Notes
-- A plugin hearing none of `recording_started`, `recording_stopped`, `transcribed` is refused, and the read adds no line to the sheet: Rust, `jshost::a_plugin_that_hears_recordings_reads_what_echo_records_now_and_no_other_plugin_does`.
+- A plugin that didn't ask is refused (even one hearing `transcribed`), and the read has its line on the sheet: Rust, `jshost::a_plugin_that_asked_reads_what_echo_records_now_and_no_other_plugin_does`.

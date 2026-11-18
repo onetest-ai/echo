@@ -852,7 +852,7 @@
   },
   {
    "id": "F-PLUG-128",
-   "feature": "A plugin that hears a recording's events (`uses.events.on` names `recording_started`, `recording_stopped` or `transcribed`) reads what Echo records now (`ctx.echo.read('recording')` → {state: idle | recording | transcribing, call, stamp}): `recording` while the watcher records a call or memo, else `transcribing` while a call's transcription runs (the newest), else `idle`; `call` the call's folder name and `stamp` its stamp, both null when idle; no line of its own on the sheet; a plugin that hears none of them is refused",
+   "feature": "A plugin that asked for it (`uses.echo.read: recording`; the sheet: 'whether Echo is recording or transcribing a call now, and which') reads what Echo records now (`ctx.echo.read('recording')` → {state: idle | recording | transcribing, call, stamp}): `recording` while the watcher records a call or memo, else `transcribing` while a call's transcription runs (the newest), else `idle`; `call` the call's folder name and `stamp` its stamp, both null when idle; a plugin that didn't ask is refused, even one that hears the recording events",
    "priority": "medium",
    "check": "agent",
    "axes": [
