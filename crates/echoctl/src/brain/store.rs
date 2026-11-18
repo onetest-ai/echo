@@ -22,6 +22,8 @@ const W_VEC: f32 = 0.6;
 const CANDIDATES: usize = 30;
 /// What `chunks_fts` holds of a section (`fts_text`); another version writes it again from `chunks` at `open`.
 const FTS_TEXT_VERSION: &str = "2";
+/// How mail and channel facts are dated (`section_day`); another version dates them again at `open`.
+const FACT_DAYS_VERSION: &str = "1";
 
 pub fn open(path: &Path) -> Result<Connection> {
     if let Some(d) = path.parent() {
@@ -93,22 +95,41 @@ pub fn open(path: &Path) -> Result<Connection> {
                 return Ok(());
             }
             c.execute_batch("ALTER TABLE chunks ADD COLUMN section TEXT")?;
-            // A mail or channel fact's day becomes its own message's (`section_day`), once with its kind.
-            // id, source, ord, the document's title, breadcrumb, heading, day.
-            type Row = (i64, String, i64, String, String, String, Option<String>);
-            let rows: Vec<Row> = c
-                .prepare("SELECT c.id, c.source, c.ord, coalesce(d.title, ''), coalesce(c.breadcrumb_path, ''), coalesce(c.title, ''), c.event_date FROM chunks c LEFT JOIN documents d ON d.source = c.source")?
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+            let rows: Vec<(i64, String, i64, String, String)> = c
+                .prepare("SELECT c.id, c.source, c.ord, coalesce(d.title, ''), coalesce(c.breadcrumb_path, '') FROM chunks c LEFT JOIN documents d ON d.source = c.source")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
                 .collect::<Result<_, _>>()?;
-            let mut up = c.prepare("UPDATE chunks SET section = ?2, event_date = ?3 WHERE id = ?1")?;
-            for (id, src, ord, title, crumb, head, day) in rows {
-                up.execute(params![id, section_kind(&src, &title, &crumb, ord as usize), section_day(&src, &head, day.as_deref())])?;
+            let mut up = c.prepare("UPDATE chunks SET section = ?2 WHERE id = ?1")?;
+            for (id, src, ord, title, crumb) in rows {
+                up.execute(params![id, section_kind(&src, &title, &crumb, ord as usize)])?;
             }
             Ok(())
         })();
         c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
         done?;
     }
+    // Each mail and channel fact dated by its own message (`section_day`), once per `FACT_DAYS_VERSION`
+    // (`meta.fact_days`), by one writer; a section already so dated stays as it is.
+    if meta(&c, "fact_days").as_deref() != Some(FACT_DAYS_VERSION) {
+        c.execute_batch("BEGIN IMMEDIATE")?;
+        let done = (|| -> Result<()> {
+            if meta(&c, "fact_days").as_deref() == Some(FACT_DAYS_VERSION) {
+                return Ok(());
+            }
+            let rows: Vec<(i64, String, String, Option<String>)> = c
+                .prepare("SELECT id, source, coalesce(title, ''), event_date FROM chunks WHERE source LIKE 'mail/%' OR source LIKE 'channel/%'")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect::<Result<_, _>>()?;
+            let mut up = c.prepare("UPDATE chunks SET event_date = ?2 WHERE id = ?1")?;
+            for (id, src, head, day) in rows {
+                up.execute(params![id, section_day(&src, &head, day.as_deref())])?;
+            }
+            set_meta(&c, "fact_days", FACT_DAYS_VERSION)
+        })();
+        c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+        done?;
+    }
+
     // A store from before scopes: fill them from each section's references, once.
     let empty: bool = c.query_row("SELECT NOT EXISTS (SELECT 1 FROM scopes) AND EXISTS (SELECT 1 FROM chunks)", [], |r| r.get(0))?;
     if empty {
@@ -594,6 +615,9 @@ pub struct Report {
     pub files_read: usize,
     /// Sections that left the index past their horizon or with their closed thread (`retain`).
     pub retired: usize,
+    /// The retention sweep was due and waits while Echo records or transcribes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sweep_waits: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -1751,5 +1775,39 @@ mod tests {
         assert_eq!(r.embedded, 1);
         let mark: Option<String> = c.query_row("SELECT retained FROM documents WHERE source = 'call/shut'", [], |r| r.get(0)).unwrap();
         assert_eq!(mark.as_deref(), Some("closed:hooli"));
+    }
+
+    #[test]
+    fn a_date_only_listing_shows_only_what_the_reader_may_see() {
+        let (_env, root) = crate::paths::testenv::folders("brain-date-only-access");
+        let db = crowded(&root);
+        let mine = ids_of(&db, "call/target");
+        let f = Filters { since: Some("2026-09-01".into()), until: Some("2026-10-02".into()), ..Default::default() };
+        let h = search_at(&db, "when?", 10, None, None, None, History::Latest, Some(&mine), &f).unwrap();
+        let srcs: Vec<&str> = h["hits"].as_array().unwrap().iter().map(|x| x["source"].as_str().unwrap()).collect();
+        assert_eq!(srcs, ["call/target"], "the other sources of those days are another reader's: {h}");
+        let h = search_at(&db, "what happened on 2026-10-02", 10, None, None, None, History::Latest, Some(&mine), &Filters::default()).unwrap();
+        assert_eq!(h["count"], 0, "that day holds only another reader's post: {h}");
+    }
+
+    #[test]
+    fn a_store_that_has_section_kinds_still_dates_its_facts_by_message_once() {
+        let (_env, root) = crate::paths::testenv::folders("brain-fact-days-again");
+        let db = root.join("knowledge.sqlite");
+        let mut m = input("mail/x", "# Pilot\n\n## 2026-11-01 09:00 Jane Doe\nThe pilot budget is approved.\n\n## 2026-11-12 09:00 Jane Doe\nThe pilot slips.\n");
+        m.event_date = Some("2026-11-12".into());
+        sync(&db, vec![m], None).unwrap();
+        let days = || -> Vec<Option<String>> { open(&db).unwrap().prepare("SELECT event_date FROM chunks WHERE source = 'mail/x' ORDER BY ord").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect() };
+        let want = days();
+        // A store from before the pass: the column is there, the facts carry the conversation's day.
+        let c = open(&db).unwrap();
+        c.execute("UPDATE chunks SET event_date = '2026-11-12' WHERE source = 'mail/x'", []).unwrap();
+        c.execute("DELETE FROM meta WHERE key = 'fact_days'", []).unwrap();
+        drop(c);
+        assert_eq!(days(), want, "dated by each message at the next open");
+        assert_eq!(meta(&open(&db).unwrap(), "fact_days").as_deref(), Some(FACT_DAYS_VERSION));
+        // Done once: a later change isn't undone by another open.
+        open(&db).unwrap().execute("UPDATE chunks SET event_date = '2026-11-12' WHERE source = 'mail/x'", []).unwrap();
+        assert!(days().iter().all(|d| d.as_deref() == Some("2026-11-12")));
     }
 }

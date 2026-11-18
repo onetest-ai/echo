@@ -131,15 +131,17 @@ fn call_inputs() -> Vec<store::Input> {
         .collect()
 }
 
-/// Bring the Brain up to date with the sources (one sync at a time on this computer), as the user asked for it (the
-/// CLI, Sync now): the retention sweep runs when due, whatever Echo is doing.
-pub fn sync() -> Result<store::Report> {
-    sync_as(true)
+/// Whether Echo records or transcribes a call now (the retention sweep waits for it): the recorder's state, or a call's
+/// `.transcribing` marker whose process is alive. On battery or not.
+fn recording_or_transcribing() -> bool {
+    crate::watch::running_watcher().and_then(|w| w.recording).is_some()
+        || crate::calls::all_calls().iter().any(|d| {
+            std::fs::read_to_string(d.join(crate::transcribe_marker())).ok().and_then(|p| p.trim().parse::<u32>().ok()).is_some_and(crate::app::process_alive)
+        })
 }
 
-/// A sync; `asked`: the user's, else the app's own, whose retention sweep waits while Echo records or transcribes
-/// (`quiet`).
-fn sync_as(asked: bool) -> Result<store::Report> {
+/// Bring the Brain up to date with the sources (one sync at a time on this computer).
+pub fn sync() -> Result<store::Report> {
     let lock = paths::config_dir().join("brain.lock");
     anyhow::ensure!(enabled(), "Intake is off (Settings → Intake)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
@@ -228,9 +230,14 @@ fn sync_as(asked: bool) -> Result<store::Report> {
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
     // Retention: sections past their horizon, and closed threads' (their cards stay), leave the index.
-    // Once a day and when a thread closed or opened again; the app's own sync not while Echo records or transcribes.
-    if retain::due(&store_path(), keep.today, &closed)? && (asked || quiet()) {
-        r.retired = retain::apply(&store_path(), keep.today, &closed)?;
+    // Once a day and when a thread closed or opened again; never while Echo records or transcribes (it waits, and the
+    // app's next pass tries again).
+    if retain::due(&store_path(), keep.today, &closed)? {
+        if recording_or_transcribing() {
+            r.sweep_waits = true;
+        } else {
+            r.retired = retain::apply(&store_path(), keep.today, &closed)?;
+        }
     }
     // Which sections mention which terms: no model; the sections written or moved to other threads since they
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
@@ -342,8 +349,7 @@ pub fn start_scheduler() {
             // As often as Recall's job settings say (5 minutes by default; a minute after start), never in
             // the night they pause it in.
             std::thread::sleep(std::time::Duration::from_secs(if last.is_none() { 60 } else { crate::jobs::after_pass("brain_reader", crate::jobs::number("brain_reader", "every")) }));
-            // Not while Echo records or transcribes (`quiet`): the sync and its sweep wait for the next pass.
-            if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) || !quiet() {
+            if crate::notes::quitting() || !settings().enabled() || !settings().auto() || crate::jobs::paused("brain_reader", chrono::Local::now().time()) {
                 continue;
             }
             let fp = fingerprint();
@@ -352,7 +358,7 @@ pub fn start_scheduler() {
                 continue;
             }
             let run = crate::jobs::begin("brain_reader");
-            match sync_as(false) {
+            match sync() {
                 Ok(r) => {
                     // A run when it indexed something or read mail into facts (its model calls).
                     run.done((r.chunks > 0).then(|| format!("{} new section{} indexed", r.chunks, if r.chunks == 1 { "" } else { "s" })));
@@ -360,7 +366,8 @@ pub fn start_scheduler() {
                     if let Some(e) = &r.embed_error {
                         eprintln!("brain: embeddings: {e}");
                     }
-                    last = Some(fp);
+                    // A sweep held back by a recording or transcription: the next pass (a minute on) runs it.
+                    last = (!r.sweep_waits).then_some(fp);
                 }
                 Err(e) => {
                     eprintln!("brain: {e:#}");

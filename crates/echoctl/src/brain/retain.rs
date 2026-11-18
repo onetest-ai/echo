@@ -325,4 +325,28 @@ mod tests {
         let r = brain::sync().unwrap();
         assert_eq!((r.retired, r.added, r.changed), (0, 0, 0), "{r:?}");
     }
+
+    #[test]
+    fn a_transcription_in_progress_holds_the_sweep_back_and_battery_never_does() {
+        let (_env, _root) = crate::paths::testenv::folders("recall-retain-busy");
+        on();
+        let hooli = projects::create("Hooli workshop", None, None).unwrap().id;
+        let shut = call("hooli", 2, Some(&hooli));
+        let other = call("other", 3, None);
+        brain::sync().unwrap();
+        assert_eq!(kinds(&source_of(&shut)).len(), 4);
+        projects::set_stage(&hooli, Stage::Done, Some("wrapped up")).unwrap();
+        // Another call is being transcribed (its marker holds a live process: this one).
+        let marker = other.join(crate::transcribe::IN_PROGRESS);
+        std::fs::write(&marker, std::process::id().to_string()).unwrap();
+        let r = brain::sync().unwrap();
+        assert!(r.sweep_waits && r.retired == 0, "{r:?}");
+        assert_eq!(kinds(&source_of(&shut)).len(), 4, "the closed thread's call waits for the sweep");
+        assert!(due(&brain::store_path(), chrono::Local::now().date_naive(), &projects::closed_threads()).unwrap(), "still due");
+        // A marker left by a process that is gone holds nothing back.
+        std::fs::write(&marker, "999999999").unwrap();
+        let r = brain::sync().unwrap();
+        assert!(!r.sweep_waits && r.retired == 3, "{r:?}");
+        assert_eq!(kinds(&source_of(&shut)), ["card"]);
+    }
 }

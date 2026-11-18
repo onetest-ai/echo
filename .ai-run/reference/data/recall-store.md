@@ -109,7 +109,8 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 
 The index is working memory, not an archive (`brain::retain`). Each section has a kind, `chunks.section`, given by
 `brain::store::section_kind` when the section is written. A store from before the column gets the kinds once, at
-`open`, together with each mail and channel fact's own day.
+`open`. Mail and channel facts are dated by their own message once per `FACT_DAYS_VERSION` (`meta.fact_days`), at
+`open`, by one writer.
 
 | Section kinds | Kept (`retain::horizon`) |
 |---|---|
@@ -140,8 +141,11 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
 - **The sweep** (`retain::apply`) takes what aged since a section was written, and closed threads' sections.
   - It runs at the end of `brain::sync` when `retain::due` says so: once a day, and when the set of closed threads
     changed (`meta.retained_for`).
-  - The app's own sync waits while Echo records or transcribes (`brain::quiet`); so does its sweep. A sync the user
-    asks for (the CLI, Sync now) sweeps when due.
+  - The sweep waits while Echo records a call, or a call is being transcribed: the recorder's state, or a
+    `.transcribing` marker (`transcribe::IN_PROGRESS`) whose process is alive (`brain::recording_or_transcribing`).
+    Battery doesn't hold it back.
+    - The sync itself still runs; its report says `sweep_waits`.
+    - The app's next pass, a minute later, tries again.
   - It reads every section and every section's threads once. It deletes index rows only and marks documents as
     above. The report's `retired` counts the sections that left.
 - **Restore.** `retain::restore`, at the start of every sync, drops a marked document whose closed threads changed,
