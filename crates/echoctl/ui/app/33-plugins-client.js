@@ -59,7 +59,7 @@ function callRowChips(items, call, log) {
   return out
 }
 /** The call a `call.row` chip is drawn for: the row's own facts. */
-const slotCall = (c) => ({ name: c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
+const slotCall = (c) => ({ name: c.name, stamp: callStamp(c.name) || c.name, title: c.title, started_at: c.started_at || null, status: c.status, memo: !!c.memo })
 // end of the call row slot block
 // ── thread slot: the plugins' rows of a thread's or a client's Profile (`thread.profile`, `client.profile`), each
 // drawn on its own — one that throws is left out (and logged), the Profile draws without it; a second row with the same
@@ -248,7 +248,8 @@ function pluginCtx(id) {
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
     where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? S.br.tab : undefined, recall: brainOn() }),
-    go: (hash) => go(hash),
+    /** Go to a hash; `{replace: true}`: the address changes without a history step (back skips it), the page as on a hashchange. */
+    go: (hash, opts) => go(hash, { replace: !!opts && opts.replace === true }),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
     ui: {

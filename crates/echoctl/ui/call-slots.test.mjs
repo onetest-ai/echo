@@ -19,7 +19,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const Plugins = { drawing: false, slots: {}, targets: {} }
 let renders = 0
 const ctxRender = () => { if (!Plugins.drawing) renders++ }
-const page = new Function('Plugins', 'esc', `${block('thread slot')}\n${block('call page slots')}\nreturn { slotCallPage, callHeadBoxes, callSlotAfter, minutesComing, callMinutesLines }`)(Plugins, esc)
+const page = new Function('Plugins', 'esc', 'callStamp', `${block('thread slot')}\n${block('call page slots')}\nreturn { slotCallPage, callHeadBoxes, callSlotAfter, minutesComing, callMinutesLines }`)(Plugins, esc, (n) => /^\d{4}-\d\d-\d\d_\d{6}/.test(n) ? n.slice(0, 17) : '')
 
 // The call's facts: only what the page has; its threads and the first thread's client.
 const c = {
@@ -27,8 +27,8 @@ const c = {
   live: { profile: 'work' }, projects: [{ id: 'internal', client: null }, { id: 'acme-rollout', client: 'acme' }], segments: [1, 2], people: ['Dana'],
 }
 const call = page.slotCallPage(c)
-assert.deepEqual(call, { name: c.name, title: 'Acme weekly sync', started_at: '2026-11-06T10:00:00Z', notes: true, profile: 'work', memo: false, threads: ['internal', 'acme-rollout'], client: 'acme' })
-assert.deepEqual(page.slotCallPage({ name: 'm', title: 'Memo', memo: true }), { name: 'm', title: 'Memo', started_at: null, notes: false, profile: null, memo: true, threads: [], client: null }, 'a memo in no thread')
+assert.deepEqual(call, { name: c.name, stamp: '2026-11-06_100000', title: 'Acme weekly sync', started_at: '2026-11-06T10:00:00Z', notes: true, profile: 'work', memo: false, threads: ['internal', 'acme-rollout'], client: 'acme' })
+assert.deepEqual(page.slotCallPage({ name: 'm', title: 'Memo', memo: true }), { name: 'm', stamp: 'm', title: 'Memo', started_at: null, notes: false, profile: null, memo: true, threads: [], client: null }, 'a memo in no thread (an undated folder: its whole name is its stamp, as calls::stamp_of)')
 
 // Header boxes: each its own, the one that throws and a duplicate left out and logged, a ctx.render() in render ignored.
 const logged = []

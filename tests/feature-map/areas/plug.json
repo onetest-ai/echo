@@ -198,7 +198,7 @@
   },
   {
    "id": "F-PLUG-101",
-   "feature": "A plugin adds a box of its own to a call's header, before its My notes and ⋯ buttons (client slot `call.header`: {id, label, render(call) → HTML, after?(box, call)}, call = {name, title, started_at, notes, profile, memo, threads, client} from what the page has): a chip or button with a popup it draws itself, its record of the call its own; each box drawn on its own (one that throws is left out and logged, the header still draws), `after` once per box drawn afresh; switched off or removed, its box leaves every call",
+   "feature": "A plugin adds a box of its own to a call's header, before its My notes and ⋯ buttons (client slot `call.header`: {id, label, render(call) → HTML, after?(box, call)}, call = {name, stamp, title, started_at, notes, profile, memo, threads, client} from what the page has; `stamp` the call's `YYYY-MM-DD_HHMMSS`, kept when it is retitled): a chip or button with a popup it draws itself, its record of the call its own; each box drawn on its own (one that throws is left out and logged, the header still draws), `after` once per box drawn afresh; switched off or removed, its box leaves every call",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -780,7 +780,7 @@
   },
   {
    "id": "F-PLUG-106",
-   "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, and a mail's Microsoft 365 ids as Recall keeps them (`m365_id`: its last message's Graph id, the one `ctx.m365.mailThread` takes; `conversation_id`; null for a post or what Recall didn't keep), never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
+   "feature": "`minutes_written` and `sources_changed` carry what Echo already decided. `minutes_written`: `{id, link, call, stamp, title, started_at, ended_at, duration_min, app, memo, revision, rewritten}` (`rewritten` true when this call's minutes were told before, `revision` changes with the minutes) and, to a plugin that reads sources (`uses.echo.read`: source or sources), also the call's `threads`, `client`, `profile`, `participants` and `minutes` by section — never its transcript. `sources_changed`: `{changed, removed}` ids and, to a reader, `items` (100 at most) with each changed mail's or post's `subject`, `at`, `threads`, `client`, `profile`, `from`, `people` and `trust` as Recall indexed it, and a mail's Microsoft 365 ids as Recall keeps them (`m365_id`: its last message's Graph id, the one `ctx.m365.mailThread` takes; `conversation_id`; null for a post or what Recall didn't keep), never its text; `echo.read('source')` of the same mail or post gives the same routing with Recall's facts per message (`messages: [{from, at, text, link}]`). A plugin that only names the event in `uses.events.on` hears neither routing, people, minutes nor mail subjects and senders",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -789,7 +789,7 @@
   },
   {
    "id": "F-PLUG-107",
-   "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names); the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
+   "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, stamp, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names); the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -799,6 +799,24 @@
   {
    "id": "F-PLUG-115",
    "feature": "A plugin's window half shows a file or folder of a folder the user gave it selected in Finder / Explorer (`ctx.system.reveal(root, path)`, `uses.folders`): only on the user's click or key (else refused with \"Finder or Explorer opens only on your click\", nothing sent); never outside the folder (`..`, an absolute path, a link out of it), a missing file, a folder it wasn't given, a plugin that didn't ask for folders or is off; never from the host half; on test data only written to the open log (`reveal <path>`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-116",
+   "feature": "A plugin's window half goes to a hash without a history step (`ctx.go(hash, {replace: true})`): the address changes in place (Back skips it) and the window shows the page as on a hashchange; without `replace`, `ctx.go(hash)` is a history step as before; the hash it is already at only redraws",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
+   "id": "F-PLUG-117",
+   "feature": "A plugin gets a call's stamp (`YYYY-MM-DD_HHMMSS`, kept when the call is retitled) as `stamp` wherever it gets a call: the `call` of `call.header`, `call.menu`, `call.minutes` and `call.row`, the `recording_started`, `recording_stopped`, `transcribed` and `minutes_written` events, and the rows of `ctx.echo.read('calls')` and `'sources'`; `ctx.echo.read('source', 'call:<stamp>')` reads the call as its folder's name does (the stamp of no call is refused)",
    "priority": "medium",
    "check": "agent",
    "axes": [

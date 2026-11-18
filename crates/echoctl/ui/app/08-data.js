@@ -291,7 +291,16 @@ function route() {
     if (m[2]) S.tab = m[2]
   }
 }
-const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
+// ── go: ──
+/** Go to a hash: a new history step, or with `{replace: true}` (a plugin's `ctx.go`) the address changed in place and
+ *  a hashchange fired, so every listener runs as on a real one (routing, sheets, a plugin's mic, drops). The same hash
+ *  only redraws. */
+const go = (hash, opts) => {
+  if (location.hash.slice(1) === hash) return render()
+  if (opts && opts.replace === true) { replaceUrl('#' + hash); return dispatchEvent(new HashChangeEvent('hashchange')) }
+  location.hash = hash
+}
+// end of the go block
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
   : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? `brain/${S.br.tab}`
