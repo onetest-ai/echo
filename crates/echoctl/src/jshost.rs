@@ -1288,7 +1288,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "people" => crate::share::people()?,
                 "dictionary" => crate::share::dictionary()?,
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
-                "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group()})).collect::<Vec<_>>()),
+                "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client, "stage": p.stage.id(), "group": p.stage.group(), "profile": crate::threadlinks::profile_of(&p)})).collect::<Vec<_>>()),
                 "calls" => crate::share::calls(&opt)?,
                 "calendar" => crate::share::calendar(&opt)?,
                 "me" => crate::share::me()?,
@@ -3491,6 +3491,15 @@ mod tests {
         let rows = run("tracker", "threads", json!({})).unwrap();
         let row = rows.as_array().unwrap().iter().find(|r| r["id"] == t.as_str()).unwrap().clone();
         assert_eq!((row["stage"].as_str(), row["group"].as_str()), (Some("lead"), Some("pursuit")));
+        // Its AI profile as core decides it: the pinned one, else the default's.
+        assert_eq!(row["profile"].as_str(), Some(crate::ai::default_id().as_str()));
+        crate::projects::update(&other, |p| {
+            p.ai_profile = Some("work".into());
+            Ok(())
+        })
+        .unwrap();
+        let rows = run("tracker", "threads", json!({})).unwrap();
+        assert_eq!(rows.as_array().unwrap().iter().find(|r| r["id"] == other.as_str()).unwrap()["profile"], "work");
         // The stage, with the plugin's name and reason in its history.
         assert_eq!(run("tracker", "stage", json!({"thread": t, "stage": "proposal"})).unwrap()["applied"], true);
         let p = crate::projects::load(&t).unwrap();

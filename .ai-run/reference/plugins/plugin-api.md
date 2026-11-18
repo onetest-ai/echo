@@ -508,8 +508,8 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source`, `calls`, `calendar`, `me`, `recording`; a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
-`pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
+`source`, `calls`, `calendar`, `me`, `recording`; a `threads` row is `{id, name, client, stage, group, profile}` of an open thread (`group`:
+`pursuit`, `delivery`; `profile`: the id of the AI profile its jobs and sync run on, the one pinned to it, else the default's (a call runs on its own pin, which may differ); never more of the profile). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
 `plugins::ECHO_READS`, `share::dictionary_add`
 
 | Read | Sheet ("Reads … in Echo") | Gives |
