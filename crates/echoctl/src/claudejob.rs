@@ -235,7 +235,7 @@ impl Spec {
 /// The longest key a plugin names a run by.
 const KEY_MAX: usize = 64;
 
-/// A key a plugin names a run by: 1 to 64 of `A-Z a-z 0-9 . _ -`.
+/// A key a plugin names a run by: 1 to 64 of `A-Z a-z 0-9 . _ -`, any case the same key (as on a disk that folds case).
 pub fn check_key(key: &str) -> Result<()> {
     if key.is_empty() || key.len() > KEY_MAX || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) {
         bail!("a run's key is 1 to {KEY_MAX} letters, digits, “.”, “_” or “-”");
@@ -245,9 +245,9 @@ pub fn check_key(key: &str) -> Result<()> {
 
 /// Where plugin `plugin`'s run under `key` keeps its files, across processes: `<base>.lock` held while it runs,
 /// `<base>.pid` its Claude Code once started, `<base>.stopped` once `stop_keyed` stopped it. The key's characters can't
-/// leave the folder: each file's name ends in its own suffix.
+/// leave the folder: each file's name ends in its own suffix, and starts with `k-` (never a Windows device name).
 fn key_base(plugin: &str, key: &str) -> PathBuf {
-    paths::state_dir().join("plugins").join(".runs").join(plugin).join(key)
+    paths::state_dir().join("plugins").join(".runs").join(plugin).join(format!("k-{}", key.to_ascii_lowercase()))
 }
 
 fn key_file(base: &Path, ext: &str) -> PathBuf {
@@ -295,15 +295,38 @@ pub fn stop_keyed(plugin: &str, key: &str) -> Result<bool> {
     if !base.parent().is_some_and(Path::is_dir) || crate::app::FileLock::try_take(&key_file(&base, "lock"))?.is_some() {
         return Ok(false);
     }
-    // The mark first, then its process: a run that starts Claude Code meanwhile sees the mark (`key_started`).
-    fs::write(key_file(&base, "stopped"), b"")?;
-    if let Some(pid) = fs::read_to_string(key_file(&base, "pid")).ok().and_then(|p| p.trim().parse::<u32>().ok()) {
-        crate::ai::stop_group(pid);
-    }
+    stop_base(&base)?;
     Ok(true)
 }
 
-/// A plugin removed with its data: its keys' locks go too, those nobody holds (`jshost::folders::forget`).
+/// The run whose files are at `base` stopped. The mark first, then its process: a run that starts Claude Code meanwhile
+/// sees the mark (`key_started`).
+fn stop_base(base: &Path) -> Result<()> {
+    fs::write(key_file(base, "stopped"), b"")?;
+    if let Some(pid) = fs::read_to_string(key_file(base, "pid")).ok().and_then(|p| p.trim().parse::<u32>().ok()) {
+        crate::ai::stop_group(pid);
+    }
+    Ok(())
+}
+
+/// A plugin removed (`plugins::remove`): its runs under a key still running stopped, each waited for till it ends
+/// (10 s at most).
+pub fn stop_keyed_runs(plugin: &str) {
+    let dir = paths::state_dir().join("plugins").join(".runs").join(plugin);
+    for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if let Some(base) = p.to_str().and_then(|s| s.strip_suffix(".lock")) {
+            if matches!(crate::app::FileLock::try_take(&p), Ok(None)) && stop_base(Path::new(base)).is_ok() {
+                let end = std::time::Instant::now() + Duration::from_secs(10);
+                while matches!(crate::app::FileLock::try_take(&p), Ok(None)) && std::time::Instant::now() < end {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+}
+
+/// A plugin removed with its data: its keys' files go, those nobody holds (`jshost::folders::forget`).
 pub fn forget_keys(plugin: &str) {
     let dir = paths::state_dir().join("plugins").join(".runs").join(plugin);
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -481,6 +504,10 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         key_started(k, c.id());
     }
     let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked));
+    // Its process reaped: its number may be another's soon (Windows reuses them), so no stop reads it any more.
+    if let Some(k) = &spec.key {
+        let _ = fs::remove_file(key_file(k, "pid"));
+    }
     if let Some(f) = settings_file {
         let _ = fs::remove_file(f);
     }

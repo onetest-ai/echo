@@ -524,7 +524,11 @@ fn copy_file(from: &Path, to: &Path) -> Result<Copied> {
 /// → {path (in the store), files, bytes, skipped, why: {large, unreadable}}. `ctx.store.remove(path)` removes it.
 pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
     let (root, base) = walk_base(id, root, &json!({}))?;
-    let asked = o["exclude"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let asked = match &o["exclude"] {
+        Value::Null => &[][..],
+        Value::Array(a) => a.as_slice(),
+        _ => bail!("exclude is a list of paths in the folder"),
+    };
     if asked.len() > EXCLUDE_MAX {
         bail!("exclude names {EXCLUDE_MAX} paths at most");
     }
@@ -1182,11 +1186,12 @@ mod tests {
             claude(json!({"folder": v, "mode": "copy", "exclude": many})),
             claude(json!({"folder": v, "mode": "read", "exclude": ["Archive"]})),
             claude(json!({"exclude": ["Archive"]})),
+            claude(json!({"folder": v, "mode": "copy", "exclude": "Archive"})),
         ]
         .into_iter()
         .map(|r| r.unwrap_err().to_string())
         .collect();
-        assert!(why[0].contains("100 paths at most") && why[1].contains("goes with a copy") && why[2].contains("go with a folder"), "{why:?}");
+        assert!(why[0].contains("100 paths at most") && why[1].contains("goes with a copy") && why[2].contains("go with a folder") && why[3].contains("a list of paths"), "{why:?}");
         assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
         plugins::remove("reader", true).unwrap();
         sync();
@@ -1214,7 +1219,7 @@ mod tests {
             a["prompt"] = json!("Index the notes");
             std::thread::spawn(move || service_async(id, "claude.run", &a).map_err(|e| format!("{e:#}")))
         };
-        let pid_of = |id: &str| std::fs::read_to_string(paths::state_dir().join(format!("plugins/.runs/{id}/index.pid"))).ok().and_then(|p| p.trim().parse::<u32>().ok());
+        let pid_of = |id: &str| std::fs::read_to_string(paths::state_dir().join(format!("plugins/.runs/{id}/k-index.pid"))).ok().and_then(|p| p.trim().parse::<u32>().ok());
         let stop = |id: &str, key: &str| service_async(id, "claude.stop", &json!(key)).map_err(|e| e.to_string());
         let mine = start("indexer", json!({"folder": v, "mode": "copy", "key": "index", "dir": "runs/a"}));
         let theirs = start("other", json!({"key": "index", "dir": "runs/b"}));
@@ -1241,12 +1246,22 @@ mod tests {
         assert!(crate::app::process_alive(their_pid) && !theirs.is_finished());
         assert_eq!(stop("indexer", "index").unwrap(), json!(false), "none of its own running");
         assert!(crate::claudejob::Keyed::take("indexer", "index").is_ok());
-        assert_eq!(stop("other", "index").unwrap(), json!(true));
+        // Any case is the same key; a Windows device name is a key like any other.
+        assert_eq!(stop("other", "INDEX").unwrap(), json!(true));
         assert_eq!(theirs.join().unwrap().unwrap_err(), "stopped");
-        for id in ["indexer", "other", "quiet"] {
+        assert_eq!(stop("other", "nul").unwrap(), json!(false));
+        // Removed: its run still running is stopped; with its data, its keys go.
+        let last = start("indexer", json!({"key": "nul", "dir": "runs/c"}));
+        let nul_pid = || std::fs::read_to_string(paths::state_dir().join("plugins/.runs/indexer/k-nul.pid")).ok().and_then(|p| p.trim().parse::<u32>().ok());
+        paths::testenv::eventually("the last run started", || nul_pid().is_some());
+        let pid = nul_pid().unwrap();
+        plugins::remove("indexer", false).unwrap();
+        assert_eq!(last.join().unwrap().unwrap_err(), "stopped");
+        assert!(!crate::app::process_alive(pid));
+        assert!(!paths::state_dir().join("plugins/.runs/indexer").exists(), "its keys go with its data");
+        for id in ["other", "quiet"] {
             plugins::remove(id, false).unwrap();
         }
-        assert!(!paths::state_dir().join("plugins/.runs/indexer").exists(), "its keys go with its data");
         sync();
     }
 

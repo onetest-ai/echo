@@ -369,14 +369,14 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`).
   Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
 - A run under a key of its own: `ctx.claude.run({..., key})`, `key` 1 to 64 letters, digits, `.`, `_` or `-` (any
-  other refused). One run at a time per plugin and key, across Echo's processes (the app and a terminal's
+  other refused; upper and lower case the same key). One run at a time per plugin and key, across Echo's processes (the app and a terminal's
   `echoctl plugin call`): a second while one runs is refused ("a run with key “…” is running already"). `await
   ctx.claude.stop(key)` (needs `uses.claude`) stops the plugin's own run under that key — Claude Code and every process
   it started (its process group; Windows: `taskkill /T /F`), wherever it runs — and gives `true`; `false` when none
   runs. The stopped `run` fails with the message `stopped`; its log ends "stopped by the plugin (ctx.claude.stop)" and
   its record (`permissions.json`) has `stopped: true`; a `copy` run's snapshot is removed. A key names only the
-  calling plugin's runs: another plugin's run under the same key goes on. Evidence: `claudejob::Keyed`,
-  `claudejob::stop_keyed`
+  calling plugin's runs: another plugin's run under the same key goes on. A plugin removed has its runs under a key
+  stopped first. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`
 - In a folder it was given (needs `uses.folders`): `await ctx.claude.run({folder, path, mode, prompt, title, profile,
   model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
   Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load
@@ -492,7 +492,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source`, `calls`, `calendar`, `me` — and `recording` with a recording's events in `uses.events.on` (below); a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
+`source`, `calls`, `calendar`, `me`, `recording`; a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
 `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
 `plugins::ECHO_READS`, `share::dictionary_add`
 

@@ -26,11 +26,13 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   inside the root as they are entered; a file that can't be opened or read, or that grows past 50 MB while it is copied, is left out (its part removed), and on a
   cap or a copy that can't be written the folder made is removed. One snapshot of a plugin is made at a time, under
   `.locks/<id>.snapshot.lock` (taken without waiting; removed with its data). Evidence: `jshost::folders::snapshot`
-- A Claude run under a plugin's key (`ctx.claude.run({key})`) holds `.runs/<id>/<key>.lock` beside the stores while
-  it runs (taken without waiting: a second run under it is refused), with `<key>.pid` (its Claude Code, once started)
-  and `<key>.stopped` (written by `ctx.claude.stop` before it stops that process group; a run starting Claude Code
-  after it stops it at once), both removed when the run ends; the locks go with the plugin's data. Evidence:
-  `claudejob::Keyed`, `claudejob::stop_keyed`, `claudejob::forget_keys`
+- A Claude run under a plugin's key (`ctx.claude.run({key})`) holds `.runs/<id>/k-<key in lower case>.lock` beside
+  the stores while it runs (taken without waiting: a second run under it is refused), with `k-<key>.pid` (its Claude
+  Code, from its start till Echo has reaped it) and `k-<key>.stopped` (written by `ctx.claude.stop` before it stops
+  that process group; a run that sees it before starting Claude Code fails `stopped`, one that sees it right after
+  stops it at once), both removed when the run ends. Removing the plugin stops its runs under a key (waiting 10 s at
+  most for each to end); the locks go with its data. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`,
+  `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and
   `work.json` there; `threads.json`, `client-values.json` and `work.json` each change under its own lock across
   processes (`.locks/<id>.threads.lock`, `.locks/<id>.clients.lock`, `.locks/<id>.work.lock`); a `threads.json` or
