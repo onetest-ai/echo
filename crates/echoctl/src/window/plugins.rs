@@ -677,6 +677,15 @@ mod tests {
         (status, serde_json::from_str(json).unwrap_or(Value::Null))
     }
 
+    /// A request of another method that declares a body anyway gets its answer, not a reset connection: the served
+    /// window reads what was declared (unused) before it closes, however late it arrives.
+    #[cfg(feature = "js")]
+    #[test]
+    fn a_served_get_with_a_body_is_answered_not_reset() {
+        let (_env, _root) = crate::paths::testenv::folders("window-get-body");
+        assert_eq!(served("GET", "/api/plugin/counter/call/len", &vec![b'x'; 1 << 20], true).0, 405);
+    }
+
     #[cfg(feature = "js")]
     #[test]
     fn a_window_halfs_call_sends_its_arguments_in_a_post_body_of_up_to_4_mb_in_both_windows() {

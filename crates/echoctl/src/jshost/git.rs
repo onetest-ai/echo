@@ -1177,6 +1177,34 @@ mod tests {
         assert!(!started.iter().any(|l| l.contains("maintenance") || l.contains("\"gc\"")), "{started:?}");
     }
 
+    /// Echo's own commit in a repository asking for gc at every chance starts no maintenance or gc behind it (git's
+    /// trace from the home's settings): nothing outlives Echo's run to read the repository's settings without its
+    /// overrides.
+    #[cfg(unix)]
+    #[test]
+    fn echos_commit_leaves_no_git_running_behind_it() {
+        let (_env, root) = paths::testenv::folders("jshost-git-behind");
+        if program().is_err() {
+            return;
+        }
+        user_identity(&root);
+        let trace = root.join("trace.json");
+        let mut home = std::fs::read_to_string(root.join("user/.gitconfig")).unwrap();
+        home.push_str(&format!("[trace2]\n\teventTarget = {}\n", trace.display()));
+        std::fs::write(root.join("user/.gitconfig"), home).unwrap();
+        let vault = root.join("vault");
+        trap(&vault, &root.join("marks"));
+        install(&root, "keeper", json!({"folders": {"what": "vaults", "write": true}}), &vault);
+        std::fs::write(&trace, "").unwrap();
+        run("keeper", "commit", json!({"paths": ["a.md", "b.md"], "message": "Echo: notes"})).unwrap();
+        let events = std::fs::read_to_string(&trace).unwrap();
+        assert!(events.lines().any(|l| l.contains("\"event\":\"start\"") && l.contains("\"commit\"")), "the trace holds Echo's commit: {events}");
+        let started: Vec<&str> = events.lines().filter(|l| l.contains("\"event\":\"child_start\"")).collect();
+        assert!(!started.iter().any(|l| l.contains("maintenance") || l.contains("\"gc\"")), "{started:?}");
+        plugins::remove("keeper", true).unwrap();
+        sync();
+    }
+
     #[test]
     fn a_repositorys_own_settings_run_nothing() {
         let (_env, root) = paths::testenv::folders("jshost-git-trap");
