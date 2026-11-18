@@ -31,7 +31,7 @@ tags: [plugins, routines, client, sheet]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/routines-demo:main`; click "All routines" | A dialog "Routines demo’s routines": "Each runs Claude Code on its own while it is on, as its sheet in Settings → Plugins says; you can switch it off there any time.", the heading "Routines — off unless you switch them on", the switches "Mail → Knowledge on" (not checked, "Every 60 min · paused at night", "Files trusted mail into your vault") and "Vault health on" (checked, "Every 1440 min"), and "Done" |
+| 1 | Navigate to `{{base_url}}/#settings/routines-demo:main`; click "All routines" | A dialog "Routines demo’s routines": "Each runs Claude Code on its own while it is on, as its sheet in Settings → Plugins says; you can switch it off there any time.", the heading "Routines — off unless you switch them on", the switches "Mail → Knowledge on" (not checked, "Every hour · paused at night", "Files trusted mail into your vault") and "Vault health on" (checked, "Every day"), and "Done" |
 | 2 | Click the switch "Mail → Knowledge on"; wait 1 s | It is checked; `$E jobs routines`: `routines-demo.mail-knowledge` `enabled` true |
 | 3 | Click "Done"; wait 1 s | The dialog closes; the plugin's line reads "mail-knowledge on, vault-health on" |
 | 4 | Click "Only Vault health" | The dialog shows one switch, "Vault health on", checked |

@@ -9,13 +9,13 @@ const start = src.indexOf('// ── plugin routine switches:')
 const end = src.indexOf('// end of the plugin routine switches block', start)
 assert.ok(start >= 0 && end > start, 'the plugin routine switches block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const names = 'plRoutineSwitches, plRoutinesStart, plRoutinesChanged, routineOfferPick, routineOfferHtml, routineOfferResult'
+const names = 'plRoutineSwitches, plSheetLines, plRoutinesStart, plRoutinesChanged, routineOfferPick, routineOfferHtml, routineOfferResult'
 const B = new Function('esc', `${src.slice(start, end)}\nreturn { ${names} }`)(esc)
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
-const mail = { routine: 'mail-knowledge', name: 'Mail → Knowledge', what: 'Files trusted mail into your vault', schedule: 'Every 60 min · paused at night', on: false }
-const vault = { routine: 'vault-health', name: 'Vault health', what: 'Checks links and stale pages', schedule: 'Every 1440 min', on: false }
+const mail = { routine: 'mail-knowledge', name: 'Mail → Knowledge', what: 'Files trusted mail into your vault', schedule: 'Every hour · paused at night', on: false, line: 'Has a routine “Mail → Knowledge”, long line', facts: ['acts on its own as you set routines', 'may change your Echo data and send as you', 'auto mode', 'prompt 1a2b3c4d'] }
+const vault = { routine: 'vault-health', name: 'Vault health', what: 'Checks links and stale pages', schedule: 'Every day', on: false, line: 'Has a routine “Vault health”, long line', facts: ['no tools: it can only answer', 'prompt 5e6f7a8b'] }
 
 test('the sheet: a switch per routine, off as it opens, with its name, when it runs and what it does', () => {
   const on = B.plRoutinesStart([mail, vault])
@@ -24,12 +24,23 @@ test('the sheet: a switch per routine, off as it opens, with its name, when it r
   assert.ok(html.includes('Routines — off unless you switch them on'))
   assert.equal((html.match(/role="switch"/g) || []).length, 2)
   assert.ok(html.includes('aria-checked="false" aria-label="Mail → Knowledge on" data-pl-sheet-rt="mail-knowledge" data-val="true"'), html)
-  for (const t of ['Every 60 min · paused at night', 'Files trusted mail into your vault', 'Vault health', 'Checks links and stale pages']) assert.ok(html.includes(t), t)
+  for (const t of ['Every hour · paused at night', 'Every day', 'Files trusted mail into your vault', 'Vault health', 'Checks links and stale pages']) assert.ok(html.includes(t), t)
+  // Its facts sit under its switch, muted, on one line; no long sentence is repeated.
+  assert.ok(html.includes('acts on its own as you set routines · may change your Echo data and send as you · auto mode · prompt 1a2b3c4d'), html)
+  assert.ok(html.includes('no tools: it can only answer · prompt 5e6f7a8b'), html)
+  assert.ok(!html.includes('1440 min') && !html.includes('long line'), html)
   // Switched on: drawn on, its click sends off.
   const on2 = B.plRoutineSwitches([vault], { 'vault-health': true }, 'data-x')
   assert.ok(on2.includes('class="sw on" role="switch" aria-checked="true"') && on2.includes('data-val="false"'), on2)
   assert.equal(B.plRoutineSwitches([], {}, 'data-x'), '', 'no routines: no block')
   assert.equal(B.plRoutineSwitches(undefined, {}, 'data-x'), '')
+})
+
+test('the sheet lists each routine once: its long line leaves "It will be able to", the others stay', () => {
+  const r = { uses: ['Reads your calls', mail.line, vault.line], new_uses: [vault.line, 'Sends mail'], routines: [mail, vault] }
+  assert.deepEqual(B.plSheetLines(r, false), ['Reads your calls'])
+  assert.deepEqual(B.plSheetLines(r, true), ['Sends mail'])
+  assert.deepEqual(B.plSheetLines({ uses: ['a'] }, false), ['a'], 'no routines: as the review has it')
 })
 
 test("a plugin's words are text, never markup", () => {

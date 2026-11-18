@@ -62,8 +62,11 @@ asks again, naming the changed routine; the user's yes to the update keeps the r
 A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
 id left. Under the lines the window's sheet has "Routines — off unless you switch them on": a switch per routine it
 offers — on an install every routine, on an update (or an install over the installed version) only those it adds or
-changes — with its name, when it runs ("Every N min · paused at night") and its `what`; one it adds starts off, one it
-changes as the user has it. The routines the user switched there are set so once it is installed (only the switches
+changes — each with its name, when it runs in plain words ("Every hour", "Every day", "Every 2 h", "Every 45 min", then
+" · paused at night"), its `what` and, in small muted text under it, its facts (acts on its own as you set routines; may
+change your Echo data and send as you; when its `tools` name one, "auto mode" or "skipping every permission check"; for "none" only "no tools: it can only answer"; its prompt <hash>); one it adds starts off, one it changes as the user has it. A routine shows once
+there: the window leaves its long line out of "It will be able to" (the review's `routines[].line` names it, `facts`
+the small text), while the CLI's review keeps the line. The routines the user switched there are set so once it is installed (only the switches
 moved are sent: `plugin_op` `install` / `update` with `routines: {<routine>: on}`); a routine kept unchanged has no
 switch and stays as the user had it. The CLI's `echoctl plugin install <id> --routines <a,b>|all` and `echoctl plugin
 update <id> --routines <a,b>|all` switch on the routines named (`all`: every one the sheet offers); the review lists
@@ -983,7 +986,7 @@ Evidence: `jshost::work::check_rows`
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.routines.offer(ids?)` (no capability: its routines are on its sheet already): Echo's sheet of the plugin's own
   routines over the window, in a plugin sheet's frame — those `ids` name (its manifest's routine ids, shown in its
-  order) or all — each with Echo's switch, name, when it runs and `what`, the line "Each runs Claude Code on its own
+  order) or all — each with Echo's switch, name, when it runs (in plain words, as on the install sheet) and `what`, the line "Each runs Claude Code on its own
   while it is on, as its sheet in Settings → Plugins says; you can switch it off there any time." and Done. `async`: it
   rejects, before anything is shown, unless the page has the user's click or key (`copyAllowed`), and on an id it
   hasn't ("the plugin has no routine “x”") or when it has none. Only the user switches them there (a click the page's

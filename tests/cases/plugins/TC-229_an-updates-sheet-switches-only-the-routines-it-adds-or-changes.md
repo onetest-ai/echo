@@ -32,7 +32,7 @@ tags: [plugins, routines, sheet, update]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/plugins`; click the tab "Installed"; click the row "Routines demo"; click "Update to 0.2.0" | The sheet "Routines demo 0.2.0 asks for more" lists one line, "Has a routine “Weekly digest”, off unless you switch it on here or later in Settings → Plugins: …"; under "Routines — off unless you switch them on" one switch, "Weekly digest on", with "Every 1440 min · paused at night" and "Sums up the week's new notes in one page", not checked — no switch for Mail → Knowledge or Vault health |
+| 1 | Navigate to `{{base_url}}/#settings/plugins`; click the tab "Installed"; click the row "Routines demo"; click "Update to 0.2.0" | The sheet "Routines demo 0.2.0 asks for more" has no "Has a routine “Weekly digest” …" line in "It will be able to"; under "Routines — off unless you switch them on" one switch, "Weekly digest on", with "Every day · paused at night", "Sums up the week's new notes in one page" and under it the small muted line "acts on its own as you set routines · may change your Echo data and send as you · prompt <hash>", not checked — no switch for Mail → Knowledge or Vault health |
 | 2 | Click the switch "Weekly digest on"; click "Update to 0.2.0"; wait 3 s | `$E jobs routines`: `routines-demo.weekly-digest` `enabled` true, `vault-health` still true, `mail-knowledge` still false; the detail says 0.2.0 |
 
 ## Expected Final State

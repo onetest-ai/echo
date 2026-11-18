@@ -163,13 +163,15 @@ function plSheet(sh) {
   const box = (inner, name = '') => `<div class="pl-sheet" role="dialog" aria-modal="true"${name ? ` aria-label="${esc(name)}"` : ''}>${inner}</div>`
   if (!r) return box('<span class="set-sub">Reading what it uses…</span>')
   if (r.error) return box(`<span class="error">${esc(r.error)}</span><div class="pl-sheet-btns"><button class="btn" data-pl-sheet-cancel>Close</button></div>`)
-  const lines = sh.update ? r.new_uses : r.uses
+  // A routine shows once, under its switch with its facts: its long line is not repeated in this list.
+  const lines = plSheetLines(r, sh.update)
+  const able = lines.length || !(r.routines || []).length ? `<div class="pl-h4">It will be able to</div>${plUses(lines)}` : ''
   const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
   const who = outside ? `<div class="pl-warn"><b>!</b><span>Listed by ${esc(r.market)} — Echo hasn’t reviewed it. Install it only if you trust who made it.</span></div>` : ''
   const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
   return box(`<div class="pl-dhead">${plTile({ id: r.id, name: r.name })}<div style="flex:1"><div class="pl-dn">${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</div>
       <div class="set-sub">from <b>${esc(r.market)}</b> · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div></div></div>
-    ${who}<div class="pl-h4">It will be able to</div>${plUses(lines)}${r.offers ? `<div class="set-sub pl-offers">${esc(r.offers)} — you add one, or not, from a dashboard's +</div>` : ''}
+    ${who}${able}${r.offers ? `<div class="set-sub pl-offers">${esc(r.offers)} — you add one, or not, from a dashboard's +</div>` : ''}
     ${plRoutineSwitches(r.routines, sh.on || plRoutinesStart(r.routines), 'data-pl-sheet-rt')}
     ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
     <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div>`, sh.update ? `${r.name} ${r.version} asks for more` : `Install ${r.name} ${r.version}?`)
@@ -184,10 +186,12 @@ function plRoutineSwitches(routines, on, attr) {
   const row = (r) => {
     const v = !!on[r.routine]
     return `<div class="pl-rt"><button class="sw${v ? ' on' : ''}" role="switch" aria-checked="${v}" aria-label="${esc(r.name)} on" ${attr}="${esc(r.routine)}" data-val="${!v}"></button>`
-      + `<div class="pl-rt-txt"><div class="pl-rt-top"><b>${esc(r.name)}</b><span class="set-sub">${esc(r.schedule)}</span></div><span class="set-sub">${esc(r.what)}</span></div></div>`
+      + `<div class="pl-rt-txt"><div class="pl-rt-top"><b>${esc(r.name)}</b><span class="set-sub">${esc(r.schedule)}</span></div><span class="set-sub">${esc(r.what)}</span>${(r.facts || []).length ? `<span class="set-sub">${esc(r.facts.join(' · '))}</span>` : ''}</div></div>`
   }
   return `<div class="pl-h4">Routines — off unless you switch them on</div><div class="pl-rts" role="group" aria-label="Routines">${routines.map(row).join('')}</div>`
 }
+/** The window sheet's "It will be able to" lines: the review's, less each routine's own (shown under its switch). */
+const plSheetLines = (r, update) => ((update ? r.new_uses : r.uses) || []).filter((l) => !(r.routines || []).some((x) => x.line === l))
 /** The switches as a sheet opens: each routine as Echo has it now (one it adds: off). */
 const plRoutinesStart = (routines) => Object.fromEntries((routines || []).map((r) => [r.routine, !!r.on]))
 /** What the user moved on the sheet ({routine: on}): a switch left as it was isn't sent. */
