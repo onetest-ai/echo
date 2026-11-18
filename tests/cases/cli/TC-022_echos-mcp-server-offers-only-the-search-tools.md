@@ -3,7 +3,7 @@ id: TC-022
 title: Echo's MCP server offers only the search tools — search_sources finds what echoctl brain search finds, read_source and read_link read around it, list_scopes gives the ids, the people and relations tools are gone
 priority: high
 type: functional
-requirements: [F-KNOW-05, F-KNOW-07]
+requirements: [F-KNOW-05, F-KNOW-07, F-KNOW-10]
 module: cli
 run: agent
 platform: any
@@ -39,6 +39,7 @@ tags: [cli, recall, search, mcp]
 | 2a | `mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_scopes","arguments":{}}}'` | `isError` false; `structuredContent.clients` and `.threads` list ids with their documents, among the threads `acme-rollout` |
 | 3 | For each of `find_people`, `get_person`, `find_related`, `get_evidence`: `mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"<it>","arguments":{}}}'` | Each answers `result.isError` true with `no tool` in its text |
 | 4 | `mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"cap yearly increase","limit":3}}}'`; then `target/debug/echoctl brain search "cap yearly increase" --limit 3` | The tool's `result.structuredContent.hits[0].breadcrumb_path` starts with "Acme renewal negotiation", the same first hit (`chunk_id`) as the CLI's `hits[0]`; its `link` is an `echo://call/…` link |
+| 4a | `mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"cap yearly increase","section":["summary"],"kind":"call"}}}'` | `isError` false; every hit's `section_kind` is "summary"; `structuredContent.filters.sections` is `["summary"]` and `.kinds` `["call"]` |
 | 5 | `mcp '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_source","arguments":{"source":"<step 4's hits[0].source>","titles_only":true}}}'` | `structuredContent.sections` lists the call's sections in order, one of them step 4's `chunk_id` |
 | 6 | `mcp '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"read_link","arguments":{"link":"<step 4's hits[0].link>"}}}'` | `structuredContent.text` holds the call's minutes, with "cap on the yearly increase" |
 | 7 | `mcp '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"search_knowledge","arguments":{"query":"cap yearly increase"}}}'` | The old name still answers, as search_sources (`isError` false, the same first hit) |
