@@ -1136,13 +1136,15 @@ pub fn review(id: &str, market: Option<&str>) -> Result<Review> {
 
 /// Install (or replace) `id` from its marketplace's last fetch. `agreed` = the permission lines the
 /// user saw: the install refuses when the plugin now asks for anything else.
-pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
+/// `install`, its own review shown to `check` first (it can refuse before anything is installed).
+pub fn install_checked(id: &str, market: Option<&str>, agreed: &[String], check: &dyn Fn(Option<&Review>) -> Result<()>) -> Result<Installed> {
     let (mk, o) = find_offer(id, market)?;
     let before = Registry::load()?.installed.get(id).cloned();
     if let Some(b) = before.as_ref().filter(|b| b.market != mk && (mk == MINE || b.market == MINE)) {
         bail!("“{id}” is installed from {} — remove it first to install the one from {mk}", if b.market == MINE { "My plugins" } else { &b.market });
     }
     let rv = review_of(&mk, &o, before.as_ref())?;
+    check(Some(&rv))?;
     if let Some(why) = &rv.blocked {
         bail!("{} can't be installed: {why}", rv.name);
     }
@@ -1270,16 +1272,19 @@ pub fn updates_in(r: &Registry) -> Vec<(Installed, Review)> {
 }
 
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
-pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
+/// `update`, the waiting update's review (none: up to date) shown to `check` first; the marketplace is read once.
+pub fn update_checked(id: &str, agreed: &[String], check: &dyn Fn(Option<&Review>) -> Result<()>) -> Result<Option<Installed>> {
     let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
     refresh(&p.market)?;
-    let Some(rv) = update_for(&p) else { return Ok(None) };
+    let rv = update_for(&p);
+    check(rv.as_ref())?;
+    let Some(rv) = rv else { return Ok(None) };
     let mut ok: Vec<String> = p.uses.clone();
     ok.extend(agreed.iter().cloned());
     if let Some(u) = rv.new_uses.iter().find(|u| !ok.contains(u)) {
         bail!("{} {} asks for more: {u}", rv.name, rv.version);
     }
-    install(id, Some(&p.market), &ok).map(Some)
+    install_checked(id, Some(&p.market), &ok, check).map(Some)
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
@@ -2083,4 +2088,17 @@ mod tests {
         assert_eq!(market_named("acme/plugins").unwrap(), "ACME", "by its owner/repo");
     }
 
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+/// The same without a check (what the tests call).
+pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
+    install_checked(id, market, agreed, &|_| Ok(()))
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
+    update_checked(id, agreed, &|_| Ok(()))
 }

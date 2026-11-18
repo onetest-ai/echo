@@ -53,8 +53,8 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `microphone` | `{}` (nothing else): its window half hears the microphone through `ctx.microphone` (§ Client half). The sheet: "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach". Nothing in its host half. Evidence: `capabilities::describe_microphone`, `window::plugins::mic_open` |
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
 
-The sheet also names each routine (§ Routines): "Has a routine “<name>”, off unless you switch it on here or later in
-Settings → Plugins: then every <every> min Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
+The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in
+Settings → Plugins: then <every, in words: every hour, every day, every 2 h, every 45 min> Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
 own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
 prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
 or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
@@ -62,9 +62,10 @@ asks again, naming the changed routine; the user's yes to the update keeps the r
 A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
 id left. Under the lines the window's sheet has "Routines — off unless you switch them on": a switch per routine it
 offers — on an install every routine, on an update (or an install over the installed version) only those it adds or
-changes — each with its name, when it runs in plain words ("Every hour", "Every day", "Every 2 h", "Every 45 min", then
+whose sheet line changed (its prompt, its interval, or what its run may do, as an update adding `claude.skip` does; an
+installed manifest that can't be read: all, and none is switched off) — each with its name, when it runs in plain words ("Every hour", "Every day", "Every 2 h", "Every 45 min", then
 " · paused at night"), its `what` and, in small muted text under it, its facts (acts on its own as you set routines; may
-change your Echo data and send as you; when its `tools` name one, "auto mode" or "skipping every permission check"; for "none" only "no tools: it can only answer"; its prompt <hash>); one it adds starts off, one it changes as the user has it. A routine shows once
+change your Echo data and send as you; when its `tools` name one, "auto mode" or "skipping every permission check"; for "none" only "no tools: it can only answer"; its prompt <hash>); one it adds starts off, one it changes as Echo has it now. A routine shows once
 there: the window leaves its long line out of "It will be able to" (the review's `routines[].line` names it, `facts`
 the small text), while the CLI's review keeps the line. The routines the user switched there are set so once it is installed (only the switches
 moved are sent: `plugin_op` `install` / `update` with `routines: {<routine>: on}`); a routine kept unchanged has no

@@ -917,7 +917,7 @@
   },
   {
    "id": "F-PLUG-135",
-   "feature": "A plugin's install sheet has a block \"Routines — off unless you switch them on\" under what it will be able to do: a switch per routine of its manifest with its name, when it runs (\"Every N min · paused at night\") and what it does, each off as the sheet opens; the routines switched on there are on right after the install, the rest off. An update's sheet shows switches only for the routines the update adds (off) or changes (as the user has it); a routine it keeps unchanged has no switch and stays as the user had it. Each routine's sheet line reads \"Has a routine “<name>”, off unless you switch it on here or later in Settings → Plugins: then …\"",
+   "feature": "A plugin's install sheet has a block \"Routines — off unless you switch them on\" under what it will be able to do: a switch per routine of its manifest with its name, when it runs (\"Every N min · paused at night\") and what it does, each off as the sheet opens; the routines switched on there are on right after the install, the rest off. An update's sheet shows switches only for the routines the update adds (off) or changes (as the user has it); a routine it keeps unchanged has no switch and stays as the user had it. Each routine's sheet line reads \"Has a routine “<name>”, off until you switch it on in Settings → Plugins: then …\"",
    "priority": "high",
    "check": "agent",
    "axes": []

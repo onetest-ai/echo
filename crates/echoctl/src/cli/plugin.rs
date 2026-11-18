@@ -210,7 +210,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             };
             let r = review(&id, from.as_deref())?;
             let agreed = agree(&r, yes)?;
-            let p = routines::install_with(&id, from.as_deref(), &agreed, &routines::chosen_from_cli(on.as_deref(), &r))?;
+            let p = routines::install_with(&id, from.as_deref(), &agreed, &chosen(on.as_deref(), &r))?;
             println!("Installed {} {}", p.name, p.version);
         }
         PluginCmd::Update { id, yes, routines: on } => {
@@ -227,7 +227,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                     continue;
                 };
                 let agreed = agree(&r, yes)?;
-                if let Some(n) = routines::update_with(&id, &agreed, &routines::chosen_from_cli(on.as_deref(), &r))? {
+                if let Some(n) = routines::update_with(&id, &agreed, &chosen(on.as_deref(), &r))? {
                     println!("Updated {} to {}", n.name, n.version);
                 }
             }
@@ -410,6 +410,15 @@ fn file_handles(id: &str, files: &[std::path::PathBuf]) -> anyhow::Result<Vec<se
 }
 
 /// A plugin's review in the terminal: what it is, where from, and what it uses.
+/// `--routines` as the user's switches; `all` with none offered says so.
+fn chosen(on: Option<&str>, r: &plugins::Review) -> Vec<(String, bool)> {
+    let c = plugins::routines::chosen_from_cli(on, r);
+    if c.is_empty() && on.is_some_and(|o| o.trim() == "all") {
+        println!("  {} {} offers no routine to switch on here", r.name, r.version);
+    }
+    c
+}
+
 fn print_review(r: &plugins::Review) {
     println!("{} {} — from {} ({})", r.name, r.version, r.market, &r.commit[..r.commit.len().min(12)]);
     if r.uses.is_empty() {

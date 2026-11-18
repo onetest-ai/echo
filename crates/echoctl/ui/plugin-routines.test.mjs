@@ -9,7 +9,7 @@ const start = src.indexOf('// ── plugin routine switches:')
 const end = src.indexOf('// end of the plugin routine switches block', start)
 assert.ok(start >= 0 && end > start, 'the plugin routine switches block not found in app.js')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const names = 'plRoutineSwitches, plSheetLines, plRoutinesStart, plRoutinesChanged, routineOfferPick, routineOfferHtml, routineOfferResult'
+const names = 'plRoutineSwitches, plRoutineClick, plSheetLines, plRoutinesStart, plRoutinesChanged, routineOfferPick, routineOfferHtml, routineOfferResult'
 const B = new Function('esc', `${src.slice(start, end)}\nreturn { ${names} }`)(esc)
 
 const tests = []
@@ -41,6 +41,18 @@ test('the sheet lists each routine once: its long line leaves "It will be able t
   assert.deepEqual(B.plSheetLines(r, false), ['Reads your calls'])
   assert.deepEqual(B.plSheetLines(r, true), ['Sends mail'])
   assert.deepEqual(B.plSheetLines({ uses: ['a'] }, false), ['a'], 'no routines: as the review has it')
+})
+
+test("the Settings switch: only the user's own click, only on Echo's Settings → Plugins page", () => {
+  const btn = (inside) => ({ dataset: { plRoutine: 'acme', routine: 'mail', val: 'true' }, closest: (sel) => (inside.includes(sel) ? {} : null) })
+  const st = { view: 'settings', setSection: 'plugins' }
+  assert.deepEqual(B.plRoutineClick(btn(['.pl-page']), true, st), { id: 'acme', routine: 'mail', on: true })
+  assert.equal(B.plRoutineClick(btn(['.pl-page']), false, st), null, "a script's click moves nothing")
+  assert.equal(B.plRoutineClick(btn([]), true, st), null, "a button outside Echo's plugins page")
+  assert.equal(B.plRoutineClick(btn(['.pl-page', '#plug-sheet']), true, st), null, "a plugin's sheet")
+  assert.equal(B.plRoutineClick(btn(['.pl-page']), true, { view: 'settings', setSection: 'acme:main' }), null, "a plugin's own settings section")
+  assert.equal(B.plRoutineClick(btn(['.pl-page']), true, { view: 'today', setSection: 'plugins' }), null, 'not the Settings view')
+  assert.ok(/const op = b && plRoutineClick\(b, e\.isTrusted, S\)/.test(src), 'the handler asks plRoutineClick')
 })
 
 test("a plugin's words are text, never markup", () => {

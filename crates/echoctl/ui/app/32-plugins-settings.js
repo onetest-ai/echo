@@ -9,9 +9,10 @@ async function loadPluginsView() {
   if (p && p.busy && Object.keys(p.busy).length) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadPluginsView().then(render) }, 1000)
 }
 function pluginOp(op, body = {}) {
-  send({ cmd: 'plugin_op', op, ...body })
+  const saved = Promise.resolve(send({ cmd: 'plugin_op', op, ...body })).catch(() => {})
   // The Inbox too: a plugin updated leaves it at once.
   setTimeout(() => { loadAttention(true); loadPluginsView().then(render) }, 300)
+  return saved
 }
 /** One of a plugin's own settings (its manifest's `settings`): a switch, or a box saved when it changes; a
  *  secret is never shown back, only whether it is set (Forget empties it). */
@@ -37,10 +38,12 @@ document.addEventListener('change', (e) => {
 document.addEventListener('focusout', (e) => {
   if (e.target.matches && e.target.matches('input[data-pl-set]') && S.renderOnBlur) { S.renderOnBlur = false; setTimeout(render) }
 })
-// A plugin's routine switched on or off: only here, by the user (a plugin never switches one); saved as shown.
+// A plugin's routine switched on or off: only here, by the user (a plugin never switches one); saved as shown. A script's
+// click, or a button in a plugin's own markup, moves nothing (defence in depth: a client half runs in this realm).
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('button[data-pl-routine]')
-  if (b) pluginOp('routine', { id: b.dataset.plRoutine, routine: b.dataset.routine, on: b.dataset.val === 'true' })
+  const op = b && plRoutineClick(b, e.isTrusted, S)
+  if (op) pluginOp('routine', op)
 })
 document.addEventListener('click', (e) => {
   const c = e.target.closest && e.target.closest('button[data-pl-cert-trust], button[data-pl-cert-forget]')
@@ -192,6 +195,10 @@ function plRoutineSwitches(routines, on, attr) {
 }
 /** The window sheet's "It will be able to" lines: the review's, less each routine's own (shown under its switch). */
 const plSheetLines = (r, update) => ((update ? r.new_uses : r.uses) || []).filter((l) => !(r.routines || []).some((x) => x.line === l))
+/** A click on a `[data-pl-routine]` button as the op it asks for, or null: only the user's own click, and only on Echo's own
+ *  Settings → Plugins page (a plugin's section, view or slot is never it). */
+const plRoutineClick = (b, trusted, st) => trusted && st.view === 'settings' && st.setSection === 'plugins' && b.closest('.pl-page') && !b.closest('#plug-sheet')
+  ? { id: b.dataset.plRoutine, routine: b.dataset.routine, on: b.dataset.val === 'true' } : null
 /** The switches as a sheet opens: each routine as Echo has it now (one it adds: off). */
 const plRoutinesStart = (routines) => Object.fromEntries((routines || []).map((r) => [r.routine, !!r.on]))
 /** What the user moved on the sheet ({routine: on}): a switch left as it was isn't sent. */

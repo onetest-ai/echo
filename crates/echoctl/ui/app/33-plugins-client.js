@@ -559,15 +559,20 @@ async function routineOffer(plugin, ids) {
   const p = await mine()
   if (!p) throw new Error('the plugin is not installed')
   const list = routineOfferPick(p.routines, ids)
-  const on = plRoutinesStart(list)
+  const on = plRoutinesStart(list), saves = []
   return new Promise((resolve) => {
+    let done = false
+    const settle = (now) => { if (!done) { done = true; if (RoutineOffer.now && RoutineOffer.now.on === on) RoutineOffer.now = null; resolve(routineOfferResult(list, now)) } }
     const closed = () => {
       if (RoutineOffer.now && RoutineOffer.now.on === on) RoutineOffer.now = null
       // After the switches' saves (`pluginOp`) have landed.
-      setTimeout(() => mine().then((x) => resolve(routineOfferResult(list, x && x.routines)), () => resolve(routineOfferResult(list, list.map((r) => ({ ...r, on: on[r.routine] }))))), 400)
+      Promise.allSettled(saves).then(mine).then((x) => settle(x && x.routines), () => settle(list.map((r) => ({ ...r, on: on[r.routine] }))))
     }
+    // The plugin unloading (switched off, updated, removed) closes the sheet without `onClose`: it settles then too.
+    const owned = Plugins.owned[plugin]
+    if (owned) owned.cleanups.push(() => settle(list.map((r) => ({ ...r, on: on[r.routine] }))))
     const box = sheetShow(plugin, routineOfferHtml(p.name, list, on), { label: `${p.name}’s routines`, onClose: closed })
-    RoutineOffer.now = { plugin, name: p.name, list, on, box }
+    RoutineOffer.now = { plugin, name: p.name, list, on, box, saves }
   })
 }
 // A switch on that sheet: only the user's own click (never one a script makes), saved as shown; Done closes it.
@@ -578,7 +583,7 @@ document.addEventListener('click', (e) => {
   if ('rtOfferDone' in b.dataset) return sheetShut(o.plugin)
   const r = b.dataset.rtOffer, v = b.dataset.val === 'true'
   o.on[r] = v
-  pluginOp('routine', { id: o.plugin, routine: r, on: v })
+  o.saves.push(pluginOp('routine', { id: o.plugin, routine: r, on: v }))
   o.box.innerHTML = routineOfferHtml(o.name, o.list, o.on)
   const again = o.box.querySelector(`[data-rt-offer="${CSS.escape(r)}"]`)
   if (again) again.focus()
