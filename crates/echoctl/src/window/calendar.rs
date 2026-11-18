@@ -3,8 +3,6 @@
 use super::*;
 use super::call::{minutes, status};
 use super::plugins::{refresh_markets_for_inbox, PLUGINS_UPDATING};
-#[cfg(feature = "brain")]
-use super::brain::BRAIN_INSIGHTS;
 
 /// Raw Graph events by id from the last calendar fetch (to schedule one by id), and a short
 /// cache so the page's refreshes don't hit Microsoft 365 each time.
@@ -28,15 +26,6 @@ pub(super) fn attention_busy() -> (Value, Value) {
             } else if let Some(e) = s["error"].as_str() {
                 failed.insert(format!("transcript:{id}"), format!("Not imported: {e}").into());
             }
-        }
-    }
-    #[cfg(feature = "brain")]
-    if let Ok(r) = BRAIN_INSIGHTS.lock() {
-        for layer in r.iter().filter_map(|k| k.strip_prefix("taxonomy:")) {
-            busy.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
-        }
-        for layer in r.iter().filter_map(|k| k.strip_prefix("split:")) {
-            busy.insert(format!("drift:{layer}"), "Splitting a topic…".into());
         }
     }
     if PLUGINS_UPDATING.load(std::sync::atomic::Ordering::SeqCst) {

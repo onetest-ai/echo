@@ -42,19 +42,6 @@ pub fn stats(scope: store::Scope) -> Result<std::sync::Arc<Stats>> {
     })
 }
 
-/// Every layer's drift (`store::kept`: it reads every verdict since each build).
-pub(super) fn drift_kept(t: &Taxonomy, snoozed: &Value) -> Result<std::sync::Arc<Vec<Value>>> {
-    let path = super::super::store_path();
-    let fp = format!("{}|{}|{}", store::changed_stamp(&path), t.version, snoozed);
-    let (t, snoozed) = (t.clone(), snoozed.clone());
-    store::kept(format!("drift|{}", path.display()), fp, move || drift_in(&store::open(&path)?, &t, &snoozed))
-}
-
-pub(super) fn coverage_kept() -> Result<std::sync::Arc<Value>> {
-    let path = super::super::store_path();
-    store::kept(format!("coverage|{}", path.display()), store::changed_stamp(&path), move || coverage(&store::open(&path)?))
-}
-
 /// The taxonomy as the window and MCP show it.
 pub fn view() -> Result<Value> {
     view_in(None)
@@ -76,7 +63,6 @@ pub(super) fn scope_layers(t: &Taxonomy, scope: store::Scope) -> Option<BTreeSet
 pub fn view_in(scope: store::Scope) -> Result<Value> {
     let Some(t) = current() else { return Ok(json!({"exists": false})) };
     let st = stats(scope)?;
-    let all = if scope.is_some() { stats(None)? } else { st.clone() };
     let empty = BTreeSet::new();
     let count = |id: &str| -> (i64, BTreeSet<String>, BTreeSet<String>) {
         (st.sections.get(id).copied().unwrap_or(0), st.threads.get(id).unwrap_or(&empty).clone(), st.clients.get(id).map(|m| m.keys().cloned().collect()).unwrap_or_default())
@@ -139,18 +125,9 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
         .filter(|(k, _)| visible(k))
         .map(|(k, l)| json!({"id": k, "name": l.name, "goal": l.goal, "audience": l.audience, "summary": l.summary, "demoted": l.demoted, "provisional": l.provisional, "built_from": l.built_from}))
         .collect();
-    // Each layer's drift (out of date or not), for its banner.
-    let snoozed: Value = std::fs::read(drift_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(json!({}));
-    let mut lv = lv;
-    if let Ok(d) = drift_kept(&t, &snoozed) {
-        for x in lv.iter_mut() {
-            x["drift"] = d.iter().find(|y| y["layer"] == x["id"]).cloned().unwrap_or(Value::Null);
-        }
-    }
-    let moves = moves_in(&all, &t, &dismissed_moves());
-    Ok(json!({"exists": true, "version": t.version, "provisional": t.provisional(), "layers": lv, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "moves": moves,
+    Ok(json!({"exists": true, "version": t.version, "provisional": t.provisional(), "layers": lv, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})),
               "groups": GROUPS.iter().map(|(k, l)| json!({"id": k, "label": l})).collect::<Vec<_>>(),
-              "topics": topics, "terms": terms, "coverage": coverage_kept()?.as_ref().clone(), "review_flags": t.review_flags, "history": t.history}))
+              "topics": topics, "terms": terms, "review_flags": t.review_flags, "history": t.history}))
 }
 
 /// The terms that hint a call's transcription: pinned to its threads, always-on ones, and its clients'

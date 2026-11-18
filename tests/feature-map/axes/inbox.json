@@ -3,7 +3,7 @@
  "axes": [
   {
    "axis": "inbox.kind",
-   "values": "signin / minutes (failed, waiting) / people / work (review) / found / sender (trust, unverified) / brain / health (permission, stale plugin) / update / plugin-update / transcript",
+   "values": "signin / minutes (failed, waiting) / people / work (review) / found / sender (trust, unverified) / health (permission, stale plugin) / update / plugin-update / transcript",
    "where": "`attention.rs` `item(…)`"
   },
   {

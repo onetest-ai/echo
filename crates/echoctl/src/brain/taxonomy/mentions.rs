@@ -2,28 +2,6 @@
 
 use super::*;
 
-/// The clients each section belongs to (`-`: none), from the store's scopes.
-pub(super) fn chunk_clients(c: &Connection) -> Result<BTreeMap<i64, BTreeSet<String>>> {
-    let mut out: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
-    let mut st = c.prepare("SELECT chunk_id, id FROM scopes WHERE kind = 'client'")?;
-    for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
-        let (k, v) = row?;
-        out.entry(k).or_default().insert(v);
-    }
-    Ok(out)
-}
-
-/// The layers a section's vocabulary comes from: the shared one and its clients' (that have a layer).
-pub(super) fn layers_for(t: &Taxonomy, clients: Option<&BTreeSet<String>>) -> Vec<String> {
-    let mut out = vec![SHARED.to_string()];
-    for c in clients.into_iter().flatten() {
-        if c != "-" && t.layers.contains_key(c) {
-            out.push(c.clone());
-        }
-    }
-    out
-}
-
 /// The graph tables from a taxonomy: topics (intent_l1 / intent_l2, `subclass_of`), entity kinds and
 /// terms; tags of a node renamed or merged move to its new id (aliases); tags of a node gone are dropped.
 pub fn build_graph(c: &Connection, t: &Taxonomy, before: Option<&Taxonomy>) -> Result<()> {

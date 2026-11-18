@@ -137,18 +137,6 @@ impl Access {
     pub fn client_ok(&self, id: &str) -> bool {
         (id == "-" || client_profile_ok(id, &self.profile)) && self.client.as_deref().is_none_or(|x| x == id)
     }
-
-    /// The clients whose numbers it may read: its own client, or (not narrowed) every client whose
-    /// threads all run on its profile.
-    pub fn numbers_clients(&self) -> Vec<String> {
-        if let Some(c) = &self.client {
-            return if client_profile_ok(c, &self.profile) { vec![c.clone()] } else { vec![] };
-        }
-        if self.narrowed() {
-            return vec![];
-        }
-        super::numbers::clients().into_iter().filter(|c| client_profile_ok(c, &self.profile)).collect()
-    }
 }
 
 /// A client's documents and workbooks may go to `profile` when every one of its threads runs on it.

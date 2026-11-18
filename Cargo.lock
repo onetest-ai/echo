@@ -875,7 +875,6 @@ dependencies = [
  "portable-pty",
  "pulldown-cmark",
  "quick-xml",
- "regex",
  "rquickjs",
  "rusqlite",
  "rustls",

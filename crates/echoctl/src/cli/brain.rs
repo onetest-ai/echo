@@ -47,11 +47,6 @@ pub enum BrainCmd {
     },
     /// The thread folders' files: what was read, how, and why the others weren't
     Files,
-    /// The numbers lane: governed metrics from a client's reporting workbooks
-    Numbers {
-        #[command(subcommand)]
-        cmd: NumbersCmd,
-    },
     /// (dev) What the Brain's readers make of files: method, pages, routing (why a page goes to the page reader), date
     #[command(hide = true)]
     ReadFile {
@@ -70,15 +65,6 @@ pub enum BrainCmd {
         /// JSON [[call stamp, quote], …]
         #[arg(long, default_value = "[]")]
         quotes: String,
-    },
-    /// A client's or a thread's insights (--run: refresh them now, Claude on the default profile)
-    Insights {
-        #[arg(long, conflicts_with = "thread")]
-        client: Option<String>,
-        #[arg(long)]
-        thread: Option<String>,
-        #[arg(long)]
-        run: bool,
     },
     /// The sections nearest to one, from other sources
     Related {
@@ -126,94 +112,9 @@ pub enum BrainCmd {
 }
 
 #[derive(Subcommand)]
-pub enum NumbersCmd {
-    /// Profile the client's workbooks (its threads' folders, or --root): sheets, headers, samples
-    Profile {
-        client: String,
-        /// A folder to read instead of the client's threads' (testing)
-        #[arg(long)]
-        root: Option<std::path::PathBuf>,
-    },
-    /// Claude proposes the families and metrics from the profiles (saved as proposed)
-    Propose {
-        client: String,
-        #[arg(long)]
-        root: Option<std::path::PathBuf>,
-    },
-    /// Use a families config written by hand or by Brain (families.<corpus>.json), and its metrics.json
-    Import {
-        client: String,
-        families: std::path::PathBuf,
-        #[arg(long)]
-        metrics: Option<std::path::PathBuf>,
-        /// Accept it at once
-        #[arg(long)]
-        accept: bool,
-    },
-    /// Accept the proposed families (the build reads them from now on)
-    Accept { client: String },
-    /// Build the client's facts from its accepted families
-    Build {
-        client: String,
-        #[arg(long)]
-        root: Option<std::path::PathBuf>,
-        /// Build a config that isn't accepted yet (testing)
-        #[arg(long)]
-        force: bool,
-    },
-    /// Every client's families, catalog and last build
-    Show,
-    /// The governed metrics (MCP list_metrics)
-    List {
-        #[arg(long)]
-        client: Option<String>,
-    },
-    /// A metric's values (MCP get_metric)
-    Get {
-        name: String,
-        #[arg(long)]
-        client: Option<String>,
-        #[arg(long)]
-        grain: Option<String>,
-        #[arg(long)]
-        entity: Option<String>,
-        #[arg(long)]
-        month: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
 pub enum TaxonomyCmd {
     /// Every topic and term, with its sections and threads, and the coverage
     Show,
-    /// Build it from the calls (Claude, on the default AI profile): every layer, or one (--layer shared | a client's id);
-    /// a provisional version to review, then the layer's sections tagged
-    Build {
-        #[arg(long)]
-        layer: Option<String>,
-    },
-    /// Whether each layer's topics still fit its calls (no model): new sections fitting no topic, one
-    /// topic taking most, calls outgrowing its build (JSON)
-    Drift,
-    /// Topics that look in the wrong place (no model): clients' topics naming one thing → up to the
-    /// practice; a practice topic only one client uses → down to it. --apply KEY does one, --dismiss KEY
-    /// keeps it where it is
-    Moves {
-        #[arg(long)]
-        apply: Option<String>,
-        #[arg(long)]
-        dismiss: Option<String>,
-    },
-    /// Split a topic that is too broad into 2–6 subtopics (Claude, on the default AI profile), then tag only
-    /// its sections again (layer: shared | a client's id)
-    Split { layer: String, topic: String },
-    /// Tag sections not tagged yet (--again: all of them; --layer: only one layer's sections)
-    Classify {
-        #[arg(long)]
-        again: bool,
-        #[arg(long)]
-        layer: Option<String>,
-    },
     /// The user's change (JSON: {op: accept|add|rename|merge|move|remove|set, label|name, term?, to?, into?, parent?, …})
     Edit { json: String },
 }
@@ -235,25 +136,8 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
     match cmd {
         BrainCmd::Mcp { .. } => unreachable!(),
         BrainCmd::Taxonomy { cmd } => {
-            let progress = |m: &str| eprintln!("{m}");
             match cmd {
                 TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
-                TaxonomyCmd::Drift => print_json(&serde_json::json!(brain::taxonomy::drift()?)),
-                TaxonomyCmd::Split { layer, topic } => print_json(&brain::taxonomy::split(&layer, &topic, &progress)?),
-                TaxonomyCmd::Moves { apply, dismiss } => {
-                    if let Some(k) = apply {
-                        println!("{}", brain::taxonomy::apply_move(&k)?);
-                    }
-                    if let Some(k) = dismiss {
-                        brain::taxonomy::dismiss_move(&k)?;
-                    }
-                    print_json(&serde_json::json!(brain::taxonomy::moves()?))
-                }
-                TaxonomyCmd::Build { layer } => print_json(&match layer {
-                    Some(l) => brain::taxonomy::induce(&l, &progress)?,
-                    None => brain::taxonomy::induce_all(&progress)?,
-                }),
-                TaxonomyCmd::Classify { again, layer } => print_json(&serde_json::json!({"classified": brain::taxonomy::classify(layer.as_deref(), again, &progress)?})),
                 TaxonomyCmd::Edit { json } => {
                     let op: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
                     brain::taxonomy::edit(&op)?;
@@ -280,38 +164,6 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
             print_json(&v)
         }
         BrainCmd::Files => print_json(&brain::files::folder::list_all()?),
-        BrainCmd::Numbers { cmd } => {
-            use brain::numbers as n;
-            let root = |r: Option<std::path::PathBuf>| r.map(|r| vec![(r, vec![])]);
-            match cmd {
-                NumbersCmd::Profile { client, root: r } => print_json(&n::profile::run(&client, root(r))?["summary"]),
-                NumbersCmd::Propose { client, root: r } => print_json(&n::profile::propose(&client, root(r))?),
-                NumbersCmd::Import { client, families, metrics, accept } => {
-                    let c = n::import_config(&client, &families, accept)?;
-                    if let Some(m) = metrics {
-                        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&m)?)?;
-                        let cat: std::collections::BTreeMap<String, serde_json::Value> = serde_json::from_value(v.get("metrics").cloned().unwrap_or(v))?;
-                        n::save_catalog(&client, &cat)?;
-                    }
-                    print_json(&serde_json::json!({"families": c.families.len(), "accepted": c.accepted()}));
-                }
-                NumbersCmd::Accept { client } => {
-                    let mut c = n::load_config(&client).ok_or_else(|| anyhow::anyhow!("no families for {client}: propose or import them first"))?;
-                    c.check()?;
-                    c._echo = Some(serde_json::json!({"status": "accepted", "at": chrono::Utc::now().to_rfc3339(), "was": c._echo}));
-                    n::save_config(&client, &c)?;
-                    print_json(&serde_json::json!({"accepted": c.families.len()}));
-                }
-                NumbersCmd::Build { client, root: r, force } => {
-                    let c = n::load_config(&client).ok_or_else(|| anyhow::anyhow!("no families for {client}: propose or import them first"))?;
-                    anyhow::ensure!(force || c.accepted(), "the families for {client} are proposed, not accepted: accept them first (or --force)");
-                    print_json(&n::build::run(&client, &c, root(r))?);
-                }
-                NumbersCmd::Show => print_json(&n::overview()?),
-                NumbersCmd::List { client } => print_json(&n::list_metrics(client.as_deref())?),
-                NumbersCmd::Get { name, client, grain, entity, month } => print_json(&n::get_metric(&serde_json::json!({"name": name, "client": client, "grain": grain, "entity": entity, "month": month}))?),
-            }
-        }
         BrainCmd::ReadFile { paths, text } => {
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             for p in paths {
@@ -343,13 +195,6 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
         BrainCmd::Mentions { thread, title, quotes } => {
             let q: Vec<(String, String)> = serde_json::from_str(&quotes).map_err(|e| anyhow::anyhow!("--quotes: {e}"))?;
             print_json(&brain::views::mentions(&thread, &title, &q)?)
-        }
-        BrainCmd::Insights { client, thread, run } => {
-            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t))).ok_or_else(|| anyhow::anyhow!("--client or --thread"))?;
-            if run {
-                print_json(&brain::insights::run(scope, &|m: &str| eprintln!("{m}"))?);
-            }
-            print_json(&brain::insights::view(scope)?)
         }
         BrainCmd::Related { chunk, limit } => print_json(&brain::store::related(&brain::store_path(), chunk, limit)?),
         BrainCmd::Set { endpoint, api, model, key, enabled } => {

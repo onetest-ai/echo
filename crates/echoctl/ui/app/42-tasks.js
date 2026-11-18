@@ -182,7 +182,7 @@ function projectBrief(p) {
   // An accordion as a client's About (folded by default), when there is something to fold.
   const key = `thread:${p.id}`, open = aboutIsOpen(key), has = !!(p.brief && p.brief.trim())
   const title = has ? `<button type="button" class="about-fold" data-pj="about-fold" data-client="${esc(key)}" aria-expanded="${open}">${CHEV(open)} <b>What it is</b></button>` : '<div><b>What it is</b></div>'
-  return `${dashboardView()}${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card${has ? ` about-acc${open ? ' open' : ''}` : ''}"><div class="set-row">${title}<div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${!has || open ? body : ''}</div></section>${pjLinked(p)}
+  return `${dashboardView()}<section class="set-sec"><div class="set-card${has ? ` about-acc${open ? ' open' : ''}` : ''}"><div class="set-row">${title}<div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${!has || open ? body : ''}</div></section>${pjLinked(p)}
     <section class="set-sec"><h3>Latest calls</h3><div class="set-card pj-calls">${recent || '<div class="set-row"><div class="set-sub">No calls yet: add a rule on Profile, or put a call in from its header.</div></div>'}</div></section>`
 }
 
@@ -522,7 +522,7 @@ function clientOverview(cd, c) {
     </div>`
   }
   const open = cd.threads.filter((p) => p.group !== 'closed'), closed = cd.threads.filter((p) => p.group === 'closed')
-  return `${dashboardView()}${insightsBlock('client', c.id, c.name)}${desc}<section class="set-sec"><h3>Threads</h3>${cd.threads.length ? `<div class="cl-grid">${open.map(card).join('')}${closed.map(card).join('')}</div>` : '<div class="set-card"><div class="set-row"><div class="set-sub">No threads for this client yet — add one on Profile.</div></div></div>'}</section>`
+  return `${dashboardView()}${desc}<section class="set-sec"><h3>Threads</h3>${cd.threads.length ? `<div class="cl-grid">${open.map(card).join('')}${closed.map(card).join('')}</div>` : '<div class="set-card"><div class="set-row"><div class="set-sub">No threads for this client yet — add one on Profile.</div></div></div>'}</section>`
 }
 /** Every call of the client's threads, newest first, with the threads each is in. */
 function clientCalls(cd) {

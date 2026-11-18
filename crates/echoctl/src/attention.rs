@@ -284,53 +284,6 @@ pub fn collect() -> Collected {
             }
         }
     }
-    #[cfg(feature = "brain")]
-    if brain_on && crate::brain::EXTRAS {
-        if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
-            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Recall → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
-        }
-        // A topic in the wrong place (`taxonomy::moves`, no model): up to the practice, or down to a client.
-        for m in crate::brain::taxonomy::moves().unwrap_or_default() {
-            let key = m["key"].as_str().unwrap_or("").to_string();
-            let (title, label) = if m["dir"] == "up" {
-                (format!("“{}” belongs to your practice?", m["label"].as_str().unwrap_or("")), "Move it up")
-            } else {
-                (format!("“{}” is only {}'s?", m["label"].as_str().unwrap_or(""), m["to_name"].as_str().unwrap_or("")), "Move it down")
-            };
-            out.push(item(format!("move:{key}"), "brain", "echo", title, m["why"].as_str().unwrap_or("").to_string(), false,
-                vec![act(label, true, json!({"cmd": "brain_topic_move", "key": key, "do": "apply"})), act("Keep it", false, json!({"cmd": "brain_topic_move", "key": key, "do": "dismiss"}))],
-                Some("brain/topics".into())));
-        }
-        // A layer whose topics no longer fit its calls (`taxonomy::drift`, no model): rebuild it, or not now.
-        for d in crate::brain::taxonomy::drift().unwrap_or_default().into_iter().filter(|d| d["stale"] == true) {
-            let layer = d["layer"].as_str().unwrap_or("").to_string();
-            let mut why: String = d["reasons"].as_array().into_iter().flatten().filter_map(|r| r["text"].as_str()).map(|t| {
-                let mut c = t.chars();
-                c.next().map(|f| f.to_uppercase().chain(c).collect::<String>() + ". ").unwrap_or_default()
-            }).collect();
-            why.push_str("Rebuild makes a new version from its calls for you to review; its topics keep their place.");
-            out.push(item(format!("drift:{layer}"), "brain", if layer == crate::brain::taxonomy::SHARED { "echo" } else { layer.as_str() },
-                format!("Topics for {} need a rebuild", d["name"].as_str().unwrap_or(&layer)), why, false,
-                {
-                    // One topic took most of the new sections (#31): Split it first; a rebuild alone doesn't fix that.
-                    let broad = d["reasons"].as_array().into_iter().flatten().find(|r| r["rule"] == "catch_all" && r["topic"].is_object()).map(|r| r["topic"].clone());
-                    let mut acts = vec![];
-                    if let Some(b) = &broad {
-                        acts.push(act(&format!("Split “{}”", b["label"].as_str().unwrap_or("")), true, json!({"cmd": "brain_split_topic", "layer": b["layer"], "label": b["label"], "for": layer})));
-                    }
-                    acts.push(act("Rebuild topics", broad.is_none(), json!({"cmd": "brain_rebuild_topics", "layer": layer})));
-                    acts.push(act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer})));
-                    acts
-                },
-                Some("brain/topics".into())));
-        }
-        if let Ok(v) = crate::brain::numbers::overview() {
-            for c in v["clients"].as_array().into_iter().flatten().filter(|c| c["status"] == "proposed") {
-                let cl = c["client"].as_str().unwrap_or("-");
-                out.push(item(format!("numbers:{cl}"), "brain", cl, "Reporting families proposed".into(), "Claude proposed how to read the workbooks — review, then accept and build".into(), false, vec![], Some("brain/numbers".into())));
-            }
-        }
-    }
 
     // Meetings of your threads nobody recorded that Teams transcribed (`teams_transcript::scan`): offered once.
     for (id, v) in crate::teams_transcript::to_offer() {

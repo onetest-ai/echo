@@ -562,7 +562,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     let mut errors: BTreeSet<String> = BTreeSet::new();
     let mut kept = vec![];
     // The reader waits while a call records or is transcribed (it would compete with it).
-    if !super::insights::quiet() {
+    if !super::quiet() {
         budget = 0;
     }
     for p in pending {
