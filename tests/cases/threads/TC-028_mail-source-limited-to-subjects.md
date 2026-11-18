@@ -16,7 +16,7 @@ tags: [threads, profile, sources, mail]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh <dir>`; window served at `{{base_url}}` (`tests/fixtures/serve.sh up <dir> <port>`) and `{{base_url}}/` loaded first (the cookie); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
-- Recall is off and Microsoft 365 is not signed in (the test data's default): the Profile shows a thread's sources as chips without reading them
+- Intake is off and Microsoft 365 is not signed in (the test data's default): the Profile shows a thread's sources as chips without reading them
 
 ## Test Data
 
