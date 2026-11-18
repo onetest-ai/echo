@@ -560,13 +560,16 @@ pub fn valid_skill_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// A package skill's `SKILL.md`: frontmatter of `name` (= `name`) and a one-line `description` only, no `!` command.
+/// A package skill's `SKILL.md`: Markdown that runs nothing, as any skill a plugin writes (`claude_skills::skill_md_ok`),
+/// its frontmatter first and only `name` (= `name`) and a one-line `description`.
 pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
-    let text = text.replace("\r\n", "\n");
-    let rest = text.strip_prefix("---\n").ok_or_else(|| anyhow!("SKILL.md starts with its frontmatter (---)"))?;
-    let (front, _) = rest.split_once("\n---").ok_or_else(|| anyhow!("SKILL.md's frontmatter has no end (---)"))?;
+    claude_skills::skill_md_ok(text)?;
+    if !text.starts_with("---") {
+        bail!("SKILL.md starts with its frontmatter (---)");
+    }
+    let front = claude_skills::frontmatter(text)?.unwrap_or_default();
     let (mut got_name, mut got_desc) = (None, None);
-    for line in front.lines().filter(|l| !l.trim().is_empty()) {
+    for line in front.into_iter().filter(|l| !l.trim().is_empty()) {
         let (k, v) = line.split_once(':').ok_or_else(|| anyhow!("SKILL.md's frontmatter holds only name and description"))?;
         let v = v.trim();
         let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(v);
@@ -582,9 +585,6 @@ pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
     let desc = got_desc.unwrap_or_default();
     if desc.is_empty() || desc.chars().count() > 1024 || matches!(desc.as_str(), "|" | ">" | "|-" | ">-") {
         bail!("SKILL.md needs a description of one line, up to 1024 characters");
-    }
-    if text.contains("!`") {
-        bail!("“!`…`” runs a command in Claude Code; a plugin's SKILL.md runs none");
     }
     Ok(())
 }
@@ -1493,6 +1493,33 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
 #[cfg(test)]
 mod tests {
 
+    /// A package skill passes what any skill a plugin writes passes (`claude_skills::skill_md_ok`), then holds only
+    /// its name and a description: a key hidden after a CR alone, a `!` code block, `!$`, or a `----` line that a
+    /// split on "\n---" took for the frontmatter's end are refused.
+    #[test]
+    fn a_package_skill_is_checked_as_any_skill_a_plugin_writes() {
+        use super::*;
+        let ok = "---\nname: s\ndescription: Does s.\n---\n\nRun ${CLAUDE_PLUGIN_ROOT}/scripts/echoctl status.\n";
+        check_skill_md("s", ok).unwrap();
+        check_skill_md("s", &ok.replace('\n', "\r\n")).unwrap();
+        for (md, why) in [
+            ("---\nname: s\ndescription: x\rhooks:\r  Stop: id\n---\n", "carriage return"),
+            ("---\nname: s\ndescription: x\n---\n```!\nid\n```\n", "a skill can't run commands"),
+            ("---\nname: s\ndescription: x\n---\n~~~ !\nid\n~~~\n", "a skill can't run commands"),
+            ("---\nname: s\ndescription: x\n---\nRun !$ARGUMENTS\n", "“!$”"),
+            ("---\nname: s\ndescription: x\n---\nToday: !`date`\n", "a skill can't run commands"),
+            ("---\nname: s\ndescription: x\n----\nhooks: y\n---\n", "frontmatter"),
+            ("---\nname: s\ndescription: x\n---x\nhooks: y\n---\n", "frontmatter"),
+            ("---\nname: s\ndescription: x\nwhen_to_use: y\n---\n", "holds only name and description"),
+            ("---\nname: t\ndescription: x\n---\n", "its folder's"),
+            ("---\nname: s\n---\n", "a description of one line"),
+            ("No frontmatter.\n", "starts with its frontmatter"),
+        ] {
+            let e = check_skill_md("s", md).expect_err(md).to_string();
+            assert!(e.contains(why), "{md:?}: {e}");
+        }
+    }
+
     #[test]
     fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
         let uses = |v: Value| v.as_object().cloned().unwrap();
@@ -2020,11 +2047,11 @@ mod tests {
         fs::create_dir_all(d.join("skills/empty")).unwrap();
         fs::create_dir_all(root.join("outside")).unwrap();
         for (bad, why) in [
-            (json!(["skills/hooked"]), "only name and description"),
+            (json!(["skills/hooked"]), "a skill can't run commands"),
             (json!(["skills/renamed"]), "its folder's"),
-            (json!(["skills/runs"]), "runs a command"),
+            (json!(["skills/runs"]), "a skill can't run commands"),
             (json!(["skills/folded"]), "only name and description"),
-            (json!(["skills/open"]), "no end"),
+            (json!(["skills/open"]), "no closing"),
             (json!(["skills/Caps"]), "named as a skill"),
             (json!(["skills/empty"]), "no SKILL.md"),
             (json!(["skills/two", "skills/two"]), "once"),

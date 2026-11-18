@@ -1527,7 +1527,7 @@ mod tests {
             ("agent/notes.md: agent/ holds only CLAUDE.md", Box::new(|d: &Path| write(&d.join("agent/notes.md"), "x"))),
             ("agent/skills/: 21 skills: 20 at most", Box::new(|d: &Path| (0..21).for_each(|i| skill(&d.join(format!("agent/skills/s{i}")), &format!("s{i}"))))),
             ("agent/skills/Bad_Name/SKILL.md: skill “agent/skills/Bad_Name”: its folder is named as a skill", Box::new(|d: &Path| skill(&d.join("agent/skills/Bad_Name"), "Bad_Name"))),
-            ("agent/skills/s/SKILL.md: skill “agent/skills/s”: SKILL.md's frontmatter holds only name and description (not “hooks”)", Box::new(|d: &Path| write(&d.join("agent/skills/s/SKILL.md"), "---\nname: s\ndescription: x\nhooks: y\n---\n"))),
+            ("agent/skills/s/SKILL.md: skill “agent/skills/s”: a skill can't run commands: “hooks” in its frontmatter", Box::new(|d: &Path| write(&d.join("agent/skills/s/SKILL.md"), "---\nname: s\ndescription: x\nhooks: y\n---\n"))),
             // Skills need a prefix: 2–4 of a–z and 0–9, no `-`, not `echo`.
             ("echo-plugin.json: it has skills: “agent.prefix”", Box::new(|d: &Path| skill(&d.join("agent/skills/s"), "s"))),
             ("echo-plugin.json: agent.prefix is 2–4 of a–z and 0–9", Box::new(|d: &Path| write(&d.join("echo-plugin.json"), &json!({"id": "kit", "name": "Kit", "version": "0.1.0", "agent": {"summary": "x", "prefix": "abcde"}}).to_string()))),

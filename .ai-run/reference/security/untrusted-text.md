@@ -43,6 +43,9 @@ Anything else is text; a page that isn't there is a link with no href (`data-md-
 As `grants::resolve` does: the path is checked as relative with only normal components before it is joined (no `..`),
 then canonicalised, links resolved and re-checked, kept inside its root; Windows device names refused.
 
+A folder at or inside a hidden one (any name in its real path starting with `.`: `~/.claude`, `vault/.claude/skills`,
+`.git`) is never granted (`grants::grant`): there nothing is hidden relative to the folder given.
+
 A write into a plugin's granted folder (`grants::writable`, `writable_folder`) also refuses hidden names, the path as
 given and as it really is (a link inside the root, a Windows short name), but for the exact names `grants::hidden_ok`
 takes: `.gitignore`, `.obsidian/<name>.json` (in any folder that isn't hidden, an ASCII name), `.claude/skills/<name>/<file>.md` (folders: `.obsidian`, `.claude`,
@@ -52,9 +55,11 @@ takes: `.gitignore`, `.obsidian/<name>.json` (in any folder that isn't hidden, a
 A skill is code Claude Code runs as well as text: its frontmatter can hold hooks, pre-approved tools, a shell or a model,
 and `` !`cmd` `` or a code block opened with `!` runs when it loads. So whatever a plugin puts in a skill — in a granted
 folder's `.claude/skills/**` (`grants::in_skills`, the path as given and as it really is, in any case) or in the user's
-own Claude Code — passes `plugins::claude_skills::skill_md_ok`: frontmatter (also after a BOM or blank space) only
+own Claude Code, a package skill (`plugins::check_skill_md`, then only `name` and a one-line `description`) and a
+runtime skill's text (`grants::set_session_skills`) — passes `plugins::claude_skills::skill_md_ok`: frontmatter (also after a BOM or blank space) only
 `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation`, `user-invocable`, plain values, closed;
-no `` !` ``, no `!` code block; refused, never stripped. There it is only written whole (`ctx.fs.write`): `append`,
+no `` !` ``, no `!` code block, no `!$`, no CR alone; refused, never stripped. Its frontmatter ends at the next line
+`---` alone (`claude_skills::frontmatter`, the one split for both checks). There it is only written whole (`ctx.fs.write`): `append`,
 `copyIn` and a `move` into it are refused, and `ctx.git.commit` refuses a file there that fails the check.
 
 A plugin's skill in the user's own Claude Code (`plugins::claude_skills`) is written only on the user's click, as

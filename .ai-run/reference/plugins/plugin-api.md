@@ -577,8 +577,10 @@ change or delete the task), and decides only the proposal still waiting. Evidenc
 through `ctx.fs.readMany/walk`; with `folders.write`, `ctx.fs.write/move/remove` change it (never through a link,
 never over another file). The picker lets the user make a new folder in it ("New Folder" on macOS, "Make New Folder" on
 Windows), so a plugin that wants a new folder (a new vault) just asks for one; the folder made and picked is the one
-given. In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
-named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `plugins::app_file`
+given. A hidden folder or one inside it (`~/.claude`, a vault's `.claude/skills`) is never given ("… is a hidden
+folder or inside one …: pick a folder that isn't hidden"); a folder holding them is. In a debug build
+`ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
+named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `grants::grant`, `plugins::app_file`
 
 Hidden files and folders (a name starting with `.`) are read, never written — but for these, by their exact names
 (`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
@@ -725,12 +727,13 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 
 - **Package skills**: a folder in the plugin (`skills/<name>/SKILL.md`, with `scripts/` and `references/` beside it as
   needed) named in `skills` (at most 10, with the runtime skills); the folder's name a–z 0–9 `-`, ≤ 40 chars, once;
-  `SKILL.md`'s frontmatter only `name` (the folder's name) and `description` (one line, ≤ 1024 chars), no `!` commands
-  anywhere. They need no `uses.sessions` (the sheet names them from `skills`). The folder session, routines and Yolo
+  `SKILL.md` Markdown that runs nothing, as any skill a plugin writes (`skill_md_ok`: no `` !` ``, `!` code block, `!$`
+  or CR alone), its frontmatter first and only `name` (the folder's name) and `description` (one line, ≤ 1024 chars). They need no `uses.sessions` (the sheet names them from `skills`). The folder session, routines and Yolo
   name each `<prefix>-<name>` through `.plugins`; a plugin not laid out keeps `echo-<id>:<name>` from its
   `--plugin-dir` copy. Evidence: `plugins::package_skills`, `grants::copy_package_skills`
 - **Runtime skills**: text built at run time, `ctx.sessions.skills = [{name, description, body}]`; Echo writes the
-  frontmatter and the plugin around them. One name is never both a package and a runtime skill.
+  frontmatter and the plugin around them; the text runs nothing (`skill_md_ok`). One name is never both a package and a
+  runtime skill.
   Evidence: `grants::set_session_skills`
 - **Commands**: a skill's Echo CLI is `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; Echo's sessions run only the plugin's
   commands listed in `uses.sessions.commands` (`plugin call <id> <command>`). Evidence: `plugins::session_commands`
