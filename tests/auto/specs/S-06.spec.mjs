@@ -149,7 +149,11 @@ scenario(test, 'S-06', 'Shape the work', () => {
     await expect(work.value(w.due)).toHaveText(p.before.due)
     // 2: Owner.
     const owner = await work.editField(w.owner)
-    await owner.fill(p.owner)
+    // Typed key by key over the prefilled name (selected on open), as a person does: the menu narrows to the match.
+    await owner.pressSequentially(p.owner.slice(0, 3).toLowerCase())
+    await expect(owner).toHaveValue(p.owner.slice(0, 3).toLowerCase())
+    expect(await work.suggestions()).toEqual([p.owner])
+    await owner.press(key('down'))
     await owner.press(key('enter'))
     await expect(work.value(w.owner)).toHaveText(p.owner)
     await expect(work.card(p.item).getByTitle(p.owner, { exact: true })).toHaveText(p.initials)

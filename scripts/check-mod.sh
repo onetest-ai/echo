@@ -34,6 +34,8 @@ node crates/echoctl/ui/select-menu.test.mjs
 node crates/echoctl/ui/suggest.test.mjs
 # Echo's calendar for a date box: a month from Monday, the quick days (date picker block).
 node crates/echoctl/ui/date-picker.test.mjs
+# An opened field editor takes the focus with its text selected (editor focus block).
+node crates/echoctl/ui/editor-focus.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
 # Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
