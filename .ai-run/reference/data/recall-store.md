@@ -13,7 +13,11 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - A session or job reads Recall data through a `brain::access::Access` built for its profile and scope; a source of
   another profile answers "not found".
 - The on/off switch: `brain::enabled`.
-- The MCP server's tools are `mcp__echo__…`, listed in `guard::BRAIN_TOOLS`.
+- The MCP server's tools are `mcp__echo__…`, listed in `guard::BRAIN_TOOLS`: `search_sources`, `list_sources`,
+  `read_source` and `read_link` (`brain::mcp::tools`; the old names `search_knowledge` and `read_document` still
+  answer). Who people are and how things relate are the Knowledge plugin's: no people or relations tools.
+- What a session is told Echo holds (`brain::advert::summary`, the MCP server's instructions and `<echo_recall>`) and
+  the window's per-view hint (`view::view_lines`) name `search_sources` and point to the Knowledge plugin for people.
 
 ## Mail and channel posts
 
@@ -85,11 +89,19 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - The generations of the newest 7 days are kept, and always the generation with the most files. Snapshots of
   `knowledge.sqlite` don't cover the facts.
 
-## Ids, archive, snapshots
+## Ids, archive
 
 - Chunk ids: `brain::chunk::chunk_id`.
 - A closed thread's sources are archived: `brain::store::archived_of`.
-- A sync that changes the store snapshots it first: `brain::store::snapshot`.
+- The index has no snapshots (it is rebuilt from its sources) and no `related` table (dropped at `open`). At the app's
+  start `brain::drop_old_folders` removes `recall/snapshots/` and `recall/assets/` (the old page images) when they are
+  there; nothing else under `recall/` is touched.
+
+## Thread folders
+
+- `brain::files::folder::sync` reads each file's text: md, html, txt, transcripts, docx, xlsx, pptx and PDF (its text
+  layer, by PDFium), each page or slide with its tables; nothing is read from page images (a scan or a picture-only
+  slide is the Knowledge plugin's). `READER_VERSION` 3 reads every file again once, from its text.
 
 ## Search
 

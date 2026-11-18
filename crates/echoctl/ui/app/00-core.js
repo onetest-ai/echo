@@ -63,7 +63,7 @@ const S = {
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
   tk: { data: null, client: '', project: '', sort: 'due', mode: '', more: {} }, // Tasks: across projects
-  br: { tab: 'sources', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
+  br: { tab: '', node: null, nodeData: null, edit: null }, // Recall's plugin tabs and the dictionary's term panel
   pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
   noteDraft: '', // the note being typed in My notes' box

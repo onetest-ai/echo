@@ -61,6 +61,7 @@ cases:
   - tests/cases/plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md
   - tests/cases/plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md
   - tests/cases/plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md
+  - tests/cases/window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
@@ -151,6 +152,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 55 | `plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md` | — | Its own marketplace `acme-tidy`, folder `$D/tidy` and profile `acme-work`: run its precondition lines as written. Skip its teardown: Acme tidy, `$D/tidy` and the fake `claude` stay for stages 56–57 |
 | 56 | `plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md` | 55 | Acme tidy is installed with `$D/tidy` given to it and the fake `claude` in place: skip the precondition lines of TC-090 and its step 1; set `D`, `E` and `S` as its prelude does. Skip its teardown |
 | 57 | `plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md` | 55 | As for stage 56. Its teardown ends with TC-090's: Acme tidy, `acme-tidy`, `acme-work` and `$D/tidy` go, the data's fake `claude` back |
+| 58 | `window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md` | — | Its own marketplace `acme-know` in `market-know`: run its precondition lines as written. On this scenario's `small` data any call or "Pick a call" counts as Calls |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

@@ -1,5 +1,5 @@
 //! PDF pages through PDFium (BSD-3; loaded at runtime, like the NeMo runtime): each page's text layer
-//! and what is drawn on it (vector paths, images), and a page rendered to PNG for the page reader.
+//! and what is drawn on it (vector paths, images).
 //! Where it is: `ECHOCTL_PDFIUM_DIR`, else the app's own copy (macOS `Echo.app/Contents/Frameworks/pdfium`,
 //! Windows `<app folder>\pdfium`, from `scripts/fetch-pdfium.sh`), else `<config dir>/pdfium`.
 
@@ -103,20 +103,6 @@ fn running_titles(pages: &mut [Page]) {
             .map(|l| l.chars().take(90).collect());
     }
 }
-
-/// Page `n` (1-based) as a PNG, at most `width` pixels wide (and 2× that tall).
-pub fn render(path: &Path, n: usize, width: i32) -> Result<Vec<u8>> {
-    let doc = pdfium()?.load_pdf_from_file(path, None).map_err(|e| anyhow!("not a readable PDF: {e}"))?;
-    let page = doc.pages().get((n - 1) as i32).map_err(|e| anyhow!("page {n}: {e}"))?;
-    let img = page
-        .render_with_config(&PdfRenderConfig::new().set_target_width(width).set_maximum_height(width * 2))
-        .and_then(|b| b.as_image())
-        .map_err(|e| anyhow!("rendering page {n}: {e}"))?;
-    let mut out = std::io::Cursor::new(Vec::new());
-    img.to_rgb8().write_to(&mut out, image::ImageFormat::Png)?;
-    Ok(out.into_inner())
-}
-
 
 #[cfg(test)]
 mod tests {

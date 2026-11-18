@@ -397,8 +397,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let q = req.uri().query().unwrap_or("");
             json_reply(json!(crate::ledger::search_open(&query_param(q, "q").unwrap_or_default(), query_param(q, "not").as_deref())))
         }
-        // Everyone across the threads (the Brain's People): who, where, what was said about them.
-        "/api/brain/people" => json_reply(crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         p if p.starts_with("/api/client/") && p.ends_with("/people") => match client_id(p, "/people") {
             Some(id) => json_reply(people_view(crate::people::of_client(id, chrono::Local::now().date_naive()))),
             None => reply(404, "text/plain", b"no such client".to_vec()),

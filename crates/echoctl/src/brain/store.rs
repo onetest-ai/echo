@@ -1,8 +1,8 @@
 //! The store (`<home>/brain/knowledge.sqlite`), Brain's schema: `chunks` (+ Echo's `link` and `refs`),
 //! `chunks_fts` (FTS5, any script), `chunks_vec` (a plain table of unit vectors, searched in Rust),
-//! `documents` (the per-document skip cache), `related`, the taxonomy tables (filled in phase 2),
-//! `meta`. A sync rebuilds only documents whose text changed and embeds only chunks whose text
-//! changed; it snapshots the file first and writes in one transaction.
+//! `documents` (the per-document skip cache), the taxonomy tables (filled in phase 2), `meta`. A sync
+//! rebuilds only documents whose text changed and embeds only chunks whose text changed (the vectors
+//! only re-rank keyword hits); it writes in one transaction.
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -14,9 +14,6 @@ use std::path::Path;
 use super::chunk::{self, CHUNKER_VERSION, MAX_CHARS};
 use super::embed::{Embedder, BATCH};
 
-/// `related`: the k nearest sections of other documents, at least this similar.
-const RELATED_K: usize = 6;
-const RELATED_MIN: f32 = 0.55;
 /// Search: the keyword top 30 are the candidates; with an embedding server they are re-ranked by weighted reciprocal
 /// rank (k = 60) of their keyword rank (0.4) and their vector rank among themselves (0.6).
 const RRF_K: f32 = 60.0;
@@ -25,8 +22,6 @@ const W_VEC: f32 = 0.6;
 const CANDIDATES: usize = 30;
 /// What `chunks_fts` holds of a section (`fts_text`); another version writes it again from `chunks` at `open`.
 const FTS_TEXT_VERSION: &str = "2";
-/// Snapshots kept.
-const SNAPSHOTS: usize = 3;
 
 pub fn open(path: &Path) -> Result<Connection> {
     if let Some(d) = path.parent() {
@@ -44,8 +39,7 @@ pub fn open(path: &Path) -> Result<Connection> {
          CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, tokenize = 'unicode61 remove_diacritics 2');
          CREATE TABLE IF NOT EXISTS chunks_vec(rowid INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
          CREATE TABLE IF NOT EXISTS documents(source TEXT PRIMARY KEY, content_hash TEXT, indexed_at TEXT, title TEXT, kind TEXT, event_date TEXT, refs TEXT);
-         CREATE TABLE IF NOT EXISTS related(chunk_id INTEGER, related_id INTEGER, score REAL, edge_type TEXT DEFAULT 'SIMILAR', directed INTEGER DEFAULT 0,
-            PRIMARY KEY(chunk_id, related_id));
+         DROP TABLE IF EXISTS related;
          CREATE TABLE IF NOT EXISTS graph_nodes(id TEXT PRIMARY KEY, label TEXT, kind TEXT, parent TEXT, description TEXT);
          CREATE TABLE IF NOT EXISTS graph_edges(source TEXT, target TEXT, rel TEXT);
          CREATE TABLE IF NOT EXISTS graph_aliases(alias_id TEXT PRIMARY KEY, node_id TEXT);
@@ -445,35 +439,13 @@ pub struct Report {
     pub chunks: usize,
     pub embedded: usize,
     pub embed_error: Option<String>,
-    /// Thread folders: files read, pages read by the page reader, pages still waiting for it.
+    /// Thread folders: files read.
     #[serde(skip_serializing_if = "is_zero")]
     pub files_read: usize,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub pages_read: usize,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub pages_pending: usize,
 }
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
-}
-
-fn snapshot(path: &Path) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let dir = path.parent().unwrap().join("snapshots");
-    std::fs::create_dir_all(&dir)?;
-    let to = dir.join(format!("knowledge-{}.sqlite", chrono::Local::now().format("%Y%m%d-%H%M%S%3f")));
-    // VACUUM INTO gives a consistent copy while others may read.
-    let c = Connection::open(path)?;
-    c.execute("VACUUM INTO ?1", [to.to_string_lossy()])?;
-    let mut all: Vec<_> = std::fs::read_dir(&dir)?.flatten().map(|e| e.path()).collect();
-    all.sort();
-    while all.len() > SNAPSHOTS {
-        let _ = std::fs::remove_file(all.remove(0));
-    }
-    Ok(())
 }
 
 fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
@@ -481,7 +453,6 @@ fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
         tx.execute("DELETE FROM chunks WHERE id = ?1", [id])?;
         tx.execute("DELETE FROM chunks_fts WHERE rowid = ?1", [id])?;
         tx.execute("DELETE FROM chunks_vec WHERE rowid = ?1", [id])?;
-        tx.execute("DELETE FROM related WHERE chunk_id = ?1 OR related_id = ?1", [id])?;
         tx.execute("DELETE FROM chunk_topics WHERE chunk_id = ?1", [id])?;
         tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
         tx.execute("DELETE FROM graph_edges WHERE source = ?1", [format!("chunk:{id}")])?;
@@ -534,15 +505,11 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
     if todo.is_empty() && gone.is_empty() && !model_changed && emb.is_none() {
         return Ok(rep);
     }
-    if !todo.is_empty() || !gone.is_empty() || model_changed {
-        snapshot(path)?;
-    }
     let tx = c.transaction()?;
     if model_changed {
         // Another model: every vector is from the old one.
         tx.execute("DELETE FROM chunks_vec", [])?;
         tx.execute("UPDATE chunks SET embedding_content_hash = NULL", [])?;
-        tx.execute("DELETE FROM related", [])?;
     }
     for s in &gone {
         let ids: Vec<i64> = tx.prepare("SELECT id FROM chunks WHERE source = ?1")?.query_map([s], |r| r.get(0))?.collect::<Result<_, _>>()?;
@@ -604,7 +571,6 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
             .prepare("SELECT c.id, c.title || char(10) || char(10) || c.text, c.sha FROM chunks c LEFT JOIN chunks_vec v ON v.rowid = c.id WHERE v.rowid IS NULL")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<Result<_, _>>()?;
-        let mut changed_ids = vec![];
         for batch in missing.chunks(BATCH) {
             let texts: Vec<String> = batch.iter().map(|b| b.1.chars().take(8000).collect()).collect();
             match e.embed(&texts) {
@@ -613,7 +579,6 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                     for ((id, _, h), v) in batch.iter().zip(vs) {
                         tx.execute("INSERT OR REPLACE INTO chunks_vec(rowid, embedding) VALUES (?1, ?2)", params![id, blob(&v)])?;
                         tx.execute("UPDATE chunks SET embedding_content_hash = ?2 WHERE id = ?1", params![id, h])?;
-                        changed_ids.push(*id);
                     }
                     set_meta(&tx, "embed_model", &model)?;
                     tx.commit()?;
@@ -627,9 +592,6 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
         }
         if let Some(d) = c.query_row("SELECT length(embedding) / 4 FROM chunks_vec LIMIT 1", [], |r| r.get::<_, i64>(0)).optional()? {
             set_meta(&c, "embed_dim", &d.to_string())?;
-        }
-        if !changed_ids.is_empty() {
-            build_related(&c, &changed_ids)?;
         }
     }
     Ok(rep)
@@ -663,42 +625,6 @@ pub fn rescope(path: &Path, source: &str, refs: &Value) -> Result<()> {
         write_scopes(&tx, id, refs)?;
     }
     doc_facts(&tx, source)?;
-    tx.commit()?;
-    Ok(())
-}
-
-/// Every vector, by chunk id, with its source.
-fn vectors(c: &Connection) -> Result<Vec<(i64, String, Vec<f32>)>> {
-    let mut st = c.prepare("SELECT v.rowid, c.source, v.embedding FROM chunks_vec v JOIN chunks c ON c.id = v.rowid")?;
-    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, floats(&r.get::<_, Vec<u8>>(2)?))))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-/// The nearest sections of other documents for these chunks (and these chunks among others'
-/// neighbours): Brain's `build_related` (k = 6, ≥ 0.55, across documents).
-fn build_related(c: &Connection, ids: &[i64]) -> Result<()> {
-    let all = vectors(c)?;
-    let by_id: BTreeMap<i64, usize> = all.iter().enumerate().map(|(i, x)| (x.0, i)).collect();
-    let tx = c.unchecked_transaction()?;
-    for id in ids {
-        let Some(&i) = by_id.get(id) else { continue };
-        let (_, src, v) = &all[i];
-        let mut near: Vec<(f32, i64)> = all.iter().filter(|o| &o.1 != src).map(|o| (dot(v, &o.2), o.0)).filter(|(s, _)| *s >= RELATED_MIN).collect();
-        near.sort_by(|a, b| b.0.total_cmp(&a.0));
-        tx.execute("DELETE FROM related WHERE chunk_id = ?1", [id])?;
-        for (s, o) in near.into_iter().take(RELATED_K) {
-            tx.execute("INSERT OR REPLACE INTO related(chunk_id, related_id, score) VALUES (?1, ?2, ?3)", params![id, o, s])?;
-            // The other side learns of it too when it is among its nearest.
-            let worst: Option<f64> = tx.query_row("SELECT min(score) FROM related WHERE chunk_id = ?1 HAVING count(*) >= ?2", params![o, RELATED_K as i64], |r| r.get(0)).optional()?.flatten();
-            if worst.is_none_or(|w| (s as f64) > w) {
-                tx.execute("INSERT OR REPLACE INTO related(chunk_id, related_id, score) VALUES (?1, ?2, ?3)", params![o, id, s])?;
-                tx.execute(
-                    "DELETE FROM related WHERE chunk_id = ?1 AND related_id NOT IN (SELECT related_id FROM related WHERE chunk_id = ?1 ORDER BY score DESC LIMIT ?2)",
-                    params![o, RELATED_K as i64],
-                )?;
-            }
-        }
-    }
     tx.commit()?;
     Ok(())
 }
@@ -934,24 +860,6 @@ pub fn archived_of(c: &Connection, ids: &[i64], closed: &BTreeMap<String, Value>
     Ok(out)
 }
 
-/// The sections nearest to a chunk, from other documents.
-pub fn related(path: &Path, id: i64, limit: usize) -> Result<Value> {
-    related_in(path, id, limit, None)
-}
-
-/// The nearest sections within a client or a thread.
-pub fn related_in(path: &Path, id: i64, limit: usize, scope: Scope) -> Result<Value> {
-    let c = open(path)?;
-    let anchor = hit(&c, id, 1.0)?;
-    let rows: Vec<(i64, f32)> = c
-        .prepare("SELECT r.related_id, r.score FROM related r WHERE r.chunk_id = ?1
-                  AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = r.related_id AND s.kind = ?3 AND s.id = ?4)) ORDER BY r.score DESC LIMIT ?2")?
-        .query_map(params![id, limit as i64, scope.map(|s| s.0), scope.map(|s| s.1)], |r| Ok((r.get(0)?, r.get::<_, f64>(1)? as f32)))?
-        .collect::<Result<_, _>>()?;
-    let related: Vec<Value> = rows.into_iter().map(|(o, s)| hit(&c, o, s)).collect::<Result<_>>()?;
-    Ok(json!({"anchor": anchor, "related": related}))
-}
-
 /// The clients and threads in the Brain: each with its documents and sections (names from Echo's own
 /// files, so a renamed thread shows its new name).
 pub fn scopes(path: &Path) -> Result<Value> {
@@ -1001,7 +909,7 @@ pub fn status(path: &Path) -> Result<Value> {
     Ok(json!({
         "exists": true, "documents": n("SELECT count(*) FROM documents"), "by_kind": kinds,
         "chunks": n("SELECT count(*) FROM chunks"), "embedded": n("SELECT count(*) FROM chunks_vec"),
-        "related": n("SELECT count(*) FROM related"), "graph_nodes": n("SELECT count(*) FROM graph_nodes"),
+        "graph_nodes": n("SELECT count(*) FROM graph_nodes"),
         "chunk_topics": n("SELECT count(*) FROM chunk_topics"),
         "embed_model": meta(&c, "embed_model"), "embed_dim": meta(&c, "embed_dim"), "built_at": meta(&c, "built_at"),
         "bytes": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
@@ -1062,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_search_related_and_deltas() {
+    fn sync_search_and_deltas() {
         let dir = std::env::temp_dir().join(format!("echo-brain-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = dir.join("knowledge.sqlite");
@@ -1082,10 +990,6 @@ mod tests {
         let top: Vec<&str> = h["hits"].as_array().unwrap().iter().take(2).map(|x| x["section"].as_str().unwrap()).collect();
         assert!(top.contains(&"SSO") && top.contains(&"Tenants"), "{h}");
         assert_eq!(search(&db, "single sign-on", 5, Some("call/b"), Some(&Words)).unwrap()["count"], 1);
-        // Related across documents.
-        let sso = h["hits"].as_array().unwrap().iter().find(|x| x["section"] == "SSO").unwrap()["chunk_id"].as_str().unwrap().parse::<i64>().unwrap();
-        let rel = related(&db, sso, 6).unwrap();
-        assert_eq!(rel["related"][0]["section"], "Tenants", "{rel}");
         // One section changed: only it is embedded again; a document gone is removed.
         let a2 = a.replace("before the security review", "after the security review");
         let r = sync(&db, vec![input("call/a", &a2)], Some(&Words)).unwrap();
@@ -1093,7 +997,7 @@ mod tests {
         let st = status(&db).unwrap();
         assert_eq!((st["documents"].as_i64(), st["chunks"].as_i64(), st["embedded"].as_i64()), (Some(1), Some(2), Some(2)), "{st}");
         assert_eq!(search(&db, "tenant", 5, None, None).unwrap()["count"], 0);
-        assert!(dir.join("snapshots").read_dir().unwrap().count() >= 1);
+        assert!(!dir.join("snapshots").exists(), "no copies of the index: it is rebuilt from its sources");
         // Without an embedder the text is still indexed; vectors come later.
         let r = sync(&db, vec![input("call/a", &a2), input("call/c", "# C\n## X\nСпринт закрыт.\n")], None).unwrap();
         assert_eq!((r.added, r.embedded), (1, 0));

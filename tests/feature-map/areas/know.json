@@ -7,23 +7,16 @@
  "features": [
   {
    "id": "F-KNOW-01",
-   "feature": "Recall shows in the activity bar only with its index on or a plugin's tab; otherwise `#brain` opens Calls",
+   "feature": "Recall is in the activity bar only while a plugin adds a Knowledge tab, and shows only those tabs; without one `#brain` (and the old `#brain/sources`, `#brain/people`) opens Calls; with one, an address of a tab Echo no longer has opens the plugin's first tab",
    "priority": "medium",
    "check": "agent",
    "axes": []
   },
   {
    "id": "F-KNOW-02",
-   "feature": "Settings → Intake → Use Intake turns reading the threads' mail and channels on or off; its card shows when they were last read, Sync now and Keep it current; the search index's server, model, key and page reader stay below it",
+   "feature": "Settings → Intake → Use Intake turns reading the threads' mail and channels on or off; its card shows when they were last read, Sync now and Keep it current; below it the search card (how much Claude asked it, what it holds) and the optional re-ranker's embedding server, model and key",
    "priority": "medium",
    "check": "agent",
-   "axes": []
-  },
-  {
-   "id": "F-KNOW-03",
-   "feature": "Recall's Sources and People tabs browse what was indexed, by client or thread",
-   "priority": "medium",
-   "check": "person",
    "axes": []
   },
   {
@@ -35,16 +28,16 @@
   },
   {
    "id": "F-KNOW-05",
-   "feature": "Claude sessions get Recall as a read-only MCP server scoped to their AI profile",
+   "feature": "Claude sessions get Echo's search as a read-only MCP server scoped to their AI profile: search_sources, list_sources, read_source and read_link only; who people are and how things relate are left to the Knowledge plugin",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
    "id": "F-KNOW-06",
-   "feature": "Plugins add tabs and settings rows to Recall (e.g. Obsidian vaults)",
+   "feature": "Plugins add tabs to Recall (its only content) and rows to Settings → Intake (e.g. Obsidian vaults)",
    "priority": "low",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
@@ -58,6 +51,13 @@
    "id": "F-KNOW-08",
    "feature": "Intake keeps the facts read from mail and channel posts as one file per source, apart from the index; a source read again is merged into its file (nothing older dropped); dated backups (7 days) before a sync changes them; moved there once from the old index; a fact file goes only when its source leaves its thread (never on a short thread list or a mass removal), and an ignored sender's sections only on the user's Ignore or Keep out",
    "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-09",
+   "feature": "After an update Echo removes the index's old snapshots and the page reader's page images (`recall/snapshots/`, `recall/assets/`) once; Intake's facts, the dictionary, the senders and the sources' state stay",
+   "priority": "medium",
    "check": "person",
    "axes": []
   }

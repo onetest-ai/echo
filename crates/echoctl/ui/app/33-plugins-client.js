@@ -201,7 +201,12 @@ function pluginCtx(id) {
     },
     slots: {
       list: () => SLOTS.slice(),
-      add: (slot, item) => { if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`); add(Plugins.slots[slot] = Plugins.slots[slot] || [], item) },
+      add: (slot, item) => {
+        if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`)
+        add(Plugins.slots[slot] = Plugins.slots[slot] || [], item)
+        // A Knowledge tab is Recall's only content: an address of Recall, loaded before the tab came, is routed again.
+        if (slot === 'knowledge.tab' && /^brain(\/|$)/.test(hashText().slice(1))) { route(); render() }
+      },
     },
     panels: { add: (v) => { PANEL_VIEWS.push({ area: 'right', ...v, id: `${id}:${v.id}`, plugin: id }); render() } },
     /** Its `page` widgets (kind `page` in its manifest): draw(widget, ({data, size, theme}) => HTML) — data from its

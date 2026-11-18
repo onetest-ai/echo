@@ -951,32 +951,8 @@ fn about_for(x: &Value, threads: &BTreeMap<String, String>) -> Value {
     if ok { x["about"].clone() } else { Value::Null }
 }
 
-/// `find_people`: the people of these threads whose name, address, organisation, title, group or role
-/// has every word of the query; the most seen first. Only the Brain's MCP server asks (`brain` feature).
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
-pub fn find(threads: &[String], query: &str, limit: usize) -> Result<Value> {
-    let (people, names) = of_threads(threads)?;
-    let words: Vec<String> = fold(&query.to_lowercase()).split_whitespace().map(str::to_owned).collect();
-    let mut seen: Vec<&Value> = people.iter().filter(|x| x["touches"].as_u64().unwrap_or(0) > 0 || x["in_thread"] == true).collect();
-    seen.sort_by_key(|x| std::cmp::Reverse(x["touches"].as_u64().unwrap_or(0)));
-    let mut hits: Vec<Value> = seen
-        .into_iter()
-        .map(|x| brief(x, &names))
-        .filter(|b| {
-            // The values only (a field's name isn't a match).
-            let mut hay: Vec<&str> = ["name", "email", "organisation", "title", "group", "about"].iter().filter_map(|k| b[*k].as_str()).collect();
-            hay.extend(b["threads"].as_array().into_iter().flatten().flat_map(|t| [t["name"].as_str(), t["role"].as_str()]).flatten());
-            let hay = fold(&hay.join(" ").to_lowercase());
-            words.iter().all(|w| hay.contains(w.as_str()))
-        })
-        .collect();
-    let total = hits.len();
-    hits.truncate(limit);
-    Ok(json!({"people": hits, "total": total, "guidance": "get_person gives one person's facts with their sources. Cite them; say 'not modeled' for what they don't say."}))
-}
-
-/// `get_person`: one person of these threads (by key, address or name) with the facts said about them
-/// there, each with its words and a link (a call's moment, the mail).
+/// One person of these threads (by key, address or name) with the facts said about them there, each with its words
+/// and a link (a call's moment, the mail): what `read_link` gives for an echo://person link.
 pub fn card(threads: &[String], who: &str, max_facts: usize) -> Result<Value> {
     let (people, names) = of_threads(threads)?;
     let w = who.trim().to_lowercase();
@@ -1332,8 +1308,6 @@ mod tests {
         let c = card(std::slice::from_ref(&p.id), "ravi@northwind.example", 10).unwrap();
         assert_eq!(c["facts"][0]["link"], "echo://call/2026-10-28_110000-aurora?t=741");
         assert_eq!(c["about"], "Ravi: careful, wants everything in writing.");
-        assert_eq!(find(std::slice::from_ref(&p.id), "procurement", 10).unwrap()["total"], 0, "facts aren't searched, only who they are");
-        assert_eq!(find(std::slice::from_ref(&p.id), "ravi security", 10).unwrap()["total"], 1);
         assert_eq!(card(std::slice::from_ref(&q.id), "Ravi Mehta", 10).unwrap()["status"], "not_found");
         // Echo's summary from one thread isn't shown to a reader of another.
         let mut x = json!({"about": "secret", "about_by": "echo", "about_thread": p.id});

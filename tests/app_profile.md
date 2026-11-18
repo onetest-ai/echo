@@ -117,7 +117,7 @@ Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be ope
 
 Not routes: the Details drawer, My notes, the Vocabulary panel, Asks and Inbox are panels on the right (or bottom); the
 actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Recall" activity (`#brain`) exists only while
-Recall is on; it is off on test data.
+a plugin adds a Knowledge tab (`knowledge.tab`); test data has none, and `#brain` opens Calls.
 
 Live notes are in **My notes** (`[data-panel-flip="notes"]`; the right panel `aside#r-right`, outside `main`), not in the
 Transcript tab, which is the transcript alone at full width: a box `section[aria-label="Live notes"]` above the list (Now
@@ -151,8 +151,7 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
   a case may check the button and the dialog, not the run's result, unless it is `run: person`.
 - Microsoft 365 (mail, Teams, calendar sync) is not signed in on test data: those views show their sign-in state.
 - The data folder's `.echo/` holds the app's state files; a case reads them only when its steps say so.
-- **First paint is empty.** Right after `browser_navigate` the snapshot can show `main` empty and an extra
-  "Recall" activity button (it vanishes once the state is loaded). Wait for text first
+- **First paint is empty.** Right after `browser_navigate` the snapshot can show `main` empty. Wait for text first
   (`browser_wait_for` "Your day" / the view's heading), then snapshot. Same after clicking a view button: re-snapshot.
 - **The minutes are in an iframe**: `iframe#minutes-frame` (`sandbox="allow-scripts"`, cross-origin, so
   `evaluate` cannot read it and `browser_wait_for text` does not see its text — it times out). The accessibility

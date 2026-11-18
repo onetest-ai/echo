@@ -5,7 +5,7 @@ const STANCES = ['champion', 'supporter', 'neutral', 'sceptic', 'blocker']
 /** Relationships between organisations (`projects::RELATIONS`), as a sentence reads them. */
 const REL_KINDS = [['partner', 'partner of'], ['vendor', 'vendor to'], ['delivers_for', 'delivers for'], ['integrates_for', 'integrates for'], ['customer', 'customer of'], ['competitor', 'competitor of']]
 const MATTERS = ['critical', 'high', 'normal', 'irrelevant']
-const peopleData = () => { if (S.view === 'brain') return S.br.people && S.br.people.people ? S.br.people : null; const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
+const peopleData = () => { const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
 const peopleCount = () => { const d = peopleData(); return d && d.people ? d.people.filter((x) => x.in_thread).length : 0 }
 const ppView = () => { try { return localStorage.getItem('echo.people.view') || 'map' } catch { return 'map' } }
 const initials = (n) => (n || '?').split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')

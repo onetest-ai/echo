@@ -47,30 +47,13 @@ pub enum BrainCmd {
     },
     /// The thread folders' files: what was read, how, and why the others weren't
     Files,
-    /// (dev) What the Brain's readers make of files: method, pages, routing (why a page goes to the page reader), date
+    /// (dev) What the Brain's readers make of files: method, pages, date
     #[command(hide = true)]
     ReadFile {
         paths: Vec<std::path::PathBuf>,
         /// Print each page's text too
         #[arg(long)]
         text: bool,
-    },
-    /// (dev) Where a work item comes up elsewhere in its thread: the Work tab's "Mentioned also in"
-    #[command(hide = true)]
-    Mentions {
-        #[arg(long)]
-        thread: String,
-        #[arg(long)]
-        title: String,
-        /// JSON [[call stamp, quote], …]
-        #[arg(long, default_value = "[]")]
-        quotes: String,
-    },
-    /// The sections nearest to one, from other sources
-    Related {
-        chunk: i64,
-        #[arg(long, default_value_t = 6)]
-        limit: usize,
     },
     /// Serve it to Claude Code as an MCP server over stdio (read-only; Brain's tool names). Only one AI
     /// profile's sources (--profile; default: the default profile's), narrowed for a call's session
@@ -176,27 +159,21 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
                             .iter()
                             .map(|x| {
                                 let mut v = serde_json::json!({"n": x.n, "title": x.title, "chars": x.text.chars().count(), "tables": x.tables.len(), "drawings": x.drawings,
-                                    "pictures": x.pictures, "connectors": x.connectors, "charts": x.charts, "smartart": x.smartart, "route": brain::files::route(x)});
+                                    "pictures": x.pictures, "connectors": x.connectors, "charts": x.charts, "smartart": x.smartart});
                                 if text {
                                     v["text"] = serde_json::json!(x.text);
                                 }
                                 v
                             })
                             .collect();
-                        let flagged = r.pages.iter().filter(|x| brain::files::route(x).is_some()).count();
                         print_json(&serde_json::json!({"file": p, "method": r.method, "fidelity": r.fidelity, "skip": r.skip, "date": date, "date_from": from,
-                            "chars": r.md.as_ref().map(|m| m.chars().count()), "figures": r.figures, "pages": r.pages.len(), "flagged": flagged,
+                            "chars": r.md.as_ref().map(|m| m.chars().count()), "figures": r.figures, "pages": r.pages.len(),
                             "page_list": pages, "md": if text { r.md } else { None }}));
                     }
                     Err(e) => print_json(&serde_json::json!({"file": p, "error": format!("{e:#}")})),
                 }
             }
         }
-        BrainCmd::Mentions { thread, title, quotes } => {
-            let q: Vec<(String, String)> = serde_json::from_str(&quotes).map_err(|e| anyhow::anyhow!("--quotes: {e}"))?;
-            print_json(&brain::views::mentions(&thread, &title, &q)?)
-        }
-        BrainCmd::Related { chunk, limit } => print_json(&brain::store::related(&brain::store_path(), chunk, limit)?),
         BrainCmd::Set { endpoint, api, model, key, enabled } => {
             let mut s = brain::settings();
             if let Some(on) = enabled {

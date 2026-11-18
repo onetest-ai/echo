@@ -247,9 +247,9 @@ function route() {
   if (h === 'whats-new') { replaceUrl('#today'); S.view = 'today'; setTimeout(whatsNewOpen); return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
-  // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
+  // Knowledge: the plugins' tabs (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`); without one, Calls.
   const bm = h.match(/^brain(?:\/([\w:-]+)(?:\/(.*))?)?$/)
-  if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'calls'; return }
+  if (bm && !knowledgeTabs().length) { S.view = 'calls'; return }
   if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; S.plRoute = bm[2] || ''; return }
   if (h === 'found') { S.view = 'projects'; S.pj.found = true; S.pj.client = null; S.pj.sel = null; S.pj.detail = null; return }
   const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/([\w-]+))?$/)
@@ -301,6 +301,6 @@ const go = (hash, opts) => {
 // end of the go block
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
-  : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? `brain/${S.br.tab}`
+  : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? (S.br.tab ? `brain/${S.br.tab}` : 'brain')
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected && !callGone() ? `call/${S.selected}/${S.tab}` : 'calls'))
 

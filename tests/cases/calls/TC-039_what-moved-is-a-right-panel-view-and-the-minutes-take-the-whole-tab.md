@@ -49,4 +49,4 @@ Initech planning is open; nothing changed.
 
 ## Notes
 - Read-only: Sync now is never pressed (it starts Claude Code).
-- A call in no thread has no What moved view at all (as Also discussed has none without the Brain); a call in a thread always has it, saying per thread what changed, or why the thread hasn't read the call yet.
+- A call in no thread has no What moved view at all; a call in a thread always has it, saying per thread what changed, or why the thread hasn't read the call yet.

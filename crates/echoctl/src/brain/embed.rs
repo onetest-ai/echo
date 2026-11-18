@@ -31,19 +31,6 @@ pub struct Settings {
     /// Keep the Brain current in the app (none: yes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<bool>,
-    /// Who reads the pages of thread folders flagged visual: `claude` (the default AI profile's minutes
-    /// model; none: this), `endpoint` (the vision endpoint below) or `off` (their text only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pages: Option<String>,
-    /// A vision model: Ollama (`/api/chat`) or OpenAI-compatible (`/v1/chat/completions`).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub vision_endpoint: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub vision_api: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub vision_model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vision_key: Option<String>,
 }
 
 impl Settings {
@@ -53,10 +40,6 @@ impl Settings {
 
     pub fn auto(&self) -> bool {
         self.auto.unwrap_or(true)
-    }
-
-    pub fn pages(&self) -> &str {
-        self.pages.as_deref().unwrap_or("claude")
     }
 
     pub fn ready(&self) -> bool {

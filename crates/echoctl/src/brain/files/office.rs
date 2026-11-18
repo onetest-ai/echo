@@ -1,7 +1,6 @@
 //! PowerPoint and Word from their XML: exact text in order, headings, real table cells as Markdown
-//! grids, and per slide what is drawn (shapes, connectors, pictures, charts, SmartArt) — the
-//! routing signals. Hidden slides are left out (LibreOffice leaves them out of its PDF too, so slide
-//! N here is page N there).
+//! grids, and per slide what is drawn (shapes, connectors, pictures, charts, SmartArt). Hidden slides
+//! are left out.
 
 use super::xml::{self, El};
 use super::{Page, Parsed};

@@ -162,15 +162,12 @@ pub fn sync() -> Result<store::Report> {
             Err(e) => eprintln!("brain: sources: {e:#}"),
         }
     }
-    // Thread folders: read what changed; pages flagged visual go to the page reader only while
-    // nothing records (and, on a Mac, on power), within a budget per run.
-    match files::folder::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder), quiet()) {
+    // Thread folders: read what changed, each page from its text.
+    match files::folder::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder)) {
         Ok(reps) => {
             for f in reps {
                 r.removed += f.removed;
                 r.files_read += f.read;
-                r.pages_read += f.pages_read;
-                r.pages_pending += f.pages_pending;
                 if let Some(s) = &f.store {
                     r.added += s.added;
                     r.changed += s.changed;
@@ -220,7 +217,7 @@ fn fingerprint() -> u64 {
         (chrono::Utc::now().timestamp() / 1800).hash(&mut h);
         serde_json::to_string(&crate::projects::list().iter().map(|p| &p.sources).collect::<Vec<_>>()).unwrap_or_default().hash(&mut h);
     }
-    // Folders: every file's size and time; with pages waiting for the page reader, every 10 minutes.
+    // Folders: every file's size and time.
     for p in crate::projects::list().iter().filter(|p| !p.stage.closed()) {
         for s in p.sources.iter().filter(|s| s.kind == "folder") {
             (s.id.as_str(), &s.exclude).hash(&mut h);
@@ -247,9 +244,6 @@ fn fingerprint() -> u64 {
     // Each thread's history date (supersession).
     for p in crate::projects::list() {
         (p.id, p.history_before).hash(&mut h);
-    }
-    if files::folder::pending() > 0 {
-        (chrono::Utc::now().timestamp() / 600).hash(&mut h);
     }
     for d in crate::calls::all_calls() {
         d.hash(&mut h);
@@ -304,14 +298,9 @@ pub fn start_scheduler() {
             }
         }
     });
-    // What the Brain's screens count over every section (seconds on millions), counted once now so the first look
-    // doesn't wait; later changes are counted again in the background (`store::kept`).
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(20));
-        if enabled() {
-            let _ = views::overview(None);
-        }
-    });
+    // What the page reader and the snapshots left behind, once: Intake's facts, the dictionary and the
+    // senders stay.
+    std::thread::spawn(drop_old_folders);
     std::thread::spawn(|| {
         let mut last: Option<u64> = None;
         let mut failed_at: Option<std::time::Instant> = None;
@@ -349,6 +338,20 @@ pub fn start_scheduler() {
     });
 }
 
+/// `recall/snapshots/` (copies of the index: it is rebuilt from its sources) and `recall/assets/` (the page reader's
+/// page images and text), removed when they are there; nothing else under `recall/` is touched.
+fn drop_old_folders() {
+    for name in ["snapshots", "assets"] {
+        let d = dir().join(name);
+        if std::fs::symlink_metadata(&d).is_ok() {
+            match std::fs::remove_dir_all(&d) {
+                Ok(()) => eprintln!("recall: {name}/ removed (no longer used)"),
+                Err(e) => eprintln!("recall: can't remove {}: {e}", d.display()),
+            }
+        }
+    }
+}
+
 pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope) -> Result<Value> {
     let emb = embedder();
     store::search_in(&store_path(), q, limit, within, scope, emb.as_ref().map(|e| e as &dyn embed::Embedder))
@@ -357,9 +360,7 @@ pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope) 
 pub fn status() -> Result<Value> {
     let mut v = store::status(&store_path())?;
     let s = settings();
-    v["settings"] = serde_json::json!({"endpoint": s.endpoint, "api": s.api, "model": s.model, "key": s.key.as_deref().is_some_and(|k| !k.is_empty()),
-        "pages": s.pages(), "vision_endpoint": s.vision_endpoint, "vision_api": s.vision_api, "vision_model": s.vision_model,
-        "vision_key": s.vision_key.as_deref().is_some_and(|k| !k.is_empty())});
+    v["settings"] = serde_json::json!({"endpoint": s.endpoint, "api": s.api, "model": s.model, "key": s.key.as_deref().is_some_and(|k| !k.is_empty())});
     v["path"] = serde_json::json!(store_path());
     Ok(v)
 }
@@ -375,5 +376,24 @@ mod tests {
         assert_eq!(super::store_path(), crate::paths::home().join("recall").join("knowledge.sqlite"));
         assert!(!old.exists() && super::store_path().exists(), "moved, not copied");
         assert!(root.exists());
+    }
+
+    #[test]
+    fn the_snapshots_and_page_images_go_and_intakes_files_stay() {
+        let (_env, _root) = crate::paths::testenv::folders("recall-old-folders");
+        let d = super::dir();
+        let keep = ["intake/facts/mail/a.json", "taxonomy/v1.json", "senders.json", "sources.json", "knowledge.sqlite"];
+        for f in keep.iter().chain(["snapshots/knowledge-1.sqlite", "assets/ab12/p01.png"].iter()) {
+            std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap();
+            std::fs::write(d.join(f), b"x").unwrap();
+        }
+        super::drop_old_folders();
+        assert!(!d.join("snapshots").exists() && !d.join("assets").exists());
+        for f in keep {
+            assert!(d.join(f).is_file(), "{f} stays");
+        }
+        // Again, with nothing to remove: nothing changes.
+        super::drop_old_folders();
+        assert!(keep.iter().all(|f| d.join(f).is_file()));
     }
 }

@@ -242,7 +242,6 @@ const hashChanged = async () => {
   if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
   if (S.view === 'tasks') { await loadTasks(); render() }
   if (S.view === 'today') { await loadToday(); render() }
-  if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 }
 // end of the hash changed block
