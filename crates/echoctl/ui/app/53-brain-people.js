@@ -397,6 +397,13 @@ function callSuggestion(c) {
 }
 
 
+// ── editor focus: an editor opened takes the focus; a list opens, a box's text is selected so typing replaces it
+function focusEditor(i, open) {
+  i.focus()
+  if (i.tagName === 'SELECT') open(i)
+  else if (i.select) try { i.select() } catch {}
+}
+// end of the editor focus block
 function projectSend(op, extra = {}) {
   send({ cmd: 'project', op, id: S.pj.sel, ...extra })
 }
@@ -437,7 +444,7 @@ document.addEventListener('click', (e) => {
     }
     case 'view-del': { const bd = boardOf(); const cur = activeViewId(); bd.views = bd.views.filter((v) => v.id !== cur); S.pj.viewMenu = false; saveBoard(bd); return chooseView(bd.views[0].id) }
     // A date box opens without its calendar: an open calendar takes Enter and picks today (#303); its icon opens it.
-    case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) { i.focus(); if (i.tagName === 'SELECT') smOpen(i) } } return // a list opens at once, as the other fields' menus do
+    case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) focusEditor(i, smOpen) } return // a list opens at once, as the other fields' menus do; a box's text is selected, so typing replaces it
     case 'edit-title': S.pj.editField = 'title'; render(); { const i = document.querySelector('.wp-title'); if (i) { i.focus(); i.select() } } return
     case 'sync': send({ cmd: 'project', op: 'sync', id: S.pj.sel }); if (S.pj.work) S.pj.work.sync = { state: 'running', message: 'reading calls' }; return render()
     case 'ledger': return ledgerEdit(JSON.parse(d.body), d.project || S.pj.sel)
