@@ -25,7 +25,8 @@ tags: [plugins, threads, stage, host-half]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `$E plugin marketplace add "$PWD/tests/fixtures/plugins" --name test-plugins`; `$E plugin install tracker-demo --from test-plugins` | The sheet has "Reads your threads' names and stages in Echo. Changes your threads' stage. Adds and updates tasks in your threads", then asks for `--yes` |
-| 2 | `$E plugin install tracker-demo --from test-plugins --yes`; `$E plugin call tracker-demo threads` | Installed; the Globex pilot row has `"stage": "lead"`, `"group": "pursuit"` |
+| 2 | `$E plugin install tracker-demo --from test-plugins --yes`; `$E plugin call tracker-demo threads` | Installed; the Globex pilot row has `"stage": "lead"`, `"group": "pursuit"` and `"profile"`: the default AI profile's id (`work` on this data), no key, endpoint or secret anywhere in the row |
+| 2a | `$E project set globex-pilot --profile ollama`; `$E plugin call tracker-demo threads`; then `$E project set globex-pilot --profile ""` | The Globex pilot row now has `"profile": "ollama"` (the pinned one); after the reset the default's id again |
 | 3 | `$E plugin call tracker-demo stage '{"thread":"globex-pilot","stage":"proposal","reason":"proposal sent in the tracker"}'` | `{"applied": true}`: the user's Lead from before the plugin's first write holds nothing |
 | 4 | Load `{{base_url}}/#project/globex-pilot/profile` | The Stage group's "Proposal" is pressed; the line under it reads "Proposal since <today> · Lead … (set by Tracker Demo: proposal sent in the tracker)"; no "Let Tracker Demo set it again" button |
 | 5 | Click "Negotiation" in the Stage group | "Negotiation" is pressed; the line has no "set by"; a button "Let Tracker Demo set it again" is there |
