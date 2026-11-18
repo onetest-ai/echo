@@ -10,13 +10,15 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use crate::calls;
 use crate::projects::{self, Client, Project};
 
 mod suggestions;
+#[cfg(test)]
+mod before_816;
 pub use suggestions::*;
 
 const FILE: &str = "people.json";
@@ -86,10 +88,24 @@ fn canon(dir_people: &[Person]) -> BTreeMap<String, String> {
     out
 }
 
-/// Did the user say these two are different people?
-fn apart(dir_people: &[Person], a: &str, b: &str) -> bool {
-    dir_people.iter().any(|p| (p.id == a || p.emails.iter().any(|e| e == a)) && p.not_same.iter().any(|x| x == b))
-        || dir_people.iter().any(|p| (p.id == b || p.emails.iter().any(|e| e == b)) && p.not_same.iter().any(|x| x == a))
+/// Whom the user said are different people: each key or address of a directory person → the ones they aren't.
+struct Apart(BTreeMap<String, BTreeSet<String>>);
+
+impl Apart {
+    fn of(dir_people: &[Person]) -> Apart {
+        let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for p in dir_people.iter().filter(|p| !p.not_same.is_empty()) {
+            for a in std::iter::once(&p.id).chain(&p.emails) {
+                out.entry(a.clone()).or_default().extend(p.not_same.iter().cloned());
+            }
+        }
+        Apart(out)
+    }
+
+    /// Did the user say these two are different people?
+    fn apart(&self, a: &str, b: &str) -> bool {
+        self.0.get(a).is_some_and(|x| x.contains(b)) || self.0.get(b).is_some_and(|x| x.contains(a))
+    }
 }
 
 /// Merge `key` into `into`: one person with both's addresses, names and fields (`into`'s win).
@@ -484,11 +500,12 @@ fn merge_same_names(seen: &mut BTreeMap<String, Seen>, dir_people: &[Person]) {
             by_name.entry(n).or_default().push(k.clone());
         }
     }
+    let apart = Apart::of(dir_people);
     for keys in by_name.into_values().filter(|k| k.len() > 1) {
         let mut keys = keys;
         keys.sort_by_key(|k| std::cmp::Reverse(seen[k].calls.len()));
         let (main, rest) = keys.split_first().unwrap();
-        for k in rest.iter().filter(|k| !apart(dir_people, main, k)) {
+        for k in rest.iter().filter(|k| !apart.apart(main, k)) {
             let o = seen.remove(k).unwrap();
             let m = seen.get_mut(main).unwrap();
             m.calls.extend(o.calls);
@@ -677,21 +694,26 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
         }
     }
     // Who is in calls with whom: for each person, the three they shared most calls with (two or more).
+    // Counted through each call's people, not over every pair of people (#816).
     let mut with: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
     {
-        let keys: Vec<&String> = seen.keys().collect();
-        for (i, a) in keys.iter().enumerate() {
-            for b in keys.iter().skip(i + 1) {
-                let n = seen[*a].calls.intersection(&seen[*b].calls).count();
-                if n >= 2 {
-                    with.entry((*a).clone()).or_default().push((n, (*b).clone()));
-                    with.entry((*b).clone()).or_default().push((n, (*a).clone()));
-                }
+        let mut in_call: HashMap<&str, Vec<&String>> = HashMap::new();
+        for (k, s) in &seen {
+            for c in &s.calls {
+                in_call.entry(c).or_default().push(k);
             }
         }
-        for v in with.values_mut() {
-            v.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
-            v.truncate(3);
+        for (a, s) in &seen {
+            let mut shared: HashMap<&String, usize> = HashMap::new();
+            for b in s.calls.iter().flat_map(|c| &in_call[c.as_str()]).filter(|b| **b != a) {
+                *shared.entry(b).or_default() += 1;
+            }
+            let mut v: Vec<(usize, String)> = shared.into_iter().filter(|(_, n)| *n >= 2).map(|(b, n)| (n, b.clone())).collect();
+            if !v.is_empty() {
+                v.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+                v.truncate(3);
+                with.insert(a.clone(), v);
+            }
         }
     }
     let canon = canon(&dir_people);
@@ -702,7 +724,31 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
             seen.entry(member_key(m)).or_insert_with(|| Seen { name: display(&m.name), email: m.email.clone(), ..Default::default() });
         }
     }
-    let work = work_of(threads, today);
+    let work: BTreeMap<String, (usize, usize, usize)> = work_of(threads, today).into_iter().map(|(k, a, b, c)| (k, (a, b, c))).collect();
+    // Indexes built once, each lookup the first match a scan would find (#816): the directory by key and by
+    // address; each thread's placed people by key, by address and, those without one, by name.
+    let mut dir_by_key: HashMap<&str, usize> = HashMap::new();
+    let mut dir_by_email: HashMap<&str, usize> = HashMap::new();
+    for (i, p) in dir_people.iter().enumerate() {
+        dir_by_key.entry(&p.id).or_insert(i);
+        for e in &p.emails {
+            dir_by_email.entry(e).or_insert(i);
+        }
+    }
+    let placed: Vec<[HashMap<String, usize>; 3]> = threads
+        .iter()
+        .map(|p| {
+            let [mut by_key, mut by_email, mut by_name] = [HashMap::new(), HashMap::new(), HashMap::new()];
+            for (i, m) in p.people.iter().enumerate() {
+                by_key.entry(member_key(m)).or_insert(i);
+                match &m.email {
+                    Some(e) => by_email.entry(e.to_lowercase()).or_insert(i),
+                    None => by_name.entry(norm(&m.name)).or_insert(i),
+                };
+            }
+            [by_key, by_email, by_name]
+        })
+        .collect();
     let call_days: Vec<String> = dirs.iter().filter_map(|d| calls::read_json(&d.join("meta.json"))["started_at"].as_str().map(|s| s.get(..10).unwrap_or("").to_string())).collect();
     let last_call = call_days.iter().max().cloned().unwrap_or_default();
     // "New" = joined an engagement already running: first seen more than a day after its first call.
@@ -716,7 +762,7 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     let mut people: Vec<Value> = seen
         .into_iter()
         .map(|(key, mut s)| {
-            let entry = dir_people.iter().find(|p| p.id == key || s.email.as_ref().is_some_and(|e| p.emails.contains(e)));
+            let entry = [dir_by_key.get(key.as_str()), s.email.as_deref().and_then(|e| dir_by_email.get(e))].into_iter().flatten().min().map(|&i| &dir_people[i]);
             let f = |k: &str| entry.and_then(|p| p.fields.get(k).cloned());
             // A colleague shown on their own address; a client address they were invited on stays in `also`.
             if let Some(i) = s.also.iter().position(|e| book.address(e)).filter(|_| !s.email.as_deref().is_some_and(|e| book.address(e))) {
@@ -740,10 +786,13 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 (None, Some(_)) => "other",
                 (None, None) => "unknown",
             };
+            let name = s.email.is_some().then(|| norm(&s.name));
             let places: Vec<Value> = threads
                 .iter()
-                .filter_map(|p| {
-                    let m = p.people.iter().find(|m| member_key(m) == key || m.email.as_ref().is_some_and(|e| s.also.contains(&e.to_lowercase())) || (m.email.is_none() && s.email.is_some() && norm(&m.name) == norm(&s.name)))?;
+                .zip(&placed)
+                .filter_map(|(p, [by_key, by_email, by_name])| {
+                    let i = by_key.get(&key).into_iter().chain(s.also.iter().filter_map(|e| by_email.get(e))).chain(name.as_ref().and_then(|n| by_name.get(n))).min()?;
+                    let m = &p.people[*i];
                     Some(json!({"thread": p.id, "role": m.role, "stance": m.place.stance, "influence": m.place.influence, "interest": m.place.interest,
                                 "group": m.group, "governance": m.governance, "works_for": m.works_for,
                                 "role_by": m.role_by, "role_at": m.role_at, "role_from": m.role_from}))
@@ -751,7 +800,7 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 .collect();
             let n = norm(entry.map(|p| p.name.as_str()).unwrap_or(&s.name));
             let first_name = n.split(' ').next().unwrap_or("").to_string();
-            let (owes, late, waiting) = work.iter().filter(|(w, ..)| *w == n || *w == first_name).fold((0, 0, 0), |a, (_, x, y, z)| (a.0 + x, a.1 + y, a.2 + z));
+            let (owes, late, waiting) = [Some(&n), Some(&first_name).filter(|f| **f != n)].into_iter().flatten().filter_map(|w| work.get(w)).fold((0, 0, 0), |a, (x, y, z)| (a.0 + x, a.1 + y, a.2 + z));
             let in_thread = !places.is_empty();
             let new = in_thread && !s.first.is_empty() && days(&s.first).is_some_and(|d| d <= NEW_DAYS) && joined_later(&s.first);
             let quiet = in_thread && !s.last.is_empty() && days(&s.last).is_some_and(|d| d > QUIET_DAYS) && last_call > s.last;
@@ -794,15 +843,25 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
             (p["key"].as_str().unwrap_or("").to_string(), t)
         })
         .collect();
-    let mut maybe: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-    for (i, (ka, ta)) in words.iter().enumerate() {
-        for (kb, tb) in words.iter().skip(i + 1) {
-            if ta.len() >= 2 && tb.len() >= 2 && ta.intersection(tb).count() >= 2 && !apart(&dir_people, ka, kb) {
-                let a = &people[i];
-                let b = people.iter().find(|p| p["key"] == kb.as_str()).unwrap();
-                maybe.entry(ka.clone()).or_default().push(json!({"key": kb, "name": b["name"], "email": b["email"]}));
-                maybe.entry(kb.clone()).or_default().push(json!({"key": ka, "name": a["name"], "email": a["email"]}));
+    // Found through each two of a person's words, not over every pair of people (#816); in the pairs' order.
+    let mut by_two: HashMap<(&String, &String), Vec<usize>> = HashMap::new();
+    for (i, (_, t)) in words.iter().enumerate() {
+        let t: Vec<&String> = t.iter().collect();
+        for (x, a) in t.iter().enumerate() {
+            for b in &t[x + 1..] {
+                by_two.entry((a, b)).or_default().push(i);
             }
+        }
+    }
+    let pairs: BTreeSet<(usize, usize)> = by_two.values().flat_map(|v| v.iter().enumerate().flat_map(move |(x, &i)| v[x + 1..].iter().map(move |&j| (i, j)))).collect();
+    let apart = Apart::of(&dir_people);
+    let mut maybe: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for (i, j) in pairs {
+        let ((ka, _), (kb, _)) = (&words[i], &words[j]);
+        if !apart.apart(ka, kb) {
+            let (a, b) = (&people[i], &people[j]);
+            maybe.entry(ka.clone()).or_default().push(json!({"key": kb, "name": b["name"], "email": b["email"]}));
+            maybe.entry(kb.clone()).or_default().push(json!({"key": ka, "name": a["name"], "email": a["email"]}));
         }
     }
     for p in people.iter_mut() {
@@ -812,12 +871,13 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     // says (a name in the ledger → a person here: the full name, else a first name only one has).
     let hints = works_for_hints(threads);
     let by_name: Vec<(String, String)> = people.iter().map(|p| (norm(p["name"].as_str().unwrap_or("")), p["key"].as_str().unwrap_or("").to_string())).collect();
-    let key_of_name = |n: &str| {
-        by_name.iter().find(|(x, _)| x == n).map(|(_, k)| k.clone()).or_else(|| {
-            let first: Vec<&(String, String)> = by_name.iter().filter(|(x, _)| x.split(' ').next() == Some(n)).collect();
-            (first.len() == 1).then(|| first[0].1.clone())
-        })
-    };
+    let mut full: HashMap<&str, &String> = HashMap::new();
+    let mut firsts: HashMap<&str, (usize, &String)> = HashMap::new();
+    for (x, k) in &by_name {
+        full.entry(x).or_insert(k);
+        firsts.entry(x.split(' ').next().unwrap_or("")).or_insert((0, k)).0 += 1;
+    }
+    let key_of_name = |n: &str| full.get(n).or_else(|| firsts.get(n).filter(|(c, _)| *c == 1).map(|(_, k)| k)).map(|k| k.to_string());
     // Handing a task over isn't leading someone: governance, PMs and partners coordinate everyone. A
     // hint only within one workstream — the same one, or its lead's.
     let part: BTreeMap<String, (Option<String>, bool, Option<String>)> = people.iter().map(|p| {
@@ -848,6 +908,12 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     ids.extend(threads.iter().flat_map(|p| p.orgs.iter().map(|o| o.client.clone())));
     let related: Vec<String> = clients.iter().filter(|c| ids.contains(&c.id)).flat_map(|c| c.parent.iter().cloned().chain(c.relations.iter().map(|r| r.to.clone()))).collect();
     ids.extend(related);
+    let mut org_people: HashMap<&str, usize> = HashMap::new();
+    for p in &people {
+        if let Some(o) = p["org"]["id"].as_str() {
+            *org_people.entry(o).or_default() += 1;
+        }
+    }
     let orgs: Vec<Value> = clients
         .iter()
         .filter(|c| ids.contains(&c.id))
@@ -858,7 +924,7 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 .collect();
             json!({"id": c.id, "name": c.name, "internal": c.internal, "account": c.account, "parent": c.parent, "relations": c.relations, "groups": c.groups,
                    "domains": c.domains, "logo_v": projects::client_logo_v(&c.id), "places": places,
-                   "people": people.iter().filter(|p| p["org"]["id"] == c.id.as_str()).count()})
+                   "people": org_people.get(c.id.as_str()).copied().unwrap_or(0)})
         })
         .collect();
     let pending: Vec<Value> = threads.iter().flat_map(|p| suggestions(&p.id).into_iter().filter(|x| x["state"] == "pending").map(move |mut x| { x["thread"] = json!(p.id); x })).collect();
@@ -1467,6 +1533,165 @@ mod tests {
         assert_eq!(names, ["Dana L", "Dana Lee"]);
         let lee_entry = directory().unwrap().into_iter().find(|p| p.id == lee).unwrap();
         assert!(!lee_entry.aliases.iter().any(|a| a == "Dana L"), "the name that came with the address went with it: {:?}", lee_entry.aliases);
+    }
+
+    /// A made-up name for person `i`: a first name and a last name of letters (`tokens` drops digits), unique per `i`.
+    fn made_up_name(i: usize) -> String {
+        const FIRST: [&str; 12] = ["Ann", "Bo", "Cy", "Dana", "Eli", "Fay", "Gus", "Hal", "Ida", "Jo", "Kit", "Lee"];
+        let syl = ["ka", "lo", "mi", "nu", "pe", "ra", "si", "to", "vu", "wy"];
+        let mut last = String::new();
+        let mut x = i;
+        loop {
+            last.push_str(syl[x % 10]);
+            x /= 10;
+            if x == 0 {
+                break;
+            }
+        }
+        let mut c = last.chars();
+        let last: String = c.next().unwrap().to_uppercase().chain(c).collect();
+        format!("{} {last}", FIRST[i % FIRST.len()])
+    }
+
+    /// Two made-up threads of `n` people at Acme and Globex: calls with attendees, speakers and chat; a directory
+    /// with aliases, `reports_to`, facts, a "not the same" pair and merged addresses; a guest account under the
+    /// same name; and tasks handed over in the ledger. Returns the threads' ids.
+    fn made_up_threads(root: &std::path::Path, n: usize, made_up_name: fn(usize) -> String) -> (String, String) {
+        projects::add_client("Acme", &["acme.example".into()], false).unwrap();
+        projects::add_client("Globex", &["globex.example".into()], false).unwrap();
+        // The user's own company: a guest address there is a colleague's.
+        projects::add_client("Initech", &["initech.example".into()], true).unwrap();
+        let mut cfg = crate::config::Config::load().unwrap_or_default();
+        cfg.me = Some(crate::meeting::Person { name: "Sam Rivera".into(), email: Some("sam@initech.example".into()) });
+        cfg.save().unwrap();
+        let a = projects::create("Acme rollout", None, None).unwrap();
+        let b = projects::create("Globex audit", None, None).unwrap();
+        let email = |i: usize| format!("p{i}@{}", if i.is_multiple_of(3) { "globex.example" } else { "acme.example" });
+        let mut stamps = vec![];
+        // 24 calls of five people each, whatever `n` (the timing tests then measure the people, not the calls): eight
+        // groups spread over everyone, in three rounds — the same five twice (in calls with each other), then shifted by two.
+        let groups = 8;
+        for c in 0..3 * groups {
+            let (round, g) = (c / groups, c % groups);
+            let who: Vec<usize> = (0..5).map(|k| (g * (n / groups) + k + if round == 2 { 2 } else { 0 }) % n).collect();
+            let mut att: Vec<Value> = who.iter().map(|&i| json!({"name": made_up_name(i), "email": email(i)})).collect();
+            if g == 0 {
+                // The same full name from a guest account: one person.
+                att.push(json!({"name": made_up_name(1), "email": "guest.p1@initech.example"}));
+            }
+            let segs: Vec<Value> = who.iter().take(3).enumerate().map(|(k, &i)| json!({"speaker": "remote", "name": made_up_name(i), "start": k as f64 * 10.0, "end": k as f64 * 10.0 + 5.0 + (c % 7) as f64})).collect();
+            let (day, time) = (c % 28 + 1, format!("{:02}{:02}{:02}", 8 + c / 3600, c / 60 % 60, c % 60));
+            let d = call(root, &format!("2026-10-{day:02}_{time}-c{c}"), &format!("2026-10-{day:02}T{}:{}:{}+00:00", &time[..2], &time[2..4], &time[4..]), json!({"attendees": att}), json!(segs));
+            let chat: Vec<Value> = who.iter().skip(3).map(|&i| json!({"from": made_up_name(i), "text": "ok"})).collect();
+            std::fs::write(d.join("chat.json"), json!(chat).to_string()).unwrap();
+            stamps.push(calls::stamp_of(&d));
+        }
+        let members = |range: std::ops::Range<usize>| -> Vec<projects::Member> {
+            range.map(|i| projects::Member {
+                name: made_up_name(i),
+                // Some are placed by name only.
+                email: (i % 7 != 0).then(|| email(i)),
+                role: Some(if i % 40 == 0 { "Stream lead".into() } else { "Engineer".into() }),
+                group: Some(format!("Stream {}", i % 5)),
+                governance: (i % 97 == 0).then_some(true),
+                ..Default::default()
+            }).collect()
+        };
+        let (ma, mb) = (members(0..n), members(n / 2..n));
+        projects::update(&a.id, |x| { x.pins = stamps[..stamps.len() * 3 / 4].to_vec(); x.people = ma; Ok(()) }).unwrap();
+        projects::update(&b.id, |x| { x.pins = stamps[stamps.len() / 2..].to_vec(); x.people = mb; Ok(()) }).unwrap();
+        let dir: Vec<Person> = (0..n).map(|i| {
+            let mut p = Person { id: email(i), name: made_up_name(i), emails: vec![email(i)], ..Default::default() };
+            if i % 5 == 0 {
+                p.aliases.push(format!("{} (Partner)", made_up_name(i)));
+            }
+            if i % 11 == 0 && i > 0 {
+                p.fields.insert("reports_to".into(), email(i - 1));
+                p.fields.insert("title".into(), "Director of IT".into());
+            }
+            if i % 13 == 0 {
+                // An address the user merged in.
+                p.emails.push(format!("alt.p{i}@acme.example"));
+            }
+            if i % 17 == 0 {
+                p.facts.push(json!({"id": format!("f{i}"), "text": "Owns the rollout.", "thread": if i % 2 == 0 { &a.id } else { &b.id }, "evidence": format!("2026-10-0{}_100000", i % 8 + 1)}));
+            }
+            p
+        }).collect();
+        let mut dir = dir;
+        // Someone only said in a mail: in the thread by a fact.
+        dir.push(Person { id: "mail.only@acme.example".into(), name: "Mo Mailonly".into(), emails: vec!["mail.only@acme.example".into()],
+            facts: vec![json!({"id": "fm", "text": "Sends the invoices.", "thread": a.id, "evidence": "mail-0001"})], ..Default::default() });
+        // Maybe the same: same first and last name at two addresses; and a pair the user said are two people.
+        dir.push(Person { id: "ann.kaka@globex.example".into(), name: "Ann Kaka".into(), emails: vec!["ann.kaka@globex.example".into()], ..Default::default() });
+        dir.push(Person { id: "ann.kaka@initech.example".into(), name: "Ann Kaka".into(), emails: vec!["ann.kaka@initech.example".into()],
+            not_same: vec!["ann.kaka@globex.example".into()], ..Default::default() });
+        projects::update(&a.id, |x| {
+            x.people.push(projects::Member { name: "Ann Kaka".into(), email: Some("ann.kaka@globex.example".into()), ..Default::default() });
+            x.people.push(projects::Member { name: "Ann Kaka".into(), email: Some("ann.kaka@initech.example".into()), ..Default::default() });
+            x.people.push(projects::Member { name: "Ann Kaka".into(), email: Some("ann.k@hooli.example".into()), ..Default::default() });
+            Ok(())
+        }).unwrap();
+        projects::with_lock(|| projects::write_json(&file(), &dir)).unwrap();
+        crate::ledger::human_event(&a.id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Rollout", "ac": ["Live"]})).unwrap();
+        for i in (1..n.min(60)).step_by(6) {
+            crate::ledger::human_event(&a.id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": format!("Part {i}"), "internal_owner": made_up_name(i), "delegated_by": made_up_name(i - (i % 40)), "due": "2026-10-02"})).unwrap();
+        }
+        (a.id, b.id)
+    }
+
+    /// Made-up names that all share two words ("Acme Person 12": digits aren't name words): everyone is maybe
+    /// the same as everyone.
+    fn numbered(i: usize) -> String {
+        format!("Acme Person {i}")
+    }
+
+    #[test]
+    fn the_people_view_is_the_same_with_its_indexes_as_with_the_scans_it_had() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        for names in [made_up_name as fn(usize) -> String, numbered] {
+            let (_env, root) = crate::paths::testenv::folders("people-view-same");
+            let (a, b) = made_up_threads(&root, 120, names);
+            let (pa, pb) = (projects::load(&a).unwrap(), projects::load(&b).unwrap());
+            for threads in [vec![&pa], vec![&pb], vec![&pa, &pb]] {
+                let (now, before) = (view(&threads, today).unwrap(), before_816::view(&threads, today).unwrap());
+                assert!(now["people"].as_array().unwrap().iter().any(|p| !p["maybe_same"].as_array().unwrap().is_empty() && !p["places"].as_array().unwrap().is_empty() && !p["with"].as_array().unwrap().is_empty()));
+                assert!(now == before, "{} threads, {}: the view changed", threads.len(), names(1));
+            }
+            // "Not the same" read from its index as from the directory, for every key and address both ways.
+            let dir = directory().unwrap();
+            let apart = Apart::of(&dir);
+            let all: BTreeSet<&str> = dir.iter().flat_map(|p| std::iter::once(&p.id).chain(&p.emails).chain(&p.not_same)).map(String::as_str).collect();
+            for x in &all {
+                for y in &all {
+                    assert_eq!(apart.apart(x, y), before_816::apart(&dir, x, y), "{x} / {y}");
+                }
+            }
+        }
+    }
+
+    /// How long `view` of one made-up thread of `n` people takes, the fastest of three.
+    fn view_time(n: usize) -> std::time::Duration {
+        let (_env, root) = crate::paths::testenv::folders("people-view-time");
+        let (a, _) = made_up_threads(&root, n, made_up_name);
+        let p = projects::load(&a).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        (0..3).map(|_| { let t = std::time::Instant::now(); view(&[&p], today).unwrap(); t.elapsed() }).min().unwrap()
+    }
+
+    #[test]
+    fn the_people_view_grows_with_its_people_not_with_their_pairs() {
+        // Four times the people: about four times as long; every pair (16 times) or more was #816.
+        let (small, big) = (view_time(400), view_time(1600));
+        assert!(big < small * 9, "400 people: {small:?}, 1,600: {big:?}");
+    }
+
+    #[test]
+    #[ignore = "timing probe: cargo test --release people_view_timing -- --ignored --nocapture"]
+    fn people_view_timing() {
+        for n in [300, 600, 1000, 3000] {
+            eprintln!("{n} people: {:?}", view_time(n));
+        }
     }
 
     #[test]

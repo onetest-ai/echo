@@ -657,15 +657,26 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
     rt.set_memory_limit(64 << 20);
     let started = Arc::new(Mutex::new(None::<Instant>));
     let stop = Arc::new(AtomicBool::new(false));
+    // The slice ran over and its JavaScript was interrupted.
+    let cut = Arc::new(AtomicBool::new(false));
     {
         let started = started.clone();
         let stop = stop.clone();
-        rt.set_interrupt_handler(Some(Box::new(move || stop.load(Ordering::Relaxed) || started.lock().ok().and_then(|s| *s).is_some_and(|t| t.elapsed() > SLICE))));
+        let cut = cut.clone();
+        rt.set_interrupt_handler(Some(Box::new(move || {
+            let over = started.lock().ok().and_then(|s| *s).is_some_and(|t| t.elapsed() > SLICE);
+            if over {
+                cut.store(true, Ordering::Relaxed);
+            }
+            stop.load(Ordering::Relaxed) || over
+        })));
     }
     let current = Arc::new(Mutex::new(Current::default()));
     let mut plugins: HashMap<String, Plugin> = HashMap::new();
     let tick_every = Duration::from_secs(1);
     let mut last_tick = Instant::now();
+    // The plugins whose JavaScript was interrupted in this round.
+    let was_cut = std::cell::RefCell::new(Vec::<String>::new());
     loop {
         let msg = rx.recv_timeout(tick_every.saturating_sub(last_tick.elapsed()));
         let mut slice = |f: &mut dyn FnMut()| {
@@ -678,11 +689,16 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     Ok(false) => break,
                     Err(e) => {
                         eprintln!("plugins: {e}");
+                        // An interrupted job leaves its exception behind: taken, so the next job starts clean.
+                        e.0.with(|c| drop(c.catch()));
                         continue;
                     }
                 }
             }
             *started.lock().unwrap() = None;
+            if cut.swap(false, Ordering::Relaxed) {
+                was_cut.borrow_mut().push(current.lock().map(|c| c.id.clone()).unwrap_or_default());
+            }
         };
         match msg {
             Ok(Msg::Load(id, dir)) => {
@@ -815,6 +831,13 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 if let Some(tx) = p.calls.remove(&n) {
                     let _ = tx.send(r.clone());
                 }
+            }
+        }
+        // An interrupted job never settles the promise it ran for (#817): every call still waiting on that plugin is
+        // answered now, or its caller would wait for nothing.
+        for id in was_cut.take() {
+            for (_, tx) in plugins.get_mut(&id).map(|p| std::mem::take(&mut p.calls)).unwrap_or_default() {
+                let _ = tx.send(Err(format!("{id}'s job took too long: Echo stops a plugin's JavaScript after {} s", SLICE.as_secs())));
             }
         }
         #[cfg(test)]
@@ -3919,6 +3942,28 @@ mod tests {
         for id in ["typer", "other"] {
             plugins::remove(id, false).unwrap();
         }
+        sync();
+    }
+    #[test]
+    fn a_command_that_runs_over_its_slice_answers_an_error_and_the_host_goes_on() {
+        let (_env, root) = paths::testenv::folders("jshost-slice");
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('spin', () => { while (true) {} })
+              ctx.command('spinLater', async () => { await Promise.resolve(); for (;;) {} })
+              ctx.command('ok', () => 1)
+            }
+            "#;
+        install_made_up(&root, "spinner", json!({}), main);
+        assert_eq!(call_loaded("spinner", "ok", &json!({})).unwrap(), json!(1));
+        for cmd in ["spin", "spinLater"] {
+            let t = Instant::now();
+            let e = call_within("spinner", cmd, &json!({}), Duration::from_secs(20)).unwrap_err().to_string();
+            assert!(e.contains("took too long"), "{cmd}: {e}");
+            assert!(t.elapsed() < SLICE + Duration::from_secs(3), "{cmd}: answered at once when interrupted, not at the caller's timeout: {:?}", t.elapsed());
+            assert_eq!(call_loaded("spinner", "ok", &json!({})).unwrap(), json!(1), "the host goes on after {cmd}");
+        }
+        plugins::remove("spinner", false).unwrap();
         sync();
     }
 }

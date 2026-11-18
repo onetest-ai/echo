@@ -6,6 +6,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// A call's source id and link.
@@ -495,22 +496,48 @@ pub fn people() -> Result<Value> {
     let known = known_people();
     let open: Vec<String> = crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| p.id).collect();
     let line = |x: &Value| x["reports_to"].as_str().map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned);
-    // Who a `reports_to` names: a key, an address or a name of someone listed.
-    let boss = |x: &Value| -> Option<&Value> {
-        let r = line(x)?;
-        let n = crate::people::norm(&r);
-        known.iter().find(|p| p["key"].as_str().is_some_and(|k| k.eq_ignore_ascii_case(&r)) || p["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(&r)) || p["name"].as_str().is_some_and(|m| crate::people::norm(m) == n))
-    };
+    // Who a `reports_to` names: a key, an address or a name of someone listed — the first listed, looked up in
+    // indexes built once (#816: a scan for each person, and for each of their reports, was every pair or more).
+    let (mut by_word, mut by_name): (HashMap<String, usize>, HashMap<String, usize>) = Default::default();
+    for (i, p) in known.iter().enumerate() {
+        for w in [&p["key"], &p["email"]].into_iter().filter_map(Value::as_str) {
+            by_word.entry(w.to_ascii_lowercase()).or_insert(i);
+        }
+        if let Some(m) = p["name"].as_str() {
+            by_name.entry(crate::people::norm(m)).or_insert(i);
+        }
+    }
+    let bosses: Vec<Option<&Value>> = known
+        .iter()
+        .map(|x| {
+            let r = line(x)?;
+            by_word.get(&r.to_ascii_lowercase()).into_iter().chain(by_name.get(&crate::people::norm(&r))).min().map(|&i| &known[i])
+        })
+        .collect();
+    let mut reports_of: HashMap<&str, Vec<&Value>> = HashMap::new();
+    for (y, b) in known.iter().zip(&bosses) {
+        if let Some(k) = b.and_then(|b| b["key"].as_str()) {
+            reports_of.entry(k).or_default().push(y);
+        }
+    }
+    let (mut dir_by_key, mut dir_by_email): (HashMap<&str, usize>, HashMap<&str, usize>) = Default::default();
+    for (i, p) in directory.iter().enumerate() {
+        dir_by_key.entry(&p.id).or_insert(i);
+        for e in &p.emails {
+            dir_by_email.entry(e).or_insert(i);
+        }
+    }
     let who = |p: &Value| json!({"key": p["key"], "name": p["name"]});
     Ok(json!(known
         .iter()
-        .map(|x| {
+        .zip(&bosses)
+        .map(|(x, boss)| {
             let key = x["key"].as_str().unwrap_or("");
-            let entry = directory.iter().find(|p| p.id == key || x["email"].as_str().is_some_and(|e| p.emails.iter().any(|m| m == e)));
+            let entry = [dir_by_key.get(key), x["email"].as_str().and_then(|e| dir_by_email.get(e))].into_iter().flatten().min().map(|&i| &directory[i]);
             let places: Vec<Value> = x["places"].as_array().into_iter().flatten().filter(|p| p["thread"].as_str().is_some_and(|t| open.iter().any(|o| o == t)))
                 .map(|p| json!({"thread": p["thread"], "role": p["role"], "stance": p["stance"]})).collect();
-            let reports_to = boss(x).filter(|b| b["key"] != x["key"]).map(who).unwrap_or(Value::Null);
-            let reports: Vec<Value> = known.iter().filter(|y| y["key"] != x["key"] && boss(y).is_some_and(|b| b["key"] == x["key"])).map(who).collect();
+            let reports_to = boss.filter(|b| b["key"] != x["key"]).map(who).unwrap_or(Value::Null);
+            let reports: Vec<Value> = reports_of.get(key).into_iter().flatten().filter(|y| y["key"] != x["key"]).map(|y| who(y)).collect();
             json!({"key": key, "name": x["name"], "aliases": entry.map(|p| p.aliases.clone()).unwrap_or_default(), "email": x["email"], "also": x["also"],
                    "organisation": x["org"]["name"], "client": x["org"]["id"], "title": x["title"], "threads": x["threads"],
                    "places": places, "reports_to": reports_to, "reports": reports,
@@ -759,6 +786,54 @@ mod tests {
         assert!(find("old@acme.example").is_none(), "seen only in a closed thread: not listed, nor their places");
         // Nothing but roles, stance and the line: no facts, no quotes.
         assert!(kim.get("facts").is_none() && kim["places"][0].get("quote").is_none());
+    }
+
+    /// One made-up thread of `n` people at Acme, every fourth with a reporting line: to a key, an address in
+    /// capitals, a name, themselves, or someone nobody lists.
+    fn acme_lines(n: usize) {
+        crate::projects::add_client("Acme", &["acme.example".into()], false).unwrap();
+        let t = crate::projects::create("Acme rollout", Some("acme"), None).unwrap().id;
+        let name = |i: usize| format!("Kim {}", ["Ito", "Roy", "Doe", "Lane"][i % 4].repeat(1 + i / 4));
+        let email = |i: usize| format!("p{i}@acme.example");
+        let members = (0..n).map(|i| crate::projects::Member { name: name(i), email: Some(email(i)), role: Some("Engineer".into()), ..Default::default() }).collect();
+        crate::projects::update(&t, |p| { p.people = members; Ok(()) }).unwrap();
+        let dir: Vec<crate::people::Person> = (0..n)
+            .map(|i| {
+                let mut p = crate::people::Person { id: email(i), name: name(i), emails: vec![email(i)], ..Default::default() };
+                let line = match i % 20 {
+                    0 => Some(email(i / 2)),
+                    4 => Some(email(i / 3).to_uppercase()),
+                    8 => Some(name(i / 2)),
+                    12 => Some(email(i)),
+                    16 => Some("Pat Outsider".to_string()),
+                    _ => None,
+                };
+                p.fields.extend(line.map(|l| ("reports_to".to_string(), l)));
+                p
+            })
+            .collect();
+        crate::projects::write_json(&crate::projects::dir().join("people.json"), &dir).unwrap();
+    }
+
+    #[test]
+    fn people_and_their_reporting_lines_grow_with_the_people_not_with_their_pairs() {
+        let time = |n: usize| {
+            let (_env, _root) = crate::paths::testenv::folders("share-people-lines");
+            acme_lines(n);
+            // The best of three: one slow run on a busy machine isn't the code.
+            let runs: Vec<(std::time::Duration, Value)> = (0..3).map(|_| { let t = std::time::Instant::now(); let ppl = people().unwrap(); (t.elapsed(), ppl) }).collect();
+            runs.into_iter().min_by_key(|(d, _)| *d).unwrap()
+        };
+        let (small, ppl) = time(200);
+        let find = |k: &str| ppl.as_array().unwrap().iter().find(|p| p["key"] == k).cloned().unwrap();
+        assert_eq!(find("p20@acme.example")["reports_to"]["key"], "p10@acme.example", "by key");
+        assert_eq!(find("p24@acme.example")["reports_to"]["key"], "p8@acme.example", "by address, any case");
+        assert_eq!(find("p28@acme.example")["reports_to"]["key"], "p14@acme.example", "by name");
+        assert!(find("p32@acme.example")["reports_to"].is_null() && find("p36@acme.example")["reports_to"].is_null(), "themselves; nobody listed");
+        assert_eq!(find("p10@acme.example")["reports"], json!([{"key": "p20@acme.example", "name": find("p20@acme.example")["name"]}]));
+        // Four times the people: about four times as long; every pair or more was #816.
+        let (big, _) = time(800);
+        assert!(big < small * 9, "200 people: {small:?}, 800: {big:?}");
     }
 
     #[test]

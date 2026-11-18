@@ -68,7 +68,9 @@ function ocCard(x, d) {
 function ocColumn(ys, key, label, d) {
   // Its lead: the one whose role leads this stream, else whom the others work for here.
   const named = (x) => (ocLay.get(x.key) || {}).lead ? 100 : 0
-  const n = (x) => ys.filter((y) => ocBoss(y) === x.key).length + named(x)
+  const under = new Map()
+  for (const y of ys) under.set(ocBoss(y), (under.get(ocBoss(y)) || 0) + 1)
+  const n = (x) => (under.get(x.key) || 0) + named(x)
   const order = ys.slice().sort((a, b) => n(b) - n(a) || (b.seniority || 0) - (a.seniority || 0) || (b.calls || 0) - (a.calls || 0) || a.name.localeCompare(b.name))
   const lead = order.length && n(order[0]) > 0 && (order.length > 1 || named(order[0])) ? order[0] : null
   const rest = order.filter((x) => x !== lead)
