@@ -789,7 +789,7 @@
   },
   {
    "id": "F-PLUG-107",
-   "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, stamp, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names); the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
+   "feature": "A plugin lists Echo's sources and people with what Echo decided (`ctx.echo.read`): `sources` (`{kind, thread, client, q, since, limit}`) gives calls with minutes `{id, stamp, kind, title, date, threads, client}` and Recall's mail and posts with their subject, day, threads, client, profile, senders, addresses and trust, never a text; `people` gives each person's `aliases`, `email`, `also`, `organisation`, `client` and `key` (what a call's `participants[].person` names), their `places` (`{thread, role, stance}` in each of their open threads) and their reporting line (`reports_to` `{key, name}` or null, `reports` `[{key, name}]`), never a fact or a quote; the sheet's people line says \"who the people in your threads are (their names, addresses and organisations)\"",
    "priority": "medium",
    "check": "agent",
    "axes": [

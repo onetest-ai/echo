@@ -30,7 +30,7 @@ tags: [plugins, host-half, echo-read, calendar]
 | 1a | The same answer | Each meeting also has `client`: "Acme weekly sync" `{"id": "acme", "name": "Acme"}`, "Globex steering" `{"id": "globex", "name": "Globex"}`, a meeting in no thread `null` |
 | 1b | `echoctl plugin call data-demo calendar '{"from":"<today>","to":"<today>"}'`; `echoctl plugin call data-demo calendar '{"from":"<tomorrow>"}'` | The same meetings as step 1; `[]` (none starts after today) |
 | 3 | `echoctl plugin call data-demo me` | `{"name": "Sam Rivera", "email": "sam@initech.example"}` |
-| 4 | `echoctl plugin call data-demo people` | The people of the open threads, each `{key, name, aliases, email, also, organisation, client, title, threads, link}`; Kim Park: `"key": "kim@globex.example"`, `"email": "kim@globex.example"`, `"organisation": "Globex"`, `"client": "globex"`, `"threads": ["globex-pilot"]`, `"aliases": []` — her `key` is what a call's `participants[].person` names (TC-100, TC-101) |
+| 4 | `echoctl plugin call data-demo people` | The people of the open threads, each `{key, name, aliases, email, also, organisation, client, title, threads, places, reports_to, reports, link}`; Kim Park: `"key": "kim@globex.example"`, `"email": "kim@globex.example"`, `"organisation": "Globex"`, `"client": "globex"`, `"threads": ["globex-pilot"]`, `"aliases": []`, `"places": [{"thread": "globex-pilot", "role": "sponsor", "stance": "supporter"}]`, `"reports_to": null`, `"reports": []` (no facts or quotes in any row) — her `key` is what a call's `participants[].person` names (TC-100, TC-101) |
 
 ## Expected Final State
 Nothing changed.
