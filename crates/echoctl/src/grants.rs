@@ -76,6 +76,9 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
     if !dir.is_dir() {
         bail!("{} isn't a folder", dir.display());
     }
+    if let Some(h) = hidden_in(&dir) {
+        bail!("{} is a hidden folder or inside one (“{h}”), where other programs keep their settings: pick a folder that isn't hidden", dir.display());
+    }
     if holds_echo(&dir) {
         bail!("{} holds Echo's own files (its settings, grants and secrets): pick a folder inside it, apart from those", dir.display());
     }
@@ -85,6 +88,15 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
         save_folders(id, &list)?;
     }
     Ok(dir)
+}
+
+/// The first hidden name of `dir` (its real path), if any. Inside a hidden folder (`~/.claude`, `.git`) nothing is hidden
+/// relative to the folder given, so `hidden_ok` would guard nothing there: other programs' settings and code.
+fn hidden_in(dir: &Path) -> Option<String> {
+    dir.components().find_map(|c| match c {
+        Component::Normal(n) => Some(n.to_string_lossy().into_owned()).filter(|n| n.starts_with('.')),
+        _ => None,
+    })
 }
 
 /// Whether `dir` is, or holds, Echo's settings folder or the data folder's own `.echo`.
@@ -189,6 +201,10 @@ fn writable_as(id: &str, root: &str, rel: &str, shape: Shape) -> Result<PathBuf>
     let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
     if !folders(id).contains(&root) {
         bail!("{} isn't one of the folders you gave this plugin", root.display());
+    }
+    // A folder inside a hidden one, granted by an older Echo: still read, never written.
+    if let Some(h) = hidden_in(&root) {
+        bail!("{} is a hidden folder or inside one (“{h}”): nothing in it is changed", root.display());
     }
     inside(&root, rel)?;
     let full = root.join(rel.trim_start_matches("./"));
@@ -400,6 +416,8 @@ pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
             bail!("skill {name}: “!`…`” runs a command in Claude Code; a plugin's skill is text only");
         }
         let md = format!("---\nname: {name}\ndescription: {}\n---\n\n{body}\n", serde_json::to_string(description)?);
+        // Nor a `!` code block or `!$` (`claude_skills::skill_md_ok`, as any skill a plugin writes).
+        crate::plugins::claude_skills::skill_md_ok(&md).map_err(|e| anyhow!("skill {name}: {e}"))?;
         files.push((name.to_string(), md));
     }
     let _lock = session_lock(id)?;
@@ -698,5 +716,52 @@ mod tests {
         set_hints("obsidian-test", &json!([{"client": "acme", "text": "Vault Team wiki"}, {"thread": "pilot", "text": "Vault Pilot"}])).unwrap();
         let v: Value = serde_json::from_slice(&std::fs::read(hints_file("obsidian-test")).unwrap()).unwrap();
         assert_eq!(v.as_array().unwrap().len(), 2);
+    }
+
+    /// A runtime skill's text runs nothing when it loads: checked as any skill a plugin writes.
+    #[test]
+    fn a_runtime_skill_runs_no_command_when_it_loads() {
+        let (_env, _root) = crate::paths::testenv::folders("grants-runtime-skill");
+        for body in ["Today: !`date`", "```!\nid\n```", "~~~!\nid\n~~~", "Run !$ARGUMENTS", "a\rhooks: x"] {
+            let e = set_session_skills("acme-notes", &json!([{"name": "notes", "description": "Notes.", "body": body}])).expect_err(body).to_string();
+            assert!(e.starts_with("skill notes: "), "{body:?}: {e}");
+        }
+        assert!(!session_dir("acme-notes").join("skills/notes").exists());
+    }
+
+    /// A folder at or inside a hidden one (`~/.claude`, `vault/.claude/skills`, `.git/info`) holds other programs'
+    /// settings and code, and nothing in it is hidden relative to it: never given to a plugin. A plain folder holding
+    /// `.claude` and `.obsidian` is, and `~/Library`-like folders too.
+    #[test]
+    fn a_hidden_folder_or_one_inside_it_is_never_given_to_a_plugin() {
+        let (_env, root) = crate::paths::testenv::folders("grants-hidden");
+        let vault = root.join("vault");
+        for d in [".claude/skills/acme", ".obsidian", ".git/info", "Library/Notes"] {
+            std::fs::create_dir_all(vault.join(d)).unwrap();
+        }
+        for d in [root.join("user/.claude"), vault.join(".claude"), vault.join(".claude/skills"), vault.join(".claude/skills/acme"), vault.join(".obsidian"), vault.join(".git/info")] {
+            let e = grant("acme-notes", &d).expect_err(&d.display().to_string()).to_string();
+            assert!(e.contains("is a hidden folder or inside one"), "{}: {e}", d.display());
+        }
+        assert!(folders("acme-notes").is_empty());
+        #[cfg(unix)]
+        {
+            // A link to a hidden folder is that folder.
+            std::os::unix::fs::symlink(vault.join(".claude"), root.join("plain-name")).unwrap();
+            assert!(grant("acme-notes", &root.join("plain-name")).is_err());
+        }
+        grant("acme-notes", &vault).unwrap();
+        grant("acme-notes", &vault.join("Library/Notes")).unwrap();
+        assert_eq!(folders("acme-notes").len(), 2);
+        // One granted by an older Echo: still read, never written.
+        let skills = dunce::canonicalize(vault.join(".claude/skills")).unwrap();
+        let mut list = folders("acme-notes");
+        list.push(skills.clone());
+        save_folders("acme-notes", &list).unwrap();
+        let s = skills.display().to_string();
+        assert!(resolve("acme-notes", &s, "acme").is_ok());
+        for e in [writable("acme-notes", &s, "acme/SKILL.md").unwrap_err(), writable_folder("acme-notes", &s, "other").unwrap_err()] {
+            assert!(e.to_string().contains("nothing in it is changed"), "{e}");
+        }
     }
 }

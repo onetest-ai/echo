@@ -1732,7 +1732,12 @@ mod tests {
         let vault = root.join("vault");
         install(&root, "near", json!({"folders": {"what": "vaults", "write": true}}), &vault);
         one_commit(&vault);
-        crate::grants::grant("other-plugin", &vault.join(".git/info")).unwrap();
+        // Echo grants no folder inside a hidden one now; one granted by an older Echo is still refused here.
+        assert!(crate::grants::grant("other-plugin", &vault.join(".git/info")).is_err());
+        let kept = paths::config_dir().join("plugins/grants/other-plugin.json");
+        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+        let info = dunce::canonicalize(vault.join(".git/info")).unwrap();
+        std::fs::write(&kept, json!({"folders": [info.display().to_string()]}).to_string()).unwrap();
         assert!(run("near", "info", json!({})).unwrap_err().contains("inside this repository's .git is given to a plugin"));
         crate::grants::forget("other-plugin", &vault.join(".git/info")).unwrap();
         assert_eq!(run("near", "info", json!({})).unwrap()["repo"], true);

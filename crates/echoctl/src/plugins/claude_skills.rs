@@ -83,19 +83,11 @@ pub fn skill_md_ok(md: &str) -> Result<()> {
         }
         i += run.max(1);
     }
-    let rest = md.trim_start_matches(|c: char| c == '\u{feff}' || c.is_whitespace());
-    if !rest.starts_with("---") {
-        return Ok(());
-    }
-    let mut lines = rest.lines();
-    ensure!(lines.next().map(str::trim_end) == Some("---"), "a skill's frontmatter starts with a line “---” alone");
+    let Some(front) = frontmatter(md)? else { return Ok(()) };
     // In a `|` / `>` text block: the indent its first line set (0 before it).
     let mut block: Option<usize> = None;
-    for line in lines {
+    for line in front {
         let l = line.trim_end();
-        if l == "---" {
-            return Ok(());
-        }
         if l.trim_start().is_empty() || l.starts_with('#') {
             continue;
         }
@@ -121,6 +113,25 @@ pub fn skill_md_ok(md: &str) -> Result<()> {
         ensure!(!v.starts_with(['{', '[', '!', '&', '*', '<', '-', '?', '%', '@']), "a skill's frontmatter holds only plain values: “{key}” has “{v}”");
         block = v.starts_with(['|', '>']).then_some(0);
         ensure!(block.is_none() || v.len() <= 3 && v[1..].chars().all(|c| matches!(c, '-' | '+' | '1'..='9')), "a skill's frontmatter holds only plain values: “{key}” has “{v}”");
+    }
+    Ok(())
+}
+
+/// A skill's frontmatter lines, as Claude Code reads them: from a first line `---` alone (after a BOM or blank space) to
+/// the next line `---` alone (`----` or `---x` is no end). `None` without one; malformed or never closed, an error.
+pub fn frontmatter(md: &str) -> Result<Option<Vec<&str>>> {
+    let rest = md.trim_start_matches(|c: char| c == '\u{feff}' || c.is_whitespace());
+    if !rest.starts_with("---") {
+        return Ok(None);
+    }
+    let mut lines = rest.lines();
+    ensure!(lines.next().map(str::trim_end) == Some("---"), "a skill's frontmatter starts with a line “---” alone");
+    let mut front = vec![];
+    for line in lines {
+        if line.trim_end() == "---" {
+            return Ok(Some(front));
+        }
+        front.push(line);
     }
     bail!("a skill's frontmatter has no closing “---”")
 }

@@ -3,7 +3,7 @@ id: TC-201
 title: A plugin writes a skill of its vault's own Claude Code project but never its settings, and adds and removes a skill in the user's own Claude Code only on a click
 priority: high
 type: functional
-requirements: [F-PLUG-118, F-PLUG-119]
+requirements: [F-PLUG-17, F-PLUG-118, F-PLUG-119]
 module: plugins
 run: agent
 platform: any
@@ -69,7 +69,7 @@ echoctl plugin marketplace add "$M" --name acme-local
 |---|--------|----------------|
 | 1 | `echoctl plugin install acme-twin --yes`; `ECHOCTL_PICK_FOLDER="$D/vault" echoctl plugin call acme-twin add` | `Installed Acme twin 0.1.0`; the sheet it printed has the line "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: …" and no line starting "Runs Claude Code"; the vault's path |
 | 2 | `echoctl plugin call acme-twin vault-skill`; `head -2 "$D/vault/.claude/skills/acme-notes/SKILL.md"` | `null`; `---` and `name: acme-notes` |
-| 3 | `echoctl plugin call acme-twin settings`; `ls -a "$D/vault/.claude"` | The call fails, saying `“.claude/settings.json” is hidden`; the listing is `.`, `..` and `skills` only |
+| 3 | `echoctl plugin call acme-twin settings`; `ls -a "$D/vault/.claude"`; `ECHOCTL_PICK_FOLDER="$D/vault/.claude/skills" echoctl plugin call acme-twin add`; `cat "$ECHOCTL_CONFIG_DIR/plugins/grants/acme-twin.json"` | The call fails, saying `“.claude/settings.json” is hidden`; the listing is `.`, `..` and `skills` only; `add` fails, saying `is a hidden folder or inside one (“.claude”), where other programs keep their settings: pick a folder that isn't hidden`; the grants list only the vault |
 | 4 | `echoctl plugin call acme-twin vault-hostile`; `tail -1 "$D/vault/.claude/skills/acme-notes/SKILL.md"` | The call fails, saying `a skill can't run commands`; `Read the Acme notes.` (the skill as step 2 wrote it) |
 | 5 | `echoctl plugin call acme-twin move-in`; `ls "$D/vault/.claude/skills/acme-notes"`; `ls "$D/vault/Projects"` | The call fails, saying `nothing is moved into a skill`; `SKILL.md` only; `Plan.md` |
 | 6 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-twin:main`; nothing touching the page, wait 3 s; read `S`; `ls "$CLAUDE_CONFIG_DIR/skills"` | The page shows "Acme twin" with its four buttons; `load` is `refused: A skill is added to your Claude Code only on your click`; the listing is `acme-mine` only |
@@ -87,4 +87,5 @@ Acme twin is removed; the test's Claude Code folder has only the user's `acme-mi
 
 ## Notes
 - Written from the features' text (F-PLUG-118, F-PLUG-119), not from the code. Never run steps 7–11 without the test data's `env`: the skill would go to this computer's `~/.claude/skills`.
+- Step 3's refusal takes in every hidden folder on purpose — `<repo>/.claude/worktrees/x`, `~/.dotfiles` too: not a bug. A folder inside a hidden one granted by an older Echo is still read, never written: `grants::tests::a_hidden_folder_or_one_inside_it_is_never_given_to_a_plugin`.
 - Every other hidden shape (`.gitignore`, `.obsidian/<name>.json`, `.obsidian/community-plugins.json` and `core-plugins.json` refused, hooks, agents, commands, `SKILL.md.js`, `.Claude`, `..`, links, Windows short names, a folder moved in) is the Rust test `jshost::tests::a_plugin_changes_files_only_in_folders_it_was_given_and_only_if_it_asked`; names, size, another plugin's skill, links in the skills folder and the test-data guard are `plugins::claude_skills::tests`; every skill shape refused (other frontmatter keys, nested maps, a BOM before `---`, unclosed, `` !` ``, ```` ```! ````, `~~~!`) and the twin's own shape taken are `plugins::claude_skills::tests::a_skill_a_plugin_writes_is_markdown_that_runs_nothing`, `append`, `copyIn`, a move through a link and `ctx.git.commit` into a skill the Rust tests of `jshost`, `jshost::files` and `jshost::git`; the route is `window::plugins::tests::a_plugins_window_half_adds_and_removes_a_skill_in_your_claude_code_by_post_only`; the click guard is `node crates/echoctl/ui/copy-guard.test.mjs`.

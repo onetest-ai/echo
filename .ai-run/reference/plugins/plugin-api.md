@@ -577,8 +577,12 @@ change or delete the task), and decides only the proposal still waiting. Evidenc
 through `ctx.fs.readMany/walk`; with `folders.write`, `ctx.fs.write/move/remove` change it (never through a link,
 never over another file). The picker lets the user make a new folder in it ("New Folder" on macOS, "Make New Folder" on
 Windows), so a plugin that wants a new folder (a new vault) just asks for one; the folder made and picked is the one
-given. In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
-named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `plugins::app_file`
+given. A hidden folder or one inside it (`~/.claude`, a vault's `.claude/skills`) is never given ("… is a hidden
+folder or inside one …: pick a folder that isn't hidden"); a folder holding them is. Every hidden folder is refused on
+purpose, `<repo>/.claude/worktrees/x` or `~/.dotfiles` too; one granted by an older Echo is still read, never written
+("… nothing in it is changed"). In a debug build
+`ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
+named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `grants::grant`, `plugins::app_file`
 
 Hidden files and folders (a name starting with `.`) are read, never written — but for these, by their exact names
 (`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
@@ -587,7 +591,7 @@ folder's `remove` as folders. A name refused (`community-plugins.json`, `core-pl
 APFS and NTFS find it. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
 - files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` in any folder that isn't hidden (a vault in a subfolder too: `knowledge/.obsidian/app.json`), the file right inside `.obsidian/`, its name ASCII; not `community-plugins.json`, `core-plugins.json` or `core-plugins-migration.json`, which switch Obsidian plugins on; Markdown in a
   skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
-  `<file>` not hidden, ending in `.md`), each Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"); only written whole by `ctx.fs.write` — `append`,
+  `<file>` not hidden, ending in `.md`), each Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` ``, a code block opened with `!` (```` ```! ````, `~~~!`), a `!$` or a CR alone: refused, never stripped ("a skill can't run commands: …"); only written whole by `ctx.fs.write` — `append`,
   `copyIn` and a `move` into `.claude/skills/**` are refused, and `ctx.git.commit` refuses a file there that fails the
   check;
 - folders: `.obsidian` (in any folder that isn't hidden), `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
@@ -725,12 +729,13 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 
 - **Package skills**: a folder in the plugin (`skills/<name>/SKILL.md`, with `scripts/` and `references/` beside it as
   needed) named in `skills` (at most 10, with the runtime skills); the folder's name a–z 0–9 `-`, ≤ 40 chars, once;
-  `SKILL.md`'s frontmatter only `name` (the folder's name) and `description` (one line, ≤ 1024 chars), no `!` commands
-  anywhere. They need no `uses.sessions` (the sheet names them from `skills`). The folder session, routines and Yolo
+  `SKILL.md` Markdown that runs nothing, as any skill a plugin writes (`skill_md_ok`: no `` !` ``, `!` code block, `!$`
+  or CR alone), its frontmatter first and only `name` (the folder's name) and `description` (one line, ≤ 1024 chars). They need no `uses.sessions` (the sheet names them from `skills`). The folder session, routines and Yolo
   name each `<prefix>-<name>` through `.plugins`; a plugin not laid out keeps `echo-<id>:<name>` from its
   `--plugin-dir` copy. Evidence: `plugins::package_skills`, `grants::copy_package_skills`
 - **Runtime skills**: text built at run time, `ctx.sessions.skills = [{name, description, body}]`; Echo writes the
-  frontmatter and the plugin around them. One name is never both a package and a runtime skill.
+  frontmatter and the plugin around them; the text runs nothing (`skill_md_ok`). One name is never both a package and a
+  runtime skill.
   Evidence: `grants::set_session_skills`
 - **Commands**: a skill's Echo CLI is `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; Echo's sessions run only the plugin's
   commands listed in `uses.sessions.commands` (`plugin call <id> <command>`). Evidence: `plugins::session_commands`
@@ -1055,7 +1060,7 @@ Evidence: `jshost::work::check_rows`
   `~/.claude`. `async`: each rejects, before anything is sent, unless the page has the user's click or key
   (`copyAllowed`); then the page asks Echo (`POST /api/plugin/<id>/install-skill` with `{name, md}`,
   `/remove-skill` with `{name}`; any other method refused), which answers `{value: true}` or `{error}`. `name` 1–64 of
-  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"), written whole (replacing the file, never
+  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` ``, a code block opened with `!` (```` ```! ````, `~~~!`), a `!$` or a CR alone: refused, never stripped ("a skill can't run commands: …"), written whole (replacing the file, never
   through a link); nothing else of a skill is written. A skill folder that is there already is never changed unless
   this plugin added it — Echo keeps who added which in `<config dir>/plugins/claude-skills.json` (`{name: plugin id}`),
   never in the skill; a link in its place, or as its `SKILL.md`, is refused. `removeSkill` takes out only a skill this
