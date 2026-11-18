@@ -44,7 +44,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         // The thread folders' files: what was read, how, and why the others weren't.
         "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // How each thread source was last read (`brain/sources.json`).
-        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
+        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "intake": crate::brain::facts::status(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
         "/api/brain" => {
             let q = req.uri().query().unwrap_or("");
@@ -52,6 +52,19 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let mut v = crate::brain::views::overview(scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             // A taxonomy edit running now (`brain_taxonomy`), and the last one's error with its number.
+            v["topic_jobs"] = json!(if BRAIN_EDITS.load(std::sync::atomic::Ordering::SeqCst) > 0 { vec!["edit:taxonomy"] } else { vec![] });
+            if let Ok(e) = BRAIN_EDIT_ERROR.lock() {
+                v["edit_error"] = json!({"n": e.0, "text": e.1});
+            }
+            json_reply(v)
+        }
+        // Settings → Vocabulary's dictionary: the whole of it, never a scope, with Intake on or off (its terms a page at
+        // a time, `browse/terms`).
+        "/api/brain/dictionary" => {
+            let mut tx = crate::brain::browse::view(None).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            let n = tx.get_mut("terms").map(Value::take).and_then(|t| t.as_array().map(Vec::len)).unwrap_or(0);
+            tx["terms_n"] = json!(n);
+            let mut v = json!({ "taxonomy": tx });
             v["topic_jobs"] = json!(if BRAIN_EDITS.load(std::sync::atomic::Ordering::SeqCst) > 0 { vec!["edit:taxonomy"] } else { vec![] });
             if let Ok(e) = BRAIN_EDIT_ERROR.lock() {
                 v["edit_error"] = json!({"n": e.0, "text": e.1});
@@ -66,7 +79,9 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            let r = if !crate::brain::enabled() { Err(anyhow::anyhow!("Recall is off")) } else { match &p["/api/brain/browse/".len()..] {
+            // The dictionary is Settings → Vocabulary's, whether Intake is on or off; the sources only with it on.
+            let what = &p["/api/brain/browse/".len()..];
+            let r = if !crate::brain::enabled() && what != "terms" { Err(anyhow::anyhow!("Intake is off")) } else { match what {
                 "groups" => browse::source_groups(scope),
                 "sources" => browse::source_list(scope, &browse::ListQuery {
                     client: query_param(q, "of"), kind: query_param(q, "kind"), root: query_param(q, "root"), channel: query_param(q, "channel"),

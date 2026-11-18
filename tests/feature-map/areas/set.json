@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-SET-01",
-   "feature": "Settings lists General, Recording, Transcription, AI & minutes, Templates, Calendar & chat, Recall, About me, Sends to you, Plugins, Layout, Health, then plugins' own sections; `#settings` opens General; each section opens without an error, and one that fails says so in its place",
+   "feature": "Settings lists General, Recording, Transcription, Vocabulary, AI & minutes, Templates, Calendar & chat, Intake, About me, Sends to you, Plugins, Layout, Health, then plugins' own sections; `#settings` opens General; each section opens without an error, and one that fails says so in its place",
    "priority": "high",
    "check": "agent",
    "axes": [

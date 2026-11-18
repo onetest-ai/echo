@@ -28,8 +28,8 @@ tags: [inbox, buttons]
 | Is Rita Gomez a champion? | people | Yes, No, Change…, Open |
 | 3 to review in Acme rollout's work | work | Open → |
 | New thread? “Acme calls” | found | Create, Not this, Open |
-| Acme News's mail isn't authenticated | sender (unverified) | Read anyway, Keep out |
-| Dana Lee isn't read yet | sender (trust) | Trust, Ignore |
+| Acme News's mail isn't authenticated | sender (unverified) | Read anyway, Keep out, Open (to Settings → Intake) |
+| Dana Lee isn't read yet | sender (trust) | Trust, Ignore, Open (to Settings → Intake) |
 | Teams transcript: Acme design review | transcript | Import, Not this, Open |
 | Claude Code has an older Echo plugin | health | Update it, Open |
 | Crm Sync 1.1.0 is available | plugin-update | Open → |
@@ -42,7 +42,7 @@ tags: [inbox, buttons]
 | 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox" | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown |
 | 2 | Read the buttons of "Sign in to Claude · out", "Minutes failed: Acme security review", "Is Rita Gomez a champion?" | As in Test Data; none is pressed |
 | 3 | Read the buttons of "3 to review in Acme rollout's work" and "New thread? “Acme calls”" | "Open →" only; "Create", "Not this", "Open" |
-| 4 | Read the buttons of the two senders | "Read anyway" and "Keep out"; "Trust" and "Ignore"; neither has an Open button |
+| 4 | Read the buttons of the two senders | "Read anyway", "Keep out" and "Open"; "Trust", "Ignore" and "Open" (each Open goes to Settings → Intake, where Who may speak is) |
 | 5 | Read the buttons of "Teams transcript: Acme design review" and "Claude Code has an older Echo plugin" | "Import", "Not this", "Open"; "Update it", "Open" |
 | 6 | Read the buttons of "Crm Sync 1.1.0 is available" and "Review today's standup list" | "Open →" only; no buttons at all |
 

@@ -74,7 +74,7 @@ scenario(test, 'S-11', 'Set Echo up your way: appearance, recording, languages, 
     await expect(settings.says(s.savedFoot)).toBeVisible()
     for (const name of s.sections.slice(1)) {
       await settings.sectionButtons.filter({ hasText: new RegExp(`^${literal(name)}`) }).click()
-      // The section's first heading (Recall's is an h3, a level lower).
+      // The section's first heading (a level 2 heading unless `headings` says otherwise).
       const [heading, level] = s.headings[name] || [name, 2]
       await expect(settings.main.getByRole('heading', { name: heading, exact: true, level })).toBeVisible()
       await expect(settings.main.getByText(s.broken)).toHaveCount(0)

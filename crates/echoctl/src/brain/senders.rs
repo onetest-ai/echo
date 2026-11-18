@@ -290,18 +290,22 @@ pub fn decide(client: &str, key: &str, decision: &str) -> Result<()> {
     } {
         let e = l.trusted.iter_mut().find(|e| e.key == key).ok_or_else(|| anyhow::anyhow!("{key} isn't trusted for this client"))?;
         e.unverified = Some(read);
+        let name = e.name.clone();
         l.unverified.retain(|w| w.key != key);
         save(&s)?;
         if read {
             super::sources::request_reread(client)?;
             crate::ledger::reread_sources(client)?;
+        } else {
+            // Kept out: their unauthenticated mail already read leaves Intake, nothing else.
+            super::sources::request_drop(client, key, &name, true)?;
         }
         return Ok(());
     }
     let name = l.waiting.iter().find(|w| w.key == key).map(|w| w.name.clone()).or_else(|| l.trusted.iter().chain(&l.ignored).find(|e| e.key == key).map(|e| e.name.clone())).unwrap_or_default();
     l.trusted.retain(|e| e.key != key);
     l.ignored.retain(|e| e.key != key);
-    let e = Entry { key: key.to_string(), name, at: chrono::Utc::now().to_rfc3339(), unverified: None };
+    let e = Entry { key: key.to_string(), name: name.clone(), at: chrono::Utc::now().to_rfc3339(), unverified: None };
     l.unverified.retain(|w| w.key != key);
     match decision {
         "trust" => l.trusted.push(e),
@@ -312,8 +316,12 @@ pub fn decide(client: &str, key: &str, decision: &str) -> Result<()> {
     l.waiting.retain(|w| w.key != key);
     save(&s)?;
     // That client's sources are read again from the start at the next sync (the reader's cache keeps
-    // it cheap): a trusted sender's messages come in, an ignored one's go.
+    // it cheap), merged into what was kept: a trusted sender's messages come in. An ignored one's sections go
+    // (the user's choice), and only theirs.
     super::sources::request_reread(client)?;
+    if decision == "ignore" {
+        super::sources::request_drop(client, key, &name, false)?;
+    }
     // A thread's work reads mail and meeting chats by the same list: a trusted one's held-back messages come in.
     if decision == "trust" {
         crate::ledger::reread_sources(client)?;

@@ -41,4 +41,4 @@ The sender is decided.
 - Click "Inbox" to close the panel
 
 ## Notes
-- Writes the sender's decision (`brain_sender`); Recall is off in the data, no mail is read.
+- Writes the sender's decision (`brain_sender`); Intake is off in the data, no mail is read.

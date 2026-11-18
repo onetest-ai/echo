@@ -4,8 +4,18 @@
 // window's Claude sessions have the Brain); this shows and edits what it is made of.
 /** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
 const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
-const BRAIN_TABS = [['sources', 'Sources'], ['terms', 'Dictionary'], ['people', 'People']]
-const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
+const BRAIN_TABS = [['sources', 'Sources'], ['people', 'People']]
+/** The Recall view's scope as a query; Settings → Vocabulary's dictionary is never scoped. */
+const brainQuery = () => { if (S.view !== 'brain') return ''; const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
+/** The dictionary's own data for Settings → Vocabulary (`/api/brain/dictionary`: unscoped, with Intake on or off);
+ *  the Recall view keeps its overview. */
+const dictData = () => S.view === 'brain' ? S.br.data : S.br.dictData
+async function loadDict() {
+  const before = S.br.dictData ? (S.br.dictData.taxonomy || {}).version : null
+  try { const d = await get('api/brain/dictionary'); S.br.dictData = d; noteEditErrors(d) } catch { /* app restarting */ }
+  if (S.br.dictData && before !== (S.br.dictData.taxonomy || {}).version && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
+  if (S.br.node) await loadBrainNode()
+}
 async function loadBrain() {
   const q = brainQuery()
   const before = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
@@ -58,8 +68,8 @@ function brainView() {
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
-  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'people' ? brainPeople() : brainTerms(tx)
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Recall</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Intake">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
+  const body = S.br.tab === 'people' ? brainPeople() : brainSources()
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
@@ -67,7 +77,7 @@ function brainView() {
  *  other names and spellings lists the matches across groups. A click opens it to edit. Tens of thousands of
  *  terms: the app sends a page at a time (`browse::terms`). */
 function termsState() {
-  const key = brainQuery() + '|' + ((S.br.data || {}).taxonomy || {}).version
+  const key = brainQuery() + '|' + ((dictData() || {}).taxonomy || {}).version
   if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, letters: S.br.dict ? S.br.dict.letters : {}, q: S.br.dict ? S.br.dict.q : '' } }
   return S.br.dict
 }
@@ -179,7 +189,7 @@ document.addEventListener('input', (e) => {
 function brItem(id) {
   const nd = S.br.nodeData
   if (nd && nd.id === id && nd.item) return nd.item
-  const tx = (S.br.data || {}).taxonomy || {}
+  const tx = (dictData() || {}).taxonomy || {}
   return (tx.topics || []).find((t) => t.id === id) || termById.get(id) || (tx.terms || []).find((t) => t.id === id) || null
 }
 /** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */
@@ -195,16 +205,15 @@ document.addEventListener('click', (e) => {
   e.preventDefault(); e.stopPropagation()
   send({ cmd: 'open_url', url: b.dataset.brExt })
 }, true)
-/** Who may speak into the Brain through mail and channels, per client: senders waiting for a decision
+/** Who may speak through mail and channels (Settings → Intake), per client: senders waiting for a decision
  *  (their messages aren't read until trusted), then the trusted and ignored ones. Colleagues and the
  *  user are trusted without asking; a trusted outside sender's mail is read only when authenticated. */
 function brainSenders() {
   loadSourceState()
   const s = (m365.state || {}).senders
   if (!s) return ''
-  const scope = S.br.scope && S.br.scope.startsWith('client:') ? S.br.scope.slice(7) : null
   const name = (c) => c === '-' ? 'No client' : ((((S.pj.data || {}).clients) || []).find((x) => x.id === c) || {}).name || c
-  const cards = Object.entries(s.clients || {}).filter(([c]) => !scope || c === scope).map(([c, l]) => {
+  const cards = Object.entries(s.clients || {}).map(([c, l]) => {
     const btn = (k, d, label, primary) => `<button class="btn${primary ? ' primary' : ''}" data-sender="${esc(d)}" data-client="${esc(c)}" data-key="${esc(k)}">${label}</button>`
     const who = (x) => `<b>${esc(x.name || x.key)}</b>${x.key.startsWith('teams:') ? '' : ` <span class="set-sub">${esc(x.key)}</span>`}`
     const wait = (l.waiting || []).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || '')).map((w) => `<tr><td><span class="pp-who"><span class="br-kind">${w.kind === 'teams' ? '#' : '✉'}</span>${who(w)}<span class="set-sub br-why">${w.count} message${w.count === 1 ? '' : 's'} · last ${esc(relDay(w.last_at))} · “${esc(w.last_about)}”${w.kind === 'mail' && !w.verified ? ' · not authenticated' : ''}${w.hint ? ' · ' + esc(w.hint) : ''}</span></span></td><td class="br-acts">${btn(w.key, 'trust', 'Trust', true)}${btn(w.key, 'ignore', 'Ignore')}</td></tr>`)
@@ -215,7 +224,7 @@ function brainSenders() {
     if (!wait.length && !unver.length && !decided.length) return ''
     return `<div class="pp-card"><table class="pp-tbl"><thead><tr><th>${esc(name(c))} · senders${wait.length ? ` · <span class="error">${wait.length} waiting</span>` : ''}${unver.length ? ` · ${unver.length} not authenticated` : ''}</th><th></th></tr></thead><tbody>${wait.join('')}${unver.join('')}${decided.join('')}</tbody></table></div>`
   }).filter(Boolean)
-  return cards.length ? `<p class="set-sub">Mail and posts are read only from you, colleagues and the senders you trust; Recall keeps facts read from them, never their text.</p>${cards.join('')}` : ''
+  return cards.length ? `<p class="set-sub">Mail and posts are read only from you, colleagues and the senders you trust; Intake keeps facts read from them, never their text.</p>${cards.join('')}` : ''
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('[data-sender]')

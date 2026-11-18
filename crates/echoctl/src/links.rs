@@ -371,15 +371,11 @@ fn person_text(v: &Value) -> String {
 
 #[cfg(feature = "brain")]
 fn mail_text(src: &str) -> Result<String> {
-    let c = crate::brain::store::open(&crate::brain::store_path())?;
-    let (title, date, refs): (Option<String>, Option<String>, Option<String>) = c
-        .query_row("SELECT title, event_date, refs FROM documents WHERE source = ?1", [src], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .map_err(|_| anyhow!("no mail {src:?}"))?;
-    let url = refs.as_deref().and_then(|r| serde_json::from_str::<Value>(r).ok()).and_then(|r| r["url"].as_str().map(str::to_owned)).unwrap_or_default();
-    let mut out = format!("# {} — {}\nOpen: {url}\n\n", title.unwrap_or_default(), date.unwrap_or_default());
-    let mut st = c.prepare("SELECT text FROM chunks WHERE source = ?1 ORDER BY ord")?;
-    for t in st.query_map([src], |r| r.get::<_, String>(0))? {
-        out.push_str(&t?);
+    let f = crate::brain::facts::read(src).ok_or_else(|| anyhow!("no mail {src:?}"))?;
+    let url = f.refs["url"].as_str().unwrap_or_default();
+    let mut out = format!("# {} — {}\nOpen: {url}\n\n", f.title, f.event_date.as_deref().unwrap_or_default());
+    for p in f.pieces() {
+        out.push_str(&p.text);
         out.push('\n');
     }
     Ok(out)
@@ -436,9 +432,7 @@ pub fn target(link: &str) -> Result<Value> {
 /// Where a mail link opens outside Echo: its message in Outlook or Teams, when Echo knows it.
 #[cfg(feature = "brain")]
 pub fn mail_url(src: &str) -> Option<String> {
-    let c = crate::brain::store::open(&crate::brain::store_path()).ok()?;
-    let refs: Option<String> = c.query_row("SELECT refs FROM documents WHERE source = ?1", [src], |r| r.get(0)).ok()?;
-    serde_json::from_str::<Value>(&refs?).ok()?["url"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)
+    crate::brain::facts::read(src)?.refs["url"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)
 }
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]

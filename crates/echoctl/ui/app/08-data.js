@@ -240,8 +240,6 @@ function route() {
   // settings/plugins/<id>: that plugin picked (an Inbox update item opens it).
   const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?(?:\/([a-z0-9-]+))?$/)
   if (sm && sm[2] && sm[1] !== 'plugins') sm[2] = undefined // only Plugins picks one of its own
-  // The vocabulary was a Settings section: its old link opens its panel, over the calls.
-  if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); replaceUrl('#settings/plugins') } return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   if (h === 'yolo') { S.view = 'yolo'; return }

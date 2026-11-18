@@ -720,7 +720,8 @@ const ownTitleBarCard = (st, state) => (state || {}).platform !== 'windows' ? ''
 // end of the own-title-bar block
 const SETTINGS_BODY = {
   templates: () => templatesSettings(),
-  brain: (st) => knowledgeSettings() + brainSettings(st),
+  brain: (st) => brainSettings(st),
+  vocabulary: (st) => vocabularySettings(st),
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')

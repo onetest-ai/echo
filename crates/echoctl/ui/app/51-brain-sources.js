@@ -88,11 +88,6 @@ function brainSources() {
   const byKind = g.by_kind || {}
   const chips = `<button class="fchip${!s.kind ? ' on' : ''}" data-bs-kind="">All <b>${nf(g.total)}</b></button>` + SRC_KINDS.filter(([k]) => byKind[k]).map(([k, m, l]) => `<button class="fchip${s.kind === k ? ' on' : ''}" data-bs-kind="${k}">${m} ${l} <b>${nf(byKind[k])}</b></button>`).join('')
   const box = `<input class="wp-in br-pq" id="bs-q" type="search" placeholder="Find a source — title, sender, file" value="${esc(s.q)}" aria-label="Find a source">`
-  // Who may speak: one line, open for the senders and the decisions waiting.
-  const sd = ((m365.state || {}).senders || {}).clients || {}
-  const waiting = Object.values(sd).reduce((n, l) => n + (l.waiting || []).length + (l.unverified || []).length, 0)
-  const anySenders = Object.values(sd).some((l) => (l.waiting || []).length || (l.unverified || []).length || (l.trusted || []).length || (l.ignored || []).length)
-  const who = anySenders ? srcAcc('senders', `<b>Who may speak</b><span class="n">mail and posts are read only from you, colleagues and senders you trust</span><span class="grow"></span>${waiting ? `<span class="warn">● ${waiting} waiting</span>` : ''}`, () => brainSenders()) : ''
   if (s.q.trim()) {
     const k = 'q'
     if (!s.lists[k]) setTimeout(() => loadSrcList(k), 0)
@@ -121,7 +116,7 @@ function brainSources() {
     const what = c.client === '-' ? 'your practice, internal calls' : 'client'
     return srcAcc(`c|${c.client}`, `<b>${esc(c.name)}</b><span class="n">${what}</span><span class="grow"></span><span class="n">${nf(docs)} source${docs === 1 ? '' : 's'} · ${nf(secs)} sections</span>`, body)
   }).join('')
-  return `<div class="br-graph-bar">${box}${chips}</div>${who}${clients || '<p class="set-sub">No sources in this scope yet.</p>'}<p class="set-foot">Everything starts closed: a client opens to its kinds, channels and folders, each to its newest 50. A search lists what matches across all of them.</p>`
+  return `<div class="br-graph-bar">${box}${chips}</div>${clients || '<p class="set-sub">No sources in this scope yet.</p>'}<p class="set-foot">Everything starts closed: a client opens to its kinds, channels and folders, each to its newest 50. A search lists what matches across all of them.</p>`
 }
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-bs-toggle],[data-bs-more],[data-bs-kind]')

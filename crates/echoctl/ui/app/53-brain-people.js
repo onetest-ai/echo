@@ -112,7 +112,7 @@ document.addEventListener('keydown', (e) => {
 /** A topic or term in the right panel: its description, where it comes up, the user's review
  *  (rename, merge, move, remove; a term's kind, variants, pins) and its latest sections. */
 function brainNodePanel() {
-  const d = S.br.data, id = S.br.node, tx = (d && d.taxonomy) || {}
+  const d = dictData(), id = S.br.node, tx = (d && d.taxonomy) || {}
   const x = brItem(id)
   if (!x) return id && !(S.br.nodeData && S.br.nodeData.id === id) ? '<div class="skeleton"><i></i><i></i><i></i></div>' : '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
@@ -204,13 +204,13 @@ function brainDocPanel() {
   </div>`
 }
 PANEL_VIEWS.push({ id: 'brain-doc', label: 'Source', icon: ICON('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.doc, render: brainDocPanel })
-PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="7" cy="19" r="2"/><path d="M9.5 10.5 6.6 7.4M14.6 10.6l2.8-2.4M10.2 14.2l-2 3.3"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.node, render: brainNodePanel })
+PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="7" cy="19" r="2"/><path d="M9.5 10.5 6.6 7.4M14.6 10.6l2.8-2.4M10.2 14.2l-2 3.3"/>'), area: 'right', when: () => (S.view === 'brain' || (S.view === 'settings' && S.setSection === 'vocabulary')) && !!S.br.node, render: brainNodePanel })
 
 /** The edit errors this page has seen (numbered by the app): an edit shows only one newer than these. */
 function noteEditErrors(d) { const n = ((d || {}).edit_error || {}).n || 0; if (n > (S.br.errSeen || 0)) S.br.errSeen = n }
 /** The user's edit: the app makes the new version in the background (a large Brain takes seconds); the page
  *  reads the Brain again until it is done, and says why when it couldn't be done. */
-function brainEdit(body, reload = loadBrain, data = () => S.br.data) {
+function brainEdit(body, reload = S.view === 'brain' ? loadBrain : loadDict, data = dictData) {
   const seen = S.br.errSeen || 0
   send({ cmd: 'brain_taxonomy', body })
   S.br.edit = null
@@ -251,7 +251,7 @@ document.addEventListener('click', (e) => {
     return brainEdit({ layer: x.layer, term: true, name: x.name, op: 'merge', into, into_layer })
   }
   if (d.brDo) {
-    const tx = (S.br.data || {}).taxonomy || {}
+    const tx = (dictData() || {}).taxonomy || {}
     const x = brItem(S.br.node)
     if (!x) return
     const base = { layer: x.layer, term: !!x.name, [x.name ? 'name' : 'label']: x.name || x.label }

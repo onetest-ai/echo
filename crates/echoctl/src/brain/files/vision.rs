@@ -76,8 +76,8 @@ impl Reader {
 pub fn reader() -> std::result::Result<Reader, String> {
     let s = crate::brain::settings();
     match s.pages() {
-        "off" => Err("the page reader is off (Settings → Recall): those pages are indexed from their text".into()),
-        "endpoint" if s.vision_endpoint.trim().is_empty() || s.vision_model.trim().is_empty() => Err("no vision endpoint set (Settings → Recall)".into()),
+        "off" => Err("the page reader is off (Settings → Intake): those pages are indexed from their text".into()),
+        "endpoint" if s.vision_endpoint.trim().is_empty() || s.vision_model.trim().is_empty() => Err("no vision endpoint set (Settings → Intake)".into()),
         "endpoint" => Ok(Reader::Endpoint(Box::new(s))),
         _ => Ok(Reader::Claude),
     }

@@ -860,7 +860,7 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         },
         Some(_) => {}
-        None if note.is_none() => note = Some("keywords only: no embedding server is set (Settings → Recall)".into()),
+        None if note.is_none() => note = Some("keywords only: no embedding server is set (Settings → Intake)".into()),
         None => {}
     }
     // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
