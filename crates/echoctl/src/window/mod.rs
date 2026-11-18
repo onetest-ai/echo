@@ -1045,7 +1045,9 @@ mod tests {
         #[cfg(target_os = "macos")]
         {
             let mut c = super::terminals::pasteboard("/bin/sh");
-            let out = c.args(["-c", "locale charmap"]).env_remove("LANG").env_remove("LC_ALL").output().unwrap();
+            // An inherited LC_ALL would override LC_CTYPE: the tools never get one.
+            assert!(c.get_envs().any(|(k, v)| k == "LC_ALL" && v.is_none()), "LC_ALL removed");
+            let out = c.args(["-c", "locale charmap"]).env_remove("LANG").output().unwrap();
             assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "UTF-8");
         }
         let bytes = super::terminals::clipboard_bytes("Тест");

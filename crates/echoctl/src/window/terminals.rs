@@ -57,7 +57,7 @@ fn put_on_clipboard(text: &str) {
 #[cfg(target_os = "macos")]
 pub(crate) fn pasteboard(tool: &str) -> std::process::Command {
     let mut c = std::process::Command::new(tool);
-    c.env("LC_CTYPE", "UTF-8");
+    c.env("LC_CTYPE", "UTF-8").env_remove("LC_ALL");
     c
 }
 
