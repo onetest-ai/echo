@@ -22,7 +22,9 @@ Prerequisites for the gates: `.ai-run/reference/development/dev-workflow.md` (Pr
 
 ## The release test bar's runs
 
-- Agent scenarios: every agent scenario in `tests/scenarios/`, run through `claude --agent test-run-lead`.
+- Agent cases no autotest covers: `run: agent` cases without a spec in their `auto:` line, given to
+  `claude --agent test-run-lead` grouped by scenario (its Assets and Prelude, only those cases' stages); headless (`-p`)
+  needs `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, or its runners are stopped after 10 minutes.
 - Autotests: `npm test` in `tests/auto`; `feature-map.py auto-report` turns the results into a report.
 
 ## Windows before a release

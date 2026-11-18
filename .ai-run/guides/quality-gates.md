@@ -12,7 +12,8 @@
 - R4. A functional FAIL stops the change only when it is a regression (the case passes on `main`); a failure with an open issue is listed with its number, a wrong case is fixed or listed. The PR lists the cases added, changed, removed and run, with their results. Evidence: `feature-map.py::changes`
 - R5. A release passes its test bar on its version-bump commit, each FAIL checked against `main` (a regression, an open issue, or a wrong case):
   - a patch release (X.Y.Z+1): the gates, the full autotests and the touched cases;
-  - a minor or major release: also every agent scenario and every `critical` case, agent and person-run.
+  - a minor or major release: also every agent case no autotest covers, run by agents within its scenario, and every
+    `critical` case, agent and person-run; an autotest stands for the agent case it covers.
 
-  Merging a long-lived branch into `main` runs every agent scenario too, only when the user decides. Evidence: `feature-map.py::auto_report` (ref: The release test bar's runs)
+  Merging a long-lived branch into `main` runs the agent cases no autotest covers too, only when the user decides. Evidence: `feature-map.py::auto_report` (ref: The release test bar's runs)
 - R6. Windows is checked on every PR, not only on Windows: the Windows type-check without default features (`cargo check -p echoctl --target x86_64-pc-windows-msvc --no-default-features`) is one of R1's gates. Before a release, on a Windows computer, also `cargo check -p echoctl --no-default-features --features tray,brain`. Evidence: `crates/echoctl/Cargo.toml::features` (ref: Gates, Windows before a release)
