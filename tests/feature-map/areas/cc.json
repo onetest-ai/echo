@@ -95,6 +95,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-CC-12",
+   "feature": "In the window's terminals (the Claude panel, a plugin's Claude session) ⌘C copies the selection and ⌘V types the clipboard's text, any language as it is (Cyrillic too), also in an Echo started from Finder (no locale)",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
   }
  ]
 }
