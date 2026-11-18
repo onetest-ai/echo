@@ -473,7 +473,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
   change), `night` paused at night by default (`true` when not said), `tools` `auto` / `skip` / `none` or left out (as
   `ctx.claude.run`'s: § Claude runs), `timeout` minutes 1–60 (20). Each is a line of its sheet (§ `uses` and the
   permission sheet). Its id among the routines is `<plugin>.<routine>`, `source` `"plugin:<id>"`, with `plugin` its
-  plugin's name, `to` `[]`, `schedule` `{text: "Every N min", kind: "timer"}`, `enabled` true only while the user
+  plugin's name, `to` `[]`, `schedule` `{text: <the interval in plain words: "Every hour", "Every 45 min"…>, kind: "timer"}`, `enabled` true only while the user
   switched it on and its plugin is on, `next_run` then (else null), and `settings`: `on` (kind `"switch"`, false by
   default), `every`, `night`, `model` (default "the profile's minutes model"). It is off until the user switches it on —
   on its install or update sheet (`--routines` in the CLI: § `uses` and the permission sheet), on the sheet its plugin's

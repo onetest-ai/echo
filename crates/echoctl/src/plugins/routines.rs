@@ -184,7 +184,7 @@ fn schedule(every: u64, night: bool) -> String {
 }
 
 /// An interval in minutes in plain words: Every hour, Every day, Every 2 h, Every 45 min.
-fn every_words(min: u64) -> String {
+pub fn every_words(min: u64) -> String {
     match min {
         60 => "Every hour".into(),
         1440 => "Every day".into(),
@@ -299,7 +299,7 @@ pub fn view(plugin: &str) -> Vec<Value> {
             let id = id_of(plugin, &r.id);
             let on = crate::jobs::on(&id);
             let night = crate::jobs::settings()[&id]["night"].as_bool().unwrap_or(r.night);
-            let when = format!("Every {} min{}{}", crate::jobs::number(&id, "every"), if night { " · paused at night" } else { "" }, if on { "" } else { " · off" });
+            let when = format!("{}{}{}", every_words(crate::jobs::number(&id, "every")), if night { " · paused at night" } else { "" }, if on { "" } else { " · off" });
             let last = crate::jobs::runs(&id, 1).ok().and_then(|v| v.into_iter().next()).map(|x| {
                 let at = x["started"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
                 format!("Last run {at}: {}", x["summary"].as_str().or(x["error"].as_str()).unwrap_or(if x["ok"] == false { "failed" } else { "done" }))

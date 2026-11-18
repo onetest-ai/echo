@@ -519,9 +519,9 @@ fn sends(id: &str) -> &'static [&'static str] {
 /// When a job runs, in words, and whether on a timer or on events.
 fn schedule(id: &str) -> Value {
     let (text, kind) = match id {
-        "needs" | "prep" => (format!("Every {} min", number(id, "every")), "timer"),
-        "brain_reader" => (format!("Every {} min · {} a pass", number(id, "every"), number(id, "per_pass")), "timer"),
-        "fetch" => (format!("Every {} min a source", number(id, "every")), "timer"),
+        "needs" | "prep" => (crate::plugins::routines::every_words(number(id, "every")), "timer"),
+        "brain_reader" => (format!("{} · {} a pass", crate::plugins::routines::every_words(number(id, "every")), number(id, "per_pass")), "timer"),
+        "fetch" => (format!("{} a source", crate::plugins::routines::every_words(number(id, "every"))), "timer"),
         "minutes" => (format!("{} min after a call", number(id, "delay")), "event"),
         "live_notes" => (format!("Every {} s during a call", number(id, "every_s")), "event"),
         _ => (next_words(id).map(|w| w[..1].to_uppercase() + &w[1..]).unwrap_or_default(), "event"),
@@ -562,7 +562,7 @@ pub fn routines() -> Value {
         let mut j = job_value(&id, &r.name, &r.what, "", &routine_fields(r.every, r.night), &s, &next_runs);
         let on = p.enabled && self::on(&id);
         j["next_run"] = if on { json!(routine_next(&id, now).to_rfc3339()) } else { Value::Null };
-        let schedule = json!({"text": format!("Every {} min", number(&id, "every")), "kind": "timer"});
+        let schedule = json!({"text": crate::plugins::routines::every_words(number(&id, "every")), "kind": "timer"});
         let mut x = as_routine(&j, &format!("plugin:{}", p.id), on, json!([]), schedule, crate::plugins::routines::running(&id), now);
         x["plugin"] = json!(p.name);
         routines.push(x);
@@ -911,7 +911,7 @@ mod tests {
         let field = |r: &Value, k: &str| r["settings"].as_array().unwrap().iter().find(|f| f["key"] == k).cloned().unwrap();
         let r = get();
         assert_eq!((r["source"].clone(), r["name"].clone(), r["plugin"].clone(), r["enabled"].clone(), r["to"].clone(), r["schedule"].clone(), r["next_run"].clone(), r["last"].clone()),
-                   (json!("plugin:acme-routine"), json!("Mail → notes"), json!("Acme routine"), json!(false), json!([]), json!({"text": "Every 60 min", "kind": "timer"}), Value::Null, Value::Null));
+                   (json!("plugin:acme-routine"), json!("Mail → notes"), json!("Acme routine"), json!(false), json!([]), json!({"text": "Every hour", "kind": "timer"}), Value::Null, Value::Null));
         assert_eq!(r["model"], json!({"value": "", "default": "the profile's minutes model"}));
         assert_eq!((field(&r, "on")["kind"].clone(), field(&r, "on")["value"].clone(), field(&r, "every")["value"].clone(), field(&r, "every")["range"].clone(), field(&r, "night")["value"].clone()),
                    (json!("switch"), json!(false), json!(60), json!({"min": 15, "max": 1440}), json!(false)));
