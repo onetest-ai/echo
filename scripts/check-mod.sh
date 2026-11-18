@@ -14,6 +14,8 @@ node crates/echoctl/ui/app-parses.test.mjs
 node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs
+# The calendar card's mark right after Record: scheduled, with its language.
+node crates/echoctl/ui/schedule-mark.test.mjs
 # The window's workbench: activities, call tabs, calendar actions, and where panel views go.
 node crates/echoctl/ui/workbench.test.mjs
 # Which handler a click runs: the nearest element a handler matches, then the first handler that holds (clickFor).
