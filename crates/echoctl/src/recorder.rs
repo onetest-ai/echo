@@ -52,22 +52,12 @@ pub fn slugify(s: &str) -> String {
 
 /// A new call's folder, created: `<stamp>-<slug of the title>`, its stamp the first second at or after `started` that no
 /// folder in the calls folder or the trash starts with, so a stamp names one call for good (`calls::by_stamp`); the real
-/// start stays in `meta.json`. Chosen and created under one lock: two recordings or imports at one instant get two.
+/// start stays in `meta.json`. Chosen and created under one lock (`new_call_lock`): two recordings or imports at one
+/// instant get two.
 pub(crate) fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> Result<PathBuf> {
     let calls = paths::calls_dir();
     fs::create_dir_all(&calls).with_context(|| format!("creating {}", calls.display()))?;
-    fs::create_dir_all(paths::state_dir())?;
-    let lock = paths::state_dir().join("new-call.lock");
-    let t = Instant::now();
-    let _lock = loop {
-        if let Some(l) = crate::app::FileLock::try_take(&lock).with_context(|| format!("opening {}", lock.display()))? {
-            break l;
-        }
-        if t.elapsed() > Duration::from_secs(10) {
-            anyhow::bail!("{} is held by another process", lock.display());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let _lock = new_call_lock();
     let stamps = |d: PathBuf| fs::read_dir(d).into_iter().flatten().flatten().map(|e| crate::calls::stamp_of(&e.path()));
     let taken: std::collections::HashSet<String> = stamps(calls.clone()).chain(stamps(crate::calls::trash_dir())).collect();
     let slug = title.map(slugify).filter(|s| !s.is_empty()).map(|s| format!("-{s}")).unwrap_or_default();
@@ -84,6 +74,28 @@ pub(crate) fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> Result
             }
         }
         at += chrono::Duration::seconds(1);
+    }
+}
+
+/// The lock a new call's stamp is chosen under (`<home>/.echo/new-call.lock`; its holders keep it for milliseconds).
+/// None, logged, when it can't be had within 2 s or opened at all: a recording never waits on it or fails for it — the
+/// folder is still a new one (`create_dir`), only its stamp may then be shared.
+pub(crate) fn new_call_lock() -> Option<crate::app::FileLock> {
+    let lock = paths::state_dir().join("new-call.lock");
+    let t = Instant::now();
+    loop {
+        match fs::create_dir_all(paths::state_dir()).and_then(|_| crate::app::FileLock::try_take(&lock)) {
+            Ok(Some(l)) => return Some(l),
+            Ok(None) if t.elapsed() < Duration::from_secs(2) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                eprintln!("{} is held by another process: a new call goes on without it", lock.display());
+                return None;
+            }
+            Err(e) => {
+                eprintln!("{}: {e}: a new call goes on without it", lock.display());
+                return None;
+            }
+        }
     }
 }
 
@@ -369,12 +381,34 @@ mod tests {
     #[test]
     fn two_threads_creating_at_one_instant_get_two_stamps() {
         let (_env, _) = paths::testenv::folders("recorder-stamp-race");
+        // Titles of their own: the folders' names differ, only the lock keeps their stamps apart.
         let made: Vec<PathBuf> = std::thread::scope(|s| {
-            let h: Vec<_> = (0..4).map(|_| s.spawn(|| call_dir(&at("2026-11-18_120000"), Some("Acme sync")).unwrap())).collect();
+            let h: Vec<_> = (0..8).map(|i| s.spawn(move || call_dir(&at("2026-11-18_120000"), Some(&format!("Call {i}"))).unwrap())).collect();
             h.into_iter().map(|h| h.join().unwrap()).collect()
         });
         let stamps: std::collections::HashSet<String> = made.iter().map(|d| stamp_of(d)).collect();
-        assert_eq!(stamps.len(), 4, "{made:?}");
+        assert_eq!(stamps.len(), 8, "{made:?}");
+    }
+
+    #[test]
+    fn a_lock_held_elsewhere_never_stops_a_new_call() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-lock-held");
+        fs::create_dir_all(paths::state_dir()).unwrap();
+        let _held = crate::app::FileLock::try_take(&paths::state_dir().join("new-call.lock")).unwrap().expect("the lock");
+        let t = Instant::now();
+        let d = call_dir(&at("2026-11-18_150000"), Some("Acme sync")).unwrap();
+        assert!(t.elapsed() < Duration::from_secs(3), "waited {:?}", t.elapsed());
+        assert_eq!(d.file_name().unwrap(), "2026-11-18_150000-acme-sync");
+        let next = call_dir(&at("2026-11-18_150000"), Some("Acme sync")).unwrap();
+        assert_eq!(next.file_name().unwrap(), "2026-11-18_150001-acme-sync", "still a fresh folder");
+    }
+
+    #[test]
+    fn a_lock_that_cant_be_opened_never_stops_a_new_call() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-lock-unopenable");
+        fs::create_dir_all(paths::state_dir().join("new-call.lock")).unwrap(); // a folder: no file to open
+        let d = call_dir(&at("2026-11-18_160000"), Some("Memo")).unwrap();
+        assert!(d.is_dir() && d.file_name().unwrap() == "2026-11-18_160000-memo");
     }
 
     #[test]

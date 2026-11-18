@@ -21,9 +21,10 @@ A call is named by its folder stamp (`calls::stamp_of`) and found with `calls::b
 folders share a stamp.
 
 Every new call folder (a recording, a memo, a Teams transcript import) is made by `recorder::call_dir`: under
-the lock `<home>/.echo/new-call.lock` it takes the first second at or after the call's start that no folder in
-`<home>/calls` or the trash has as its stamp, and creates the folder with `create_dir` (one that appeared meanwhile
-moves it a second on). A new call's stamp is therefore unique and never changes; `meta.json`'s `started_at` keeps the
+the lock `<home>/.echo/new-call.lock` (`recorder::new_call_lock`, also taken by `calls::restore`) it takes the first
+second at or after the call's start that no folder in `<home>/calls` or the trash has as its stamp, and creates the
+folder with `create_dir` (one that appeared meanwhile moves it a second on). The lock is waited for 2 s at most; when it
+can't be had or opened, that is logged and the call goes on without it (a fresh folder still, its stamp possibly shared). A new call's stamp is therefore unique and never changes; `meta.json`'s `started_at` keeps the
 real start, which may be a second or two before the stamp. Calls made before this have no migration: two that share
 a stamp stay found by neither. The test-data makers pick stamps the same way (`make_data.py` `write_call`,
 `recordings.py` `free_folder`).
