@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.10.0",
+    "items": [
+      { "icon": "plugin", "title": "Turn routines on as you install", "text": "Each routine a plugin brings has its own switch on the plugin's install sheet, so you no longer go to the Scheduler to start it.", "open": "settings/plugins" },
+      { "icon": "plugin", "title": "Plugins that work with your folders", "text": "Plugins can read and edit the folders you give them, keep their history in git and ask Claude Code about them on your click.", "open": "settings/plugins" },
+      { "icon": "layout", "title": "Knowledge in Settings is now Recall", "text": "Echo's search across your calls, mail and folders is called Recall, so a Knowledge plugin can bring your own vaults.", "open": "settings/brain" },
+      { "icon": "fix", "title": "Minutes counted in any language", "text": "Today counts the decisions and open questions of minutes written in Russian or Ukrainian too.", "open": "today" },
+      { "icon": "shield", "title": "Safer plugins", "text": "Plugins never write into hidden settings folders, and the skills they add to Claude Code can't run commands.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.9.14",
     "items": [
       { "icon": "layout", "title": "Echo's jobs, tracked like routines", "text": "Each job Echo runs by itself keeps its runs, cost and next run, shown in the Scheduler's System tab beside your routines.", "open": "settings/plugins" }
