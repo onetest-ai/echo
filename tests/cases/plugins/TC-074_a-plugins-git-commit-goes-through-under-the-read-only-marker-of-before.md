@@ -51,7 +51,7 @@ echoctl plugin marketplace add "$M" --name acme-git
 | 1 | `echoctl plugin install acme-history --yes`; `ECHOCTL_PICK_FOLDER="$D/history" echoctl plugin call acme-history add`; `echoctl plugin call acme-history init`; `echoctl plugin call acme-history put '{"path":"Notes/Acme.md","text":"# Acme\nPilot planned.\n"}'`; `echoctl plugin call acme-history commit '{"paths":["Notes/Acme.md"],"message":"Acme: first notes"}'` | `Installed Acme history 0.1.0`; the vault's path; its `info`; `null`; `{"rev": "<40 hex>"}` |
 | 2 | `echoctl plugin call acme-history put '{"path":"Notes/Routine.md","text":"# Routine\n"}'`; `echoctl plugin call acme-history log '{"max":1}'` | `null`; one commit — note its `subject` and `rev` |
 | 3 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history commit '{"paths":["Notes/Routine.md"],"message":"Routine notes"}'` | `{"rev": "<40 hex>"}`: the marker limits nothing |
-| 4 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history log '{"max":1}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history status` | One commit, subject `Routine notes` (step 3's); the status lists nothing: reads answer too |
+| 4 | `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history log '{"max":1}'`; `ECHOCTL_RUN_MODE=routine echoctl plugin call acme-history status` | One commit, subject `Routine notes` (step 3's); the status answers with a list (not an error) holding neither `Notes/Acme.md` nor `Notes/Routine.md`, both committed: reads answer too. Other files in the vault, left by earlier work (as `??`), may be listed |
 
 ## Expected Final State
 `Notes/Routine.md` is in the vault, committed by step 3.

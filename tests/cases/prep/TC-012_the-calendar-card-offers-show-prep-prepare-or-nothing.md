@@ -38,7 +38,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 2 | Click `[data-ev="ev-m11"]` | The card has "Show prep" and no "Prepare again" |
 | 3 | Click `[data-ev="ev-m08"]` | The card has a button "Prepare" beside its main one (on one line) and its line ends "Prepare writes last time, what is open, what is new and who is coming."; no "Show prep" |
 | 4 | Click `[data-ev="ev-m01"]` | The card has no prep line at all |
-| 5 | Click `[data-ev="ev-m11"]`, then "Show prep" | The URL becomes `#upcoming/<prep id>`; the title is "Umbrella security Q&A"; the prep is shown with "In short"; the people line in the header reads six names and "and 6 more"; no "Write it again" (the meeting is over) |
+| 5 | Click `[data-ev="ev-m11"]`, then "Show prep" | The URL becomes `#upcoming/<prep id>`; the title is "Umbrella security Q&A"; the prep is shown with "In short"; the header's people are the meeting's one invitee: the date line ends with "1 no answer" and under it stands "Kai Larsen" (answer: No answer yet), with no "+N more"; no "Write it again" (the meeting is over) |
 
 ## Expected Final State
 The prep of Umbrella security Q&A is open.

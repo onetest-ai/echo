@@ -14,6 +14,8 @@ node crates/echoctl/ui/app-parses.test.mjs
 node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs
+# The calendar card's mark right after Record: scheduled, with its language.
+node crates/echoctl/ui/schedule-mark.test.mjs
 # The window's workbench: activities, call tabs, calendar actions, and where panel views go.
 node crates/echoctl/ui/workbench.test.mjs
 # Which handler a click runs: the nearest element a handler matches, then the first handler that holds (clickFor).
@@ -32,6 +34,8 @@ node crates/echoctl/ui/select-menu.test.mjs
 node crates/echoctl/ui/suggest.test.mjs
 # Echo's calendar for a date box: a month from Monday, the quick days (date picker block).
 node crates/echoctl/ui/date-picker.test.mjs
+# An opened field editor takes the focus with its text selected (editor focus block).
+node crates/echoctl/ui/editor-focus.test.mjs
 # My notes as moments: note lines of my-notes.md read and written (NoteDoc).
 node crates/echoctl/ui/my-notes.test.mjs
 # Whether a note keeps its call time, after the app confirmed the call records (recordsCall, noteTime).
@@ -60,6 +64,7 @@ node crates/echoctl/ui/client-tabs.test.mjs
 node crates/echoctl/ui/column-menu.test.mjs
 # Opening a thread loads its work tree on every tab (loadProject).
 node crates/echoctl/ui/thread-load.test.mjs
+node crates/echoctl/ui/hash-changed.test.mjs
 # Whether the open call may write its own address, or a click is on its way (callUrl).
 node crates/echoctl/ui/call-url.test.mjs
 # History's words for the user's own ledger edits (humanHistory).
