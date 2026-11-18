@@ -30,7 +30,9 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   the stores while it runs (taken without waiting: a second run under it is refused), with `k-<key>.pid` (its Claude
   Code, from its start till Echo has reaped it) and `k-<key>.stopped` (written by `ctx.claude.stop` before it stops
   that process group; a run that sees it before starting Claude Code fails `stopped`, one that sees it right after
-  stops it at once), both removed when the run ends. Removing the plugin stops its runs under a key (waiting 10 s at
+  stops it at once), both removed when the run ends. `k-<key>.gate` is held for a moment by a run taking the key
+  and by `ctx.claude.stop` from its check of the lock to its mark (each waits for it, 5 s at most): no run takes the
+  key in between, so a stop's check never refuses a run and its mark never lands on the next run. Removing the plugin stops its runs under a key (waiting 10 s at
   most for each to end); the locks go with its data. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`,
   `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and

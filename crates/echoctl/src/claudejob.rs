@@ -244,7 +244,8 @@ pub fn check_key(key: &str) -> Result<()> {
 }
 
 /// Where plugin `plugin`'s run under `key` keeps its files, across processes: `<base>.lock` held while it runs,
-/// `<base>.pid` its Claude Code once started, `<base>.stopped` once `stop_keyed` stopped it. The key's characters can't
+/// `<base>.pid` its Claude Code once started, `<base>.stopped` once `stop_keyed` stopped it, `<base>.gate` held for a
+/// moment by a run taking the key and by a stop from its check to its mark. The key's characters can't
 /// leave the folder: each file's name ends in its own suffix, and starts with `k-` (never a Windows device name).
 fn key_base(plugin: &str, key: &str) -> PathBuf {
     paths::state_dir().join("plugins").join(".runs").join(plugin).join(format!("k-{}", key.to_ascii_lowercase()))
@@ -255,6 +256,27 @@ fn key_file(base: &Path, ext: &str) -> PathBuf {
     f.push(format!(".{ext}"));
     PathBuf::from(f)
 }
+
+/// The key's gate (`<base>.gate`), waited for: no run takes the key while a stop checks or marks it, so a stop's check
+/// never refuses a run and its mark never lands on the next run. Each holder keeps it for a moment only.
+fn key_gate(base: &Path) -> Result<crate::app::FileLock> {
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(g) = crate::app::FileLock::try_take(&key_file(base, "gate"))? {
+            return Ok(g);
+        }
+        #[cfg(test)]
+        GATE_WAITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if std::time::Instant::now() > end {
+            bail!("the run's key is busy: try again");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// How often a test's run waited at a key's gate.
+#[cfg(test)]
+static GATE_WAITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// A plugin's run under its key, held while it runs: one at a time per plugin and key, in the app and in
 /// `echoctl plugin call` alike. Dropped, its files go and the key is free.
@@ -269,6 +291,7 @@ impl Keyed {
         check_key(key)?;
         let base = key_base(plugin, key);
         fs::create_dir_all(base.parent().unwrap_or(&base))?;
+        let _gate = key_gate(&base)?;
         let Some(lock) = crate::app::FileLock::try_take(&key_file(&base, "lock"))? else {
             bail!("a run with key “{key}” is running already: stop it (ctx.claude.stop) or wait for it");
         };
@@ -291,12 +314,29 @@ impl Drop for Keyed {
 pub fn stop_keyed(plugin: &str, key: &str) -> Result<bool> {
     check_key(key)?;
     let base = key_base(plugin, key);
-    // Its lock free: no run under that key.
-    if !base.parent().is_some_and(Path::is_dir) || crate::app::FileLock::try_take(&key_file(&base, "lock"))?.is_some() {
+    if !base.parent().is_some_and(Path::is_dir) {
         return Ok(false);
     }
-    stop_base(&base)?;
+    stop_key(&base, || {})
+}
+
+/// The run under the key at `base` stopped, if one runs; under the key's gate from the check to the mark
+/// (`between`: a test's step right after the check).
+fn stop_key(base: &Path, between: impl FnOnce()) -> Result<bool> {
+    let _gate = key_gate(base)?;
+    // Its lock free: no run under that key.
+    let free = crate::app::FileLock::try_take(&key_file(base, "lock"))?;
+    between();
+    if free.is_some() {
+        return Ok(false);
+    }
+    stop_base(base)?;
     Ok(true)
+}
+
+/// Does a run hold the key at `base`? Checked under its gate, so a run taking the key meanwhile isn't refused.
+fn key_held(base: &Path) -> bool {
+    key_gate(base).is_ok_and(|_gate| matches!(crate::app::FileLock::try_take(&key_file(base, "lock")), Ok(None)))
 }
 
 /// The run whose files are at `base` stopped. The mark first, then its process: a run that starts Claude Code meanwhile
@@ -315,10 +355,10 @@ pub fn stop_keyed_runs(plugin: &str) {
     let dir = paths::state_dir().join("plugins").join(".runs").join(plugin);
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
         let p = e.path();
-        if let Some(base) = p.to_str().and_then(|s| s.strip_suffix(".lock")) {
-            if matches!(crate::app::FileLock::try_take(&p), Ok(None)) && stop_base(Path::new(base)).is_ok() {
+        if let Some(base) = p.to_str().and_then(|s| s.strip_suffix(".lock")).map(Path::new) {
+            if matches!(stop_key(base, || {}), Ok(true)) {
                 let end = std::time::Instant::now() + Duration::from_secs(10);
-                while matches!(crate::app::FileLock::try_take(&p), Ok(None)) && std::time::Instant::now() < end {
+                while key_held(base) && std::time::Instant::now() < end {
                     std::thread::sleep(Duration::from_millis(50));
                 }
             }
@@ -923,5 +963,41 @@ mod tests {
         assert_eq!(after(&in_folder_session(&local, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some("acceptEdits"));
         // The user's own Claude Code loads the folder's project anyway: no sources named.
         assert!(!in_folder_session(&profile(crate::ai::Kind::System), None, &inf(FolderMode::Read), Permissions::Ask).unwrap().contains(&"--setting-sources".to_string()));
+    }
+
+    /// A run taking the key in a thread of its own, once it has either ended or waits at the key's gate.
+    fn take_meanwhile() -> std::thread::JoinHandle<std::result::Result<Keyed, String>> {
+        let waits = GATE_WAITS.load(std::sync::atomic::Ordering::SeqCst);
+        let next = std::thread::spawn(|| Keyed::take("indexer", "index").map_err(|e| e.to_string()));
+        crate::paths::testenv::eventually("the run took the key or waits for it", || next.is_finished() || GATE_WAITS.load(std::sync::atomic::Ordering::SeqCst) > waits);
+        next
+    }
+
+    #[test]
+    fn a_stop_meant_for_a_run_under_a_key_never_lands_on_the_next_run_under_it() {
+        let (_env, _root) = crate::paths::testenv::folders("claudejob-stop-next");
+        let a = Keyed::take("indexer", "index").unwrap();
+        let base = a.base.clone();
+        // Run A ends right after the stop found it running, and run B under the same key starts at once.
+        let mut b = None;
+        assert!(stop_key(&base, || {
+            drop(a);
+            b = Some(take_meanwhile());
+        })
+        .unwrap());
+        let b = b.unwrap().join().unwrap().unwrap();
+        // The stop meant for A left no mark B would fail on or stop its Claude Code by.
+        assert!(!key_stopped(&b.base), "B is marked stopped");
+    }
+
+    #[test]
+    fn a_stop_checking_a_key_never_refuses_a_run_starting_under_it() {
+        let (_env, _root) = crate::paths::testenv::folders("claudejob-stop-check");
+        let base = key_base("indexer", "index");
+        fs::create_dir_all(base.parent().unwrap()).unwrap();
+        // A stop checks the key while no run holds it; a run starts under it meanwhile.
+        let mut next = None;
+        assert!(!stop_key(&base, || next = Some(take_meanwhile())).unwrap());
+        assert!(next.unwrap().join().unwrap().is_ok(), "the run took the key once the check was done");
     }
 }
