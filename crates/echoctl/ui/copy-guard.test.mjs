@@ -24,4 +24,6 @@ assert.ok(/reveal: async \(root, path\) => \{\s*if \(!copyAllowed\(/.test(src), 
 // A skill added to or removed from the user's own Claude Code, too: asked before the request is sent.
 assert.ok(/installSkill: async \(name, md\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.claude.installSkill asks copyAllowed first')
 assert.ok(/removeSkill: async \(name\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.claude.removeSkill asks copyAllowed first')
+// Echo's sheet of a plugin's own routines, too: opened only on the user's click.
+assert.ok(/offer: async \(ids\) => \{\s*if \(!copyAllowed\(/.test(src), 'ctx.echo.routines.offer asks copyAllowed first')
 console.log('ok - a plugin copies, changes Echo\'s jobs, shows a file in Finder and adds or removes a Claude Code skill only with the user\'s activation; an engine that can\'t tell refuses')

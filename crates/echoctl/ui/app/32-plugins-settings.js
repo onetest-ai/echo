@@ -9,9 +9,10 @@ async function loadPluginsView() {
   if (p && p.busy && Object.keys(p.busy).length) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadPluginsView().then(render) }, 1000)
 }
 function pluginOp(op, body = {}) {
-  send({ cmd: 'plugin_op', op, ...body })
+  const saved = Promise.resolve(send({ cmd: 'plugin_op', op, ...body })).catch(() => {})
   // The Inbox too: a plugin updated leaves it at once.
   setTimeout(() => { loadAttention(true); loadPluginsView().then(render) }, 300)
+  return saved
 }
 /** One of a plugin's own settings (its manifest's `settings`): a switch, or a box saved when it changes; a
  *  secret is never shown back, only whether it is set (Forget empties it). */
@@ -37,10 +38,12 @@ document.addEventListener('change', (e) => {
 document.addEventListener('focusout', (e) => {
   if (e.target.matches && e.target.matches('input[data-pl-set]') && S.renderOnBlur) { S.renderOnBlur = false; setTimeout(render) }
 })
-// A plugin's routine switched on or off: only here, by the user (a plugin never switches one); saved as shown.
+// A plugin's routine switched on or off: only here, by the user (a plugin never switches one); saved as shown. A script's
+// click, or a button in a plugin's own markup, moves nothing (defence in depth: a client half runs in this realm).
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('button[data-pl-routine]')
-  if (b) pluginOp('routine', { id: b.dataset.plRoutine, routine: b.dataset.routine, on: b.dataset.val === 'true' })
+  const op = b && plRoutineClick(b, e.isTrusted, S)
+  if (op) pluginOp('routine', op)
 })
 document.addEventListener('click', (e) => {
   const c = e.target.closest && e.target.closest('button[data-pl-cert-trust], button[data-pl-cert-forget]')
@@ -163,16 +166,62 @@ function plSheet(sh) {
   const box = (inner, name = '') => `<div class="pl-sheet" role="dialog" aria-modal="true"${name ? ` aria-label="${esc(name)}"` : ''}>${inner}</div>`
   if (!r) return box('<span class="set-sub">Reading what it uses…</span>')
   if (r.error) return box(`<span class="error">${esc(r.error)}</span><div class="pl-sheet-btns"><button class="btn" data-pl-sheet-cancel>Close</button></div>`)
-  const lines = sh.update ? r.new_uses : r.uses
+  // A routine shows once, under its switch with its facts: its long line is not repeated in this list.
+  const lines = plSheetLines(r, sh.update)
+  const able = lines.length || !(r.routines || []).length ? `<div class="pl-h4">It will be able to</div>${plUses(lines)}` : ''
   const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
   const who = outside ? `<div class="pl-warn"><b>!</b><span>Listed by ${esc(r.market)} — Echo hasn’t reviewed it. Install it only if you trust who made it.</span></div>` : ''
   const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
   return box(`<div class="pl-dhead">${plTile({ id: r.id, name: r.name })}<div style="flex:1"><div class="pl-dn">${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</div>
       <div class="set-sub">from <b>${esc(r.market)}</b> · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div></div></div>
-    ${who}<div class="pl-h4">It will be able to</div>${plUses(lines)}${r.offers ? `<div class="set-sub pl-offers">${esc(r.offers)} — you add one, or not, from a dashboard's +</div>` : ''}
+    ${who}${able}${r.offers ? `<div class="set-sub pl-offers">${esc(r.offers)} — you add one, or not, from a dashboard's +</div>` : ''}
+    ${plRoutineSwitches(r.routines, sh.on || plRoutinesStart(r.routines), 'data-pl-sheet-rt')}
     ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
     <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div>`, sh.update ? `${r.name} ${r.version} asks for more` : `Install ${r.name} ${r.version}?`)
 }
+// ── plugin routine switches: the routines a plugin's install or update sheet offers, and the sheet its own setup opens
+// (`ctx.echo.routines.offer`), each with Echo's switch and words (no DOM: `plugin-routines.test.mjs`). A routine is off
+// unless the user switches it on; only what the user moved is sent.
+/** The routines' block: a switch each (`attr` names the routine), its name, when it runs and what it does; `on` the
+ *  switches as shown ({routine: bool}). Nothing when there are none. */
+function plRoutineSwitches(routines, on, attr) {
+  if (!(routines || []).length) return ''
+  const row = (r) => {
+    const v = !!on[r.routine]
+    return `<div class="pl-rt"><button class="sw${v ? ' on' : ''}" role="switch" aria-checked="${v}" aria-label="${esc(r.name)} on" ${attr}="${esc(r.routine)}" data-val="${!v}"></button>`
+      + `<div class="pl-rt-txt"><div class="pl-rt-top"><b>${esc(r.name)}</b><span class="set-sub">${esc(r.schedule)}</span></div><span class="set-sub">${esc(r.what)}</span>${(r.facts || []).length ? `<span class="set-sub">${esc(r.facts.join(' · '))}</span>` : ''}</div></div>`
+  }
+  return `<div class="pl-h4">Routines — off unless you switch them on</div><div class="pl-rts" role="group" aria-label="Routines">${routines.map(row).join('')}</div>`
+}
+/** The window sheet's "It will be able to" lines: the review's, less each routine's own (shown under its switch). */
+const plSheetLines = (r, update) => ((update ? r.new_uses : r.uses) || []).filter((l) => !(r.routines || []).some((x) => x.line === l))
+/** A click on a `[data-pl-routine]` button as the op it asks for, or null: only the user's own click, and only on Echo's own
+ *  Settings → Plugins page (a plugin's section, view or slot is never it). */
+const plRoutineClick = (b, trusted, st) => trusted && st.view === 'settings' && st.setSection === 'plugins' && b.closest('.pl-page') && !b.closest('#plug-sheet')
+  ? { id: b.dataset.plRoutine, routine: b.dataset.routine, on: b.dataset.val === 'true' } : null
+/** The switches as a sheet opens: each routine as Echo has it now (one it adds: off). */
+const plRoutinesStart = (routines) => Object.fromEntries((routines || []).map((r) => [r.routine, !!r.on]))
+/** What the user moved on the sheet ({routine: on}): a switch left as it was isn't sent. */
+const plRoutinesChanged = (routines, on) => Object.fromEntries((routines || []).filter((r) => !!on[r.routine] !== !!r.on).map((r) => [r.routine, !!on[r.routine]]))
+/** The routines a plugin's offer shows: those `ids` name (its own routine ids, in its order), or all of them; it throws
+ *  on an id it doesn't have, or when it has none. */
+function routineOfferPick(routines, ids) {
+  const all = routines || []
+  if (!all.length) throw new Error('the plugin has no routines')
+  if (ids == null) return all.slice()
+  const want = (Array.isArray(ids) ? ids : [ids]).map(String)
+  const bad = want.find((x) => !all.some((r) => r.routine === x))
+  if (bad !== undefined) throw new Error(`the plugin has no routine “${bad}”`)
+  if (!want.length) throw new Error('no routine named')
+  return all.filter((r) => want.includes(r.routine))
+}
+/** The offer's sheet: Echo's words and switches, never the plugin's. */
+const routineOfferHtml = (name, routines, on) => `<div class="pl-rt-offer"><div class="pl-dn">${esc(name)}’s routines</div>`
+  + '<div class="set-sub">Each runs Claude Code on its own while it is on, as its sheet in Settings → Plugins says; you can switch it off there any time.</div>'
+  + `${plRoutineSwitches(routines, on, 'data-rt-offer')}<div class="pl-sheet-btns"><button class="btn primary" data-rt-offer-done>Done</button></div></div>`
+/** What the offer resolves to: each routine it showed as Echo has it now ([{id, name, on}]). */
+const routineOfferResult = (list, now) => list.map((r) => ({ id: r.routine, name: r.name, on: !!((now || []).find((x) => x.routine === r.routine) || {}).on }))
+// end of the plugin routine switches block
 function plMarkets(p) {
   const rows = p.markets.map((m) => {
     const busy = plBusy(p, `market:${m.name}`)
@@ -202,9 +251,15 @@ function plMarkets(p) {
 }
 // The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-mask-remove],[data-pl-mremove-cancel],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-mask-remove],[data-pl-mremove-cancel],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open],[data-pl-sheet-rt]')
   if (!t) { if (S.plMenu) { S.plMenu = null; render() } return }
   const d = t.dataset
+  // A routine's switch on the sheet: only the user's own click (never one a script makes); sent with Install / Update.
+  if (d.plSheetRt != null) {
+    if (!e.isTrusted || !S.plSheet || !S.plSheet.review) return
+    S.plSheet.on = { ...(S.plSheet.on || plRoutinesStart(S.plSheet.review.routines)), [d.plSheetRt]: d.val === 'true' }
+    return render()
+  }
   // The sheet's backdrop closes it; a click inside the sheet doesn't.
   if ('plSheetCancel' in d && t.classList.contains('pl-scrim') && e.target.closest('.pl-sheet')) return
   if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; S.plRemove = null; S.plMRemove = null; return render() }
@@ -225,7 +280,7 @@ document.addEventListener('click', (e) => {
   if ('plSheetGo' in d) {
     const sh = S.plSheet
     S.plSheet = null
-    if (sh && sh.review) pluginOp(sh.update ? 'update' : 'install', { id: sh.review.id, market: sh.review.market, agreed: sh.update ? sh.review.new_uses : sh.review.uses })
+    if (sh && sh.review) pluginOp(sh.update ? 'update' : 'install', { id: sh.review.id, market: sh.review.market, agreed: sh.update ? sh.review.new_uses : sh.review.uses, routines: plRoutinesChanged(sh.review.routines, sh.on || plRoutinesStart(sh.review.routines)) })
     return render()
   }
   if (d.plAskRemove) { S.plRemove = d.plAskRemove; return render() }

@@ -86,6 +86,10 @@
       "source": "./plugins/routine-demo"
     },
     {
+      "id": "routines-demo",
+      "source": "./plugins/routines-demo"
+    },
+    {
       "id": "me-demo",
       "source": "./plugins/me-demo"
     },

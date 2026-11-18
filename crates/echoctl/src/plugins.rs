@@ -1116,13 +1116,15 @@ pub struct Review {
     pub offers: Option<String>,
     /// Why this Echo can't install it (shown; installing refuses).
     pub blocked: Option<String>,
+    /// The routines it offers a switch for (`routines::offered`).
+    pub routines: Vec<Value>,
 }
 
 fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Review> {
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
     let uses = sheet(m)?;
     let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
-    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, offers: presets::offers(m), blocked: why_not(m) })
+    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, offers: presets::offers(m), blocked: why_not(m), routines: routines::offered(before, m) })
 }
 
 /// The permission sheet for installing `id` (nothing changes).
@@ -1134,13 +1136,15 @@ pub fn review(id: &str, market: Option<&str>) -> Result<Review> {
 
 /// Install (or replace) `id` from its marketplace's last fetch. `agreed` = the permission lines the
 /// user saw: the install refuses when the plugin now asks for anything else.
-pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
+/// `install`, its own review shown to `check` first (it can refuse before anything is installed).
+pub fn install_checked(id: &str, market: Option<&str>, agreed: &[String], check: &dyn Fn(Option<&Review>) -> Result<()>) -> Result<Installed> {
     let (mk, o) = find_offer(id, market)?;
     let before = Registry::load()?.installed.get(id).cloned();
     if let Some(b) = before.as_ref().filter(|b| b.market != mk && (mk == MINE || b.market == MINE)) {
         bail!("“{id}” is installed from {} — remove it first to install the one from {mk}", if b.market == MINE { "My plugins" } else { &b.market });
     }
     let rv = review_of(&mk, &o, before.as_ref())?;
+    check(Some(&rv))?;
     if let Some(why) = &rv.blocked {
         bail!("{} can't be installed: {why}", rv.name);
     }
@@ -1268,16 +1272,19 @@ pub fn updates_in(r: &Registry) -> Vec<(Installed, Review)> {
 }
 
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
-pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
+/// `update`, the waiting update's review (none: up to date) shown to `check` first; the marketplace is read once.
+pub fn update_checked(id: &str, agreed: &[String], check: &dyn Fn(Option<&Review>) -> Result<()>) -> Result<Option<Installed>> {
     let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
     refresh(&p.market)?;
-    let Some(rv) = update_for(&p) else { return Ok(None) };
+    let rv = update_for(&p);
+    check(rv.as_ref())?;
+    let Some(rv) = rv else { return Ok(None) };
     let mut ok: Vec<String> = p.uses.clone();
     ok.extend(agreed.iter().cloned());
     if let Some(u) = rv.new_uses.iter().find(|u| !ok.contains(u)) {
         bail!("{} {} asks for more: {u}", rv.name, rv.version);
     }
-    install(id, Some(&p.market), &ok).map(Some)
+    install_checked(id, Some(&p.market), &ok, check).map(Some)
 }
 
 pub fn set_enabled(id: &str, on: bool) -> Result<()> {
@@ -1360,7 +1367,7 @@ pub static BUSY: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
 pub static ERRORS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
 
 fn review_json(r: &Review) -> Value {
-    json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked})
+    json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked, "routines": r.routines})
 }
 
 /// The review sheet for the window (`plugin_review`), as JSON.
@@ -1421,13 +1428,14 @@ pub fn page_op(v: &Value) -> Result<()> {
             Ok(())
         }
         "install" => {
-            let (id, market, agreed) = (s("id"), s("market"), list("agreed"));
-            background(format!("plugin:{id}"), "Installing…", move || install(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed).map(|_| reload()));
+            // With the routines the user switched on its sheet.
+            let (id, market, agreed, chosen) = (s("id"), s("market"), list("agreed"), routines::chosen(&v["routines"]));
+            background(format!("plugin:{id}"), "Installing…", move || routines::install_with(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed, &chosen).map(|_| reload()));
             Ok(())
         }
         "update" => {
-            let (id, agreed) = (s("id"), list("agreed"));
-            background(format!("plugin:{id}"), "Updating…", move || update(&id, &agreed).map(|_| reload()));
+            let (id, agreed, chosen) = (s("id"), list("agreed"), routines::chosen(&v["routines"]));
+            background(format!("plugin:{id}"), "Updating…", move || routines::update_with(&id, &agreed, &chosen).map(|_| reload()));
             Ok(())
         }
         o => bail!("unknown plugin operation “{o}”"),
@@ -2107,4 +2115,17 @@ mod tests {
         assert_eq!(market_named("acme/plugins").unwrap(), "ACME", "by its owner/repo");
     }
 
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+/// The same without a check (what the tests call).
+pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Installed> {
+    install_checked(id, market, agreed, &|_| Ok(()))
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
+    update_checked(id, agreed, &|_| Ok(()))
 }

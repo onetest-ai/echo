@@ -118,29 +118,154 @@ fn prompt_text(dir: &Path, r: &RoutineDef) -> Result<String> {
 
 /// The sheet's line of each routine: its name, how often once the user switches it on, what its run may do, its hash.
 pub(super) fn sheet_lines(m: &Manifest) -> Vec<String> {
-    let skip = m.uses.get("claude").is_some_and(|c| c["skip"] == true);
-    m.routines
-        .iter()
-        .map(|r| {
-            let how = match r.tools.as_str() {
-                "none" => "with no tools: it can only answer".to_string(),
-                "auto" => format!("acting on its own in auto mode — {MAY}"),
-                "skip" if skip => format!("acting on its own, skipping every permission check — {MAY}"),
-                _ => format!("acting on its own as you set routines — {MAY}"),
-            };
-            let digest = r.digest.as_deref().map(|d| format!(" (its prompt: {d})")).unwrap_or_default();
-            format!("Has a routine “{}”, off until you switch it on in Settings → Plugins: then every {} min Echo runs Claude Code on your default AI profile with the prompt it ships, {how}{digest}", r.name, r.every)
-        })
-        .collect()
+    let skip = skip_of(m);
+    m.routines.iter().map(|r| line_of(r, skip)).collect()
+}
+
+fn line_of(r: &RoutineDef, skip: bool) -> String {
+    let how = match r.tools.as_str() {
+        "none" => "with no tools: it can only answer".to_string(),
+        "auto" => format!("acting on its own in auto mode — {MAY}"),
+        "skip" if skip => format!("acting on its own, skipping every permission check — {MAY}"),
+        _ => format!("acting on its own as you set routines — {MAY}"),
+    };
+    let digest = r.digest.as_deref().map(|d| format!(" (its prompt: {d})")).unwrap_or_default();
+    format!("Has a routine “{}”, off until you switch it on in Settings → Plugins: then {} Echo runs Claude Code on your default AI profile with the prompt it ships, {how}{digest}", r.name, every_words(r.every).to_lowercase())
+}
+
+/// What the window's sheet says under a routine's switch, in short (its line of `sheet_lines` is not shown there).
+fn facts_of(r: &RoutineDef, skip: bool) -> Vec<String> {
+    let mut f: Vec<String> = match r.tools.as_str() {
+        "none" => vec!["no tools: it can only answer".into()],
+        t => {
+            let mut v: Vec<String> = vec!["acts on its own as you set routines".into(), "may change your Echo data and send as you".into()];
+            match t {
+                "auto" => v.push("auto mode".into()),
+                "skip" if skip => v.push("skipping every permission check".into()),
+                _ => {}
+            }
+            v
+        }
+    };
+    f.extend(r.digest.as_deref().map(|d| format!("prompt {d}")));
+    f
+}
+
+/// The routines `before` had, and whether its manifest let a run use `claude.skip`; `None` when its manifest can't be read.
+fn had(before: &Installed) -> Option<(Vec<RoutineDef>, bool)> {
+    read_manifest(&plugin_dir(before)).ok().map(|m| { let skip = skip_of(&m); (m.routines, skip) })
+}
+
+fn skip_of(m: &Manifest) -> bool {
+    m.uses.get("claude").is_some_and(|c| c["skip"] == true)
 }
 
 /// A version of `old` about to replace it (an update, an install over it): each routine `new` adds starts off, whatever
 /// an earlier version of it left in the user's settings; one it keeps, changed or not, stays as the user had it (their
-/// yes to the update, whose sheet named the change, is their yes to it).
+/// yes to the update, whose sheet named the change, is their yes to it). Its old manifest unreadable: none is known to be
+/// added, so none is switched off.
 pub(super) fn switch_off_new(old: &Installed, new: &Manifest) -> Result<()> {
-    let before: Vec<RoutineDef> = read_manifest(&plugin_dir(old)).map(|m| m.routines).unwrap_or_default();
+    let Some((before, _)) = had(old) else { return Ok(()) };
     let added: Vec<String> = new.routines.iter().filter(|r| !before.iter().any(|b| b.id == r.id)).map(|r| r.id.clone()).collect();
     crate::jobs::switch_off_routines(&old.id, &added)
+}
+
+/// The routines an install or update sheet offers a switch for: every one of a first install; of an update (or an install
+/// over the installed version) those it adds and those whose sheet line changed (its prompt, its interval, or what its
+/// run may do, as `claude.skip` now allows) — one whose line is as it was stays as the user had it. Its old manifest
+/// unreadable: all of them. Each `{routine, name, what, schedule, on, line, facts}`, `on` as Echo has it now (one an
+/// update adds: off, as `switch_off_new` leaves it).
+pub(super) fn offered(before: Option<&Installed>, new: &Manifest) -> Vec<Value> {
+    let skip = skip_of(new);
+    let old = before.map(had);
+    new.routines
+        .iter()
+        .filter_map(|r| {
+            let id = id_of(&new.id, &r.id);
+            let (added, kept) = match &old {
+                None => (true, false),
+                Some(None) => (false, true),
+                Some(Some((rs, _))) => (!rs.iter().any(|o| o.id == r.id), rs.iter().any(|o| o.id == r.id)),
+            };
+            if let Some(Some((rs, was))) = &old {
+                if rs.iter().find(|o| o.id == r.id).is_some_and(|o| line_of(o, *was) == line_of(r, skip)) {
+                    return None;
+                }
+            }
+            let (every, night) = if kept { (crate::jobs::number(&id, "every"), crate::jobs::settings()[&id]["night"].as_bool().unwrap_or(r.night)) } else { (r.every, r.night) };
+            let on = !(added && old.is_some()) && crate::jobs::on(&id);
+            Some(json!({"routine": r.id, "name": r.name, "what": r.what, "schedule": schedule(every, night), "on": on, "line": line_of(r, skip), "facts": facts_of(r, skip)}))
+        })
+        .collect()
+}
+
+/// When a routine runs, in Echo's words.
+fn schedule(every: u64, night: bool) -> String {
+    format!("{}{}", every_words(every), if night { " · paused at night" } else { "" })
+}
+
+/// An interval in minutes in plain words: Every hour, Every day, Every 2 h, Every 45 min.
+pub fn every_words(min: u64) -> String {
+    match min {
+        60 => "Every hour".into(),
+        1440 => "Every day".into(),
+        m if m > 1440 && m % 1440 == 0 => format!("Every {} days", m / 1440),
+        m if m > 60 && m % 60 == 0 => format!("Every {} h", m / 60),
+        m => format!("Every {m} min"),
+    }
+}
+
+/// The user's switches on the window's sheet (`{routine: on}`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub(super) fn chosen(v: &Value) -> Vec<(String, bool)> {
+    v.as_object().map(|o| o.iter().map(|(k, on)| (k.clone(), on.as_bool().unwrap_or(false))).collect()).unwrap_or_default()
+}
+
+/// `--routines a,b` or `all` (each routine the sheet offers) as the user's switches: each on.
+pub fn chosen_from_cli(arg: Option<&str>, rv: &Review) -> Vec<(String, bool)> {
+    match arg.map(str::trim) {
+        None | Some("") => vec![],
+        Some("all") => rv.routines.iter().filter_map(|r| r["routine"].as_str()).map(|r| (r.to_string(), true)).collect(),
+        Some(list) => list.split(',').map(str::trim).filter(|r| !r.is_empty()).map(|r| (r.to_string(), true)).collect(),
+    }
+}
+
+/// Each routine the user switched is one the sheet offered: refused, naming it, before anything is installed.
+fn check_chosen(rv: &Review, chosen: &[(String, bool)]) -> Result<()> {
+    let ids: Vec<&str> = rv.routines.iter().filter_map(|r| r["routine"].as_str()).collect();
+    if let Some((r, _)) = chosen.iter().find(|(r, _)| !ids.contains(&r.as_str())) {
+        let offered = if ids.is_empty() { "none (one it keeps as it was stays as you had it: echoctl jobs set)".to_string() } else { ids.join(", ") };
+        bail!("{} {} has no routine “{r}” to switch on here — its routines on this sheet: {offered}", rv.name, rv.version);
+    }
+    Ok(())
+}
+
+/// The routines as the user switched them on the sheet, once its plugin is installed.
+fn set_chosen(plugin: &str, chosen: &[(String, bool)]) -> Result<()> {
+    chosen.iter().try_for_each(|(r, on)| switch(plugin, r, *on))
+}
+
+/// Install `id` (`install`), then its routines as the user switched them on its sheet (the rest stay off); a routine the
+/// sheet didn't offer is refused, against the review the install itself uses, before anything is installed.
+pub fn install_with(id: &str, market: Option<&str>, agreed: &[String], chosen: &[(String, bool)]) -> Result<Installed> {
+    let p = install_checked(id, market, agreed, &|rv| rv.map_or(Ok(()), |rv| check_chosen(rv, chosen)))?;
+    set_chosen(id, chosen)?;
+    Ok(p)
+}
+
+/// Update `id` (`update`), then the routines the update adds or changes as the user switched them on its sheet; a
+/// routine the update's sheet didn't offer is refused, against the review the update itself uses, before anything is
+/// installed.
+pub fn update_with(id: &str, agreed: &[String], chosen: &[(String, bool)]) -> Result<Option<Installed>> {
+    let n = update_checked(id, agreed, &|rv| match rv {
+        Some(rv) => check_chosen(rv, chosen),
+        None if chosen.is_empty() => Ok(()),
+        None => bail!("“{id}” is up to date: switch its routines in Settings → Plugins or with echoctl jobs set"),
+    })?;
+    if n.is_some() {
+        set_chosen(id, chosen)?;
+    }
+    Ok(n)
 }
 
 /// A routine's id among Echo's jobs and routines: `<plugin>.<routine>` (Echo's jobs have no dot).
@@ -191,18 +316,17 @@ pub fn view(plugin: &str) -> Vec<Value> {
             let id = id_of(plugin, &r.id);
             let on = crate::jobs::on(&id);
             let night = crate::jobs::settings()[&id]["night"].as_bool().unwrap_or(r.night);
-            let when = format!("Every {} min{}{}", crate::jobs::number(&id, "every"), if night { " · paused at night" } else { "" }, if on { "" } else { " · off" });
+            let when = format!("{}{}{}", every_words(crate::jobs::number(&id, "every")), if night { " · paused at night" } else { "" }, if on { "" } else { " · off" });
             let last = crate::jobs::runs(&id, 1).ok().and_then(|v| v.into_iter().next()).map(|x| {
                 let at = x["started"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
                 format!("Last run {at}: {}", x["summary"].as_str().or(x["error"].as_str()).unwrap_or(if x["ok"] == false { "failed" } else { "done" }))
             });
-            json!({"id": id, "routine": r.id, "name": r.name, "what": r.what, "on": on, "when": when, "last": last})
+            json!({"id": id, "routine": r.id, "name": r.name, "what": r.what, "on": on, "when": when, "schedule": schedule(crate::jobs::number(&id, "every"), night), "last": last})
         })
         .collect()
 }
 
-/// The user's switch (Settings → Plugins): the routine on or off.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+/// The user's switch (Settings → Plugins, a sheet's): the routine on or off.
 pub fn switch(plugin: &str, routine: &str, on: bool) -> Result<()> {
     let id = id_of(plugin, routine);
     find(&id).ok_or_else(|| anyhow!("{plugin} has no routine “{routine}”"))?;
@@ -437,7 +561,7 @@ mod tests {
         assert_eq!(digest.len(), 8);
         assert_eq!(
             routine_line(&m),
-            format!("Has a routine “Mail → notes”, off until you switch it on in Settings → Plugins: then every 60 min Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its own as you set routines — {MAY} (its prompt: {digest})")
+            format!("Has a routine “Mail → notes”, off until you switch it on in Settings → Plugins: then every hour Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its own as you set routines — {MAY} (its prompt: {digest})")
         );
         // Its prompt or its definition changed: another hash, so another line (an update asks again).
         fs::write(d.join("routines/mail-notes.md"), "Read the mail and the chats.").unwrap();
@@ -523,6 +647,113 @@ mod tests {
         let rv = review("acme-routine", Some(&name)).unwrap();
         update("acme-routine", &rv.new_uses).unwrap().unwrap();
         assert!(!crate::jobs::on("acme-routine.mail-notes"), "added again: off until the user switches it on");
+    }
+
+    #[test]
+    fn an_update_that_changes_what_a_routine_may_do_offers_its_switch_and_an_unreadable_old_manifest_shows_the_real_state() {
+        let (_env, root) = paths::testenv::folders("routines-offer-line");
+        let mk = root.join("market");
+        let name = test_install(&mk, "acme-routine", json!({"claude": {}}), json!({"tools": "skip"}), "Read the mail.");
+        switch("acme-routine", "mail-notes", true).unwrap();
+        // 0.2.0 only allows skip: the same routine, the same prompt, but its run now skips every permission check.
+        let pkg = mk.join("plugins/acme-routine");
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(pkg.join(MANIFEST)).unwrap()).unwrap();
+        m["version"] = json!("0.2.0");
+        m["uses"] = json!({"claude": {"skip": true}});
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        assert_eq!(rv.routines.len(), 1, "its line changed, so its switch is on the sheet: {:?}", rv.routines);
+        assert_eq!(rv.routines[0]["on"], json!(true), "as the user has it");
+        assert!(rv.routines[0]["facts"].as_array().unwrap().iter().any(|f| f == "skipping every permission check"));
+        assert!(rv.new_uses.iter().any(|l| l == rv.routines[0]["line"].as_str().unwrap()), "{:?}", rv.new_uses);
+        // An unreadable installed manifest: the routine is as Echo has it (on), none counts as added, so none is switched off.
+        let p = Registry::load().unwrap().installed["acme-routine"].clone();
+        fs::remove_file(plugin_dir(&p).join(MANIFEST)).unwrap();
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        assert_eq!(rv.routines.iter().map(|r| r["on"].clone()).collect::<Vec<_>>(), [json!(true)]);
+        let new = read_package(&pkg).unwrap();
+        switch_off_new(&p, &new).unwrap();
+        assert!(crate::jobs::on("acme-routine.mail-notes"), "an old manifest that can't be read switches nothing off");
+    }
+
+    #[test]
+    fn an_interval_is_in_plain_words() {
+        let w: Vec<String> = [15, 45, 60, 90, 120, 1440, 2880].iter().map(|m| every_words(*m)).collect();
+        assert_eq!(w, ["Every 15 min", "Every 45 min", "Every hour", "Every 90 min", "Every 2 h", "Every day", "Every 2 days"]);
+    }
+
+    #[test]
+    fn a_routines_facts_name_its_tools_mode_and_its_prompt() {
+        let r = |tools: &str| -> RoutineDef { serde_json::from_value(json!({"id": "a", "name": "A", "what": "w", "prompt": "p.md", "tools": tools, "digest": "abcd1234"})).unwrap() };
+        assert_eq!(facts_of(&r("auto"), false)[2..], ["auto mode", "prompt abcd1234"]);
+        assert_eq!(facts_of(&r("skip"), true)[2..], ["skipping every permission check", "prompt abcd1234"]);
+        assert_eq!(facts_of(&r("skip"), false)[2..], ["prompt abcd1234"], "skip the sheet doesn't allow: as you set routines");
+        assert_eq!(facts_of(&r("none"), true), ["no tools: it can only answer", "prompt abcd1234"]);
+    }
+
+    #[test]
+    fn the_sheet_switches_on_only_the_routines_it_offers_and_an_unknown_one_is_refused_before_installing() {
+        let (_env, root) = paths::testenv::folders("routines-chosen");
+        let mk = root.join("market");
+        let name = test_install(&mk, "acme-routine", json!({"claude": {}}), json!({}), "Read the mail.");
+        remove("acme-routine", false).unwrap();
+        let pkg = mk.join("plugins/acme-routine");
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(pkg.join(MANIFEST)).unwrap()).unwrap();
+        let routine = |id: &str, name: &str| json!({"id": id, "name": name, "what": format!("{name}, as the test says"), "prompt": "routines/mail-notes.md", "every": 60});
+        m["routines"] = json!([routine("mail-notes", "Mail → notes"), routine("vault-health", "Vault health")]);
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        // A first install offers every routine, each off, with when it runs.
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        let plain = |rv: &Review| rv.routines.iter().map(|r| { let mut r = r.clone(); r.as_object_mut().unwrap().remove("line"); r.as_object_mut().unwrap().remove("facts"); r }).collect::<Vec<_>>();
+        assert_eq!(plain(&rv), vec![
+            json!({"routine": "mail-notes", "name": "Mail → notes", "what": "Mail → notes, as the test says", "schedule": "Every hour · paused at night", "on": false}),
+            json!({"routine": "vault-health", "name": "Vault health", "what": "Vault health, as the test says", "schedule": "Every hour · paused at night", "on": false}),
+        ]);
+        // Each carries its sheet line (the window leaves it out of "It will be able to") and its facts for under the switch.
+        for r in &rv.routines {
+            assert!(rv.uses.iter().any(|l| Some(l.as_str()) == r["line"].as_str()), "its line is one of the sheet's: {r}");
+            let f: Vec<&str> = r["facts"].as_array().unwrap().iter().filter_map(|x| x.as_str()).collect();
+            assert_eq!(&f[..2], ["acts on its own as you set routines", "may change your Echo data and send as you"]);
+            assert!(f.len() == 3 && f[2].starts_with("prompt "), "{f:?}");
+        }
+        assert!(rv.uses.iter().any(|l| l.starts_with("Has a routine “Vault health”, off until you switch it on in Settings → Plugins: then every hour")), "{:?}", rv.uses);
+        assert_eq!(chosen_from_cli(Some("all"), &rv), vec![("mail-notes".to_string(), true), ("vault-health".to_string(), true)]);
+        assert_eq!(chosen_from_cli(Some(" vault-health, "), &rv), vec![("vault-health".to_string(), true)]);
+        assert!(chosen_from_cli(None, &rv).is_empty(), "no flag: they stay off");
+        // A routine it doesn't have: refused before anything is installed.
+        let e = install_with("acme-routine", Some(&name), &rv.uses, &[("nope".into(), true)]).unwrap_err();
+        assert_eq!(e.to_string(), "Acme routine 0.1.0 has no routine “nope” to switch on here — its routines on this sheet: mail-notes, vault-health");
+        assert!(!Registry::load().unwrap().installed.contains_key("acme-routine"), "nothing installed");
+        // One on, one off: as the user switched them.
+        install_with("acme-routine", Some(&name), &rv.uses, &chosen(&json!({"vault-health": true, "mail-notes": false}))).unwrap();
+        assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::on("acme-routine.vault-health")), (false, true));
+        // An update offers only the routine it adds; one it keeps as it was is no switch of its sheet, and stays as it was.
+        m["version"] = json!("0.2.0");
+        m["routines"].as_array_mut().unwrap().push(routine("digest", "Weekly digest"));
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        assert_eq!(rv.routines.iter().map(|r| r["routine"].as_str().unwrap()).collect::<Vec<_>>(), ["digest"]);
+        let e = update_with("acme-routine", &rv.new_uses, &[("mail-notes".into(), true)]).unwrap_err();
+        assert_eq!(e.to_string(), "Acme routine 0.2.0 has no routine “mail-notes” to switch on here — its routines on this sheet: digest");
+        assert_eq!(Registry::load().unwrap().installed["acme-routine"].version, "0.1.0", "nothing updated");
+        update_with("acme-routine", &rv.new_uses, &chosen_from_cli(Some("digest"), &rv)).unwrap().unwrap();
+        assert_eq!((crate::jobs::on("acme-routine.mail-notes"), crate::jobs::on("acme-routine.vault-health"), crate::jobs::on("acme-routine.digest")), (false, true, true));
+        // A routine the update changes is offered as the user has it now (on here, every 30 min); the switch shown is kept.
+        crate::jobs::set("acme-routine.vault-health", &["every=30".into(), "night=off".into()]).unwrap();
+        m["version"] = json!("0.3.0");
+        m["routines"][1]["what"] = json!("Checks the links and the stale pages");
+        fs::write(pkg.join(MANIFEST), m.to_string()).unwrap();
+        refresh(&name).unwrap();
+        let rv = review("acme-routine", Some(&name)).unwrap();
+        assert_eq!(plain(&rv), vec![json!({"routine": "vault-health", "name": "Vault health", "what": "Checks the links and the stale pages", "schedule": "Every 30 min", "on": true})]);
+        update_with("acme-routine", &rv.new_uses, &chosen(&json!({"vault-health": false}))).unwrap().unwrap();
+        assert!(!crate::jobs::on("acme-routine.vault-health"), "switched off on the update's sheet");
+        assert!(crate::jobs::on("acme-routine.digest"), "kept as it was");
+        // Up to date: nothing to switch here.
+        assert!(update_with("acme-routine", &[], &[("digest".into(), true)]).unwrap_err().to_string().contains("is up to date: switch its routines in Settings → Plugins or with echoctl jobs set"));
     }
 
     #[test]

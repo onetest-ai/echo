@@ -104,3 +104,14 @@
 /* Under the palette and Echo's own dialogs, which open over it; notices over all. */
 .plug-scrim { z-index: 29; }
 .td-dialog.plug-sheet { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; outline: none; }
+
+/* A plugin's routines on its install or update sheet, and on the sheet its setup opens (`ctx.echo.routines.offer`): a
+   switch each, its name and when it runs on one line, what it does under; the sheet scrolls when they make it tall. */
+.pl-sheet { max-height: calc(100vh - 48px); overflow: auto; }
+.pl-rts { display: flex; flex-direction: column; }
+.pl-rt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.pl-rt .sw { flex: none; margin-top: 1px; }
+.pl-rt-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pl-rt-top { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.pl-rt-top b { font-size: 12.5px; font-weight: 600; }
+.pl-rt-offer { display: flex; flex-direction: column; gap: 10px; }

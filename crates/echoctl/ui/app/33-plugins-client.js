@@ -164,6 +164,15 @@ function pluginCtx(id) {
           if (!r || r.error) throw new Error((r && r.error) || 'Echo did not answer')
           return r.value
         },
+        /** Its own routines (`ids`: some of its routine ids; none: all) on Echo's sheet, each with Echo's switch and
+         *  words — only on the user's click or key (else it rejects); no capability needed. The user switches them there,
+         *  never the plugin. Resolves once the sheet closes to [{id, name, on}], each as Echo has it then. */
+        offer: async (ids) => {
+          if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('Echo shows your routines’ switches only on your click')
+          if (gone()) throw new Error('the plugin is no longer loaded')
+          if (!owned.sheet) { owned.sheet = true; owned.cleanups.push(() => sheetShut(id, true)) }
+          return routineOffer(id, ids)
+        },
       },
       jobs: {
         list: async () => {
@@ -540,6 +549,45 @@ function slotClick(slot, key, i) {
   return item ? { item, target } : null
 }
 // end of the plugin slot targets block
+/** The sheet `ctx.echo.routines.offer` has open: its plugin, the routines shown and their switches as shown. */
+const RoutineOffer = { now: null }
+/** Echo's sheet of a plugin's own routines (`routineOfferHtml`) over the window, in a plugin sheet's frame; each switch
+ *  saved as Settings → Plugins saves it. Resolves once the sheet closes (Done, Esc, a click beside it, another sheet)
+ *  to the routines as Echo has them then. */
+async function routineOffer(plugin, ids) {
+  const mine = async () => ((((await get('api/plugins')) || {}).installed) || []).find((x) => x.id === plugin)
+  const p = await mine()
+  if (!p) throw new Error('the plugin is not installed')
+  const list = routineOfferPick(p.routines, ids)
+  const on = plRoutinesStart(list), saves = []
+  return new Promise((resolve) => {
+    let done = false
+    const settle = (now) => { if (!done) { done = true; if (RoutineOffer.now && RoutineOffer.now.on === on) RoutineOffer.now = null; resolve(routineOfferResult(list, now)) } }
+    const closed = () => {
+      if (RoutineOffer.now && RoutineOffer.now.on === on) RoutineOffer.now = null
+      // After the switches' saves (`pluginOp`) have landed.
+      Promise.allSettled(saves).then(mine).then((x) => settle(x && x.routines), () => settle(list.map((r) => ({ ...r, on: on[r.routine] }))))
+    }
+    // The plugin unloading (switched off, updated, removed) closes the sheet without `onClose`: it settles then too.
+    const owned = Plugins.owned[plugin]
+    if (owned) owned.cleanups.push(() => settle(list.map((r) => ({ ...r, on: on[r.routine] }))))
+    const box = sheetShow(plugin, routineOfferHtml(p.name, list, on), { label: `${p.name}’s routines`, onClose: closed })
+    RoutineOffer.now = { plugin, name: p.name, list, on, box, saves }
+  })
+}
+// A switch on that sheet: only the user's own click (never one a script makes), saved as shown; Done closes it.
+document.addEventListener('click', (e) => {
+  const o = RoutineOffer.now
+  const b = o && o.box.isConnected && e.target.closest && e.target.closest('[data-rt-offer], [data-rt-offer-done]')
+  if (!b || !o.box.contains(b) || !e.isTrusted) return
+  if ('rtOfferDone' in b.dataset) return sheetShut(o.plugin)
+  const r = b.dataset.rtOffer, v = b.dataset.val === 'true'
+  o.on[r] = v
+  o.saves.push(pluginOp('routine', { id: o.plugin, routine: r, on: v }))
+  o.box.innerHTML = routineOfferHtml(o.name, o.list, o.on)
+  const again = o.box.querySelector(`[data-rt-offer="${CSS.escape(r)}"]`)
+  if (again) again.focus()
+})
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-plug-slot]')
   if (!t) return

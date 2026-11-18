@@ -1,0 +1,34 @@
+{
+  "id": "routines-demo",
+  "name": "Routines demo",
+  "version": "0.2.0",
+  "summary": "A test plugin: two routines of its own, switched on where you install it or from its own setup (tests/cases/plugins/TC-227 to TC-230).",
+  "client": "client.js",
+  "uses": {
+    "claude": {}
+  },
+  "routines": [
+    {
+      "id": "mail-knowledge",
+      "name": "Mail → Knowledge",
+      "what": "Files trusted mail into your vault",
+      "prompt": "routines/mail-knowledge.md",
+      "every": 60
+    },
+    {
+      "id": "vault-health",
+      "name": "Vault health",
+      "what": "Checks links and stale pages",
+      "prompt": "routines/vault-health.md",
+      "every": 1440,
+      "night": false
+    },
+    {
+      "id": "weekly-digest",
+      "name": "Weekly digest",
+      "what": "Sums up the week's new notes in one page",
+      "prompt": "routines/weekly-digest.md",
+      "every": 1440
+    }
+  ]
+}

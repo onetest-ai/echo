@@ -53,14 +53,28 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `microphone` | `{}` (nothing else): its window half hears the microphone through `ctx.microphone` (§ Client half). The sheet: "Hears your microphone in its own view: only after you click there, with Echo's recording sign on while it listens, and never while Echo records a call or a memo; it stops when you leave the view. What it hears can go to the addresses it may reach". Nothing in its host half. Evidence: `capabilities::describe_microphone`, `window::plugins::mic_open` |
 | `ai.wrapper` | `{name, command}`: a wrapper profile it offers — `command` one program name (letters, digits, `.`, `_`, `-`), no arguments or path, found on the user's PATH when they add it, never a file of the plugin; `name` up to 40 characters. The sheet: "Offers an AI profile that starts <command> — a program you install yourself — in place of Claude Code; it sees and can change everything Claude in Echo is sent, call transcripts included. You add it in Settings → AI & minutes, if you want it". Only offered: the user adds it (Settings → AI & minutes, `echoctl ai add-wrapper --plugin <id>`); the plugin never makes it the default or picks it for anything. An update naming another program asks again, and the profile keeps its program until the user takes the new one on it (Use it, `echoctl ai update-wrapper <id>`); the plugin off or removed leaves the profile. Its offer is bound to its marketplace: a plugin of the same id from another one offers nothing to that profile. Its jobs (`ctx.claude.run({profile})`) run on a wrapper profile only when it is the user's default. Evidence: `plugins::describe_ai`, `ai::offered`, `ai::plugin_may_name` |
 
-The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in Settings →
-Plugins: then every <every> min Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
+The sheet also names each routine (§ Routines): "Has a routine “<name>”, off until you switch it on in
+Settings → Plugins: then <every, in words: every hour, every day, every 2 h, every 45 min> Echo runs Claude Code on your default AI profile with the prompt it ships, acting on its
 own as you set routines — it may change your Echo data and send as you, as your Claude · Echo folder session may (its
 prompt: <hash>)" (its own `tools`: "in auto mode", "skipping every permission check" when the sheet has `claude.skip`,
 or "with no tools: it can only answer"); the hash is of its definition and its prompt, so an update that changes either
 asks again, naming the changed routine; the user's yes to the update keeps the routine as they had it (on stays on).
 A routine the update adds starts off (an install over the installed version too), whatever an earlier version of that
-id left. Evidence: `plugins::routines::sheet_lines`, `plugins::routines::switch_off_new`
+id left. Under the lines the window's sheet has "Routines — off unless you switch them on": a switch per routine it
+offers — on an install every routine, on an update (or an install over the installed version) only those it adds or
+whose sheet line changed (its prompt, its interval, or what its run may do, as an update adding `claude.skip` does; an
+installed manifest that can't be read: all, and none is switched off) — each with its name, when it runs in plain words ("Every hour", "Every day", "Every 2 h", "Every 45 min", then
+" · paused at night"), its `what` and, in small muted text under it, its facts (acts on its own as you set routines; may
+change your Echo data and send as you; when its `tools` name one, "auto mode" or "skipping every permission check"; for "none" only "no tools: it can only answer"; its prompt <hash>); one it adds starts off, one it changes as Echo has it now. A routine shows once
+there: the window leaves its long line out of "It will be able to" (the review's `routines[].line` names it, `facts`
+the small text), while the CLI's review keeps the line. The routines the user switched there are set so once it is installed (only the switches
+moved are sent: `plugin_op` `install` / `update` with `routines: {<routine>: on}`); a routine kept unchanged has no
+switch and stays as the user had it. The CLI's `echoctl plugin install <id> --routines <a,b>|all` and `echoctl plugin
+update <id> --routines <a,b>|all` switch on the routines named (`all`: every one the sheet offers); the review lists
+them ("Its routines stay off unless you switch them on: --routines a,b (or all)"); a routine the sheet doesn't offer is
+refused before anything is installed ("<name> <version> has no routine “x” to switch on here — its routines on this
+sheet: …"); `update --routines` needs the plugin's id. Evidence: `plugins::routines::offered`,
+`plugins::routines::install_with`, `plugins::routines::update_with`
 
 The sheet also names each script, says it runs on this computer with the user's rights and can reach the network, its
 time when over 300 s; an update that adds a script or changes any
@@ -460,10 +474,12 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
   change), `night` paused at night by default (`true` when not said), `tools` `auto` / `skip` / `none` or left out (as
   `ctx.claude.run`'s: § Claude runs), `timeout` minutes 1–60 (20). Each is a line of its sheet (§ `uses` and the
   permission sheet). Its id among the routines is `<plugin>.<routine>`, `source` `"plugin:<id>"`, with `plugin` its
-  plugin's name, `to` `[]`, `schedule` `{text: "Every N min", kind: "timer"}`, `enabled` true only while the user
+  plugin's name, `to` `[]`, `schedule` `{text: <the interval in plain words: "Every hour", "Every 45 min"…>, kind: "timer"}`, `enabled` true only while the user
   switched it on and its plugin is on, `next_run` then (else null), and `settings`: `on` (kind `"switch"`, false by
   default), `every`, `night`, `model` (default "the profile's minutes model"). It is off until the user switches it on —
-  its row in Settings → Plugins, or `echoctl jobs set <plugin>.<routine> on=on` — and tuned as Echo's jobs are
+  on its install or update sheet (`--routines` in the CLI: § `uses` and the permission sheet), on the sheet its plugin's
+  setup opens (`ctx.echo.routines.offer`, § Client half), its row in Settings → Plugins, or `echoctl jobs set
+  <plugin>.<routine> on=on` — and tuned as Echo's jobs are
   (`echoctl jobs set … every=30 night=off model=sonnet`, never inside a run Echo started); a plugin with
   `uses.echo.jobs` tunes `every`, `night` and `model` on the user's click (`ctx.echo.jobs.set`, which then resolves to
   the routine) but never `on`: "a plugin can't switch a routine on or off: you do, in Settings → Plugins or with
@@ -974,6 +990,16 @@ Evidence: `jshost::work::check_rows`
   it unloads, and runs its `onUnload` cleanups first (one that throws is logged, the rest still run). Evidence:
   `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
+- `ctx.echo.routines.offer(ids?)` (no capability: its routines are on its sheet already): Echo's sheet of the plugin's own
+  routines over the window, in a plugin sheet's frame — those `ids` name (its manifest's routine ids, shown in its
+  order) or all — each with Echo's switch, name, when it runs (in plain words, as on the install sheet) and `what`, the line "Each runs Claude Code on its own
+  while it is on, as its sheet in Settings → Plugins says; you can switch it off there any time." and Done. `async`: it
+  rejects, before anything is shown, unless the page has the user's click or key (`copyAllowed`), and on an id it
+  hasn't ("the plugin has no routine “x”") or when it has none. Only the user switches them there (a click the page's
+  script makes moves nothing), each saved as its row in Settings → Plugins saves it; the plugin never switches one. It
+  resolves once the sheet closes (Done, Esc, a click beside it, another sheet, the address changing) to `[{id, name,
+  on}]` (`id` the routine's own), each as Echo has it then; the plugin switched off, updated or removed closes it
+  without resolving. Evidence: `routineOffer`, `routineOfferPick` (window script)
 - `ctx.echo.jobs` (manifest `uses.echo.jobs`, the plugin on): `list()` — what `echoctl jobs` prints (every job, where
   it shows, its fields with value, default and range, its last run, next run or what it waits for, the last 30 days by
   day with cost, today's counts, and the night with Echo's default); `runs(job, {limit})` — its runs, newest first, as

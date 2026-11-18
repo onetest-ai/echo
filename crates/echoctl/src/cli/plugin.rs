@@ -29,12 +29,19 @@ pub enum PluginCmd {
         from: Option<String>,
         #[arg(long)]
         yes: bool,
+        /// Its routines to switch on once it is installed (their ids, comma-separated, or `all`); without it they stay off
+        #[arg(long, value_name = "a,b|all")]
+        routines: Option<String>,
     },
     /// Update a plugin (or all) to its marketplace's newer version; more permissions need --yes
     Update {
         id: Option<String>,
         #[arg(long)]
         yes: bool,
+        /// The routines the update adds or changes to switch on (their ids, comma-separated, or `all`); one it keeps stays
+        /// as you had it
+        #[arg(long, value_name = "a,b|all")]
+        routines: Option<String>,
     },
     /// Remove a plugin (its settings and data stay unless --delete-data)
     Remove {
@@ -183,7 +190,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
     refuse_in_run(&cmd)?;
     match cmd {
         PluginCmd::List => print_json(&snapshot()),
-        PluginCmd::Install { id, from, yes } => {
+        PluginCmd::Install { id, from, yes, routines: on } => {
             let mut from = from.map(|f| market_named(&f)).transpose()?;
             // A folder (a path: `./pulse`, `/…`, `.`): copied into My plugins, installed from there (#589). A bare name is
             // always an id.
@@ -203,12 +210,13 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
             };
             let r = review(&id, from.as_deref())?;
             let agreed = agree(&r, yes)?;
-            let p = install(&id, from.as_deref(), &agreed)?;
+            let p = routines::install_with(&id, from.as_deref(), &agreed, &chosen(on.as_deref(), &r))?;
             println!("Installed {} {}", p.name, p.version);
         }
-        PluginCmd::Update { id, yes } => {
+        PluginCmd::Update { id, yes, routines: on } => {
             let ids: Vec<String> = match id {
                 Some(i) => vec![i],
+                None if on.is_some() => anyhow::bail!("--routines needs the plugin's id"),
                 None => Registry::load()?.installed.into_keys().collect(),
             };
             for id in ids {
@@ -219,7 +227,7 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
                     continue;
                 };
                 let agreed = agree(&r, yes)?;
-                if let Some(n) = update(&id, &agreed)? {
+                if let Some(n) = routines::update_with(&id, &agreed, &chosen(on.as_deref(), &r))? {
                     println!("Updated {} to {}", n.name, n.version);
                 }
             }
@@ -402,6 +410,15 @@ fn file_handles(id: &str, files: &[std::path::PathBuf]) -> anyhow::Result<Vec<se
 }
 
 /// A plugin's review in the terminal: what it is, where from, and what it uses.
+/// `--routines` as the user's switches; `all` with none offered says so.
+fn chosen(on: Option<&str>, r: &plugins::Review) -> Vec<(String, bool)> {
+    let c = plugins::routines::chosen_from_cli(on, r);
+    if c.is_empty() && on.is_some_and(|o| o.trim() == "all") {
+        println!("  {} {} offers no routine to switch on here", r.name, r.version);
+    }
+    c
+}
+
 fn print_review(r: &plugins::Review) {
     println!("{} {} — from {} ({})", r.name, r.version, r.market, &r.commit[..r.commit.len().min(12)]);
     if r.uses.is_empty() {
@@ -416,6 +433,10 @@ fn print_review(r: &plugins::Review) {
     }
     if let Some(o) = &r.offers {
         println!("  {o}");
+    }
+    let ids: Vec<&str> = r.routines.iter().filter_map(|x| x["routine"].as_str()).collect();
+    if !ids.is_empty() {
+        println!("  Its routines stay off unless you switch them on: --routines {} (or all)", ids.join(","));
     }
 }
 
@@ -561,7 +582,7 @@ mod tests {
         let cmds = [
             PluginCmd::Set { id: "acme-feed".into(), key: "feed".into(), value: Some("https://evil.acme.example".into()) },
             PluginCmd::Enable { id: "acme-feed".into() },
-            PluginCmd::Install { id: "acme-other".into(), from: None, yes: true },
+            PluginCmd::Install { id: "acme-other".into(), from: None, yes: true, routines: None },
             PluginCmd::Trust { id: "acme-feed".into(), address: "feed.acme.example".into(), key: None },
         ];
         std::env::set_var("ECHO_PLUGIN_SCRIPT", "1");

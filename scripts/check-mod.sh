@@ -24,6 +24,8 @@ node crates/echoctl/ui/copy-guard.test.mjs
 node crates/echoctl/ui/plugin-mic.test.mjs
 # A plugin's ctx.claude.session: only on the user's click, in a folder it was given, read or edit (pluginSessionAsk).
 node crates/echoctl/ui/plugin-session.test.mjs
+# A plugin's routines on its install / update sheet and on its offer (ctx.echo.routines.offer): off unless the user switches.
+node crates/echoctl/ui/plugin-routines.test.mjs
 # Echo's menu for the page's selects: rows, arrows, type-ahead, where it opens (select menu block).
 node crates/echoctl/ui/select-menu.test.mjs
 # Echo's suggestions for a text box: the rows for what is typed (suggest block).
