@@ -34,19 +34,27 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   and `message` ids, a post's `channel` and `channel_name`), `sections`, `archived` (every thread it is under is closed)
   and `migrated_raw` (moved from the index as its text was). A section: `head` "YYYY-MM-DD HH:MM <who>", `from`, `at`
   (RFC 3339), `link`, `facts` (`[{text, quote?}]`), `sender` (as Who may speak names them: a mail's address, a Teams
-  author's id), `unverified` (read unauthenticated after "Read anyway") and `raw` (its facts are the index's text).
-- A sync (`brain::sources::sync`) writes each read source into its file first, merged into what the file held
-  (`brain::facts::merge`: a section is the same message by its heading and link; one read again replaces it, a new
-  one is added, one the new read lacks stays; people and subjects of both reads; the later date), then feeds the index
-  from it (`Facts::input`).
+  author's id), `unverified` (read unauthenticated after "Read anyway"), `id` (the message's Graph id) and `raw` (its
+  facts are the index's text).
+- A file that can't be read is renamed `<name>.broken-<time>.json` before a new one is written (`Writer::write`).
+- A sync (`brain::sources::sync`) reads nothing until the move from the index is done (`facts::migrated`).
+- It writes each read source into its file first, merged into what the file held (`brain::facts::merge`: a section is
+  the same message by its Graph id, or, when one of the two has none, by its heading and link; one read again replaces
+  it, each old section at most once, so two sections of one read are never folded into one; a new one is added; one
+  the new read lacks stays; people and subjects of both reads; the later date), then feeds the index from it
+  (`Facts::input`), with every fact file the index has no document of (`missing_from_index`).
 - It then puts every file under the threads that match it now (`brain::sources::place`): moved, the file and the index
   rewritten; matched by none (its source left its thread), the file and its index rows removed. This runs only when
   every thread was read (`projects::list_whole`: none unreadable, at least one); otherwise nothing is moved or removed
   that sync and the reason is logged. More than a fifth of the files leaving at once (past 5) is refused and logged.
 - Who may speak (`brain::senders::decide`): Trust and Read anyway read the client's sources again
-  (`request_reread`), merged in, nothing taken out; Ignore and Keep out ask (`request_drop`, `intake/drops.json`)
-  for that sender's sections to leave that client's facts at the next sync (`apply_drops`; Keep out: only their
-  `unverified` ones; a section from before `sender` was kept: by its author's name); a source left with no section goes.
+  (`request_reread`, `recall/reread.json`), merged in, nothing taken out; Ignore and Keep out ask (`request_drop`,
+  `intake/drops.json`) for that sender's sections to leave that client's facts at the next sync (`apply_drops`; Keep
+  out: only their `unverified` ones). Only sections that recorded that sender's id go; a section with only the
+  author's name stays, and how many stayed is logged. A source left with no section goes.
+- The request files are written under their lock (`<name>.lock`). A sync takes them by renaming them to
+  `<name>.processing.json` under that lock (adding to one a sync before didn't finish), and deletes that file only once
+  the requests were applied; a request made meanwhile waits in a new file for the next sync.
 - A new reader version reads every window again and merges; it drops nothing.
 - Readers: `share::source` / `share::sources` / `sources_changed` (`mail_item`, `mail_messages`) and `links::mail_text`
   / `links::mail_url` read the files; the sections they give are the index's (`Facts::pieces`, the same chunker).
@@ -55,7 +63,8 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   until `intake/migrated.json` records it done with its counts (`documents`, `written`, `kept`, `raw`, `skipped`). It
   reads `knowledge.sqlite` read-only. A document that has a file keeps it; one whose facts give the index's sections
   back text for text is written from them, else from its sections' text (`migrated_raw`, its sections `raw`); one no
-  file can be named for is listed as skipped with why. It is marked done once every document is accounted for.
+  file can be named for is listed as skipped with why. A failed write stops it unmarked, to run again. It is marked
+  done once every document is accounted for.
 - With Intake off the dictionary's view (`taxonomy::view_in`) has no index counts and never opens or makes the index:
   the transcription hint (`projects::terms_for_meeting`) reads the dictionary alone.
 
@@ -64,8 +73,8 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - Before a sync's first change to the facts (a write that changes a file, or a removal), `brain::facts::backup` copies
   `facts/` into today's generation, `intake/facts.bak/YYYY-MM-DD/`, made whole under a name of its own first
   (`.copy.<pid>.<n>.tmp`) and then renamed into place.
-- A copy with less than half the files of today's generation never replaces it: it is kept beside it as
-  `YYYY-MM-DD-HHMMSSmmm`.
+- A copy with less than half the files of today's generation never replaces it: it is the day's one shrunk copy,
+  `YYYY-MM-DD-shrunk`, replacing an earlier shrunk copy of that day.
 - The generations of the newest 7 days are kept, and always the generation with the most files. Snapshots of
   `knowledge.sqlite` don't cover the facts.
 
