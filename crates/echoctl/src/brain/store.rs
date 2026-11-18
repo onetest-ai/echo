@@ -106,57 +106,98 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(c)
 }
 
-/// Write every section's keyword text again (`fts_text`) from what `chunks` keeps: once per `FTS_TEXT_VERSION`, one
-/// writer at a time; no source is read again and no vector made again.
+/// Sections whose keyword text one transaction of `rewrite_fts` writes.
+const FTS_BATCH: i64 = 500;
+
+/// Write every section's keyword text again (`fts_text`) from what `chunks` keeps, once per `FTS_TEXT_VERSION`: in
+/// short transactions by id (`meta.fts_text_next`: the version and the last id done), each taken only when no one else
+/// writes — busy, it stops, and the old text is searched until a later open goes on. No source is read again and no
+/// vector made again.
 fn rewrite_fts(c: &Connection) -> Result<()> {
-    c.execute_batch("BEGIN IMMEDIATE")?;
-    let done = (|| -> Result<()> {
-        if meta(c, "fts_text").as_deref() == Some(FTS_TEXT_VERSION) {
-            return Ok(());
+    c.busy_timeout(std::time::Duration::ZERO)?;
+    let r = (|| -> Result<()> {
+        loop {
+            if let Err(e) = c.execute_batch("BEGIN IMMEDIATE") {
+                return if matches!(e.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)) { Ok(()) } else { Err(e.into()) };
+            }
+            let step = (|| -> Result<bool> {
+                if meta(c, "fts_text").as_deref() == Some(FTS_TEXT_VERSION) {
+                    return Ok(true);
+                }
+                let after: i64 = meta(c, "fts_text_next")
+                    .and_then(|v| v.strip_prefix(&format!("{FTS_TEXT_VERSION}:")).and_then(|id| id.parse().ok()))
+                    .unwrap_or(i64::MIN);
+                let mut st = c.prepare("SELECT id, coalesce(breadcrumb_path, ''), coalesce(speaker, ''), coalesce(title, ''), coalesce(text, '') FROM chunks WHERE id > ?1 ORDER BY id LIMIT ?2")?;
+                let mut del = c.prepare("DELETE FROM chunks_fts WHERE rowid = ?1")?;
+                let mut ins = c.prepare("INSERT INTO chunks_fts(rowid, text) VALUES (?1, ?2)")?;
+                let (mut n, mut last) = (0, after);
+                let mut rows = st.query(params![after, FTS_BATCH])?;
+                while let Some(r) = rows.next()? {
+                    last = r.get(0)?;
+                    del.execute([last])?;
+                    ins.execute(params![last, fts_text(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?, &r.get::<_, String>(3)?, &r.get::<_, String>(4)?)])?;
+                    n += 1;
+                }
+                if n < FTS_BATCH {
+                    set_meta(c, "fts_text", FTS_TEXT_VERSION)?;
+                    c.execute("DELETE FROM meta WHERE key = 'fts_text_next'", [])?;
+                    return Ok(true);
+                }
+                set_meta(c, "fts_text_next", &format!("{FTS_TEXT_VERSION}:{last}"))?;
+                Ok(false)
+            })();
+            c.execute_batch(if step.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+            if step? {
+                return Ok(());
+            }
         }
-        c.execute("DELETE FROM chunks_fts", [])?;
-        let mut st = c.prepare("SELECT id, coalesce(breadcrumb_path, ''), coalesce(speaker, ''), coalesce(title, ''), coalesce(text, '') FROM chunks")?;
-        let mut ins = c.prepare("INSERT INTO chunks_fts(rowid, text) VALUES (?1, ?2)")?;
-        let mut rows = st.query([])?;
-        while let Some(r) = rows.next()? {
-            ins.execute(params![r.get::<_, i64>(0)?, fts_text(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?, &r.get::<_, String>(3)?, &r.get::<_, String>(4)?)])?;
-        }
-        set_meta(c, "fts_text", FTS_TEXT_VERSION)
     })();
-    c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
-    done
+    c.busy_timeout(std::time::Duration::from_secs(10))?;
+    r
 }
 
 /// A section's keyword text: its breadcrumb, speaker, title and body, without the minutes' header lines that link
-/// people and threads (`**Who:** [Dana](echo://…)`, repeated in every section of a call) and with any other echo://
-/// link reduced to its label.
+/// people and threads (`**Who:** [Dana](echo://…)`, repeated in every section of a call; what such a line says besides
+/// its label and links stays) and with any other echo:// link reduced to its label.
 fn fts_text(breadcrumb: &str, speaker: &str, title: &str, body: &str) -> String {
     let all = format!("{breadcrumb}\n{speaker}\n{title}\n{body}");
-    let kept: Vec<&str> = all.lines().filter(|l| !echo_header(l)).collect();
-    strip_echo_links(&kept.join("\n"))
+    let kept: Vec<String> = all
+        .lines()
+        .filter_map(|l| match header_rest(l) {
+            None => Some(l.to_string()),
+            Some(rest) => rest.chars().any(char::is_alphanumeric).then_some(rest),
+        })
+        .collect();
+    strip_echo_links(&kept.join("\n"), true)
 }
 
-/// `Who:`, `Thread:`, `Threads:` or `Client:` (bold or not) on a line with an echo:// link.
-fn echo_header(line: &str) -> bool {
+/// A `Who:`, `Thread:`, `Threads:` or `Client:` line (bold or not) with an echo:// link: what it says besides its label
+/// and its links (none: not such a line).
+fn header_rest(line: &str) -> Option<String> {
     let t = line.trim_start();
     let t = t.strip_prefix("**").unwrap_or(t);
-    let low = t.to_lowercase();
-    ["threads", "thread", "who", "client"].iter().any(|w| {
-        low.strip_prefix(w).is_some_and(|rest| rest.trim_start().trim_start_matches("**").starts_with(':') && rest.contains("echo://"))
+    ["threads", "thread", "who", "client"].iter().find_map(|w| {
+        let rest = t.get(..w.len()).filter(|p| p.eq_ignore_ascii_case(w)).map(|_| &t[w.len()..])?;
+        let after = rest.trim_start().trim_start_matches("**").strip_prefix(':')?.trim_start_matches("**");
+        rest.contains("echo://").then(|| strip_echo_links(after, false))
     })
 }
 
-/// `[label](echo://…)` → `label`; a bare `echo://…` (in backticks or not) → a space.
-fn strip_echo_links(s: &str) -> String {
+/// `[label](echo://…)` → `label` (with `keep_label`, else nothing); a bare `echo://…` (in backticks or not) → a space.
+/// A link never reaches past its line.
+fn strip_echo_links(s: &str, keep_label: bool) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(i) = rest.find("echo://") {
         let (before, after) = rest.split_at(i);
+        let line_end = after.find('\n').unwrap_or(after.len());
         if let Some(head) = before.strip_suffix("](") {
-            if let Some(o) = head.rfind('[').filter(|o| !head[o + 1..].contains(']')) {
+            if let Some(o) = head.rfind('[').filter(|o| !head[o + 1..].contains([']', '\n'])) {
                 out.push_str(&head[..o]);
-                out.push_str(&head[o + 1..]);
-                rest = after.find(')').map_or("", |e| &after[e + 1..]);
+                if keep_label {
+                    out.push_str(&head[o + 1..]);
+                }
+                rest = after[..line_end].find(')').map_or(&after[line_end..], |e| &after[e + 1..]);
                 continue;
             }
         }
@@ -661,9 +702,9 @@ fn build_related(c: &Connection, ids: &[i64]) -> Result<()> {
 /// Words a query is never matched on: English, Ukrainian and Russian function words.
 const STOPWORDS: &str = "
 a an the and or but if of to in on at by for from with without into onto over under about as is are was were be been being
-am do does did done doing have has had having i me my we our us you your he she it its they them their this that these those
-there here what which who whom whose when where why how all any some no not nor only so than too very can could will would
-shall should may might must just also more most other such own same again then once both each few s t don now up down out
+am do does did done doing have has had having i me my we our you your he she its they them their this that these those
+there here what which who whom whose when where why how all any some not nor only so than too very could would
+shall should might must just also more most other such own same again then once both each few s t don now up down out
 off further while until because between through during before after above below vs via per let lets get got please
 що як де коли чому хто який яка яке які це цей ця ці той та те ті і й а але або чи не ні так в у на з із зі до від по за
 для про при над під між через без є був була було були буде будуть я ти ви ми він вона воно вони його її їх мене мені нам вам
@@ -721,10 +762,6 @@ pub enum History<'a> {
     Latest,
     All,
     AsOf(&'a str),
-}
-
-fn total_chunks(c: &Connection) -> usize {
-    c.query_row("SELECT count(*) FROM chunks", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize
 }
 
 fn hidden(c: &Connection, h: History) -> Result<BTreeSet<i64>> {
@@ -790,28 +827,37 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
     let hide = hidden(&c, history)?;
     let ok = |id: &i64| allowed.as_ref().is_none_or(|a| a.contains(id)) && !hide.contains(id) && only.is_none_or(|o| o.contains(id));
     let like = source_contains.map(|s| format!("%{s}%")).unwrap_or_else(|| "%".into());
-    // The candidates, in keyword order.
+    // The candidates, in keyword order: matches read best first until enough of them may be seen (history and the
+    // reader's profile are checked here, so sections it can't see never crowd out the ones it can).
+    let want = CANDIDATES.max(limit);
     let mut cands: Vec<i64> = vec![];
-    if let Some(fq) = fts_query(q) {
-        let mut st = c.prepare(
-            "SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND c.source LIKE ?2
-             AND (?4 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?4 AND s.id = ?5)) ORDER BY bm25(chunks_fts) LIMIT ?3",
-        )?;
-        // Hidden sections (history) are dropped after the query: ask for as many more as could be hidden.
-        let not_seen = hide.len() + only.map(|o| total_chunks(&c).saturating_sub(o.len())).unwrap_or(0);
-        let want = (CANDIDATES + not_seen).min(CANDIDATES * 40) as i64;
-        let ids: Vec<i64> = st.query_map(params![fq, like, want, scope.map(|s| s.0), scope.map(|s| s.1)], |r| r.get(0))?.collect::<Result<_, _>>()?;
-        cands = ids.into_iter().filter(|i| ok(i)).take(CANDIDATES).collect();
+    let mut note = None;
+    match fts_query(q) {
+        Some(fq) => {
+            let mut st = c.prepare(
+                "SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1 AND c.source LIKE ?2
+                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = ?3 AND s.id = ?4)) ORDER BY bm25(chunks_fts)",
+            )?;
+            let mut rows = st.query(params![fq, like, scope.map(|s| s.0), scope.map(|s| s.1)])?;
+            while cands.len() < want {
+                let Some(r) = rows.next()? else { break };
+                let id: i64 = r.get(0)?;
+                if ok(&id) {
+                    cands.push(id);
+                }
+            }
+        }
+        None => note = Some("only common words; nothing to search".to_string()),
     }
     let mut ranked: Vec<(i64, f32)> = cands.iter().enumerate().map(|(rank, id)| (*id, W_FTS / (RRF_K + rank as f32 + 1.0))).collect();
-    let mut note = None;
     match emb {
         Some(e) if !ranked.is_empty() => match e.embed(&[q.to_string()]) {
             Ok(v) => rerank(&c, &mut ranked, &v[0])?,
             Err(err) => note = Some(format!("keywords only: {err:#}")),
         },
         Some(_) => {}
-        None => note = Some("keywords only: no embedding server is set (Settings → Recall)".into()),
+        None if note.is_none() => note = Some("keywords only: no embedding server is set (Settings → Recall)".into()),
+        None => {}
     }
     // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
     // is within that thread.
@@ -1128,7 +1174,13 @@ mod tests {
         assert_eq!(fts_query("What did we decide about the Gateway?").as_deref(), Some(r#""decide" OR "gateway""#));
         assert_eq!(fts_query("що ми вирішили про бюджет").as_deref(), Some(r#""вирішили" OR "бюджет""#));
         assert_eq!(fts_query("что мы решили по бюджету").as_deref(), Some(r#""решили" OR "бюджету""#));
-        assert_eq!(fts_query("who is it, and when?"), None, "nothing but stopwords: no keyword search");
+        assert_eq!(fts_query("who is this, and when?"), None, "nothing but stopwords: no keyword search");
+        assert_eq!(fts_query("can it go live, or will they say no?").as_deref(), Some(r#""can" OR "it" OR "go" OR "live" OR "will" OR "say" OR "no""#), "words that carry meaning in a question stay");
+        let (_env, root) = crate::paths::testenv::folders("brain-stopwords");
+        let db = root.join("knowledge.sqlite");
+        sync(&db, vec![input("call/a", "# A\n## Notes\nWho is this and when?\n")], None).unwrap();
+        let h = search_in(&db, "who is this, and when?", 5, None, None, None).unwrap();
+        assert_eq!((h["count"].as_u64(), h["note"].as_str()), (Some(0), Some("only common words; nothing to search")), "{h}");
     }
 
     #[test]
@@ -1137,7 +1189,12 @@ mod tests {
         let t = fts_text("Acme kickoff > Summary", "", "Summary", body);
         assert!(!t.contains("echo://") && !t.contains("Ruiz") && !t.contains("rollout") && !t.contains("Globex"), "{t}");
         assert!(t.contains("Who owns the gateway? Dana does.") && t.contains("See the kickoff and   too."), "{t}");
-        assert!(echo_header("  **Client**: [Acme](echo://client/acme)") && !echo_header("Whoever links echo://call/x") && !echo_header("Who: Dana"));
+        assert!(t.contains("Lee Park (Me)") && !t.contains("Who:"), "what a header line says besides its links stays: {t}");
+        assert_eq!(header_rest("  **Client**: [Acme](echo://client/acme)").as_deref(), Some(" "));
+        assert_eq!((header_rest("Whoever links echo://call/x"), header_rest("Who: Dana")), (None, None), "not header lines");
+        // An unclosed link stops at its line's end.
+        let t = fts_text("", "", "", "See [the kickoff](echo://call/x?t=95 unclosed\nThe gateway (phase two) slips.");
+        assert!(t.contains("The gateway (phase two) slips."), "{t}");
 
         // A store written before: its keyword text is written again once, from the sections it keeps.
         let (_env, root) = crate::paths::testenv::folders("brain-fts-text");
@@ -1149,8 +1206,16 @@ mod tests {
         let id: i64 = c.query_row("SELECT id FROM chunks WHERE source = 'call/a'", [], |r| r.get(0)).unwrap();
         c.execute("UPDATE chunks_fts SET text = ?2 WHERE rowid = ?1", params![id, body]).unwrap();
         set_meta(&c, "fts_text", "1").unwrap();
+        // Another process writing: the rewrite neither waits nor fails, and leaves it for a later open.
+        let other = Connection::open(&db).unwrap();
+        other.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let t0 = std::time::Instant::now();
+        rewrite_fts(&c).unwrap();
+        assert!(t0.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(meta(&c, "fts_text").as_deref(), Some("1"));
+        other.execute_batch("COMMIT").unwrap();
         drop(c);
-        assert_eq!(srcs("Ruiz"), ["call/b"], "written again at open");
+        assert_eq!(srcs("Ruiz"), ["call/b"], "written again at a later open");
         assert_eq!(meta(&open(&db).unwrap(), "fts_text").as_deref(), Some(FTS_TEXT_VERSION));
     }
 
@@ -1172,6 +1237,55 @@ mod tests {
         assert_eq!(srcs(Some(&Words)), srcs(None), "the same sections, re-ranked");
         assert_eq!(search_in(&db, "rollout of the plan", 10, None, None, Some(&Words)).unwrap()["hits"][0]["source"], "call/c");
         assert_eq!(search_in(&db, "zeppelin", 10, None, None, Some(&Words)).unwrap()["count"], 0, "no keyword match: nothing, whatever is nearest");
+    }
+
+    /// An embedder that puts the query "budget" and every text about the gateway in one place, everything else in another.
+    struct Gateway;
+    impl Embedder for Gateway {
+        fn model(&self) -> String {
+            "test-gateway".into()
+        }
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts.iter().map(|t| if t == "budget" || t.contains("gateway") { vec![1.0, 0.0] } else { vec![0.0, 1.0] }).collect())
+        }
+    }
+
+    #[test]
+    fn the_vectors_reorder_the_keyword_candidates() {
+        let (_env, root) = crate::paths::testenv::folders("brain-reorder");
+        let db = root.join("knowledge.sqlite");
+        let docs = [("call/a", "# A\n## Notes\nBudget: the budget, the budget.\n"), ("call/b", "# B\n## Notes\nThe budget for the new gateway goes to the board next month with the rest of the plan.\n")];
+        sync(&db, docs.iter().map(|(s, m)| input(s, m)).collect(), Some(&Gateway)).unwrap();
+        let order = |emb: Option<&dyn Embedder>| -> Vec<String> {
+            search_in(&db, "budget", 5, None, None, emb).unwrap()["hits"].as_array().unwrap().iter().map(|h| h["source"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(order(None), ["call/a", "call/b"], "keyword order");
+        assert_eq!(order(Some(&Gateway)), ["call/b", "call/a"], "the nearer one first");
+    }
+
+    #[test]
+    fn sections_a_reader_may_not_see_never_crowd_out_the_ones_it_may() {
+        let (_env, root) = crate::paths::testenv::folders("brain-only");
+        let db = root.join("knowledge.sqlite");
+        // 1,300 short sections that match better than the one the reader may see (more than any cap would read).
+        let mut md = String::from("# Other\n");
+        for i in 0..1300 {
+            md.push_str(&format!("## S{i}\nGateway.\n"));
+        }
+        sync(&db, vec![input("call/other", &md), input("call/mine", "# Mine\n## Notes\nThe gateway goes in after the long security review of the pilot.\n")], None).unwrap();
+        let c = open(&db).unwrap();
+        let mine: BTreeSet<i64> = c.prepare("SELECT id FROM chunks WHERE source = 'call/mine'").unwrap().query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        let h = search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine)).unwrap();
+        assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("call/mine")), "{h}");
+        // Asked for more than 30: as many as asked.
+        assert_eq!(search_in(&db, "gateway", 50, None, None, None).unwrap()["count"], 50);
+        // A rewrite of the keyword text in several batches ends with every section's.
+        set_meta(&c, "fts_text", "1").unwrap();
+        drop(c);
+        let c = open(&db).unwrap();
+        assert_eq!((meta(&c, "fts_text").as_deref(), meta(&c, "fts_text_next")), (Some(FTS_TEXT_VERSION), None));
+        assert_eq!(c.query_row("SELECT count(*) FROM chunks_fts", [], |r| r.get::<_, i64>(0)).unwrap(), 1301);
+        assert_eq!(search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine)).unwrap()["count"], 1);
     }
 
     /// The made-up regression set (intake-and-search R11): a small store of acme.example calls and mail, each query with
@@ -1220,7 +1334,7 @@ mod tests {
             ("how do the procurement bots match an invoice", None, "mail/acme-procurement"),
             ("tenant consent for single sign-on", None, "call/2026-10-29_090000"),
             ("which warehouses are in the Globex discovery scope", None, "mail/globex-scope"),
-            ("what is Dana Ruiz doing about it", None, "call/2026-10-20_090000"),
+            ("what is Dana Ruiz doing about this", None, "call/2026-10-20_090000"),
         ];
         for emb in [None, Some(&Words as &dyn Embedder)] {
             for (q, scope, want) in golden {

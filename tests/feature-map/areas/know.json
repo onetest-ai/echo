@@ -49,7 +49,7 @@
   },
   {
    "id": "F-KNOW-07",
-   "feature": "Recall search finds the query's words (English, Ukrainian and Russian stopwords skipped, the minutes' Who and Thread link lines not indexed) and, when an embedding server answers, orders those hits by meaning without adding others",
+   "feature": "Recall search finds the query's words (English, Ukrainian and Russian stopwords skipped, names and threads linked in the minutes' Who and Thread lines not indexed) and, when an embedding server answers, orders those hits by meaning without adding others",
    "priority": "high",
    "check": "agent",
    "axes": []

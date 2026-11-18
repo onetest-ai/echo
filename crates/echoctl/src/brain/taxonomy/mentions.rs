@@ -263,8 +263,11 @@ pub(super) fn mentions_of(c: &Connection, t: &Taxonomy, ids: &BTreeSet<String>) 
                 continue;
             }
             let phrase = format!("\"{}\"", ws.join(" ").replace('"', "\"\""));
+            // The full-text index leaves out the minutes' echo:// header lines (`store::fts_text`), which the full scan
+            // reads: sections with an echo:// link are candidates too.
             let sql = format!(
-                "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, '') FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1{}",
+                "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, '') FROM chunks c
+                 WHERE (c.id IN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1) OR c.text LIKE '%echo://%'){}",
                 if tm.layer == SHARED { "" } else { " AND EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = 'client' AND s.id = ?2)" }
             );
             let mut st = tx.prepare(&sql)?;
