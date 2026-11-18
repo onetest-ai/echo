@@ -141,10 +141,10 @@ pub fn skill_name(name: &str) -> bool {
 }
 
 /// The only hidden paths a plugin writes in a folder it may change, by their exact names (`.Claude` is not `.claude`):
-/// a file `.gitignore` in any folder that isn't hidden, Obsidian's `.obsidian/<name>.json` (not its plugins, themes or
-/// snippets, nor `community-plugins.json` / `core-plugins.json`: code and what switches it on), and Markdown in a skill of the folder's own Claude Code project,
+/// a file `.gitignore` in any folder that isn't hidden, Obsidian's `.obsidian/<name>.json` in any folder that isn't hidden (not its plugins, themes or
+/// snippets, nor `community-plugins.json` / `core-plugins.json` / `core-plugins-migration.json`: code and what switches it on; ASCII names only), and Markdown in a skill of the folder's own Claude Code project,
 /// `.claude/skills/<name>/<file>.md` — never Claude Code's settings, hooks, agents, commands or anything else under
-/// `.claude`, never `.git` or `.mcp.json`. A folder: `.obsidian`, `.claude`, `.claude/skills` and
+/// `.claude`, never `.git` or `.mcp.json`. A folder: `.obsidian` (in any folder that isn't hidden), `.claude`, `.claude/skills` and
 /// `.claude/skills/<name>`. Nothing else hidden.
 pub fn hidden_ok(rel: &Path, shape: Shape) -> bool {
     let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
@@ -158,9 +158,17 @@ pub fn hidden_ok(rel: &Path, shape: Shape) -> bool {
         (Shape::File, [above @ .., ".gitignore"]) => !above.iter().any(|s| s.starts_with('.')),
         // Not the lists of Obsidian plugins switched on: switching one on runs its code.
         // Compared ignoring case, as APFS and NTFS find them.
-        (Shape::File, [".obsidian", n]) => named(n, ".json") && !["community-plugins.json", "core-plugins.json"].iter().any(|r| n.eq_ignore_ascii_case(r)),
+        // At any depth (a vault in a subfolder of the folder given), under plain folders only.
+        (Shape::File, [above @ .., ".obsidian", n]) => {
+            // ASCII only: APFS folds other letters too (`ſ` as `s`), so no other name can reach the refused ones.
+            !above.iter().any(|s| s.starts_with('.'))
+                && n.is_ascii()
+                && named(n, ".json")
+                && !["community-plugins.json", "core-plugins.json", "core-plugins-migration.json"].iter().any(|r| n.eq_ignore_ascii_case(r))
+        }
         (Shape::File, [".claude", "skills", s, f]) => skill_name(s) && named(f, ".md"),
-        (Shape::Folder, [".obsidian"] | [".claude"] | [".claude", "skills"]) => true,
+        (Shape::Folder, [above @ .., ".obsidian"]) => !above.iter().any(|s| s.starts_with('.')),
+        (Shape::Folder, [".claude"] | [".claude", "skills"]) => true,
         (Shape::Folder, [".claude", "skills", s]) => skill_name(s),
         _ => false,
     }

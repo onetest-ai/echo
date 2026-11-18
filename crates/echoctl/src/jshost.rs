@@ -3107,6 +3107,9 @@ mod tests {
         run("writer", "write", json!({"path": ".gitignore", "text": ".trash/\n"})).unwrap();
         run("writer", "append", json!({"path": "People/.gitignore", "text": "*.tmp"})).unwrap();
         run("writer", "mkdir", json!({"path": ".obsidian"})).unwrap();
+        // A vault in a subfolder of the folder given: its own `.obsidian`, with the same names.
+        run("writer", "mkdir", json!({"path": "knowledge/.obsidian"})).unwrap();
+        run("writer", "write", json!({"path": "knowledge/.obsidian/app.json", "text": "{}"})).unwrap();
         // A skill of its own taken out again: its file, then its empty folder.
         run("writer", "remove", json!({"path": ".claude/skills/acme-twin/SKILL.md"})).unwrap();
         run("writer", "remove", json!({"path": ".claude/skills/acme-twin"})).unwrap();
@@ -3124,6 +3127,15 @@ mod tests {
             ".obsidian/app.js",
             ".obsidian/community-plugins.json",
             ".obsidian/core-plugins.json",
+            "knowledge/.obsidian/core-plugins.json",
+            "knowledge/.obsidian/Core-Plugins.json",
+            "knowledge/.obsidian/core-plugins-migration.json",
+            "knowledge/.obsidian/community-plugin\u{17f}.json",
+            "knowledge/.Obsidian/app.json",
+            "knowledge/.obsidian/plugins/x/main.js",
+            "knowledge/.obsidian/snippets/x.css",
+            ".trash/.obsidian/app.json",
+            ".claude/.obsidian/app.json",
             // The same files on a disk that doesn't tell case apart (APFS, NTFS).
             ".obsidian/Community-Plugins.json",
             ".obsidian/CORE-PLUGINS.JSON",
