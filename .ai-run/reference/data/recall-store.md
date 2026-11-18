@@ -74,3 +74,29 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - Chunk ids: `brain::chunk::chunk_id`.
 - A closed thread's sources are archived: `brain::store::archived_of`.
 - A sync that changes the store snapshots it first: `brain::store::snapshot`.
+
+## Search
+
+- `brain::store::search_at`: the candidates are the keyword (FTS5, BM25) top 30 (or the limit asked, when higher),
+  read best first until that many pass scope, access and history; the query's words skip `STOPWORDS` (English,
+  Ukrainian, Russian). A query of only stopwords searches nothing and says so in `note`.
+- With an embedding server that answers, the candidates are re-ranked by `brain::store::rerank`: weighted reciprocal
+  rank (k = 60) of the keyword rank (0.4) and the vector rank among the candidates (0.6). No section outside the
+  candidates is added; without embeddings the keyword order stays.
+- A closed thread's sections weigh `ARCHIVE_WEIGHT` against current ones, except within that thread.
+- The keyword text of a section (`brain::store::fts_text`) leaves out of the minutes' `Who:`, `Thread:`, `Threads:`
+  and `Client:` lines that carry echo:// links their label and links (what else such a line says stays), and reduces
+  other echo:// links to their labels. A store whose `meta.fts_text` differs from `FTS_TEXT_VERSION` has it written
+  again from `chunks` at `open`, in batches of `FTS_BATCH` sections (`meta.fts_text_next`), each only when no one else
+  writes, for `FTS_OPEN_BUDGET` per open; busy or out of time, the rest waits for a later open. Done, rows of
+  `chunks_fts` without a section are dropped.
+- Term mentions after a dictionary edit (`brain::taxonomy::mentions::mentions_of`) take their candidates from the
+  keyword index and from the sections with an echo:// link (read once per edit), so a name only in a header line
+  counts as in a full scan.
+
+## Evaluation
+
+- The made-up regression set: `brain::store::tests::the_made_up_regression_set_finds_its_sources_first`.
+- The blind evaluation runs the built `echoctl brain search` on a copy of the developer's store (`ECHOCTL_HOME` and
+  `ECHOCTL_CONFIG_DIR` pointing into a temp folder), at depth 5, graded 0/1/2 per unit (0: unrelated, 1: related,
+  2: answers); it reports nDCG@5, P@5 and how many queries got an answer. The queries and grades stay off the repo.

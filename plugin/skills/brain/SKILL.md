@@ -22,8 +22,8 @@ that Intake is off → say so (Settings → Intake → Use Intake) and stop.
          "not in the Brain" when nothing supports it — never fill gaps from memory
 ```
 
-- Search fuses keywords and meaning (when an embedding server is set): phrase the query as the content would say it,
-  not as a question.
+- Search finds the query's words (common words like "what" or "що" are skipped) and, when an embedding server is set,
+  orders those hits by meaning: phrase the query with the words the content would use, not as a question.
 - `--within call/2026-10` narrows to sources whose id contains it (one month of calls, one mailbox thread).
 - Hits marked `closed` come from closed threads (the archive); `history` ones are older than the thread's history
   date. Say so when you use them.

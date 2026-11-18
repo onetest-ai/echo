@@ -48,6 +48,13 @@
    "axes": []
   },
   {
+   "id": "F-KNOW-07",
+   "feature": "Recall search finds the query's words (English, Ukrainian and Russian stopwords skipped, names and threads linked in the minutes' Who and Thread lines not indexed) and, when an embedding server answers, orders those hits by meaning without adding others",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
    "id": "F-KNOW-08",
    "feature": "Intake keeps the facts read from mail and channel posts as one file per source, apart from the index; a source read again is merged into its file (nothing older dropped); dated backups (7 days) before a sync changes them; moved there once from the old index; a fact file goes only when its source leaves its thread (never on a short thread list or a mass removal), and an ignored sender's sections only on the user's Ignore or Keep out",
    "priority": "high",
