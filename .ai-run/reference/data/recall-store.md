@@ -73,7 +73,7 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - Before a sync's first change to the facts (a write that changes a file, or a removal), `brain::facts::backup` copies
   `facts/` into today's generation, `intake/facts.bak/YYYY-MM-DD/`, made whole under a name of its own first
   (`.copy.<pid>.<n>.tmp`) and then renamed into place.
-- A copy with less than half the files of today's generation never replaces it: it is the day's one shrunk copy,
+- A copy with fewer files than today's generation never replaces it: it is the day's one shrunk copy,
   `YYYY-MM-DD-shrunk`, replacing an earlier shrunk copy of that day.
 - The generations of the newest 7 days are kept, and always the generation with the most files. Snapshots of
   `knowledge.sqlite` don't cover the facts.

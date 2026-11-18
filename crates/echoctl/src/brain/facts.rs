@@ -295,7 +295,7 @@ fn count_files(d: &Path) -> usize {
 }
 
 /// The generations under `facts.bak/`, oldest first: `YYYY-MM-DD`, and `YYYY-MM-DD-shrunk` for the copy kept beside its
-/// day's (it had less than half its files).
+/// day's (it had fewer files).
 pub fn generations() -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_dir(backup_dir())
         .map(|rd| rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.len() >= 10 && n.as_bytes()[0].is_ascii_digit()).collect())
@@ -305,7 +305,7 @@ pub fn generations() -> Vec<String> {
 }
 
 /// Copy the facts to today's generation under `facts.bak/` (made whole beside it under a name of its own first). A copy
-/// with less than half the files of today's earlier one never takes its place: it is the day's shrunk copy. The newest
+/// with fewer files than today's earlier one never takes its place: it is the day's one shrunk copy. The newest
 /// `GENERATIONS` days are kept, and always the generation with the most files.
 pub fn backup() -> Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -325,8 +325,9 @@ pub fn backup() -> Result<()> {
     let n = count_files(&tmp);
     let now = chrono::Local::now();
     let day = root.join(now.format("%Y-%m-%d").to_string());
-    // Smaller than half of today's copy: kept beside it as the day's one shrunk copy (replacing an earlier one).
-    let to = if day.exists() && n * 2 < count_files(&day) { root.join(format!("{}-shrunk", now.format("%Y-%m-%d"))) } else { day };
+    // Fewer files than today's copy: kept beside it as the day's one shrunk copy (replacing an earlier one), so no
+    // shrinking within a day ever wears today's copy down.
+    let to = if day.exists() && n < count_files(&day) { root.join(format!("{}-shrunk", now.format("%Y-%m-%d"))) } else { day };
     if to.exists() {
         std::fs::remove_dir_all(&to)?;
     }
@@ -619,7 +620,8 @@ mod tests {
         // A later sync replaces today's copy with the folder as it is now (5 files).
         assert!(w.remove("mail/m4").unwrap());
         assert_eq!(gen_files(&today), 5);
-        // The facts wiped (a bug, a bad list): the copy of 1 file is kept beside today's, never in its place.
+        // Files taken out (3 of 4 left): the smaller copy is the day's shrunk one, never today's. Then the facts wiped
+        // (a bug, a bad list): the copy of 1 file replaces the shrunk one, today's stays whole.
         let mut w = Writer::default();
         for i in 0..3 {
             w.remove(&format!("mail/m{i}")).unwrap();
@@ -628,7 +630,7 @@ mod tests {
         w.write(&sample("mail/m9", json!([]))).unwrap();
         let gens = generations();
         assert_eq!(gens.len(), 2, "{gens:?}");
-        assert_eq!(gen_files(&today), 4, "the fuller copy stays");
+        assert_eq!(gen_files(&today), 5, "the fuller copy stays");
         assert!(gens[1] == format!("{today}-shrunk") && gen_files(&gens[1]) == 1);
         // Older days past seven go, but never the fullest generation.
         for d in 1..=9 {
@@ -647,7 +649,16 @@ mod tests {
         let days: BTreeSet<&str> = gens.iter().map(|g| &g[..10]).collect();
         assert_eq!(days.len(), 8, "seven days and the fullest: {gens:?}");
         assert_eq!(gens.iter().filter(|g| g.ends_with("-shrunk")).count(), 1, "one shrunk copy a day, the latest");
-        assert_eq!((gen_files(&today), gen_files(&format!("{today}-shrunk"))), (2, 1), "half of today's is no shrink: it replaces today's");
+        assert_eq!((gen_files(&today), gen_files(&format!("{today}-shrunk"))), (5, 2), "a smaller copy never replaces today's: it replaces the shrunk one");
+        // Halving again and again within the day never wears today's copy down.
+        for i in [3, 9, 10] {
+            let mut w = Writer::default();
+            w.write(&sample("mail/m11", json!([]))).unwrap();
+            let _ = w.remove(&format!("mail/m{i}"));
+            let _ = w.remove("mail/m11");
+        }
+        assert_eq!(gen_files(&today), 5, "today's copy is whole");
+        assert_eq!(generations().iter().filter(|g| g.starts_with(&today)).count(), 2, "today's and one shrunk copy");
         assert!(gens.contains(&fullest));
         assert!(!std::fs::read_dir(backup_dir()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".tmp")));
     }
