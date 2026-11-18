@@ -1568,14 +1568,21 @@ mod tests {
         let b = projects::create("Globex audit", None, None).unwrap();
         let email = |i: usize| format!("p{i}@{}", if i.is_multiple_of(3) { "globex.example" } else { "acme.example" });
         let mut stamps = vec![];
-        for c in 0..8 {
-            let who: Vec<usize> = (0..n).filter(|i| (i + c) % 4 == 0 || i % 50 == c).collect();
+        // 24 calls of five people each, whatever `n` (the timing tests then measure the people, not the calls): eight
+        // groups spread over everyone, in three rounds — the same five twice (in calls with each other), then shifted by two.
+        let groups = 8;
+        for c in 0..3 * groups {
+            let (round, g) = (c / groups, c % groups);
+            let who: Vec<usize> = (0..5).map(|k| (g * (n / groups) + k + if round == 2 { 2 } else { 0 }) % n).collect();
             let mut att: Vec<Value> = who.iter().map(|&i| json!({"name": made_up_name(i), "email": email(i)})).collect();
-            // The same full name from a guest account: one person.
-            att.push(json!({"name": made_up_name(1), "email": "guest.p1@initech.example"}));
-            let segs: Vec<Value> = who.iter().take(20).enumerate().map(|(k, &i)| json!({"speaker": "remote", "name": made_up_name(i), "start": k as f64 * 10.0, "end": k as f64 * 10.0 + 5.0 + c as f64})).collect();
-            let d = call(root, &format!("2026-10-{:02}_100000-c{c}", c + 1), &format!("2026-10-{:02}T10:00:00+00:00", c + 1), json!({"attendees": att}), json!(segs));
-            let chat: Vec<Value> = who.iter().skip(5).take(10).map(|&i| json!({"from": made_up_name(i), "text": "ok"})).collect();
+            if g == 0 {
+                // The same full name from a guest account: one person.
+                att.push(json!({"name": made_up_name(1), "email": "guest.p1@initech.example"}));
+            }
+            let segs: Vec<Value> = who.iter().take(3).enumerate().map(|(k, &i)| json!({"speaker": "remote", "name": made_up_name(i), "start": k as f64 * 10.0, "end": k as f64 * 10.0 + 5.0 + (c % 7) as f64})).collect();
+            let (day, time) = (c % 28 + 1, format!("{:02}{:02}{:02}", 8 + c / 3600, c / 60 % 60, c % 60));
+            let d = call(root, &format!("2026-10-{day:02}_{time}-c{c}"), &format!("2026-10-{day:02}T{}:{}:{}+00:00", &time[..2], &time[2..4], &time[4..]), json!({"attendees": att}), json!(segs));
+            let chat: Vec<Value> = who.iter().skip(3).map(|&i| json!({"from": made_up_name(i), "text": "ok"})).collect();
             std::fs::write(d.join("chat.json"), json!(chat).to_string()).unwrap();
             stamps.push(calls::stamp_of(&d));
         }
@@ -1591,8 +1598,8 @@ mod tests {
             }).collect()
         };
         let (ma, mb) = (members(0..n), members(n / 2..n));
-        projects::update(&a.id, |x| { x.pins = stamps[..6].to_vec(); x.people = ma; Ok(()) }).unwrap();
-        projects::update(&b.id, |x| { x.pins = stamps[4..].to_vec(); x.people = mb; Ok(()) }).unwrap();
+        projects::update(&a.id, |x| { x.pins = stamps[..stamps.len() * 3 / 4].to_vec(); x.people = ma; Ok(()) }).unwrap();
+        projects::update(&b.id, |x| { x.pins = stamps[stamps.len() / 2..].to_vec(); x.people = mb; Ok(()) }).unwrap();
         let dir: Vec<Person> = (0..n).map(|i| {
             let mut p = Person { id: email(i), name: made_up_name(i), emails: vec![email(i)], ..Default::default() };
             if i % 5 == 0 {
