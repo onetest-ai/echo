@@ -395,6 +395,23 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 let r = reveal(id, body["root"].as_str().unwrap_or_default(), body["path"].as_str().unwrap_or_default());
                 return Some(json_reply(r.map_or_else(|e| json!({"error": format!("{e:#}")}), |()| json!({"value": true}))));
             }
+            // A skill added to, or removed from, the user's own Claude Code (`ctx.claude.installSkill` / `removeSkill`,
+            // its page checked the user's click or key): `{name, md}` / `{name}` in a POST body.
+            for (op, install) in [("/install-skill", true), ("/remove-skill", false)] {
+                if let Some(id) = rest.strip_suffix(op).filter(|id| crate::plugins::valid_id(id)) {
+                    let body = match call_body(req) {
+                        Ok(b) => b,
+                        Err(refused) => return Some(*refused),
+                    };
+                    let name = body["name"].as_str().unwrap_or_default();
+                    let r = if install {
+                        crate::plugins::claude_skills::install(id, name, body["md"].as_str().unwrap_or_default()).map(|_| ())
+                    } else {
+                        crate::plugins::claude_skills::remove(id, name)
+                    };
+                    return Some(json_reply(r.map_or_else(|e| json!({"error": format!("{e:#}")}), |()| json!({"value": true}))));
+                }
+            }
             match rest.split_once("/call/") {
                 Some((id, cmd)) if crate::plugins::valid_id(id) && !cmd.is_empty() && !cmd.contains('/') => {
                     // `{args, files}` in a POST body; `files`: handles of files the user handed this plugin
@@ -881,6 +898,32 @@ mod tests {
         // Only by POST, a JSON object.
         assert_eq!(native("GET", "/api/plugin/notes/reveal", vec![]).0, 405);
         assert_eq!(native("POST", "/api/plugin/notes/reveal", b"[1]".to_vec()).0, 400);
+    }
+
+    #[test]
+    fn a_plugins_window_half_adds_and_removes_a_skill_in_your_claude_code_by_post_only() {
+        let (_env, root) = crate::paths::testenv::folders("window-plugin-claude-skill");
+        let mk = root.join("market");
+        let d = mk.join("plugins/twin");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "twin", "name": "Twin", "version": "0.1.0", "uses": {"skills": true}}).to_string()).unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "twin", "source": "./plugins/twin"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("twin", Some(&name)).unwrap().uses;
+        crate::plugins::install("twin", Some(&name), &agreed).unwrap();
+        let skill = root.join("user/.claude/skills/acme-notes/SKILL.md");
+        let post = |what: &str, body: Value| native("POST", &format!("/api/plugin/twin/{what}"), body.to_string().into_bytes()).1;
+        assert_eq!(post("install-skill", json!({"name": "acme-notes", "md": "Notes."})), json!({"value": true}));
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "Notes.");
+        assert!(post("install-skill", json!({"name": "Acme", "md": "x"}))["error"].as_str().is_some_and(|e| e.contains("a skill's name")));
+        assert_eq!(post("remove-skill", json!({"name": "acme-notes"})), json!({"value": true}));
+        assert!(!skill.exists());
+        assert!(post("remove-skill", json!({"name": "acme-notes"}))["error"].as_str().is_some_and(|e| e.contains("isn't a skill Twin added")));
+        // Only by POST, a JSON object.
+        assert_eq!(native("GET", "/api/plugin/twin/install-skill", vec![]).0, 405);
+        assert_eq!(native("POST", "/api/plugin/twin/remove-skill", b"[1]".to_vec()).0, 400);
+        crate::plugins::remove("twin", false).unwrap();
     }
 
     #[test]

@@ -87,6 +87,9 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     if to.is_dir() {
         bail!("“{rel}” is a folder");
     }
+    if crate::grants::in_skills(root, rel, &to) {
+        bail!("“{rel}”: nothing is copied into a skill; a skill is written whole (ctx.fs.write)");
+    }
     if create_new && std::fs::symlink_metadata(&to).is_ok() {
         bail!("“{rel}” is there already");
     }
@@ -271,6 +274,12 @@ mod tests {
         for (to, why) in [("../x.pdf", "isn't a path inside"), (".obsidian/x.pdf", "hidden"), ("sources", "a folder")] {
             assert!(run("ingest", "copy", json!({"to": to}), one).unwrap_err().contains(why), "{to}");
         }
+        // Nor into a skill of the folder's own Claude Code, even as Markdown: its bytes would skip the skill's check.
+        std::fs::write(&src, "```!\nid\n```").unwrap();
+        let md = make("ingest", &src).unwrap();
+        let e = run("ingest", "copy", json!({"to": ".claude/skills/acme-notes/SKILL.md"}), std::slice::from_ref(&md)).unwrap_err();
+        assert!(e.contains("nothing is copied into a skill"), "{e}");
+        assert!(!vault.join(".claude/skills/acme-notes").exists());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&outside, vault.join("out")).unwrap();

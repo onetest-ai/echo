@@ -16,6 +16,11 @@ pub(crate) fn user_home() -> PathBuf {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
 
+/// The user's own Claude Code folder: `CLAUDE_CONFIG_DIR` when Echo has it, else `~/.claude`.
+pub(crate) fn own_claude_folder() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| user_home().join(".claude"))
+}
+
 /// Per-user application directory (fixed; never moves with the data folder).
 pub fn config_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("ECHOCTL_CONFIG_DIR") {

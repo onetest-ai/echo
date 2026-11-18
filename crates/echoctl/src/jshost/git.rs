@@ -794,6 +794,11 @@ pub(super) fn commit(id: &str, root: &str, o: &Value) -> Result<Value> {
         if f.is_dir() {
             bail!("“{rel}” is a folder: commit names files");
         }
+        // A skill committed runs nothing (one written another way than ctx.fs.write may).
+        if crate::grants::in_skills(root, rel, &f) && f.is_file() {
+            let md = std::fs::read(&f)?;
+            crate::plugins::claude_skills::skill_md_ok(&String::from_utf8_lossy(&md)).map_err(|e| anyhow!("“{rel}”: {e}"))?;
+        }
         Ok(f)
     })?;
     let g = Git::new(real_root)?;
@@ -1011,7 +1016,10 @@ mod tests {
         let subjects = rel(&run("lit", "log", json!({})).unwrap(), "subject");
         assert_eq!(subjects.last().unwrap(), "the user's start");
         assert!(run("lit", "show", json!({"rev": "HEAD", "path": "README.md"})).unwrap().is_null(), "./ — never a file above the vault");
-        // Refused as ctx.fs.write refuses them: hidden, a link, outside, nothing there.
+        // Refused as ctx.fs.write refuses them: hidden, a link, outside, nothing there; a skill put there another way
+        // (not by ctx.fs.write) that runs a command.
+        std::fs::create_dir_all(vault.join(".claude/skills/acme-x")).unwrap();
+        std::fs::write(vault.join(".claude/skills/acme-x/SKILL.md"), "---\nname: acme-x\nhooks:\n  Stop: id\n---\n").unwrap();
         std::fs::create_dir_all(root.join("outside")).unwrap();
         #[cfg(unix)]
         {
@@ -1024,7 +1032,13 @@ mod tests {
             assert!(run("lit", "commit", json!({"paths": ["Out"], "message": "x"})).unwrap_err().contains("leads outside"));
             assert!(run("lit", "commit", json!({"paths": ["Link.md"], "message": "x"})).unwrap_err().contains("is a link"));
         }
-        for (p, why) in [(".obsidian/app.json", "hidden"), ("../README.md", "isn't a path inside"), ("Missing/none.md", "isn't there and git doesn't know it")] {
+        for (p, why) in [
+            (".obsidian/plugins/x/main.js", "hidden"),
+            (".claude/settings.json", "hidden"),
+            (".claude/skills/acme-x/SKILL.md", "a skill can't run commands"),
+            ("../README.md", "isn't a path inside"),
+            ("Missing/none.md", "isn't there and git doesn't know it"),
+        ] {
             assert!(run("lit", "commit", json!({"paths": [p], "message": "x"})).unwrap_err().contains(why), "{p}");
         }
         assert!(run("lit", "commit", json!({"paths": [], "message": "x"})).unwrap_err().contains("1 to 1000"));

@@ -234,6 +234,17 @@ function pluginCtx(id) {
         if (a.other) throw new Error('Claude is open for this plugin in another folder: close it in its panel first')
         if (a.start) termStart('claude-plugin', key, a.extra)
       },
+      /** A skill in the user's own Claude Code (`uses.skills`): `installSkill(name, md)` writes
+       *  `~/.claude/skills/<name>/SKILL.md`, `removeSkill(name)` takes one it added out — each only on the user's click
+       *  or key (else it rejects before anything is sent); Echo checks the rest. */
+      installSkill: async (name, md) => {
+        if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('A skill is added to your Claude Code only on your click')
+        return pluginValue(await pluginPost(id, 'install-skill', { name: String(name == null ? '' : name), md: String(md == null ? '' : md) }))
+      },
+      removeSkill: async (name) => {
+        if (!copyAllowed(typeof navigator === 'undefined' ? null : navigator)) throw new Error('A skill is removed from your Claude Code only on your click')
+        return pluginValue(await pluginPost(id, 'remove-skill', { name: String(name == null ? '' : name) }))
+      },
     },
     /** The computer's own apps. `reveal(root, path)`: a file or folder in a folder the user gave it (`uses.folders`;
      *  `root` as `ctx.fs.folders()` names it, `path` inside it, '' the folder itself) shown selected in Finder /
