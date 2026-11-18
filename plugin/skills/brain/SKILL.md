@@ -7,7 +7,7 @@ argument-hint: "[question or what to change]"
 # echo: the Brain
 
 CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl brain` (below: `brain`). If the session has the `echo-brain` MCP tools
-(`echo-brain:search_knowledge`, `echo-brain:read_document`, `echo-brain:get_evidence`), prefer them: they answer the same, scoped to this session's profile. A command that answers
+(`mcp__echo__search_sources`, `mcp__echo__read_source`, `mcp__echo__read_link`), prefer them: they answer the same, scoped to this session's profile. A command that answers
 that Recall is off → say so (Settings → Recall → Use Recall) and stop.
 
 ## Answering a question
