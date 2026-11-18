@@ -484,18 +484,36 @@ pub fn about_me(opts: &Value) -> Result<Value> {
     Ok(json!({"text": text, "name": name.flatten(), "parts": parts, "hash": crate::calls::me_hash(Some(&text))}))
 }
 
-/// People across the threads: `{key, name, aliases, email, also, organisation, client, title, threads, link}` (People's
-/// own; roles stay there) — `aliases` the other names the user's directory knows them by, `also` their other addresses,
-/// `client` their organisation's id; `known_people`: never someone seen only in closed threads.
+/// People across the threads: `{key, name, aliases, email, also, organisation, client, title, threads, places, reports_to,
+/// reports, link}` (People's own) — `aliases` the other names the user's directory knows them by, `also` their other
+/// addresses, `client` their organisation's id; `places` `[{thread, role, stance}]`, where they stand in each of those
+/// threads; `reports_to` `{key, name}` of the listed person they report to, else null, `reports` the
+/// `{key, name}` of the listed people who report to them (never themselves); `known_people`: never someone seen only in closed threads. No facts,
+/// no quotes.
 pub fn people() -> Result<Value> {
     let directory = crate::people::directory().unwrap_or_default();
-    Ok(json!(known_people()
+    let known = known_people();
+    let open: Vec<String> = crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| p.id).collect();
+    let line = |x: &Value| x["reports_to"].as_str().map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned);
+    // Who a `reports_to` names: a key, an address or a name of someone listed.
+    let boss = |x: &Value| -> Option<&Value> {
+        let r = line(x)?;
+        let n = crate::people::norm(&r);
+        known.iter().find(|p| p["key"].as_str().is_some_and(|k| k.eq_ignore_ascii_case(&r)) || p["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(&r)) || p["name"].as_str().is_some_and(|m| crate::people::norm(m) == n))
+    };
+    let who = |p: &Value| json!({"key": p["key"], "name": p["name"]});
+    Ok(json!(known
         .iter()
         .map(|x| {
             let key = x["key"].as_str().unwrap_or("");
             let entry = directory.iter().find(|p| p.id == key || x["email"].as_str().is_some_and(|e| p.emails.iter().any(|m| m == e)));
+            let places: Vec<Value> = x["places"].as_array().into_iter().flatten().filter(|p| p["thread"].as_str().is_some_and(|t| open.iter().any(|o| o == t)))
+                .map(|p| json!({"thread": p["thread"], "role": p["role"], "stance": p["stance"]})).collect();
+            let reports_to = boss(x).filter(|b| b["key"] != x["key"]).map(who).unwrap_or(Value::Null);
+            let reports: Vec<Value> = known.iter().filter(|y| y["key"] != x["key"] && boss(y).is_some_and(|b| b["key"] == x["key"])).map(who).collect();
             json!({"key": key, "name": x["name"], "aliases": entry.map(|p| p.aliases.clone()).unwrap_or_default(), "email": x["email"], "also": x["also"],
                    "organisation": x["org"]["name"], "client": x["org"]["id"], "title": x["title"], "threads": x["threads"],
+                   "places": places, "reports_to": reports_to, "reports": reports,
                    "link": format!("echo://person/{}", key.replace('%', "%25").replace(' ', "%20"))})
         })
         .collect::<Vec<_>>()))
@@ -709,6 +727,38 @@ mod tests {
         let ppl = people().unwrap();
         let jane = ppl.as_array().unwrap().iter().find(|p| p["key"] == "jane@acme.example").unwrap();
         assert_eq!((jane["email"].as_str(), jane["client"].as_str(), jane["aliases"].clone()), (Some("jane@acme.example"), Some("acme"), json!(["J. Doe"])), "{jane}");
+    }
+
+    #[test]
+    fn people_carry_their_role_and_stance_per_thread_and_their_reporting_line() {
+        let (_env, _root) = crate::paths::testenv::folders("share-people-places");
+        let pilot = acme_pilot();
+        let other = crate::projects::create("Acme audit", Some("acme"), None).unwrap().id;
+        let old = crate::projects::create("Acme old", Some("acme"), None).unwrap().id;
+        crate::people::place(&pilot, "Kim Ito", Some("kim@acme.example"), &json!({"role": "Security", "stance": "sceptic"})).unwrap();
+        crate::people::place(&other, "Kim Ito", Some("kim@acme.example"), &json!({"role": "Reviewer"})).unwrap();
+        crate::people::place(&pilot, "Lee Roy", Some("lee@acme.example"), &json!({"role": "Engineer"})).unwrap();
+        crate::people::place(&old, "Kim Ito", Some("kim@acme.example"), &json!({"role": "Sponsor", "stance": "champion"})).unwrap();
+        crate::people::place(&old, "Old Timer", Some("old@acme.example"), &json!({"role": "Sponsor", "stance": "champion"})).unwrap();
+        crate::projects::set_stage(&old, crate::projects::Stage::Done, None).unwrap();
+        crate::people::set("kim@acme.example", "Kim Ito", Some("kim@acme.example"), "reports_to", "Jane Doe", "you").unwrap();
+        crate::people::set("lee@acme.example", "Lee Roy", Some("lee@acme.example"), "reports_to", "Pat Outsider", "you").unwrap();
+        let ppl = people().unwrap();
+        let find = |k: &str| ppl.as_array().unwrap().iter().find(|p| p["key"] == k).cloned();
+        let kim = find("kim@acme.example").unwrap();
+        let mut places = kim["places"].as_array().unwrap().clone();
+        places.sort_by_key(|p| p["thread"].as_str().unwrap().to_string());
+        let mut want = vec![json!({"thread": pilot, "role": "Security", "stance": "sceptic"}), json!({"thread": other, "role": "Reviewer", "stance": null})];
+        want.sort_by_key(|p| p["thread"].as_str().unwrap().to_string());
+        assert_eq!(places, want, "only the open threads: {kim}");
+        assert_eq!(kim["reports_to"], json!({"key": "jane@acme.example", "name": "Jane Doe"}));
+        let jane = find("jane@acme.example").unwrap();
+        assert_eq!(jane["reports"], json!([{"key": "kim@acme.example", "name": "Kim Ito"}]));
+        assert_eq!(jane["reports_to"], Value::Null);
+        assert_eq!(find("lee@acme.example").unwrap()["reports_to"], Value::Null, "someone People doesn't list");
+        assert!(find("old@acme.example").is_none(), "seen only in a closed thread: not listed, nor their places");
+        // Nothing but roles, stance and the line: no facts, no quotes.
+        assert!(kim.get("facts").is_none() && kim["places"][0].get("quote").is_none());
     }
 
     #[test]
