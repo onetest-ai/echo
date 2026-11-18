@@ -140,9 +140,10 @@ fn counts(dir: &std::path::Path) -> Value {
         if let Some(h) = l.strip_prefix("## ") {
             section = h.to_lowercase();
         } else if l.starts_with("- ") || l.starts_with("* ") || l.starts_with("| ") && !l.contains("---") {
-            if section.contains("decision") {
+            let under = |words: &[&str]| words.iter().any(|w| section.contains(w));
+            if under(crate::calls::DECISION_WORDS) {
                 decisions += 1;
-            } else if section.contains("question") {
+            } else if under(crate::calls::QUESTION_WORDS) {
                 questions += 1;
             }
         }
@@ -678,6 +679,23 @@ pub fn view(tasks: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_find_decisions_and_questions_under_english_russian_and_ukrainian_headings() {
+        let dir = std::env::temp_dir().join(format!("echo-today-counts-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let cases = [
+            ("## Decisions\n- a\n- b\n## Open questions\n- c\n", 2, 1),
+            ("## Итоги\nтекст\n## Решения\n- a\n- b\n## Открытые вопросы\n- c\n", 2, 1),
+            ("## Підсумок\nтекст\n## Рішення\n- a\n- b\n- c\n## Відкриті питання\n* d\n- e\n", 3, 2),
+        ];
+        for (md, d, q) in cases {
+            fs::write(dir.join("notes.md"), md).unwrap();
+            let c = counts(&dir);
+            assert_eq!((c["decisions"].as_u64(), c["questions"].as_u64()), (Some(d), Some(q)), "{md}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn my_work_takes_a_plugins_rows_late_or_due_this_week_and_undated_but_echos_undated_tasks_stay_off() {

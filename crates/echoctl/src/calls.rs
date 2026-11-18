@@ -109,6 +109,11 @@ pub fn lock_meta(dir: &Path) -> Result<crate::app::FileLock> {
     }
 }
 
+/// What a minutes heading has in it (lowercase) to open a part: its words in English, Ukrainian or Russian.
+pub(crate) const SUMMARY_WORDS: &[&str] = &["summary", "підсум", "резюм", "итог", "сводк"];
+pub(crate) const DECISION_WORDS: &[&str] = &["decision", "рішен", "решени", "решено"];
+pub(crate) const QUESTION_WORDS: &[&str] = &["question", "питан", "вопрос"];
+
 /// A call's stamp: the `YYYY-MM-DD_HHMMSS` its folder name starts with. Retitling changes only
 /// what follows it, so it names the call across renames. A folder whose name doesn't start with
 /// a stamp is its own key (its whole name).

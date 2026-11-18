@@ -88,11 +88,6 @@ fn participants(dir: &Path, people: &[Value]) -> Vec<Value> {
     invited.into_iter().take(LIST_MAX).map(|p| json!({"name": p["name"], "email": p["email"], "person": person(p["name"].as_str().unwrap_or(""), p["email"].as_str())})).collect()
 }
 
-/// What a minutes heading has in it (lowercase) to open a part: its words in English, Ukrainian or Russian.
-const SUMMARY_WORDS: &[&str] = &["summary", "підсум", "резюм", "итог", "сводк"];
-const DECISION_WORDS: &[&str] = &["decision", "рішен", "решени", "решено"];
-const QUESTION_WORDS: &[&str] = &["question", "питан", "вопрос"];
-
 /// A call's minutes by section, from what Echo keeps: `{summary, decisions, actions, questions, revision}` — `summary`
 /// the text under a heading with one of `SUMMARY_WORDS` in it, `decisions` and `questions` the bullets under headings
 /// with one of `DECISION_WORDS` / `QUESTION_WORDS`, `actions` the call's action items as Echo keeps them
@@ -111,12 +106,12 @@ fn minutes_parts(dir: &Path, body: bool) -> Option<Value> {
         }
         let bullet = l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")).map(|b| b.trim_start_matches("[ ] ").trim_start_matches("[x] ")).filter(|b| !b.trim().is_empty());
         let under = |words: &[&str]| words.iter().any(|w| section.contains(w));
-        if under(SUMMARY_WORDS) {
+        if under(crate::calls::SUMMARY_WORDS) {
             summary.push(line);
         } else if let Some(b) = bullet {
-            if under(DECISION_WORDS) && decisions.len() < LIST_MAX {
+            if under(crate::calls::DECISION_WORDS) && decisions.len() < LIST_MAX {
                 decisions.push(cut(b, LINE_MAX));
-            } else if under(QUESTION_WORDS) && questions.len() < LIST_MAX {
+            } else if under(crate::calls::QUESTION_WORDS) && questions.len() < LIST_MAX {
                 questions.push(cut(b, LINE_MAX));
             }
         }
