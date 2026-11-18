@@ -1494,8 +1494,8 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
 mod tests {
 
     /// A package skill passes what any skill a plugin writes passes (`claude_skills::skill_md_ok`), then holds only
-    /// its name and a description: a key hidden after a CR alone, a `!` code block, `!$`, or a `----` line that a
-    /// split on "\n---" took for the frontmatter's end are refused.
+    /// its name and a description: a key hidden after a CR alone, a `!` code block or `!$` are refused; its frontmatter
+    /// ends only at a line `---` alone, as for every skill (a `----` or `---x` line is no end).
     #[test]
     fn a_package_skill_is_checked_as_any_skill_a_plugin_writes() {
         use super::*;

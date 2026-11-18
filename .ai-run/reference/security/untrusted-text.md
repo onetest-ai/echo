@@ -44,7 +44,9 @@ As `grants::resolve` does: the path is checked as relative with only normal comp
 then canonicalised, links resolved and re-checked, kept inside its root; Windows device names refused.
 
 A folder at or inside a hidden one (any name in its real path starting with `.`: `~/.claude`, `vault/.claude/skills`,
-`.git`) is never granted (`grants::grant`): there nothing is hidden relative to the folder given.
+`.git`) is never granted (`grants::grant`): there nothing is hidden relative to the folder given. On purpose this takes
+in every such folder, e.g. `<repo>/.claude/worktrees/x` or `~/.dotfiles`, not a bug. One granted by an older Echo is
+still read but never written (`grants::writable`, `writable_folder`).
 
 A write into a plugin's granted folder (`grants::writable`, `writable_folder`) also refuses hidden names, the path as
 given and as it really is (a link inside the root, a Windows short name), but for the exact names `grants::hidden_ok`

@@ -76,13 +76,7 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
     if !dir.is_dir() {
         bail!("{} isn't a folder", dir.display());
     }
-    // Inside a hidden folder (`~/.claude`, `.git`) nothing is hidden relative to the folder given, so `hidden_ok`
-    // would guard nothing there: other programs' settings and code.
-    let hidden = dir.components().find_map(|c| match c {
-        Component::Normal(n) => Some(n.to_string_lossy()).filter(|n| n.starts_with('.')),
-        _ => None,
-    });
-    if let Some(h) = hidden {
+    if let Some(h) = hidden_in(&dir) {
         bail!("{} is a hidden folder or inside one (“{h}”), where other programs keep their settings: pick a folder that isn't hidden", dir.display());
     }
     if holds_echo(&dir) {
@@ -94,6 +88,15 @@ pub fn grant(id: &str, dir: &Path) -> Result<PathBuf> {
         save_folders(id, &list)?;
     }
     Ok(dir)
+}
+
+/// The first hidden name of `dir` (its real path), if any. Inside a hidden folder (`~/.claude`, `.git`) nothing is hidden
+/// relative to the folder given, so `hidden_ok` would guard nothing there: other programs' settings and code.
+fn hidden_in(dir: &Path) -> Option<String> {
+    dir.components().find_map(|c| match c {
+        Component::Normal(n) => Some(n.to_string_lossy().into_owned()).filter(|n| n.starts_with('.')),
+        _ => None,
+    })
 }
 
 /// Whether `dir` is, or holds, Echo's settings folder or the data folder's own `.echo`.
@@ -198,6 +201,10 @@ fn writable_as(id: &str, root: &str, rel: &str, shape: Shape) -> Result<PathBuf>
     let root = dunce::canonicalize(root).map_err(|_| anyhow!("{root} isn't one of the folders you gave this plugin"))?;
     if !folders(id).contains(&root) {
         bail!("{} isn't one of the folders you gave this plugin", root.display());
+    }
+    // A folder inside a hidden one, granted by an older Echo: still read, never written.
+    if let Some(h) = hidden_in(&root) {
+        bail!("{} is a hidden folder or inside one (“{h}”): nothing in it is changed", root.display());
     }
     inside(&root, rel)?;
     let full = root.join(rel.trim_start_matches("./"));
@@ -746,5 +753,15 @@ mod tests {
         grant("acme-notes", &vault).unwrap();
         grant("acme-notes", &vault.join("Library/Notes")).unwrap();
         assert_eq!(folders("acme-notes").len(), 2);
+        // One granted by an older Echo: still read, never written.
+        let skills = dunce::canonicalize(vault.join(".claude/skills")).unwrap();
+        let mut list = folders("acme-notes");
+        list.push(skills.clone());
+        save_folders("acme-notes", &list).unwrap();
+        let s = skills.display().to_string();
+        assert!(resolve("acme-notes", &s, "acme").is_ok());
+        for e in [writable("acme-notes", &s, "acme/SKILL.md").unwrap_err(), writable_folder("acme-notes", &s, "other").unwrap_err()] {
+            assert!(e.to_string().contains("nothing in it is changed"), "{e}");
+        }
     }
 }
