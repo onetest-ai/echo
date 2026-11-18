@@ -1116,13 +1116,15 @@ pub struct Review {
     pub offers: Option<String>,
     /// Why this Echo can't install it (shown; installing refuses).
     pub blocked: Option<String>,
+    /// The routines it offers a switch for (`routines::offered`).
+    pub routines: Vec<Value>,
 }
 
 fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Review> {
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
     let uses = sheet(m)?;
     let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
-    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, offers: presets::offers(m), blocked: why_not(m) })
+    Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, offers: presets::offers(m), blocked: why_not(m), routines: routines::offered(before, m) })
 }
 
 /// The permission sheet for installing `id` (nothing changes).
@@ -1360,7 +1362,7 @@ pub static BUSY: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
 pub static ERRORS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
 
 fn review_json(r: &Review) -> Value {
-    json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked})
+    json!({"id": r.id, "name": r.name, "version": r.version, "market": r.market, "commit": r.commit, "uses": r.uses, "new_uses": r.new_uses, "blocked": r.blocked, "routines": r.routines})
 }
 
 /// The review sheet for the window (`plugin_review`), as JSON.
@@ -1421,13 +1423,14 @@ pub fn page_op(v: &Value) -> Result<()> {
             Ok(())
         }
         "install" => {
-            let (id, market, agreed) = (s("id"), s("market"), list("agreed"));
-            background(format!("plugin:{id}"), "Installing…", move || install(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed).map(|_| reload()));
+            // With the routines the user switched on its sheet.
+            let (id, market, agreed, chosen) = (s("id"), s("market"), list("agreed"), routines::chosen(&v["routines"]));
+            background(format!("plugin:{id}"), "Installing…", move || routines::install_with(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed, &chosen).map(|_| reload()));
             Ok(())
         }
         "update" => {
-            let (id, agreed) = (s("id"), list("agreed"));
-            background(format!("plugin:{id}"), "Updating…", move || update(&id, &agreed).map(|_| reload()));
+            let (id, agreed, chosen) = (s("id"), list("agreed"), routines::chosen(&v["routines"]));
+            background(format!("plugin:{id}"), "Updating…", move || routines::update_with(&id, &agreed, &chosen).map(|_| reload()));
             Ok(())
         }
         o => bail!("unknown plugin operation “{o}”"),
