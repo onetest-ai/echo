@@ -46,6 +46,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `echo.jobs` | `true`: it shows Echo's background jobs and changes them (echo-plugins R25). The sheet: "Shows Echo's background jobs and changes how often each runs, when it pauses at night and which model it uses — only when you change them in its screens". Its client half's `ctx.echo.jobs.list()` / `set(job, ["key=value", …])` (§ Client half); nothing in its host half. Evidence: `capabilities::describe_echo`, `jshost::may_tune_jobs` |
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
+| `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -274,6 +275,85 @@ another plugin, a second fetch, another method, headers or a body is refused as 
 type in Echo's own box when it asks — that page only, once each time" (after the `Talks to …` line when it names hosts
 too). A plugin never sets the address: not by its settings, its store or its window half. Evidence: `jshost::typed`
 
+### Reading a web page (`ctx.web`)
+
+No capability of its own and no line on the sheet: reading a page is a GET under the network grants above, made
+through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in
+`network.hosts` over https, an address the user listed (its pinned key too), or the page the user typed in Echo's box
+(`askAddress`, once). Like every fetch it follows no redirect, and in a run Echo started it is allowed or refused as
+`ctx.http.fetch` is. Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
+`User-Agent: Mozilla/5.0 (compatible; Echo)`, `Accept-Encoding: identity`. Evidence: `jshost::web`
+
+- `await ctx.web.read(url, {max, timeout, images})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
+  caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}`. `url` is the
+  address asked for (no redirect followed: a page that moved rejects with its 3xx). HTML only (`text/html`,
+  `application/xhtml+xml`; anything else rejects "this is <type>, not a web page"), never compressed (a
+  `Content-Encoding` other than identity rejects before its body is read), 5 MB (`max` less) read as it comes and
+  stopped past it, 30 s (`timeout` less); the charset the server or the page names (else UTF-8; bytes that aren't in it
+  become �). Off the plugin's 5 s slice, as every async service.
+  - `markdown`: the main part (the largest `<article>`, else `<main>`, else `<body>`) without scripts, styles,
+    navigation, headers, footers, asides, forms, frames, objects, SVG or templates; headings, paragraphs, lists, code,
+    tables, links and pictures kept. The title (its first `<h1>`, else JSON-LD's headline, else `og:title`, else
+    `<title>`) isn't repeated in it. A page that builds itself with JavaScript is never run: what it embeds — JSON-LD
+    (an article's `articleBody`, `headline`, `author`, `datePublished`, `image`), a framework's JSON state
+    (`__NEXT_DATA__`, `__NUXT_DATA__`, `application/json` scripts: its strings that read as prose, HTML in them read as
+    HTML), `<noscript>` — is read as data, and its text is taken when clearly fuller than the HTML's (`source`: `html`,
+    `json-ld`, `state`, `noscript`, or `meta` for an Open Graph description alone). `needs_js`: under 200 characters of
+    text on a page with scripts.
+  - Links: absolute `http://` / `https://` only (relative ones against `url`); `javascript:`, `data:`, `file:`,
+    `mailto:`, the page's own anchors, an address with a user part (`https://bank.example@evil.example`) and one over
+    2 KB once resolved are their words. `links` lists the main part's, each once (2,000 at most), with its text (500
+    characters at most); a link inside a link isn't listed again (a browser never nests them).
+  - Pictures: in place as `![alt](src)`, a figure's caption under it as text; `images` lists each once (500 at most,
+    its `alt` and `caption` 500 characters at most; a caption leaves out figures inside it),
+    from `<img>` (`srcset`'s largest, a lazy `data-src`), `<picture>`'s largest source, then `og:image` and JSON-LD's;
+    `data:` and a picture whose page-given width or height is under 32 left out.
+  - The page's words are never markup: outside code, every ASCII mark with a meaning to Markdown or GFM wherever it
+    stands is backslash-escaped (`` \ ` * _ ~ [ ] ( ) < > | # ! { } ``), an `&` only where it starts an entity (`&#…`,
+    `&name;`), and at a line's start (after its indent) a `-`, `+` or `=` (`\-`) and digits with a `.` (`1\.`); an inline code span is fenced one backtick longer than the longest run in it and never touches another
+    backtick (a space between), and in a table's cell code holding a `|` is escaped text; a `<pre>` is fenced by
+    backticks one longer than its longest run (never tildes); a link's or picture's address has `|` and `` ` ``
+    percent-encoded. Control characters and invisible direction and joining marks (U+200B–U+200F, U+202A–U+202E,
+    U+2060–U+2064, U+2066–U+2069, U+FEFF) are dropped from the text, title, links and pictures. Its work is bounded:
+    256 levels of nesting (deeper elements keep their text), 250,000 elements and text pieces (`truncated`: the rest
+    left out), 2 MB of each embedded JSON. Its output is bounded too, checked as it is written: the Markdown is at most
+    ten times the HTML and 20 MB, one budget for the main text and one for each alternative (all of a page's
+    noscripts together, all of its framework state together). A cut falls only between blocks or a paragraph's
+    lines: a fenced block, a heading, a picture is left out whole; a table's rows and a paragraph's lines are kept
+    while they fit. A table keeps 64 columns; list items have a marker and indent by its width for 8 levels of items
+    (lists without items don't count; a deeper item's text sits at the 8th level's indent, with no marker); a numbered
+    list starts at 1,000,000 at most (`truncated` when something was left out). Evidence: `web::read::read`
+  - `images: 'save'` also downloads its pictures: each entry gets `saved` — a file handle `{file, name, size, type}`
+    (§ Folders and files: `ctx.files.read`, `ctx.fs.copyIn`) — or `error`, why not. 50 pictures, 10 MB each, 50 MB and
+    2 minutes for a page; PNG, JPEG, GIF, WebP, AVIF and SVG only (by the answer's type; Echo never shows an SVG: the
+    folder picture route serves raster only). Saved in the store's `cache/web/` (swept with `cache/`) as `NN.<ext>`;
+    the Markdown keeps each picture's `src`, and the plugin maps `src` → `saved.name` when it writes them elsewhere.
+    A picture is fetched as anything the plugin may reach — or, **the one widening**, as a browser shows a page: a page
+    on the public internet may have Echo fetch its pictures from their own hosts though the plugin wasn't granted them,
+    only these pictures, GET only, https (http only for an http page), port 80 or 443 (or the page's own port on the
+    page's own host), a host name or an IPv4 address (an IPv6 address written as one refused), and only from a public
+    address: Echo looks the host up (10 s at most, within the 2 minutes), refuses it when any of its addresses is this
+    computer or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
+    or tunnels to an IPv4 address (IPv4-compatible and -translated, 6to4, Teredo, local-use NAT64; v4-mapped and NAT64
+    only to a public IPv4), an address written as a number other than plain IPv4 or IPv6 refused too, and connects to
+    the address it checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
+    may reach. Evidence: `jshost::web::picture_reach`
+- `await ctx.web.fetch(url, {max})` → a file handle `{file, name, size, type}` for one file the plugin may reach (the
+  same rules; any type), 10 MB (`max` up to 50 MB, what `ctx.fs.copyIn` copies), 2 minutes; `name` the address's last
+  segment in letters, digits, `.`, `_`, `-`.
+- `await ctx.web.markdown(html, {base})` → the same as `read` for HTML the plugin has (a mail's body, a page it fetched
+  itself), without `url` and `bytes`; `base` an http(s) address of 2 KB at most for its relative links (none: they are
+  text). 5 MB.
+  Nothing is fetched. Also for a page's DOM rendered elsewhere.
+
+What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its
+links and pictures only as that allows: § Host half) — never as HTML of its own, never in a prompt as instructions.
+
+| Rejected | When |
+|---|---|
+| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it) |
+| the answer | not 2xx (a 3xx: "it moved", never followed), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
+
 ## Claude runs
 
 - `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})`, only with `claude` in `uses`. It runs
@@ -500,6 +580,22 @@ Windows), so a plugin that wants a new folder (a new vault) just asks for one; t
 given. In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Other apps' files: as
 named in `uses.files.read`, with `ctx.system.readFile(entry)`. Evidence: `app::choose_folder`, `plugins::app_file`
 
+Hidden files and folders (a name starting with `.`) are read, never written — but for these, by their exact names
+(`.Claude` is not `.claude`; a link or a Windows short name checked as what it reaches), which `ctx.fs.write`,
+`append`, `move` (to and from), `remove` and `copyIn` and `ctx.git.commit` take as files, `ctx.fs.mkdir` and an empty
+folder's `remove` as folders. A name refused (`community-plugins.json`, `core-plugins.json`) is refused in any case, as
+APFS and NTFS find it. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
+- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`; not `community-plugins.json` or `core-plugins.json`, which switch Obsidian plugins on); Markdown in a
+  skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
+  `<file>` not hidden, ending in `.md`), each Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"); only written whole by `ctx.fs.write` — `append`,
+  `copyIn` and a `move` into `.claude/skills/**` are refused, and `ctx.git.commit` refuses a file there that fails the
+  check;
+- folders: `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
+  place;
+- everything else hidden is refused ("is hidden"): `.claude/settings*.json`, `.claude/hooks`, `agents`, `commands`,
+  anything under `.claude` that isn't such Markdown (`SKILL.md.js` too), `.obsidian/plugins`, `themes`, `snippets`, `community-plugins.json`, `core-plugins.json`,
+  `.git/**`, `.mcp.json`, `.gitattributes`, `.env`, a hidden note.
+
 Files the user hands a plugin come as **handles** `{file, name, size}`: `file` an opaque id of that plugin's alone (another
 plugin's is refused as one that isn't there), never the path; kept in the process's memory for an hour (1,000 at most).
 No line on the sheet: handing a file over is the user's own act. Evidence: `jshost::files::make`
@@ -512,7 +608,7 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
-  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
+  it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
 - `ctx.fs.read(root, path, max)` → its text, `max` bytes (1 MB by default, 4 MB at most), bytes that aren't UTF-8 as
   U+FFFD; `ctx.fs.read(root, path, {max, strict: true})` throws "not UTF-8: <path>" instead (a character `max` cuts at
@@ -859,6 +955,7 @@ Evidence: `jshost::work::check_rows`
   (a document listener), `listenWindow` (a window listener), `onUnload(fn)` (its own cleanup: timers, observers),
   `slots.list` / `slots.add` on a known slot, `panels.add`, `showPanel(view)` (one of its panels),
   `claude.session(opts)` (Claude Code in a folder it was given, on the user's click: § Claude runs),
+  `claude.installSkill(name, md)` / `claude.removeSkill(name)` (a skill in the user's own Claude Code, on the user's click: below),
   `system.reveal(root, path)` (a file of a folder it was given shown in Finder / Explorer, on the user's click: below),
   `openEchoPanel(view)` (one of Echo's), `activities.add`, `settings.add` / `section`, `palette.add`, `widgets.draw`,
   `where()` (the activity and Settings section shown, and `recall`: whether Recall is on), `go(hash, {replace}?)` (`replace: true`: the address changes without a history step, so Back skips it, and a hashchange fires, so the window shows the page as on a real one; without it a new history step; the hash it is already at only redraws), `render()`, `markdown(md, opts)` and
@@ -952,6 +1049,19 @@ Evidence: `jshost::work::check_rows`
   control character, or a `\\?\` path, is refused; a closing `\` left off). On test data
   (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it opens nothing and logs `reveal <path>` to the open log. Evidence:
   `window::plugins::reveal_target`, `app::reveal_command`
+- `ctx.claude.installSkill(name, md)` / `ctx.claude.removeSkill(name)` (manifest `uses.skills: true`, the plugin
+  on; client half only — the host half's `ctx.claude` has neither): a skill in the user's own Claude Code, not Echo's
+  sessions — `<Claude Code folder>/skills/<name>/SKILL.md`, the folder `CLAUDE_CONFIG_DIR` when Echo has it, else
+  `~/.claude`. `async`: each rejects, before anything is sent, unless the page has the user's click or key
+  (`copyAllowed`); then the page asks Echo (`POST /api/plugin/<id>/install-skill` with `{name, md}`,
+  `/remove-skill` with `{name}`; any other method refused), which answers `{value: true}` or `{error}`. `name` 1–64 of
+  `a-z`, `0-9`, `-`; `md` the whole `SKILL.md`, not empty, 256 KB at most, Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"), written whole (replacing the file, never
+  through a link); nothing else of a skill is written. A skill folder that is there already is never changed unless
+  this plugin added it — Echo keeps who added which in `<config dir>/plugins/claude-skills.json` (`{name: plugin id}`),
+  never in the skill; a link in its place, or as its `SKILL.md`, is refused. `removeSkill` takes out only a skill this
+  plugin added: its `SKILL.md`, and its folder when nothing else is in it. Removing the plugin (`echoctl plugin
+  remove`, with `--delete-data` or not) takes out every skill it added. On test data (`ECHOCTL_TEST_OPEN_LOG_ONLY`) it
+  writes only to the test's own `CLAUDE_CONFIG_DIR`, refused when that isn't set. Evidence: `plugins::claude_skills`
 - `ctx.widgets.draw(widget, ({data, size, height, fits, theme}) => HTML)` draws a `page` widget from `data` (given by `provide` /
   `set`). Evidence: `pluginWidgetView` (window script)
 - `ctx.slots.add('thread.profile', {id, label, render(thread) → HTML, after?(box, thread)})`: `thread` is

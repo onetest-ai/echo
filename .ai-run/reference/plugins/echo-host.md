@@ -16,6 +16,11 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   puts it into place with `paths::place_new`, which never replaces a file, the part removed either way. The lock holds only Echo's own
   processes: another program changing a granted folder's file meanwhile isn't held off. Evidence:
   `jshost::folders::put`
+- `ctx.web.read(…, {images: 'save'})` saves a page's pictures as `cache/web/<16 hex of the page's address>/NN.<ext>`
+  (`NN` the picture's place on the page, the extension from its type, never a name the page gave) and `ctx.web.fetch`
+  a file as `cache/web/files/<16 hex>/<name>` (the address's last segment, letters, digits, `.`, `_`, `-`), each
+  written to a `.part` beside it first and handed to the plugin as a handle (`jshost::files`); swept with `cache/`.
+  Evidence: `jshost::web::save`
 - `ctx.fs.snapshot` copies into `cache/snapshots/<16 hex>/` of the store, each file opened without following a link
   (`O_NOFOLLOW`; Windows: the reparse point opened as itself and refused) and refused unless regular, folders checked
   inside the root as they are entered; a file that can't be opened or read, or that grows past 50 MB while it is copied, is left out (its part removed), and on a

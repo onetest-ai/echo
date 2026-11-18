@@ -329,10 +329,7 @@ fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Optio
     out
 }
 
-/// The user's own Claude Code folder: `CLAUDE_CONFIG_DIR` when Echo has it, else `~/.claude`.
-fn own_claude_folder() -> PathBuf {
-    std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| paths::user_home().join(".claude"))
-}
+use crate::paths::own_claude_folder;
 
 /// A Claude account profile's own Claude Code folder (None: the user's own, `~/.claude`).
 fn claude_folder(profile: &str) -> Option<PathBuf> {

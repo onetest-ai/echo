@@ -40,6 +40,138 @@ pub(super) fn reach(id: &str, url: &str) -> Result<Reach> {
     Ok(Reach { listed: false, fake: test_host(url, &hosts)? })
 }
 
+/// `reach`, or — for a plain GET (no headers, no body) — the address the user just typed in Echo's box for this
+/// plugin, once (`typed`). Every request a plugin's host half makes to a page or file is let through here.
+pub(super) fn admit(id: &str, url: &str, plain_get: bool) -> Result<Reach> {
+    match reach(id, url) {
+        Ok(r) => Ok(r),
+        Err(_) if plain_get && super::typed::take(id, url) => Ok(Reach { listed: false, fake: None }),
+        Err(e) => Err(e),
+    }
+}
+
+/// An answer's head as `get_capped` read it: its status, type (`text/html`: lower case, no parameters), charset (as
+/// the server named it) and `Content-Encoding` (lower case, "" for none).
+pub(super) struct Head {
+    pub status: u16,
+    pub kind: String,
+    pub charset: Option<String>,
+    pub encoding: String,
+}
+
+/// A plain GET for `ctx.web` (a page, its pictures, a file): `fetch`'s curl and checks — reached as `reach` let it,
+/// the key the user pinned, no redirect followed — and also no cookies, no credentials, a generic User-Agent, nothing
+/// compressed asked for. The head goes to `accept` first, which may refuse it (nothing more is read); the body is
+/// written to `sink` as it comes and the request stopped once it passes `max` bytes (never all held first); `secs`
+/// in all. `resolve` (`host:port:address`): the one address curl may connect to, checked by the caller; a request
+/// with it never goes through a proxy (the proxy would look the name up again). The body's size.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn get_capped(
+    id: &str,
+    url: &str,
+    reach: &Reach,
+    max: u64,
+    secs: u64,
+    accept_types: &str,
+    resolve: Option<&str>,
+    accept: &dyn Fn(&Head) -> Result<()>,
+    sink: &mut dyn std::io::Write,
+) -> Result<(Head, u64)> {
+    let target = reach.fake.as_deref().unwrap_or(url);
+    if target.contains(['\0', '\n', '\r']) {
+        bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");
+    }
+    let mut cfg = curl_head(target, "GET", reach.fake.is_some())
+        .replace("max-time = 60\n", &format!("max-time = {secs}\nconnect-timeout = {}\n", secs.min(15)))
+        .replace(&format!("max-filesize = {SMALL}\n"), &format!("max-filesize = {max}\n"))
+        .replace("write-out = \"\\n%{http_code}\"\n", "");
+    cfg.push_str("include\nuser-agent = \"Mozilla/5.0 (compatible; Echo)\"\nheader = \"Accept-Encoding: identity\"\n");
+    cfg.push_str(&format!("header = {}\n", curl_quote(&format!("Accept: {accept_types}"))));
+    if let Some(r) = resolve {
+        cfg.push_str(&format!("resolve = {}\nnoproxy = \"*\"\n", curl_quote(r)));
+    }
+    cfg.push_str(&pin_lines(id, target, reach).unwrap_or_default());
+    let (mut child, _cfg) = curl(&cfg, None)?;
+    let (mut out, mut err) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
+    let said = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = (&mut err).take(64 << 10).read_to_string(&mut s);
+        s
+    });
+    let stop = |child: &mut std::process::Child| {
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let size = |n: u64| match n {
+        n if n >= 1 << 20 => format!("{} MB", n >> 20),
+        n if n >= 1 << 10 => format!("{} KB", n >> 10),
+        n => format!("{n} bytes"),
+    };
+    let mut buf = vec![0u8; 64 << 10];
+    let mut head_bytes: Vec<u8> = vec![];
+    let mut head: Option<Head> = None;
+    let mut body: u64 = 0;
+    loop {
+        let n = match out.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        let mut piece = &buf[..n];
+        let mut rest_of_head = vec![];
+        if head.is_none() {
+            head_bytes.extend_from_slice(piece);
+            // Header blocks until the answer's own: a 1xx, or a proxy's "Connection established", comes first.
+            while let Some(end) = head_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                let block = String::from_utf8_lossy(&head_bytes[..end]).into_owned();
+                let after = head_bytes.split_off(end + 4);
+                head_bytes = after;
+                let status = block.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+                if (100..200).contains(&status) || block.lines().next().is_some_and(|l| l.to_ascii_lowercase().contains("connection established")) {
+                    continue;
+                }
+                let field = |k: &str| block.lines().skip(1).filter_map(|l| l.split_once(':')).find(|(n, _)| n.trim().eq_ignore_ascii_case(k)).map(|(_, v)| v.trim().to_string());
+                let ctype = field("content-type").unwrap_or_default();
+                let mut parts = ctype.split(';');
+                let kind = parts.next().unwrap_or("").trim().to_ascii_lowercase();
+                let charset = parts.filter_map(|p| p.split_once('=')).find(|(k, _)| k.trim().eq_ignore_ascii_case("charset")).map(|(_, v)| v.trim().trim_matches('"').to_string());
+                let h = Head { status, kind, charset, encoding: field("content-encoding").unwrap_or_default().to_ascii_lowercase() };
+                if let Err(e) = accept(&h) {
+                    stop(&mut child);
+                    return Err(e);
+                }
+                head = Some(h);
+                rest_of_head = std::mem::take(&mut head_bytes);
+                break;
+            }
+            if head.is_none() {
+                if head_bytes.len() > 64 << 10 {
+                    stop(&mut child);
+                    bail!("the answer's head is over 64 KB");
+                }
+                continue;
+            }
+            piece = &rest_of_head;
+        }
+        body += piece.len() as u64;
+        if body > max {
+            stop(&mut child);
+            bail!("the answer is over {}: Echo stopped reading it", size(max));
+        }
+        sink.write_all(piece)?;
+    }
+    let status = child.wait()?;
+    let said = said.join().unwrap_or_default();
+    if !status.success() {
+        return Err(match status.code() {
+            Some(28) => anyhow!("the answer took longer than {secs} s"),
+            Some(63) => anyhow!("the answer is over {}: Echo stopped reading it", size(max)),
+            code => failed(id, target, reach, code, &said),
+        });
+    }
+    let head = head.ok_or_else(|| anyhow!("the answer had no head"))?;
+    Ok((head, body))
+}
+
 /// A file the user handed the plugin, sent as a request's body: opened by Echo, its bytes given to curl's stdin as
 /// they go (never in memory), exactly `size` of them.
 pub(super) struct Upload {
@@ -160,17 +292,9 @@ fn failed(id: &str, url: &str, reach: &Reach, code: Option<i32>, stderr: &str) -
 /// minutes — and the answer is {status, body: "", saved, bytes}: the body is text, so audio and images can't come
 /// through it. With `file: <handle>` that file is the body (up to 512 MB, 15 minutes).
 pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
-    let reach = match reach(id, url) {
-        Ok(r) => r,
-        // An address the user just typed in Echo's box: once, a plain GET (`typed`).
-        Err(e) => {
-            let get = opts["method"].as_str().unwrap_or("GET").eq_ignore_ascii_case("GET");
-            if !get || opts.get("body").is_some_and(|b| !b.is_null()) || opts["headers"].as_object().is_some_and(|h| !h.is_empty()) || !super::typed::take(id, url) {
-                return Err(e);
-            }
-            Reach { listed: false, fake: None }
-        }
-    };
+    let get = opts["method"].as_str().unwrap_or("GET").eq_ignore_ascii_case("GET");
+    let plain_get = get && !opts.get("body").is_some_and(|b| !b.is_null()) && !opts["headers"].as_object().is_some_and(|h| !h.is_empty());
+    let reach = admit(id, url, plain_get)?;
     let url = reach.fake.as_deref().unwrap_or(url);
     if url.contains('\0') {
         bail!("a URL, header or body with a NUL, a line break in a header or a header name that isn't a plain word");

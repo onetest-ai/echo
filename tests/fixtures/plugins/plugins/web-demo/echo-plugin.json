@@ -1,0 +1,9 @@
+{
+  "id": "web-demo",
+  "name": "Web demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: reads pages of a made-up site as Markdown and saves their pictures (tests/cases/plugins/TC-190, TC-191, TC-192).",
+  "main": "main.js",
+  "uses": { "network": { "hosts_from": ["site"] } },
+  "settings": [{ "key": "site", "label": "Site", "type": "string" }]
+}

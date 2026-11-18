@@ -98,6 +98,10 @@
       "source": "./plugins/menu-demo"
     },
     {
+      "id": "web-demo",
+      "source": "./plugins/web-demo"
+    },
+    {
       "id": "run-demo",
       "source": "./plugins/run-demo"
     }
