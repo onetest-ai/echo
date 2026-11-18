@@ -35,7 +35,7 @@ ECHOCTL_PICK_FOLDER="$D/vault" $E plugin call acme-ask-b add
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-ask:main`; click "Ask the vault"; read `#acme-ask` and the bottom panel's tabs | `opened`; the bottom panel has a tab for Acme ask's session (`[data-panel-show="claude-plugin:acme-ask"]`), none for Acme ask B's |
+| 1 | With the helpers: `close` (no session left running, Acme ask B's either, by an earlier attempt of this case); reload `{{base_url}}/`, navigate to `{{base_url}}/#acme-ask:main`; click "Ask the vault"; read `#acme-ask` and the bottom panel's tabs | `opened`; the bottom panel has a tab for Acme ask's session (`[data-panel-show="claude-plugin:acme-ask"]`), none for Acme ask B's |
 | 2 | Navigate to `{{base_url}}/#acme-ask-b:main`; click "Ask the vault"; read `#acme-ask-b` and the bottom panel's tabs; `curl -s "$B/api/ptys"` | `opened`; the bottom panel has both `[data-panel-show="claude-plugin:acme-ask"]` and `[data-panel-show="claude-plugin:acme-ask-b"]`; the list has `claude:plugin:acme-ask` and `claude:plugin:acme-ask-b`, each `"exited":false` |
 | 3 | Reload `{{base_url}}/` (the window reopened: sessions found running); read the bottom panel's tabs (open it with the status bar's "Claude" if it is closed); click the tab "Claude · Acme ask", read the panel; click the tab "Claude · Acme ask B", read the panel | The tabs "Claude", "Claude · Acme ask" and "Claude · Acme ask B"; the first shows `Acme ask · Claude Code in <$D/vault>, as that folder's own project — it reads only; asks each time` above its terminal (`acme fake session in <$D/vault>`), the second `Acme ask B · Claude Code in <$D/vault>, …` above its own |
 
