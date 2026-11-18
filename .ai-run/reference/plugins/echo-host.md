@@ -30,9 +30,13 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   the stores while it runs (taken without waiting: a second run under it is refused), with `k-<key>.pid` (its Claude
   Code, from its start till Echo has reaped it) and `k-<key>.stopped` (written by `ctx.claude.stop` before it stops
   that process group; a run that sees it before starting Claude Code fails `stopped`, one that sees it right after
-  stops it at once), both removed when the run ends. Removing the plugin stops its runs under a key (waiting 10 s at
-  most for each to end); the locks go with its data. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`,
-  `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
+  stops it at once), both removed when the run ends. `k-<key>.gate` is held for a moment by a run taking the key
+  and by `ctx.claude.stop` from its check of the lock through its mark and its read of `.pid` (the process group is
+  stopped after the gate is free again): no run takes the key in between, so a stop's check never refuses a run and
+  its mark never lands on the next run. Each waits for the gate 5 s at most; past that `run({key})` and `stop` fail
+  "the run's key is busy: try again". Removing the plugin stops its runs under a key (waiting 10 s at most for each
+  to end; a gate still busy counts as running); the locks go with its data. Evidence: `claudejob::Keyed`,
+  `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and
   `work.json` there; `threads.json`, `client-values.json` and `work.json` each change under its own lock across
   processes (`.locks/<id>.threads.lock`, `.locks/<id>.clients.lock`, `.locks/<id>.work.lock`); a `threads.json` or
