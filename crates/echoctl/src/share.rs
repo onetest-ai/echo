@@ -453,6 +453,22 @@ pub fn me() -> Result<Value> {
     Ok(json!({"name": name, "email": email}))
 }
 
+/// What Echo records now (`echo.read('recording')`), from what it keeps already: `recording` while the watcher names a
+/// recording (`watch::running_watcher`), else `transcribing` while a call's transcription runs (its marker naming a
+/// live process; the newest such call), else `idle`. `call` is the call's folder name and `stamp` its stamp
+/// (`calls::stamp_of`), both null when idle. No title, no words: what a recording's events give.
+pub fn recording() -> Value {
+    let row = |state: &str, dir: &Path| json!({"state": state, "call": dir.file_name().map(|n| n.to_string_lossy()), "stamp": crate::calls::stamp_of(dir)});
+    if let Some(dir) = crate::watch::running_watcher().and_then(|w| w.recording) {
+        return row("recording", Path::new(&dir));
+    }
+    let live = |d: &Path| std::fs::read_to_string(d.join(crate::transcribe_marker())).ok().and_then(|t| t.split_whitespace().next().and_then(|p| p.parse::<u32>().ok())).is_some_and(crate::app::process_alive);
+    match crate::calls::all_calls().into_iter().rev().find(|d| live(d)) {
+        Some(dir) => row("transcribing", &dir),
+        None => json!({"state": "idle", "call": null, "stamp": null}),
+    }
+}
+
 /// The parts of About me a plugin may ask for (`calls::me_parts`); all but `patterns` when it names none — as the
 /// Brain's readers, never how the user works unless asked.
 const ME_KINDS: &[&str] = &["identity", "people", "terms", "style", "patterns"];

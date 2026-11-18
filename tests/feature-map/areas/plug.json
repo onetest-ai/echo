@@ -840,6 +840,42 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-127",
+   "feature": "A plugin names a Claude run by a key of its own (`ctx.claude.run({key})`: 1 to 64 letters, digits, `.`, `_` or `-`) and stops it (`await ctx.claude.stop(key)` → true, or false when none of its runs under that key is running): Claude Code and every process it started are stopped (macOS and Windows), wherever the run is (the app or a terminal's `echoctl plugin call`); the pending run fails with `stopped`, its log says \"stopped by the plugin\" and its record (`permissions.json`) `stopped: true`; a copy run's snapshot goes. A second run under a key still running is refused; a key names only the plugin's own runs (another plugin's run under the same key goes on); a key Echo can't take is refused; stopping needs `uses.claude`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-128",
+   "feature": "A plugin that hears a recording's events (`uses.events.on` names `recording_started`, `recording_stopped` or `transcribed`) reads what Echo records now (`ctx.echo.read('recording')` → {state: idle | recording | transcribing, call, stamp}): `recording` while the watcher records a call or memo, else `transcribing` while a call's transcription runs (the newest), else `idle`; `call` the call's folder name and `stamp` its stamp, both null when idle; no line of its own on the sheet; a plugin that hears none of them is refused",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-129",
+   "feature": "A plugin walks its own store as it walks a folder it was given (`await ctx.store.walk(path, {ext, hidden, max, sha})` → [{path, size, mtime, sha?}]): the files under that folder of its store ('' the whole store), paths relative to the store as `ctx.store.read` takes them, off its time slice; dot names left out unless `hidden`, no link followed, nothing outside the store; a folder that isn't there gives []; a path out of the store is refused",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-130",
+   "feature": "A plugin's copy run leaves out of its snapshot what `exclude` names (`ctx.claude.run({folder, mode: 'copy', exclude})`, as `ctx.fs.snapshot`'s: more than 100 refused); `exclude` in another mode or without a folder is refused before Claude Code starts",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

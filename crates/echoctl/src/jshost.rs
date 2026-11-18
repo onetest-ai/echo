@@ -160,6 +160,8 @@ const PRELUDE: &str = r#"
       path: (path) => call('store.path', path || ''),
       /** What it keeps in its store (`dir`: one folder of it): {bytes, files} — its own files only, not its settings. */
       size: (dir) => call('store.size', dir || ''),
+      /** As ctx.fs.walk, under its store's folder `path` ('' the store): [{path, size, mtime, sha?}]. */
+      walk: (path, opts) => later('store.walk', [String(path || ''), opts || {}]),
     },
     /** Its `cache/` (Echo removes what is there over 7 days): `size()` {bytes, files}. */
     cache: { size: () => call('store.size', 'cache') },
@@ -266,6 +268,8 @@ const PRELUDE: &str = r#"
     },
     claude: {
       run: (opts) => later('claude.run', opts),
+      /** Its run under `key` (run's `key`) stopped: true, or false when none was running; that run fails "stopped". */
+      stop: (key) => later('claude.stop', String(key)),
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
       hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
       /** Install it (user scope of the default profile's Claude Code): only the one `uses.channel.plugin` names. */
@@ -289,7 +293,7 @@ const PRELUDE: &str = r#"
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
      *  client, q, since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves
      *  it out) | 'calls' (opts: q, since, until, thread, client, limit) | 'calendar' (opts: from, to; the meetings Echo
-     *  last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
+     *  last read) | 'me' ({name, email}) | 'recording' ({state, call, stamp}: hearing a recording's events). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
      *  template, else {text, name, parts: {identity, people, terms, style, patterns}, hash} — only the kinds asked (all
@@ -1259,6 +1263,11 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 Value::Array(a) => (a.first().and_then(|k| k.as_str()).unwrap_or("").to_string(), a.get(1).cloned().unwrap_or(Value::Null), a.get(2).cloned().unwrap_or(Value::Null)),
                 _ => (s(arg), Value::Null, Value::Null),
             };
+            // What Echo records now: for a plugin that hears its recordings, with no line of its own on the sheet.
+            if kind == "recording" {
+                plugins::may_read_recording(id, &plugins::read_manifest(&package_dir(id)?)?.uses)?;
+                return Ok(crate::share::recording());
+            }
             // `source` is read under `sources`'s grant too, and the other way round: both are the same data.
             let asked = |k: &str| uses(id, "echo").is_ok_and(|u| u["read"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(k))));
             let granted = asked(&kind) || (matches!(kind.as_str(), "source" | "sources") && (asked("source") || asked("sources")));
@@ -3568,6 +3577,43 @@ mod tests {
         // What it didn't ask for isn't read.
         assert!(read("threads", Value::Null).unwrap_err().to_string().contains("didn't ask to read your threads"));
         plugins::remove("reader", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_that_hears_recordings_reads_what_echo_records_now_and_no_other_plugin_does() {
+        let (_env, root) = paths::testenv::folders("jshost-recording-read");
+        let call = paths::calls_dir().join("2026-11-18_100000-acme-sync");
+        std::fs::create_dir_all(&call).unwrap();
+        std::fs::write(call.join("meta.json"), r#"{"app": "teams", "title": "Acme sync", "started_at": "2026-11-18T10:00:00+02:00"}"#).unwrap();
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('rec', () => ctx.echo.read('recording'))
+            }
+            "#;
+        let sheet = install_made_up(&root, "listener", json!({"events": {"on": ["transcribed"]}}), main);
+        assert!(sheet.iter().all(|l| !l.contains("record") || l.starts_with("Knows when")), "no line of its own: {sheet:?}");
+        install_made_up(&root, "lister", json!({"echo": {"read": ["calls"]}}), main);
+        let rec = |id: &str| call_loaded(id, "rec", &Value::Null);
+        assert_eq!(rec("listener").unwrap(), json!({"state": "idle", "call": null, "stamp": null}));
+        // A transcription whose process is gone (a crash) isn't one.
+        std::fs::write(call.join(crate::transcribe_marker()), "4000000").unwrap();
+        assert_eq!(rec("listener").unwrap()["state"], "idle");
+        // Transcribing: its marker names a live process.
+        std::fs::write(call.join(crate::transcribe_marker()), std::process::id().to_string()).unwrap();
+        assert_eq!(rec("listener").unwrap(), json!({"state": "transcribing", "call": "2026-11-18_100000-acme-sync", "stamp": "2026-11-18_100000"}));
+        // Recording: the watcher names the call (its heartbeat fresh); ahead of a transcription.
+        let rec_dir = paths::calls_dir().join("2026-11-18_110000-globex-pilot");
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        let watch = json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now(), "app": "teams", "in_call": true, "armed": false, "recording": rec_dir.display().to_string()});
+        std::fs::create_dir_all(paths::state_dir()).unwrap();
+        std::fs::write(paths::state_dir().join("watch.json"), watch.to_string()).unwrap();
+        assert_eq!(rec("listener").unwrap(), json!({"state": "recording", "call": "2026-11-18_110000-globex-pilot", "stamp": "2026-11-18_110000"}));
+        // A plugin that doesn't hear recordings can't read it.
+        assert!(rec("lister").unwrap_err().to_string().contains("didn't ask to hear about your recordings"));
+        for id in ["listener", "lister"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 

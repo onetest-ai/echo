@@ -155,6 +155,11 @@ Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `sha
   `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered. The same for
   `client-values.json` (write and remove), changed through `ctx.clients.set`.
   Evidence: `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file`
+- `await ctx.store.walk(path, {ext, hidden, max, sha})` → `[{path, size, mtime, sha?}]`: as `ctx.fs.walk`, under the
+  store's folder `path` (`""` the store) — its paths relative to the store (what `ctx.store.read` takes), off the
+  time slice, 20,000 rows by default and 100,000 at most, dot names only with `hidden`, no link followed and nothing
+  outside the store, `sha` for a file of 64 MB at most; a folder that isn't there gives `[]`. Evidence:
+  `jshost::folders::store_walk`
 - `ctx.http.fetch(url, {save: "<store path>"})` saves audio or a picture, shown from `/plugin/<id>/store/<path>` (media
   kinds only). Echo removes what lies in `cache/` over 7 days; the rest is the plugin's to remove with `ctx.store.remove`.
   Evidence: `jshost::sweep_store`, `window::plugins::store_file`
@@ -283,6 +288,15 @@ too). A plugin never sets the address: not by its settings, its store or its win
 
   What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`).
   Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
+- A run under a key of its own: `ctx.claude.run({..., key})`, `key` 1 to 64 letters, digits, `.`, `_` or `-` (any
+  other refused). One run at a time per plugin and key, across Echo's processes (the app and a terminal's
+  `echoctl plugin call`): a second while one runs is refused ("a run with key “…” is running already"). `await
+  ctx.claude.stop(key)` (needs `uses.claude`) stops the plugin's own run under that key — Claude Code and every process
+  it started (its process group; Windows: `taskkill /T /F`), wherever it runs — and gives `true`; `false` when none
+  runs. The stopped `run` fails with the message `stopped`; its log ends "stopped by the plugin (ctx.claude.stop)" and
+  its record (`permissions.json`) has `stopped: true`; a `copy` run's snapshot is removed. A key names only the
+  calling plugin's runs: another plugin's run under the same key goes on. Evidence: `claudejob::Keyed`,
+  `claudejob::stop_keyed`
 - In a folder it was given (needs `uses.folders`): `await ctx.claude.run({folder, path, mode, prompt, title, profile,
   model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
   Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load
@@ -298,7 +312,9 @@ too). A plugin never sets the address: not by its settings, its store or its win
     comes along; never `.git` or `.obsidian/plugins`, its caps and its 3-snapshot limit), the folder itself untouched;
     the result's `snapshot` is the snapshot's answer (`{path, files, bytes, skipped, why}`), for the plugin to compare
     with the folder and apply what the user accepts (`ctx.fs.write`); nothing is applied by Echo. A `path` the
-    snapshot left out is refused before the run, and a run that fails removes its snapshot.
+    snapshot left out is refused before the run, and a run that fails removes its snapshot. `exclude` (only with
+    `copy`; in another mode or without a folder refused) is the snapshot's: the paths under the root it leaves out,
+    100 at most.
 
   Its permissions are the user's setting for routines (Settings → AI & minutes → Claude's permissions), by
   `folder_args::permission_args`: Auto — `--permission-mode auto` where the profile's model has auto mode, else
@@ -396,7 +412,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 ## Echo's data
 
 `ctx.echo.read(kind, arg)` for kinds in `uses.echo.read`: `clients`, `threads`, `people`, `dictionary`, `sources`,
-`source`, `calls`, `calendar`, `me`; a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
+`source`, `calls`, `calendar`, `me` — and `recording` with a recording's events in `uses.events.on` (below); a `threads` row is `{id, name, client, stage, group}` of an open thread (`group`:
 `pursuit`, `delivery`). `ctx.echo.dictionary.add(...)` under `uses.echo.write: ["dictionary"]`. Evidence:
 `plugins::ECHO_READS`, `share::dictionary_add`
 
@@ -408,6 +424,7 @@ The one shape for every routine, whoever's it is: the user's (the Scheduler's ow
 | `calendar` | the meetings Echo has read from your calendar | `ctx.echo.read('calendar', {from, to})` → the agenda Echo last read (no request to Microsoft 365), by start: `{id, subject, start, end, organizer, attendees, join_url, response, threads, client}` (`threads`: the ids of the threads Echo puts it in; `client` `{id, name}` when they have one between them, else `null`); `from` / `to` `YYYY-MM-DD` by its start's day in your time zone (as Today's), both days in |
 | `people` | who the people in your threads are (their names, addresses and organisations) | `ctx.echo.read('people')` → `{key, name, aliases, email, also, organisation, client, title, threads, link}` of everyone in your open threads: `aliases` the other names Echo knows them by (merged in People), `also` their other addresses, `client` their organisation's id; `key` is what a call's `participants[].person` names |
 | `me` | your name and email | `ctx.echo.read('me')` → `{name, email}` (About me's; the email else Microsoft 365's account; `null` each when unknown) |
+| `recording` | no line of its own: granted with `uses.events.on` naming `recording_started`, `recording_stopped` or `transcribed` ("Knows when …"), not in `uses.echo.read` | `ctx.echo.read('recording')` → `{state, call, stamp}`: `state` `recording` while Echo records a call or memo, else `transcribing` while a call's transcription runs (the newest such call), else `idle`; `call` the call's folder name and `stamp` its stamp (§ Events), both `null` when idle. Evidence: `share::recording`, `plugins::may_read_recording` |
 
 **About me** (`uses.me`, the host half only): `await ctx.me({kinds})` → `null` when About me (Settings → About me) is
 missing, empty or still the template; else `{text, name, parts, hash}`. `kinds` are About me's parts: `identity` (name,

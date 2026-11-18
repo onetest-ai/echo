@@ -49,6 +49,7 @@ pub fn forget(id: &str) {
             let _ = std::fs::remove_file(&p);
         }
     }
+    crate::claudejob::forget_keys(id);
 }
 
 pub(super) fn sha_hex(bytes: &[u8]) -> String {
@@ -334,10 +335,29 @@ fn has_ext(p: &Path, exts: &[String]) -> bool {
 /// `ctx.fs.walk(root, {path, ext, hidden, max, sha})`: [{path, size, mtime, sha?}].
 pub(super) fn walk(id: &str, root: &str, o: &Value) -> Result<Value> {
     let (root, base) = walk_base(id, root, o)?;
+    Ok(walk_rows(&root, &base, o))
+}
+
+/// `ctx.store.walk(path, {ext, hidden, max, sha})`: as `ctx.fs.walk`, in the plugin's own store (`path` a folder in it,
+/// "" the store) — no link followed, nothing outside the store; `[]` when the folder isn't there.
+pub(super) fn store_walk(id: &str, path: &str, o: &Value) -> Result<Value> {
+    let store = plugins::data_dir(id);
+    std::fs::create_dir_all(&store)?;
+    let root = dunce::canonicalize(&store)?;
+    // A folder in it once links are followed, else nothing.
+    let Ok(base) = dunce::canonicalize(store_path(id, path)?) else { return Ok(json!([])) };
+    if !base.is_dir() || !base.starts_with(&root) {
+        return Ok(json!([]));
+    }
+    Ok(walk_rows(&root, &base, o))
+}
+
+/// The files under `base` (inside the canonical `root`) as `ctx.fs.walk` gives them.
+fn walk_rows(root: &Path, base: &Path, o: &Value) -> Value {
     let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(20_000).min(100_000) as usize;
     let (exts, sha) = (exts(o), o["sha"] == true);
     let mut out = vec![];
-    walk_files(&root, &base, o["hidden"] == true, &|_| false, &mut |rel, p, m| {
+    walk_files(root, base, o["hidden"] == true, &|_| false, &mut |rel, p, m| {
         if has_ext(p, &exts) {
             let mut row = json!({"path": rel, "size": m.len(), "mtime": secs(m)});
             if sha && m.len() <= SHA_MAX {
@@ -347,7 +367,7 @@ pub(super) fn walk(id: &str, root: &str, o: &Value) -> Result<Value> {
         }
         out.len() < max
     });
-    Ok(json!(out))
+    json!(out)
 }
 
 /// `ctx.fs.search(root, query, {path, ext, hidden, max, caseSensitive})`: the lines holding `query` as it is typed
@@ -520,23 +540,27 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
 
 /// `ctx.claude.run({folder, path, mode})`: the run goes into a folder given to the plugin (`uses.folders`; `edit` also
 /// `folders.write`), at `path` inside it — or, for `copy`, into a snapshot of it (`snapshot`, dot names too, so the
-/// folder's `.claude` comes along), whose answer is the run's `snapshot` for the plugin to compare and apply. No
-/// `folder`: the run as before (`mode` and `path` then refused).
+/// folder's `.claude` comes along; less the paths `exclude` names, as `ctx.fs.snapshot`'s), whose answer is the run's
+/// `snapshot` for the plugin to compare and apply. No `folder`: the run as before (`mode`, `path` and `exclude` then
+/// refused); `exclude` only with `copy`.
 pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
     use crate::claudejob::{FolderMode, InFolder};
     let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
     if root.is_empty() {
-        if !arg["mode"].is_null() || !path.is_empty() {
-            bail!("a run's mode and path go with a folder it was given (folder)");
+        if !arg["mode"].is_null() || !path.is_empty() || !arg["exclude"].is_null() {
+            bail!("a run's mode, path and exclude go with a folder it was given (folder)");
         }
         return Ok(None);
     }
     let mode = FolderMode::parse(arg["mode"].as_str().unwrap_or(""))?;
+    if mode != FolderMode::Copy && !arg["exclude"].is_null() {
+        bail!("exclude goes with a copy of the folder (mode “copy”)");
+    }
     let cwd = granted_cwd(id, root, path, mode)?;
     let (cwd, snap) = match mode {
         // The path in the snapshot: a subfolder it left out (`.git`, a cap) refuses the run, and the snapshot goes.
         FolderMode::Copy => {
-            let s = snapshot(id, root, &json!({"hidden": true}))?;
+            let s = snapshot(id, root, &json!({"hidden": true, "exclude": arg["exclude"]}))?;
             let at = store_path(id, s["path"].as_str().unwrap_or(""))?;
             let inner = dunce::canonicalize(&at).map_err(anyhow::Error::from).and_then(|a| crate::grants::inside(&a, path)).and_then(|c| Ok(dunce::canonicalize(c)?));
             match inner {
@@ -604,6 +628,7 @@ mod tests {
               ctx.command('stat', (a) => ctx.fs.stat(r(), a.path, a.opts))
               ctx.command('sha', (a) => ctx.crypto.sha256(a.text))
               ctx.command('walk', async (a) => await ctx.fs.walk(r(), a))
+              ctx.command('storeWalk', async (a) => await ctx.store.walk(a.path, a.opts))
               ctx.command('search', async (a) => await ctx.fs.search(r(), a.q, a.opts))
               ctx.command('snapshot', async (a) => await ctx.fs.snapshot(r(), a))
               ctx.command('storeRead', (a) => ctx.store.read(a.path, a.opts))
@@ -1076,6 +1101,146 @@ mod tests {
         for id in ["reader", "writer", "asker"] {
             plugins::remove(id, true).unwrap();
         }
+        sync();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_copy_run_leaves_out_what_exclude_names_and_exclude_goes_only_with_a_copy() {
+        let (_env, root) = paths::testenv::folders("jshost-folders-claude-exclude");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        crate::ai::set_default("work").unwrap();
+        let vault = root.join("acme-vault");
+        for (f, text) in [("Notes/Acme.md", "# Acme\n"), ("Archive/Old.md", "# Old\n")] {
+            std::fs::create_dir_all(vault.join(f).parent().unwrap()).unwrap();
+            std::fs::write(vault.join(f), text).unwrap();
+        }
+        install(&root, "reader", json!({"claude": {}, "folders": {"what": "vaults"}}));
+        crate::grants::grant("reader", &vault).unwrap();
+        sync();
+        let v = dunce::canonicalize(&vault).unwrap().display().to_string();
+        let claude = |mut a: Value| {
+            a["prompt"] = json!("Index the notes");
+            a["dir"] = json!("runs/x");
+            service_async("reader", "claude.run", &a)
+        };
+        std::fs::write(crate::ai::fake::file(&p, "p.result"), json!({"type": "result", "subtype": "success", "result": "Indexed", "usage": {}}).to_string() + "\n").unwrap();
+        let out = claude(json!({"folder": v, "mode": "copy", "exclude": ["Archive"]})).unwrap();
+        let snap = plugins::data_dir("reader").join(out["snapshot"]["path"].as_str().unwrap());
+        assert!(snap.join("Notes/Acme.md").is_file() && !snap.join("Archive").exists(), "{out}");
+        // Refused before Claude Code starts: over 100 paths, `exclude` in another mode or with no folder.
+        let _ = std::fs::remove_file(crate::ai::fake::file(&p, "p.args"));
+        let many: Vec<String> = (0..101).map(|i| format!("Old{i}")).collect();
+        let why: Vec<String> = [
+            claude(json!({"folder": v, "mode": "copy", "exclude": many})),
+            claude(json!({"folder": v, "mode": "read", "exclude": ["Archive"]})),
+            claude(json!({"exclude": ["Archive"]})),
+        ]
+        .into_iter()
+        .map(|r| r.unwrap_err().to_string())
+        .collect();
+        assert!(why[0].contains("100 paths at most") && why[1].contains("goes with a copy") && why[2].contains("go with a folder"), "{why:?}");
+        assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
+        plugins::remove("reader", true).unwrap();
+        sync();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_plugin_stops_its_own_run_by_its_key_and_another_plugins_run_under_that_key_goes_on() {
+        let (_env, root) = paths::testenv::folders("jshost-folders-claude-stop");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        crate::ai::set_default("work").unwrap();
+        // Every run goes on until it is stopped.
+        std::fs::write(crate::ai::fake::file(&p, "p.hang"), "indexing\n").unwrap();
+        let vault = root.join("acme-vault");
+        std::fs::create_dir_all(vault.join("Notes")).unwrap();
+        std::fs::write(vault.join("Notes/Acme.md"), "# Acme\n").unwrap();
+        install(&root, "indexer", json!({"claude": {}, "folders": {"what": "vaults"}}));
+        install(&root, "other", json!({"claude": {}}));
+        install(&root, "quiet", json!({}));
+        crate::grants::grant("indexer", &vault).unwrap();
+        sync();
+        let v = dunce::canonicalize(&vault).unwrap().display().to_string();
+        let start = |id: &'static str, mut a: Value| {
+            a["prompt"] = json!("Index the notes");
+            std::thread::spawn(move || service_async(id, "claude.run", &a).map_err(|e| format!("{e:#}")))
+        };
+        let pid_of = |id: &str| std::fs::read_to_string(paths::state_dir().join(format!("plugins/.runs/{id}/index.pid"))).ok().and_then(|p| p.trim().parse::<u32>().ok());
+        let stop = |id: &str, key: &str| service_async(id, "claude.stop", &json!(key)).map_err(|e| e.to_string());
+        let mine = start("indexer", json!({"folder": v, "mode": "copy", "key": "index", "dir": "runs/a"}));
+        let theirs = start("other", json!({"key": "index", "dir": "runs/b"}));
+        paths::testenv::eventually("both runs started", || pid_of("indexer").is_some() && pid_of("other").is_some());
+        // A second run under a key still running is refused; a key Echo can't take too, and stopping without `claude`.
+        let again = service_async("indexer", "claude.run", &json!({"prompt": "Again", "key": "index"})).unwrap_err().to_string();
+        assert!(again.contains("is running already"), "{again}");
+        for bad in ["", "a b", "../index", &"k".repeat(65)] {
+            assert!(stop("indexer", bad).unwrap_err().contains("a run's key is"), "{bad}");
+        }
+        assert!(stop("quiet", "index").unwrap_err().contains("“claude”"));
+        // Stopped: its Claude Code gone, the run failing "stopped", so recorded, its snapshot gone.
+        let pid = pid_of("indexer").unwrap();
+        assert_eq!(stop("indexer", "index").unwrap(), json!(true));
+        assert_eq!(mine.join().unwrap().unwrap_err(), "stopped");
+        assert!(!crate::app::process_alive(pid));
+        let store = plugins::data_dir("indexer");
+        let record: Value = serde_json::from_str(&std::fs::read_to_string(store.join("runs/a/permissions.json")).unwrap()).unwrap();
+        assert_eq!(record["stopped"], true, "{record}");
+        assert!(std::fs::read_to_string(store.join("runs/a/log.txt")).unwrap().contains("stopped by the plugin"));
+        assert_eq!(std::fs::read_dir(store.join("cache/snapshots")).map(|d| d.count()).unwrap_or(0), 0, "no snapshot left");
+        // Another plugin's run under the same key goes on; its own key is free again.
+        let their_pid = pid_of("other").unwrap();
+        assert!(crate::app::process_alive(their_pid) && !theirs.is_finished());
+        assert_eq!(stop("indexer", "index").unwrap(), json!(false), "none of its own running");
+        assert!(crate::claudejob::Keyed::take("indexer", "index").is_ok());
+        assert_eq!(stop("other", "index").unwrap(), json!(true));
+        assert_eq!(theirs.join().unwrap().unwrap_err(), "stopped");
+        for id in ["indexer", "other", "quiet"] {
+            plugins::remove(id, false).unwrap();
+        }
+        assert!(!paths::state_dir().join("plugins/.runs/indexer").exists(), "its keys go with its data");
+        sync();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_plugin_walks_its_own_store_as_a_folder_it_was_given_never_through_a_link() {
+        let (_env, root) = paths::testenv::folders("jshost-store-walk");
+        install(&root, "keeper", json!({}));
+        sync();
+        let store = plugins::data_dir("keeper");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.md"), "not the plugin's").unwrap();
+        for (f, text) in [("index/a.md", "alpha"), ("index/sub/b.txt", "beta"), ("index/.hidden.md", "h"), ("top.md", "top")] {
+            std::fs::create_dir_all(store.join(f).parent().unwrap()).unwrap();
+            std::fs::write(store.join(f), text).unwrap();
+        }
+        std::os::unix::fs::symlink(&outside, store.join("index/out")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), store.join("index/link.md")).unwrap();
+        let walk = |a: Value| run("keeper", "storeWalk", a);
+        let paths_of = |v: &Value| {
+            let mut p: Vec<String> = v.as_array().unwrap().iter().map(|r| r["path"].as_str().unwrap().to_string()).collect();
+            p.sort();
+            p
+        };
+        // Its paths under the store, as ctx.store.read takes them; `sha` asked; dot names and links left out.
+        let rows = walk(json!({"path": "index", "opts": {"sha": true}})).unwrap();
+        assert_eq!(paths_of(&rows), ["index/a.md", "index/sub/b.txt"]);
+        let a = rows.as_array().unwrap().iter().find(|r| r["path"] == "index/a.md").unwrap();
+        assert_eq!((a["size"].as_u64(), a["sha"].as_str()), (Some(5), Some(sha_hex(b"alpha").as_str())));
+        assert!(a["mtime"].as_u64().unwrap() > 0);
+        // The whole store, by extension, dot names with `hidden`; no sha unless asked.
+        let all = walk(json!({"path": "", "opts": {"ext": ["md"], "hidden": true}})).unwrap();
+        assert_eq!(paths_of(&all), ["index/.hidden.md", "index/a.md", "top.md"]);
+        assert!(all[0].get("sha").is_none());
+        // A folder that isn't there, or a link out of the store: nothing. A path out of it: refused.
+        assert_eq!(walk(json!({"path": "nothing"})).unwrap(), json!([]));
+        assert_eq!(walk(json!({"path": "index/out"})).unwrap(), json!([]));
+        assert!(walk(json!({"path": "../outside"})).unwrap_err().contains("isn't a path inside"));
+        plugins::remove("keeper", true).unwrap();
         sync();
     }
 }

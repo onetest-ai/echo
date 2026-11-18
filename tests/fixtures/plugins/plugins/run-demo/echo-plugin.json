@@ -1,0 +1,8 @@
+{
+  "id": "run-demo",
+  "name": "Run demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: a Claude run under a key it stops, and what Echo records now (tests/cases/plugins/TC-216, TC-217).",
+  "main": "main.js",
+  "uses": { "claude": {}, "events": { "on": ["transcribed"] } }
+}

@@ -118,6 +118,17 @@ pub fn heard_events(uses: &serde_json::Map<String, Value>) -> Vec<String> {
     out
 }
 
+/// May plugin `id` read what Echo records now (`echo.read('recording')`)? When it hears a recording's events
+/// (`recording_started`, `recording_stopped` or `transcribed`): its sheet's "Knows when …" line already says so, and
+/// the read gives no more than they do (the call's folder name and stamp, no title).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn may_read_recording(id: &str, uses: &serde_json::Map<String, Value>) -> Result<()> {
+    if !heard_events(uses).iter().any(|e| matches!(e.as_str(), "recording_started" | "recording_stopped" | "transcribed")) {
+        bail!("{id} didn't ask to hear about your recordings when it was installed (uses.events.on: recording_started, recording_stopped or transcribed)");
+    }
+    Ok(())
+}
+
 /// The plugin may read Echo's sources (`uses.echo.read` names `source` or `sources`: the same data).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn reads_sources(uses: &serde_json::Map<String, Value>) -> bool {
