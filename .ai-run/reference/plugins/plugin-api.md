@@ -585,12 +585,12 @@ Hidden files and folders (a name starting with `.`) are read, never written — 
 `append`, `move` (to and from), `remove` and `copyIn` and `ctx.git.commit` take as files, `ctx.fs.mkdir` and an empty
 folder's `remove` as folders. A name refused (`community-plugins.json`, `core-plugins.json`) is refused in any case, as
 APFS and NTFS find it. No sheet line of their own: `folders.write` covers them. Evidence: `grants::hidden_ok`
-- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` (directly in `.obsidian/`; not `community-plugins.json` or `core-plugins.json`, which switch Obsidian plugins on); Markdown in a
+- files: `.gitignore` in any folder that isn't hidden; `.obsidian/<name>.json` in any folder that isn't hidden (a vault in a subfolder too: `knowledge/.obsidian/app.json`; directly in `.obsidian/`; not `community-plugins.json` or `core-plugins.json`, which switch Obsidian plugins on); Markdown in a
   skill of the folder's own Claude Code project, `.claude/skills/<name>/<file>.md` (`<name>` 1–64 of `a-z`, `0-9`, `-`;
   `<file>` not hidden, ending in `.md`), each Markdown that runs nothing (`plugins::claude_skills::skill_md_ok`): a frontmatter — YAML between leading `---` lines, also after a BOM or blank space — holds only `name`, `description`, `when_to_use`, `argument-hint`, `disable-model-invocation` and `user-invocable`, each a value on its line or a `|` / `>` text block (no other key: `hooks`, `allowed-tools`, `shell`, `model`, `context`, `agent`…; no nested map, list, tag or anchor; never malformed or unclosed), and nowhere a `` !` `` or a code block opened with `!` (```` ```! ````, `~~~!`): refused, never stripped ("a skill can't run commands: …"); only written whole by `ctx.fs.write` — `append`,
   `copyIn` and a `move` into `.claude/skills/**` are refused, and `ctx.git.commit` refuses a file there that fails the
   check;
-- folders: `.obsidian`, `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
+- folders: `.obsidian` (in any folder that isn't hidden), `.claude`, `.claude/skills`, `.claude/skills/<name>`; a folder is never moved into a hidden
   place;
 - everything else hidden is refused ("is hidden"): `.claude/settings*.json`, `.claude/hooks`, `agents`, `commands`,
   anything under `.claude` that isn't such Markdown (`SKILL.md.js` too), `.obsidian/plugins`, `themes`, `snippets`, `community-plugins.json`, `core-plugins.json`,
