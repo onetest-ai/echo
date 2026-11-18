@@ -317,36 +317,43 @@ pub fn stop_keyed(plugin: &str, key: &str) -> Result<bool> {
     if !base.parent().is_some_and(Path::is_dir) {
         return Ok(false);
     }
-    stop_key(&base, || {})
+    stop_key(&base)
 }
 
-/// The run under the key at `base` stopped, if one runs; under the key's gate from the check to the mark
-/// (`between`: a test's step right after the check).
-fn stop_key(base: &Path, between: impl FnOnce()) -> Result<bool> {
-    let _gate = key_gate(base)?;
-    // Its lock free: no run under that key.
-    let free = crate::app::FileLock::try_take(&key_file(base, "lock"))?;
-    between();
-    if free.is_some() {
-        return Ok(false);
+/// The run under the key at `base` stopped, if one runs: its check, mark and pid read under the key's gate, its process
+/// stopped once the gate is free again (a slow stop never keeps another stop or run waiting).
+fn stop_key(base: &Path) -> Result<bool> {
+    let pid = {
+        let _gate = key_gate(base)?;
+        // Its lock free: no run under that key.
+        let free = crate::app::FileLock::try_take(&key_file(base, "lock"))?;
+        #[cfg(test)]
+        if let Some(step) = BETWEEN.take() {
+            step();
+        }
+        if free.is_some() {
+            return Ok(false);
+        }
+        // The mark first, then its process: a run that starts Claude Code meanwhile sees the mark (`key_started`).
+        fs::write(key_file(base, "stopped"), b"")?;
+        fs::read_to_string(key_file(base, "pid")).ok().and_then(|p| p.trim().parse::<u32>().ok())
+    };
+    if let Some(pid) = pid {
+        crate::ai::stop_group(pid);
     }
-    stop_base(base)?;
     Ok(true)
 }
 
-/// Does a run hold the key at `base`? Checked under its gate, so a run taking the key meanwhile isn't refused.
-fn key_held(base: &Path) -> bool {
-    key_gate(base).is_ok_and(|_gate| matches!(crate::app::FileLock::try_take(&key_file(base, "lock")), Ok(None)))
+#[cfg(test)]
+thread_local! {
+    /// A test's step inside a stop, right after its check of the key's lock.
+    static BETWEEN: std::cell::Cell<Option<Box<dyn FnOnce()>>> = const { std::cell::Cell::new(None) };
 }
 
-/// The run whose files are at `base` stopped. The mark first, then its process: a run that starts Claude Code meanwhile
-/// sees the mark (`key_started`).
-fn stop_base(base: &Path) -> Result<()> {
-    fs::write(key_file(base, "stopped"), b"")?;
-    if let Some(pid) = fs::read_to_string(key_file(base, "pid")).ok().and_then(|p| p.trim().parse::<u32>().ok()) {
-        crate::ai::stop_group(pid);
-    }
-    Ok(())
+/// Does a run hold the key at `base`? Checked under its gate, so a run taking the key meanwhile isn't refused; a gate
+/// still busy counts as held.
+fn key_held(base: &Path) -> bool {
+    key_gate(base).map_or(true, |_gate| matches!(crate::app::FileLock::try_take(&key_file(base, "lock")), Ok(None)))
 }
 
 /// A plugin removed (`plugins::remove`): its runs under a key still running stopped, each waited for till it ends
@@ -356,7 +363,7 @@ pub fn stop_keyed_runs(plugin: &str) {
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
         let p = e.path();
         if let Some(base) = p.to_str().and_then(|s| s.strip_suffix(".lock")).map(Path::new) {
-            if matches!(stop_key(base, || {}), Ok(true)) {
+            if matches!(stop_key(base), Ok(true)) {
                 let end = std::time::Instant::now() + Duration::from_secs(10);
                 while key_held(base) && std::time::Instant::now() < end {
                     std::thread::sleep(Duration::from_millis(50));
@@ -979,13 +986,13 @@ mod tests {
         let a = Keyed::take("indexer", "index").unwrap();
         let base = a.base.clone();
         // Run A ends right after the stop found it running, and run B under the same key starts at once.
-        let mut b = None;
-        assert!(stop_key(&base, || {
+        let (tx, b) = std::sync::mpsc::channel();
+        BETWEEN.set(Some(Box::new(move || {
             drop(a);
-            b = Some(take_meanwhile());
-        })
-        .unwrap());
-        let b = b.unwrap().join().unwrap().unwrap();
+            tx.send(take_meanwhile()).unwrap();
+        })));
+        assert!(stop_key(&base).unwrap());
+        let b = b.recv().unwrap().join().unwrap().unwrap();
         // The stop meant for A left no mark B would fail on or stop its Claude Code by.
         assert!(!key_stopped(&b.base), "B is marked stopped");
     }
@@ -996,8 +1003,36 @@ mod tests {
         let base = key_base("indexer", "index");
         fs::create_dir_all(base.parent().unwrap()).unwrap();
         // A stop checks the key while no run holds it; a run starts under it meanwhile.
-        let mut next = None;
-        assert!(!stop_key(&base, || next = Some(take_meanwhile())).unwrap());
-        assert!(next.unwrap().join().unwrap().is_ok(), "the run took the key once the check was done");
+        let (tx, next) = std::sync::mpsc::channel();
+        BETWEEN.set(Some(Box::new(move || tx.send(take_meanwhile()).unwrap())));
+        assert!(!stop_key(&base).unwrap());
+        assert!(next.recv().unwrap().join().unwrap().is_ok(), "the run took the key once the check was done");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_stop_waiting_for_its_run_to_end_keeps_no_other_stop_or_run_waiting() {
+        use std::os::unix::process::CommandExt;
+        let (_env, _root) = crate::paths::testenv::folders("claudejob-stop-slow");
+        let run = Keyed::take("indexer", "index").unwrap();
+        // Its Claude Code, deaf to the stop's first signal: the stop waits its full 3 s before the last.
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; echo deaf; while :; do sleep 1; done"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut deaf = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut deaf).unwrap();
+        key_started(&run.base, child.id());
+        let base = run.base.clone();
+        let stopping = std::thread::spawn(move || stop_key(&base).unwrap());
+        crate::paths::testenv::eventually("the stop marked the run", || key_stopped(&run.base));
+        // The gate is free again while the stop still waits for the process (its 3 s).
+        let at = std::time::Instant::now();
+        drop(key_gate(&run.base).unwrap());
+        assert!(at.elapsed() < Duration::from_secs(2), "the gate waited for the stop's kill: {:?}", at.elapsed());
+        assert!(stopping.join().unwrap());
+        let _ = child.wait();
     }
 }
